@@ -3643,10 +3643,31 @@ components:
           type: integer
           title: Size
           description: File size in bytes reported by the provider.
+        sha256:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Sha256
+          description: SHA-256 hex digest of the full file bytes before truncation.
+        encoding:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Encoding
+          description: "Content encoding: 'utf-8' for clean text, 'utf-8-lossy'
+            when replacement characters were introduced, or 'binary' for non-text
+            files."
         content:
           type: string
           title: Content
-          description: UTF-8 text preview returned for the requested file.
+          description: UTF-8 text preview returned for the requested file. Empty for
+            binary files.
+        binary:
+          type: boolean
+          title: Binary
+          description: True when the file was detected as binary; content will be
+            empty.
+          default: false
         truncated:
           type: boolean
           title: Truncated

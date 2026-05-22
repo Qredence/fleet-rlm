@@ -57,8 +57,16 @@ def resolve_volume_provider(
     return provider or "daytona"
 
 
+def _reject_url_encoded_traversal(path: str, *, detail: str) -> None:
+    """Raise HTTPException 400 when *path* contains URL-encoded traversal sequences."""
+    lowered = path.lower()
+    if "%2e%2e" in lowered or "%2f" in lowered or "%5c" in lowered:
+        raise HTTPException(status_code=400, detail=detail)
+
+
 def normalize_volume_file_path(path: str) -> str:
     """Normalize a requested file path and reject traversal attempts."""
+    _reject_url_encoded_traversal(path, detail="Invalid file path.")
     normalized_path = path if path.startswith("/") else f"/{path}"
     if ".." in PurePosixPath(normalized_path).parts:
         raise HTTPException(status_code=400, detail="Invalid file path.")
@@ -70,6 +78,7 @@ def normalize_volume_file_path(path: str) -> str:
 
 def normalize_volume_tree_path(root_path: str) -> str:
     """Normalize a requested root path and reject traversal attempts."""
+    _reject_url_encoded_traversal(root_path, detail="Invalid root path.")
     normalized_path = root_path if root_path.startswith("/") else f"/{root_path}"
     normalized_path = normalized_path.rstrip("/") or "/"
     if ".." in PurePosixPath(normalized_path).parts:
@@ -115,6 +124,8 @@ def raise_volume_file_error(exc: Exception) -> NoReturn:
         raise HTTPException(status_code=404, detail="File not found.") from exc
     if "directory" in message:
         raise HTTPException(status_code=400, detail="Path must point to a file.") from exc
+    if "outside canonical roots" in message:
+        raise HTTPException(status_code=403, detail="File path is outside the canonical volume roots.") from exc
     raise HTTPException(status_code=502, detail=f"Volume file read failed: {exc}") from exc
 
 

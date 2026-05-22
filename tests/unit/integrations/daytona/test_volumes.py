@@ -158,13 +158,14 @@ def test_read_daytona_volume_file_text_uses_native_fs_download(
     )
 
     assert calls == ["/home/daytona/memory/artifacts/docs/readme.txt"]
-    assert payload == {
-        "path": "/artifacts/docs/readme.txt",
-        "mime": "text/plain",
-        "size": 10,
-        "content": "abcdef",
-        "truncated": True,
-    }
+    assert payload["path"] == "/artifacts/docs/readme.txt"
+    assert payload["mime"] == "text/plain"
+    assert payload["size"] == 10
+    assert payload["content"] == "abcdef"
+    assert payload["truncated"] is True
+    assert payload["binary"] is False
+    assert payload["encoding"] == "utf-8"
+    assert len(payload["sha256"]) == 64  # SHA-256 hex digest is 64 chars
 
 
 def test_read_daytona_volume_file_text_rejects_path_traversal() -> None:
@@ -249,13 +250,11 @@ def test_aread_daytona_volume_file_text_runs_sync_impl_off_thread(monkeypatch: p
     payload = asyncio.run(aread_daytona_volume_file_text("tenant-a", "/docs/readme.txt", max_bytes=5))
 
     assert calls == [("tenant-a", "/docs/readme.txt", 5)]
-    assert payload == {
-        "path": "/docs/readme.txt",
-        "mime": "text/plain",
-        "size": 5,
-        "content": "hello",
-        "truncated": False,
-    }
+    assert payload["path"] == "/docs/readme.txt"
+    assert payload["mime"] == "text/plain"
+    assert payload["size"] == 5
+    assert payload["content"] == "hello"
+    assert payload["truncated"] is False
 
 
 # ---------------------------------------------------------------------------

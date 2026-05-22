@@ -2167,10 +2167,26 @@ export interface components {
        */
       size: number;
       /**
+       * Sha256
+       * @description SHA-256 hex digest of the full file bytes before truncation.
+       */
+      sha256?: string | null;
+      /**
+       * Encoding
+       * @description Content encoding: 'utf-8' for clean text, 'utf-8-lossy' when replacement characters were introduced, or 'binary' for non-text files.
+       */
+      encoding?: string | null;
+      /**
        * Content
-       * @description UTF-8 text preview returned for the requested file.
+       * @description UTF-8 text preview returned for the requested file. Empty for binary files.
        */
       content: string;
+      /**
+       * Binary
+       * @description True when the file was detected as binary; content will be empty.
+       * @default false
+       */
+      binary?: boolean;
       /**
        * Truncated
        * @description Whether the returned file content was truncated to respect max_bytes.

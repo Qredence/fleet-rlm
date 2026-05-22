@@ -67,7 +67,22 @@ class VolumeFileContentResponse(BaseModel):
     path: str = Field(description="Normalized file path used for the preview request.")
     mime: str = Field(description="Detected MIME type for the returned content.")
     size: int = Field(description="File size in bytes reported by the provider.")
-    content: str = Field(description="UTF-8 text preview returned for the requested file.")
+    sha256: str | None = Field(
+        default=None,
+        description="SHA-256 hex digest of the full file bytes before truncation.",
+    )
+    encoding: str | None = Field(
+        default=None,
+        description=(
+            "Content encoding: 'utf-8' for clean text, 'utf-8-lossy' when replacement "
+            "characters were introduced, or 'binary' for non-text files."
+        ),
+    )
+    content: str = Field(description="UTF-8 text preview returned for the requested file. Empty for binary files.")
+    binary: bool = Field(
+        default=False,
+        description="True when the file was detected as binary; content will be empty.",
+    )
     truncated: bool = Field(
         default=False,
         description="Whether the returned file content was truncated to respect max_bytes.",

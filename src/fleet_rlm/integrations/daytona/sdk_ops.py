@@ -11,6 +11,7 @@ from __future__ import annotations
 # Volume operations  (was: volume_runtime.py)
 # ---------------------------------------------------------------------------
 import dataclasses
+import hashlib
 import logging
 import mimetypes
 import re
@@ -48,6 +49,43 @@ DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH = PurePosixPath("/home/daytona/memory")
 _REMOTE_DIRECTORY_MODE = "755"
 _VOLUME_READY_STATES = frozenset({"ready"})
 _VOLUME_ERROR_STATES = frozenset({"error", "failed", "deleted"})
+
+# Canonical VFS roots — the only first-level path components allowed in volume
+# tree and file operations.  Any other component is an authorization error.
+VFS_CANONICAL_ROOTS: frozenset[str] = frozenset({"/memory", "/artifacts", "/buffers", "/meta"})
+
+# Byte threshold above which content is considered binary (non-text).
+# Determined by scanning the first 8 KiB for NUL bytes or a high ratio of
+# non-printable, non-whitespace bytes.
+_BINARY_SAMPLE_BYTES = 8192
+_BINARY_NUL_THRESHOLD = 1  # any NUL byte → binary
+_BINARY_NONTEXT_RATIO = 0.30  # >30 % non-text bytes → binary
+
+
+def _detect_binary_content(data: bytes) -> bool:
+    """Return True when *data* appears to be non-text binary content."""
+    sample = data[:_BINARY_SAMPLE_BYTES]
+    if not sample:
+        return False
+    if b"\x00" in sample:
+        return True
+    non_text = sum(1 for byte in sample if byte < 0x09 or (0x0E <= byte <= 0x1F and byte != 0x1B))
+    return non_text / len(sample) > _BINARY_NONTEXT_RATIO
+
+
+def _check_vfs_root_allowed(display_path: str) -> None:
+    """Raise ValueError when *display_path* is outside the canonical VFS roots."""
+    pure = PurePosixPath(display_path)
+    if pure == PurePosixPath("/"):
+        return  # root listing is allowed; callers filter children themselves
+    parts = pure.parts
+    if len(parts) < 2:
+        return
+    root = f"/{parts[1]}"
+    if root not in VFS_CANONICAL_ROOTS:
+        raise ValueError(
+            f"Volume path outside canonical roots: {display_path!r}. Allowed roots: {sorted(VFS_CANONICAL_ROOTS)}"
+        )
 
 
 def ensure_remote_directory(fs: Any, remote_path: PurePosixPath) -> None:
@@ -291,11 +329,22 @@ def _resolve_daytona_path(
     path: str,
     *,
     default_path: str = "/",
+    check_root: bool = False,
 ) -> _ResolvedDaytonaPath:
     candidate = (path or default_path).strip() or default_path
+
+    # Reject URL-encoded traversal sequences before path parsing.
+    # Covers %2e%2e, %2E%2E, mixed-case, and slash variants.
+    lowered = candidate.lower()
+    if "%2e%2e" in lowered or "%2f" in lowered or "%5c" in lowered:
+        raise ValueError(f"Path traversal not allowed: {candidate!r}")
+
     pure_path = PurePosixPath("/", candidate.lstrip("/"))
     if ".." in pure_path.parts:
         raise ValueError(f"Path traversal not allowed: {candidate!r}")
+
+    if check_root:
+        _check_vfs_root_allowed(str(pure_path))
 
     mounted_path = DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH.joinpath(*pure_path.parts[1:])
     return _ResolvedDaytonaPath(
@@ -332,7 +381,7 @@ def list_daytona_volume_tree(
     """Adapt Daytona sandbox.fs listings to the runtime volume tree schema."""
     max_depth = max(1, min(max_depth, 10))
     max_entries = max(1, min(max_entries, 1000))
-    root = _resolve_daytona_path(root_path, default_path="/")
+    root = _resolve_daytona_path(root_path, default_path="/", check_root=True)
 
     counters: dict[str, int] = {"files": 0, "dirs": 0}
     truncated = False
@@ -443,27 +492,54 @@ def read_daytona_volume_file_text(
     path: str,
     max_bytes: int = 200_000,
 ) -> dict[str, Any]:
-    """Adapt Daytona sandbox.fs file downloads to the runtime preview schema."""
+    """Adapt Daytona sandbox.fs file downloads to the runtime preview schema.
+
+    Returns a dict with:
+    - path, mime, size, sha256, encoding, content, truncated
+    - encoding is "utf-8" for clean text, "utf-8-lossy" when UTF-8 decoding
+      introduced replacement characters, or "binary" for non-text files.
+    - For binary files, content is "" and binary=True is set.
+    """
     if not path:
         raise ValueError("path is required")
 
     max_bytes = max(1, min(max_bytes, 1_000_000))
-    resolved_path = _resolve_daytona_path(path)
+    resolved_path = _resolve_daytona_path(path, check_root=True)
 
     with _mounted_daytona_volume(volume_name) as sandbox:
         raw = sandbox.fs.download_file(str(resolved_path.mounted_path))
 
     raw_bytes = b"" if raw is None else raw.encode("utf-8") if isinstance(raw, str) else bytes(raw)
     size = len(raw_bytes)
+    sha256 = hashlib.sha256(raw_bytes).hexdigest()
+    mime = mimetypes.guess_type(resolved_path.display_path)[0] or "text/plain"
+
+    # Detect binary content; return a hash-only payload for non-text files.
+    if _detect_binary_content(raw_bytes):
+        return {
+            "path": resolved_path.display_path,
+            "mime": mime,
+            "size": size,
+            "sha256": sha256,
+            "encoding": "binary",
+            "content": "",
+            "binary": True,
+            "truncated": False,
+        }
+
     truncated = size > max_bytes
     preview_bytes = raw_bytes[:max_bytes] if truncated else raw_bytes
-    mime = mimetypes.guess_type(resolved_path.display_path)[0] or "text/plain"
+    decoded = preview_bytes.decode("utf-8", errors="replace")
+    encoding = "utf-8-lossy" if "\ufffd" in decoded else "utf-8"
 
     return {
         "path": resolved_path.display_path,
         "mime": mime,
         "size": size,
-        "content": preview_bytes.decode("utf-8", errors="replace"),
+        "sha256": sha256,
+        "encoding": encoding,
+        "content": decoded,
+        "binary": False,
         "truncated": truncated,
     }
 

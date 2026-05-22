@@ -593,6 +593,116 @@ def build_delegate_child(  # type: ignore[no-redef]
 # This keeps ``DATABASE_URL`` out of the sandbox while giving RLM child
 # runs durable cross-child evidence sharing via NeonDB.
 
+# ---------------------------------------------------------------------------
+# Evidence payload bounds
+# ---------------------------------------------------------------------------
+_EVIDENCE_MAX_KEY_BYTES = 512
+_EVIDENCE_MAX_CONTENT_BYTES = 1_000_000  # 1 MiB
+_EVIDENCE_MAX_TAGS = 32
+_EVIDENCE_MAX_TAG_BYTES = 256
+_EVIDENCE_MAX_LIMIT = 500
+
+# Regex pattern to detect potential credential strings in error messages.
+# Ordered from most-specific to least-specific to avoid partial matches.
+_CREDENTIAL_PATTERN = re.compile(
+    r"("
+    # Full database/service URLs (match scheme + everything to next whitespace or comma)
+    r"(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|neon(?:db)?|redis|amqp)://[^\s,;'\"]*"
+    r"|password=[^\s,;'\"&]*"
+    r"|sslpassword=[^\s,;'\"&]*"
+    r"|host=[^\s,;'\"&]+"
+    # Named environment variable references
+    r"|DAYTONA_API_KEY"
+    r"|DATABASE(?:_ADMIN)?_URL"
+    r"|(?:LLM_|OPENAI_|ANTHROPIC_|AZURE_)?API_KEY"
+    r"|SECRET_KEY"
+    r"|ACCESS_TOKEN"
+    # JWT-like base64 tokens (at least 20 chars in the header section)
+    r"|eyJ[A-Za-z0-9+/\-_]{20,}"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _redact_error_message(message: str) -> str:
+    """Replace potential credential-bearing patterns with a safe placeholder."""
+    return _CREDENTIAL_PATTERN.sub("[REDACTED]", message)
+
+
+def _safe_error(exc: Exception) -> str:
+    """Return a redacted, sandbox-safe error string from an exception."""
+    return _redact_error_message(str(exc))
+
+
+def _validate_evidence_payload(
+    *,
+    key: str,
+    content: str,
+    kind: str,
+    scope: str,
+    tags: list[str] | None,
+) -> dict[str, Any] | None:
+    """Return a structured validation error dict, or None when the payload is valid."""
+    if len(key.encode("utf-8")) > _EVIDENCE_MAX_KEY_BYTES:
+        return {
+            "status": "error",
+            "reason": "validation_error",
+            "error": f"Evidence key exceeds maximum {_EVIDENCE_MAX_KEY_BYTES} bytes.",
+        }
+    if len(content.encode("utf-8")) > _EVIDENCE_MAX_CONTENT_BYTES:
+        return {
+            "status": "error",
+            "reason": "validation_error",
+            "error": f"Evidence content exceeds maximum {_EVIDENCE_MAX_CONTENT_BYTES} bytes.",
+        }
+    effective_tags = list(tags or [])
+    if len(effective_tags) > _EVIDENCE_MAX_TAGS:
+        return {
+            "status": "error",
+            "reason": "validation_error",
+            "error": f"Evidence tag count exceeds maximum {_EVIDENCE_MAX_TAGS}.",
+        }
+    for tag in effective_tags:
+        if not isinstance(tag, str):
+            return {
+                "status": "error",
+                "reason": "validation_error",
+                "error": "Evidence tags must be strings.",
+            }
+        if len(tag.encode("utf-8")) > _EVIDENCE_MAX_TAG_BYTES:
+            return {
+                "status": "error",
+                "reason": "validation_error",
+                "error": f"Evidence tag exceeds maximum {_EVIDENCE_MAX_TAG_BYTES} bytes.",
+            }
+
+    from fleet_rlm.integrations.database.models_enums import MemoryKind, MemoryScope
+
+    try:
+        MemoryScope(scope)
+    except ValueError:
+        return {
+            "status": "error",
+            "reason": "validation_error",
+            "error": f"Invalid evidence scope: {scope!r}.",
+        }
+    try:
+        MemoryKind(kind)
+    except ValueError:
+        return {
+            "status": "error",
+            "reason": "validation_error",
+            "error": f"Invalid evidence kind: {kind!r}.",
+        }
+
+    if not isinstance(content, str):
+        return {
+            "status": "error",
+            "reason": "validation_error",
+            "error": "Evidence content must be a string.",
+        }
+    return None
+
 
 def _host_refs(interpreter: Any) -> tuple[Any, Any, Any]:
     repository = getattr(interpreter, "_host_repository", None)
@@ -609,7 +719,17 @@ def store_evidence(
     scope: str = "run",
     tags: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Persist evidence from sandbox code into NeonDB via the host repository."""
+    """Persist evidence from sandbox code into NeonDB via the host repository.
+
+    Validates payload bounds and kind/scope enum values before calling the
+    repository, and redacts credential-bearing values from error messages so
+    that DATABASE_URL, API keys, and other secrets never cross the sandbox
+    boundary in error payloads.
+    """
+    validation_error = _validate_evidence_payload(key=key, content=content, kind=kind, scope=scope, tags=tags)
+    if validation_error is not None:
+        return validation_error
+
     repository, identity, run_id = _host_refs(interpreter)
     if repository is None or identity is None:
         return {"status": "skipped", "reason": "no_repository"}
@@ -641,7 +761,7 @@ def store_evidence(
         )
     except Exception as exc:
         logger.warning("store_evidence failed: %s", exc)
-        return {"status": "error", "error": str(exc)}
+        return {"status": "error", "reason": "store_failed", "error": _safe_error(exc)}
     return {"status": "ok", "id": str(item.id), "key": key}
 
 
@@ -651,12 +771,27 @@ def fetch_evidence(
     scope_id: str | None = None,
     limit: int = 20,
 ) -> dict[str, Any]:
-    """Fetch evidence items from NeonDB for use inside sandbox code."""
+    """Fetch evidence items from NeonDB for use inside sandbox code.
+
+    Error messages are redacted to prevent credential leakage.
+    """
     repository, identity, _ = _host_refs(interpreter)
     if repository is None or identity is None:
         return {"status": "skipped", "items": []}
 
+    effective_limit = max(1, min(limit, _EVIDENCE_MAX_LIMIT))
+
     from fleet_rlm.integrations.database.models_enums import MemoryScope
+
+    try:
+        MemoryScope(scope)
+    except ValueError:
+        return {
+            "status": "error",
+            "items": [],
+            "reason": "validation_error",
+            "error": f"Invalid evidence scope: {scope!r}.",
+        }
 
     try:
         items = _run_async_compat(
@@ -666,11 +801,11 @@ def fetch_evidence(
             user_id=identity.user_id,
             scope=MemoryScope(scope),
             scope_id=scope_id,
-            limit=limit,
+            limit=effective_limit,
         )
     except Exception as exc:
         logger.warning("fetch_evidence failed: %s", exc)
-        return {"status": "error", "items": [], "error": str(exc)}
+        return {"status": "error", "items": [], "reason": "fetch_failed", "error": _safe_error(exc)}
     return {
         "status": "ok",
         "items": [
@@ -690,12 +825,27 @@ def list_evidence(
     scope: str = "run",
     limit: int = 50,
 ) -> dict[str, Any]:
-    """List available evidence handles (metadata only, no full content)."""
+    """List available evidence handles (metadata only, no full content).
+
+    Error messages are redacted to prevent credential leakage.
+    """
     repository, identity, _ = _host_refs(interpreter)
     if repository is None or identity is None:
         return {"status": "skipped", "items": []}
 
+    effective_limit = max(1, min(limit, _EVIDENCE_MAX_LIMIT))
+
     from fleet_rlm.integrations.database.models_enums import MemoryScope
+
+    try:
+        MemoryScope(scope)
+    except ValueError:
+        return {
+            "status": "error",
+            "items": [],
+            "reason": "validation_error",
+            "error": f"Invalid evidence scope: {scope!r}.",
+        }
 
     try:
         items = _run_async_compat(
@@ -704,11 +854,11 @@ def list_evidence(
             workspace_id=identity.workspace_id,
             user_id=identity.user_id,
             scope=MemoryScope(scope),
-            limit=limit,
+            limit=effective_limit,
         )
     except Exception as exc:
         logger.warning("list_evidence failed: %s", exc)
-        return {"status": "error", "items": [], "error": str(exc)}
+        return {"status": "error", "items": [], "reason": "list_failed", "error": _safe_error(exc)}
     return {
         "status": "ok",
         "items": [
