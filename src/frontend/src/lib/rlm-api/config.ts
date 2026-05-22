@@ -23,7 +23,7 @@ function deriveWsUrl(apiUrl: string, path: string): string {
 
 function normalizeExplicitWsUrl(wsUrl: string, path: string): string {
   const normalized = wsUrl.replace(/\/$/, "");
-  const defaultWsPath = /\/api\/v1\/ws\/(?:chat|execution(?:\/events)?)(?=\/?$|[?#])/;
+  const defaultWsPath = /\/api\/v1\/ws\/execution(?:\/events)?(?=\/?$|[?#])/;
   if (!defaultWsPath.test(normalized)) return normalized;
   if (!/^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(normalized)) {
     return normalized.replace(defaultWsPath, path);
@@ -31,8 +31,8 @@ function normalizeExplicitWsUrl(wsUrl: string, path: string): string {
 
   try {
     const url = new URL(normalized);
-    if (/\/api\/v1\/ws\/(?:chat|execution(?:\/events)?)$/.test(url.pathname)) {
-      url.pathname = url.pathname.replace(/\/api\/v1\/ws\/(?:chat|execution(?:\/events)?)$/, path);
+    if (/\/api\/v1\/ws\/execution(?:\/events)?$/.test(url.pathname)) {
+      url.pathname = url.pathname.replace(/\/api\/v1\/ws\/execution(?:\/events)?$/, path);
       return url.toString().replace(/\/$/, "");
     }
   } catch {

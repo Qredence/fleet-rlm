@@ -18,18 +18,7 @@ export interface RuntimeSettingsPatchInput {
   updates: Record<string, string>;
 }
 
-const localLoopbackHosts = new Set(["127.0.0.1", "localhost"]);
 const RUNTIME_CONNECTION_TEST_TIMEOUT_MS = 10_000;
-
-function hasLocalBackendBaseUrl(): boolean {
-  if (!rlmApiConfig.baseUrl) return false;
-
-  try {
-    return localLoopbackHosts.has(new URL(rlmApiConfig.baseUrl).hostname);
-  } catch {
-    return false;
-  }
-}
 
 function isRetryableRuntimeFailure(error: unknown): boolean {
   if (error instanceof RlmApiError) {
@@ -42,8 +31,7 @@ function isRetryableRuntimeFailure(error: unknown): boolean {
 }
 
 function shouldUseRuntimeReadFallback(error: unknown): boolean {
-  const supportsFrontendFallback =
-    rlmApiConfig.mockMode || rlmApiConfig.e2eMode || hasLocalBackendBaseUrl();
+  const supportsFrontendFallback = rlmApiConfig.mockMode || rlmApiConfig.e2eMode;
 
   return supportsFrontendFallback && isRetryableRuntimeFailure(error);
 }

@@ -27,22 +27,22 @@ describe("rlmApiConfig — wsUrl derivation", () => {
     expect(rlmApiConfig.wsExecutionUrl).toBe("ws://custom-host:9000/api/v1/ws/execution/events");
   });
 
-  it("rewrites the legacy explicit chat websocket URL to execution", async () => {
+  it("does not rewrite a deleted legacy explicit chat websocket URL", async () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "ws://custom-host:9000/api/v1/ws/chat");
     vi.stubEnv("VITE_FLEET_API_URL", "");
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
-    expect(rlmApiConfig.wsUrl).toBe("ws://custom-host:9000/api/v1/ws/execution");
-    expect(rlmApiConfig.wsExecutionUrl).toBe("ws://custom-host:9000/api/v1/ws/execution/events");
+    expect(rlmApiConfig.wsUrl).toBe("ws://custom-host:9000/api/v1/ws/chat");
+    expect(rlmApiConfig.wsExecutionUrl).toBe("ws://custom-host:9000/api/v1/ws/chat");
   });
 
-  it("rewrites a legacy explicit chat websocket suffix even when the URL is malformed", async () => {
+  it("does not rewrite a malformed deleted chat websocket suffix", async () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "custom-host/api/v1/ws/chat");
     vi.stubEnv("VITE_FLEET_API_URL", "");
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
-    expect(rlmApiConfig.wsUrl).toBe("custom-host/api/v1/ws/execution");
-    expect(rlmApiConfig.wsExecutionUrl).toBe("custom-host/api/v1/ws/execution/events");
+    expect(rlmApiConfig.wsUrl).toBe("custom-host/api/v1/ws/chat");
+    expect(rlmApiConfig.wsExecutionUrl).toBe("custom-host/api/v1/ws/chat");
   });
 
   it("leaves a malformed explicit websocket URL unchanged when it is not legacy chat", async () => {

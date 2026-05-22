@@ -180,16 +180,20 @@ describe("runtimeEndpoints", () => {
     );
   });
 
-  it("uses fallback data when a local loopback backend returns 502", async () => {
+  it("does not use read fallback when a local loopback backend returns 502", async () => {
     vi.stubEnv("VITE_FLEET_API_URL", "http://127.0.0.1:8000");
     const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ detail: "Bad Gateway" }, 502));
     vi.stubGlobal("fetch", fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();
-    const status = await runtimeEndpoints.status();
-
-    expect(status.ready).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(runtimeEndpoints.status()).rejects.toEqual(
+      expect.objectContaining<RlmApiError>({
+        detail: "Bad Gateway",
+        message: "[502] Bad Gateway",
+        name: "RlmApiError",
+        status: 502,
+      }),
+    );
   });
 
   it("does not use write fallback for loopback backend failures", async () => {
