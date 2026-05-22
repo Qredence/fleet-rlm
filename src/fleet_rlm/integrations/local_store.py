@@ -752,6 +752,32 @@ def get_turns_paginated(
         return items, total
 
 
+def get_local_session_stats(
+    session_id: int,
+    *,
+    owner_tenant: str | None = None,
+    owner_user: str | None = None,
+) -> dict[str, object] | None:
+    """Return aggregate stats for a local chat session."""
+    with get_session() as db:
+        session_row = db.get(ChatSession, session_id)
+        if session_row is None:
+            return None
+        if owner_tenant is not None and session_row.owner_tenant != owner_tenant:
+            return None
+        if owner_user is not None and session_row.owner_user != owner_user:
+            return None
+        turns = list(
+            db.exec(select(ChatTurn).where(ChatTurn.session_id == session_id).order_by(text("turn_index"))).all()
+        )
+    return {
+        "total_tokens_in": sum(int(turn.tokens_in or 0) for turn in turns),
+        "total_tokens_out": sum(int(turn.tokens_out or 0) for turn in turns),
+        "total_latency_ms": sum(int(turn.latency_ms or 0) for turn in turns),
+        "model_breakdown": ({session_row.model_name: len(turns)} if session_row.model_name else {}),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Evaluation result + prompt snapshot persistence
 # ---------------------------------------------------------------------------
@@ -1192,7 +1218,15 @@ class LocalStore(PersistenceProtocol):
         user_id: uuid.UUID | None = None,
         workspace_id: uuid.UUID | None = None,
     ) -> dict[str, object] | None:
-        return None
+        session_id_int = _uuid_to_int(session_id)
+        if session_id_int is None:
+            return None
+        return await asyncio.to_thread(
+            get_local_session_stats,
+            session_id_int,
+            owner_tenant=str(tenant_id),
+            owner_user=str(user_id) if user_id is not None else None,
+        )
 
     # ------------------------------------------------------------------
     # Runs / Steps

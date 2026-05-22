@@ -3174,6 +3174,7 @@ components:
           title: Module Slug
           description: Target GEPA module slug whose dataset keys determine the export
             column mapping.
+      additionalProperties: false
       type: object
       required:
       - module_slug
@@ -3271,6 +3272,7 @@ components:
           - type: 'null'
           title: Metadata Json
           description: New metadata dictionary to merge or replace session metadata.
+      additionalProperties: false
       type: object
       title: SessionPatchRequest
       description: Patch body for updating session metadata.
@@ -3419,6 +3421,7 @@ components:
           title: Expected Response
           description: Optional ground-truth response or correction to log alongside
             the feedback.
+      additionalProperties: false
       type: object
       required:
       - is_correct

@@ -14,7 +14,6 @@ from fastapi import HTTPException
 
 from fleet_rlm.integrations.database import ChatSessionStatus, ChatTurn
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
-from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 from fleet_rlm.utils.session_titles import derive_session_title, is_placeholder_session_title
 
 from ..schemas.optimization import DatasetResponse
@@ -34,7 +33,6 @@ from ..schemas.sessions import (
 )
 from .session_helpers import (
     optional_string,
-    parse_legacy_session_key_owner,
     parse_session_uuid,
     session_external_id,
     string_or_default,
@@ -52,6 +50,15 @@ def _turn_item_from_repo(turn: ChatTurn) -> TurnItem:
         assistant_message=turn.assistant_message,
         created_at=turn.created_at.isoformat(),
     )
+
+
+def _canonical_id(value: object) -> str:
+    """Return the public canonical UUID string for repository/local rows."""
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, int):
+        return str(uuid.UUID(int=value))
+    return str(value)
 
 
 async def _resolve_session_title(
@@ -127,39 +134,21 @@ class SessionService:
     ) -> SessionStateResponse:
         """Return lightweight summaries of active/restored in-memory session state."""
         summaries: list[SessionStateSummary] = []
-        expected_workspace_id = _sanitize_id(identity.tenant_claim, "default")
-        expected_user_id = _sanitize_id(identity.user_claim, "anonymous")
         for key, payload in session_cache.items():
             if not isinstance(payload, Mapping):
                 continue
             payload_dict = payload
             owner_tenant_claim = optional_string(payload_dict.get("owner_tenant_claim"))
             owner_user_claim = optional_string(payload_dict.get("owner_user_claim"))
-            if owner_tenant_claim is not None and owner_user_claim is not None:
-                if owner_tenant_claim != identity.tenant_claim or owner_user_claim != identity.user_claim:
-                    continue
-            else:
-                key_workspace_id, key_user_id = parse_legacy_session_key_owner(key)
-                workspace_id_fallback = optional_string(payload_dict.get("workspace_id"))
-                user_id_fallback = optional_string(payload_dict.get("user_id"))
-                legacy_workspace_id = workspace_id_fallback or key_workspace_id
-                legacy_user_id = user_id_fallback or key_user_id
-                if legacy_workspace_id is None or legacy_user_id is None:
-                    continue
-                if legacy_workspace_id != expected_workspace_id or legacy_user_id != expected_user_id:
-                    continue
+            if owner_tenant_claim != identity.tenant_claim or owner_user_claim != identity.user_claim:
+                continue
 
             workspace_id = string_or_default(payload_dict.get("workspace_id"), "default")
             user_id = string_or_default(payload_dict.get("user_id"), "anonymous")
-            manifest = payload_dict.get("manifest", {})
             session = payload_dict.get("session", {})
             session_state = session.get("state", {}) if isinstance(session, Mapping) else {}
             history = session_state.get("history", []) if isinstance(session_state, Mapping) else []
             documents = session_state.get("documents", {}) if isinstance(session_state, Mapping) else {}
-            memory = manifest.get("memory", []) if isinstance(manifest, Mapping) else []
-            logs = manifest.get("logs", []) if isinstance(manifest, Mapping) else []
-            artifacts = manifest.get("artifacts", []) if isinstance(manifest, Mapping) else []
-            metadata = manifest.get("metadata", {}) if isinstance(manifest, Mapping) else {}
             summaries.append(
                 SessionStateSummary(
                     key=str(key),
@@ -168,10 +157,10 @@ class SessionService:
                     session_id=optional_string(payload_dict.get("session_id")),
                     history_turns=len(history) if isinstance(history, list) else 0,
                     document_count=len(documents) if isinstance(documents, dict) else 0,
-                    memory_count=len(memory) if isinstance(memory, list) else 0,
-                    log_count=len(logs) if isinstance(logs, list) else 0,
-                    artifact_count=len(artifacts) if isinstance(artifacts, list) else 0,
-                    updated_at=optional_string(metadata.get("updated_at")) if isinstance(metadata, Mapping) else None,
+                    memory_count=0,
+                    log_count=0,
+                    artifact_count=0,
+                    updated_at=optional_string(payload_dict.get("updated_at")),
                 )
             )
         return SessionStateResponse(ok=True, sessions=summaries)
@@ -248,7 +237,7 @@ class SessionService:
         return SessionListResponse(
             items=[
                 SessionListItem(
-                    id=str(s.id),
+                    id=_canonical_id(s.id),
                     title=resolved_titles[index],
                     status=s.status.value if hasattr(s.status, "value") else str(s.status),
                     model_name=s.model_name,
@@ -295,7 +284,7 @@ class SessionService:
             persisted_identity=persisted_identity,
         )
         return SessionDetailResponse(
-            id=str(session.id),
+            id=_canonical_id(session.id),
             title=resolved_title,
             status=session.status.value if hasattr(session.status, "value") else str(session.status),
             model_name=session.model_name,
@@ -335,7 +324,7 @@ class SessionService:
             offset=0,
         )
         return SessionDetailResponse(
-            id=str(session.id),
+            id=_canonical_id(session.id),
             title=session.title,
             status=session.status.value if hasattr(session.status, "value") else str(session.status),
             model_name=session.model_name,

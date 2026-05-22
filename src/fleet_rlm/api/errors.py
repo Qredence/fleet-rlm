@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException, Request
@@ -56,6 +56,25 @@ def _http_exception_message(exc: HTTPException) -> str:
     return "HTTP request failed."
 
 
+def _json_safe_validation_errors(errors: Sequence[Any]) -> list[dict[str, Any]]:
+    """Return FastAPI validation details without non-serializable exception objects."""
+    safe_errors: list[dict[str, Any]] = []
+    for error in errors:
+        if not isinstance(error, Mapping):
+            safe_errors.append({"message": str(error)})
+            continue
+        safe_error = dict(error)
+        ctx = safe_error.get("ctx")
+        if isinstance(ctx, dict):
+            safe_error["ctx"] = {
+                str(key): str(value)
+                for key, value in ctx.items()
+                if isinstance(value, str | int | float | bool) or value is None
+            }
+        safe_errors.append(safe_error)
+    return safe_errors
+
+
 async def http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Convert FastAPI HTTPException payloads to the canonical error envelope."""
     _ = request
@@ -87,7 +106,7 @@ async def validation_exception_handler(request: Request, exc: Exception) -> JSON
         code="validation_error",
         message="Request validation failed.",
         status_code=422,
-        detail=exc.errors(),
+        detail=_json_safe_validation_errors(exc.errors()),
     )
 
 

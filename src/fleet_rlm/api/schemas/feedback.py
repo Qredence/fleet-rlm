@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TraceFeedbackRequest(BaseModel):
     """Feedback payload for annotating an MLflow trace."""
+
+    model_config = ConfigDict(extra="forbid")
 
     trace_id: str | None = Field(
         default=None,

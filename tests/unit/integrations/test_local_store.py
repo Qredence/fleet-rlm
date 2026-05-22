@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from pathlib import Path
 
 import dspy
@@ -138,6 +139,44 @@ def test_list_datasets_pagination():
     page3, total3 = list_datasets(limit=2, offset=4)
     assert total3 == 5
     assert len(page3) == 1
+
+
+@pytest.mark.asyncio
+async def test_local_store_session_stats_are_supported_for_canonical_http_contract() -> None:
+    from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+    from fleet_rlm.integrations.local_store import LocalStore, add_turn, create_session
+
+    store = LocalStore()
+    identity = await store.upsert_identity(
+        entra_tenant_id="tenant-local-stats",
+        entra_user_id="user-local-stats",
+        email="local@example.com",
+    )
+    assert isinstance(identity, IdentityUpsertResult)
+    session = create_session(
+        title="stats",
+        model_name="local-model",
+        owner_tenant=str(identity.tenant_id),
+        owner_user=str(identity.user_id),
+        workspace_id=str(identity.workspace_id),
+    )
+    assert session.id is not None
+    add_turn(session.id, 99, "first", "one", tokens_in=2, tokens_out=3, latency_ms=5)
+    add_turn(session.id, 99, "second", "two", tokens_in=7, tokens_out=11, latency_ms=13)
+
+    stats = await store.get_session_stats(
+        tenant_id=identity.tenant_id,
+        session_id=uuid.UUID(int=session.id),
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+    )
+
+    assert stats == {
+        "total_tokens_in": 9,
+        "total_tokens_out": 14,
+        "total_latency_ms": 18,
+        "model_breakdown": {"local-model": 2},
+    }
 
 
 def test_get_dataset_found_and_not_found():

@@ -132,7 +132,7 @@ def test_load_manifest_from_volume_uses_daytona_session(monkeypatch) -> None:
     assert session.read_calls == ["/home/daytona/memory/meta/workspaces/test/session.json"]
 
 
-def test_load_manifest_from_volume_falls_back_to_legacy_path(monkeypatch) -> None:
+def test_load_manifest_from_volume_does_not_fall_back_to_legacy_path(monkeypatch) -> None:
     session = FakeDaytonaStorageSession()
     session.file_contents["/home/daytona/memory/workspaces/test/session.json"] = '{"rev": 5}'
     agent = cast(
@@ -147,14 +147,11 @@ def test_load_manifest_from_volume_falls_back_to_legacy_path(monkeypatch) -> Non
 
     manifest = asyncio.run(_chat_persistence.load_manifest_from_volume(agent, "meta/workspaces/test/session.json"))
 
-    assert manifest == {"rev": 5}
-    assert session.read_calls == [
-        "/home/daytona/memory/meta/workspaces/test/session.json",
-        "/home/daytona/memory/workspaces/test/session.json",
-    ]
+    assert manifest == {}
+    assert session.read_calls == ["/home/daytona/memory/meta/workspaces/test/session.json"]
 
 
-def test_load_manifest_from_volume_falls_back_to_legacy_user_memory_path(
+def test_load_manifest_from_volume_does_not_fall_back_to_legacy_user_memory_path(
     monkeypatch,
 ) -> None:
     session = FakeDaytonaStorageSession()
@@ -178,10 +175,9 @@ def test_load_manifest_from_volume_falls_back_to_legacy_user_memory_path(
         )
     )
 
-    assert manifest == {"rev": 7}
+    assert manifest == {}
     assert session.read_calls == [
-        "/home/daytona/memory/meta/workspaces/workspace-1/users/user-1/" + "react-session-session-a.json",
-        "/home/daytona/memory/workspaces/workspace-1/users/user-1/" + "memory/react-session-session-a.json",
+        "/home/daytona/memory/meta/workspaces/workspace-1/users/user-1/" + "react-session-session-a.json"
     ]
 
 

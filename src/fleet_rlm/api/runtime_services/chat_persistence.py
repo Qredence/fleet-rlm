@@ -334,26 +334,6 @@ def _manifest_path(workspace_id: str, user_id: str, session_id: str) -> str:
     return f"meta/workspaces/{workspace_id}/users/{user_id}/react-session-{safe_session_id}.json"
 
 
-def _legacy_manifest_path(path: str) -> str | None:
-    normalized = str(path or "").strip()
-    if not normalized.startswith("meta/"):
-        return None
-    stripped = normalized.removeprefix("meta/")
-    parts = PurePosixPath(stripped).parts
-    if len(parts) < 5 or parts[0] != "workspaces" or parts[2] != "users":
-        return stripped
-
-    user_prefix = PurePosixPath(*parts[:4])
-    remainder = parts[4:]
-    if not remainder:
-        return stripped
-    if remainder[0] == "memory":
-        return stripped
-    if remainder[0].startswith("react-session-"):
-        return str(user_prefix / "memory" / PurePosixPath(*remainder))
-    return stripped
-
-
 async def _aget_daytona_session(agent: Any) -> Any | None:
     try:
         from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
@@ -387,49 +367,43 @@ async def load_manifest_from_volume(agent: Any, path: str) -> dict[str, Any]:
     interpreter = agent.interpreter
     if interpreter is None:
         return {}
-    candidate_paths = [path]
-    legacy_path = _legacy_manifest_path(path)
-    if legacy_path is not None:
-        candidate_paths.append(legacy_path)
     daytona_session = await _aget_daytona_session(agent)
     if daytona_session is not None:
-        for candidate_path in candidate_paths:
-            storage_path = _persistent_storage_path(interpreter, candidate_path)
-            try:
-                text = await daytona_session.aread_file(storage_path)
-            except Exception:
-                logger.debug(
-                    "manifest_load_daytona_read_error",
-                    extra={"path": storage_path},
-                    exc_info=True,
-                )
-                continue
-            if not text:
-                continue
-            try:
-                parsed = json.loads(text)
-                return parsed if isinstance(parsed, dict) else {}
-            except json.JSONDecodeError:
-                return {}
-        return {}
-    for candidate_path in candidate_paths:
-        result = await interpreter.aexecute(
-            "text = load_from_volume(path)\nSUBMIT(text=text)",
-            variables={"path": candidate_path},
-            execution_profile=ExecutionProfile.MAINTENANCE,
-        )
-        if not _is_final_output(result):
-            continue
-        output = getattr(result, "output", None)
-        output = output if isinstance(output, dict) else {}
-        text = str(output.get("text", ""))
-        if not text or text.startswith("[file not found:") or text.startswith("[error:"):
-            continue
+        storage_path = _persistent_storage_path(interpreter, path)
+        try:
+            text = await daytona_session.aread_file(storage_path)
+        except Exception:
+            logger.debug(
+                "manifest_load_daytona_read_error",
+                extra={"path": storage_path},
+                exc_info=True,
+            )
+            return {}
+        if not text:
+            return {}
         try:
             parsed = json.loads(text)
             return parsed if isinstance(parsed, dict) else {}
         except json.JSONDecodeError:
             return {}
+        return {}
+    result = await interpreter.aexecute(
+        "text = load_from_volume(path)\nSUBMIT(text=text)",
+        variables={"path": path},
+        execution_profile=ExecutionProfile.MAINTENANCE,
+    )
+    if not _is_final_output(result):
+        return {}
+    output = getattr(result, "output", None)
+    output = output if isinstance(output, dict) else {}
+    text = str(output.get("text", ""))
+    if not text or text.startswith("[file not found:") or text.startswith("[error:"):
+        return {}
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError:
+        return {}
     return {}
 
 
@@ -1012,7 +986,6 @@ __all__ = [
     "load_manifest_from_volume",
     "save_manifest_to_volume",
     "_manifest_path",
-    "_legacy_manifest_path",
     "_aget_daytona_session",
     "_persistent_storage_path",
     "_is_final_output",
