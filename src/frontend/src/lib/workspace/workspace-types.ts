@@ -26,10 +26,7 @@ export interface ChatMessage {
     | "trace"
     | "hitl"
     | "clarification"
-    | "reasoning"
-    | "plan_update"
-    | "rlm_executing"
-    | "memory_update";
+    | "reasoning";
   content: string;
   traceSource?: "live" | "trajectory" | "summary";
   phase?: 1 | 2 | 3;

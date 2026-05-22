@@ -33,7 +33,7 @@ describe("runWorkbenchAdapter", () => {
 
     const next = applyFrameToRunWorkbenchState(
       started,
-      makeEvent("final", "Done", {
+      makeEvent("done", "Done", {
         runtime_mode: "daytona_pilot",
         runtime: {
           runtime_mode: "daytona_pilot",
@@ -167,7 +167,7 @@ describe("runWorkbenchAdapter", () => {
     const next = applyFrameToRunWorkbenchState(started, {
       type: "event",
       data: {
-        kind: "final",
+        kind: "done",
         text: "Done",
         payload: {
           source_type: "execution_completed",
@@ -215,7 +215,7 @@ describe("runWorkbenchAdapter", () => {
 
     const next = applyFrameToRunWorkbenchState(
       started,
-      makeEvent("final", "Need a human to review the risky repair.", {
+      makeEvent("done", "Need a human to review the risky repair.", {
         source_type: "execution_completed",
         run_summary: {
           run_id: "run-human-review",
@@ -256,7 +256,7 @@ describe("runWorkbenchAdapter", () => {
 
     const next = applyFrameToRunWorkbenchState(
       started,
-      makeEvent("final", "Daytona summary complete", {
+      makeEvent("done", "Daytona summary complete", {
         source_type: "execution_completed",
         run_summary: {
           run_id: "run-daytona-2",
@@ -354,7 +354,7 @@ describe("runWorkbenchAdapter", () => {
 
     const next = applyFrameToRunWorkbenchState(
       started,
-      makeEvent("final", "Daytona summary complete", {
+      makeEvent("done", "Daytona summary complete", {
         source_type: "execution_completed",
         runtime_mode: "daytona_pilot",
         daytona_mode: "daytona_pilot",
@@ -602,8 +602,9 @@ describe("runWorkbenchAdapter", () => {
 
     const next = applyFrameToRunWorkbenchState(
       state,
-      makeEvent("cancelled", "Run cancelled", {
+      makeEvent("done", "Run cancelled", {
         runtime_mode: "daytona_pilot",
+        cancelled: true,
       }),
     );
 
@@ -678,7 +679,7 @@ describe("runWorkbenchAdapter", () => {
 
     const next = applyFrameToRunWorkbenchState(
       started,
-      makeEvent("final", "Done", {
+      makeEvent("done", "Done", {
         source_type: "execution_completed",
         runtime_mode: "daytona_pilot",
         run_summary: {
@@ -725,7 +726,7 @@ describe("runWorkbenchAdapter", () => {
       startRunWorkbenchRun(createInitialRunWorkbenchState(), {
         task: "Analyze the repo",
       }),
-      makeEvent("final", "Done", {
+      makeEvent("done", "Done", {
         source_type: "execution_completed",
         runtime_mode: "daytona_pilot",
         runtime: {
@@ -764,7 +765,7 @@ describe("runWorkbenchAdapter", () => {
       startRunWorkbenchRun(createInitialRunWorkbenchState(), {
         task: "Analyze the repo",
       }),
-      makeEvent("final", "Done", {
+      makeEvent("done", "Done", {
         source_type: "execution_completed",
         runtime_mode: "daytona_pilot",
         runtime: {

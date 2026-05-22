@@ -114,7 +114,6 @@ def test_prepare_chat_message_turn_initializes_daytona_turn(monkeypatch) -> None
                 docs_path="docs/current.md",
                 trace=False,
                 execution_mode="tools_only",
-                runtime_mode="daytona_pilot",
                 repo_url="https://github.com/example/repo.git",
                 repo_ref="main",
                 context_paths=["src", " ", "docs"],

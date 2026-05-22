@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_core import PydanticCustomError
 
 from .runtime import ExecutionMode
@@ -12,6 +12,8 @@ from .runtime import ExecutionMode
 
 class WSMessage(BaseModel):
     """Typed websocket payload for chat, cancel, and command frames."""
+
+    model_config = ConfigDict(extra="forbid")
 
     type: Literal["message", "cancel", "command"] = Field(
         default="message",

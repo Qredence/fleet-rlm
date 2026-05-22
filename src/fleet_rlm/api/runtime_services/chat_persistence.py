@@ -105,6 +105,7 @@ def build_execution_event(
     workspace_id: str,
     user_id: str,
     session_id: str,
+    sequence: int,
     step: ExecutionStep | None = None,
     summary: dict[str, Any] | None = None,
 ) -> ExecutionEvent:
@@ -114,6 +115,7 @@ def build_execution_event(
         workspace_id=workspace_id,
         user_id=user_id,
         session_id=session_id,
+        sequence=sequence,
         step=step,
         summary=summary,
     )
@@ -483,6 +485,7 @@ class ExecutionLifecycleManager:
         self._persist_queue: asyncio.Queue[ExecutionStep | None] | None = None
         self._persist_worker_task: asyncio.Task[None] | None = None
         self._persistence_error: Exception | None = None
+        self._event_sequence = 0
         self.run_completed = False
 
     def _build_event(
@@ -491,12 +494,14 @@ class ExecutionLifecycleManager:
         step: ExecutionStep | None = None,
         summary: dict[str, Any] | None = None,
     ) -> Any:
+        self._event_sequence += 1
         return build_execution_event(
             event_type=event_type,
             run_id=self.run_id,
             workspace_id=self.workspace_id,
             user_id=self.user_id,
             session_id=self.session_id,
+            sequence=self._event_sequence,
             step=step,
             summary=summary,
         )

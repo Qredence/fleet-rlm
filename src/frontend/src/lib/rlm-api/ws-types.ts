@@ -23,7 +23,6 @@ export interface WsMessageRequest {
   repo_ref?: string | null;
   context_paths?: string[] | null;
   batch_concurrency?: number | null;
-  analytics_enabled?: boolean;
   session_id?: string;
 }
 
@@ -41,7 +40,6 @@ export interface WsCommandRequest {
 export type WsClientMessage = WsMessageRequest | WsCancelRequest | WsCommandRequest;
 
 export type WsEventKind =
-  // Canonical backend kinds (v0.5+)
   | "status"
   | "text"
   | "reasoning"
@@ -55,20 +53,8 @@ export type WsEventKind =
   | "turn_failed"
   | "sandbox_exec"
   | "rlm_delegate"
-  // Legacy kinds (retained for backward compatibility)
-  | "assistant_token"
-  | "reasoning_step"
-  | "trajectory_step"
-  | "final"
-  | "cancelled"
-  | "plan_update"
-  | "rlm_executing"
-  | "memory_update"
-  | "hitl_request"
-  | "hitl_resolved"
   | "clarification"
-  | "command_ack"
-  | "command_reject";
+  | "command_result";
 
 export interface WsEventPayload {
   kind: WsEventKind;

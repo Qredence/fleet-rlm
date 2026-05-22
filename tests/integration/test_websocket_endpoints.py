@@ -59,6 +59,28 @@ def test_websocket_execution_events_requires_session_id() -> None:
             assert exc_info.value.code == 1008
 
 
+@pytest.mark.parametrize(
+    "frame",
+    [
+        {"type": "message", "content": "start a run"},
+        {"type": "cancel"},
+        {"type": "command", "command": "resolve_hitl", "args": {}},
+    ],
+)
+def test_websocket_execution_events_rejects_active_frames(frame: dict[str, object]) -> None:
+    """Passive event streams are subscription-only and reject run-mutating frames."""
+    app = create_app()
+    with TestClient(app) as client:
+        with client.websocket_connect("/api/v1/ws/execution/events?session_id=session-123") as websocket:
+            websocket.send_json(frame)
+            data = websocket.receive_json()
+            assert data.get("type") == "error"
+            assert data.get("code") == "passive_subscription_only"
+            with pytest.raises(WebSocketDisconnect) as exc_info:
+                websocket.receive_json()
+            assert exc_info.value.code == 1008
+
+
 def test_websocket_routes_have_correct_tags() -> None:
     """Verify WebSocket routes are tagged appropriately for OpenAPI documentation."""
     app = create_app()

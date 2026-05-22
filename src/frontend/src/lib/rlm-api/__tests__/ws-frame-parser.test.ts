@@ -20,7 +20,7 @@ describe("parseWsServerFrame", () => {
     expect(frame.data.event_id).toBe("evt-1");
   });
 
-  it("maps command_result success to command_ack event", () => {
+  it("maps command_result success to canonical command_result event", () => {
     const frame = parseWsServerFrame({
       type: "command_result",
       command: "hitl.respond",
@@ -31,13 +31,13 @@ describe("parseWsServerFrame", () => {
 
     expect(frame).toBeTruthy();
     if (!frame || frame.type !== "event") return;
-    expect(frame.data.kind).toBe("command_ack");
+    expect(frame.data.kind).toBe("command_result");
     expect(frame.data.payload?.command).toBe("hitl.respond");
     expect(frame.data.version).toBe(2);
     expect(frame.data.event_id).toBe("evt-command-ack");
   });
 
-  it("maps command_result error to command_reject event", () => {
+  it("maps command_result error to canonical command_result event", () => {
     const frame = parseWsServerFrame({
       type: "command_result",
       command: "hitl.respond",
@@ -46,7 +46,7 @@ describe("parseWsServerFrame", () => {
 
     expect(frame).toBeTruthy();
     if (!frame || frame.type !== "event") return;
-    expect(frame.data.kind).toBe("command_reject");
+    expect(frame.data.kind).toBe("command_result");
     expect(frame.data.text).toContain("Denied");
   });
 
@@ -84,7 +84,7 @@ describe("parseWsServerFrame", () => {
 
     expect(frame).toBeTruthy();
     if (!frame || frame.type !== "event") return;
-    expect(frame.data.kind).toBe("final");
+    expect(frame.data.kind).toBe("done");
     expect(frame.data.payload?.source_type).toBe("execution_completed");
     expect(frame.data.payload?.run_summary).toMatchObject({
       run_id: "run-123",
@@ -114,7 +114,7 @@ describe("parseWsServerFrame", () => {
     expect(frame.data.timestamp).toBe(1710849602);
   });
 
-  it("prioritizes step.output over step.label when kind is final", () => {
+  it("prioritizes step.output over step.label when kind is done", () => {
     const frame = parseWsServerFrame({
       type: "execution_step",
       timestamp: 1710849601,
@@ -129,7 +129,7 @@ describe("parseWsServerFrame", () => {
 
     expect(frame).toBeTruthy();
     if (!frame || frame.type !== "event") return;
-    expect(frame.data.kind).toBe("final");
+    expect(frame.data.kind).toBe("done");
     expect(frame.data.text).toBe("This is the actual final response text!");
   });
 });

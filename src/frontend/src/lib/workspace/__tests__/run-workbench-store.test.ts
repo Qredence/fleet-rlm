@@ -98,7 +98,7 @@ describe("useRunWorkbenchStore", () => {
     useRunWorkbenchStore.getState().applyFrame({
       type: "event",
       data: {
-        kind: "final",
+        kind: "done",
         text: "Done",
         event_id: "evt-compat-final",
         payload: {

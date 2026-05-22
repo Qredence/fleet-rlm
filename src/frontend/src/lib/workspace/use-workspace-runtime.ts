@@ -22,9 +22,7 @@ import type {
 function isTerminalFrame(frame: WsServerMessage): boolean {
   if (frame.type === "error") return true;
   return (
-    frame.data.kind === "final" ||
     frame.data.kind === "done" ||
-    frame.data.kind === "cancelled" ||
     frame.data.kind === "error"
   );
 }

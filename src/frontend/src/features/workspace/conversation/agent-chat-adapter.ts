@@ -487,19 +487,6 @@ function messageToParts(message: ChatMessage, options: AgentChatMessageAdapterOp
     const questionPart = clarificationToQuestionPart(message, options.onResolveClarification);
     if (questionPart) return [questionPart];
   }
-  if (
-    message.type === "plan_update" ||
-    message.type === "rlm_executing" ||
-    message.type === "memory_update"
-  ) {
-    parts.push({
-      type: message.type === "plan_update" ? "tool-PlanWrite" : "tool-Status",
-      toolCallId: message.id,
-      state: "output-available",
-      input: { message: message.content },
-      output: { message: message.content },
-    } satisfies AgentToolPart);
-  }
   return parts;
 }
 

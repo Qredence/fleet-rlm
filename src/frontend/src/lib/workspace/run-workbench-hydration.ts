@@ -269,8 +269,7 @@ function isRunWorkbenchFrame(frame: WsServerMessage): boolean {
     payload?.run_result != null ||
     payload?.final_artifact != null ||
     payload?.iterations != null ||
-    frame.data.kind === "final" ||
-    frame.data.kind === "cancelled" ||
+    frame.data.kind === "done" ||
     frame.data.kind === "error"
   );
 }
@@ -286,9 +285,7 @@ export function shouldApplyRunFrame(state: RunWorkbenchState, frame: WsServerMes
     return acceptsRawError;
   }
   if (
-    (frame.data.kind === "final" ||
-      frame.data.kind === "cancelled" ||
-      frame.data.kind === "error") &&
+    (frame.data.kind === "done" || frame.data.kind === "error") &&
     acceptsTerminalCompat
   ) {
     return true;
@@ -305,8 +302,9 @@ function statusFromFrame(
   if (frame.type === "error") return "error";
   const payloadStatus = normalizeRunStatus(runSummary?.status ?? payload?.status);
   if (payloadStatus) return payloadStatus;
-  if (frame.data.kind === "final") return "completed";
-  if (frame.data.kind === "cancelled") return "cancelled";
+  if (frame.data.kind === "done") {
+    return payload?.cancelled === true ? "cancelled" : "completed";
+  }
   if (frame.data.kind === "error") return "error";
   if (current === "idle") return "bootstrapping";
   return "running";
@@ -343,7 +341,7 @@ export function applyFrameToRunWorkbenchState(
   const isTerminalCompatFrame =
     !isCanonicalCompletion &&
     frame.type === "event" &&
-    (frame.data.kind === "final" || frame.data.kind === "cancelled" || frame.data.kind === "error");
+    (frame.data.kind === "done" || frame.data.kind === "error");
 
   const payloadPrompts = !isTerminalCompatFrame
     ? dedupePromptHandles([
@@ -384,7 +382,7 @@ export function applyFrameToRunWorkbenchState(
         status:
           frame.data.kind === "error"
             ? "error"
-            : frame.data.kind === "final"
+            : frame.data.kind === "done"
               ? "completed"
               : "running",
         phase: asText(payload?.phase),

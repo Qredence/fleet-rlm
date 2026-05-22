@@ -63,7 +63,7 @@ export async function sendCommandOverWs(
     ...options,
     url: rlmApiConfig.wsUrl,
     maxRetries: options.maxRetries ?? 0,
-    terminalEventKinds: ["command_ack", "command_reject"],
+    terminalEventKinds: ["command_result"],
   });
 }
 

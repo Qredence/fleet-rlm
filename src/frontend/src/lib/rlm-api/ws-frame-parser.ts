@@ -2,7 +2,6 @@ import type { WsEventKind, WsServerEvent, WsServerMessage } from "@/lib/rlm-api/
 
 function isWsEventKind(value: string): value is WsEventKind {
   return [
-    // Canonical backend kinds (v0.5+)
     "status",
     "text",
     "reasoning",
@@ -11,20 +10,13 @@ function isWsEventKind(value: string): value is WsEventKind {
     "warning",
     "error",
     "done",
-    // Legacy kinds (retained for backward compatibility)
-    "assistant_token",
-    "reasoning_step",
-    "trajectory_step",
-    "final",
-    "cancelled",
-    "plan_update",
-    "rlm_executing",
-    "memory_update",
-    "hitl_request",
-    "hitl_resolved",
+    "turn_started",
+    "turn_completed",
+    "turn_failed",
+    "sandbox_exec",
+    "rlm_delegate",
     "clarification",
-    "command_ack",
-    "command_reject",
+    "command_result",
   ].includes(value);
 }
 
@@ -75,15 +67,13 @@ function normalizeExecutionStepKind(step: Record<string, unknown>): WsEventKind 
     .trim()
     .toLowerCase();
 
-  if (rawType === "output") return "final";
+  if (rawType === "output") return "done";
   if (rawType === "tool" || rawType === "repl") {
     return step.output == null ? "tool_call" : "tool_result";
   }
   if (rawType === "memory") return "status";
   if (rawType === "llm") {
-    return typeof step.output === "string" && step.output.length > 0
-      ? "assistant_token"
-      : "reasoning_step";
+    return typeof step.output === "string" && step.output.length > 0 ? "text" : "reasoning";
   }
 
   return "status";
@@ -115,7 +105,7 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
     return {
       type: "event",
       data: {
-        kind: "final",
+        kind: "done",
         text: asText(
           parsed.output ??
             artifactValue?.final_markdown ??
@@ -160,7 +150,7 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
 
   const kind = normalizeExecutionStepKind(step);
   const text = asText(
-    kind === "final"
+    kind === "done"
       ? (step.output ?? step.content ?? step.message ?? step.label ?? kind)
       : (step.label ?? step.output ?? step.input ?? step.content ?? step.message ?? kind),
   );
@@ -211,15 +201,13 @@ export function parseWsServerFrame(parsed: Record<string, unknown>): WsServerMes
   if (frameType === "command_result") {
     const result = asRecord(parsed.result) ?? {};
     const command = asText(parsed.command || "command");
-    const status = String(result.status ?? "ok").toLowerCase();
-    const kind: WsEventKind = status === "ok" ? "command_ack" : "command_reject";
 
     return {
       type: "event",
       data: {
-        kind,
+        kind: "command_result",
         text:
-          kind === "command_ack"
+          String(result.status ?? "ok").toLowerCase() === "ok"
             ? `${command} completed`
             : asText(result.error ?? `${command} failed`),
         payload: {

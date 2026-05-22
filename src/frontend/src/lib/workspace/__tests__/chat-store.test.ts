@@ -239,11 +239,11 @@ describe("useChatStore — streamMessage", () => {
       trace: true,
       trace_mode: "compact",
       execution_mode: "auto",
-      analytics_enabled: true,
       session_id: "sess-abc",
     });
     expect(payload).not.toHaveProperty("workspace_id");
     expect(payload).not.toHaveProperty("user_id");
+    expect(payload).not.toHaveProperty("analytics_enabled");
   });
 
   it("passes execution mode overrides to the websocket payload", async () => {
@@ -341,7 +341,7 @@ describe("useChatStore — streamMessage", () => {
   it("calls onFrameCallback for every yielded frame", async () => {
     const fakeFrame = {
       type: "event" as const,
-      data: { kind: "assistant_token" as const, text: "Hi!" },
+      data: { kind: "text" as const, text: "Hi!" },
     };
 
     vi.mocked(streamChatOverWs).mockImplementation(async (_payload, opts) => {
@@ -360,7 +360,7 @@ describe("useChatStore — streamMessage", () => {
 
     const fakeFrame = {
       type: "event" as const,
-      data: { kind: "assistant_token" as const, text: "Hi!" },
+      data: { kind: "text" as const, text: "Hi!" },
     };
 
     const frameSpy = vi.fn();

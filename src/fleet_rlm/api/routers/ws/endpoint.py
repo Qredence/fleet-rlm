@@ -247,6 +247,16 @@ class _ExecutionWebSocketConnection:
                 websocket=self.websocket,
                 raw_payload=raw_payload,
             )
+            if initial_msg is not None and initial_msg.type != "message":
+                if await _try_send_json(
+                    self.websocket,
+                    _error_envelope(
+                        code="initial_message_required",
+                        message="Execution websocket must start with a canonical message frame.",
+                    ),
+                ):
+                    await _close_websocket_safely(self.websocket, code=1008)
+                return None
         return initial_msg
 
     async def run(self) -> None:
@@ -270,6 +280,8 @@ class _ExecutionWebSocketConnection:
                 build_dspy_context(lm=runtime.planner_lm),
             ):
                 initial_msg = await self._receive_initial_message()
+                if initial_msg is None:
+                    return
                 if initial_msg.type == "message":
                     startup_status_task = asyncio.create_task(self._emit_delayed_startup_status())
                 agent_context = await _build_chat_agent_context(runtime)
@@ -349,11 +361,29 @@ async def _run_execution_subscription_stream(
 
     try:
         while True:
-            await websocket.receive()
+            message = await websocket.receive()
+            if message.get("type") != "websocket.receive":
+                continue
+            if message.get("text") is None and message.get("bytes") is None:
+                continue
+            if await _try_send_json(
+                websocket,
+                _error_envelope(
+                    code="passive_subscription_only",
+                    message=(
+                        "Passive execution event streams are subscription-only; "
+                        "message, cancel, command, and start frames are rejected."
+                    ),
+                ),
+            ):
+                await _close_websocket_safely(websocket, code=1008)
+            break
     except WebSocketDisconnect:
         await emitter.disconnect(websocket)
     except Exception:
         logger.debug("execution_stream_receive_error", exc_info=True)
+        await emitter.disconnect(websocket)
+    else:
         await emitter.disconnect(websocket)
 
 

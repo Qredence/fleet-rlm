@@ -561,6 +561,8 @@ def test_lifecycle_without_repository_does_not_start_persist_worker() -> None:
             "execution_started",
             "execution_completed",
         ]
+        assert [event.sequence for event in emitter.events] == [1, 2]
+        assert all(event.timestamp is not None for event in emitter.events)
 
     asyncio.run(scenario())
 
