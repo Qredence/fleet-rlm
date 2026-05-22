@@ -135,15 +135,20 @@ override-dependencies = [
     # LiteLLM 1.83.x pins older vulnerable releases; keep the resolver on
     # patched floors until upstream relaxes its metadata.
     "aiohttp>=3.13.4",
+    # idna.encode() bypass advisory; force a patched release family.
+    "idna>=3.16",
+    # Mako <=1.3.11 allows TemplateLookup traversal with Windows backslash URIs.
+    "mako>=1.3.12",
     "python-dotenv>=1.2.2",
-    # GitPython <3.1.47 has two command-injection CVEs (Dependabot alerts).
-    # mlflow-skinny is the only dependent; 3.1.47 is a drop-in upgrade.
-    "gitpython>=3.1.47",
+    # GitPython <=3.1.49 allows config_writer() newline injection.
+    "gitpython>=3.1.50",
     # DSPy 3.2.x pins litellm<=1.82.6 but >=1.83.7 is required to resolve 7 CVEs.
     # scorers.py no longer calls litellm directly (uses dspy.settings.lm instead),
     # so the only litellm consumer is DSPy itself — its stable completion() path
     # is unaffected by the 1.82→1.83 bump.
     "litellm>=1.83.7",
+    # urllib3 <2.7.0 has redirect header leak and streaming decompression issues.
+    "urllib3>=2.7.0",
 ]
 
 [tool.setuptools]
