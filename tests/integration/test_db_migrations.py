@@ -140,7 +140,6 @@ async def test_migrations_apply_and_core_tables_exist(
             "memory_links",
             "optimization_modules",
             "optimization_runs",
-            "outbox_events",
             "program_versions",
             "prompt_snapshots",
             "sandbox_sessions",
@@ -150,10 +149,8 @@ async def test_migrations_apply_and_core_tables_exist(
             "tenants",
             "trace_feedback",
             "users",
-            "volume_objects",
             "workspace_memberships",
             "workspace_runtime_settings",
-            "workspace_volumes",
             "workspaces",
         }
         assert all_table_names - {"alembic_version"} == expected_tables

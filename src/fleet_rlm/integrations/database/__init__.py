@@ -31,7 +31,6 @@ if TYPE_CHECKING:
         MemorySource,
         MemoryStatus,
         OptimizationRunStatus,
-        OutboxStatus,
         PromptSnapshotType,
         RunStatus,
         RunStepType,
@@ -41,10 +40,8 @@ if TYPE_CHECKING:
         SubscriptionStatus,
         TenantPlan,
         TenantStatus,
-        VolumeObjectType,
         WorkspaceRole,
         WorkspaceStatus,
-        WorkspaceVolumeStatus,
     )
     from .models_identity import (
         Membership,
@@ -54,7 +51,7 @@ if TYPE_CHECKING:
         WorkspaceMembership,
         WorkspaceRuntimeSetting,
     )
-    from .models_jobs import Job, OutboxEvent, TenantSubscription
+    from .models_jobs import Job, TenantSubscription
     from .models_memory import MemoryItem, MemoryLink
     from .models_optimization import (
         Dataset,
@@ -76,7 +73,7 @@ if TYPE_CHECKING:
         SessionStateSnapshot,
         TraceFeedback,
     )
-    from .models_sandbox import SandboxSession, VolumeObject, WorkspaceVolume
+    from .models_sandbox import SandboxSession
     from .repository_chat import ChatRepository
     from .repository_identity import IdentityRepository
     from .repository_jobs import JobsRepository
@@ -110,7 +107,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "MemorySource",
         "MemoryStatus",
         "OptimizationRunStatus",
-        "OutboxStatus",
         "PromptSnapshotType",
         "RunStatus",
         "RunStepType",
@@ -120,10 +116,8 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "SubscriptionStatus",
         "TenantPlan",
         "TenantStatus",
-        "VolumeObjectType",
         "WorkspaceRole",
         "WorkspaceStatus",
-        "WorkspaceVolumeStatus",
     ),
     "models_identity": (
         "Membership",
@@ -133,7 +127,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "WorkspaceMembership",
         "WorkspaceRuntimeSetting",
     ),
-    "models_jobs": ("Job", "OutboxEvent", "TenantSubscription"),
+    "models_jobs": ("Job", "TenantSubscription"),
     "models_memory": ("MemoryItem", "MemoryLink"),
     "models_optimization": (
         "Dataset",
@@ -155,7 +149,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "SessionStateSnapshot",
         "TraceFeedback",
     ),
-    "models_sandbox": ("SandboxSession", "VolumeObject", "WorkspaceVolume"),
+    "models_sandbox": ("SandboxSession",),
     "repository_chat": ("ChatRepository",),
     "repository_identity": ("IdentityRepository",),
     "repository_jobs": ("JobsRepository",),

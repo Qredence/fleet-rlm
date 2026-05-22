@@ -241,27 +241,3 @@ def complete_event_data(
         error_type=error_type,
         error=error,
     )
-
-
-def progress_event_data(
-    *,
-    execution_profile: str,
-    code_hash: str,
-    code_preview: str,
-    event_kind: str,
-    path: str | None = None,
-    bytes_total: int | None = None,
-    bytes_written: int | None = None,
-) -> InterpreterExecutionEventData:
-    """Build an execution-progress payload for durable-write updates."""
-    return InterpreterExecutionEventData(
-        phase="progress",
-        timestamp=time.time(),
-        execution_profile=execution_profile,
-        code_hash=code_hash,
-        code_preview=code_preview,
-        event_kind=event_kind,
-        path=path,
-        bytes_total=bytes_total,
-        bytes_written=bytes_written,
-    )
