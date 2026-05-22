@@ -40,20 +40,9 @@ export interface WsCommandRequest {
 export type WsClientMessage = WsMessageRequest | WsCancelRequest | WsCommandRequest;
 
 export type WsEventKind =
-  | "status"
-  | "text"
-  | "reasoning"
-  | "tool_call"
-  | "tool_result"
-  | "warning"
-  | "error"
-  | "done"
-  | "turn_started"
-  | "turn_completed"
-  | "turn_failed"
-  | "sandbox_exec"
-  | "rlm_delegate"
-  | "clarification"
+  | "execution_started"
+  | "execution_step"
+  | "execution_completed"
   | "command_result";
 
 export interface WsEventPayload {

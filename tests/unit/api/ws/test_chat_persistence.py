@@ -15,7 +15,6 @@ from fleet_rlm.api.runtime_services import chat_persistence as ws_persistence
 from fleet_rlm.api.runtime_services.chat_persistence import (
     PersistenceRequiredError,
     cancel_task,
-    cancelled_event_payload,
     enqueue_latest_nonblocking,
     initialize_turn_lifecycle,
     should_reload_docs_path,
@@ -587,24 +586,6 @@ def test_enqueue_latest_nonblocking_drops_oldest_when_full() -> None:
 
     assert queue.get_nowait() == 2
     assert queue.get_nowait() == 3
-
-
-def test_cancelled_event_payload_structure() -> None:
-    payload = cancelled_event_payload("stop now")
-
-    assert payload["type"] == "event"
-    assert payload["data"]["kind"] == "done"
-    assert payload["data"]["text"] == "stop now"
-    assert payload["data"]["payload"] == {"cancelled": True}
-    assert payload["data"]["version"] == 2
-    assert isinstance(payload["data"]["event_id"], str) and payload["data"]["event_id"]
-    assert isinstance(payload["data"]["timestamp"], str)
-
-
-def test_cancelled_event_payload_default_message() -> None:
-    payload = cancelled_event_payload()
-
-    assert payload["data"]["text"] == "Request cancelled."
 
 
 def test_cancel_task_handles_none() -> None:

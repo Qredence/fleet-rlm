@@ -221,21 +221,6 @@ def enqueue_latest_nonblocking(
         return False
 
 
-def cancelled_event_payload(message: str = "Request cancelled.") -> dict[str, Any]:
-    """Build the websocket event payload for cancellation notifications."""
-    return {
-        "type": "event",
-        "data": {
-            "kind": "done",
-            "text": message,
-            "payload": {"cancelled": True},
-            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "version": 2,
-            "event_id": str(uuid.uuid4()),
-        },
-    }
-
-
 async def cancel_task(task: asyncio.Task[object] | None) -> None:
     """Cancel an in-flight task and swallow expected shutdown exceptions."""
     if task is None or task.done():
@@ -984,7 +969,6 @@ __all__ = [
     "cancel_startup_status_task",
     "should_reload_docs_path",
     "enqueue_latest_nonblocking",
-    "cancelled_event_payload",
     "cancel_task",
     "handle_chat_disconnect",
     "build_workspace_task_request",

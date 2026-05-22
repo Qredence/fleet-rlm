@@ -2,20 +2,9 @@ import type { WsEventKind, WsServerEvent, WsServerMessage } from "@/lib/rlm-api/
 
 function isWsEventKind(value: string): value is WsEventKind {
   return [
-    "status",
-    "text",
-    "reasoning",
-    "tool_call",
-    "tool_result",
-    "warning",
-    "error",
-    "done",
-    "turn_started",
-    "turn_completed",
-    "turn_failed",
-    "sandbox_exec",
-    "rlm_delegate",
-    "clarification",
+    "execution_started",
+    "execution_step",
+    "execution_completed",
     "command_result",
   ].includes(value);
 }
@@ -62,23 +51,6 @@ function asTimestamp(value: unknown): string | number | undefined {
   return undefined;
 }
 
-function normalizeExecutionStepKind(step: Record<string, unknown>): WsEventKind {
-  const rawType = String(step.type ?? "")
-    .trim()
-    .toLowerCase();
-
-  if (rawType === "output") return "done";
-  if (rawType === "tool" || rawType === "repl") {
-    return step.output == null ? "tool_call" : "tool_result";
-  }
-  if (rawType === "memory") return "status";
-  if (rawType === "llm") {
-    return typeof step.output === "string" && step.output.length > 0 ? "text" : "reasoning";
-  }
-
-  return "status";
-}
-
 function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent | null {
   const frameType = String(parsed.type ?? "").trim();
   if (!frameType.startsWith("execution_")) return null;
@@ -87,7 +59,7 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
     return {
       type: "event",
       data: {
-        kind: "status",
+        kind: "execution_started",
         text: asText(parsed.message ?? "Execution started"),
         payload: {
           source_type: frameType,
@@ -105,7 +77,7 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
     return {
       type: "event",
       data: {
-        kind: "done",
+        kind: "execution_completed",
         text: asText(
           parsed.output ??
             artifactValue?.final_markdown ??
@@ -137,7 +109,7 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
     return {
       type: "event",
       data: {
-        kind: "status",
+        kind: "execution_step",
         text: "Execution step received",
         payload: {
           source_type: frameType,
@@ -148,17 +120,12 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
     };
   }
 
-  const kind = normalizeExecutionStepKind(step);
-  const text = asText(
-    kind === "done"
-      ? (step.output ?? step.content ?? step.message ?? step.label ?? kind)
-      : (step.label ?? step.output ?? step.input ?? step.content ?? step.message ?? kind),
-  );
+  const text = asText(step.label ?? step.output ?? step.input ?? step.content ?? step.message ?? "execution_step");
 
   return {
     type: "event",
     data: {
-      kind,
+      kind: "execution_step",
       text,
       payload: {
         source_type: frameType,

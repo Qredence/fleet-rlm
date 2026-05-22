@@ -16,7 +16,6 @@ class WSMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["message", "cancel", "command"] = Field(
-        default="message",
         description="Websocket frame type.",
     )
     content: str = Field(default="", description="Primary chat content for message frames.")
@@ -69,6 +68,12 @@ class WSMessage(BaseModel):
         if not isinstance(raw, dict):
             return raw
 
+        if "type" not in raw:
+            raise PydanticCustomError(
+                "websocket_type_required",
+                "WebSocket frames must include an explicit canonical type.",
+            )
+
         if "workspace_id" in raw or "user_id" in raw:
             raise PydanticCustomError(
                 "unsupported_identity_fields",
@@ -76,6 +81,11 @@ class WSMessage(BaseModel):
             )
 
         message_type = str(raw.get("type", "message") or "message").strip()
+        if message_type == "message" and not str(raw.get("content", "") or "").strip():
+            raise PydanticCustomError(
+                "websocket_message_content_required",
+                "Canonical websocket message frames require non-empty content.",
+            )
         if message_type == "message" and raw.get("max_depth") is not None:
             raise PydanticCustomError(
                 "daytona_max_depth_removed",

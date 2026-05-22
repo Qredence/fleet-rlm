@@ -1,7 +1,6 @@
 import { create } from "zustand";
 
 import type { WsServerMessage } from "@/lib/rlm-api";
-import { telemetryClient } from "@/lib/telemetry/client";
 import {
   applyFrameToRunWorkbenchState,
   createInitialRunWorkbenchState,
@@ -34,18 +33,7 @@ export const useRunWorkbenchStore = create<RunWorkbenchStore>((set, get) => ({
   applyFrame: (frame) =>
     set((state) => {
       if (!shouldApplyRunFrame(state, frame)) return state;
-      const next = applyFrameToRunWorkbenchState(state, frame);
-      if (
-        next.compatBackfillCount > state.compatBackfillCount &&
-        next.lastCompatBackfill?.eventId
-      ) {
-        telemetryClient.capture("run_workbench_chat_final_backfill_used", {
-          runtime_mode: next.lastCompatBackfill.runtimeMode ?? "unknown",
-          used_summary: next.lastCompatBackfill.usedSummary,
-          used_final_artifact: next.lastCompatBackfill.usedFinalArtifact,
-        });
-      }
-      return next;
+      return applyFrameToRunWorkbenchState(state, frame);
     }),
   selectIteration: (iterationId) => set({ selectedIterationId: iterationId }),
   selectCallback: (callbackId) => set({ selectedCallbackId: callbackId }),

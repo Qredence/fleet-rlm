@@ -341,7 +341,7 @@ describe("useChatStore — streamMessage", () => {
   it("calls onFrameCallback for every yielded frame", async () => {
     const fakeFrame = {
       type: "event" as const,
-      data: { kind: "text" as const, text: "Hi!" },
+      data: { kind: "execution_step" as const, text: "Hi!" },
     };
 
     vi.mocked(streamChatOverWs).mockImplementation(async (_payload, opts) => {
@@ -360,7 +360,7 @@ describe("useChatStore — streamMessage", () => {
 
     const fakeFrame = {
       type: "event" as const,
-      data: { kind: "text" as const, text: "Hi!" },
+      data: { kind: "execution_step" as const, text: "Hi!" },
     };
 
     const frameSpy = vi.fn();

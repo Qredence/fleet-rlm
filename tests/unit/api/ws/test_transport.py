@@ -44,6 +44,46 @@ def test_parse_ws_message_or_send_error_returns_valid_message() -> None:
     assert websocket.sent == []
 
 
+def test_parse_ws_message_or_send_error_rejects_missing_type() -> None:
+    websocket = _RecordingWebSocket()
+
+    message = asyncio.run(
+        parse_ws_message_or_send_error(
+            websocket=websocket,
+            raw_payload={"content": "hello"},
+        )
+    )
+
+    assert message is None
+    assert websocket.sent == [
+        {
+            "type": "error",
+            "code": "websocket_type_required",
+            "message": "WebSocket frames must include an explicit canonical type.",
+        }
+    ]
+
+
+def test_parse_ws_message_or_send_error_rejects_empty_message_content() -> None:
+    websocket = _RecordingWebSocket()
+
+    message = asyncio.run(
+        parse_ws_message_or_send_error(
+            websocket=websocket,
+            raw_payload={"type": "message", "content": "   "},
+        )
+    )
+
+    assert message is None
+    assert websocket.sent == [
+        {
+            "type": "error",
+            "code": "websocket_message_content_required",
+            "message": "Canonical websocket message frames require non-empty content.",
+        }
+    ]
+
+
 def test_parse_ws_message_or_send_error_reports_unknown_type() -> None:
     websocket = _RecordingWebSocket()
 

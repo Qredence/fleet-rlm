@@ -1,10 +1,10 @@
-import type { ChatAttachmentItem, ChatSourceItem } from "@/lib/workspace/workspace-types";
 import type { WsServerMessage } from "@/lib/rlm-api";
 import { normalizeDaytonaMode } from "@/lib/workspace/daytona-mode";
 import type {
   ActivityEntry,
   CallbackSummary,
-  CompatBackfillInfo,
+  ChatAttachmentItem,
+  ChatSourceItem,
   ContextSourceSummary,
   IterationSummary,
   PromptHandleSummary,
@@ -43,20 +43,20 @@ function extractRuntime(payload?: Record<string, unknown>): Record<string, unkno
   return asRecord(payload?.runtime) ?? payload;
 }
 
-function isExecutionCompletedPayload(payload?: Record<string, unknown>): boolean {
-  return asText(payload?.source_type ?? payload?.sourceType) === "execution_completed";
+function isExecutionCompletedPayload(
+  payload?: Record<string, unknown>,
+  frame?: WsServerMessage,
+): boolean {
+  return (
+    (frame?.type === "event" && frame.data.kind === "execution_completed") ||
+    asText(payload?.source_type ?? payload?.sourceType) === "execution_completed"
+  );
 }
 
 function getCanonicalRunSummary(
   payload?: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   return asRecord(payload?.run_summary ?? payload?.runSummary);
-}
-
-function getCompatRunResult(
-  payload?: Record<string, unknown>,
-): Record<string, unknown> | undefined {
-  return asRecord(payload?.run_result ?? payload?.runResult);
 }
 
 function mergeMlflowTraceMetadata(
@@ -79,30 +79,6 @@ function mergeMlflowTraceMetadata(
   };
 }
 
-function resolveCompatSummary(
-  payload?: Record<string, unknown>,
-  compatRunResult?: Record<string, unknown>,
-) {
-  return normalizeSummary(payload?.summary ?? compatRunResult?.summary);
-}
-
-function resolveCompatFinalArtifact(
-  payload?: Record<string, unknown>,
-  compatRunResult?: Record<string, unknown>,
-) {
-  return normalizeArtifact(
-    payload?.final_artifact ??
-      payload?.finalArtifact ??
-      compatRunResult?.final_artifact ??
-      compatRunResult?.finalArtifact,
-  );
-}
-
-function compatBackfillEventId(frame: WsServerMessage): string {
-  if (frame.type === "error") return `frame-error-${Date.now()}`;
-  return String(frame.data.event_id ?? `${frame.data.kind}-${frame.data.timestamp ?? Date.now()}`);
-}
-
 function buildActivityEntry(frame: WsServerMessage): ActivityEntry {
   if (frame.type === "error") {
     return {
@@ -113,9 +89,10 @@ function buildActivityEntry(frame: WsServerMessage): ActivityEntry {
   }
 
   const payload = asRecord(frame.data.payload);
+  const kind = frame.data.kind;
   return {
-    id: String(frame.data.event_id ?? `${frame.data.kind}-${frame.data.timestamp ?? Date.now()}`),
-    kind: frame.data.kind,
+    id: String(frame.data.event_id ?? `${kind}-${frame.data.timestamp ?? Date.now()}`),
+    kind,
     text: frame.data.text,
     timestamp: frame.data.timestamp,
     iteration: asNumber(payload?.iteration),
@@ -257,38 +234,22 @@ export function failRunWorkbenchRun(
 function isRunWorkbenchFrame(frame: WsServerMessage): boolean {
   if (frame.type === "error") return true;
   const payload = asRecord(frame.data.payload);
-  const runtime = extractRuntime(payload);
   const sourceType = asText(payload?.source_type ?? payload?.sourceType);
   return (
+    frame.data.kind === "execution_started" ||
+    frame.data.kind === "execution_step" ||
+    frame.data.kind === "execution_completed" ||
     sourceType === "execution_started" ||
     sourceType === "execution_step" ||
     sourceType === "execution_completed" ||
-    asText(payload?.runtime_mode) === "daytona_pilot" ||
-    asText(runtime?.runtime_mode) === "daytona_pilot" ||
-    payload?.run_summary != null ||
-    payload?.run_result != null ||
-    payload?.final_artifact != null ||
-    payload?.iterations != null ||
-    frame.data.kind === "done" ||
-    frame.data.kind === "error"
+    payload?.run_summary != null
   );
 }
 
 export function shouldApplyRunFrame(state: RunWorkbenchState, frame: WsServerMessage): boolean {
-  const acceptsTerminalCompat =
-    state.status === "bootstrapping" ||
-    state.status === "running" ||
-    state.status === "completed" ||
-    state.status === "needs_human_review";
   const acceptsRawError = state.status === "bootstrapping" || state.status === "running";
   if (frame.type === "error") {
     return acceptsRawError;
-  }
-  if (
-    (frame.data.kind === "done" || frame.data.kind === "error") &&
-    acceptsTerminalCompat
-  ) {
-    return true;
   }
   return isRunWorkbenchFrame(frame);
 }
@@ -302,10 +263,8 @@ function statusFromFrame(
   if (frame.type === "error") return "error";
   const payloadStatus = normalizeRunStatus(runSummary?.status ?? payload?.status);
   if (payloadStatus) return payloadStatus;
-  if (frame.data.kind === "done") {
-    return payload?.cancelled === true ? "cancelled" : "completed";
-  }
-  if (frame.data.kind === "error") return "error";
+  if (payload?.cancelled === true) return "cancelled";
+  if (frame.data.kind === "execution_completed") return "completed";
   if (current === "idle") return "bootstrapping";
   return "running";
 }
@@ -331,28 +290,24 @@ export function applyFrameToRunWorkbenchState(
   const payload = asRecord(frame.data.payload);
   const runtime = extractRuntime(payload);
   const runSummary = getCanonicalRunSummary(payload);
-  const compatRunResult = getCompatRunResult(payload);
 
   if (runSummary) {
     next = hydrateFromRunSummary(next, runSummary);
   }
 
-  const isCanonicalCompletion = isExecutionCompletedPayload(payload);
-  const isTerminalCompatFrame =
-    !isCanonicalCompletion &&
-    frame.type === "event" &&
-    (frame.data.kind === "done" || frame.data.kind === "error");
+  const isCanonicalCompletion = isExecutionCompletedPayload(payload, frame);
 
-  const payloadPrompts = !isTerminalCompatFrame
-    ? dedupePromptHandles([
+  const payloadPrompts =
+    frame.data.kind !== "execution_completed"
+      ? dedupePromptHandles([
         ...next.promptHandles,
         ...collectPromptHandlePayloads(payload)
           .map((item) => normalizePromptHandle(item))
           .filter((item): item is PromptHandleSummary => item !== null),
       ])
-    : next.promptHandles;
+      : next.promptHandles;
 
-  const payloadContextSources = !isTerminalCompatFrame
+  const payloadContextSources = frame.data.kind !== "execution_completed"
     ? asArray(payload?.context_sources ?? payload?.contextSources)
         .map((item) => normalizeContextSource(item))
         .filter((item): item is ContextSourceSummary => item !== null)
@@ -380,11 +335,7 @@ export function applyFrameToRunWorkbenchState(
         id: `iteration-${iterationNumber}`,
         iteration: iterationNumber,
         status:
-          frame.data.kind === "error"
-            ? "error"
-            : frame.data.kind === "done"
-              ? "completed"
-              : "running",
+          frame.data.kind === "execution_completed" ? "completed" : "running",
         phase: asText(payload?.phase),
         summary: frame.data.text,
         durationMs: asNumber(payload?.duration_ms ?? payload?.durationMs),
@@ -409,7 +360,7 @@ export function applyFrameToRunWorkbenchState(
         `${callbackName}-${iterationNumber ?? "na"}-${next.callbacks.length + 1}`,
       callbackName,
       iteration: iterationNumber,
-      status: frame.data.kind === "tool_call" ? "running" : "completed",
+      status: frame.data.kind === "execution_step" ? "running" : "completed",
       task:
         asText(toolInput?.task) ??
         asText(toolTask?.task) ??
@@ -433,7 +384,7 @@ export function applyFrameToRunWorkbenchState(
     };
   }
 
-  const payloadSources = !isTerminalCompatFrame
+  const payloadSources = frame.data.kind !== "execution_completed"
     ? dedupeSources([
         ...next.sources,
         ...asArray(payload?.sources)
@@ -441,7 +392,7 @@ export function applyFrameToRunWorkbenchState(
           .filter((item): item is ChatSourceItem => item !== null),
       ])
     : next.sources;
-  const payloadAttachments = !isTerminalCompatFrame
+  const payloadAttachments = frame.data.kind !== "execution_completed"
     ? dedupeAttachments([
         ...next.attachments,
         ...asArray(payload?.attachments)
@@ -461,29 +412,10 @@ export function applyFrameToRunWorkbenchState(
           runSummary?.finalArtifact,
       )
     : undefined;
-  const compatSummary = resolveCompatSummary(payload, compatRunResult);
-  const compatFinalArtifact = resolveCompatFinalArtifact(payload, compatRunResult);
-  const useCompatSummary = !isCanonicalCompletion && next.summary == null && compatSummary != null;
-  const useCompatFinalArtifact =
-    !isCanonicalCompletion && next.finalArtifact == null && compatFinalArtifact != null;
   const mergedSummary = mergeMlflowTraceMetadata(
-    canonicalSummary ?? (useCompatSummary ? compatSummary : undefined) ?? next.summary,
+    canonicalSummary ?? next.summary,
     payload,
   );
-
-  let compatBackfillCount = next.compatBackfillCount;
-  let lastCompatBackfill = next.lastCompatBackfill;
-  if (useCompatSummary || useCompatFinalArtifact) {
-    compatBackfillCount += 1;
-    lastCompatBackfill = {
-      eventId: compatBackfillEventId(frame),
-      runtimeMode:
-        asText(payload?.runtime_mode ?? payload?.runtimeMode) ??
-        asText(runtime?.runtime_mode ?? runtime?.runtimeMode),
-      usedSummary: useCompatSummary,
-      usedFinalArtifact: useCompatFinalArtifact,
-    } satisfies CompatBackfillInfo;
-  }
 
   const nextStatus = statusFromFrame(next.status, frame, payload, runSummary);
   // When the run reaches a terminal state, finalize any orphaned "running"
@@ -514,12 +446,11 @@ export function applyFrameToRunWorkbenchState(
     attachments: payloadAttachments,
     finalArtifact:
       canonicalFinalArtifact ??
-      (useCompatFinalArtifact ? compatFinalArtifact : undefined) ??
       next.finalArtifact ??
       null,
     summary: mergedSummary,
-    errorMessage: frame.data.kind === "error" ? frame.data.text : (next.errorMessage ?? null),
-    compatBackfillCount,
-    lastCompatBackfill,
+    errorMessage: nextStatus === "error" ? frame.data.text : (next.errorMessage ?? null),
+    compatBackfillCount: next.compatBackfillCount,
+    lastCompatBackfill: next.lastCompatBackfill,
   };
 }

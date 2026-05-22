@@ -180,6 +180,117 @@ function readGuardrailWarnings(payload: Record<string, unknown> | undefined): st
   return raw.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
 }
 
+function canonicalSummaryPayload(payload: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  return asRecord(payload?.run_summary ?? payload?.runSummary ?? payload?.summary);
+}
+
+function canonicalCompletionStatus(payload: Record<string, unknown> | undefined): string {
+  const summary = canonicalSummaryPayload(payload);
+  return asOptionalText(summary?.status ?? payload?.status)?.toLowerCase() ?? "";
+}
+
+function canonicalStepText(step: Record<string, unknown>, fallback: string): string {
+  return (
+    asOptionalText(step.label) ??
+    asOptionalText(step.output) ??
+    asOptionalText(step.input) ??
+    fallback
+  );
+}
+
+function applyCanonicalExecutionStep(
+  messages: ChatMessage[],
+  text: string,
+  payload?: Record<string, unknown>,
+): ApplyFrameResult {
+  const step = asRecord(payload?.step);
+  if (!step) {
+    return {
+      messages: appendStatusTrace(messages, text || "Execution step received", "neutral", payload),
+      terminal: false,
+      errored: false,
+    };
+  }
+
+  const stepType = asOptionalText(step.type)?.toLowerCase();
+  const stepText = canonicalStepText(step, text);
+  if (stepType === "tool" || stepType === "repl") {
+    const kind = step.output == null ? "tool_call" : "tool_result";
+    return {
+      messages: appendToolLikePart(messages, kind, stepText, { ...payload, ...step }, appendTracePart),
+      terminal: false,
+      errored: false,
+    };
+  }
+  if (stepType === "llm") {
+    const output = asRecord(step.output);
+    const token = typeof output?.text === "string" ? output.text : asOptionalText(step.output);
+    const reasoning =
+      typeof step.label === "string"
+        ? step.label
+        : asOptionalText(output?.reasoning ?? step.input);
+    return {
+      messages: token
+        ? appendAssistantToken(messages, token)
+        : appendReasoningEvent(messages, reasoning ?? stepText, "live", { ...payload, ...step }),
+      terminal: false,
+      errored: false,
+    };
+  }
+  if (stepType === "output") {
+    return {
+      messages: appendStatusTrace(messages, stepText || "Output step completed", "success", payload),
+      terminal: false,
+      errored: false,
+    };
+  }
+  return {
+    messages: appendStatusTrace(messages, stepText || "Execution step received", "neutral", payload),
+    terminal: false,
+    errored: false,
+  };
+}
+
+function applyCanonicalExecutionCompleted(
+  messages: ChatMessage[],
+  text: string,
+  payload?: Record<string, unknown>,
+): ApplyFrameResult {
+  const status = canonicalCompletionStatus(payload);
+  if (status === "cancelled") {
+    let next = finishReasoning(messages);
+    next = finalizeTraceParts(next);
+    next = appendSystem(next, text || "Request cancelled.");
+    return { messages: next, terminal: true, errored: false };
+  }
+  if (status === "failed" || status === "error") {
+    let next = finishReasoning(messages);
+    next = finalizeTraceParts(next);
+    next = appendSystem(next, `Backend error: ${text || "Unknown server error."}`);
+    return { messages: next, terminal: true, errored: true };
+  }
+
+  let next = completeAssistant(messages, resolveFinalAssistantText(text, payload));
+  next = finishReasoning(next);
+  next = finalizeTraceParts(next);
+  next = appendFinalTrajectoryThoughts(next, payload);
+
+  const finalReasoning =
+    typeof payload?.final_reasoning === "string" ? payload.final_reasoning.trim() : "";
+  if (finalReasoning) {
+    next = appendReasoningEvent(next, finalReasoning, "summary", payload, "final_reasoning");
+  }
+
+  next = attachFinalReferences(next, payload);
+
+  const warnings = readGuardrailWarnings(payload);
+  if (warnings.length > 0) {
+    next = appendSystem(next, `Guardrail warnings:\n- ${warnings.join("\n- ")}`);
+  }
+
+  return { messages: next, terminal: true, errored: false };
+}
+
 function appendTracePart(
   messages: ChatMessage[],
   part: ChatRenderPart,
@@ -350,26 +461,8 @@ function applyEvent(
   const { kind, text, payload } = frame.data;
 
   switch (kind) {
-    case "text": {
-      return {
-        messages: appendAssistantToken(messages, text),
-        terminal: false,
-        errored: false,
-      };
-    }
-    case "reasoning": {
-      return {
-        messages: appendReasoningEvent(messages, text, "live", payload),
-        terminal: false,
-        errored: false,
-      };
-    }
-    case "turn_started":
-    case "status":
-    case "sandbox_exec":
-    case "rlm_delegate": {
-      const normalizedPayload =
-        kind === "turn_started" ? { ...payload, phase: payload?.phase ?? "startup" } : payload;
+    case "execution_started": {
+      const normalizedPayload = { ...payload, phase: payload?.phase ?? "startup" };
       const sandboxPart = sandboxProgressPartFromStatus(normalizedPayload);
       if (sandboxPart) {
         return {
@@ -389,68 +482,8 @@ function applyEvent(
         errored: false,
       };
     }
-    case "warning": {
-      return {
-        messages: appendStatusTrace(messages, text, "warning", payload),
-        terminal: false,
-        errored: false,
-      };
-    }
-    case "tool_call": {
-      return {
-        messages: appendToolLikePart(messages, "tool_call", text, payload, appendTracePart),
-        terminal: false,
-        errored: false,
-      };
-    }
-    case "tool_result": {
-      return {
-        messages: appendToolLikePart(messages, "tool_result", text, payload, appendTracePart),
-        terminal: false,
-        errored: false,
-      };
-    }
-    case "clarification": {
-      const clarPayload = asRecord(payload);
-      const question =
-        asOptionalText(clarPayload?.question) || text.trim() || "Please clarify your intent.";
-      const messageId =
-        asOptionalText(clarPayload?.message_id ?? clarPayload?.messageId) ?? nextId("clar");
-      const stepLabel =
-        asOptionalText(clarPayload?.step_label ?? clarPayload?.stepLabel) ?? "Clarification needed";
-      const rawOptions = clarPayload?.options;
-      const options: { id: string; label: string; description?: string }[] = Array.isArray(
-        rawOptions,
-      )
-        ? rawOptions.flatMap((item) => {
-            const rec = asRecord(item);
-            if (!rec) return [];
-            const id = asOptionalText(rec.id);
-            const label = asOptionalText(rec.label);
-            if (!id || !label) return [];
-            const description = asOptionalText(rec.description);
-            return description != null ? [{ id, label, description }] : [{ id, label }];
-          })
-        : [];
-      return {
-        messages: [
-          ...messages,
-          {
-            id: messageId,
-            type: "clarification" as const,
-            content: question,
-            phase: DEFAULT_PHASE,
-            clarificationData: {
-              question,
-              stepLabel,
-              options,
-              customOptionId: "",
-            },
-          },
-        ],
-        terminal: false,
-        errored: false,
-      };
+    case "execution_step": {
+      return applyCanonicalExecutionStep(messages, text, payload);
     }
     case "command_result": {
       const command = asOptionalText(payload?.command);
@@ -479,42 +512,8 @@ function applyEvent(
         errored: false,
       };
     }
-    case "done":
-    case "turn_completed": {
-      // A "done" event with payload["cancelled"]=True marks a cancelled turn.
-      if (payload && payload["cancelled"] === true) {
-        let next = finishReasoning(messages);
-        next = finalizeTraceParts(next);
-        next = appendSystem(next, text || "Request cancelled.");
-        return { messages: next, terminal: true, errored: false };
-      }
-
-      let next = completeAssistant(messages, resolveFinalAssistantText(text, payload));
-      next = finishReasoning(next);
-      next = finalizeTraceParts(next);
-      next = appendFinalTrajectoryThoughts(next, payload);
-
-      const finalReasoning =
-        typeof payload?.final_reasoning === "string" ? payload.final_reasoning.trim() : "";
-      if (finalReasoning) {
-        next = appendReasoningEvent(next, finalReasoning, "summary", payload, "final_reasoning");
-      }
-
-      next = attachFinalReferences(next, payload);
-
-      const warnings = readGuardrailWarnings(payload);
-      if (warnings.length > 0) {
-        next = appendSystem(next, `Guardrail warnings:\n- ${warnings.join("\n- ")}`);
-      }
-
-      return { messages: next, terminal: true, errored: false };
-    }
-    case "turn_failed":
-    case "error": {
-      let next = finishReasoning(messages);
-      next = finalizeTraceParts(next);
-      next = appendSystem(next, `Backend error: ${text || "Unknown server error."}`);
-      return { messages: next, terminal: true, errored: true };
+    case "execution_completed": {
+      return applyCanonicalExecutionCompleted(messages, text, payload);
     }
     default: {
       return { messages, terminal: false, errored: false };

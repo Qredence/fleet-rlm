@@ -205,28 +205,6 @@ function appendIntoLlmStep(entry: {
   setActive(current.id);
 }
 
-function addToolStep(
-  kind: "tool_call" | "tool_result",
-  text: string,
-  payload: Record<string, unknown> | undefined,
-  timestamp: number,
-): void {
-  const { steps, activeStepId } = useArtifactStore.getState();
-  const llm = getCurrentLlmStep(steps, activeStepId);
-  const toolName = asText(payload?.tool_name).trim();
-  const label = toolName ? `Tool: ${toolName}` : kind === "tool_call" ? "Tool call" : "Tool result";
-
-  add({
-    id: nextId("tool"),
-    type: "tool",
-    label,
-    parent_id: llm?.id,
-    input: kind === "tool_call" ? (payload?.tool_input ?? text) : payload?.tool_input,
-    output: kind === "tool_result" ? (payload?.tool_output ?? text) : payload?.tool_output,
-    timestamp,
-  });
-}
-
 function finalizeCurrentLlm(
   text: string,
   payload: Record<string, unknown> | undefined,
@@ -286,41 +264,31 @@ export function applyWsFrameToArtifacts(frame: WsServerMessage): void {
   const epoch = toEpochMs(timestamp);
 
   const executionStep = normalizeExecutionStepFromPayload(payload, timestamp);
-  if (executionStep) {
+  if (kind === "execution_step" && executionStep) {
     upsert(executionStep);
     setActive(executionStep.id);
     return;
   }
 
   switch (kind) {
-    case "text":
-      appendIntoLlmStep({ bucket: "tokens", text, timestamp: epoch });
-      return;
-    case "reasoning":
-      appendIntoLlmStep({ bucket: "reasoning", text, timestamp: epoch });
-      return;
-    case "turn_started":
-    case "status":
-    case "sandbox_exec":
-    case "rlm_delegate":
-    case "warning":
+    case "execution_started":
       appendIntoLlmStep({ bucket: "status", text, timestamp: epoch });
       return;
-    case "tool_call":
-    case "tool_result":
-      addToolStep(kind, text, payload, epoch);
+    case "execution_step":
+      appendIntoLlmStep({ bucket: "status", text: text || "Execution step received", timestamp: epoch });
       return;
-    case "done":
-    case "turn_completed": {
+    case "execution_completed": {
       const parentId = finalizeCurrentLlm(text, payload, epoch);
-      const cancelled = Boolean(payload?.cancelled);
+      const summary = asRecord(payload?.run_summary ?? payload?.runSummary ?? payload?.summary);
+      const cancelled = asText(summary?.status ?? payload?.status).toLowerCase() === "cancelled";
+      const failed = ["failed", "error"].includes(
+        asText(summary?.status ?? payload?.status).toLowerCase(),
+      );
+      if (failed) {
+        addOutputStep("Execution error", text || "Server error", payload, epoch, parentId);
+        return;
+      }
       addOutputStep(cancelled ? "Execution cancelled" : "Final output", text, payload, epoch, parentId);
-      return;
-    }
-    case "turn_failed":
-    case "error": {
-      const parentId = finalizeCurrentLlm(text, payload, epoch);
-      addOutputStep("Execution error", text || "Server error", payload, epoch, parentId);
       return;
     }
     default:

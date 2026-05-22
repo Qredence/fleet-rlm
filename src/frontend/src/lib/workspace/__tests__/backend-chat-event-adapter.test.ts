@@ -5,6 +5,54 @@ import type { ChatMessage, ChatRenderPart } from "@/lib/workspace/workspace-type
 import type { WsServerMessage } from "@/lib/rlm-api";
 
 function makeEvent(kind: string, text: string, payload?: Record<string, unknown>): WsServerMessage {
+  if (kind === "done" || kind === "turn_completed" || kind === "error" || kind === "turn_failed") {
+    return {
+      type: "event",
+      data: {
+        kind: "execution_completed",
+        text,
+        payload: {
+          ...payload,
+          source_type: "execution_completed",
+          run_summary: {
+            status: kind === "error" || kind === "turn_failed" ? "failed" : "completed",
+          },
+        },
+      },
+    };
+  }
+  if (kind === "text" || kind === "reasoning" || kind === "tool_call" || kind === "tool_result") {
+    const stepType = kind === "tool_call" || kind === "tool_result" ? "tool" : "llm";
+    return {
+      type: "event",
+      data: {
+        kind: "execution_step",
+        text,
+        payload: {
+          ...payload,
+          source_type: "execution_step",
+          step: {
+            type: stepType,
+            label: text,
+            input: kind === "tool_call" ? text : undefined,
+            output:
+              kind === "text"
+                ? { text }
+                : kind === "tool_result"
+                  ? text
+                  : undefined,
+            ...payload,
+          },
+        },
+      },
+    };
+  }
+  if (kind === "status" || kind === "turn_started" || kind === "warning" || kind === "sandbox_exec" || kind === "rlm_delegate") {
+    return {
+      type: "event",
+      data: { kind: "execution_started", text, payload },
+    };
+  }
   return {
     type: "event",
     data: { kind: kind as never, text, payload },

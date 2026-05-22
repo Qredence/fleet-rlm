@@ -138,6 +138,24 @@ async def parse_ws_message_or_send_error(
             return None
         errors = exc.errors()
         error_types = {str(error.get("type", "")) for error in errors}
+        if "websocket_type_required" in error_types:
+            await _try_send_json(
+                websocket,
+                _error_envelope(
+                    code="websocket_type_required",
+                    message="WebSocket frames must include an explicit canonical type.",
+                ),
+            )
+            return None
+        if "websocket_message_content_required" in error_types:
+            await _try_send_json(
+                websocket,
+                _error_envelope(
+                    code="websocket_message_content_required",
+                    message="Canonical websocket message frames require non-empty content.",
+                ),
+            )
+            return None
         if "daytona_repo_ref_requires_repo" in error_types:
             await _try_send_json(
                 websocket,

@@ -154,7 +154,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
       data: JSON.stringify({
         type: "event",
         data: {
-          kind: "done",
+          kind: "execution_completed",
           text: "done",
         },
       }),
@@ -185,7 +185,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
       data: JSON.stringify({
         type: "event",
         data: {
-          kind: "done",
+          kind: "execution_completed",
           text: "done",
         },
       }),
@@ -216,7 +216,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
       data: JSON.stringify({
         type: "event",
         data: {
-          kind: "done",
+          kind: "execution_completed",
           text: "done",
         },
       }),
@@ -279,7 +279,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
       data: JSON.stringify({
         type: "event",
         data: {
-          kind: "done",
+          kind: "execution_completed",
           text: "[cancelled]",
         },
       }),

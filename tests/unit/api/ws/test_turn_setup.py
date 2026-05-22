@@ -6,6 +6,9 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
 
+import pytest
+from pydantic import ValidationError
+
 from fleet_rlm.api.routers.ws.turn_setup import prepare_chat_message_turn
 from fleet_rlm.api.runtime_services.chat_persistence import build_workspace_task_request
 from fleet_rlm.api.runtime_services.chat_runtime import (
@@ -25,48 +28,10 @@ class _RecordingWebSocket:
 
 
 def test_prepare_chat_message_turn_rejects_empty_content() -> None:
-    async def scenario() -> None:
-        websocket = _RecordingWebSocket()
-        session = _ChatSessionState(
-            canonical_workspace_id="workspace",
-            canonical_user_id="user",
-            owner_tenant_claim="workspace",
-            owner_user_claim="user",
-            cancel_flag={"cancelled": False},
-            last_loaded_docs_path="docs/last.md",
-        )
-        persist_calls: list[dict[str, Any]] = []
+    with pytest.raises(ValidationError) as exc_info:
+        WSMessage(type="message", content="   ")
 
-        async def local_persist(**kwargs: Any) -> None:
-            persist_calls.append(kwargs)
-
-        prepared = await prepare_chat_message_turn(
-            websocket=cast(Any, websocket),
-            msg=WSMessage(type="message", content="   "),
-            agent=cast(Any, FakeChatAgent()),
-            session=session,
-            local_persist=cast(Any, local_persist),
-            runtime=cast(
-                Any,
-                SimpleNamespace(
-                    planner_lm=object(),
-                    cfg=SimpleNamespace(app_env="test"),
-                    repository=None,
-                    identity_rows=None,
-                    persistence_required=False,
-                ),
-            ),
-            workspace_id="workspace",
-            user_id="user",
-            sess_id="session",
-            execution_emitter=cast(Any, object()),
-        )
-
-        assert prepared is None
-        assert persist_calls == []
-        assert websocket.sent == [{"type": "error", "message": "Message content cannot be empty"}]
-
-    asyncio.run(scenario())
+    assert exc_info.value.errors()[0]["type"] == "websocket_message_content_required"
 
 
 def test_prepare_chat_message_turn_initializes_daytona_turn(monkeypatch) -> None:
