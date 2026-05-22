@@ -700,13 +700,27 @@ export interface components {
        */
       guidance?: string[];
     };
-    /** HTTPValidationError */
+    /**
+     * HTTPValidationError
+     * @description Canonical HTTP error envelope returned for request validation failures.
+     */
     HTTPValidationError: {
       /**
-       * Detail
-       * @description Structured list of request validation issues returned by FastAPI.
+       * Code
+       * @description Stable machine-readable error code.
        */
-      detail?: components["schemas"]["ValidationError"][];
+      code: string;
+      /**
+       * Message
+       * @description Human-readable non-secret error summary.
+       */
+      message: string;
+      /**
+       * Detail
+       * @description Structured non-secret error details, when available.
+       * @default null
+       */
+      detail?: unknown;
     };
     /**
      * HealthResponse
@@ -714,11 +728,12 @@ export interface components {
      */
     HealthResponse: {
       /**
-       * Ok
-       * @description Whether the service reports itself as healthy.
-       * @default true
+       * Status
+       * @description Unambiguous liveness state for this service.
+       * @default live
+       * @constant
        */
-      ok?: boolean;
+      status?: "live";
       /**
        * Version
        * @description Package version currently serving the API.
@@ -954,11 +969,6 @@ export interface components {
        * @description Whether critical startup dependencies are ready.
        */
       ready: boolean;
-      /**
-       * Planner Configured
-       * @description Whether a planner model is currently configured and available.
-       */
-      planner_configured: boolean;
       /**
        * Planner
        * @description Planner readiness classification.
@@ -2293,6 +2303,28 @@ export interface components {
        */
       truncated?: boolean;
     };
+    /**
+     * ApiErrorResponse
+     * @description Canonical HTTP error envelope returned by Fleet RLM API routes.
+     */
+    ApiErrorResponse: {
+      /**
+       * Code
+       * @description Stable machine-readable error code.
+       */
+      code: string;
+      /**
+       * Message
+       * @description Human-readable non-secret error summary.
+       */
+      message: string;
+      /**
+       * Detail
+       * @description Structured non-secret error details, when available.
+       * @default null
+       */
+      detail?: unknown;
+    };
   };
   responses: never;
   parameters: never;
@@ -2339,9 +2371,11 @@ export interface operations {
           "application/json": components["schemas"]["ReadyResponse"];
         };
       };
-      /** @description Readiness evaluation could not complete. */
+      /** @description A critical runtime dependency is unavailable. */
       503: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["ReadyResponse"];
+        };
       };
     };
   };

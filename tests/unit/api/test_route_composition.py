@@ -43,10 +43,13 @@ class TestHealthRoutesTopLevel:
 
 _EXPECTED_ROUTE_SAMPLES: dict[str, str] = {
     "auth": "/api/v1/auth/me",
+    "info": "/api/v1/info",
     "ws_execution": "/api/v1/ws/execution",
     "ws_events": "/api/v1/ws/execution/events",
     "sessions": "/api/v1/sessions",
+    "runtime_settings": "/api/v1/runtime/settings",
     "runtime_status": "/api/v1/runtime/status",
+    "runtime_lm_test": "/api/v1/runtime/tests/lm",
     "sandboxes": "/api/v1/sandboxes",
     "runs": "/api/v1/runs",
     "memory": "/api/v1/memory",
@@ -101,7 +104,10 @@ class TestOpenAPIPathKeys:
             "/health",
             "/ready",
             "/api/v1/auth/me",
+            "/api/v1/info",
+            "/api/v1/runtime/settings",
             "/api/v1/runtime/status",
+            "/api/v1/runtime/tests/lm",
             "/api/v1/traces/feedback",
         }
         missing = must_have - paths
@@ -112,3 +118,11 @@ class TestOpenAPIPathKeys:
         paths = set(schema.get("paths", {}).keys())
         assert "/api/v1/health" not in paths
         assert "/api/v1/ready" not in paths
+
+    def test_validation_error_schema_uses_canonical_envelope(self, app):
+        schema = app.openapi()
+        validation_schema = schema["components"]["schemas"]["HTTPValidationError"]
+
+        assert set(validation_schema["properties"]) == {"code", "message", "detail"}
+        assert validation_schema["required"] == ["code", "message"]
+        assert "body" not in validation_schema["properties"]

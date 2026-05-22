@@ -180,6 +180,32 @@ describe("runtimeEndpoints", () => {
     );
   });
 
+  it("surfaces canonical API error envelope messages", async () => {
+    vi.stubEnv("VITE_FLEET_API_URL", "");
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockJsonResponse(
+        {
+          code: "validation_error",
+          message: "Request validation failed.",
+          detail: [{ loc: ["query", "max_depth"], msg: "Input should be greater than or equal to 1" }],
+        },
+        422,
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { runtimeEndpoints } = await loadRuntimeModule();
+
+    await expect(runtimeEndpoints.status()).rejects.toEqual(
+      expect.objectContaining<RlmApiError>({
+        detail: "Request validation failed.",
+        message: "[422] Request validation failed.",
+        name: "RlmApiError",
+        status: 422,
+      }),
+    );
+  });
+
   it("does not use read fallback when a local loopback backend returns 502", async () => {
     vi.stubEnv("VITE_FLEET_API_URL", "http://127.0.0.1:8000");
     const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ detail: "Bad Gateway" }, 502));

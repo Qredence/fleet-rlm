@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from ..dependencies import ConfigDepsDep, LmDepsDep, PersistenceDepsDep
 from ..schemas.base import HealthResponse, ReadyResponse
@@ -29,13 +30,18 @@ def health() -> HealthResponse:
 @router.get(
     "/ready",
     response_model=ReadyResponse,
-    responses={503: {"description": "Readiness evaluation could not complete."}},
+    responses={
+        503: {
+            "description": "A critical runtime dependency is unavailable.",
+            "model": ReadyResponse,
+        }
+    },
 )
 async def ready(
     config_deps: ConfigDepsDep,
     lm_deps: LmDepsDep,
     persistence_deps: PersistenceDepsDep,
-) -> ReadyResponse:
+) -> ReadyResponse | JSONResponse:
     """Report whether critical startup dependencies are ready for requests.
 
     Verifies DB connectivity with a short-timeout ping so a sleeping Neon
@@ -63,11 +69,13 @@ async def ready(
 
     overall_ready = planner_ready and (database_status == "ready" or not cfg.database_required)
 
-    return ReadyResponse(
+    payload = ReadyResponse(
         ready=overall_ready,
-        planner_configured=planner_ready,
         planner="ready" if planner_ready else "missing",
         database=database_status,
         database_required=cfg.database_required,
         sandbox_provider=cfg.sandbox_provider,
     )
+    if not overall_ready:
+        return JSONResponse(status_code=503, content=payload.model_dump(mode="json"))
+    return payload
