@@ -80,6 +80,7 @@ def list_optimization_modules(
             description=m.get("description", ""),
             program_spec=m["program_spec"],
             required_dataset_keys=m["required_dataset_keys"],
+            offline_only=True,
         )
         for m in module_registry.list_module_metadata()
     ]

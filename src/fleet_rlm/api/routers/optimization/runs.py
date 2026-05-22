@@ -167,13 +167,9 @@ def _resolve_blocking_output_path(output_path: str | None) -> Path | None:
 
 
 def _resolve_run_uuid(run_id: str) -> uuid.UUID:
-    """Parse a run UUID or legacy integer id."""
+    """Parse the canonical optimization run UUID."""
     try:
         return uuid.UUID(run_id)
-    except ValueError:
-        pass
-    try:
-        return uuid.UUID(int=int(run_id))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Run not found.") from exc
 
@@ -224,13 +220,6 @@ async def _execute_blocking_optimization(
     program_spec: str,
     db_run_id: str | None,
 ) -> dict:
-    run_id_int = None
-    if db_run_id is not None:
-        try:
-            run_id_int = int(db_run_id)
-        except ValueError:
-            pass
-
     if request.module_slug:
         return await run_blocking(
             partial(
@@ -241,7 +230,7 @@ async def _execute_blocking_optimization(
                 default_output_root=OPTIMIZATION_DATA_ROOT,
                 auto=request.auto,
                 train_ratio=request.train_ratio,
-                run_id=run_id_int,
+                run_id=None,
             ),
             timeout=OPTIMIZATION_TIMEOUT_SECONDS,
         )

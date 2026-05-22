@@ -701,6 +701,19 @@ paths:
             default: 3
             title: Max Depth
           description: Maximum directory depth to traverse while building the file tree.
+        - name: max_entries
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 1000
+            minimum: 1
+            description: Maximum total node entries to return while building the file
+              tree.
+            default: 200
+            title: Max Entries
+          description: Maximum total node entries to return while building the file
+            tree.
         - name: provider
           in: query
           required: false
@@ -728,6 +741,9 @@ paths:
             incomplete.
         "400":
           description: The requested root path is invalid.
+        "403":
+          description: The requested root is outside the canonical runtime volume
+            roots.
         "502":
           description: The runtime volume provider failed to list the requested path.
         "504":
@@ -799,6 +815,9 @@ paths:
             incomplete.
         "400":
           description: The requested file path is invalid or points to a directory.
+        "403":
+          description: The requested file is outside the canonical runtime volume
+            roots.
         "404":
           description: The requested runtime volume file does not exist.
         "502":
@@ -1916,6 +1935,12 @@ components:
           type: array
           title: Required Dataset Keys
           description: Dataset keys required for this module's examples.
+        offline_only:
+          type: boolean
+          title: Offline Only
+          description: Whether this module can only be optimized through offline optimization
+            endpoints.
+          default: true
       type: object
       required:
         - slug
@@ -1972,6 +1997,7 @@ components:
           description: Fraction of examples to use for training (remainder used for
             validation).
           default: 0.8
+      additionalProperties: false
       type: object
       title: GEPAOptimizationRequest
       description: Request body for triggering a GEPA prompt optimization run.
@@ -2872,7 +2898,7 @@ components:
             type: string
           type: object
           title: Env Vars
-          description: Environment variables configured for the sandbox.
+          description: Redacted environment variables configured for the sandbox.
         image:
           anyOf:
             - type: string
@@ -3744,6 +3770,13 @@ components:
           type: string
           title: Root Path
           description: Normalized root path used for the listing request.
+        allowed_roots:
+          items:
+            type: string
+          type: array
+          title: Allowed Roots
+          description: Canonical volume roots that may be addressed by tree and file
+            requests.
         nodes:
           items:
             $ref: "#/components/schemas/VolumeTreeNode"
@@ -3766,12 +3799,27 @@ components:
           description: Whether the provider truncated the tree because of depth or
             payload limits.
           default: false
+        max_depth:
+          type: integer
+          title: Max Depth
+          description: Depth limit applied to the tree request.
+        max_entries:
+          type: integer
+          title: Max Entries
+          description: Entry limit applied to the tree request.
+        entries_returned:
+          type: integer
+          title: Entries Returned
+          description: Total node entries returned in this response.
       type: object
       required:
         - provider
         - volume_name
         - root_path
         - nodes
+        - max_depth
+        - max_entries
+        - entries_returned
       title: VolumeTreeResponse
       description: Response for the volume tree listing endpoint.
     ApiErrorResponse:

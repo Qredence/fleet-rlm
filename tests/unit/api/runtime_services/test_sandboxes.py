@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import threading
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from fleet_rlm.api.runtime_services.sandboxes import _get_sandbox, _list_sandboxes
+from fleet_rlm.api.runtime_services.sandboxes import (
+    _get_sandbox,
+    _list_sandboxes,
+    _raise_if_sandbox_inaccessible,
+    _sandbox_detail_response,
+)
 
 
 @pytest.mark.asyncio
@@ -61,3 +67,40 @@ async def test_list_sandboxes_keeps_typeerror_fallback_off_thread() -> None:
     }
     assert client.calls[1][1] == {"page": 2, "limit": 25}
     assert all(thread_id != caller_thread_id for thread_id, _ in client.calls)
+
+
+def test_sandbox_detail_redacts_environment_secrets() -> None:
+    sandbox = SimpleNamespace(
+        id="sbx-1",
+        name="owned",
+        state="started",
+        labels={"fleet_owner": "owner"},
+        env={
+            "DAYTONA_API_KEY": "daytona-secret-value",
+            "DATABASE_URL": "postgres://user:pass@example/db",
+            "SAFE_FLAG": "enabled",
+            "HEADER": "Authorization: Bearer token-value",
+        },
+        volumes=[],
+    )
+
+    response = _sandbox_detail_response(sandbox)
+
+    assert response.env_vars["DAYTONA_API_KEY"] == "<redacted>"
+    assert response.env_vars["SAFE_FLAG"] == "enabled"
+    assert "***REDACTED***" in response.env_vars["HEADER"]
+    assert "daytona-secret-value" not in response.model_dump_json()
+    assert "token-value" not in response.model_dump_json()
+
+
+def test_sandbox_access_rejects_unlabeled_sandboxes_without_legacy_fallback() -> None:
+    sandbox = SimpleNamespace(labels={})
+
+    with pytest.raises(Exception) as exc_info:
+        _raise_if_sandbox_inaccessible(
+            sandbox,
+            owner_labels={"fleet_owner": "owner"},
+            allow_unlabeled_legacy=False,
+        )
+
+    assert getattr(exc_info.value, "status_code", None) == 404

@@ -546,6 +546,12 @@ export interface components {
        * @description Dataset keys required for this module's examples.
        */
       required_dataset_keys: string[];
+      /**
+       * Offline Only
+       * @description Whether this module can only be optimized through offline optimization endpoints.
+       * @default true
+       */
+      offline_only?: boolean;
     };
     /**
      * GEPAOptimizationRequest
@@ -1450,7 +1456,7 @@ export interface components {
       disk?: number | null;
       /**
        * Env Vars
-       * @description Environment variables configured for the sandbox.
+       * @description Redacted environment variables configured for the sandbox.
        */
       env_vars?: {
         [key: string]: string;
@@ -2280,6 +2286,11 @@ export interface components {
        */
       root_path: string;
       /**
+       * Allowed Roots
+       * @description Canonical volume roots that may be addressed by tree and file requests.
+       */
+      allowed_roots?: string[];
+      /**
        * Nodes
        * @description Tree nodes rooted at the requested path.
        */
@@ -2302,6 +2313,21 @@ export interface components {
        * @default false
        */
       truncated?: boolean;
+      /**
+       * Max Depth
+       * @description Depth limit applied to the tree request.
+       */
+      max_depth: number;
+      /**
+       * Max Entries
+       * @description Entry limit applied to the tree request.
+       */
+      max_entries: number;
+      /**
+       * Entries Returned
+       * @description Total node entries returned in this response.
+       */
+      entries_returned: number;
     };
     /**
      * ApiErrorResponse
@@ -2959,6 +2985,8 @@ export interface operations {
         root_path?: string;
         /** @description Maximum directory depth to traverse while building the file tree. */
         max_depth?: number;
+        /** @description Maximum total node entries to return while building the file tree. */
+        max_entries?: number;
         /** @description Optional runtime volume backend override. Defaults to the active sandbox provider. */
         provider?: "daytona" | null;
       };
@@ -2976,6 +3004,10 @@ export interface operations {
       };
       /** @description Authentication is required or the provided token is invalid. */
       401: {
+        content: never;
+      };
+      /** @description The requested root is outside the canonical runtime volume roots. */
+      403: {
         content: never;
       };
       /** @description Validation Error */
@@ -3026,6 +3058,10 @@ export interface operations {
       };
       /** @description Authentication is required or the provided token is invalid. */
       401: {
+        content: never;
+      };
+      /** @description The requested file is outside the canonical runtime volume roots. */
+      403: {
         content: never;
       };
       /** @description The requested runtime volume file does not exist. */

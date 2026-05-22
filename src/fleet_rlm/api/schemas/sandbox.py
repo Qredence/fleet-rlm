@@ -41,7 +41,7 @@ class SandboxDetailResponse(BaseModel):
     disk: int | None = Field(default=None, description="Allocated disk in GiB.")
     env_vars: dict[str, str] = Field(
         default_factory=dict,
-        description="Environment variables configured for the sandbox.",
+        description="Redacted environment variables configured for the sandbox.",
     )
     image: str | None = Field(default=None, description="Base image or declarative image used by the sandbox.")
     snapshot: str | None = Field(default=None, description="Snapshot name used to create the sandbox.")

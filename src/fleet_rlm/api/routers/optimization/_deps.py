@@ -99,10 +99,6 @@ class OptimizationContext:
 def _parse_uuid_id(value: str, *, detail: str) -> uuid.UUID:
     try:
         return uuid.UUID(value)
-    except ValueError:
-        pass
-    try:
-        return uuid.UUID(int=int(value))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=detail) from exc
 

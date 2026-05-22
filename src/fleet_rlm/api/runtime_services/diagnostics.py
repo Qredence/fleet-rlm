@@ -323,6 +323,8 @@ async def run_daytona_connection_test(
                 timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
             )
             items = getattr(response, "items", [])
+            checks["cleanup_confirmed"] = True
+            checks["probe_created_sandbox"] = False
             output_preview = f"Daytona connectivity verified. Found {len(items)} sandboxes (limited)."
             return True, output_preview, None
         except ImportError:

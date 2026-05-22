@@ -91,29 +91,19 @@ def _run_program_optimization_with_thread_config(
 
 
 def _resolve_run_uuid(run_id: str | int) -> uuid.UUID:
-    """Convert a run identifier to a UUID for the persistence protocol."""
+    """Convert a canonical run identifier to a UUID for the persistence protocol."""
     if isinstance(run_id, uuid.UUID):
         return run_id
-    if isinstance(run_id, int):
-        return uuid.UUID(int=run_id)
     try:
-        return uuid.UUID(run_id)
-    except ValueError:
-        pass
-    try:
-        return uuid.UUID(int=int(run_id))
+        return uuid.UUID(str(run_id))
     except ValueError as exc:
         raise RuntimeError(f"Invalid run_id: {run_id}") from exc
 
 
 def _try_int_run_id(run_id: str | int) -> int | None:
     """Try to extract an integer run id for MLflow / module optimization tracking."""
-    if isinstance(run_id, int):
-        return run_id
-    try:
-        return int(run_id)
-    except ValueError:
-        return None
+    _ = run_id
+    return None
 
 
 # ---------------------------------------------------------------------------

@@ -38,6 +38,10 @@ class VolumeTreeResponse(BaseModel):
     provider: VolumeProvider = Field(description="Runtime volume backend used to satisfy the request.")
     volume_name: str = Field(description="Resolved volume name used for the listing request.")
     root_path: str = Field(description="Normalized root path used for the listing request.")
+    allowed_roots: list[str] = Field(
+        default_factory=list,
+        description="Canonical volume roots that may be addressed by tree and file requests.",
+    )
     nodes: list[VolumeTreeNode] = Field(description="Tree nodes rooted at the requested path.")
     total_files: int = Field(
         default=0,
@@ -51,6 +55,9 @@ class VolumeTreeResponse(BaseModel):
         default=False,
         description="Whether the provider truncated the tree because of depth or payload limits.",
     )
+    max_depth: int = Field(description="Depth limit applied to the tree request.")
+    max_entries: int = Field(description="Entry limit applied to the tree request.")
+    entries_returned: int = Field(description="Total node entries returned in this response.")
 
 
 class VolumeFileContentResponse(BaseModel):

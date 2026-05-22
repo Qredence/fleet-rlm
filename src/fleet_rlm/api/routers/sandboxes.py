@@ -35,7 +35,8 @@ SBX_ERROR_RESPONSES: OpenAPIResponses = {
 
 
 def _allow_unlabeled_legacy_sandboxes(config_deps: ConfigDepsDep) -> bool:
-    return config_deps.config.app_env == "local" and config_deps.config.auth_mode == "dev"
+    _ = config_deps
+    return False
 
 
 @router.get(

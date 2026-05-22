@@ -172,11 +172,19 @@ def test_delegate_local_workspace_context_is_staged_as_explicit_child_artifact(
     assert "current behavior" in child.session.write_calls[0][1]
 
 
-@pytest.mark.parametrize("path", ["memory/note.txt", "/artifacts/out.txt", "/"])
+@pytest.mark.parametrize("path", ["memory/note.txt", "/artifacts/out.txt"])
 def test_volume_path_normalization_accepts_current_allowed_shapes(path: str) -> None:
     """Volume path helpers normalize relative Daytona paths while preserving absolute canonical paths."""
     assert normalize_volume_file_path(path).startswith("/")
     assert normalize_volume_tree_path(path).startswith("/")
+
+
+def test_volume_file_path_normalization_rejects_root_without_file() -> None:
+    """File reads require a canonical volume root descendant instead of implicit volume root aliases."""
+    with pytest.raises(HTTPException) as exc_info:
+        normalize_volume_file_path("/")
+
+    assert exc_info.value.status_code == 403
 
 
 @pytest.mark.parametrize("path", ["../secrets", "/memory/../meta", "artifacts/%2e%2e/secret"])

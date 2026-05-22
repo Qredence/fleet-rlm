@@ -161,6 +161,72 @@ def test_validation_errors_use_canonical_http_envelope() -> None:
     assert "traceback" not in response.text.lower()
 
 
+def test_volume_tree_uses_auth_scoped_bounded_canonical_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def _fake_tree(volume_name: str, root_path: str, max_depth: int, max_entries: int) -> dict[str, object]:
+        captured.update(
+            {
+                "volume_name": volume_name,
+                "root_path": root_path,
+                "max_depth": max_depth,
+                "max_entries": max_entries,
+            }
+        )
+        return {
+            "volume_name": volume_name,
+            "root_path": root_path,
+            "allowed_roots": ["/memory", "/artifacts", "/buffers", "/meta"],
+            "nodes": [
+                {
+                    "id": "node-memory",
+                    "name": "memory",
+                    "path": "/memory",
+                    "type": "volume",
+                    "children": [],
+                }
+            ],
+            "total_files": 0,
+            "total_dirs": 0,
+            "truncated": False,
+            "max_depth": max_depth,
+            "max_entries": max_entries,
+            "entries_returned": 1,
+        }
+
+    monkeypatch.setattr("fleet_rlm.api.runtime_services.volumes.alist_daytona_volume_tree", _fake_tree)
+    app = _core_app(config_deps=_config(ws_default_workspace_id="workspace-contract"))
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/runtime/volume/tree?root_path=/memory&max_depth=2&max_entries=5")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["allowed_roots"] == ["/memory", "/artifacts", "/buffers", "/meta"]
+    assert body["max_depth"] == 2
+    assert body["max_entries"] == 5
+    assert body["entries_returned"] == 1
+    assert captured == {
+        "volume_name": "tenant-contract",
+        "root_path": "/memory",
+        "max_depth": 2,
+        "max_entries": 5,
+    }
+
+
+@pytest.mark.parametrize("path", ["/workspace", "/tmp/secret.txt", "/home/daytona/memory/meta/config"])
+def test_volume_file_rejects_noncanonical_roots(path: str) -> None:
+    app = _core_app()
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/runtime/volume/file", params={"path": path})
+
+    assert response.status_code == 403
+    body = response.json()
+    assert body["code"] == "forbidden"
+    assert "canonical volume root" in body["message"]
+
+
 def test_runtime_settings_writes_are_local_only_and_unknown_fields_use_error_envelope() -> None:
     production_app = _core_app(config_deps=_config(app_env="production"))
     local_app = _core_app(config_deps=_config(app_env="local"))

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class GEPAOptimizationRequest(BaseModel):
     """Request body for triggering a GEPA prompt optimization run."""
+
+    model_config = ConfigDict(extra="forbid")
 
     dataset_path: str | None = Field(
         default=None,
@@ -101,6 +103,10 @@ class GEPAModuleInfo(BaseModel):
     )
     program_spec: str = Field(description="DSPy program specification string.")
     required_dataset_keys: list[str] = Field(description="Dataset keys required for this module's examples.")
+    offline_only: bool = Field(
+        default=True,
+        description="Whether this module can only be optimized through offline optimization endpoints.",
+    )
 
 
 class GEPAStatusResponse(BaseModel):

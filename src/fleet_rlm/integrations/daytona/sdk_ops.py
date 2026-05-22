@@ -327,24 +327,30 @@ def list_daytona_volume_tree(
     volume_name: str,
     root_path: str = "/",
     max_depth: int = 4,
+    max_entries: int = 200,
 ) -> dict[str, Any]:
     """Adapt Daytona sandbox.fs listings to the runtime volume tree schema."""
     max_depth = max(1, min(max_depth, 10))
+    max_entries = max(1, min(max_entries, 1000))
     root = _resolve_daytona_path(root_path, default_path="/")
 
     counters: dict[str, int] = {"files": 0, "dirs": 0}
     truncated = False
+    entries_returned = 0
 
     def _walk(
         sandbox: Any,
         location: _ResolvedDaytonaPath,
         depth: int,
     ) -> list[dict[str, Any]]:
-        nonlocal truncated
+        nonlocal entries_returned, truncated
         nodes: list[dict[str, Any]] = []
         entries = sandbox.fs.list_files(str(location.mounted_path))
 
         for entry in entries:
+            if entries_returned >= max_entries:
+                truncated = True
+                break
             name = entry_name(getattr(entry, "name", "") or getattr(entry, "path", ""))
             if not name:
                 continue
@@ -352,6 +358,7 @@ def list_daytona_volume_tree(
             child = _child_daytona_path(location, name)
             is_dir = bool(getattr(entry, "is_dir", False))
             modified_iso = _entry_modified_iso(entry)
+            entries_returned += 1
 
             if is_dir:
                 counters["dirs"] += 1
@@ -398,10 +405,14 @@ def list_daytona_volume_tree(
     return {
         "volume_name": volume_name,
         "root_path": root.display_path,
+        "allowed_roots": ["/memory", "/artifacts", "/buffers", "/meta"],
         "nodes": [root_node],
         "total_files": counters["files"],
         "total_dirs": counters["dirs"],
         "truncated": truncated,
+        "max_depth": max_depth,
+        "max_entries": max_entries,
+        "entries_returned": entries_returned,
     }
 
 
@@ -409,12 +420,21 @@ async def alist_daytona_volume_tree(
     volume_name: str,
     root_path: str = "/",
     max_depth: int = 4,
+    max_entries: int = 200,
 ) -> dict[str, Any]:
+    if max_entries == 200:
+        return await _run_sync_in_thread(
+            list_daytona_volume_tree,
+            volume_name,
+            root_path,
+            max_depth,
+        )
     return await _run_sync_in_thread(
         list_daytona_volume_tree,
         volume_name,
         root_path,
         max_depth,
+        max_entries,
     )
 
 
