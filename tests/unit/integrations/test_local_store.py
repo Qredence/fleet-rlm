@@ -878,3 +878,405 @@ def test_create_transcript_dataset_requires_usable_turns():
             title="Broken transcript",
             turns=[("Only user", None)],
         )
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-013: SQLite initializes and persists across connections
+# ---------------------------------------------------------------------------
+
+
+def test_sqlite_initializes_and_persists_across_connections(tmp_path):
+    """VAL-PERSIST-013: Data written via one engine handle is readable via a second handle."""
+    import os
+
+    db_path = str(tmp_path / "cross_conn.db")
+    os.environ["FLEET_RLM_LOCAL_DB_URL"] = f"sqlite:///{db_path}"
+    from fleet_rlm.integrations import local_store
+
+    local_store._engines.clear()
+
+    # Write via first handle
+    sess1 = local_store.create_session(title="cross-conn-test", owner_tenant="t", owner_user="u")
+    assert sess1.id is not None
+
+    # Clear engine cache to force new connection (simulates new process/engine open)
+    local_store._engines.clear()
+
+    # Read via fresh second handle
+    second_engine = local_store.get_engine()
+    assert second_engine is not None
+
+    result = local_store.get_chat_session(sess1.id, owner_tenant="t", owner_user="u")
+    assert result is not None
+    assert result.title == "cross-conn-test"
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-014: SQLite local chat lifecycle matches supported subset
+# ---------------------------------------------------------------------------
+
+
+def test_local_chat_archive_restore_cycle():
+    """VAL-PERSIST-014: Local store supports archive+restore with active/archived semantics."""
+    from fleet_rlm.integrations.local_store import (
+        SessionStatus,
+        archive_session,
+        create_session,
+        get_chat_session,
+        list_sessions,
+        restore_session,
+    )
+
+    s = create_session(title="lifecycle-test", owner_tenant="t", owner_user="u")
+    assert s.id is not None
+
+    # Archive
+    assert archive_session(s.id, owner_tenant="t", owner_user="u") is True
+    row = get_chat_session(s.id, owner_tenant="t", owner_user="u")
+    assert row is not None
+    assert row.status == SessionStatus.ARCHIVED
+
+    # Archived not in active listings
+    active, total = list_sessions(owner_tenant="t", owner_user="u")
+    assert all(item.id != s.id for item in active)
+
+    # Restore
+    assert restore_session(s.id, owner_tenant="t", owner_user="u") is True
+    restored = get_chat_session(s.id, owner_tenant="t", owner_user="u")
+    assert restored is not None
+    assert restored.status == SessionStatus.ACTIVE
+
+    # Active again in listings
+    active_after, _ = list_sessions(owner_tenant="t", owner_user="u")
+    assert any(item.id == s.id for item in active_after)
+
+    # Ownership filter: wrong tenant returns None
+    assert get_chat_session(s.id, owner_tenant="wrong", owner_user="u") is None
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-015: SQLite local turns, stats, and transcript export
+# ---------------------------------------------------------------------------
+
+
+def test_local_session_stats_and_transcript_export(tmp_path, monkeypatch):
+    """VAL-PERSIST-015: local stats match persisted turns; transcript export produces JSONL."""
+    monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", str(tmp_path / "datasets"))
+
+    from fleet_rlm.integrations.local_store import (
+        add_turn,
+        create_session,
+        export_session_as_dataset,
+        get_local_session_stats,
+        get_turns_paginated,
+    )
+
+    sess = create_session(title="stats-export-test", model_name="test-model")
+    turns_data = [
+        ("q0", "a0", 5, 10, 100),
+        ("q1", "a1", 7, 14, 200),
+        ("q2", "a2", 3, 6, 50),
+    ]
+    for i, (um, am, ti, to, lat) in enumerate(turns_data):
+        add_turn(sess.id, i, um, am, tokens_in=ti, tokens_out=to, latency_ms=lat)
+
+    # Check turn ordering
+    turns, total = get_turns_paginated(sess.id, limit=100, offset=0)
+    assert total == 3
+    assert [t.turn_index for t in turns] == [0, 1, 2]
+
+    # Stats should match aggregated turn data
+    stats = get_local_session_stats(sess.id)
+    assert stats is not None
+    assert stats["total_tokens_in"] == 15
+    assert stats["total_tokens_out"] == 30
+    assert stats["total_latency_ms"] == 350
+    assert "test-model" in stats["model_breakdown"]
+
+    # Transcript export writes JSONL
+    dataset = export_session_as_dataset(sess.id, "reflect-and-revise")
+    assert dataset.row_count == 3
+    assert dataset.format == "jsonl"
+    assert dataset.module_slug == "reflect-and-revise"
+
+    import json
+    from pathlib import Path
+
+    lines = Path(dataset.uri).read_text().strip().splitlines()
+    assert len(lines) == 3
+    row0 = json.loads(lines[0])
+    assert row0["user_request"] == "q0"
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-016: SQLite local optimization state survives engine reset
+# ---------------------------------------------------------------------------
+
+
+def test_local_optimization_state_survives_engine_reset(tmp_path, monkeypatch):
+    """VAL-PERSIST-016: optimization run/phase/completion state is readable after engine clear."""
+    db_path = str(tmp_path / "optim_reset.db")
+    ds_root = str(tmp_path / "datasets")
+    monkeypatch.setenv("FLEET_RLM_LOCAL_DB_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", ds_root)
+
+    from fleet_rlm.integrations import local_store
+
+    local_store._engines.clear()
+
+    # Write state
+    run = local_store.create_optimization_run(program_spec="test:module", module_slug="reflect-and-revise")
+    local_store.update_optimization_run_phase(run.id, phase="compiling")
+    local_store.save_evaluation_results(
+        run.id,
+        [{"example_index": 0, "input_data": '{"q":"hi"}', "score": 0.8}],
+    )
+    local_store.save_prompt_snapshots(
+        run.id,
+        [{"predictor_name": "pred", "prompt_type": "before", "prompt_text": "original-prompt"}],
+    )
+    local_store.complete_optimization_run(
+        run.id,
+        train_examples=5,
+        validation_examples=2,
+        validation_score=0.88,
+        manifest_path="/tmp/manifest.json",
+    )
+
+    # Clear engine (simulate process restart)
+    local_store._engines.clear()
+
+    # Read back
+    fetched = local_store.get_optimization_run(run.id)
+    assert fetched is not None
+    assert fetched.status.value == "completed"
+    assert fetched.phase == "completed"
+    assert fetched.validation_score == pytest.approx(0.88)
+    assert fetched.train_examples == 5
+
+    eval_results, total = local_store.get_evaluation_results(run.id)
+    assert total == 1
+    assert eval_results[0].score == pytest.approx(0.8)
+
+    snapshots = local_store.get_prompt_snapshots(run.id)
+    assert len(snapshots) == 1
+    assert snapshots[0].prompt_text == "original-prompt"
+
+    # Stale recovery is idempotent after process reset
+    local_store.create_optimization_run(program_spec="test:running")
+    recovered_first = local_store.recover_stale_optimization_runs()
+    assert recovered_first >= 1
+
+    local_store._engines.clear()
+    recovered_second = local_store.recover_stale_optimization_runs()
+    assert recovered_second == 0
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-017: Local temporary files bounded to caller-provided test roots
+# ---------------------------------------------------------------------------
+
+
+def test_local_temp_files_bounded_to_test_roots(tmp_path, monkeypatch):
+    """VAL-PERSIST-017: SQLite file and JSONL exports stay inside the tmp_path root."""
+    from pathlib import Path  # noqa: PLC0415 - local import is fine in test helpers
+
+    db_path = str(tmp_path / "bounded.db")
+    ds_root = str(tmp_path / "datasets")
+    monkeypatch.setenv("FLEET_RLM_LOCAL_DB_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("FLEET_RLM_DATASET_ROOT", ds_root)
+
+    from fleet_rlm.integrations import local_store
+
+    local_store._engines.clear()
+
+    # SQLite file must be under tmp_path
+    local_store.get_engine()
+    db_url = local_store._resolve_db_url()
+    resolved_db = Path(db_url.replace("sqlite:///", "")).resolve()
+    assert str(resolved_db).startswith(str(tmp_path.resolve()))
+
+    # JSONL export must be under the caller-provided dataset root (which is also under tmp_path)
+    sess = local_store.create_session(title="bounded-test")
+    local_store.add_turn(sess.id, 0, "q", "a")
+    dataset = local_store.export_session_as_dataset(sess.id, "reflect-and-revise")
+    export_path = Path(dataset.uri).resolve()
+    assert str(export_path).startswith(str(tmp_path.resolve()))
+
+    # Dataset root itself must also be under tmp_path
+    dataset_root = local_store.get_dataset_root()
+    assert str(dataset_root).startswith(str(tmp_path.resolve()))
+
+    # The SQLite db file must exist exactly at the monkeypatched path
+    assert Path(db_path).exists()
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-019: Multi-row SQLite writes are atomic
+# ---------------------------------------------------------------------------
+
+
+def test_local_evaluation_results_replacement_is_atomic():
+    """VAL-PERSIST-019: save_evaluation_results replaces prior rows without partial state."""
+    from fleet_rlm.integrations.local_store import (
+        create_optimization_run,
+        get_evaluation_results,
+        get_prompt_snapshots,
+        save_evaluation_results,
+        save_prompt_snapshots,
+    )
+
+    run = create_optimization_run(program_spec="atomic:test")
+
+    # First save: 2 results
+    save_evaluation_results(
+        run.id,
+        [
+            {"example_index": 0, "input_data": '{"q":"old"}', "score": 0.1},
+            {"example_index": 1, "input_data": '{"q":"old"}', "score": 0.2},
+        ],
+    )
+    first_results, first_total = get_evaluation_results(run.id)
+    assert first_total == 2
+
+    # Replace with 3 results — old rows must be completely gone
+    save_evaluation_results(
+        run.id,
+        [
+            {"example_index": 0, "input_data": '{"q":"new"}', "score": 0.9},
+            {"example_index": 1, "input_data": '{"q":"new"}', "score": 0.8},
+            {"example_index": 2, "input_data": '{"q":"new"}', "score": 0.7},
+        ],
+    )
+    replaced_results, replaced_total = get_evaluation_results(run.id)
+    assert replaced_total == 3
+    assert [r.example_index for r in replaced_results] == [0, 1, 2]
+    assert all(r.score >= 0.7 for r in replaced_results)
+
+    # Prompt snapshot replacement
+    save_prompt_snapshots(
+        run.id,
+        [{"predictor_name": "pred", "prompt_type": "before", "prompt_text": "old-prompt"}],
+    )
+    save_prompt_snapshots(
+        run.id,
+        [
+            {"predictor_name": "pred", "prompt_type": "before", "prompt_text": "new-before"},
+            {"predictor_name": "pred", "prompt_type": "after", "prompt_text": "new-after"},
+        ],
+    )
+    snapshots = get_prompt_snapshots(run.id)
+    assert len(snapshots) == 2
+    texts = {s.prompt_text for s in snapshots}
+    assert "new-before" in texts
+    assert "new-after" in texts
+    assert "old-prompt" not in texts
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-020: Unsupported local persistence capabilities are explicit
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_unsupported_trace_operations_raise_explicit_errors() -> None:
+    """VAL-PERSIST-020: store_trace_feedback and store_rlm_trace raise UnsupportedLocalCapabilityError."""
+    import uuid as _uuid
+
+    from fleet_rlm.integrations.local_store import LocalStore
+    from fleet_rlm.integrations.persistence_protocol import UnsupportedLocalCapabilityError
+
+    store = LocalStore()
+    tenant = _uuid.uuid4()
+
+    # store_trace_feedback must raise, not return a sentinel UUID
+    with pytest.raises(UnsupportedLocalCapabilityError) as exc_info:
+        await store.store_trace_feedback(
+            tenant_id=tenant,
+            trace_id="mlflow-trace-abc123",
+            is_correct=True,
+        )
+    assert exc_info.value.capability == "store_trace_feedback"
+
+    # store_rlm_trace must raise, not return uuid.UUID(int=0)
+    with pytest.raises(UnsupportedLocalCapabilityError) as exc_info2:
+        await store.store_rlm_trace(
+            tenant_id=tenant,
+            run_id=_uuid.uuid4(),
+            trace_id="rlm-child-test123",
+        )
+    assert exc_info2.value.capability == "store_rlm_trace"
+
+
+@pytest.mark.asyncio
+async def test_unsupported_run_artifact_write_fails_explicitly() -> None:
+    """VAL-PERSIST-020: create_run, append_step, and store_artifact raise in local mode."""
+    import uuid as _uuid
+
+    from fleet_rlm.integrations.database.models_enums import ArtifactKind
+    from fleet_rlm.integrations.database.repository_chat import (
+        ArtifactCreateRequest,
+        RunCreateRequest,
+        RunStepCreateRequest,
+        RunStepType,
+    )
+    from fleet_rlm.integrations.local_store import LocalStore
+
+    store = LocalStore()
+    tenant = _uuid.uuid4()
+
+    with pytest.raises(NotImplementedError):
+        await store.create_run(
+            RunCreateRequest(
+                tenant_id=tenant,
+                created_by_user_id=None,
+                external_run_id="run-local-test",
+            )
+        )
+
+    with pytest.raises(NotImplementedError):
+        await store.append_step(
+            RunStepCreateRequest(
+                tenant_id=tenant,
+                run_id=_uuid.uuid4(),
+                step_index=0,
+                step_type=RunStepType.LLM_CALL,
+            )
+        )
+
+    with pytest.raises(NotImplementedError):
+        await store.store_artifact(
+            ArtifactCreateRequest(
+                tenant_id=tenant,
+                kind=ArtifactKind.TRACE,
+                uri="memory://test/trace.json",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_unsupported_memory_write_fails_explicitly() -> None:
+    """VAL-PERSIST-020: store_memory_item raises in local mode."""
+    import uuid as _uuid
+
+    from fleet_rlm.integrations.database.models_enums import (
+        MemoryKind,
+        MemoryScope,
+        MemorySource,
+    )
+    from fleet_rlm.integrations.database.repository_memory import MemoryItemCreateRequest
+    from fleet_rlm.integrations.local_store import LocalStore
+
+    store = LocalStore()
+
+    with pytest.raises(NotImplementedError):
+        await store.store_memory_item(
+            MemoryItemCreateRequest(
+                tenant_id=_uuid.uuid4(),
+                scope=MemoryScope.RUN,
+                scope_id="run-id",
+                kind=MemoryKind.SUMMARY,
+                source=MemorySource.SYSTEM,
+                content_text="test memory",
+            )
+        )

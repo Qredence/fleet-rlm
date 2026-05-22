@@ -3,6 +3,23 @@
 This protocol defines the interface used by API routers and runtime services
 for all persistence operations. Both the Neon/Postgres ``FleetRepository`` and
 the SQLite ``local_store`` backend implement this contract.
+
+Supported local (SQLite) capabilities:
+- Identity resolution (deterministic UUIDs from Entra claims)
+- Chat session lifecycle: list, get, update, archive, restore, stats
+- Chat turns: append and paginated listing
+- Optimization run lifecycle: create, update phase, complete, fail, recover
+- Dataset creation, listing, and retrieval (JSONL-file-backed)
+- Evaluation results and prompt snapshots: save, get, replace
+
+Unsupported local capabilities (raise ``UnsupportedLocalCapabilityError``):
+- Durable run creation, step append, artifact storage
+- Memory item storage and listing
+- Trace feedback persistence
+- RLM child trace persistence
+- Inline dataset examples (DatasetExample rows)
+
+Use managed Postgres/Neon for full durable persistence.
 """
 
 from __future__ import annotations
@@ -45,6 +62,22 @@ from fleet_rlm.integrations.database.repository_optimization import (
     DatasetCreateRequest,
     OptimizationRunCreateRequest,
 )
+
+
+class UnsupportedLocalCapabilityError(NotImplementedError):
+    """Raised when an operation is not supported in local SQLite persistence mode.
+
+    Every unsupported LocalStore capability raises this error explicitly so
+    callers know exactly which operation failed and why, rather than receiving
+    a sentinel ID, an empty success payload, or a silently dropped write.
+    """
+
+    def __init__(self, capability: str) -> None:
+        super().__init__(
+            f"Capability '{capability}' is not supported in local SQLite persistence mode. "
+            "Use managed Postgres/Neon for full durable persistence."
+        )
+        self.capability = capability
 
 
 @runtime_checkable
@@ -459,4 +492,4 @@ class PersistenceProtocol(Protocol):
         pass
 
 
-__all__ = ["PersistenceProtocol"]
+__all__ = ["PersistenceProtocol", "UnsupportedLocalCapabilityError"]

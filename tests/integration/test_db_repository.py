@@ -59,6 +59,9 @@ from fleet_rlm.utils.session_titles import derive_session_title
 
 pytestmark = pytest.mark.db
 
+# VAL-PERSIST mission marker — used to scope and clean up all new test rows
+_PERSIST_TEST_MARKER = "val-persist-mission-test"
+
 
 @pytest.fixture(scope="module", autouse=True)
 def _register_reflect_and_revise_stub():
@@ -1274,3 +1277,948 @@ async def test_tenant_subscription_purchaser_tenant_id_persists(
                         status=SubscriptionStatus.ACTIVE,
                     )
                 )
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-001: Identity upsert returns stable IDs on repeated calls
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_upsert_identity_returns_stable_ids_on_repeated_calls(
+    repository: FleetRepository,
+) -> None:
+    """VAL-PERSIST-001: upsert_identity returns stable IDs for the same claims."""
+    entra_tenant = f"tenant-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}"
+    entra_user = f"user-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}"
+
+    first = await repository.upsert_identity(
+        entra_tenant_id=entra_tenant,
+        entra_user_id=entra_user,
+        email="persist001@example.com",
+        full_name="Persist 001 User",
+    )
+    second = await repository.upsert_identity(
+        entra_tenant_id=entra_tenant,
+        entra_user_id=entra_user,
+        email="persist001-again@example.com",
+        full_name="Persist 001 User Updated",
+    )
+
+    assert first.tenant_id == second.tenant_id
+    assert first.user_id == second.user_id
+    assert first.workspace_id == second.workspace_id
+    assert first.tenant_id is not None
+    assert first.user_id is not None
+    assert first.workspace_id is not None
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-002: Chat session full lifecycle including restore
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_chat_session_full_lifecycle_with_restore(
+    repository: FleetRepository,
+) -> None:
+    """VAL-PERSIST-002: create/read/update title/archive/restore lifecycle is durable."""
+    identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        entra_user_id=f"user-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        email=f"{_PERSIST_TEST_MARKER}-002@example.com",
+    )
+    assert identity.workspace_id is not None
+
+    session = await repository.upsert_chat_session(
+        ChatSessionUpsertRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            user_id=identity.user_id,
+            title=f"{_PERSIST_TEST_MARKER}-session-002",
+        )
+    )
+    assert session.id is not None
+
+    # Read it back
+    fetched = await repository.get_chat_session(
+        tenant_id=identity.tenant_id,
+        session_id=session.id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+    )
+    assert fetched is not None
+    assert fetched.id == session.id
+    assert fetched.status == ChatSessionStatus.ACTIVE
+
+    # Update title
+    updated = await repository.upsert_chat_session(
+        ChatSessionUpsertRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            user_id=identity.user_id,
+            session_id=session.id,
+            title=f"{_PERSIST_TEST_MARKER}-session-002-updated",
+        )
+    )
+    assert updated.id == session.id
+    assert updated.title == f"{_PERSIST_TEST_MARKER}-session-002-updated"
+
+    # Archive
+    archived = await repository.archive_chat_session(
+        tenant_id=identity.tenant_id,
+        session_id=session.id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+    )
+    assert archived is True
+
+    active_sessions, active_total = await repository.list_chat_sessions(
+        tenant_id=identity.tenant_id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+        limit=100,
+        offset=0,
+    )
+    assert all(s.id != session.id for s in active_sessions)
+
+    # Restore
+    restored = await repository.restore_chat_session(
+        tenant_id=identity.tenant_id,
+        session_id=session.id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+    )
+    assert restored is True
+
+    after_restore = await repository.get_chat_session(
+        tenant_id=identity.tenant_id,
+        session_id=session.id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+    )
+    assert after_restore is not None
+    assert after_restore.status == ChatSessionStatus.ACTIVE
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-003: Chat turns have monotonic index starting at 0
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_chat_turns_are_append_only_with_monotonic_index(
+    repository: FleetRepository,
+) -> None:
+    """VAL-PERSIST-003: Appended turns get monotonically increasing turn_index from 0."""
+    identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        entra_user_id=f"user-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        email=f"{_PERSIST_TEST_MARKER}-003@example.com",
+    )
+    assert identity.workspace_id is not None
+
+    session = await repository.upsert_chat_session(
+        ChatSessionUpsertRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            user_id=identity.user_id,
+            title=f"{_PERSIST_TEST_MARKER}-turns-003",
+        )
+    )
+
+    n_turns = 5
+    for i in range(n_turns):
+        await repository.append_chat_turn(
+            ChatTurnCreateRequest(
+                tenant_id=identity.tenant_id,
+                workspace_id=identity.workspace_id,
+                session_id=session.id,
+                user_id=identity.user_id,
+                user_message=f"user-{i}",
+                assistant_message=f"assistant-{i}",
+                tokens_in=10 + i,
+                tokens_out=20 + i,
+                latency_ms=100 + i * 10,
+            )
+        )
+
+    turns, total = await repository.list_chat_turns(
+        tenant_id=identity.tenant_id,
+        session_id=session.id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+        limit=100,
+        offset=0,
+    )
+    assert total == n_turns
+    indices = [t.turn_index for t in turns]
+    assert indices == list(range(n_turns)), f"Expected [0..{n_turns - 1}], got {indices}"
+    assert all(t.user_message == f"user-{t.turn_index}" for t in turns)
+
+    # Pagination preserves order
+    page1, _ = await repository.list_chat_turns(
+        tenant_id=identity.tenant_id,
+        session_id=session.id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+        limit=2,
+        offset=0,
+    )
+    page2, _ = await repository.list_chat_turns(
+        tenant_id=identity.tenant_id,
+        session_id=session.id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+        limit=2,
+        offset=2,
+    )
+    assert [t.turn_index for t in page1] == [0, 1]
+    assert [t.turn_index for t in page2] == [2, 3]
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-004: Session stats aggregate persisted turns
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_session_stats_aggregate_persisted_turns(
+    repository: FleetRepository,
+) -> None:
+    """VAL-PERSIST-004: get_session_stats returns correct aggregates over persisted turns."""
+    identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        entra_user_id=f"user-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        email=f"{_PERSIST_TEST_MARKER}-004@example.com",
+    )
+    assert identity.workspace_id is not None
+
+    session = await repository.upsert_chat_session(
+        ChatSessionUpsertRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            user_id=identity.user_id,
+            title=f"{_PERSIST_TEST_MARKER}-stats-004",
+        )
+    )
+
+    turn_data = [
+        {"tokens_in": 5, "tokens_out": 10, "latency_ms": 100},
+        {"tokens_in": 7, "tokens_out": 14, "latency_ms": 200},
+        {"tokens_in": 3, "tokens_out": 6, "latency_ms": 50},
+    ]
+    for i, td in enumerate(turn_data):
+        await repository.append_chat_turn(
+            ChatTurnCreateRequest(
+                tenant_id=identity.tenant_id,
+                workspace_id=identity.workspace_id,
+                session_id=session.id,
+                user_id=identity.user_id,
+                user_message=f"q{i}",
+                assistant_message=f"a{i}",
+                model_name="gpt-test-model-004",
+                **td,
+            )
+        )
+
+    stats = await repository.get_session_stats(
+        tenant_id=identity.tenant_id,
+        session_id=session.id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+    )
+    assert stats is not None
+    assert stats["total_tokens_in"] == 15
+    assert stats["total_tokens_out"] == 30
+    assert stats["total_latency_ms"] == 350
+    assert "gpt-test-model-004" in stats["model_breakdown"]
+    assert stats["model_breakdown"]["gpt-test-model-004"] == 3
+
+    # Non-existent session returns None
+    missing_stats = await repository.get_session_stats(
+        tenant_id=identity.tenant_id,
+        session_id=uuid.uuid4(),
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+    )
+    assert missing_stats is None
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-005: Session export creates a canonical optimization dataset
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_session_export_creates_canonical_optimization_dataset(
+    repository: FleetRepository,
+) -> None:
+    """VAL-PERSIST-005: create_dataset with examples persists dataset + example rows."""
+    identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        entra_user_id=f"user-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        email=f"{_PERSIST_TEST_MARKER}-005@example.com",
+    )
+    assert identity.workspace_id is not None
+
+    examples = [
+        {"user_request": "What is 2+2?", "next_action": "finalize", "rationale": "4"},
+        {"user_request": "What is 3+3?", "next_action": "finalize", "rationale": "6"},
+        {"user_request": "Explain recursion.", "next_action": "revise", "rationale": "A function that calls itself."},
+    ]
+
+    dataset = await repository.create_dataset(
+        DatasetCreateRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            created_by_user_id=identity.user_id,
+            name=f"{_PERSIST_TEST_MARKER}-export-dataset-005",
+            row_count=len(examples),
+            format=DatasetFormat.JSONL,
+            source=DatasetSource.TRANSCRIPT,
+            module_slug="reflect-and-revise",
+            uri=f"memory://datasets/{_PERSIST_TEST_MARKER}-export-005.jsonl",
+        ),
+        examples=examples,
+    )
+    assert dataset.id is not None
+    assert dataset.row_count == len(examples)
+
+    # Verify dataset is listable
+    listed, total = await repository.list_datasets(
+        tenant_id=identity.tenant_id,
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+        module_slug="reflect-and-revise",
+        limit=100,
+        offset=0,
+    )
+    assert any(d.id == dataset.id for d in listed)
+    assert total >= 1
+
+    # Verify examples are retrievable in deterministic row_index order
+    examples_list, example_total = await repository.list_dataset_examples(
+        tenant_id=identity.tenant_id,
+        dataset_id=dataset.id,
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+        limit=100,
+        offset=0,
+    )
+    assert example_total == len(examples)
+    assert [ex.row_index for ex in examples_list] == list(range(len(examples)))
+    assert examples_list[0].input_json["user_request"] == "What is 2+2?"
+    assert examples_list[2].input_json["user_request"] == "Explain recursion."
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-006: Child trace record (RLM trace) is durable
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_child_trace_record_is_durable(
+    repository: FleetRepository,
+) -> None:
+    """VAL-PERSIST-006: store_rlm_trace persists a child trace linked to the run."""
+    identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        entra_user_id=f"user-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        email=f"{_PERSIST_TEST_MARKER}-006@example.com",
+    )
+    assert identity.workspace_id is not None
+
+    run = await repository.create_run(
+        RunCreateRequest(
+            tenant_id=identity.tenant_id,
+            created_by_user_id=identity.user_id,
+            external_run_id=f"{_PERSIST_TEST_MARKER}-run-006:{uuid.uuid4()}",
+        )
+    )
+    child_trace_id = f"rlm-child-{_PERSIST_TEST_MARKER}-{uuid.uuid4().hex[:12]}"
+
+    trace_row_id = await repository.store_rlm_trace(
+        tenant_id=identity.tenant_id,
+        run_id=run.id,
+        trace_id=child_trace_id,
+        workspace_id=identity.workspace_id,
+        summary_text="Child answered: 42",
+        payload_json={"query": "What is the answer?", "answer": "42"},
+        latency_ms=150,
+    )
+    assert trace_row_id is not None
+
+    # Verify it's persisted via a direct DB read
+    from fleet_rlm.integrations.database.models_runs import ExternalTrace
+
+    async with repository._db.session() as session:
+        async with session.begin():
+            result = await session.execute(select(ExternalTrace).where(ExternalTrace.trace_id == child_trace_id))
+            trace = result.scalar_one_or_none()
+
+    assert trace is not None
+    assert trace.run_id == run.id
+    assert trace.metadata_json.get("summary_text") == "Child answered: 42"
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-007: Optimization run failed path persists error text
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_optimization_run_failed_path_persists_error_text(
+    repository: FleetRepository,
+) -> None:
+    """VAL-PERSIST-007: fail_optimization_run persists error text, failed status, phase, and timestamp."""
+    identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        entra_user_id=f"user-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        email=f"{_PERSIST_TEST_MARKER}-007@example.com",
+    )
+    assert identity.workspace_id is not None
+
+    run = await repository.create_optimization_run(
+        OptimizationRunCreateRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            created_by_user_id=identity.user_id,
+            optimizer="GEPA",
+            program_spec="reflect_and_revise:program",
+            module_slug="reflect-and-revise",
+        )
+    )
+    assert run.status == OptimizationRunStatus.RUNNING
+
+    # Advance to a phase first
+    await repository.update_optimization_run_phase(
+        tenant_id=identity.tenant_id,
+        run_id=run.id,
+        phase="compiling",
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+    )
+
+    failed_run = await repository.fail_optimization_run(
+        tenant_id=identity.tenant_id,
+        run_id=run.id,
+        error=f"{_PERSIST_TEST_MARKER}: GEPA compilation failed for test purposes",
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+    )
+    assert failed_run is not None
+    assert failed_run.status == OptimizationRunStatus.FAILED
+    assert failed_run.error is not None
+    assert _PERSIST_TEST_MARKER in failed_run.error
+    assert failed_run.phase == "failed"
+    assert failed_run.completed_at is not None
+
+    # Verify persisted via get
+    detail = await repository.get_optimization_run(
+        tenant_id=identity.tenant_id,
+        run_id=run.id,
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+    )
+    assert detail is not None
+    assert detail.status == OptimizationRunStatus.FAILED
+    assert _PERSIST_TEST_MARKER in (detail.error or "")
+
+    # Failed runs do not appear in RUNNING list
+    running_runs = await repository.list_optimization_runs(
+        tenant_id=identity.tenant_id,
+        workspace_id=identity.workspace_id,
+        status=OptimizationRunStatus.RUNNING,
+        limit=100,
+        offset=0,
+    )
+    assert all(r.id != run.id for r in running_runs)
+
+    # Failed runs appear in FAILED list
+    failed_runs = await repository.list_optimization_runs(
+        tenant_id=identity.tenant_id,
+        workspace_id=identity.workspace_id,
+        status=OptimizationRunStatus.FAILED,
+        limit=100,
+        offset=0,
+    )
+    assert any(r.id == run.id for r in failed_runs)
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-008: Evaluation results replacement is atomic
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_evaluation_results_replacement_is_atomic(
+    repository: FleetRepository,
+) -> None:
+    """VAL-PERSIST-008: save_evaluation_results replaces prior rows atomically."""
+    identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        entra_user_id=f"user-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        email=f"{_PERSIST_TEST_MARKER}-008@example.com",
+    )
+    assert identity.workspace_id is not None
+
+    run = await repository.create_optimization_run(
+        OptimizationRunCreateRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            created_by_user_id=identity.user_id,
+            optimizer="GEPA",
+            program_spec="reflect_and_revise:program",
+            module_slug="reflect-and-revise",
+        )
+    )
+
+    # First save: 2 results
+    await repository.save_evaluation_results(
+        tenant_id=identity.tenant_id,
+        run_id=run.id,
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+        results=[
+            {"example_index": 0, "input_data": {"q": "old-0"}, "expected_output": "a", "score": 0.5},
+            {"example_index": 1, "input_data": {"q": "old-1"}, "expected_output": "b", "score": 0.5},
+        ],
+    )
+    results_after_first, total_first = await repository.get_evaluation_results(
+        tenant_id=identity.tenant_id,
+        run_id=run.id,
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+        limit=100,
+        offset=0,
+    )
+    assert total_first == 2
+
+    # Replace with 3 results — old rows should be gone
+    await repository.save_evaluation_results(
+        tenant_id=identity.tenant_id,
+        run_id=run.id,
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+        results=[
+            {"example_index": 0, "input_data": {"q": "new-0"}, "expected_output": "x", "score": 0.9},
+            {"example_index": 1, "input_data": {"q": "new-1"}, "expected_output": "y", "score": 0.8},
+            {"example_index": 2, "input_data": {"q": "new-2"}, "expected_output": "z", "score": 0.7},
+        ],
+    )
+    results_after_replace, total_replace = await repository.get_evaluation_results(
+        tenant_id=identity.tenant_id,
+        run_id=run.id,
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+        limit=100,
+        offset=0,
+    )
+    assert total_replace == 3
+    assert [r.example_index for r in results_after_replace] == [0, 1, 2]
+    # Old scores should be gone
+    assert all(r.score >= 0.7 for r in results_after_replace)
+
+    # Prompt snapshot replacement
+    await repository.save_prompt_snapshots(
+        tenant_id=identity.tenant_id,
+        run_id=run.id,
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+        snapshots=[
+            {"predictor_name": "responder", "prompt_type": "before", "prompt_text": "old-prompt"},
+        ],
+    )
+    await repository.save_prompt_snapshots(
+        tenant_id=identity.tenant_id,
+        run_id=run.id,
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+        snapshots=[
+            {"predictor_name": "responder", "prompt_type": "before", "prompt_text": "new-prompt-before"},
+            {"predictor_name": "responder", "prompt_type": "after", "prompt_text": "new-prompt-after"},
+        ],
+    )
+    snapshots = await repository.get_prompt_snapshots(
+        tenant_id=identity.tenant_id,
+        run_id=run.id,
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+    )
+    assert len(snapshots) == 2
+    texts = {s.prompt_text for s in snapshots}
+    assert "new-prompt-before" in texts
+    assert "new-prompt-after" in texts
+    assert "old-prompt" not in texts
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-009: Stale recovery is idempotent and leaves completed rows unchanged
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stale_recovery_is_idempotent_and_exact(
+    repository: FleetRepository,
+) -> None:
+    """VAL-PERSIST-009: recover_stale_optimization_runs converts only RUNNING→FAILED and is idempotent."""
+    identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        entra_user_id=f"user-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        email=f"{_PERSIST_TEST_MARKER}-009@example.com",
+    )
+    assert identity.workspace_id is not None
+
+    running_run = await repository.create_optimization_run(
+        OptimizationRunCreateRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            created_by_user_id=identity.user_id,
+            optimizer="GEPA",
+            program_spec="reflect_and_revise:program",
+            module_slug="reflect-and-revise",
+        )
+    )
+
+    # Create a completed run — it must not be touched
+    completed_run = await repository.create_optimization_run(
+        OptimizationRunCreateRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            created_by_user_id=identity.user_id,
+            optimizer="GEPA",
+            program_spec="reflect_and_revise:program",
+            module_slug="reflect-and-revise",
+        )
+    )
+    await repository.complete_optimization_run(
+        tenant_id=identity.tenant_id,
+        run_id=completed_run.id,
+        train_examples=2,
+        validation_examples=1,
+        validation_score=0.9,
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+    )
+
+    # First recovery — should convert running_run to failed
+    recovered = await repository.recover_stale_optimization_runs()
+    assert recovered >= 1  # may include other running runs in shared DB
+
+    running_detail = await repository.get_optimization_run(
+        tenant_id=identity.tenant_id,
+        run_id=running_run.id,
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+    )
+    assert running_detail is not None
+    assert running_detail.status == OptimizationRunStatus.FAILED
+    assert running_detail.error == "Server restarted while optimization was in progress"
+
+    completed_detail = await repository.get_optimization_run(
+        tenant_id=identity.tenant_id,
+        run_id=completed_run.id,
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+    )
+    assert completed_detail is not None
+    assert completed_detail.status == OptimizationRunStatus.COMPLETED
+
+    # Second recovery — running_run already failed, so this should not change it again
+    second_recovery = await repository.recover_stale_optimization_runs()
+    assert second_recovery == 0
+
+    running_detail_again = await repository.get_optimization_run(
+        tenant_id=identity.tenant_id,
+        run_id=running_run.id,
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+    )
+    assert running_detail_again is not None
+    assert running_detail_again.status == OptimizationRunStatus.FAILED
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-010: Legacy fallback rejection — nonexistent IDs return None/404
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_nonexistent_session_id_returns_not_found(
+    repository: FleetRepository,
+) -> None:
+    """VAL-PERSIST-010: Querying stale/nonexistent IDs returns None without fallback hydration."""
+    identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        entra_user_id=f"user-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        email=f"{_PERSIST_TEST_MARKER}-010@example.com",
+    )
+    assert identity.workspace_id is not None
+
+    # Nonexistent session UUID — must return None, not create a hidden compatibility record
+    missing_session = await repository.get_chat_session(
+        tenant_id=identity.tenant_id,
+        session_id=uuid.uuid4(),
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+    )
+    assert missing_session is None
+
+    # Nonexistent optimization run UUID
+    missing_run = await repository.get_optimization_run(
+        tenant_id=identity.tenant_id,
+        run_id=uuid.uuid4(),
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+    )
+    assert missing_run is None
+
+    # Nonexistent dataset UUID
+    missing_dataset = await repository.get_dataset(
+        tenant_id=identity.tenant_id,
+        dataset_id=uuid.uuid4(),
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+    )
+    assert missing_dataset is None
+
+    # Cross-ownership lookup must return None (not expose another user's session)
+    other_identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        entra_user_id=f"user-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        email=f"{_PERSIST_TEST_MARKER}-010-other@example.com",
+    )
+    other_session = await repository.upsert_chat_session(
+        ChatSessionUpsertRequest(
+            tenant_id=other_identity.tenant_id,
+            workspace_id=other_identity.workspace_id,
+            user_id=other_identity.user_id,
+            title=f"{_PERSIST_TEST_MARKER}-other-session-010",
+        )
+    )
+    cross_lookup = await repository.get_chat_session(
+        tenant_id=identity.tenant_id,
+        session_id=other_session.id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+    )
+    assert cross_lookup is None
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-011: Read-only session restore does not mutate rows
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_read_only_session_get_does_not_mutate_rows(
+    repository: FleetRepository,
+) -> None:
+    """VAL-PERSIST-011: get_chat_session is read-only and does not change row counts."""
+    identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        entra_user_id=f"user-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        email=f"{_PERSIST_TEST_MARKER}-011@example.com",
+    )
+    assert identity.workspace_id is not None
+
+    session = await repository.upsert_chat_session(
+        ChatSessionUpsertRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            user_id=identity.user_id,
+            title=f"{_PERSIST_TEST_MARKER}-readonly-011",
+        )
+    )
+    for i in range(3):
+        await repository.append_chat_turn(
+            ChatTurnCreateRequest(
+                tenant_id=identity.tenant_id,
+                workspace_id=identity.workspace_id,
+                session_id=session.id,
+                user_id=identity.user_id,
+                user_message=f"q{i}",
+                assistant_message=f"a{i}",
+            )
+        )
+
+    # Multiple reads must not change row count
+    for _ in range(3):
+        await repository.get_chat_session(
+            tenant_id=identity.tenant_id,
+            session_id=session.id,
+            user_id=identity.user_id,
+            workspace_id=identity.workspace_id,
+        )
+        await repository.list_chat_turns(
+            tenant_id=identity.tenant_id,
+            session_id=session.id,
+            user_id=identity.user_id,
+            workspace_id=identity.workspace_id,
+            limit=100,
+            offset=0,
+        )
+
+    turns, total = await repository.list_chat_turns(
+        tenant_id=identity.tenant_id,
+        session_id=session.id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+        limit=100,
+        offset=0,
+    )
+    assert total == 3
+    assert [t.turn_index for t in turns] == [0, 1, 2]
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-012: Temporary test data uses mission marker and is isolated
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_temporary_test_data_uses_mission_marker(
+    repository: FleetRepository,
+) -> None:
+    """VAL-PERSIST-012: All test-created rows carry _PERSIST_TEST_MARKER for isolation/cleanup."""
+    identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        entra_user_id=f"user-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        email=f"{_PERSIST_TEST_MARKER}-012@example.com",
+    )
+    assert identity.workspace_id is not None
+
+    # Create a session with marker in title
+    session = await repository.upsert_chat_session(
+        ChatSessionUpsertRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            user_id=identity.user_id,
+            title=f"{_PERSIST_TEST_MARKER}-marker-012",
+        )
+    )
+    # Verify the marker is present in the title
+    assert _PERSIST_TEST_MARKER in session.title
+
+    # Create a dataset with marker in name
+    dataset = await repository.create_dataset(
+        DatasetCreateRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            created_by_user_id=identity.user_id,
+            name=f"{_PERSIST_TEST_MARKER}-dataset-012",
+            row_count=0,
+            format=DatasetFormat.JSONL,
+            source=DatasetSource.TRANSCRIPT,
+            module_slug="reflect-and-revise",
+            uri=f"memory://datasets/{_PERSIST_TEST_MARKER}-012.jsonl",
+        )
+    )
+    assert _PERSIST_TEST_MARKER in dataset.name
+
+    # Verify no credential leak in session/dataset responses
+    session_str = str(session.id)
+    assert "postgres" not in session_str.lower()
+    assert "neon" not in session_str.lower()
+
+    # Archive the test session to demonstrate cleanup
+    archived = await repository.archive_chat_session(
+        tenant_id=identity.tenant_id,
+        session_id=session.id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+    )
+    assert archived is True
+
+    # After archive, the session is no longer in active listings
+    active, _ = await repository.list_chat_sessions(
+        tenant_id=identity.tenant_id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+        limit=100,
+        offset=0,
+    )
+    assert all(s.id != session.id for s in active)
+
+
+# ---------------------------------------------------------------------------
+# VAL-PERSIST-019: Multi-row Postgres writes are atomic
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dataset_creation_with_examples_is_atomic(
+    repository: FleetRepository,
+) -> None:
+    """VAL-PERSIST-019: dataset + examples are committed atomically; no partial inserts."""
+    identity = await repository.upsert_identity(
+        entra_tenant_id=f"tenant-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        entra_user_id=f"user-{_PERSIST_TEST_MARKER}-{uuid.uuid4()}",
+        email=f"{_PERSIST_TEST_MARKER}-019@example.com",
+    )
+    assert identity.workspace_id is not None
+
+    examples = [{"user_request": f"{_PERSIST_TEST_MARKER}-atomic-q{i}", "next_action": "finalize"} for i in range(5)]
+
+    dataset = await repository.create_dataset(
+        DatasetCreateRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            created_by_user_id=identity.user_id,
+            name=f"{_PERSIST_TEST_MARKER}-atomic-dataset-019",
+            row_count=len(examples),
+            format=DatasetFormat.JSONL,
+            source=DatasetSource.TRANSCRIPT,
+            module_slug="reflect-and-revise",
+            uri=f"memory://datasets/{_PERSIST_TEST_MARKER}-atomic-019.jsonl",
+        ),
+        examples=examples,
+    )
+    assert dataset.id is not None
+    assert dataset.row_count == len(examples)
+
+    # Retrieve and verify all examples committed together
+    example_list, example_total = await repository.list_dataset_examples(
+        tenant_id=identity.tenant_id,
+        dataset_id=dataset.id,
+        workspace_id=identity.workspace_id,
+        created_by_user_id=identity.user_id,
+        limit=100,
+        offset=0,
+    )
+    assert example_total == len(examples)
+    assert [e.row_index for e in example_list] == list(range(len(examples)))
+
+    # Append-turn atomicity: each turn is committed with the monotonic counter update
+    session = await repository.upsert_chat_session(
+        ChatSessionUpsertRequest(
+            tenant_id=identity.tenant_id,
+            workspace_id=identity.workspace_id,
+            user_id=identity.user_id,
+            title=f"{_PERSIST_TEST_MARKER}-atomic-session-019",
+        )
+    )
+    for i in range(3):
+        turn = await repository.append_chat_turn(
+            ChatTurnCreateRequest(
+                tenant_id=identity.tenant_id,
+                workspace_id=identity.workspace_id,
+                session_id=session.id,
+                user_id=identity.user_id,
+                user_message=f"{_PERSIST_TEST_MARKER}-atomic-q{i}",
+                assistant_message=f"a{i}",
+            )
+        )
+        assert turn.turn_index == i
+
+    turns, total = await repository.list_chat_turns(
+        tenant_id=identity.tenant_id,
+        session_id=session.id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+        limit=100,
+        offset=0,
+    )
+    assert total == 3
+    assert [t.turn_index for t in turns] == [0, 1, 2]

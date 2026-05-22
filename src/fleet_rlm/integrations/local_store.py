@@ -86,7 +86,10 @@ from fleet_rlm.integrations.database.repository_optimization import (
     DatasetCreateRequest,
     OptimizationRunCreateRequest,
 )
-from fleet_rlm.integrations.persistence_protocol import PersistenceProtocol
+from fleet_rlm.integrations.persistence_protocol import (
+    PersistenceProtocol,
+    UnsupportedLocalCapabilityError,
+)
 from fleet_rlm.utils.time import utc_now as _utc_now
 
 _DEFAULT_DB_DIR = Path(".data")
@@ -1314,7 +1317,7 @@ class LocalStore(PersistenceProtocol):
         turn_id: uuid.UUID | None = None,
         metadata_json: dict[str, Any] | None = None,
     ) -> uuid.UUID:
-        return uuid.UUID(int=0)
+        raise UnsupportedLocalCapabilityError("store_trace_feedback")
 
     async def store_rlm_trace(
         self,
@@ -1328,7 +1331,7 @@ class LocalStore(PersistenceProtocol):
         payload_json: dict[str, Any] | None = None,
         latency_ms: int | None = None,
     ) -> uuid.UUID:
-        return uuid.UUID(int=0)
+        raise UnsupportedLocalCapabilityError("store_rlm_trace")
 
     # ------------------------------------------------------------------
     # Datasets
