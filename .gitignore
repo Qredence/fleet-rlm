@@ -154,3 +154,6 @@ blogs/
 logs/
 mlflow_verification_report.md
 src/frontend/test_output.txt
+
+
+.understand-anything/
