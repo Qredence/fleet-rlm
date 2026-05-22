@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import { SessionList } from "@/features/history/session-list";
 import { RlmApiError } from "@/lib/rlm-api/client";
-import type { Conversation } from "@/features/workspace/workspace-layout-contract";
 
 (
   globalThis as typeof globalThis & {
@@ -12,9 +11,6 @@ import type { Conversation } from "@/features/workspace/workspace-layout-contrac
   }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-const workspaceHistoryState = {
-  conversations: [] as Conversation[],
-};
 const queryState = {
   data: undefined as unknown,
   isLoading: false,
@@ -35,13 +31,8 @@ vi.mock("@/lib/rlm-api/sessions", () => ({
   },
 }));
 
-vi.mock("@/features/workspace/workspace-layout-contract", () => ({
-  useWorkspaceLayoutHistory: () => workspaceHistoryState.conversations,
-}));
-
 describe("SessionList", () => {
   beforeEach(() => {
-    workspaceHistoryState.conversations = [];
     queryState.data = undefined;
     queryState.isLoading = false;
     queryState.isError = false;
@@ -52,23 +43,7 @@ describe("SessionList", () => {
     document.body.innerHTML = "";
   });
 
-  it("falls back to local history when the durable sessions API returns 404", async () => {
-    workspaceHistoryState.conversations = [
-      {
-        id: "conv-local-1",
-        title: "Recovered local session",
-        messages: [
-          {
-            id: "user-1",
-            type: "user",
-            content: "Find my prior session",
-          },
-        ],
-        phase: "complete",
-        createdAt: "2026-04-14T09:00:00.000Z",
-        updatedAt: "2026-04-14T09:30:00.000Z",
-      },
-    ];
+  it("reports durable sessions API failures instead of using local history", async () => {
     queryState.isError = true;
     queryState.error = new RlmApiError(404, "Not Found");
 
@@ -80,8 +55,8 @@ describe("SessionList", () => {
       root.render(<SessionList selectedSession={null} onSelect={() => undefined} />);
     });
 
-    expect(container.textContent).toContain("Recovered local session");
-    expect(container.textContent).not.toContain("Failed to load sessions");
+    expect(container.textContent).toContain("Failed to load sessions: [404] Not Found");
+    expect(container.textContent).not.toContain("Recovered local session");
 
     act(() => {
       root.unmount();

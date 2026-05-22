@@ -2,13 +2,13 @@
  * React Query hooks for durable runtime volume filesystem data.
  *
  * Fetches the real volume tree from the backend endpoint
- * GET /api/v1/runtime/volume/tree. Falls back to local mock data
- * or an empty degraded state when the backend is unreachable.
+ * GET /api/v1/runtime/volume/tree. Explicit mock mode is the only
+ * non-live data path; production backend failures surface as query errors.
  */
 import { useQuery } from "@tanstack/react-query";
 
 import { rlmApiConfig } from "@/lib/rlm-api/config";
-import { rlmApiClient, RlmApiError } from "@/lib/rlm-api/client";
+import { rlmApiClient } from "@/lib/rlm-api/client";
 import type { DataSource } from "@/lib/rlm-api/capabilities";
 
 export { useVolumesSelectionStore } from "@/features/volumes/volumes-selection-store";
@@ -316,7 +316,7 @@ interface UseFilesystemReturn {
   volumes: FsNode[];
   /** Data source used to populate filesystem data. */
   dataSource: DataSource;
-  /** Optional reason when local fallback data is used. */
+  /** Optional non-secret reason for live API errors. */
   degradedReason?: string;
   /** True while the initial fetch is in progress */
   isLoading: boolean;
@@ -348,26 +348,14 @@ export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
         };
       }
 
-      try {
-        const url = new URL("/api/v1/runtime/volume/tree", window.location.origin);
-        url.searchParams.set("max_depth", "4");
-        url.searchParams.set("provider", provider);
-        const resp = await rlmApiClient.get<VolumeTreeResponse>(url.pathname + url.search, signal);
-        return {
-          volumes: resp.nodes.map((node) => toFsNode(node, resp.provider)),
-          dataSource: "api",
-        };
-      } catch (err) {
-        const reason =
-          err instanceof RlmApiError
-            ? `${provider === "daytona" ? "Daytona" : "Modal"} volume API returned ${err.status}: ${err.detail}`
-            : `${provider === "daytona" ? "Daytona" : "Modal"} volume API unreachable.`;
-        return {
-          volumes: [],
-          dataSource: "fallback",
-          degradedReason: reason,
-        };
-      }
+      const url = new URL("/api/v1/runtime/volume/tree", window.location.origin);
+      url.searchParams.set("max_depth", "4");
+      url.searchParams.set("provider", provider);
+      const resp = await rlmApiClient.get<VolumeTreeResponse>(url.pathname + url.search, signal);
+      return {
+        volumes: resp.nodes.map((node) => toFsNode(node, resp.provider)),
+        dataSource: "api",
+      };
     },
     staleTime: mock ? Infinity : 30_000,
     retry: false,
@@ -376,7 +364,7 @@ export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
   return {
     volumes: query.data?.volumes ?? [],
     dataSource: query.data?.dataSource ?? (mock ? "mock" : "api"),
-    degradedReason: query.data?.degradedReason,
+    degradedReason: query.error instanceof Error ? query.error.message : query.data?.degradedReason,
     isLoading: query.isLoading,
     isFetching: query.isFetching,
     error: query.error,

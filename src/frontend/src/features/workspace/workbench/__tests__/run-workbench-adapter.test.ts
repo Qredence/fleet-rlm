@@ -23,140 +23,36 @@ function makeEvent(kind: string, text: string, payload?: Record<string, unknown>
 }
 
 describe("runWorkbenchAdapter", () => {
-  it.skip("uses chat final run_result only as a narrow summary and final artifact backfill", () => {
+  it("ignores deleted chat final run_result backfill payloads", () => {
     const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
       task: "Analyze the diligence corpus",
-      repoUrl: "https://github.com/qredence/fleet-rlm.git",
-      repoRef: "main",
-      contextPaths: ["/Users/zocho/Documents/spec.pdf"],
     });
 
     const next = applyFrameToRunWorkbenchState(
       started,
       makeEvent("execution_completed", "Done", {
-        runtime_mode: "daytona_pilot",
-        runtime: {
-          runtime_mode: "daytona_pilot",
-          run_id: "run-123",
-          daytona_mode: "daytona_pilot",
-          value: {
-            summary: "Readable final summary of the Daytona run.",
-            final_markdown: "## Final\nDone",
-          },
-          finalization_mode: "SUBMIT",
-        },
         run_result: {
           run_id: "run-123",
-          repo: "https://github.com/qredence/fleet-rlm.git",
-          ref: "main",
           task: "Analyze the diligence corpus",
-          context_sources: [
-            {
-              source_id: "ctx-1",
-              kind: "file",
-              host_path: "/Users/zocho/Documents/spec.pdf",
-              staged_path: "/workspace/context/spec.pdf.extracted.txt",
-              source_type: "pdf",
-              extraction_method: "pypdf",
-              file_count: 1,
-            },
-          ],
-          prompts: [
-            {
-              handle_id: "prompt-1",
-              kind: "task",
-              label: "Root task",
-              char_count: 9001,
-              line_count: 120,
-              preview: "A long root task preview that should stay visible.",
-            },
-          ],
-          iterations: [
-            {
-              iteration: 1,
-              status: "completed",
-              reasoning_summary: "Planner selected a grounded repo-and-doc sweep.",
-              code: "summary = 'Done'\nSUBMIT(summary=summary)",
-              stdout: "done",
-              duration_ms: 123,
-              callback_count: 1,
-              finalized: true,
-            },
-          ],
-          callbacks: [
-            {
-              id: "callback-1",
-              callback_name: "llm_query_batched",
-              iteration: 1,
-              status: "completed",
-              task: "Summarize tracing subsystem",
-              label: "Tracing pass",
-              result_preview: "Summarized tracing subsystem.",
-              source: {
-                kind: "file_slice",
-                source_id: "src-1",
-                path: "src/fleet_rlm/analytics/scorers.py",
-                start_line: 1,
-                end_line: 80,
-                preview: "Tracing scorer file preview",
-              },
-            },
-          ],
-          sources: [
-            {
-              source_id: "ctx-1",
-              kind: "file",
-              title: "spec.pdf",
-              display_url: "/Users/zocho/Documents/spec.pdf",
-              description: "Staged at /workspace/context/spec.pdf.extracted.txt",
-            },
-          ],
-          attachments: [
-            {
-              attachment_id: "ctx-1",
-              name: "spec.pdf",
-              kind: "file",
-              mime_type: "pdf",
-            },
-          ],
           final_artifact: {
             kind: "markdown",
             value: {
-              summary: "Readable final summary of the Daytona run.",
-              final_markdown: "## Final\nDone",
+              summary: "Deleted compatibility summary",
             },
-            finalization_mode: "SUBMIT",
-          },
-          summary: {
-            duration_ms: 1234,
-            sandboxes_used: 1,
-            termination_reason: "completed",
           },
         },
       }),
     );
 
     expect(next.status).toBe("completed");
-    expect(next.runId).toBe("run-123");
-    expect(next.daytonaMode).toBe("daytona_pilot");
-    expect(next.contextSources[0]?.hostPath).toBe("/Users/zocho/Documents/spec.pdf");
+    expect(next.runId).toBeUndefined();
     expect(next.iterations).toEqual([]);
     expect(next.callbacks).toEqual([]);
     expect(next.promptHandles).toEqual([]);
     expect(next.sources).toEqual([]);
     expect(next.attachments).toEqual([]);
-    expect(next.finalArtifact?.finalizationMode).toBe("SUBMIT");
-    expect(next.summary).toMatchObject({
-      durationMs: 1234,
-      sandboxesUsed: 1,
-      terminationReason: "completed",
-    });
-    expect(next.compatBackfillCount).toBe(1);
-    expect(next.lastCompatBackfill).toMatchObject({
-      runtimeMode: "daytona_pilot",
-      usedSummary: true,
-      usedFinalArtifact: true,
-    });
+    expect(next.finalArtifact).toBeNull();
+    expect(next.summary).toBeUndefined();
   });
 
   it("hydrates execution_completed run_summary payloads without relying on chat final run_result", () => {

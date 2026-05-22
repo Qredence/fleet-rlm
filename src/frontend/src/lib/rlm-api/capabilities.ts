@@ -19,7 +19,7 @@ export function isSectionSupported(nav: NavItem): boolean {
 
 // ── Shared API data-source type ─────────────────────────────────────
 
-export type DataSource = "api" | "mock" | "fallback";
+export type DataSource = "api" | "mock";
 
 export interface TaskListParams {
   page?: number;

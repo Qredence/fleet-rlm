@@ -25,8 +25,6 @@ function resetWorkbenchStore() {
     summary: undefined,
     errorMessage: null,
     lastFrame: null,
-    compatBackfillCount: 0,
-    lastCompatBackfill: null,
   });
 }
 
@@ -125,7 +123,5 @@ describe("useRunWorkbenchStore", () => {
     expect(state.finalArtifact).toBeNull();
     expect(state.summary).toBeUndefined();
     expect(state.iterations).toEqual([]);
-    expect(state.compatBackfillCount).toBe(0);
-    expect(state.lastCompatBackfill).toBeNull();
   });
 });

@@ -166,10 +166,7 @@ function preferredFinalArtifactText(value: unknown): string | undefined {
 }
 
 function resolveFinalAssistantText(text: string, payload?: Record<string, unknown>): string {
-  const runResult = asRecord(payload?.run_result ?? payload?.runResult);
-  const preferred =
-    preferredFinalArtifactText(payload?.final_artifact ?? payload?.finalArtifact) ??
-    preferredFinalArtifactText(runResult?.final_artifact ?? runResult?.finalArtifact);
+  const preferred = preferredFinalArtifactText(payload?.final_artifact ?? payload?.finalArtifact);
 
   return preferred ?? text;
 }

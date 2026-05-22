@@ -25,11 +25,6 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { DataTable, type ColumnDef } from "@/components/product/data-table";
 import { StateNotice } from "@/components/product";
-import {
-  useWorkspaceLayoutHistory,
-  type Conversation,
-} from "@/features/workspace/workspace-layout-contract";
-import { RlmApiError } from "@/lib/rlm-api/client";
 import { parseIsoTimestamp } from "@/lib/date";
 import {
   datasetEndpoints,
@@ -37,7 +32,6 @@ import {
   optimizationKeys,
   type DatasetResponse,
   type GEPAModuleInfo,
-  type TranscriptTurnInput,
 } from "@/lib/rlm-api/optimization";
 import { sessionEndpoints, sessionKeys, type SessionListItem } from "@/lib/rlm-api/sessions";
 import type { OptimizationRunDraft } from "@/features/optimization/optimization-form";
@@ -52,43 +46,13 @@ function formatDate(iso: string): string {
 
 const EMPTY_MODULES: GEPAModuleInfo[] = [];
 
-function sortConversations(conversations: Conversation[]) {
-  return [...conversations].sort(
-    (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
-  );
-}
-
-function buildTranscriptTurns(conversation: Conversation): TranscriptTurnInput[] {
-  const turns: TranscriptTurnInput[] = [];
-  let pendingUserMessage: string | null = null;
-
-  for (const message of conversation.messages) {
-    if (message.type === "user") {
-      pendingUserMessage = message.content;
-      continue;
-    }
-
-    if (message.type === "assistant" && pendingUserMessage) {
-      turns.push({
-        user_message: pendingUserMessage,
-        assistant_message: message.content,
-      });
-      pendingUserMessage = null;
-    }
-  }
-
-  return turns;
-}
-
 function SessionRow({
   session,
-  conversation,
   onPrepareRun,
   modules,
   moduleProgramSpecsBySlug,
 }: {
   session: SessionListItem;
-  conversation?: Conversation;
   onPrepareRun?: (draft: OptimizationRunDraft) => void;
   modules: GEPAModuleInfo[];
   moduleProgramSpecsBySlug: Map<string, string>;
@@ -100,21 +64,11 @@ function SessionRow({
     mutationFn: async ({
       sessionId,
       moduleSlug,
-      conversationTitle,
-      transcriptTurns,
     }: {
-      sessionId?: string;
+      sessionId: string;
       moduleSlug: string;
-      conversationTitle?: string;
-      transcriptTurns?: TranscriptTurnInput[];
     }) => {
-      return typeof sessionId === "string"
-        ? await sessionEndpoints.exportSession(sessionId, moduleSlug)
-        : await datasetEndpoints.createFromTranscript({
-            module_slug: moduleSlug,
-            title: conversationTitle,
-            turns: transcriptTurns ?? [],
-          });
+      return await sessionEndpoints.exportSession(sessionId, moduleSlug);
     },
     onSuccess: (dataset, variables) => {
       toast.success("Dataset ready for GEPA", {
@@ -143,8 +97,6 @@ function SessionRow({
     },
   });
 
-  const transcriptTurns = conversation ? buildTranscriptTurns(conversation) : undefined;
-
   return (
     <Item variant="outline" size="sm">
       <ItemContent>
@@ -152,7 +104,6 @@ function SessionRow({
         <ItemDescription>{formatDate(session.created_at)}</ItemDescription>
       </ItemContent>
       <ItemActions>
-        {conversation ? <Badge variant="secondary">Local history</Badge> : null}
         <Select
           value={selectedModule}
           onValueChange={(v) => {
@@ -176,16 +127,13 @@ function SessionRow({
           disabled={
             !selectedModule ||
             modules.length === 0 ||
-            optimizeMutation.isPending ||
-            (conversation ? transcriptTurns?.length === 0 : false)
+            optimizeMutation.isPending
           }
           onClick={() => {
             if (!selectedModule) return;
             optimizeMutation.mutate({
-              sessionId: conversation ? undefined : session.id,
+              sessionId: session.id,
               moduleSlug: selectedModule,
-              conversationTitle: conversation?.title ?? session.title,
-              transcriptTurns,
             });
           }}
         >
@@ -206,7 +154,6 @@ function SessionsSection({
   modules: GEPAModuleInfo[];
   moduleProgramSpecsBySlug: Map<string, string>;
 }) {
-  const localConversations = useWorkspaceLayoutHistory();
   const listParams = { limit: 10 };
 
   const sessionsQuery = useQuery({
@@ -216,24 +163,6 @@ function SessionsSection({
   });
 
   const sessions = sessionsQuery.data?.items ?? [];
-  const fallbackSessions = sortConversations(localConversations).map((conversation) => ({
-    conversation,
-    session: {
-      id: `local:${conversation.id}`,
-      title: conversation.title,
-      status: "local",
-      model_name: null,
-      external_session_id: null,
-      created_at: conversation.createdAt,
-      updated_at: conversation.updatedAt,
-    } satisfies SessionListItem,
-  }));
-  const shouldUseLocalFallback =
-    (!sessions.length && fallbackSessions.length > 0) ||
-    (sessionsQuery.isError &&
-      fallbackSessions.length > 0 &&
-      sessionsQuery.error instanceof RlmApiError &&
-      sessionsQuery.error.status === 404);
 
   return (
     <div className="flex flex-col gap-3">
@@ -254,24 +183,6 @@ function SessionsSection({
           <Skeleton className="h-14 w-full rounded-lg" />
           <Skeleton className="h-14 w-full rounded-lg" />
           <Skeleton className="h-14 w-full rounded-lg" />
-        </div>
-      ) : shouldUseLocalFallback ? (
-        <div className="flex flex-col gap-2">
-          <p className="text-xs text-muted-foreground">
-            Showing local session history because the durable sessions API is unavailable.
-          </p>
-          <ItemGroup>
-            {fallbackSessions.map(({ session, conversation }, index) => (
-              <SessionRow
-                key={`${session.title}-${index}`}
-                session={session}
-                conversation={conversation}
-                onPrepareRun={onPrepareRun}
-                modules={modules}
-                moduleProgramSpecsBySlug={moduleProgramSpecsBySlug}
-              />
-            ))}
-          </ItemGroup>
         </div>
       ) : sessionsQuery.isError ? (
         <Card className="border-destructive/30 bg-destructive/5">

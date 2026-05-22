@@ -27,31 +27,35 @@ describe("rlmApiConfig — wsUrl derivation", () => {
     expect(rlmApiConfig.wsExecutionUrl).toBe("ws://custom-host:9000/api/v1/ws/execution/events");
   });
 
-  it("does not rewrite a deleted legacy explicit chat websocket URL", async () => {
+  it("ignores a deleted legacy explicit chat websocket URL and derives canonical routes", async () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "ws://custom-host:9000/api/v1/ws/chat");
-    vi.stubEnv("VITE_FLEET_API_URL", "");
+    vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
-    expect(rlmApiConfig.wsUrl).toBe("ws://custom-host:9000/api/v1/ws/chat");
-    expect(rlmApiConfig.wsExecutionUrl).toBe("ws://custom-host:9000/api/v1/ws/chat");
+    expect(rlmApiConfig.wsUrl).toBe("ws://localhost:8000/api/v1/ws/execution");
+    expect(rlmApiConfig.wsExecutionUrl).toBe("ws://localhost:8000/api/v1/ws/execution/events");
   });
 
-  it("does not rewrite a malformed deleted chat websocket suffix", async () => {
+  it("ignores a malformed deleted chat websocket suffix and derives from browser origin", async () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "custom-host/api/v1/ws/chat");
     vi.stubEnv("VITE_FLEET_API_URL", "");
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
-    expect(rlmApiConfig.wsUrl).toBe("custom-host/api/v1/ws/chat");
-    expect(rlmApiConfig.wsExecutionUrl).toBe("custom-host/api/v1/ws/chat");
+    expect(rlmApiConfig.wsUrl).toBe("ws://localhost:3000/api/v1/ws/execution");
+    expect(rlmApiConfig.wsExecutionUrl).toBe(
+      "ws://localhost:3000/api/v1/ws/execution/events",
+    );
   });
 
-  it("leaves a malformed explicit websocket URL unchanged when it is not legacy chat", async () => {
+  it("ignores non-canonical explicit websocket URLs and derives from browser origin", async () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "custom-host/socket");
     vi.stubEnv("VITE_FLEET_API_URL", "");
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
-    expect(rlmApiConfig.wsUrl).toBe("custom-host/socket");
-    expect(rlmApiConfig.wsExecutionUrl).toBe("custom-host/socket");
+    expect(rlmApiConfig.wsUrl).toBe("ws://localhost:3000/api/v1/ws/execution");
+    expect(rlmApiConfig.wsExecutionUrl).toBe(
+      "ws://localhost:3000/api/v1/ws/execution/events",
+    );
   });
 
   // ── derive from VITE_FLEET_API_URL ─────────────────────────────────────────

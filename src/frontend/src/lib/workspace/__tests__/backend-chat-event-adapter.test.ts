@@ -873,6 +873,25 @@ describe("applyWsFrameToMessages", () => {
     expect(assistant?.content).toBe("Hello there, it is great to meet you!");
   });
 
+  it("does not backfill final assistant text from deleted run_result payloads", () => {
+    const result = applyWsFrameToMessages(
+      [],
+      makeEvent("done", "Canonical completion text", {
+        run_result: {
+          final_artifact: {
+            kind: "markdown",
+            value: {
+              final_markdown: "Deleted compatibility artifact",
+            },
+          },
+        },
+      }),
+    );
+
+    const assistant = result.messages.find((message) => message.type === "assistant");
+    expect(assistant?.content).toBe("Canonical completion text");
+  });
+
   it.skip("maps clarification and command_result events to interactive hitl messages", () => {
     const requested = applyWsFrameToMessages(
       [],

@@ -6,9 +6,7 @@ import { SessionList } from "./session-list";
 import { SessionDetail } from "./session-detail";
 import { cn } from "@/lib/utils";
 
-export type HistorySelection =
-  | { source: "api"; sessionId: string }
-  | { source: "local"; conversationId: string };
+export type HistorySelection = { source: "api"; sessionId: string };
 
 export function HistoryScreen() {
   const isMobile = useIsMobile();

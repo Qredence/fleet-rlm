@@ -14,8 +14,6 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StateNotice } from "@/components/product";
-import { useWorkspaceLayoutHistory } from "@/features/workspace/workspace-layout-contract";
-import { RlmApiError } from "@/lib/rlm-api/client";
 import { parseIsoTimestamp } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import {
@@ -24,7 +22,6 @@ import {
   type SessionListItem,
   type SessionListParams,
 } from "@/lib/rlm-api/sessions";
-import { shouldPreferLocalHistory, sortConversationsByUpdatedAt } from "./history-source";
 import type { HistorySelection } from "./history-screen";
 
 const PAGE_SIZE = 20;
@@ -39,8 +36,6 @@ function StatusBadge({ status }: { status: string }) {
       );
     case "archived":
       return <Badge variant="secondary">Archived</Badge>;
-    case "local":
-      return <Badge variant="secondary">Local</Badge>;
     default:
       return <Badge variant="secondary">{status}</Badge>;
   }
@@ -104,7 +99,6 @@ function sessionErrorDetail(error: unknown): string {
 }
 
 export function SessionList({ selectedSession, onSelect }: SessionListProps) {
-  const localConversations = useWorkspaceLayoutHistory();
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -127,24 +121,6 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
 
   // Reset offset when filters change
   useResetOffset(deferredSearch, statusFilter, setOffset);
-
-  const normalizedSearch = deferredSearch.trim().toLowerCase();
-  const localItems = sortConversationsByUpdatedAt(localConversations).filter((conversation) => {
-    if (normalizedSearch && !conversation.title.toLowerCase().includes(normalizedSearch)) {
-      return false;
-    }
-    return statusFilter !== "archived";
-  });
-  const apiItems = sessionsQuery.data?.items ?? [];
-  const preferLocalHistory = shouldPreferLocalHistory(apiItems, localItems, offset);
-  const shouldUseLocalFallback =
-    preferLocalHistory ||
-    (sessionsQuery.isLoading && localItems.length > 0) ||
-    (!sessionsQuery.data?.items.length && localItems.length > 0) ||
-    (sessionsQuery.isError &&
-      localItems.length > 0 &&
-      sessionsQuery.error instanceof RlmApiError &&
-      sessionsQuery.error.status === 404);
 
   const toolbar = (
     <div className="mb-4 flex items-center gap-3">
@@ -174,37 +150,6 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
       </Select>
     </div>
   );
-
-  if (shouldUseLocalFallback) {
-    return (
-      <div className="flex flex-col gap-2">
-        {toolbar}
-        {localItems.map((conversation) => {
-          const isSelected =
-            selectedSession?.source === "local" &&
-            selectedSession.conversationId === conversation.id;
-          return (
-            <SessionRow
-              key={conversation.id}
-              session={{
-                id: `local:${conversation.id}`,
-                title: conversation.title,
-                status: "local",
-                model_name: null,
-                external_session_id: null,
-                created_at: conversation.createdAt,
-                updated_at: conversation.updatedAt,
-              }}
-              isSelected={isSelected}
-              onSelect={() =>
-                onSelect(isSelected ? null : { source: "local", conversationId: conversation.id })
-              }
-            />
-          );
-        })}
-      </div>
-    );
-  }
 
   if (sessionsQuery.isLoading) {
     return (

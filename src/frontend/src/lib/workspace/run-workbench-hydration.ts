@@ -176,8 +176,6 @@ export function createInitialRunWorkbenchState(): RunWorkbenchState {
     summary: undefined,
     errorMessage: null,
     lastFrame: null,
-    compatBackfillCount: 0,
-    lastCompatBackfill: null,
   };
 }
 
@@ -450,7 +448,5 @@ export function applyFrameToRunWorkbenchState(
       null,
     summary: mergedSummary,
     errorMessage: nextStatus === "error" ? frame.data.text : (next.errorMessage ?? null),
-    compatBackfillCount: next.compatBackfillCount,
-    lastCompatBackfill: next.lastCompatBackfill,
   };
 }

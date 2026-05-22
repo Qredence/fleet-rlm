@@ -396,13 +396,6 @@ export interface HumanReviewSummary {
   repairSteps?: string[];
 }
 
-export interface CompatBackfillInfo {
-  eventId: string;
-  runtimeMode?: string;
-  usedSummary: boolean;
-  usedFinalArtifact: boolean;
-}
-
 export interface RunWorkbenchState {
   status: RunStatus;
   runId?: string;
@@ -424,6 +417,4 @@ export interface RunWorkbenchState {
   summary?: RunSummary;
   errorMessage?: string | null;
   lastFrame?: WsServerMessage | null;
-  compatBackfillCount: number;
-  lastCompatBackfill?: CompatBackfillInfo | null;
 }
