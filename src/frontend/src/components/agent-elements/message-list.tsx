@@ -397,7 +397,7 @@ export const MessageList = memo(function MessageList({
 
     resizeObserver.observe(contentWrapper);
     return () => resizeObserver.disconnect();
-  }, []);
+  }, [initialScrollBehavior]);
 
   const normalizedMessages = useMemo(() => normalizeMessages(messages), [messages]);
   const lastMessage = normalizedMessages[normalizedMessages.length - 1];

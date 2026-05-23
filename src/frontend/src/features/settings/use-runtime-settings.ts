@@ -222,10 +222,12 @@ export function computeLmRuntimeUpdates(
 
 export function useRuntimeSettings() {
   const queryClient = useQueryClient();
+  const canQueryRuntime = typeof window !== "undefined";
 
   const settingsQuery = useQuery({
     queryKey: runtimeKeys.settings(),
     queryFn: ({ signal }) => runtimeEndpoints.settings(signal),
+    enabled: canQueryRuntime,
     staleTime: 5_000,
   });
 

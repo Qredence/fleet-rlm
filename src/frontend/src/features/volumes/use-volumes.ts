@@ -330,6 +330,7 @@ interface UseFilesystemReturn {
 
 export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
   const mock = rlmApiConfig.mockMode;
+  const canQueryFilesystem = typeof window !== "undefined";
 
   type FilesystemPayload = {
     volumes: FsNode[];
@@ -361,6 +362,7 @@ export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
         dataSource: "api",
       };
     },
+    enabled: canQueryFilesystem,
     staleTime: mock ? Infinity : 30_000,
     retry: false,
   });
@@ -404,6 +406,7 @@ export function useFileContent(
   provider: VolumeProvider,
 ): UseFileContentReturn {
   const mock = rlmApiConfig.mockMode;
+  const canQueryFilesystem = typeof window !== "undefined";
 
   const query = useQuery({
     queryKey: filesystemKeys.fileContent(provider, path ?? ""),
@@ -427,7 +430,7 @@ export function useFileContent(
         size: resp.size,
       };
     },
-    enabled: !!path,
+    enabled: canQueryFilesystem && !!path,
     staleTime: mock ? Infinity : undefined,
     retry: false,
   });

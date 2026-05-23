@@ -27,6 +27,7 @@ export type QuestionAnswer = {
 };
 
 const QUESTION_CUSTOM_ID = "__custom__";
+const EMPTY_SELECTED_IDS: string[] = [];
 
 function optionBadge(idx: number) {
   return String.fromCharCode(65 + idx);
@@ -79,9 +80,13 @@ export function QuestionPrompt({
   const canGoNext = clampedIndex < resolvedTotal;
   const isLastQuestion = clampedIndex >= resolvedTotal;
   const primaryLabel = isLastQuestion ? submitLabel : nextLabel;
+  const hasInitialAnswer = initialAnswer != null;
+  const initialAnswerKind = initialAnswer?.kind;
+  const initialAnswerText = initialAnswer?.text ?? "";
+  const initialAnswerSelectedIds = initialAnswer?.selectedIds ?? EMPTY_SELECTED_IDS;
 
   useEffect(() => {
-    if (!initialAnswer || initialAnswer.kind === "skip") {
+    if (!hasInitialAnswer || initialAnswerKind === "skip") {
       setSelectedIds([]);
       setCustomText("");
       setTextValue("");
@@ -91,12 +96,12 @@ export function QuestionPrompt({
     if (activeQuestion?.kind === "text") {
       setSelectedIds([]);
       setCustomText("");
-      setTextValue(initialAnswer.text ?? "");
+      setTextValue(initialAnswerText);
       return;
     }
 
-    const nextSelected = new Set(initialAnswer.selectedIds ?? []);
-    const nextCustomText = initialAnswer.text ?? "";
+    const nextSelected = new Set(initialAnswerSelectedIds);
+    const nextCustomText = initialAnswerText;
     if (customEnabled && nextCustomText.trim().length > 0) {
       nextSelected.add(QUESTION_CUSTOM_ID);
     }
@@ -107,9 +112,10 @@ export function QuestionPrompt({
     activeQuestion?.kind,
     clampedIndex,
     customEnabled,
-    initialAnswer?.kind,
-    initialAnswer?.text,
-    initialAnswer?.selectedIds?.join("|"),
+    hasInitialAnswer,
+    initialAnswerKind,
+    initialAnswerText,
+    initialAnswerSelectedIds,
   ]);
 
   const canSubmit = useMemo(() => {

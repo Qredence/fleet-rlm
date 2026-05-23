@@ -103,6 +103,7 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
   const deferredSearch = useDeferredValue(search);
   const [statusFilter, setStatusFilter] = useState("all");
   const [offset, setOffset] = useState(0);
+  const canQueryHistoryApi = typeof window !== "undefined";
 
   const filterLabel =
     statusFilter === "all" ? "All" : statusFilter === "active" ? "Active" : "Archived";
@@ -117,6 +118,7 @@ export function SessionList({ selectedSession, onSelect }: SessionListProps) {
   const sessionsQuery = useQuery({
     queryKey: sessionKeys.list(params),
     queryFn: ({ signal }) => sessionEndpoints.listSessions(params, signal),
+    enabled: canQueryHistoryApi,
   });
 
   // Reset offset when filters change

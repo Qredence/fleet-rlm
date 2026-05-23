@@ -58,10 +58,12 @@ type SessionReplayProps =
 function SessionReplayApi({ sessionId }: { sessionId: string }) {
   const [offset, setOffset] = useState(0);
   const params = { limit: PAGE_SIZE, offset };
+  const canQueryHistoryApi = typeof window !== "undefined";
 
   const turnsQuery = useQuery({
     queryKey: sessionKeys.turns(sessionId, params),
     queryFn: ({ signal }) => sessionEndpoints.getSessionTurns(sessionId, params, signal),
+    enabled: canQueryHistoryApi,
   });
 
   if (turnsQuery.isLoading) {

@@ -29,6 +29,8 @@ export type DetectedChanges = {
   items: TodoChange[];
 };
 
+const EMPTY_TODOS: TodoItem[] = [];
+
 function detectChanges(oldTodos: TodoItem[], newTodos: TodoItem[]): DetectedChanges {
   if (!oldTodos || oldTodos.length === 0) {
     return {
@@ -124,8 +126,8 @@ export const TodoTool = memo(function TodoTool({ part, chatStatus }: TodoToolPro
   const { isPending } = getToolStatus(part, chatStatus);
 
   const isStreaming = part.state === "input-streaming";
-  const oldTodos: TodoItem[] = part.output?.oldTodos || [];
-  const newTodos: TodoItem[] = part.input?.todos || part.output?.newTodos || [];
+  const oldTodos: TodoItem[] = part.output?.oldTodos ?? EMPTY_TODOS;
+  const newTodos: TodoItem[] = part.input?.todos ?? part.output?.newTodos ?? EMPTY_TODOS;
 
   const isCreation = oldTodos.length === 0;
   const changes = useMemo(() => detectChanges(oldTodos, newTodos), [oldTodos, newTodos]);

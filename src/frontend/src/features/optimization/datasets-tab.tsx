@@ -155,10 +155,12 @@ function SessionsSection({
   moduleProgramSpecsBySlug: Map<string, string>;
 }) {
   const listParams = { limit: 10 };
+  const canQueryOptimizationApi = typeof window !== "undefined";
 
   const sessionsQuery = useQuery({
     queryKey: sessionKeys.list(listParams),
     queryFn: ({ signal }) => sessionEndpoints.listSessions(listParams, signal),
+    enabled: canQueryOptimizationApi,
     staleTime: 30_000,
   });
 
@@ -225,10 +227,12 @@ export function DatasetsTab({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [moduleFilter, setModuleFilter] = useState<string>("all");
   const [dragActive, setDragActive] = useState(false);
+  const canQueryOptimizationApi = typeof window !== "undefined";
 
   const modulesQuery = useQuery({
     queryKey: optimizationKeys.modules(),
     queryFn: ({ signal }) => optimizationEndpoints.modules(signal),
+    enabled: canQueryOptimizationApi,
     staleTime: 60_000,
   });
 
@@ -241,6 +245,7 @@ export function DatasetsTab({
         moduleFilter !== "all" ? { module_slug: moduleFilter } : undefined,
         signal,
       ),
+    enabled: canQueryOptimizationApi,
     staleTime: 15_000,
   });
 

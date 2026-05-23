@@ -173,6 +173,7 @@ export function RunsTab({ onCompare }: { onCompare?: (runIds: string[]) => void 
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [drawerRunId, setDrawerRunId] = useState<string | null>(null);
+  const canQueryOptimizationApi = typeof window !== "undefined";
 
   const runsQuery = useQuery({
     queryKey: optimizationKeys.runsList(
@@ -183,6 +184,7 @@ export function RunsTab({ onCompare }: { onCompare?: (runIds: string[]) => void 
         statusFilter !== "all" ? { status: statusFilter } : undefined,
         signal,
       ),
+    enabled: canQueryOptimizationApi,
     refetchInterval: (query) => {
       const data = query.state.data;
       if (data?.some((r) => r.status === "running")) return 3_000;

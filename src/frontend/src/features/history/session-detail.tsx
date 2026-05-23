@@ -23,11 +23,12 @@ function formatDate(iso: string): string {
 export function SessionDetail({ selectedSession, open, onOpenChange }: SessionDetailProps) {
   const queryClient = useQueryClient();
   const sessionId = selectedSession.sessionId;
+  const canQueryHistoryApi = typeof window !== "undefined";
 
   const detailQuery = useQuery({
     queryKey: sessionKeys.detail(sessionId),
     queryFn: ({ signal }) => sessionEndpoints.getSession(sessionId!, signal),
-    enabled: open,
+    enabled: canQueryHistoryApi && open,
   });
 
   const archiveMutation = useMutation({

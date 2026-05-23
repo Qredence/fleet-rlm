@@ -261,11 +261,12 @@ function groupByPredictor(diffs: PromptDiff[]): Map<string, PromptDiff[]> {
 export function CompareTab({ initialRunIds }: { initialRunIds?: string[] }) {
   const [runIdsInput, setRunIdsInput] = useState(initialRunIds?.join(", ") ?? "");
   const [activeRunIds, setActiveRunIds] = useState<string[]>(initialRunIds ?? []);
+  const canQueryOptimizationApi = typeof window !== "undefined";
 
   const comparisonQuery = useQuery({
     queryKey: optimizationKeys.runComparison(activeRunIds),
     queryFn: ({ signal }) => comparisonEndpoints.compare(activeRunIds, signal),
-    enabled: activeRunIds.length >= 2,
+    enabled: canQueryOptimizationApi && activeRunIds.length >= 2,
     staleTime: 30_000,
   });
 
@@ -280,7 +281,7 @@ export function CompareTab({ initialRunIds }: { initialRunIds?: string[] }) {
         queryKey: optimizationKeys.runResults(runId, { limit: 200 }),
         queryFn: ({ signal }: { signal: AbortSignal }) =>
           evaluationEndpoints.getResults(runId, { limit: 200 }, signal),
-        enabled: comparisonQuery.isSuccess,
+        enabled: canQueryOptimizationApi && comparisonQuery.isSuccess,
         staleTime: 60_000,
       })),
   });
