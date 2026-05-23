@@ -19,14 +19,7 @@ export type InspectorTab =
 
 export interface ChatMessage {
   id: string;
-  type:
-    | "user"
-    | "assistant"
-    | "system"
-    | "trace"
-    | "hitl"
-    | "clarification"
-    | "reasoning";
+  type: "user" | "assistant" | "system" | "trace" | "hitl" | "clarification" | "reasoning";
   content: string;
   traceSource?: "live" | "trajectory" | "summary";
   phase?: 1 | 2 | 3;

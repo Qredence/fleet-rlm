@@ -61,13 +61,7 @@ function SessionRow({
   const [selectedModule, setSelectedModule] = useState<string>("");
 
   const optimizeMutation = useMutation({
-    mutationFn: async ({
-      sessionId,
-      moduleSlug,
-    }: {
-      sessionId: string;
-      moduleSlug: string;
-    }) => {
+    mutationFn: async ({ sessionId, moduleSlug }: { sessionId: string; moduleSlug: string }) => {
       return await sessionEndpoints.exportSession(sessionId, moduleSlug);
     },
     onSuccess: (dataset, variables) => {
@@ -124,11 +118,7 @@ function SessionRow({
         <Button
           variant="outline"
           size="sm"
-          disabled={
-            !selectedModule ||
-            modules.length === 0 ||
-            optimizeMutation.isPending
-          }
+          disabled={!selectedModule || modules.length === 0 || optimizeMutation.isPending}
           onClick={() => {
             if (!selectedModule) return;
             optimizeMutation.mutate({

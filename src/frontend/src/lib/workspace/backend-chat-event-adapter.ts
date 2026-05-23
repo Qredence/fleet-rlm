@@ -177,7 +177,9 @@ function readGuardrailWarnings(payload: Record<string, unknown> | undefined): st
   return raw.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
 }
 
-function canonicalSummaryPayload(payload: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+function canonicalSummaryPayload(
+  payload: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
   return asRecord(payload?.run_summary ?? payload?.runSummary ?? payload?.summary);
 }
 
@@ -214,7 +216,13 @@ function applyCanonicalExecutionStep(
   if (stepType === "tool" || stepType === "repl") {
     const kind = step.output == null ? "tool_call" : "tool_result";
     return {
-      messages: appendToolLikePart(messages, kind, stepText, { ...payload, ...step }, appendTracePart),
+      messages: appendToolLikePart(
+        messages,
+        kind,
+        stepText,
+        { ...payload, ...step },
+        appendTracePart,
+      ),
       terminal: false,
       errored: false,
     };
@@ -223,9 +231,7 @@ function applyCanonicalExecutionStep(
     const output = asRecord(step.output);
     const token = typeof output?.text === "string" ? output.text : asOptionalText(step.output);
     const reasoning =
-      typeof step.label === "string"
-        ? step.label
-        : asOptionalText(output?.reasoning ?? step.input);
+      typeof step.label === "string" ? step.label : asOptionalText(output?.reasoning ?? step.input);
     return {
       messages: token
         ? appendAssistantToken(messages, token)
@@ -236,13 +242,23 @@ function applyCanonicalExecutionStep(
   }
   if (stepType === "output") {
     return {
-      messages: appendStatusTrace(messages, stepText || "Output step completed", "success", payload),
+      messages: appendStatusTrace(
+        messages,
+        stepText || "Output step completed",
+        "success",
+        payload,
+      ),
       terminal: false,
       errored: false,
     };
   }
   return {
-    messages: appendStatusTrace(messages, stepText || "Execution step received", "neutral", payload),
+    messages: appendStatusTrace(
+      messages,
+      stepText || "Execution step received",
+      "neutral",
+      payload,
+    ),
     terminal: false,
     errored: false,
   };
@@ -451,10 +467,7 @@ function rollbackHitlByMessageId(messages: ChatMessage[], messageId: string): Ch
   return changed ? next : messages;
 }
 
-function applyEvent(
-  messages: ChatMessage[],
-  frame: WsServerEvent,
-): ApplyFrameResult {
+function applyEvent(messages: ChatMessage[], frame: WsServerEvent): ApplyFrameResult {
   const { kind, text, payload } = frame.data;
 
   switch (kind) {

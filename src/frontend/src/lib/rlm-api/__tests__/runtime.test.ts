@@ -187,7 +187,9 @@ describe("runtimeEndpoints", () => {
         {
           code: "validation_error",
           message: "Request validation failed.",
-          detail: [{ loc: ["query", "max_depth"], msg: "Input should be greater than or equal to 1" }],
+          detail: [
+            { loc: ["query", "max_depth"], msg: "Input should be greater than or equal to 1" },
+          ],
         },
         422,
       ),

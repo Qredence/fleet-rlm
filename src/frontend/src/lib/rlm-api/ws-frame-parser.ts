@@ -1,12 +1,9 @@
 import type { WsEventKind, WsServerEvent, WsServerMessage } from "@/lib/rlm-api/ws-types";
 
 function isWsEventKind(value: string): value is WsEventKind {
-  return [
-    "execution_started",
-    "execution_step",
-    "execution_completed",
-    "command_result",
-  ].includes(value);
+  return ["execution_started", "execution_step", "execution_completed", "command_result"].includes(
+    value,
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -120,7 +117,9 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
     };
   }
 
-  const text = asText(step.label ?? step.output ?? step.input ?? step.content ?? step.message ?? "execution_step");
+  const text = asText(
+    step.label ?? step.output ?? step.input ?? step.content ?? step.message ?? "execution_step",
+  );
 
   return {
     type: "event",

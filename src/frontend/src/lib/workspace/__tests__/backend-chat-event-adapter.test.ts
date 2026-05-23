@@ -35,19 +35,20 @@ function makeEvent(kind: string, text: string, payload?: Record<string, unknown>
             type: stepType,
             label: text,
             input: kind === "tool_call" ? text : undefined,
-            output:
-              kind === "text"
-                ? { text }
-                : kind === "tool_result"
-                  ? text
-                  : undefined,
+            output: kind === "text" ? { text } : kind === "tool_result" ? text : undefined,
             ...payload,
           },
         },
       },
     };
   }
-  if (kind === "status" || kind === "turn_started" || kind === "warning" || kind === "sandbox_exec" || kind === "rlm_delegate") {
+  if (
+    kind === "status" ||
+    kind === "turn_started" ||
+    kind === "warning" ||
+    kind === "sandbox_exec" ||
+    kind === "rlm_delegate"
+  ) {
     return {
       type: "event",
       data: { kind: "execution_started", text, payload },
@@ -284,10 +285,7 @@ describe("applyWsFrameToMessages", () => {
 
   it.skip("suppresses trajectory fallback primary rows when live trace already exists", () => {
     let messages: ChatMessage[] = [];
-    messages = applyWsFrameToMessages(
-      messages,
-      makeEvent("reasoning", "Live reasoning"),
-    ).messages;
+    messages = applyWsFrameToMessages(messages, makeEvent("reasoning", "Live reasoning")).messages;
 
     messages = applyWsFrameToMessages(
       messages,
@@ -432,10 +430,7 @@ describe("applyWsFrameToMessages", () => {
   it.skip("maps status, rlm_delegate, status to task rows in order", () => {
     let messages: ChatMessage[] = [];
 
-    messages = applyWsFrameToMessages(
-      messages,
-      makeEvent("status", "Moving to step 2"),
-    ).messages;
+    messages = applyWsFrameToMessages(messages, makeEvent("status", "Moving to step 2")).messages;
     messages = applyWsFrameToMessages(
       messages,
       makeEvent("rlm_delegate", "Delegating", {

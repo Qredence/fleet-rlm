@@ -275,7 +275,11 @@ export function applyWsFrameToArtifacts(frame: WsServerMessage): void {
       appendIntoLlmStep({ bucket: "status", text, timestamp: epoch });
       return;
     case "execution_step":
-      appendIntoLlmStep({ bucket: "status", text: text || "Execution step received", timestamp: epoch });
+      appendIntoLlmStep({
+        bucket: "status",
+        text: text || "Execution step received",
+        timestamp: epoch,
+      });
       return;
     case "execution_completed": {
       const parentId = finalizeCurrentLlm(text, payload, epoch);
@@ -288,7 +292,13 @@ export function applyWsFrameToArtifacts(frame: WsServerMessage): void {
         addOutputStep("Execution error", text || "Server error", payload, epoch, parentId);
         return;
       }
-      addOutputStep(cancelled ? "Execution cancelled" : "Final output", text, payload, epoch, parentId);
+      addOutputStep(
+        cancelled ? "Execution cancelled" : "Final output",
+        text,
+        payload,
+        epoch,
+        parentId,
+      );
       return;
     }
     default:

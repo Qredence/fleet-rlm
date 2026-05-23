@@ -298,18 +298,19 @@ export function applyFrameToRunWorkbenchState(
   const payloadPrompts =
     frame.data.kind !== "execution_completed"
       ? dedupePromptHandles([
-        ...next.promptHandles,
-        ...collectPromptHandlePayloads(payload)
-          .map((item) => normalizePromptHandle(item))
-          .filter((item): item is PromptHandleSummary => item !== null),
-      ])
+          ...next.promptHandles,
+          ...collectPromptHandlePayloads(payload)
+            .map((item) => normalizePromptHandle(item))
+            .filter((item): item is PromptHandleSummary => item !== null),
+        ])
       : next.promptHandles;
 
-  const payloadContextSources = frame.data.kind !== "execution_completed"
-    ? asArray(payload?.context_sources ?? payload?.contextSources)
-        .map((item) => normalizeContextSource(item))
-        .filter((item): item is ContextSourceSummary => item !== null)
-    : [];
+  const payloadContextSources =
+    frame.data.kind !== "execution_completed"
+      ? asArray(payload?.context_sources ?? payload?.contextSources)
+          .map((item) => normalizeContextSource(item))
+          .filter((item): item is ContextSourceSummary => item !== null)
+      : [];
 
   if (payloadContextSources.length > 0) {
     next = {
@@ -332,8 +333,7 @@ export function applyFrameToRunWorkbenchState(
       iterations: upsertIteration(next.iterations, {
         id: `iteration-${iterationNumber}`,
         iteration: iterationNumber,
-        status:
-          frame.data.kind === "execution_completed" ? "completed" : "running",
+        status: frame.data.kind === "execution_completed" ? "completed" : "running",
         phase: asText(payload?.phase),
         summary: frame.data.text,
         durationMs: asNumber(payload?.duration_ms ?? payload?.durationMs),
@@ -382,22 +382,24 @@ export function applyFrameToRunWorkbenchState(
     };
   }
 
-  const payloadSources = frame.data.kind !== "execution_completed"
-    ? dedupeSources([
-        ...next.sources,
-        ...asArray(payload?.sources)
-          .map((item) => normalizeSource(item))
-          .filter((item): item is ChatSourceItem => item !== null),
-      ])
-    : next.sources;
-  const payloadAttachments = frame.data.kind !== "execution_completed"
-    ? dedupeAttachments([
-        ...next.attachments,
-        ...asArray(payload?.attachments)
-          .map((item) => normalizeAttachment(item))
-          .filter((item): item is ChatAttachmentItem => item !== null),
-      ])
-    : next.attachments;
+  const payloadSources =
+    frame.data.kind !== "execution_completed"
+      ? dedupeSources([
+          ...next.sources,
+          ...asArray(payload?.sources)
+            .map((item) => normalizeSource(item))
+            .filter((item): item is ChatSourceItem => item !== null),
+        ])
+      : next.sources;
+  const payloadAttachments =
+    frame.data.kind !== "execution_completed"
+      ? dedupeAttachments([
+          ...next.attachments,
+          ...asArray(payload?.attachments)
+            .map((item) => normalizeAttachment(item))
+            .filter((item): item is ChatAttachmentItem => item !== null),
+        ])
+      : next.attachments;
 
   const canonicalSummary = isCanonicalCompletion
     ? normalizeSummary(payload?.summary ?? runSummary?.summary)
@@ -410,10 +412,7 @@ export function applyFrameToRunWorkbenchState(
           runSummary?.finalArtifact,
       )
     : undefined;
-  const mergedSummary = mergeMlflowTraceMetadata(
-    canonicalSummary ?? next.summary,
-    payload,
-  );
+  const mergedSummary = mergeMlflowTraceMetadata(canonicalSummary ?? next.summary, payload);
 
   const nextStatus = statusFromFrame(next.status, frame, payload, runSummary);
   // When the run reaches a terminal state, finalize any orphaned "running"
@@ -442,10 +441,7 @@ export function applyFrameToRunWorkbenchState(
       ) ?? next.daytonaMode,
     sources: payloadSources,
     attachments: payloadAttachments,
-    finalArtifact:
-      canonicalFinalArtifact ??
-      next.finalArtifact ??
-      null,
+    finalArtifact: canonicalFinalArtifact ?? next.finalArtifact ?? null,
     summary: mergedSummary,
     errorMessage: nextStatus === "error" ? frame.data.text : (next.errorMessage ?? null),
   };

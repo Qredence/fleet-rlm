@@ -289,11 +289,11 @@ describe("DatasetsTab sessions", () => {
     let resolveDataset:
       | ((value: Awaited<ReturnType<typeof sessionEndpoints.exportSession>>) => void)
       | null = null;
-    const pendingDataset = new Promise<
-      Awaited<ReturnType<typeof sessionEndpoints.exportSession>>
-    >((resolve) => {
-      resolveDataset = resolve;
-    });
+    const pendingDataset = new Promise<Awaited<ReturnType<typeof sessionEndpoints.exportSession>>>(
+      (resolve) => {
+        resolveDataset = resolve;
+      },
+    );
     vi.mocked(sessionEndpoints.exportSession).mockReturnValue(pendingDataset);
 
     const container = document.createElement("div");

@@ -42,9 +42,7 @@ describe("rlmApiConfig — wsUrl derivation", () => {
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
     expect(rlmApiConfig.wsUrl).toBe("ws://localhost:3000/api/v1/ws/execution");
-    expect(rlmApiConfig.wsExecutionUrl).toBe(
-      "ws://localhost:3000/api/v1/ws/execution/events",
-    );
+    expect(rlmApiConfig.wsExecutionUrl).toBe("ws://localhost:3000/api/v1/ws/execution/events");
   });
 
   it("ignores non-canonical explicit websocket URLs and derives from browser origin", async () => {
@@ -53,9 +51,7 @@ describe("rlmApiConfig — wsUrl derivation", () => {
 
     const { rlmApiConfig } = await loadRlmApiConfigModule();
     expect(rlmApiConfig.wsUrl).toBe("ws://localhost:3000/api/v1/ws/execution");
-    expect(rlmApiConfig.wsExecutionUrl).toBe(
-      "ws://localhost:3000/api/v1/ws/execution/events",
-    );
+    expect(rlmApiConfig.wsExecutionUrl).toBe("ws://localhost:3000/api/v1/ws/execution/events");
   });
 
   // ── derive from VITE_FLEET_API_URL ─────────────────────────────────────────
