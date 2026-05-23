@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette import status
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ExceptionHandler
 
 from .schemas.base import ApiErrorResponse
@@ -49,7 +50,7 @@ def _http_error_code(status_code: int) -> str:
     return _STATUS_ERROR_CODES.get(status_code, f"http_{status_code}")
 
 
-def _http_exception_message(exc: HTTPException) -> str:
+def _http_exception_message(exc: HTTPException | StarletteHTTPException) -> str:
     detail = exc.detail
     if isinstance(detail, str) and detail.strip():
         return detail
@@ -76,20 +77,21 @@ def _json_safe_validation_errors(errors: Sequence[Any]) -> list[dict[str, Any]]:
 
 
 async def http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Convert FastAPI HTTPException payloads to the canonical error envelope."""
+    """Convert FastAPI/Starlette HTTPException payloads to the canonical error envelope."""
     _ = request
-    if not isinstance(exc, HTTPException):
+    if not isinstance(exc, HTTPException | StarletteHTTPException):
         return build_error_response(
             code="internal_error",
             message="HTTP request failed.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+    headers = exc.headers if isinstance(exc, HTTPException | StarletteHTTPException) else None
     return build_error_response(
         code=_http_error_code(exc.status_code),
         message=_http_exception_message(exc),
         status_code=exc.status_code,
         detail=exc.detail if not isinstance(exc.detail, str) else None,
-        headers=exc.headers,
+        headers=headers,
     )
 
 
@@ -113,6 +115,7 @@ async def validation_exception_handler(request: Request, exc: Exception) -> JSON
 def add_exception_handlers(app: FastAPI) -> None:
     """Register canonical HTTP exception handlers on the app."""
     app.add_exception_handler(HTTPException, cast(ExceptionHandler, http_exception_handler))
+    app.add_exception_handler(StarletteHTTPException, cast(ExceptionHandler, http_exception_handler))
     app.add_exception_handler(RequestValidationError, cast(ExceptionHandler, validation_exception_handler))
 
 

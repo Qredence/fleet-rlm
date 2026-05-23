@@ -1,8 +1,8 @@
 # Memory API Reference
 
-> **Status:** Backend API-only. The `memory` product surface and frontend routes are retired — `/app/memory` falls through to `/404`. This endpoint remains available for API consumers and internal persistence, but it is not part of the supported product shell.
+> **Status:** Removed. The `memory` product surface and its legacy backend route are retired — `/app/memory` and `/api/v1/memory` now fall through to the canonical `404` surface.
 
-This reference documents the memory browsing HTTP API exposed under `/api/v1/memory`.
+This page is retained only as historical reference for the removed memory browsing HTTP API that previously lived at `/api/v1/memory`.
 
 All endpoints require authentication. See [Auth Modes](../auth.md) for details.
 

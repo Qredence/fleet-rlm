@@ -181,13 +181,6 @@ export interface paths {
      */
     get: operations["get_run_steps_api_v1_runs__run_id__steps_get"];
   };
-  "/api/v1/memory": {
-    /**
-     * List memory items
-     * @description Return memory items filtered by scope and scope_id. Without filters, returns all memory for the authenticated user.
-     */
-    get: operations["list_memory_items_api_v1_memory_get"];
-  };
   "/api/v1/optimization/status": {
     /**
      * Get Optimization Status
@@ -746,93 +739,6 @@ export interface components {
        * @default 0.5.31
        */
       version?: string;
-    };
-    /**
-     * MemoryItemResponse
-     * @description Single memory item returned by the memory browse endpoint.
-     */
-    MemoryItemResponse: {
-      /**
-       * Id
-       * @description Durable memory item identifier.
-       */
-      id: string;
-      /**
-       * Scope
-       * @description Memory scope (e.g. user, tenant, workspace, run, session).
-       */
-      scope: string;
-      /**
-       * Scope Id
-       * @description Identifier within the scope.
-       */
-      scope_id: string;
-      /**
-       * Kind
-       * @description Memory kind (e.g. fact, observation, preference).
-       */
-      kind: string;
-      /**
-       * Source
-       * @description Memory source (e.g. user, agent, system).
-       */
-      source: string;
-      /**
-       * Status
-       * @description Memory status (e.g. active, archived).
-       */
-      status: string;
-      /**
-       * Content Text
-       * @description Textual content when available.
-       */
-      content_text?: string | null;
-      /**
-       * Importance
-       * @description Importance score (0-100).
-       */
-      importance: number;
-      /**
-       * Tags
-       * @description Associated tags.
-       */
-      tags?: string[];
-      /**
-       * Created At
-       * @description ISO-8601 creation timestamp.
-       */
-      created_at: string;
-    };
-    /**
-     * MemoryListResponse
-     * @description Paginated memory item list response.
-     */
-    MemoryListResponse: {
-      /**
-       * Items
-       * @description Memory item list items.
-       */
-      items: components["schemas"]["MemoryItemResponse"][];
-      /**
-       * Total
-       * @description Total matching memory items.
-       */
-      total: number;
-      /**
-       * Offset
-       * @description Current pagination offset.
-       */
-      offset: number;
-      /**
-       * Limit
-       * @description Current page size.
-       */
-      limit: number;
-      /**
-       * Has More
-       * @description Whether more results exist beyond this page.
-       */
-      has_more: boolean;
     };
     /**
      * OptimizationRunCreatedResponse
@@ -3337,50 +3243,6 @@ export interface operations {
         };
       };
       /** @description Run services are unavailable because server startup is incomplete. */
-      503: {
-        content: never;
-      };
-    };
-  };
-  /**
-   * List memory items
-   * @description Return memory items filtered by scope and scope_id. Without filters, returns all memory for the authenticated user.
-   */
-  list_memory_items_api_v1_memory_get: {
-    parameters: {
-      query?: {
-        /** @description Filter by memory scope (user, tenant, workspace, run, session). */
-        scope?: string | null;
-        /** @description Filter by scope identifier. */
-        scope_id?: string | null;
-        /** @description Page size */
-        limit?: number;
-        /** @description Pagination offset */
-        offset?: number;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["MemoryListResponse"];
-        };
-      };
-      /** @description Invalid scope filter value. */
-      400: {
-        content: never;
-      };
-      /** @description Authentication is required or the provided token is invalid. */
-      401: {
-        content: never;
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-      /** @description Memory services are unavailable because server startup is incomplete. */
       503: {
         content: never;
       };
