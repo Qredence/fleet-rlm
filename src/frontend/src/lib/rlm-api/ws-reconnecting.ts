@@ -63,7 +63,7 @@ export async function createReconnectingWs(
     initialBackoff = DEFAULT_INITIAL_BACKOFF,
     maxBackoff = DEFAULT_MAX_BACKOFF,
     firstFrameTimeoutMs = DEFAULT_FIRST_FRAME_TIMEOUT,
-    terminalEventKinds = ["final", "done", "cancelled"],
+    terminalEventKinds = ["execution_completed"],
     abortMode = "close",
     abortTimeoutMs = 1500,
   } = options;
@@ -216,11 +216,6 @@ export async function createReconnectingWs(
             safeClose();
             updateStatus("disconnected");
             finish(resolve);
-          } else if (kind === "error") {
-            completed = true;
-            safeClose();
-            updateStatus("disconnected");
-            finish(() => reject(createWsError(frame.data.text || "Server stream error")));
           }
         } catch {
           // Ignore malformed frames to avoid taking down the stream.

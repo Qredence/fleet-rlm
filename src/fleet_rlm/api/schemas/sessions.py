@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SessionStateSummary(BaseModel):
@@ -138,6 +138,8 @@ class SessionRestoreResponse(BaseModel):
 class SessionPatchRequest(BaseModel):
     """Patch body for updating session metadata."""
 
+    model_config = ConfigDict(extra="forbid")
+
     title: str | None = Field(
         default=None,
         description="New human-readable session title.",
@@ -171,6 +173,8 @@ class SessionStatsResponse(BaseModel):
 
 class SessionExportRequest(BaseModel):
     """Request body for exporting a session's turns as a GEPA training dataset."""
+
+    model_config = ConfigDict(extra="forbid")
 
     module_slug: str = Field(
         description="Target GEPA module slug whose dataset keys determine the export column mapping."

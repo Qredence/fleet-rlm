@@ -3,11 +3,11 @@ import { applyWsFrameToMessages } from "@/lib/workspace/backend-chat-event-adapt
 import type { WsServerMessage } from "@/lib/rlm-api";
 
 describe("backend chat event adapter contract", () => {
-  it("renders typed backend status events with runtime payloads", () => {
+  it("renders canonical execution start events with runtime payloads", () => {
     const frame: WsServerMessage = {
       type: "event",
       data: {
-        kind: "turn_started",
+        kind: "execution_started",
         text: "Preparing Daytona workspace...",
         payload: {
           phase: "startup",
@@ -39,11 +39,11 @@ describe("backend chat event adapter contract", () => {
     });
   });
 
-  it("renders typed backend completion events like done events", () => {
+  it("renders canonical execution completion events", () => {
     const frame: WsServerMessage = {
       type: "event",
       data: {
-        kind: "turn_completed",
+        kind: "execution_completed",
         text: "Final answer",
         payload: {
           final_artifact: {
@@ -51,6 +51,9 @@ describe("backend chat event adapter contract", () => {
           },
           runtime: {
             runtime_mode: "daytona_pilot",
+          },
+          run_summary: {
+            status: "completed",
           },
         },
         timestamp: new Date().toISOString(),

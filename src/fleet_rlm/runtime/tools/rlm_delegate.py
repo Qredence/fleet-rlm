@@ -251,6 +251,10 @@ def _run_delegate_child(
             metadata["iteration_pressure"] = max_iterations >= llm_budget
     except Exception as exc:
         logger.warning("delegate_to_rlm execution failed: %s", exc)
+        # Persist the error outcome so degraded/failed child results are never
+        # silently discarded — callers can look up the child trace after the
+        # parent returns (VAL-RLM-010).
+        _persist_child_trace_error(interpreter, query, str(exc), started_at)
         return {"status": "error", "error": str(exc)}
     finally:
         if child is not None:
@@ -625,6 +629,60 @@ def _record_child_sandbox_id(child: Any) -> None:
     sandbox_id = getattr(session, "sandbox_id", None)
     if sandbox_id:
         metadata.setdefault("child_sandbox_id", sandbox_id)
+
+
+def _persist_child_trace_error(
+    interpreter: Any,
+    query: str,
+    error: str,
+    started_at: float,
+) -> None:
+    """Persist a failed child RLM execution trace (best-effort).
+
+    Called when ``_run_delegate_child`` raises an exception before the
+    prediction object is available.  Ensures degraded/failed child outcomes
+    are persisted instead of only being logged (VAL-RLM-010).
+    """
+    import asyncio
+    import uuid as _uuid
+
+    repository = getattr(interpreter, "_host_repository", None)
+    identity = getattr(interpreter, "_host_identity", None)
+    run_id = getattr(interpreter, "_host_run_id", None)
+    if repository is None or identity is None or run_id is None:
+        return
+
+    latency_ms = int((time.time() - started_at) * 1000)
+    trace_id = f"rlm-child-err-{_uuid.uuid4().hex[:12]}"
+    payload: dict[str, Any] = {"query": query, "error": error, "status": "error"}
+    summary_text = f"Error: {error[:200]}"
+
+    async def _store_coro() -> None:
+        await repository.store_rlm_trace(
+            tenant_id=identity.tenant_id,
+            run_id=run_id,
+            trace_id=trace_id,
+            workspace_id=identity.workspace_id,
+            summary_text=summary_text,
+            payload_json=payload,
+            latency_ms=latency_ms,
+        )
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is not None:
+        try:
+            loop.create_task(_store_coro())
+        except Exception as exc_:
+            logger.warning("Failed to schedule failed RLM child error trace: %s", exc_)
+    else:
+        try:
+            asyncio.run(_store_coro())
+        except Exception as exc_:
+            logger.warning("Failed to persist failed RLM child error trace: %s", exc_)
 
 
 def _persist_child_trace(

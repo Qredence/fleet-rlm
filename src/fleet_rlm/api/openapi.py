@@ -6,8 +6,15 @@ from typing import Any, cast
 
 from fastapi import FastAPI
 
-_VALIDATION_ERROR_PROPERTY_DESCRIPTIONS: dict[str, str] = {
-    "detail": "Structured list of request validation issues returned by FastAPI.",
+from .schemas.base import ApiErrorResponse
+
+_ERROR_SCHEMA_PROPERTY_DESCRIPTIONS: dict[str, str] = {
+    "code": "Stable machine-readable error code.",
+    "message": "Human-readable non-secret error summary.",
+    "detail": "Structured non-secret error details, when available.",
+}
+
+_VALIDATION_ISSUE_PROPERTY_DESCRIPTIONS: dict[str, str] = {
     "loc": "Location path identifying where the validation error occurred.",
     "msg": "Human-readable validation failure message.",
     "type": "Pydantic validation error type identifier.",
@@ -32,11 +39,25 @@ def annotate_validation_error_schemas(app: FastAPI) -> None:
         schema = original_openapi()
         components = schema.get("components", {}).get("schemas", {})
 
-        for schema_name in ("HTTPValidationError", "ValidationError"):
+        api_error_schema = components.setdefault("ApiErrorResponse", ApiErrorResponse.model_json_schema())
+        components["HTTPValidationError"] = {
+            **api_error_schema,
+            "title": "HTTPValidationError",
+            "description": "Canonical HTTP error envelope returned for request validation failures.",
+        }
+
+        for schema_name in ("ApiErrorResponse", "HTTPValidationError"):
             properties = components.get(schema_name, {}).get("properties", {})
-            for property_name, description in _VALIDATION_ERROR_PROPERTY_DESCRIPTIONS.items():
+            for property_name, description in _ERROR_SCHEMA_PROPERTY_DESCRIPTIONS.items():
                 if property_name in properties and not properties[property_name].get("description"):
                     properties[property_name]["description"] = description
+
+        validation_issue_properties = components.get("ValidationError", {}).get("properties", {})
+        for property_name, description in _VALIDATION_ISSUE_PROPERTY_DESCRIPTIONS.items():
+            if property_name in validation_issue_properties and not validation_issue_properties[property_name].get(
+                "description"
+            ):
+                validation_issue_properties[property_name]["description"] = description
 
         app.openapi_schema = schema
         return schema

@@ -16,6 +16,13 @@ from .artifacts import track_command_artifact_if_needed
 
 logger = logging.getLogger(__name__)
 
+_ALLOWED_COMMAND_SCHEMAS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "resolve_hitl": (
+        frozenset({"message_id", "resolution"}),
+        frozenset({"comment"}),
+    ),
+}
+
 
 def _command_response(
     *,
@@ -50,6 +57,37 @@ def _message_id_from_args(args: dict[str, Any] | None) -> str | None:
     if not isinstance(args, dict):
         return None
     return str(args.get("message_id", "")).strip() or None
+
+
+def _validate_command_args(command: str, args: dict[str, Any]) -> dict[str, Any] | None:
+    schema = _ALLOWED_COMMAND_SCHEMAS.get(command)
+    if schema is None:
+        return {
+            "status": "error",
+            "error": f"Unsupported websocket command: {command}",
+            "code": "unsupported_command",
+            "message_id": _message_id_from_args(args),
+        }
+
+    required, optional = schema
+    keys = frozenset(args)
+    missing = sorted(required - keys)
+    unknown = sorted(keys - required - optional)
+    if missing:
+        return {
+            "status": "error",
+            "error": f"Missing required args for {command}: {', '.join(missing)}",
+            "code": "invalid_command_args",
+            "message_id": _message_id_from_args(args),
+        }
+    if unknown:
+        return {
+            "status": "error",
+            "error": f"Unknown args for {command}: {', '.join(unknown)}",
+            "code": "invalid_command_args",
+            "message_id": _message_id_from_args(args),
+        }
+    return None
 
 
 async def _send_command_args_error(
@@ -88,14 +126,40 @@ async def _handle_command(
     if args is None:
         await _send_command_args_error(websocket=websocket, command=command)
         return
+    args_error = _validate_command_args(command, args)
+    if args_error is not None:
+        await websocket.send_json(_command_response(command=command, result=args_error))
+        return
+
+    # Explicit allow-list guard: _validate_command_args() already rejects unknown
+    # commands above, but we enforce the invariant here too so any future code path
+    # that skips that check cannot reach dispatch with an unlisted command.
+    if command not in _ALLOWED_COMMAND_SCHEMAS:
+        await websocket.send_json(
+            _command_response(
+                command=command,
+                result={
+                    "status": "error",
+                    "error": f"Unsupported websocket command: {command}",
+                    "code": "unsupported_command",
+                },
+            )
+        )
+        return
 
     try:
-        interpreter = agent.interpreter
-        if interpreter is None:
-            result = await agent.execute_command(command, args)
+        if command == "resolve_hitl":
+            result = {
+                "message_id": str(args["message_id"]),
+                "resolution": str(args["resolution"]),
+            }
         else:
-            with interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+            interpreter = agent.interpreter
+            if interpreter is None:
                 result = await agent.execute_command(command, args)
+            else:
+                with interpreter.execution_profile(ExecutionProfile.RLM_DELEGATE):
+                    result = await agent.execute_command(command, args)
         normalized_result = _normalize_command_result(result)
 
         await track_command_artifact_if_needed(

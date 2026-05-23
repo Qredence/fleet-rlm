@@ -38,6 +38,10 @@ class VolumeTreeResponse(BaseModel):
     provider: VolumeProvider = Field(description="Runtime volume backend used to satisfy the request.")
     volume_name: str = Field(description="Resolved volume name used for the listing request.")
     root_path: str = Field(description="Normalized root path used for the listing request.")
+    allowed_roots: list[str] = Field(
+        default_factory=list,
+        description="Canonical volume roots that may be addressed by tree and file requests.",
+    )
     nodes: list[VolumeTreeNode] = Field(description="Tree nodes rooted at the requested path.")
     total_files: int = Field(
         default=0,
@@ -51,6 +55,9 @@ class VolumeTreeResponse(BaseModel):
         default=False,
         description="Whether the provider truncated the tree because of depth or payload limits.",
     )
+    max_depth: int = Field(description="Depth limit applied to the tree request.")
+    max_entries: int = Field(description="Entry limit applied to the tree request.")
+    entries_returned: int = Field(description="Total node entries returned in this response.")
 
 
 class VolumeFileContentResponse(BaseModel):
@@ -60,7 +67,22 @@ class VolumeFileContentResponse(BaseModel):
     path: str = Field(description="Normalized file path used for the preview request.")
     mime: str = Field(description="Detected MIME type for the returned content.")
     size: int = Field(description="File size in bytes reported by the provider.")
-    content: str = Field(description="UTF-8 text preview returned for the requested file.")
+    sha256: str | None = Field(
+        default=None,
+        description="SHA-256 hex digest of the full file bytes before truncation.",
+    )
+    encoding: str | None = Field(
+        default=None,
+        description=(
+            "Content encoding: 'utf-8' for clean text, 'utf-8-lossy' when replacement "
+            "characters were introduced, or 'binary' for non-text files."
+        ),
+    )
+    content: str = Field(description="UTF-8 text preview returned for the requested file. Empty for binary files.")
+    binary: bool = Field(
+        default=False,
+        description="True when the file was detected as binary; content will be empty.",
+    )
     truncated: bool = Field(
         default=False,
         description="Whether the returned file content was truncated to respect max_bytes.",

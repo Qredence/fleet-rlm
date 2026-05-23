@@ -181,13 +181,6 @@ export interface paths {
      */
     get: operations["get_run_steps_api_v1_runs__run_id__steps_get"];
   };
-  "/api/v1/memory": {
-    /**
-     * List memory items
-     * @description Return memory items filtered by scope and scope_id. Without filters, returns all memory for the authenticated user.
-     */
-    get: operations["list_memory_items_api_v1_memory_get"];
-  };
   "/api/v1/optimization/status": {
     /**
      * Get Optimization Status
@@ -546,6 +539,12 @@ export interface components {
        * @description Dataset keys required for this module's examples.
        */
       required_dataset_keys: string[];
+      /**
+       * Offline Only
+       * @description Whether this module can only be optimized through offline optimization endpoints.
+       * @default true
+       */
+      offline_only?: boolean;
     };
     /**
      * GEPAOptimizationRequest
@@ -700,13 +699,27 @@ export interface components {
        */
       guidance?: string[];
     };
-    /** HTTPValidationError */
+    /**
+     * HTTPValidationError
+     * @description Canonical HTTP error envelope returned for request validation failures.
+     */
     HTTPValidationError: {
       /**
-       * Detail
-       * @description Structured list of request validation issues returned by FastAPI.
+       * Code
+       * @description Stable machine-readable error code.
        */
-      detail?: components["schemas"]["ValidationError"][];
+      code: string;
+      /**
+       * Message
+       * @description Human-readable non-secret error summary.
+       */
+      message: string;
+      /**
+       * Detail
+       * @description Structured non-secret error details, when available.
+       * @default null
+       */
+      detail?: unknown;
     };
     /**
      * HealthResponse
@@ -714,104 +727,18 @@ export interface components {
      */
     HealthResponse: {
       /**
-       * Ok
-       * @description Whether the service reports itself as healthy.
-       * @default true
+       * Status
+       * @description Unambiguous liveness state for this service.
+       * @default live
+       * @constant
        */
-      ok?: boolean;
+      status?: "live";
       /**
        * Version
        * @description Package version currently serving the API.
-       * @default 0.5.31
+       * @default 0.5.40
        */
       version?: string;
-    };
-    /**
-     * MemoryItemResponse
-     * @description Single memory item returned by the memory browse endpoint.
-     */
-    MemoryItemResponse: {
-      /**
-       * Id
-       * @description Durable memory item identifier.
-       */
-      id: string;
-      /**
-       * Scope
-       * @description Memory scope (e.g. user, tenant, workspace, run, session).
-       */
-      scope: string;
-      /**
-       * Scope Id
-       * @description Identifier within the scope.
-       */
-      scope_id: string;
-      /**
-       * Kind
-       * @description Memory kind (e.g. fact, observation, preference).
-       */
-      kind: string;
-      /**
-       * Source
-       * @description Memory source (e.g. user, agent, system).
-       */
-      source: string;
-      /**
-       * Status
-       * @description Memory status (e.g. active, archived).
-       */
-      status: string;
-      /**
-       * Content Text
-       * @description Textual content when available.
-       */
-      content_text?: string | null;
-      /**
-       * Importance
-       * @description Importance score (0-100).
-       */
-      importance: number;
-      /**
-       * Tags
-       * @description Associated tags.
-       */
-      tags?: string[];
-      /**
-       * Created At
-       * @description ISO-8601 creation timestamp.
-       */
-      created_at: string;
-    };
-    /**
-     * MemoryListResponse
-     * @description Paginated memory item list response.
-     */
-    MemoryListResponse: {
-      /**
-       * Items
-       * @description Memory item list items.
-       */
-      items: components["schemas"]["MemoryItemResponse"][];
-      /**
-       * Total
-       * @description Total matching memory items.
-       */
-      total: number;
-      /**
-       * Offset
-       * @description Current pagination offset.
-       */
-      offset: number;
-      /**
-       * Limit
-       * @description Current page size.
-       */
-      limit: number;
-      /**
-       * Has More
-       * @description Whether more results exist beyond this page.
-       */
-      has_more: boolean;
     };
     /**
      * OptimizationRunCreatedResponse
@@ -954,11 +881,6 @@ export interface components {
        * @description Whether critical startup dependencies are ready.
        */
       ready: boolean;
-      /**
-       * Planner Configured
-       * @description Whether a planner model is currently configured and available.
-       */
-      planner_configured: boolean;
       /**
        * Planner
        * @description Planner readiness classification.
@@ -1440,7 +1362,7 @@ export interface components {
       disk?: number | null;
       /**
        * Env Vars
-       * @description Environment variables configured for the sandbox.
+       * @description Redacted environment variables configured for the sandbox.
        */
       env_vars?: {
         [key: string]: string;
@@ -1591,7 +1513,7 @@ export interface components {
       /**
        * Version
        * @description Package version currently serving the API.
-       * @default 0.5.31
+       * @default 0.5.40
        */
       version?: string;
       /**
@@ -2151,10 +2073,26 @@ export interface components {
        */
       size: number;
       /**
+       * Sha256
+       * @description SHA-256 hex digest of the full file bytes before truncation.
+       */
+      sha256?: string | null;
+      /**
+       * Encoding
+       * @description Content encoding: 'utf-8' for clean text, 'utf-8-lossy' when replacement characters were introduced, or 'binary' for non-text files.
+       */
+      encoding?: string | null;
+      /**
        * Content
-       * @description UTF-8 text preview returned for the requested file.
+       * @description UTF-8 text preview returned for the requested file. Empty for binary files.
        */
       content: string;
+      /**
+       * Binary
+       * @description True when the file was detected as binary; content will be empty.
+       * @default false
+       */
+      binary?: boolean;
       /**
        * Truncated
        * @description Whether the returned file content was truncated to respect max_bytes.
@@ -2270,6 +2208,11 @@ export interface components {
        */
       root_path: string;
       /**
+       * Allowed Roots
+       * @description Canonical volume roots that may be addressed by tree and file requests.
+       */
+      allowed_roots?: string[];
+      /**
        * Nodes
        * @description Tree nodes rooted at the requested path.
        */
@@ -2292,6 +2235,43 @@ export interface components {
        * @default false
        */
       truncated?: boolean;
+      /**
+       * Max Depth
+       * @description Depth limit applied to the tree request.
+       */
+      max_depth: number;
+      /**
+       * Max Entries
+       * @description Entry limit applied to the tree request.
+       */
+      max_entries: number;
+      /**
+       * Entries Returned
+       * @description Total node entries returned in this response.
+       */
+      entries_returned: number;
+    };
+    /**
+     * ApiErrorResponse
+     * @description Canonical HTTP error envelope returned by Fleet RLM API routes.
+     */
+    ApiErrorResponse: {
+      /**
+       * Code
+       * @description Stable machine-readable error code.
+       */
+      code: string;
+      /**
+       * Message
+       * @description Human-readable non-secret error summary.
+       */
+      message: string;
+      /**
+       * Detail
+       * @description Structured non-secret error details, when available.
+       * @default null
+       */
+      detail?: unknown;
     };
   };
   responses: never;
@@ -2339,9 +2319,11 @@ export interface operations {
           "application/json": components["schemas"]["ReadyResponse"];
         };
       };
-      /** @description Readiness evaluation could not complete. */
+      /** @description A critical runtime dependency is unavailable. */
       503: {
-        content: never;
+        content: {
+          "application/json": components["schemas"]["ReadyResponse"];
+        };
       };
     };
   };
@@ -2925,6 +2907,8 @@ export interface operations {
         root_path?: string;
         /** @description Maximum directory depth to traverse while building the file tree. */
         max_depth?: number;
+        /** @description Maximum total node entries to return while building the file tree. */
+        max_entries?: number;
         /** @description Optional runtime volume backend override. Defaults to the active sandbox provider. */
         provider?: "daytona" | null;
       };
@@ -2942,6 +2926,10 @@ export interface operations {
       };
       /** @description Authentication is required or the provided token is invalid. */
       401: {
+        content: never;
+      };
+      /** @description The requested root is outside the canonical runtime volume roots. */
+      403: {
         content: never;
       };
       /** @description Validation Error */
@@ -2992,6 +2980,10 @@ export interface operations {
       };
       /** @description Authentication is required or the provided token is invalid. */
       401: {
+        content: never;
+      };
+      /** @description The requested file is outside the canonical runtime volume roots. */
+      403: {
         content: never;
       };
       /** @description The requested runtime volume file does not exist. */
@@ -3251,50 +3243,6 @@ export interface operations {
         };
       };
       /** @description Run services are unavailable because server startup is incomplete. */
-      503: {
-        content: never;
-      };
-    };
-  };
-  /**
-   * List memory items
-   * @description Return memory items filtered by scope and scope_id. Without filters, returns all memory for the authenticated user.
-   */
-  list_memory_items_api_v1_memory_get: {
-    parameters: {
-      query?: {
-        /** @description Filter by memory scope (user, tenant, workspace, run, session). */
-        scope?: string | null;
-        /** @description Filter by scope identifier. */
-        scope_id?: string | null;
-        /** @description Page size */
-        limit?: number;
-        /** @description Pagination offset */
-        offset?: number;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["MemoryListResponse"];
-        };
-      };
-      /** @description Invalid scope filter value. */
-      400: {
-        content: never;
-      };
-      /** @description Authentication is required or the provided token is invalid. */
-      401: {
-        content: never;
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-      /** @description Memory services are unavailable because server startup is incomplete. */
       503: {
         content: never;
       };

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -12,7 +12,7 @@ from fleet_rlm import __version__
 class HealthResponse(BaseModel):
     """Response body for the lightweight health endpoint."""
 
-    ok: bool = Field(default=True, description="Whether the service reports itself as healthy.")
+    status: Literal["live"] = Field(default="live", description="Unambiguous liveness state for this service.")
     version: str = Field(
         default=__version__,
         description="Package version currently serving the API.",
@@ -23,7 +23,6 @@ class ReadyResponse(BaseModel):
     """Response body for the readiness endpoint."""
 
     ready: bool = Field(description="Whether critical startup dependencies are ready.")
-    planner_configured: bool = Field(description="Whether a planner model is currently configured and available.")
     planner: Literal["ready", "missing"] = Field(description="Planner readiness classification.")
     database: Literal["ready", "missing", "disabled", "degraded"] = Field(
         description="Database readiness classification for persistence-backed features."
@@ -32,6 +31,17 @@ class ReadyResponse(BaseModel):
         description="Whether the current server configuration requires database availability."
     )
     sandbox_provider: str = Field(description="Active sandbox backend selected for runtime execution.")
+
+
+class ApiErrorResponse(BaseModel):
+    """Canonical HTTP error envelope returned by Fleet RLM API routes."""
+
+    code: str = Field(description="Stable machine-readable error code.")
+    message: str = Field(description="Human-readable non-secret error summary.")
+    detail: Any | None = Field(
+        default=None,
+        description="Structured non-secret error details, when available.",
+    )
 
 
 class AuthMeResponse(BaseModel):

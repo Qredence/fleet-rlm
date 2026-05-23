@@ -11,6 +11,7 @@ from daytona import (
 )
 from fastapi import HTTPException
 
+from fleet_rlm.api.runtime_services.common import sanitize_error
 from fleet_rlm.utils.sandbox_ownership import sandbox_owner_labels
 
 from ..schemas.sandbox import (
@@ -33,12 +34,12 @@ def _map_daytona_error(exc: BaseException) -> HTTPException:
     if isinstance(exc, _DAYTONA_NOT_FOUND_ERRORS):
         return HTTPException(
             status_code=404,
-            detail=f"Sandbox not found: {exc}",
+            detail="Sandbox not found or inaccessible.",
         )
     if isinstance(exc, _DAYTONA_UNAVAILABLE_ERRORS):
         return HTTPException(
             status_code=503,
-            detail=f"Sandbox service unavailable: {exc}",
+            detail=f"Sandbox service unavailable: {sanitize_error(exc)}",
         )
     raise exc
 

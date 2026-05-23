@@ -1,9 +1,4 @@
-import type {
-  ChatMessage,
-  ChatQueueItem,
-  ChatRenderPart,
-  ChatTraceStep,
-} from "@/lib/workspace/workspace-types";
+import type { ChatMessage, ChatRenderPart } from "@/lib/workspace/workspace-types";
 import type { WsServerEvent, WsServerMessage } from "@/lib/rlm-api";
 import { createLocalId } from "@/lib/id";
 import { QueryClient } from "@tanstack/react-query";
@@ -15,12 +10,7 @@ import {
 } from "@/lib/workspace/backend-chat-event-payload";
 import { useWorkspaceUiStore } from "@/lib/workspace/workspace-ui-store";
 import { attachFinalReferences } from "@/lib/workspace/backend-chat-event-references";
-import {
-  normalizeTrajectorySteps,
-  normalizeTrajectoryStepsFromFinalPayload,
-  trajectoryStepDetails,
-  type NormalizedTrajectoryStep,
-} from "@/lib/workspace/backend-chat-event-trajectory";
+import { normalizeTrajectoryStepsFromFinalPayload } from "@/lib/workspace/backend-chat-event-trajectory";
 import {
   appendToolLikePart,
   inferStatusTone,
@@ -55,18 +45,6 @@ function latestStreamingAssistantIndex(messages: ChatMessage[]): number {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
     if (msg?.type === "assistant" && msg.streaming) return i;
-  }
-  return -1;
-}
-
-function latestTraceIndex(
-  messages: ChatMessage[],
-  predicate: (part: ChatRenderPart) => boolean,
-): number {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const msg = messages[i];
-    if (!msg || msg.type !== "trace" || !msg.renderParts) continue;
-    if (msg.renderParts.some(predicate)) return i;
   }
   return -1;
 }
@@ -188,10 +166,7 @@ function preferredFinalArtifactText(value: unknown): string | undefined {
 }
 
 function resolveFinalAssistantText(text: string, payload?: Record<string, unknown>): string {
-  const runResult = asRecord(payload?.run_result ?? payload?.runResult);
-  const preferred =
-    preferredFinalArtifactText(payload?.final_artifact ?? payload?.finalArtifact) ??
-    preferredFinalArtifactText(runResult?.final_artifact ?? runResult?.finalArtifact);
+  const preferred = preferredFinalArtifactText(payload?.final_artifact ?? payload?.finalArtifact);
 
   return preferred ?? text;
 }
@@ -200,6 +175,133 @@ function readGuardrailWarnings(payload: Record<string, unknown> | undefined): st
   const raw = payload?.guardrail_warnings;
   if (!Array.isArray(raw)) return [];
   return raw.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
+}
+
+function canonicalSummaryPayload(
+  payload: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  return asRecord(payload?.run_summary ?? payload?.runSummary ?? payload?.summary);
+}
+
+function canonicalCompletionStatus(payload: Record<string, unknown> | undefined): string {
+  const summary = canonicalSummaryPayload(payload);
+  return asOptionalText(summary?.status ?? payload?.status)?.toLowerCase() ?? "";
+}
+
+function canonicalStepText(step: Record<string, unknown>, fallback: string): string {
+  return (
+    asOptionalText(step.label) ??
+    asOptionalText(step.output) ??
+    asOptionalText(step.input) ??
+    fallback
+  );
+}
+
+function applyCanonicalExecutionStep(
+  messages: ChatMessage[],
+  text: string,
+  payload?: Record<string, unknown>,
+): ApplyFrameResult {
+  const step = asRecord(payload?.step);
+  if (!step) {
+    return {
+      messages: appendStatusTrace(messages, text || "Execution step received", "neutral", payload),
+      terminal: false,
+      errored: false,
+    };
+  }
+
+  const stepType = asOptionalText(step.type)?.toLowerCase();
+  const stepText = canonicalStepText(step, text);
+  if (stepType === "tool" || stepType === "repl") {
+    const kind = step.output == null ? "tool_call" : "tool_result";
+    return {
+      messages: appendToolLikePart(
+        messages,
+        kind,
+        stepText,
+        { ...payload, ...step },
+        appendTracePart,
+      ),
+      terminal: false,
+      errored: false,
+    };
+  }
+  if (stepType === "llm") {
+    const output = asRecord(step.output);
+    const token = typeof output?.text === "string" ? output.text : asOptionalText(step.output);
+    const reasoning =
+      typeof step.label === "string" ? step.label : asOptionalText(output?.reasoning ?? step.input);
+    return {
+      messages: token
+        ? appendAssistantToken(messages, token)
+        : appendReasoningEvent(messages, reasoning ?? stepText, "live", { ...payload, ...step }),
+      terminal: false,
+      errored: false,
+    };
+  }
+  if (stepType === "output") {
+    return {
+      messages: appendStatusTrace(
+        messages,
+        stepText || "Output step completed",
+        "success",
+        payload,
+      ),
+      terminal: false,
+      errored: false,
+    };
+  }
+  return {
+    messages: appendStatusTrace(
+      messages,
+      stepText || "Execution step received",
+      "neutral",
+      payload,
+    ),
+    terminal: false,
+    errored: false,
+  };
+}
+
+function applyCanonicalExecutionCompleted(
+  messages: ChatMessage[],
+  text: string,
+  payload?: Record<string, unknown>,
+): ApplyFrameResult {
+  const status = canonicalCompletionStatus(payload);
+  if (status === "cancelled") {
+    let next = finishReasoning(messages);
+    next = finalizeTraceParts(next);
+    next = appendSystem(next, text || "Request cancelled.");
+    return { messages: next, terminal: true, errored: false };
+  }
+  if (status === "failed" || status === "error") {
+    let next = finishReasoning(messages);
+    next = finalizeTraceParts(next);
+    next = appendSystem(next, `Backend error: ${text || "Unknown server error."}`);
+    return { messages: next, terminal: true, errored: true };
+  }
+
+  let next = completeAssistant(messages, resolveFinalAssistantText(text, payload));
+  next = finishReasoning(next);
+  next = finalizeTraceParts(next);
+  next = appendFinalTrajectoryThoughts(next, payload);
+
+  const finalReasoning =
+    typeof payload?.final_reasoning === "string" ? payload.final_reasoning.trim() : "";
+  if (finalReasoning) {
+    next = appendReasoningEvent(next, finalReasoning, "summary", payload, "final_reasoning");
+  }
+
+  next = attachFinalReferences(next, payload);
+
+  const warnings = readGuardrailWarnings(payload);
+  if (warnings.length > 0) {
+    next = appendSystem(next, `Guardrail warnings:\n- ${warnings.join("\n- ")}`);
+  }
+
+  return { messages: next, terminal: true, errored: false };
 }
 
 function appendTracePart(
@@ -219,25 +321,6 @@ function appendTracePart(
       renderParts: [part],
     },
   ];
-}
-
-function currentTurnStartIndex(messages: ChatMessage[]): number {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.type === "user") return i;
-  }
-  return -1;
-}
-
-function currentTurnMessages(messages: ChatMessage[]): ChatMessage[] {
-  const start = currentTurnStartIndex(messages);
-  return start >= 0 ? messages.slice(start + 1) : messages;
-}
-
-function hasLiveTraceInCurrentTurn(messages: ChatMessage[]): boolean {
-  return currentTurnMessages(messages).some((message) => {
-    if (message.traceSource !== "live") return false;
-    return message.type === "trace" || message.type === "reasoning";
-  });
 }
 
 function appendReasoningEvent(
@@ -270,15 +353,6 @@ function appendReasoningEvent(
   );
 }
 
-function appendTaskTrace(
-  messages: ChatMessage[],
-  task: Extract<ChatRenderPart, { kind: "task" }>,
-  content: string,
-  traceSource: ChatMessage["traceSource"] = "live",
-): ChatMessage[] {
-  return appendTracePart(messages, task, content, traceSource);
-}
-
 function appendStatusTrace(
   messages: ChatMessage[],
   text: string,
@@ -303,139 +377,6 @@ function appendStatusTrace(
     },
     trimmed,
     traceSource,
-  );
-}
-
-function upsertQueue(messages: ChatMessage[], text: string): ChatMessage[] {
-  const label = text.trim() || "Plan update";
-  const idx = latestTraceIndex(messages, (part) => part.kind === "queue");
-  const queueItem: ChatQueueItem = {
-    id: nextId("queue-item"),
-    label,
-    completed: false,
-  };
-
-  if (idx < 0) {
-    return appendTracePart(
-      messages,
-      {
-        kind: "queue",
-        title: "Plan",
-        items: [queueItem],
-      },
-      text,
-      "summary",
-    );
-  }
-
-  const copy = [...messages];
-  const msg = copy[idx];
-  if (!msg?.renderParts?.length) return messages;
-  const nextParts = msg.renderParts.map((part) => {
-    if (part.kind !== "queue") return part;
-    return { ...part, items: [...part.items, queueItem] };
-  });
-  copy[idx] = {
-    ...msg,
-    content: label,
-    traceSource: "summary",
-    renderParts: nextParts,
-  };
-  return copy;
-}
-
-function isDaytonaPayload(payload?: Record<string, unknown>): boolean {
-  const runtime = asRecord(payload?.runtime);
-  const runtimeMode =
-    asOptionalText(payload?.runtime_mode) ?? asOptionalText(runtime?.runtime_mode);
-  return runtimeMode === "daytona_pilot";
-}
-
-function upsertChainOfThought(
-  messages: ChatMessage[],
-  step: NormalizedTrajectoryStep,
-): ChatMessage[] {
-  const traceStep: ChatTraceStep = {
-    id: `trajectory-step-${step.index}`,
-    index: step.index,
-    label: step.label,
-    body: step.thought,
-    status: "active",
-    details: trajectoryStepDetails(step),
-  };
-
-  const idx = latestTraceIndex(messages, (part) => part.kind === "chain_of_thought");
-  if (idx < 0) {
-    return appendTracePart(
-      messages,
-      {
-        kind: "chain_of_thought",
-        title: "Trajectory",
-        steps: [traceStep],
-      },
-      step.label,
-      "summary",
-    );
-  }
-
-  const copy = [...messages];
-  const msg = copy[idx];
-  if (!msg?.renderParts) return messages;
-  const nextParts = msg.renderParts.map((part) => {
-    if (part.kind !== "chain_of_thought") return part;
-    const withoutCurrent = part.steps.filter((s) => s.index !== step.index);
-    const sortedSteps = [...withoutCurrent, traceStep].sort((left, right) => {
-      const leftIndex = typeof left.index === "number" ? left.index : Number.POSITIVE_INFINITY;
-      const rightIndex = typeof right.index === "number" ? right.index : Number.POSITIVE_INFINITY;
-      if (leftIndex !== rightIndex) return leftIndex - rightIndex;
-      return left.id.localeCompare(right.id);
-    });
-    const updatedSteps = sortedSteps.map((candidate) => ({
-      ...candidate,
-      status: candidate.index === step.index ? ("active" as const) : ("complete" as const),
-    }));
-    return { ...part, steps: updatedSteps };
-  });
-  copy[idx] = {
-    ...msg,
-    content: step.label,
-    traceSource: "summary",
-    renderParts: nextParts,
-  };
-  return copy;
-}
-
-function applyTrajectoryStep(
-  messages: ChatMessage[],
-  step: NormalizedTrajectoryStep,
-  includePrimaryFallback = false,
-): ChatMessage[] {
-  let next = messages;
-  if (includePrimaryFallback && step.thought) {
-    next = appendReasoningEvent(
-      next,
-      step.thought,
-      "trajectory",
-      undefined,
-      `thought_${step.index}`,
-    );
-  }
-  next = upsertChainOfThought(next, step);
-  return next;
-}
-
-function applyTrajectoryEvent(
-  messages: ChatMessage[],
-  text: string,
-  payload?: Record<string, unknown>,
-): ChatMessage[] {
-  const steps = normalizeTrajectorySteps(text, payload);
-  if (steps.length === 0) return messages;
-
-  const includePrimaryFallback = !hasLiveTraceInCurrentTurn(messages) || isDaytonaPayload(payload);
-  return steps.reduce<ChatMessage[]>(
-    (acc, step) => applyTrajectoryStep(acc, step, includePrimaryFallback),
-    messages,
   );
 }
 
@@ -526,43 +467,12 @@ function rollbackHitlByMessageId(messages: ChatMessage[], messageId: string): Ch
   return changed ? next : messages;
 }
 
-function applyEvent(
-  messages: ChatMessage[],
-  frame: WsServerEvent,
-  queryClient?: QueryClient,
-): ApplyFrameResult {
+function applyEvent(messages: ChatMessage[], frame: WsServerEvent): ApplyFrameResult {
   const { kind, text, payload } = frame.data;
 
   switch (kind) {
-    case "assistant_token":
-    case "text": {
-      return {
-        messages: appendAssistantToken(messages, text),
-        terminal: false,
-        errored: false,
-      };
-    }
-    case "reasoning_step":
-    case "reasoning": {
-      return {
-        messages: appendReasoningEvent(messages, text, "live", payload),
-        terminal: false,
-        errored: false,
-      };
-    }
-    case "trajectory_step": {
-      return {
-        messages: applyTrajectoryEvent(messages, text, payload),
-        terminal: false,
-        errored: false,
-      };
-    }
-    case "turn_started":
-    case "status":
-    case "sandbox_exec":
-    case "rlm_delegate": {
-      const normalizedPayload =
-        kind === "turn_started" ? { ...payload, phase: payload?.phase ?? "startup" } : payload;
+    case "execution_started": {
+      const normalizedPayload = { ...payload, phase: payload?.phase ?? "startup" };
       const sandboxPart = sandboxProgressPartFromStatus(normalizedPayload);
       if (sandboxPart) {
         return {
@@ -582,242 +492,20 @@ function applyEvent(
         errored: false,
       };
     }
-    case "warning": {
-      return {
-        messages: appendStatusTrace(messages, text, "warning", payload),
-        terminal: false,
-        errored: false,
-      };
+    case "execution_step": {
+      return applyCanonicalExecutionStep(messages, text, payload);
     }
-    case "tool_call": {
-      return {
-        messages: appendToolLikePart(messages, "tool_call", text, payload, appendTracePart),
-        terminal: false,
-        errored: false,
-      };
-    }
-    case "tool_result": {
-      return {
-        messages: appendToolLikePart(messages, "tool_result", text, payload, appendTracePart),
-        terminal: false,
-        errored: false,
-      };
-    }
-    case "plan_update": {
-      const label = text.trim() || "Running plan...";
-      let next = appendTaskTrace(
-        messages,
-        {
-          kind: "task",
-          title: "Plan update",
-          status: "in_progress",
-          items: [{ id: nextId("task-item"), text: label }],
-        },
-        label,
-      );
-      next = upsertQueue(next, label);
-      return { messages: next, terminal: false, errored: false };
-    }
-    case "rlm_executing": {
-      let next = messages;
-      const toolName =
-        typeof payload?.tool_name === "string" && payload.tool_name
-          ? payload.tool_name
-          : "Sub-agent iteration";
-      next = appendTaskTrace(
-        next,
-        {
-          kind: "task",
-          title: `Executing ${toolName}`,
-          status: "in_progress",
-          items: text ? [{ id: nextId("task-item"), text }] : undefined,
-        },
-        `Executing ${toolName}...`,
-      );
-      return { messages: next, terminal: false, errored: false };
-    }
-    case "memory_update": {
-      const next = appendTaskTrace(
-        messages,
-        {
-          kind: "task",
-          title: text || "Updating memory...",
-          status: "completed",
-          items: text ? [{ id: nextId("task-item"), text }] : undefined,
-        },
-        text || "Updating memory...",
-      );
-
-      if (text.trim()) {
-        useWorkspaceUiStore.getState().addMemoryEntry({
-          content: text.trim(),
-          timestamp:
-            typeof frame.data.timestamp === "string"
-              ? frame.data.timestamp
-              : new Date().toISOString(),
-        });
-      }
-
-      if (queryClient) {
-        queryClient.invalidateQueries({ queryKey: ["memory"] });
-      }
-      return { messages: next, terminal: false, errored: false };
-    }
-    case "clarification": {
-      const clarPayload = asRecord(payload);
-      const question =
-        asOptionalText(clarPayload?.question) || text.trim() || "Please clarify your intent.";
-      const messageId =
-        asOptionalText(clarPayload?.message_id ?? clarPayload?.messageId) ?? nextId("clar");
-      const stepLabel =
-        asOptionalText(clarPayload?.step_label ?? clarPayload?.stepLabel) ?? "Clarification needed";
-      const rawOptions = clarPayload?.options;
-      const options: { id: string; label: string; description?: string }[] = Array.isArray(
-        rawOptions,
-      )
-        ? rawOptions.flatMap((item) => {
-            const rec = asRecord(item);
-            if (!rec) return [];
-            const id = asOptionalText(rec.id);
-            const label = asOptionalText(rec.label);
-            if (!id || !label) return [];
-            const description = asOptionalText(rec.description);
-            return description != null ? [{ id, label, description }] : [{ id, label }];
-          })
-        : [];
-      return {
-        messages: [
-          ...messages,
-          {
-            id: messageId,
-            type: "clarification" as const,
-            content: question,
-            phase: DEFAULT_PHASE,
-            clarificationData: {
-              question,
-              stepLabel,
-              options,
-              customOptionId: "",
-            },
-          },
-        ],
-        terminal: false,
-        errored: false,
-      };
-    }
-    case "hitl_request": {
-      const hitlPayload = asRecord(payload?.hitl ?? payload);
-      const question = asOptionalText(hitlPayload?.question) || text.trim() || "Approval needed";
-      const messageId =
-        asOptionalText(hitlPayload?.message_id ?? hitlPayload?.messageId) ?? nextId("hitl");
-      const rawActions = hitlPayload?.actions;
-      const actions = Array.isArray(rawActions)
-        ? rawActions
-            .map((item) => {
-              const rec = asRecord(item);
-              if (!rec) return null;
-              const label = asOptionalText(rec.label);
-              if (!label) return null;
-              const variant = asOptionalText(rec.variant);
-              return {
-                label,
-                variant: variant === "primary" || variant === "secondary" ? variant : "secondary",
-              } as const;
-            })
-            .filter(
-              (value): value is { label: string; variant: "primary" | "secondary" } =>
-                value != null,
-            )
-        : [];
-
-      useWorkspaceUiStore.getState().setPendingHitlMessageId(messageId);
-      return {
-        messages: [
-          ...messages,
-          {
-            id: messageId,
-            type: "hitl",
-            content: question,
-            phase: DEFAULT_PHASE,
-            hitlData: {
-              question,
-              actions:
-                actions.length > 0
-                  ? actions
-                  : [
-                      { label: "Approve", variant: "primary" },
-                      { label: "Reject", variant: "secondary" },
-                    ],
-            },
-          },
-        ],
-        terminal: false,
-        errored: false,
-      };
-    }
-    case "hitl_resolved": {
-      const messageId = asOptionalText(payload?.message_id ?? payload?.messageId);
-      const resolution =
-        asOptionalText(payload?.resolution) ?? asOptionalText(payload?.label) ?? text.trim();
-      if (!resolution) return { messages, terminal: false, errored: false };
-
-      useWorkspaceUiStore.getState().setPendingHitlMessageId(null);
-
-      if (messageId) {
-        return {
-          messages: resolveHitlByMessageId(messages, messageId, resolution),
-          terminal: false,
-          errored: false,
-        };
-      }
-
-      let updated = false;
-      const next = messages.map((msg) => {
-        if (updated || msg.type !== "hitl" || !msg.hitlData || msg.hitlData.resolved) {
-          return msg;
-        }
-        updated = true;
-        return {
-          ...msg,
-          hitlData: {
-            ...msg.hitlData,
-            resolved: true,
-            resolvedLabel: resolution,
-          },
-        };
-      });
-      return { messages: next, terminal: false, errored: false };
-    }
-    case "command_ack": {
+    case "command_result": {
       const command = asOptionalText(payload?.command);
       const result = asRecord(payload?.result);
       const messageId = asOptionalText(result?.message_id ?? result?.messageId);
       const resolution = asOptionalText(result?.resolution) ?? asOptionalText(result?.action_label);
+      const succeeded = asOptionalText(result?.status)?.toLowerCase() !== "error";
       let next = messages;
-      if (command === "resolve_hitl" && messageId && resolution) {
+      if (succeeded && command === "resolve_hitl" && messageId && resolution) {
         next = resolveHitlByMessageId(next, messageId, resolution);
         useWorkspaceUiStore.getState().setPendingHitlMessageId(null);
-      }
-      return {
-        messages: appendTracePart(
-          next,
-          {
-            kind: "status_note",
-            tone: "success",
-            text: text || "Action acknowledged",
-          },
-          text || "Action acknowledged",
-        ),
-        terminal: false,
-        errored: false,
-      };
-    }
-    case "command_reject": {
-      const command = asOptionalText(payload?.command);
-      const result = asRecord(payload?.result);
-      const messageId = asOptionalText(result?.message_id ?? result?.messageId);
-      let next = messages;
-      if (command === "resolve_hitl" && messageId) {
+      } else if (!succeeded && command === "resolve_hitl" && messageId) {
         next = rollbackHitlByMessageId(next, messageId);
       }
       return {
@@ -825,58 +513,17 @@ function applyEvent(
           next,
           {
             kind: "status_note",
-            tone: "error",
-            text: text || "Action rejected",
+            tone: succeeded ? "success" : "error",
+            text: text || (succeeded ? "Action acknowledged" : "Action rejected"),
           },
-          text || "Action rejected",
+          text || (succeeded ? "Action acknowledged" : "Action rejected"),
         ),
         terminal: false,
         errored: false,
       };
     }
-    case "final":
-    case "done":
-    case "turn_completed": {
-      // A "done" event with payload["cancelled"]=True marks a cancelled turn.
-      if (payload && payload["cancelled"] === true) {
-        let next = finishReasoning(messages);
-        next = finalizeTraceParts(next);
-        next = appendSystem(next, text || "Request cancelled.");
-        return { messages: next, terminal: true, errored: false };
-      }
-
-      let next = completeAssistant(messages, resolveFinalAssistantText(text, payload));
-      next = finishReasoning(next);
-      next = finalizeTraceParts(next);
-      next = appendFinalTrajectoryThoughts(next, payload);
-
-      const finalReasoning =
-        typeof payload?.final_reasoning === "string" ? payload.final_reasoning.trim() : "";
-      if (finalReasoning) {
-        next = appendReasoningEvent(next, finalReasoning, "summary", payload, "final_reasoning");
-      }
-
-      next = attachFinalReferences(next, payload);
-
-      const warnings = readGuardrailWarnings(payload);
-      if (warnings.length > 0) {
-        next = appendSystem(next, `Guardrail warnings:\n- ${warnings.join("\n- ")}`);
-      }
-
-      return { messages: next, terminal: true, errored: false };
-    }
-    case "cancelled": {
-      let next = finishReasoning(messages);
-      next = finalizeTraceParts(next);
-      next = appendSystem(next, text || "Request cancelled.");
-      return { messages: next, terminal: true, errored: false };
-    }
-    case "turn_failed":
-    case "error": {
-      let next = finishReasoning(messages);
-      next = finalizeTraceParts(next);
-      next = appendSystem(next, `Backend error: ${text || "Unknown server error."}`);
-      return { messages: next, terminal: true, errored: true };
+    case "execution_completed": {
+      return applyCanonicalExecutionCompleted(messages, text, payload);
     }
     default: {
       return { messages, terminal: false, errored: false };
@@ -887,12 +534,12 @@ function applyEvent(
 export function applyWsFrameToMessages(
   messages: ChatMessage[],
   frame: WsServerMessage,
-  queryClient?: QueryClient,
+  _queryClient?: QueryClient,
 ): ApplyFrameResult {
   if (frame.type === "error") {
     const next = finalizeTraceParts(appendSystem(messages, `Backend error: ${frame.message}`));
     return { messages: finishReasoning(next), terminal: true, errored: true };
   }
 
-  return applyEvent(messages, frame, queryClient);
+  return applyEvent(messages, frame);
 }

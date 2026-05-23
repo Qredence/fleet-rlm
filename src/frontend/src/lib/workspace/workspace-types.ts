@@ -19,17 +19,7 @@ export type InspectorTab =
 
 export interface ChatMessage {
   id: string;
-  type:
-    | "user"
-    | "assistant"
-    | "system"
-    | "trace"
-    | "hitl"
-    | "clarification"
-    | "reasoning"
-    | "plan_update"
-    | "rlm_executing"
-    | "memory_update";
+  type: "user" | "assistant" | "system" | "trace" | "hitl" | "clarification" | "reasoning";
   content: string;
   traceSource?: "live" | "trajectory" | "summary";
   phase?: 1 | 2 | 3;
@@ -399,13 +389,6 @@ export interface HumanReviewSummary {
   repairSteps?: string[];
 }
 
-export interface CompatBackfillInfo {
-  eventId: string;
-  runtimeMode?: string;
-  usedSummary: boolean;
-  usedFinalArtifact: boolean;
-}
-
 export interface RunWorkbenchState {
   status: RunStatus;
   runId?: string;
@@ -427,6 +410,4 @@ export interface RunWorkbenchState {
   summary?: RunSummary;
   errorMessage?: string | null;
   lastFrame?: WsServerMessage | null;
-  compatBackfillCount: number;
-  lastCompatBackfill?: CompatBackfillInfo | null;
 }

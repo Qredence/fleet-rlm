@@ -95,7 +95,6 @@ Canonical HTTP and websocket surfaces:
 - `GET /api/v1/runtime/status`
 - `GET /api/v1/runtime/volume/tree`
 - `GET /api/v1/runtime/volume/file`
-- `GET /api/v1/memory` — list memory items
 - `GET /api/v1/sandboxes` — list active sandboxes
 - `GET /api/v1/sandboxes/{id}` — sandbox detail
 - `DELETE /api/v1/sandboxes/{id}` — delete sandbox

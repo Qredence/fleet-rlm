@@ -19,26 +19,9 @@ def optional_string(value: object) -> str | None:
 
 
 def parse_session_uuid(session_id: str) -> uuid.UUID:
-    """Parse a repository-backed session UUID or legacy integer id.
-
-    Integer ids are wrapped as ``uuid.UUID(int=...)`` so they can be
-    passed through the unified ``PersistenceProtocol`` and recovered
-    by the local-store backend via ``_uuid_to_int``.
-    """
+    """Parse the canonical repository-backed session UUID."""
     try:
         return uuid.UUID(session_id)
-    except ValueError:
-        pass
-    try:
-        return uuid.UUID(int=int(session_id))
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Session not found") from exc
-
-
-def parse_legacy_session_id(session_id: str) -> int:
-    """Parse a local-store legacy integer session id or raise 404."""
-    try:
-        return int(session_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
 
@@ -51,28 +34,8 @@ def session_external_id(metadata: object) -> str | None:
     return optional_string(metadata_dict.get("external_session_id"))
 
 
-def parse_legacy_session_key_owner(key: object) -> tuple[str | None, str | None]:
-    """Parse legacy in-memory session-cache keys into workspace/user ids."""
-    if not isinstance(key, str):
-        return None, None
-    if key.startswith("owner:"):
-        return None, None
-    workspace_id, separator, remainder = key.partition(":")
-    if not separator:
-        return None, None
-    user_id, separator, _session_id = remainder.partition(":")
-    if not separator:
-        return None, None
-    return (
-        workspace_id or None,
-        user_id or None,
-    )
-
-
 __all__ = [
     "optional_string",
-    "parse_legacy_session_id",
-    "parse_legacy_session_key_owner",
     "parse_session_uuid",
     "session_external_id",
     "string_or_default",

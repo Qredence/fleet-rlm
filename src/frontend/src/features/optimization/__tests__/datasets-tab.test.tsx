@@ -3,9 +3,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { DatasetsTab } from "@/features/optimization/datasets-tab";
-import { RlmApiError } from "@/lib/rlm-api/client";
-import type { Conversation } from "@/features/workspace/workspace-layout-contract";
-import { datasetEndpoints, optimizationEndpoints } from "@/lib/rlm-api/optimization";
+import { optimizationEndpoints } from "@/lib/rlm-api/optimization";
 import { sessionEndpoints } from "@/lib/rlm-api/sessions";
 
 (
@@ -14,10 +12,6 @@ import { sessionEndpoints } from "@/lib/rlm-api/sessions";
   }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-const workspaceHistoryState = {
-  conversations: [] as Conversation[],
-};
-
 const modulesState = {
   items: [] as Array<{
     slug: string;
@@ -25,6 +19,19 @@ const modulesState = {
     description?: string;
     program_spec: string;
     required_dataset_keys: string[];
+  }>,
+};
+
+const sessionsState = {
+  isError: false,
+  items: [] as Array<{
+    id: string;
+    title: string;
+    status: string;
+    model_name: string | null;
+    external_session_id: string | null;
+    created_at: string;
+    updated_at: string;
   }>,
 };
 
@@ -54,10 +61,16 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     if (queryKey[0] === "sessions") {
       return {
-        data: undefined,
+        data: {
+          items: sessionsState.items,
+          total: sessionsState.items.length,
+          limit: 10,
+          offset: 0,
+          has_more: false,
+        },
         isLoading: false,
-        isError: true,
-        error: new RlmApiError(404, "Not Found"),
+        isError: sessionsState.isError,
+        error: sessionsState.isError ? new Error("Durable sessions API failed") : null,
         isFetching: false,
         refetch: vi.fn(),
       };
@@ -92,10 +105,6 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => queryClientState,
 }));
 
-vi.mock("@/features/workspace/workspace-layout-contract", () => ({
-  useWorkspaceLayoutHistory: () => workspaceHistoryState.conversations,
-}));
-
 vi.mock("@/lib/rlm-api/optimization", async () => {
   const actual = await vi.importActual<typeof import("@/lib/rlm-api/optimization")>(
     "@/lib/rlm-api/optimization",
@@ -103,10 +112,6 @@ vi.mock("@/lib/rlm-api/optimization", async () => {
 
   return {
     ...actual,
-    datasetEndpoints: {
-      ...actual.datasetEndpoints,
-      createFromTranscript: vi.fn(),
-    },
     optimizationEndpoints: {
       ...actual.optimizationEndpoints,
       createRun: vi.fn(),
@@ -127,16 +132,16 @@ vi.mock("@/lib/rlm-api/sessions", async () => {
   };
 });
 
-describe("DatasetsTab sessions fallback", () => {
+describe("DatasetsTab sessions", () => {
   beforeEach(() => {
-    workspaceHistoryState.conversations = [];
+    sessionsState.isError = false;
+    sessionsState.items = [];
     modulesState.items = [reflectAndReviseModule];
     mutationState.isPending = false;
     mutationState.mutate.mockReset();
     mutationState.config = null;
     queryClientState.invalidateQueries.mockReset();
     vi.mocked(sessionEndpoints.exportSession).mockReset();
-    vi.mocked(datasetEndpoints.createFromTranscript).mockReset();
     vi.mocked(optimizationEndpoints.createRun).mockReset();
 
     mutationState.mutate.mockImplementation((variables: unknown) => {
@@ -155,17 +160,8 @@ describe("DatasetsTab sessions fallback", () => {
     document.body.innerHTML = "";
   });
 
-  it("shows local session history when the durable sessions API is unavailable", () => {
-    workspaceHistoryState.conversations = [
-      {
-        id: "conv-opt-1",
-        title: "Recovered optimization session",
-        messages: [],
-        phase: "complete",
-        createdAt: "2026-04-14T09:00:00.000Z",
-        updatedAt: "2026-04-14T09:30:00.000Z",
-      },
-    ];
+  it("reports durable session API failures instead of using local history fallback", () => {
+    sessionsState.isError = true;
 
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -175,35 +171,30 @@ describe("DatasetsTab sessions fallback", () => {
       root.render(<DatasetsTab />);
     });
 
-    expect(container.textContent).toContain(
-      "Showing local session history because the durable sessions API is unavailable.",
-    );
-    expect(container.textContent).toContain("Recovered optimization session");
-    expect(container.textContent).not.toContain("Failed to load sessions");
+    expect(container.textContent).toContain("Failed to load sessions: Durable sessions API failed");
+    expect(container.textContent).not.toContain("Showing local session history");
 
     act(() => {
       root.unmount();
     });
   });
 
-  it("prepares GEPA from local session history", async () => {
+  it("prepares GEPA from canonical durable session export", async () => {
     const onPrepareRun = vi.fn();
-    workspaceHistoryState.conversations = [
+    sessionsState.items = [
       {
-        id: "conv-opt-1",
-        title: "Recovered optimization session",
-        messages: [
-          { id: "u1", type: "user", content: "What is 2+2?" },
-          { id: "a1", type: "assistant", content: "4" },
-        ],
-        phase: "complete",
-        createdAt: "2026-04-14T09:00:00.000Z",
-        updatedAt: "2026-04-14T09:30:00.000Z",
+        id: "550e8400-e29b-41d4-a716-446655440000",
+        title: "Durable optimization session",
+        status: "active",
+        model_name: null,
+        external_session_id: null,
+        created_at: "2026-04-14T09:00:00.000Z",
+        updated_at: "2026-04-14T09:30:00.000Z",
       },
     ];
-    vi.mocked(datasetEndpoints.createFromTranscript).mockResolvedValue({
+    vi.mocked(sessionEndpoints.exportSession).mockResolvedValue({
       id: "41",
-      name: "Recovered optimization session",
+      name: "Durable optimization session",
       row_count: 1,
       format: "jsonl",
       module_slug: "reflect-and-revise",
@@ -246,13 +237,12 @@ describe("DatasetsTab sessions fallback", () => {
       await Promise.resolve();
     });
 
-    expect(datasetEndpoints.createFromTranscript).toHaveBeenCalledWith({
-      module_slug: "reflect-and-revise",
-      title: "Recovered optimization session",
-      turns: [{ user_message: "What is 2+2?", assistant_message: "4" }],
-    });
+    expect(sessionEndpoints.exportSession).toHaveBeenCalledWith(
+      "550e8400-e29b-41d4-a716-446655440000",
+      "reflect-and-revise",
+    );
     expect(onPrepareRun).toHaveBeenCalledWith({
-      datasetName: "Recovered optimization session",
+      datasetName: "Durable optimization session",
       datasetId: "41",
       auto: "light",
       trainRatio: 0.8,
@@ -268,17 +258,15 @@ describe("DatasetsTab sessions fallback", () => {
 
   it("uses the mutation variables when the selected module changes mid-flight", async () => {
     const onPrepareRun = vi.fn();
-    workspaceHistoryState.conversations = [
+    sessionsState.items = [
       {
-        id: "conv-opt-1",
-        title: "Recovered optimization session",
-        messages: [
-          { id: "u1", type: "user", content: "What is 2+2?" },
-          { id: "a1", type: "assistant", content: "4" },
-        ],
-        phase: "complete",
-        createdAt: "2026-04-14T09:00:00.000Z",
-        updatedAt: "2026-04-14T09:30:00.000Z",
+        id: "550e8400-e29b-41d4-a716-446655440000",
+        title: "Durable optimization session",
+        status: "active",
+        model_name: null,
+        external_session_id: null,
+        created_at: "2026-04-14T09:00:00.000Z",
+        updated_at: "2026-04-14T09:30:00.000Z",
       },
     ];
     modulesState.items = [
@@ -299,14 +287,14 @@ describe("DatasetsTab sessions fallback", () => {
     ];
 
     let resolveDataset:
-      | ((value: Awaited<ReturnType<typeof datasetEndpoints.createFromTranscript>>) => void)
+      | ((value: Awaited<ReturnType<typeof sessionEndpoints.exportSession>>) => void)
       | null = null;
-    const pendingDataset = new Promise<
-      Awaited<ReturnType<typeof datasetEndpoints.createFromTranscript>>
-    >((resolve) => {
-      resolveDataset = resolve;
-    });
-    vi.mocked(datasetEndpoints.createFromTranscript).mockReturnValue(pendingDataset);
+    const pendingDataset = new Promise<Awaited<ReturnType<typeof sessionEndpoints.exportSession>>>(
+      (resolve) => {
+        resolveDataset = resolve;
+      },
+    );
+    vi.mocked(sessionEndpoints.exportSession).mockReturnValue(pendingDataset);
 
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -353,7 +341,7 @@ describe("DatasetsTab sessions fallback", () => {
     await act(async () => {
       resolveDataset?.({
         id: "77",
-        name: "Recovered optimization session",
+        name: "Durable optimization session",
         row_count: 1,
         format: "jsonl",
         module_slug: "reflect-and-revise",
@@ -364,7 +352,7 @@ describe("DatasetsTab sessions fallback", () => {
     });
 
     expect(onPrepareRun).toHaveBeenCalledWith({
-      datasetName: "Recovered optimization session",
+      datasetName: "Durable optimization session",
       datasetId: "77",
       auto: "light",
       trainRatio: 0.8,

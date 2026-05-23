@@ -49,18 +49,6 @@ class SandboxSessionStatus(str, enum.Enum):
     FAILED = "failed"
 
 
-class WorkspaceVolumeStatus(str, enum.Enum):
-    PROVISIONING = "provisioning"
-    READY = "ready"
-    ERROR = "error"
-    ARCHIVED = "archived"
-
-
-class VolumeObjectType(str, enum.Enum):
-    FILE = "file"
-    DIRECTORY = "directory"
-
-
 class RunStatus(str, enum.Enum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -209,9 +197,3 @@ class PromptSnapshotType(str, enum.Enum):
 
 class ExternalTraceProvider(str, enum.Enum):
     MLFLOW = "mlflow"
-
-
-class OutboxStatus(str, enum.Enum):
-    PENDING = "pending"
-    DISPATCHED = "dispatched"
-    FAILED = "failed"

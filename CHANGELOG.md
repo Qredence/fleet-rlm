@@ -4,6 +4,46 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [0.5.40] - 2026-05-23
+
+### Added
+
+- **Change:** Added explicit API error response helpers and route-level error
+  schema registration across HTTP and WebSocket-adjacent surfaces.
+  **Outcome:** OpenAPI consumers get more consistent failure envelopes and
+  endpoint metadata for auth, validation, runtime, sandbox, session, and
+  optimization failures.
+- **Change:** Added bounded test-harness parallelism and timeout defaults.
+  **Outcome:** Local and CI test runs fail faster on hung tests and can use
+  `pytest-xdist` without requiring extra contributor setup.
+
+### Changed
+
+- **Change:** Hardened session, sandbox, volume, trace, and optimization runtime
+  service boundaries while keeping routers thin.
+  **Outcome:** API handlers have clearer ownership, stronger typed response
+  boundaries, and fewer duplicated persistence/session helpers.
+- **Change:** Refined Daytona recursive isolation, SDK volume handling, and
+  delegated RLM artifact staging.
+  **Outcome:** Recursive child workspaces have more explicit cleanup,
+  evidence-staging, and mounted-volume behavior without broadening the public
+  runtime contract.
+- **Change:** Reorganized backend tests into clearer unit, contract,
+  integration, e2e, and fixture lanes.
+  **Outcome:** Test coverage maps more directly to product boundaries and the
+  documented validation commands.
+- **Change:** Bumped package, OpenAPI, generated frontend API, and documentation
+  release metadata to `0.5.40`.
+  **Outcome:** Runtime health metadata, generated contracts, package metadata,
+  and release docs agree on the release being prepared.
+
+### Removed
+
+- **Change:** Removed the retired Memory API from the canonical active HTTP
+  surface and public docs navigation.
+  **Outcome:** `/api/v1/memory*` is documented with other removed endpoints
+  instead of being presented as a supported product/API surface.
+
 ## [0.5.31] - 2026-05-17
 
 ### Added
@@ -1028,6 +1068,7 @@ All notable changes to this project are documented in this file.
 - Removed checked-in `__pycache__` directories under `src/fleet_rlm/`.
 - Moved non-runtime memory-topology notes out of package source and into docs.
 
+[0.5.40]: https://github.com/Qredence/fleet-rlm/compare/v0.5.31...v0.5.40
 [0.5.31]: https://github.com/Qredence/fleet-rlm/compare/v0.5.3...v0.5.31
 [0.5.3]: https://github.com/Qredence/fleet-rlm/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/Qredence/fleet-rlm/compare/v0.5.1...v0.5.2

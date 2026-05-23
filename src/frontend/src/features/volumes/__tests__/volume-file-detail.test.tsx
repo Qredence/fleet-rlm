@@ -217,4 +217,33 @@ describe("VolumesBrowser", () => {
       root.unmount();
     });
   });
+
+  it("reports live volume API failures without rendering fallback volume data", () => {
+    useFilesystemMock.mockImplementation(() => ({
+      volumes: [],
+      dataSource: "api",
+      degradedReason: "Daytona volume API returned 503: unavailable",
+      isLoading: false,
+      isFetching: false,
+      error: new Error("Daytona volume API returned 503: unavailable"),
+      refetch: vi.fn(),
+    }));
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(<VolumesBrowser />);
+    });
+
+    expect(container.textContent).toContain("Daytona durable volume unavailable");
+    expect(container.textContent).toContain("Daytona volume API returned 503: unavailable");
+    expect(container.textContent).toContain("No daytona durable volume data available.");
+    expect(container.textContent).toContain("Daytona · 0 volumes · 0 files · Live");
+
+    act(() => {
+      root.unmount();
+    });
+  });
 });

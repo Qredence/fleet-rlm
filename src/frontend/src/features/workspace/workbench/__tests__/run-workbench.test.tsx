@@ -107,8 +107,6 @@ const mockedWorkbenchStore: MockedRunWorkbenchStore = {
     warnings: ["One callback result was truncated before rendering."],
   },
   errorMessage: null,
-  compatBackfillCount: 0,
-  lastCompatBackfill: null,
 };
 
 vi.mock("@/features/workspace/use-workspace", () => ({

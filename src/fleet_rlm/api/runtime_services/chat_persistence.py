@@ -105,6 +105,7 @@ def build_execution_event(
     workspace_id: str,
     user_id: str,
     session_id: str,
+    sequence: int,
     step: ExecutionStep | None = None,
     summary: dict[str, Any] | None = None,
 ) -> ExecutionEvent:
@@ -114,6 +115,7 @@ def build_execution_event(
         workspace_id=workspace_id,
         user_id=user_id,
         session_id=session_id,
+        sequence=sequence,
         step=step,
         summary=summary,
     )
@@ -219,21 +221,6 @@ def enqueue_latest_nonblocking(
         return False
 
 
-def cancelled_event_payload(message: str = "Request cancelled.") -> dict[str, Any]:
-    """Build the websocket event payload for cancellation notifications."""
-    return {
-        "type": "event",
-        "data": {
-            "kind": "done",
-            "text": message,
-            "payload": {"cancelled": True},
-            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "version": 2,
-            "event_id": str(uuid.uuid4()),
-        },
-    }
-
-
 async def cancel_task(task: asyncio.Task[object] | None) -> None:
     """Cancel an in-flight task and swallow expected shutdown exceptions."""
     if task is None or task.done():
@@ -334,26 +321,6 @@ def _manifest_path(workspace_id: str, user_id: str, session_id: str) -> str:
     return f"meta/workspaces/{workspace_id}/users/{user_id}/react-session-{safe_session_id}.json"
 
 
-def _legacy_manifest_path(path: str) -> str | None:
-    normalized = str(path or "").strip()
-    if not normalized.startswith("meta/"):
-        return None
-    stripped = normalized.removeprefix("meta/")
-    parts = PurePosixPath(stripped).parts
-    if len(parts) < 5 or parts[0] != "workspaces" or parts[2] != "users":
-        return stripped
-
-    user_prefix = PurePosixPath(*parts[:4])
-    remainder = parts[4:]
-    if not remainder:
-        return stripped
-    if remainder[0] == "memory":
-        return stripped
-    if remainder[0].startswith("react-session-"):
-        return str(user_prefix / "memory" / PurePosixPath(*remainder))
-    return stripped
-
-
 async def _aget_daytona_session(agent: Any) -> Any | None:
     try:
         from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
@@ -387,49 +354,42 @@ async def load_manifest_from_volume(agent: Any, path: str) -> dict[str, Any]:
     interpreter = agent.interpreter
     if interpreter is None:
         return {}
-    candidate_paths = [path]
-    legacy_path = _legacy_manifest_path(path)
-    if legacy_path is not None:
-        candidate_paths.append(legacy_path)
     daytona_session = await _aget_daytona_session(agent)
     if daytona_session is not None:
-        for candidate_path in candidate_paths:
-            storage_path = _persistent_storage_path(interpreter, candidate_path)
-            try:
-                text = await daytona_session.aread_file(storage_path)
-            except Exception:
-                logger.debug(
-                    "manifest_load_daytona_read_error",
-                    extra={"path": storage_path},
-                    exc_info=True,
-                )
-                continue
-            if not text:
-                continue
-            try:
-                parsed = json.loads(text)
-                return parsed if isinstance(parsed, dict) else {}
-            except json.JSONDecodeError:
-                return {}
-        return {}
-    for candidate_path in candidate_paths:
-        result = await interpreter.aexecute(
-            "text = load_from_volume(path)\nSUBMIT(text=text)",
-            variables={"path": candidate_path},
-            execution_profile=ExecutionProfile.MAINTENANCE,
-        )
-        if not _is_final_output(result):
-            continue
-        output = getattr(result, "output", None)
-        output = output if isinstance(output, dict) else {}
-        text = str(output.get("text", ""))
-        if not text or text.startswith("[file not found:") or text.startswith("[error:"):
-            continue
+        storage_path = _persistent_storage_path(interpreter, path)
+        try:
+            text = await daytona_session.aread_file(storage_path)
+        except Exception:
+            logger.debug(
+                "manifest_load_daytona_read_error",
+                extra={"path": storage_path},
+                exc_info=True,
+            )
+            return {}
+        if not text:
+            return {}
         try:
             parsed = json.loads(text)
             return parsed if isinstance(parsed, dict) else {}
         except json.JSONDecodeError:
             return {}
+    result = await interpreter.aexecute(
+        "text = load_from_volume(path)\nSUBMIT(text=text)",
+        variables={"path": path},
+        execution_profile=ExecutionProfile.MAINTENANCE,
+    )
+    if not _is_final_output(result):
+        return {}
+    output = getattr(result, "output", None)
+    output = output if isinstance(output, dict) else {}
+    text = str(output.get("text", ""))
+    if not text or text.startswith("[file not found:") or text.startswith("[error:"):
+        return {}
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError:
+        return {}
     return {}
 
 
@@ -509,6 +469,7 @@ class ExecutionLifecycleManager:
         self._persist_queue: asyncio.Queue[ExecutionStep | None] | None = None
         self._persist_worker_task: asyncio.Task[None] | None = None
         self._persistence_error: Exception | None = None
+        self._event_sequence = 0
         self.run_completed = False
 
     def _build_event(
@@ -517,12 +478,14 @@ class ExecutionLifecycleManager:
         step: ExecutionStep | None = None,
         summary: dict[str, Any] | None = None,
     ) -> Any:
+        self._event_sequence += 1
         return build_execution_event(
             event_type=event_type,
             run_id=self.run_id,
             workspace_id=self.workspace_id,
             user_id=self.user_id,
             session_id=self.session_id,
+            sequence=self._event_sequence,
             step=step,
             summary=summary,
         )
@@ -1005,14 +968,12 @@ __all__ = [
     "cancel_startup_status_task",
     "should_reload_docs_path",
     "enqueue_latest_nonblocking",
-    "cancelled_event_payload",
     "cancel_task",
     "handle_chat_disconnect",
     "build_workspace_task_request",
     "load_manifest_from_volume",
     "save_manifest_to_volume",
     "_manifest_path",
-    "_legacy_manifest_path",
     "_aget_daytona_session",
     "_persistent_storage_path",
     "_is_final_output",

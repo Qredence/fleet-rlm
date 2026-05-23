@@ -23,16 +23,16 @@ function deriveWsUrl(apiUrl: string, path: string): string {
 
 function normalizeExplicitWsUrl(wsUrl: string, path: string): string {
   const normalized = wsUrl.replace(/\/$/, "");
-  const defaultWsPath = /\/api\/v1\/ws\/(?:chat|execution(?:\/events)?)(?=\/?$|[?#])/;
-  if (!defaultWsPath.test(normalized)) return normalized;
+  const defaultWsPath = /\/api\/v1\/ws\/execution(?:\/events)?(?=\/?$|[?#])/;
+  if (!defaultWsPath.test(normalized)) return "";
   if (!/^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(normalized)) {
     return normalized.replace(defaultWsPath, path);
   }
 
   try {
     const url = new URL(normalized);
-    if (/\/api\/v1\/ws\/(?:chat|execution(?:\/events)?)$/.test(url.pathname)) {
-      url.pathname = url.pathname.replace(/\/api\/v1\/ws\/(?:chat|execution(?:\/events)?)$/, path);
+    if (/\/api\/v1\/ws\/execution(?:\/events)?$/.test(url.pathname)) {
+      url.pathname = url.pathname.replace(/\/api\/v1\/ws\/execution(?:\/events)?$/, path);
       return url.toString().replace(/\/$/, "");
     }
   } catch {
@@ -48,7 +48,8 @@ const mockMode = parseBool(import.meta.env.VITE_MOCK_MODE, false);
 
 function getActiveWsUrl(path: string) {
   if (explicitWsUrl) {
-    return normalizeExplicitWsUrl(explicitWsUrl, path);
+    const canonicalExplicitUrl = normalizeExplicitWsUrl(explicitWsUrl, path);
+    if (canonicalExplicitUrl) return canonicalExplicitUrl;
   }
   if (baseUrl) return deriveWsUrl(baseUrl, path);
 

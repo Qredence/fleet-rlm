@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.5.31
+  version: 0.5.40
 paths:
   /health:
     get:
@@ -39,7 +39,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/ReadyResponse'
         '503':
-          description: Readiness evaluation could not complete.
+          description: A critical runtime dependency is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
   /api/v1/auth/me:
     get:
       tags:
@@ -697,6 +701,19 @@ paths:
           default: 3
           title: Max Depth
         description: Maximum directory depth to traverse while building the file tree.
+      - name: max_entries
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          description: Maximum total node entries to return while building the file
+            tree.
+          default: 200
+          title: Max Entries
+        description: Maximum total node entries to return while building the file
+          tree.
       - name: provider
         in: query
         required: false
@@ -724,6 +741,9 @@ paths:
             incomplete.
         '400':
           description: The requested root path is invalid.
+        '403':
+          description: The requested root is outside the canonical runtime volume
+            roots.
         '502':
           description: The runtime volume provider failed to list the requested path.
         '504':
@@ -795,6 +815,9 @@ paths:
             incomplete.
         '400':
           description: The requested file path is invalid or points to a directory.
+        '403':
+          description: The requested file is outside the canonical runtime volume
+            roots.
         '404':
           description: The requested runtime volume file does not exist.
         '502':
@@ -1067,77 +1090,6 @@ paths:
           description: Run services are unavailable because server startup is incomplete.
         '404':
           description: Run not found.
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/memory:
-    get:
-      tags:
-      - memory
-      summary: List memory items
-      description: Return memory items filtered by scope and scope_id. Without filters,
-        returns all memory for the authenticated user.
-      operationId: list_memory_items_api_v1_memory_get
-      security:
-      - HTTPBearer: []
-      parameters:
-      - name: scope
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          description: Filter by memory scope (user, tenant, workspace, run, session).
-          title: Scope
-        description: Filter by memory scope (user, tenant, workspace, run, session).
-      - name: scope_id
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          description: Filter by scope identifier.
-          title: Scope Id
-        description: Filter by scope identifier.
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 200
-          minimum: 1
-          description: Page size
-          default: 100
-          title: Limit
-        description: Page size
-      - name: offset
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 0
-          description: Pagination offset
-          default: 0
-          title: Offset
-        description: Pagination offset
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MemoryListResponse'
-        '401':
-          description: Authentication is required or the provided token is invalid.
-        '503':
-          description: Memory services are unavailable because server startup is incomplete.
-        '400':
-          description: Invalid scope filter value.
         '422':
           description: Validation Error
           content:
@@ -1912,6 +1864,12 @@ components:
           type: array
           title: Required Dataset Keys
           description: Dataset keys required for this module's examples.
+        offline_only:
+          type: boolean
+          title: Offline Only
+          description: Whether this module can only be optimized through offline optimization
+            endpoints.
+          default: true
       type: object
       required:
       - slug
@@ -1968,6 +1926,7 @@ components:
           description: Fraction of examples to use for training (remainder used for
             validation).
           default: 0.8
+      additionalProperties: false
       type: object
       title: GEPAOptimizationRequest
       description: Request body for triggering a GEPA prompt optimization run.
@@ -2083,121 +2042,44 @@ components:
       title: GEPAStatusResponse
       description: Status payload for GEPA optimization availability.
     HTTPValidationError:
+      description: Canonical HTTP error envelope returned for request validation failures.
       properties:
+        code:
+          description: Stable machine-readable error code.
+          title: Code
+          type: string
+        message:
+          description: Human-readable non-secret error summary.
+          title: Message
+          type: string
         detail:
-          items:
-            $ref: '#/components/schemas/ValidationError'
-          type: array
+          anyOf:
+          - {}
+          - type: 'null'
+          default: null
+          description: Structured non-secret error details, when available.
           title: Detail
-          description: Structured list of request validation issues returned by FastAPI.
-      type: object
+      required:
+      - code
+      - message
       title: HTTPValidationError
+      type: object
     HealthResponse:
       properties:
-        ok:
-          type: boolean
-          title: Ok
-          description: Whether the service reports itself as healthy.
-          default: true
+        status:
+          type: string
+          const: live
+          title: Status
+          description: Unambiguous liveness state for this service.
+          default: live
         version:
           type: string
           title: Version
           description: Package version currently serving the API.
-          default: 0.5.31
+          default: 0.5.40
       type: object
       title: HealthResponse
       description: Response body for the lightweight health endpoint.
-    MemoryItemResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-          description: Durable memory item identifier.
-        scope:
-          type: string
-          title: Scope
-          description: Memory scope (e.g. user, tenant, workspace, run, session).
-        scope_id:
-          type: string
-          title: Scope Id
-          description: Identifier within the scope.
-        kind:
-          type: string
-          title: Kind
-          description: Memory kind (e.g. fact, observation, preference).
-        source:
-          type: string
-          title: Source
-          description: Memory source (e.g. user, agent, system).
-        status:
-          type: string
-          title: Status
-          description: Memory status (e.g. active, archived).
-        content_text:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Content Text
-          description: Textual content when available.
-        importance:
-          type: integer
-          title: Importance
-          description: Importance score (0-100).
-        tags:
-          items:
-            type: string
-          type: array
-          title: Tags
-          description: Associated tags.
-        created_at:
-          type: string
-          title: Created At
-          description: ISO-8601 creation timestamp.
-      type: object
-      required:
-      - id
-      - scope
-      - scope_id
-      - kind
-      - source
-      - status
-      - importance
-      - created_at
-      title: MemoryItemResponse
-      description: Single memory item returned by the memory browse endpoint.
-    MemoryListResponse:
-      properties:
-        items:
-          items:
-            $ref: '#/components/schemas/MemoryItemResponse'
-          type: array
-          title: Items
-          description: Memory item list items.
-        total:
-          type: integer
-          title: Total
-          description: Total matching memory items.
-        offset:
-          type: integer
-          title: Offset
-          description: Current pagination offset.
-        limit:
-          type: integer
-          title: Limit
-          description: Current page size.
-        has_more:
-          type: boolean
-          title: Has More
-          description: Whether more results exist beyond this page.
-      type: object
-      required:
-      - items
-      - total
-      - offset
-      - limit
-      - has_more
-      title: MemoryListResponse
-      description: Paginated memory item list response.
     OptimizationRunCreatedResponse:
       properties:
         run_id:
@@ -2344,10 +2226,6 @@ components:
           type: boolean
           title: Ready
           description: Whether critical startup dependencies are ready.
-        planner_configured:
-          type: boolean
-          title: Planner Configured
-          description: Whether a planner model is currently configured and available.
         planner:
           type: string
           enum:
@@ -2376,7 +2254,6 @@ components:
       type: object
       required:
       - ready
-      - planner_configured
       - planner
       - database
       - database_required
@@ -2859,7 +2736,7 @@ components:
             type: string
           type: object
           title: Env Vars
-          description: Environment variables configured for the sandbox.
+          description: Redacted environment variables configured for the sandbox.
         image:
           anyOf:
           - type: string
@@ -3018,7 +2895,7 @@ components:
           type: string
           title: Version
           description: Package version currently serving the API.
-          default: 0.5.31
+          default: 0.5.40
         app_env:
           type: string
           enum:
@@ -3161,6 +3038,7 @@ components:
           title: Module Slug
           description: Target GEPA module slug whose dataset keys determine the export
             column mapping.
+      additionalProperties: false
       type: object
       required:
       - module_slug
@@ -3258,6 +3136,7 @@ components:
           - type: 'null'
           title: Metadata Json
           description: New metadata dictionary to merge or replace session metadata.
+      additionalProperties: false
       type: object
       title: SessionPatchRequest
       description: Patch body for updating session metadata.
@@ -3406,6 +3285,7 @@ components:
           title: Expected Response
           description: Optional ground-truth response or correction to log alongside
             the feedback.
+      additionalProperties: false
       type: object
       required:
       - is_correct
@@ -3601,10 +3481,31 @@ components:
           type: integer
           title: Size
           description: File size in bytes reported by the provider.
+        sha256:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sha256
+          description: SHA-256 hex digest of the full file bytes before truncation.
+        encoding:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Encoding
+          description: 'Content encoding: ''utf-8'' for clean text, ''utf-8-lossy''
+            when replacement characters were introduced, or ''binary'' for non-text
+            files.'
         content:
           type: string
           title: Content
-          description: UTF-8 text preview returned for the requested file.
+          description: UTF-8 text preview returned for the requested file. Empty for
+            binary files.
+        binary:
+          type: boolean
+          title: Binary
+          description: True when the file was detected as binary; content will be
+            empty.
+          default: false
         truncated:
           type: boolean
           title: Truncated
@@ -3728,6 +3629,13 @@ components:
           type: string
           title: Root Path
           description: Normalized root path used for the listing request.
+        allowed_roots:
+          items:
+            type: string
+          type: array
+          title: Allowed Roots
+          description: Canonical volume roots that may be addressed by tree and file
+            requests.
         nodes:
           items:
             $ref: '#/components/schemas/VolumeTreeNode'
@@ -3750,14 +3658,52 @@ components:
           description: Whether the provider truncated the tree because of depth or
             payload limits.
           default: false
+        max_depth:
+          type: integer
+          title: Max Depth
+          description: Depth limit applied to the tree request.
+        max_entries:
+          type: integer
+          title: Max Entries
+          description: Entry limit applied to the tree request.
+        entries_returned:
+          type: integer
+          title: Entries Returned
+          description: Total node entries returned in this response.
       type: object
       required:
       - provider
       - volume_name
       - root_path
       - nodes
+      - max_depth
+      - max_entries
+      - entries_returned
       title: VolumeTreeResponse
       description: Response for the volume tree listing endpoint.
+    ApiErrorResponse:
+      description: Canonical HTTP error envelope returned by Fleet RLM API routes.
+      properties:
+        code:
+          description: Stable machine-readable error code.
+          title: Code
+          type: string
+        message:
+          description: Human-readable non-secret error summary.
+          title: Message
+          type: string
+        detail:
+          anyOf:
+          - {}
+          - type: 'null'
+          default: null
+          description: Structured non-secret error details, when available.
+          title: Detail
+      required:
+      - code
+      - message
+      title: ApiErrorResponse
+      type: object
   securitySchemes:
     HTTPBearer:
       type: http

@@ -1,379 +1,131 @@
-"""Unit tests for execution event models, emitter, and step builder."""
-
 from __future__ import annotations
 
 import asyncio
+import importlib
 
 import pytest
 
-from fleet_rlm.api.events.events import (
-    ExecutionEvent,
-    ExecutionEventEmitter,
-    ExecutionStepBuilder,
-    ExecutionSubscription,
-    sanitize_event_payload,
-)
 
-
-class _FakeWebSocket:
-    def __init__(self, *, fail_on_send: bool = False):
-        self.accepted = False
-        self.fail_on_send = fail_on_send
-        self.sent: list[dict] = []
+class DummyWebSocket:
+    def __init__(self) -> None:
+        self.accept_calls = 0
+        self.sent_payloads: list[dict[str, object]] = []
 
     async def accept(self) -> None:
-        self.accepted = True
+        self.accept_calls += 1
 
-    async def send_json(self, payload: dict) -> None:
-        if self.fail_on_send:
-            raise RuntimeError("send failed")
-        self.sent.append(payload)
-
-
-def test_sanitize_event_payload_redacts_and_truncates():
-    payload = {
-        "api_key": "abc123",
-        "nested": {
-            "token": "secret-value",
-            "text": "x" * 70000,
-        },
-    }
-
-    sanitized = sanitize_event_payload(payload)
-    assert sanitized["api_key"] == "<redacted>"
-    assert sanitized["nested"]["token"] == "<redacted>"
-    assert sanitized["nested"]["text"].endswith("...[truncated]")
-
-
-def test_sanitize_event_payload_honors_env_limits(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("WS_EXECUTION_MAX_TEXT_CHARS", "16")
-    monkeypatch.setenv("WS_EXECUTION_MAX_COLLECTION_ITEMS", "8")
-    monkeypatch.setenv("WS_EXECUTION_MAX_RECURSION_DEPTH", "2")
-
-    payload = {
-        "text": "abcdefghijklmnopqrstuvwxyz",
-        "nested": {"a": {"b": {"c": "too-deep"}}},
-    }
-    sanitized = sanitize_event_payload(payload)
-    assert sanitized["text"].endswith("...[truncated]")
-    assert sanitized["nested"]["a"] == "<max-depth>"
-
-
-def test_sanitize_event_payload_honors_collection_limit(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setenv("WS_EXECUTION_MAX_COLLECTION_ITEMS", "2")
-
-    sanitized = sanitize_event_payload([1, 2, 3, 4])
-    assert sanitized[-1] == "<truncated:2>"
-
-
-def test_sanitize_event_payload_invalid_env_uses_defaults(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setenv("WS_EXECUTION_MAX_TEXT_CHARS", "invalid")
-    monkeypatch.setenv("WS_EXECUTION_MAX_COLLECTION_ITEMS", "0")
-    monkeypatch.setenv("WS_EXECUTION_MAX_RECURSION_DEPTH", "-3")
-
-    payload = {"text": "x" * 70000}
-    sanitized = sanitize_event_payload(payload)
-    assert sanitized["text"].endswith("...[truncated]")
+    async def send_json(self, payload) -> None:
+        self.sent_payloads.append(payload)
 
 
 @pytest.mark.asyncio
-async def test_execution_event_emitter_filters_by_subscription():
-    emitter = ExecutionEventEmitter()
-    ws_match = _FakeWebSocket()
-    ws_other = _FakeWebSocket()
+async def test_execution_event_emitter_delivers_events_to_matching_subscribers():
+    events_module = importlib.import_module("fleet_rlm.api.events")
 
-    await emitter.connect(
-        ws_match,  # type: ignore[arg-type]
-        ExecutionSubscription(workspace_id="default", user_id="alice", session_id="session-1"),
+    emitter = events_module.ExecutionEventEmitter()
+    websocket = DummyWebSocket()
+    subscription = events_module.ExecutionSubscription(
+        workspace_id="workspace-a",
+        user_id="user-a",
+        session_id="session-a",
     )
-    await emitter.connect(
-        ws_other,  # type: ignore[arg-type]
-        ExecutionSubscription(workspace_id="default", user_id="bob", session_id="session-2"),
+    await emitter.connect(websocket, subscription)
+
+    event = events_module.ExecutionEvent(
+        type="execution_step",
+        run_id="run-1",
+        workspace_id="workspace-a",
+        user_id="user-a",
+        session_id="session-a",
+        sequence=1,
+        step=events_module.ExecutionStep(
+            id="step-1",
+            type="tool",
+            label="Search code",
+            timestamp=1.0,
+        ),
     )
 
-    event = ExecutionEvent(
-        type="execution_started",
-        run_id="default:alice:session-1:1",
-        workspace_id="default",
-        user_id="alice",
-        session_id="session-1",
-        step=None,
-    )
     await emitter.emit(event)
     await asyncio.sleep(0.01)
+    await emitter.disconnect(websocket)
 
-    assert ws_match.accepted is True
-    assert len(ws_match.sent) == 1
-    assert ws_other.accepted is True
-    assert ws_other.sent == []
-    await emitter.disconnect(ws_match)  # type: ignore[arg-type]
-    await emitter.disconnect(ws_other)  # type: ignore[arg-type]
-
-
-@pytest.mark.asyncio
-async def test_execution_event_emitter_requires_exact_session_match():
-    emitter = ExecutionEventEmitter()
-    ws_match = _FakeWebSocket()
-    ws_other = _FakeWebSocket()
-
-    await emitter.connect(
-        ws_match,  # type: ignore[arg-type]
-        ExecutionSubscription(workspace_id="default", user_id="alice", session_id="session-new"),
-    )
-    await emitter.connect(
-        ws_other,  # type: ignore[arg-type]
-        ExecutionSubscription(workspace_id="default", user_id="alice", session_id="session-other"),
-    )
-
-    await emitter.emit(
-        ExecutionEvent(
-            type="execution_started",
-            run_id="default:alice:session-new:1",
-            workspace_id="default",
-            user_id="alice",
-            session_id="session-new",
-            step=None,
-        )
-    )
-    await asyncio.sleep(0.01)
-
-    assert len(ws_match.sent) == 1
-    assert ws_other.sent == []
-    await emitter.disconnect(ws_match)  # type: ignore[arg-type]
-    await emitter.disconnect(ws_other)  # type: ignore[arg-type]
+    assert websocket.accept_calls == 1
+    assert len(websocket.sent_payloads) == 1
+    assert websocket.sent_payloads[0]["run_id"] == "run-1"
+    assert websocket.sent_payloads[0]["step"]["label"] == "Search code"
 
 
 @pytest.mark.asyncio
-async def test_execution_event_emitter_updates_subscription_for_existing_socket():
-    emitter = ExecutionEventEmitter()
-    ws = _FakeWebSocket()
+async def test_execution_event_emitter_filters_non_matching_subscriptions():
+    events_module = importlib.import_module("fleet_rlm.api.events")
 
+    emitter = events_module.ExecutionEventEmitter()
+    matching_websocket = DummyWebSocket()
+    other_websocket = DummyWebSocket()
     await emitter.connect(
-        ws,  # type: ignore[arg-type]
-        ExecutionSubscription(workspace_id="default", user_id="alice", session_id="session-a"),
-    )
-    await emitter.update_subscription(
-        ws,  # type: ignore[arg-type]
-        ExecutionSubscription(workspace_id="default", user_id="alice", session_id="session-b"),
-    )
-    await emitter.emit(
-        ExecutionEvent(
-            type="execution_started",
-            run_id="default:alice:session-a:1",
-            workspace_id="default",
-            user_id="alice",
+        matching_websocket,
+        events_module.ExecutionSubscription(
+            workspace_id="workspace-a",
+            user_id="user-a",
             session_id="session-a",
-            step=None,
-        )
+        ),
     )
-    await emitter.emit(
-        ExecutionEvent(
-            type="execution_started",
-            run_id="default:alice:session-b:1",
-            workspace_id="default",
-            user_id="alice",
-            session_id="session-b",
-            step=None,
-        )
-    )
-    await asyncio.sleep(0.01)
-
-    assert len(ws.sent) == 1
-    assert ws.sent[0]["session_id"] == "session-b"
-    await emitter.disconnect(ws)  # type: ignore[arg-type]
-
-
-@pytest.mark.asyncio
-async def test_execution_event_emitter_removes_stale_connections():
-    emitter = ExecutionEventEmitter()
-    ws_stale = _FakeWebSocket(fail_on_send=True)
-
     await emitter.connect(
-        ws_stale,  # type: ignore[arg-type]
-        ExecutionSubscription(workspace_id="default", user_id="alice", session_id="session-1"),
+        other_websocket,
+        events_module.ExecutionSubscription(
+            workspace_id="workspace-a",
+            user_id="user-a",
+            session_id="session-b",
+        ),
     )
-    await emitter.emit(
-        ExecutionEvent(
-            type="execution_started",
-            run_id="default:alice:session-1:1",
-            workspace_id="default",
-            user_id="alice",
-            session_id="session-1",
-            step=None,
-        )
+
+    event = events_module.ExecutionEvent(
+        type="execution_completed",
+        run_id="run-1",
+        workspace_id="workspace-a",
+        user_id="user-a",
+        session_id="session-a",
+        summary={"status": "ok"},
     )
+
+    await emitter.emit(event)
     await asyncio.sleep(0.01)
+    await emitter.disconnect(matching_websocket)
+    await emitter.disconnect(other_websocket)
 
-    assert ws_stale not in emitter._connections
-
-
-def test_execution_step_builder_builds_deterministic_ids_and_parents():
-    builder = ExecutionStepBuilder(run_id="run-1")
-    call_step = builder.from_stream_event(
-        kind="tool_call",
-        text="tool call: memory_write",
-        payload={"tool_name": "memory_write"},
-        timestamp=1.0,
-    )
-    result_step = builder.from_stream_event(
-        kind="tool_result",
-        text="tool result: finished",
-        payload={"tool_name": "memory_write"},
-        timestamp=2.0,
-    )
-
-    assert call_step is not None
-    assert call_step.id == "run-1:s1"
-    assert call_step.type == "memory"
-    assert call_step.actor_kind == "root_rlm"
-    assert call_step.depth == 0
-    assert result_step is not None
-    assert result_step.id == "run-1:s2"
-    assert result_step.parent_id == call_step.id
+    assert len(matching_websocket.sent_payloads) == 1
+    assert other_websocket.sent_payloads == []
 
 
-def test_execution_step_builder_converts_text_chunks_to_transient_llm_steps():
-    builder = ExecutionStepBuilder(run_id="run-1")
+def test_sanitize_event_payload_redacts_sensitive_values_and_truncates(monkeypatch):
+    sanitizer_module = importlib.import_module("fleet_rlm.api.events.sanitizer")
 
-    step = builder.from_stream_event(kind="text", text="hello", payload={}, timestamp=1.0)
+    monkeypatch.setattr(sanitizer_module, "_max_text_chars", lambda: 5)
+    monkeypatch.setattr(sanitizer_module, "_max_collection_items", lambda: 10)
+    monkeypatch.setattr(sanitizer_module, "_max_recursion_depth", lambda: 4)
 
-    assert step is not None
-    assert step.type == "llm"
-    assert step.label == "assistant_token"
-    assert step.output == {"text": "hello"}
+    payload = {
+        "token": "super-secret-token",
+        "nested": {"password": "hidden", "text": "abcdefg"},
+        "blob": b"abc",
+    }
 
+    sanitized = sanitizer_module.sanitize_event_payload(payload)
+    truncated_items = sanitizer_module.sanitize_event_payload([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
 
-def test_execution_step_builder_annotates_delegate_actor_metadata():
-    builder = ExecutionStepBuilder(run_id="run-actor")
-
-    step = builder.from_stream_event(
-        kind="tool_call",
-        text="Calling tool: read_file_slice",
-        payload={
-            "tool_name": "read_file_slice",
-            "delegate_depth": 2,
-            "delegate_id": "delegate-42",
-        },
-        timestamp=3.0,
-    )
-
-    assert step is not None
-    assert step.actor_kind == "delegate"
-    assert step.depth == 2
-    assert step.actor_id == "delegate-42"
-    assert step.lane_key == "delegate:delegate-42"
+    assert sanitized["token"] == "<redacted>"
+    assert sanitized["nested"]["password"] == "<redacted>"
+    assert sanitized["nested"]["text"] == "abcde...[truncated]"
+    assert sanitized["blob"] == "<bytes:3>"
+    assert truncated_items[-1] == "<truncated:1>"
 
 
-def test_execution_step_builder_reads_actor_hints_from_step_data():
-    builder = ExecutionStepBuilder(run_id="run-actor-step-data")
+def test_summarize_code_for_event_returns_stable_preview(monkeypatch):
+    sanitizer_module = importlib.import_module("fleet_rlm.api.events.sanitizer")
 
-    step = builder.from_stream_event(
-        kind="tool_call",
-        text="Calling tool: read_file_slice",
-        payload={
-            "tool_name": "read_file_slice",
-            "step_data": {
-                "delegate_depth": 3,
-                "delegate_id": "delegate-step-data",
-            },
-        },
-        timestamp=3.0,
-    )
+    monkeypatch.setattr(sanitizer_module, "_max_text_chars", lambda: 12)
+    summary = sanitizer_module.summarize_code_for_event("print(  'hello'  )\n")
 
-    assert step is not None
-    assert step.actor_kind == "delegate"
-    assert step.depth == 3
-    assert step.actor_id == "delegate-step-data"
-    assert step.lane_key == "delegate:delegate-step-data"
-
-
-def test_execution_step_builder_reads_nested_runtime_envelope():
-    builder = ExecutionStepBuilder(run_id="run-runtime-envelope")
-
-    step = builder.from_stream_event(
-        kind="tool_call",
-        text="Calling tool: grounded_answer",
-        payload={
-            "tool_name": "grounded_answer",
-            "runtime": {
-                "depth": 2,
-                "execution_profile": "RLM_DELEGATE",
-                "provider_session_active": True,
-            },
-            "step_data": {
-                "runtime": {
-                    "delegate_id": "delegate-runtime",
-                }
-            },
-        },
-        timestamp=4.0,
-    )
-
-    assert step is not None
-    assert step.actor_kind == "delegate"
-    assert step.depth == 2
-    assert step.actor_id == "delegate-runtime"
-
-
-def test_execution_step_builder_links_repl_start_and_complete():
-    builder = ExecutionStepBuilder(run_id="run-2")
-    repl_start = builder.from_interpreter_hook(
-        {
-            "phase": "start",
-            "timestamp": 10.0,
-            "execution_profile": "RLM_DELEGATE",
-            "code_hash": "abc123",
-            "code_preview": "print('hi')",
-        }
-    )
-    repl_done = builder.from_interpreter_hook(
-        {
-            "phase": "complete",
-            "timestamp": 11.0,
-            "execution_profile": "RLM_DELEGATE",
-            "code_hash": "abc123",
-            "success": True,
-            "result_kind": "final_output",
-        }
-    )
-
-    assert repl_start is not None
-    assert repl_done is not None
-    assert repl_start.type == "repl"
-    assert repl_done.type == "repl"
-    assert repl_done.parent_id == repl_start.id
-
-
-def test_execution_step_builder_keeps_repl_progress_under_parent():
-    builder = ExecutionStepBuilder(run_id="run-3")
-    repl_start = builder.from_interpreter_hook(
-        {
-            "phase": "start",
-            "timestamp": 20.0,
-            "execution_profile": "RLM_DELEGATE",
-            "code_hash": "durable-write",
-            "code_preview": "sandbox.fs.upload_file",
-        }
-    )
-    progress = builder.from_interpreter_hook(
-        {
-            "phase": "progress",
-            "timestamp": 20.5,
-            "execution_profile": "durable_write",
-            "code_hash": "durable-write",
-            "code_preview": "sandbox.fs.upload_file",
-            "event_kind": "durable_write_completed",
-            "path": "/workspace/out.txt",
-            "bytes_total": 12,
-            "bytes_written": 12,
-        }
-    )
-
-    assert repl_start is not None
-    assert progress is not None
-    assert progress.parent_id == repl_start.id
-    assert progress.label == "durable_write_completed: /workspace/out.txt"
+    assert summary["code_hash"]
+    assert summary["code_preview"] == "print( 'hell...[truncated]"

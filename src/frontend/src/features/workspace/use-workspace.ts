@@ -30,7 +30,6 @@ export type {
   ChatSubmitOptions,
   ChatTaskItem,
   ChatTraceStep,
-  CompatBackfillInfo,
   ContextSourceSummary,
   Conversation,
   CreationPhase,

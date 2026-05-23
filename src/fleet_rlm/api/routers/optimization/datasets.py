@@ -225,18 +225,23 @@ async def upload_dataset(
         raise HTTPException(status_code=400, detail="Dataset is empty.")
     object_rows = _require_object_rows(rows)
 
-    # Validate first row keys against module requirements if module_slug given
+    # Validate ALL rows against module requirements if module_slug given.
+    # No file or dataset record is written when any row fails validation.
     if module_slug:
         spec = module_registry.get_module_spec(module_slug)
         if spec is None:
             raise HTTPException(status_code=400, detail=f"Unknown module slug: {module_slug!r}")
-        first_keys = set(object_rows[0].keys())
-        missing = set(spec.required_dataset_keys) - first_keys
-        if missing:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Dataset is missing required keys for module '{module_slug}': {sorted(missing)}",
-            )
+        required_keys = set(spec.required_dataset_keys)
+        for row_index, row in enumerate(object_rows):
+            missing = required_keys - row.keys()
+            if missing:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Dataset row {row_index} is missing required keys for module "
+                        f"'{module_slug}': {sorted(missing)}"
+                    ),
+                )
 
     # Save file to dataset root
     ds_root = Path(os.environ.get("FLEET_RLM_DATASET_ROOT", OPTIMIZATION_DATA_ROOT)).resolve()

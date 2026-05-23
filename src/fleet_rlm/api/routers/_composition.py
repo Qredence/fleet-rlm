@@ -21,7 +21,6 @@ def build_api_router() -> APIRouter:
     from . import (
         auth,
         info,
-        memory,
         optimization,
         runs,
         runtime,
@@ -41,7 +40,6 @@ def build_api_router() -> APIRouter:
         runtime.router,
         sandboxes.router,
         runs.router,
-        memory.router,
         optimization.router,
         traces.router,
     ):

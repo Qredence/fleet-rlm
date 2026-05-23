@@ -102,6 +102,8 @@ class ExecutionEvent(BaseModel):
     workspace_id: str
     user_id: str
     session_id: str
+    sequence: int = 0
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     step: ExecutionStep | None = None
     summary: dict[str, Any] | None = None
 

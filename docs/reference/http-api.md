@@ -12,7 +12,6 @@ This reference documents the REST and WebSocket API surface exposed by `src/flee
 | Sessions | `/api/v1/sessions` | Session history, turns, stats, export, restore |
 | Sandboxes | `/api/v1/sandboxes` | Daytona sandbox management |
 | Runs | `/api/v1/runs` | Execution run steps |
-| Memory | `/api/v1/memory` | Memory item browsing |
 | Optimization | `/api/v1/optimization` | GEPA optimization, datasets, runs |
 | Traces | `/api/v1/traces` | MLflow trace feedback |
 | WebSocket | `/api/v1/ws` | Real-time chat and execution streams |
@@ -43,7 +42,7 @@ Basic liveness check.
 ```json
 {
   "ok": true,
-  "version": "0.5.31"
+  "version": "0.5.40"
 }
 ```
 
@@ -736,45 +735,6 @@ Paginated execution trace steps for a run with step_type, tool_name, tokens, and
 
 ---
 
-## Memory Endpoints
-
-### `GET /api/v1/memory`
-
-Return memory items filtered by scope and scope_id. Without filters, returns all memory for the authenticated user.
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `scope` | string | no | `null` | Filter by memory scope (`user`, `tenant`, `workspace`, `run`, `session`) |
-| `scope_id` | string | no | `null` | Filter by scope identifier |
-| `limit` | integer | no | `100` | Page size (1-200) |
-
-**Response:**
-
-```json
-{
-  "items": [
-    {
-      "id": "memory-uuid",
-      "scope": "session",
-      "scope_id": "session-123",
-      "kind": "fact",
-      "source": "agent",
-      "status": "active",
-      "content_text": "User prefers concise answers.",
-      "importance": 80,
-      "tags": ["preference"],
-      "created_at": "2026-03-09T12:00:00Z"
-    }
-  ],
-  "total": 1,
-  "limit": 100
-}
-```
-
----
-
 ## Traces Endpoints
 
 ### `POST /api/v1/traces/feedback`
@@ -1236,6 +1196,8 @@ The following endpoints have been removed from the API:
 | `/api/v1/auth/logout` | Removed | Not applicable for token-based auth |
 | `/api/v1/tasks*` | Removed | Task management discontinued |
 | `/api/v1/taxonomy*` | Removed | Taxonomy feature discontinued |
+| `/api/v1/skills*` | Removed | Skills feature discontinued |
+| `/api/v1/memory*` | Removed | Memory browsing is retired from the canonical API surface |
 | `/api/v1/analytics*` | Removed | Use MLflow traces instead |
 | `/api/v1/search` | Removed | Search feature discontinued |
 

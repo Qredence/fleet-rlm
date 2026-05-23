@@ -1,13 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-
-vi.mock("@/lib/telemetry/client", () => ({
-  telemetryClient: {
-    capture: vi.fn(),
-  },
-}));
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { useRunWorkbenchStore } from "@/lib/workspace/run-workbench-store";
-import { telemetryClient } from "@/lib/telemetry/client";
+import type { WsServerMessage } from "@/lib/rlm-api";
 
 function resetWorkbenchStore() {
   useRunWorkbenchStore.setState({
@@ -31,15 +25,12 @@ function resetWorkbenchStore() {
     summary: undefined,
     errorMessage: null,
     lastFrame: null,
-    compatBackfillCount: 0,
-    lastCompatBackfill: null,
   });
 }
 
 describe("useRunWorkbenchStore", () => {
   beforeEach(() => {
     resetWorkbenchStore();
-    vi.clearAllMocks();
   });
 
   it("clears a stale error banner when a new Daytona run begins", () => {
@@ -90,7 +81,7 @@ describe("useRunWorkbenchStore", () => {
     expect(state.activity).toEqual([]);
   });
 
-  it("tracks telemetry when terminal chat frames backfill only summary and final artifact", () => {
+  it("ignores removed terminal chat compatibility frames", () => {
     useRunWorkbenchStore.getState().beginRun({
       task: "Inspect the repo",
     });
@@ -98,7 +89,7 @@ describe("useRunWorkbenchStore", () => {
     useRunWorkbenchStore.getState().applyFrame({
       type: "event",
       data: {
-        kind: "final",
+        kind: "done",
         text: "Done",
         event_id: "evt-compat-final",
         payload: {
@@ -126,30 +117,11 @@ describe("useRunWorkbenchStore", () => {
           },
         },
       },
-    });
+    } as unknown as WsServerMessage);
 
     const state = useRunWorkbenchStore.getState();
-    expect(state.finalArtifact?.value).toMatchObject({
-      summary: "Compatibility summary",
-    });
-    expect(state.summary?.warnings).toEqual(["late execution summary"]);
-    expect(state.summary?.mlflowTraceId).toBe("trace-123");
-    expect(state.summary?.mlflowClientRequestId).toBe("chat-123");
+    expect(state.finalArtifact).toBeNull();
+    expect(state.summary).toBeUndefined();
     expect(state.iterations).toEqual([]);
-    expect(state.compatBackfillCount).toBe(1);
-    expect(state.lastCompatBackfill).toMatchObject({
-      eventId: "evt-compat-final",
-      runtimeMode: "daytona_pilot",
-      usedSummary: true,
-      usedFinalArtifact: true,
-    });
-    expect(telemetryClient.capture).toHaveBeenCalledWith(
-      "run_workbench_chat_final_backfill_used",
-      expect.objectContaining({
-        runtime_mode: "daytona_pilot",
-        used_summary: true,
-        used_final_artifact: true,
-      }),
-    );
   });
 });

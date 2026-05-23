@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from fleet_rlm.integrations.daytona import config as _daytona_config
 from fleet_rlm.integrations.daytona import runtime as _daytona_runtime
 from fleet_rlm.integrations.daytona.async_compat import _run_sync_in_thread
+from fleet_rlm.integrations.observability.sanitization import redact_sensitive
 from fleet_rlm.utils.sandbox_ownership import (
     SANDBOX_OWNER_LABEL,
     sandbox_has_owner_label,
@@ -274,7 +275,22 @@ def _sandbox_volume_mounts(sandbox: Any) -> tuple[Any, list[dict[str, Any]]]:
 
 def _sandbox_env_vars(sandbox: Any) -> dict[str, Any]:
     env_vars = getattr(sandbox, "env", None) or {}
-    return env_vars if isinstance(env_vars, dict) else {}
+    if not isinstance(env_vars, dict):
+        return {}
+    redacted: dict[str, str] = {}
+    for key, value in env_vars.items():
+        key_str = str(key)
+        value_str = str(value)
+        if _looks_sensitive_env_key(key_str):
+            redacted[key_str] = "<redacted>"
+        else:
+            redacted[key_str] = redact_sensitive(value_str)
+    return redacted
+
+
+def _looks_sensitive_env_key(key: str) -> bool:
+    lowered = key.strip().lower()
+    return any(token in lowered for token in ("key", "token", "secret", "password", "credential", "authorization"))
 
 
 def _sandbox_image_name(sandbox: Any) -> str | None:

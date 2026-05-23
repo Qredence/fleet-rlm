@@ -119,6 +119,7 @@ export function OptimizationForm({
   const lastHydratedDraftVersionRef = useRef<number | null>(null);
   const lastResolvedDraftVersionRef = useRef<number | null>(null);
   const queryClient = useQueryClient();
+  const canQueryOptimizationApi = typeof window !== "undefined";
 
   useEffect(() => {
     mountedRef.current = true;
@@ -131,17 +132,20 @@ export function OptimizationForm({
   const statusQuery = useQuery({
     queryKey: optimizationKeys.status(),
     queryFn: ({ signal }) => optimizationEndpoints.status(signal),
+    enabled: canQueryOptimizationApi,
     staleTime: 30_000,
   });
 
   const modulesQuery = useQuery({
     queryKey: optimizationKeys.modules(),
     queryFn: ({ signal }) => optimizationEndpoints.modules(signal),
+    enabled: canQueryOptimizationApi,
     staleTime: 60_000,
   });
   const datasetsQuery = useQuery({
     queryKey: [...optimizationKeys.datasets(), "list", { limit: 100 }],
     queryFn: ({ signal }) => datasetEndpoints.list({ limit: 100 }, signal),
+    enabled: canQueryOptimizationApi,
     staleTime: 60_000,
   });
 

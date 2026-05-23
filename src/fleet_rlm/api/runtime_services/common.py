@@ -18,7 +18,7 @@ VOLUME_OPERATION_TIMEOUT_SECONDS = 30
 _BlockingResultT = TypeVar("_BlockingResultT")
 
 
-def sanitize_error(exc: Exception) -> str:
+def sanitize_error(exc: BaseException) -> str:
     message = str(exc)
     sensitive_values = [
         os.environ.get("DSPY_LLM_API_KEY"),

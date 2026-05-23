@@ -92,7 +92,7 @@ export function VolumesBrowser() {
     [filesystem],
   );
 
-  const isDegraded = filesystemDataSource === "fallback";
+  const isDegraded = Boolean(filesystemDegradedReason);
 
   const headerChildren = (
     <div className={cn(isMobile && "px-4")}>
@@ -217,7 +217,7 @@ export function VolumesBrowser() {
       <div className="shrink-0 border-t border-border-subtle px-4 py-3 md:px-6">
         <span className="text-muted-foreground typo-helper">
           {providerLabel} · {fsStats.volumes} volumes · {fsStats.totalFiles} files
-          {filesystemDataSource !== "mock" && filesystemDataSource !== "fallback" ? " · Live" : ""}
+          {filesystemDataSource !== "mock" ? " · Live" : ""}
         </span>
       </div>
     </div>

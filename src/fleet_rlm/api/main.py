@@ -19,6 +19,7 @@ from .bootstrap import (
 )
 from .config import ServerRuntimeConfig
 from .docs import mount_scalar_docs
+from .errors import add_exception_handlers
 from .middleware import add_middlewares
 from .openapi import annotate_validation_error_schemas
 from .routers import health
@@ -63,6 +64,7 @@ def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     )
     annotate_validation_error_schemas(app)
 
+    add_exception_handlers(app)
     add_middlewares(app, cfg)
     _register_api_routes(app)
 

@@ -10,6 +10,6 @@ export function useServiceInfo(options?: { enabled?: boolean }) {
     queryFn: ({ signal }) => infoEndpoints.get(signal),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
-    enabled: options?.enabled ?? true,
+    enabled: typeof window !== "undefined" && (options?.enabled ?? true),
   });
 }

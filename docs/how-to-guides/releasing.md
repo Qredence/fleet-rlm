@@ -11,7 +11,7 @@ Use the GitHub Actions workflow for a fully automated release:
 1. Go to **Actions** → **Release to PyPI** in the GitHub repository
 2. Click **Run workflow**
 3. Finalize the `CHANGELOG.md` section for the version you are shipping
-4. Enter the version number (for this release, `0.5.31` or `v0.5.31`)
+4. Enter the version number (for this release, `0.5.40` or `v0.5.40`)
 5. Approve the TestPyPI environment deployment
 6. Once smoke tests pass, approve the PyPI environment deployment
 
@@ -115,8 +115,8 @@ make release-artifacts
 
 Expected outputs:
 
-- `dist/fleet_rlm-0.5.31.tar.gz`
-- `dist/fleet_rlm-0.5.31-py3-none-any.whl`
+- `dist/fleet_rlm-0.5.40.tar.gz`
+- `dist/fleet_rlm-0.5.40-py3-none-any.whl`
 
 ## 3) Upload to TestPyPI
 
@@ -143,7 +143,7 @@ uv venv .venv-release-smoke
 uv pip install --python .venv-release-smoke/bin/python \
   --index-url https://test.pypi.org/simple/ \
   --extra-index-url https://pypi.org/simple \
-  fleet-rlm==0.5.31
+  fleet-rlm==0.5.40
 source .venv-release-smoke/bin/activate
 python -m uvicorn fleet_rlm.api.main:app --host 127.0.0.1 --port 8765 >/tmp/fleet-release-smoke.log 2>&1 &
 SERVER_PID=$!
@@ -187,8 +187,8 @@ Finalize `CHANGELOG.md` and any docs release-notes page before tagging or runnin
 
 ```bash
 # from repo root
-git tag v0.5.31
-git push origin v0.5.31
+git tag v0.5.40
+git push origin v0.5.40
 ```
 
 ## Important rules

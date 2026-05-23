@@ -89,14 +89,18 @@ export function ModulesTab({
 }: {
   onPrepareRun?: (draft: OptimizationRunDraft) => void;
 }) {
+  const canQueryOptimizationApi = typeof window !== "undefined";
+
   const modulesQuery = useQuery({
     queryKey: optimizationKeys.modules(),
     queryFn: ({ signal }) => optimizationEndpoints.modules(signal),
+    enabled: canQueryOptimizationApi,
     staleTime: 60_000,
   });
   const datasetsQuery = useQuery({
     queryKey: [...optimizationKeys.datasets(), "list", { limit: 100 }],
     queryFn: ({ signal }) => datasetEndpoints.list({ limit: 100 }, signal),
+    enabled: canQueryOptimizationApi,
     staleTime: 60_000,
   });
 

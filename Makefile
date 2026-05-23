@@ -1,5 +1,6 @@
 PYTHON_SOURCES = src tests
-PYTEST_FAST_MARKERS = not live_llm and not benchmark
+PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db
+PYTEST := uv run --no-sync pytest
 
 .PHONY: \
 	help \
@@ -84,15 +85,19 @@ typecheck:
 	uv run ty check src
 
 test:
-	uv run pytest -q -m "$(PYTEST_FAST_MARKERS)"
+	$(PYTEST) -q -n auto tests/unit tests/contracts -m "$(PYTEST_FAST_MARKERS)"
+	$(PYTEST) -q tests/integration -m "$(PYTEST_FAST_MARKERS)" -n 0
 
 test-fast: test
 
 test-unit:
-	uv run pytest -q tests/unit -m "$(PYTEST_FAST_MARKERS)"
+	$(PYTEST) -q -n auto tests/unit -m "$(PYTEST_FAST_MARKERS)"
 
 test-integration:
-	uv run pytest -q tests/integration tests/e2e -m "$(PYTEST_FAST_MARKERS)"
+	$(PYTEST) -q tests/integration tests/contracts -m "$(PYTEST_FAST_MARKERS)" -n 0
+
+test-db:
+	$(PYTEST) -q -m "db" -n 0
 
 test-e2e:
 	@if [ -f src/frontend/package.json ]; then \

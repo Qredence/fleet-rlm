@@ -18,7 +18,6 @@ Implementation-facing contracts, interfaces, and current-state facts.
 - [Database Architecture](database.md)
 - [Sandbox API](sandbox-api.md)
 - [Runs API](runs-api.md)
-- [Memory API](retired/memory-api.md) — Retired product surface
 - [Sandbox File System](sandbox-fs.md)
 - [Daytona Runtime Architecture](daytona-runtime-architecture.md)
 

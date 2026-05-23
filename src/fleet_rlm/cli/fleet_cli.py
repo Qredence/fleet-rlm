@@ -107,14 +107,17 @@ def chat(
         resolved_trace_mode: TraceMode = cast(TraceMode, trace_mode)
     else:
         resolved_trace_mode = "verbose" if trace else "compact"
-    run_terminal_chat(
-        config=config,
-        options=TerminalChatOptions(
-            docs_path=docs_path,
-            trace_mode=resolved_trace_mode,
-            volume_name=volume_name,
-        ),
-    )
+    try:
+        run_terminal_chat(
+            config=config,
+            options=TerminalChatOptions(
+                docs_path=docs_path,
+                trace_mode=resolved_trace_mode,
+                volume_name=volume_name,
+            ),
+        )
+    except Exception as exc:
+        _handle_error(exc)
 
 
 @app.command("daytona-smoke")

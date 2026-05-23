@@ -63,6 +63,7 @@ SETTINGS_WRITE_RESPONSES: OpenAPIResponses = {
 VOLUME_TREE_RESPONSES: OpenAPIResponses = {
     **AUTH_ERROR_RESPONSES,
     400: {"description": "The requested root path is invalid."},
+    403: {"description": "The requested root is outside the canonical runtime volume roots."},
     502: {"description": "The runtime volume provider failed to list the requested path."},
     504: {"description": "Volume listing timed out before the backend returned a result."},
 }
@@ -70,6 +71,7 @@ VOLUME_TREE_RESPONSES: OpenAPIResponses = {
 VOLUME_FILE_RESPONSES: OpenAPIResponses = {
     **AUTH_ERROR_RESPONSES,
     400: {"description": "The requested file path is invalid or points to a directory."},
+    403: {"description": "The requested file is outside the canonical runtime volume roots."},
     404: {"description": "The requested runtime volume file does not exist."},
     502: {"description": "The runtime volume provider failed to read the requested file."},
     504: {"description": "Volume file reading timed out before the backend returned a result."},
@@ -202,6 +204,14 @@ async def get_volume_tree(
             description="Maximum directory depth to traverse while building the file tree.",
         ),
     ] = 3,
+    max_entries: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=1000,
+            description="Maximum total node entries to return while building the file tree.",
+        ),
+    ] = 200,
     provider: Annotated[
         VolumeProvider | None,
         Query(description="Optional runtime volume backend override. Defaults to the active sandbox provider."),
@@ -214,6 +224,7 @@ async def get_volume_tree(
         provider=provider,
         root_path=root_path,
         max_depth=max_depth,
+        max_entries=max_entries,
     )
 
 

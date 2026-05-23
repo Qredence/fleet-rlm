@@ -39,7 +39,6 @@ from ...runtime_services.chat_persistence import (
     ExecutionLifecycleManager,
     build_local_persist_fn,
     build_workspace_task_request,
-    cancelled_event_payload,
     classify_stream_failure,
     enqueue_latest_nonblocking,
     get_execution_emitter,
@@ -1000,7 +999,13 @@ async def _handle_idle_non_turn_message(
 ) -> bool:
     if msg.type == "cancel":
         session.cancel_flag["cancelled"] = True
-        await _try_send_json(websocket, cancelled_event_payload())
+        await _try_send_json(
+            websocket,
+            _error_envelope(
+                code="no_active_run",
+                message="No active websocket run is available to cancel.",
+            ),
+        )
         return True
 
     if msg.type == "command":

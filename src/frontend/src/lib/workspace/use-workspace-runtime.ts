@@ -21,16 +21,15 @@ import type {
 
 function isTerminalFrame(frame: WsServerMessage): boolean {
   if (frame.type === "error") return true;
-  return (
-    frame.data.kind === "final" ||
-    frame.data.kind === "done" ||
-    frame.data.kind === "cancelled" ||
-    frame.data.kind === "error"
-  );
+  return frame.data.kind === "execution_completed";
 }
 
 function isErrorFrame(frame: WsServerMessage): boolean {
-  return frame.type === "error" || frame.data.kind === "error";
+  if (frame.type === "error") return true;
+  const payload = asRecord(frame.data.payload);
+  const summary = asRecord(payload?.run_summary ?? payload?.runSummary ?? payload?.summary);
+  const status = String(summary?.status ?? payload?.status ?? "").toLowerCase();
+  return frame.data.kind === "execution_completed" && ["failed", "error"].includes(status);
 }
 
 let localMessageSequence = 0;

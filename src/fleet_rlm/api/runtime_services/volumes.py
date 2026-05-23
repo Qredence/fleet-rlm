@@ -31,13 +31,16 @@ from ..schemas.volumes import (
 from .common import VOLUME_OPERATION_TIMEOUT_SECONDS, run_blocking
 
 VolumeOperation = Callable[[str, str, int], dict[str, Any] | Awaitable[dict[str, Any]]]
+VolumeTreeOperation = Callable[[str, str, int, int], dict[str, Any] | Awaitable[dict[str, Any]]]
+
+CANONICAL_VOLUME_ROOTS: tuple[str, ...] = ("/memory", "/artifacts", "/buffers", "/meta")
 
 
 @dataclass(frozen=True)
 class _ResolvedVolumeBackend:
     provider: VolumeProvider
     volume_name: str
-    list_tree: VolumeOperation
+    list_tree: VolumeTreeOperation
     read_file_text: VolumeOperation
 
 
@@ -54,21 +57,49 @@ def resolve_volume_provider(
     return provider or "daytona"
 
 
+def _reject_url_encoded_traversal(path: str, *, detail: str) -> None:
+    """Raise HTTPException 400 when *path* contains URL-encoded traversal sequences."""
+    lowered = path.lower()
+    if "%2e%2e" in lowered or "%2f" in lowered or "%5c" in lowered:
+        raise HTTPException(status_code=400, detail=detail)
+
+
 def normalize_volume_file_path(path: str) -> str:
     """Normalize a requested file path and reject traversal attempts."""
+    _reject_url_encoded_traversal(path, detail="Invalid file path.")
     normalized_path = path if path.startswith("/") else f"/{path}"
     if ".." in PurePosixPath(normalized_path).parts:
         raise HTTPException(status_code=400, detail="Invalid file path.")
+    _ensure_allowed_volume_path(
+        normalized_path, allow_root=False, error_detail="File path must be under a canonical volume root."
+    )
     return normalized_path
 
 
 def normalize_volume_tree_path(root_path: str) -> str:
     """Normalize a requested root path and reject traversal attempts."""
+    _reject_url_encoded_traversal(root_path, detail="Invalid root path.")
     normalized_path = root_path if root_path.startswith("/") else f"/{root_path}"
     normalized_path = normalized_path.rstrip("/") or "/"
     if ".." in PurePosixPath(normalized_path).parts:
         raise HTTPException(status_code=400, detail="Invalid root path.")
+    _ensure_allowed_volume_path(
+        normalized_path,
+        allow_root=True,
+        error_detail="Root path must be / or under a canonical volume root.",
+    )
     return normalized_path
+
+
+def _ensure_allowed_volume_path(path: str, *, allow_root: bool, error_detail: str) -> None:
+    """Reject unknown roots, host paths, and deleted compatibility aliases."""
+    pure_path = PurePosixPath(path)
+    if allow_root and pure_path == PurePosixPath("/"):
+        return
+    parts = pure_path.parts
+    root = f"/{parts[1]}" if len(parts) > 1 else str(pure_path)
+    if root not in CANONICAL_VOLUME_ROOTS:
+        raise HTTPException(status_code=403, detail=error_detail)
 
 
 def normalize_volume_timestamp(value: Any) -> str | None:
@@ -93,6 +124,8 @@ def raise_volume_file_error(exc: Exception) -> NoReturn:
         raise HTTPException(status_code=404, detail="File not found.") from exc
     if "directory" in message:
         raise HTTPException(status_code=400, detail="Path must point to a file.") from exc
+    if "outside canonical roots" in message:
+        raise HTTPException(status_code=403, detail="File path is outside the canonical volume roots.") from exc
     raise HTTPException(status_code=502, detail=f"Volume file read failed: {exc}") from exc
 
 
@@ -142,6 +175,33 @@ async def _run_volume_operation(
         raise HTTPException(status_code=502, detail=f"{error_prefix}: {exc}") from exc
 
 
+async def _run_volume_tree_operation(
+    *,
+    operation: VolumeTreeOperation,
+    volume_name: str,
+    path: str,
+    max_depth: int,
+    max_entries: int,
+) -> dict[str, Any]:
+    try:
+        result = operation(volume_name, path, max_depth, max_entries)
+        if inspect.isawaitable(result):
+            return await asyncio.wait_for(result, timeout=VOLUME_OPERATION_TIMEOUT_SECONDS)
+        sync_operation = cast(Callable[[str, str, int, int], dict[str, Any]], operation)
+        return await run_blocking(
+            sync_operation,
+            volume_name,
+            path,
+            max_depth,
+            max_entries,
+            timeout=VOLUME_OPERATION_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="Volume listing timed out.") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Volume listing failed: {exc}") from exc
+
+
 async def load_volume_tree(
     *,
     config_deps: ConfigDeps,
@@ -149,17 +209,17 @@ async def load_volume_tree(
     provider: VolumeProvider | None,
     root_path: str,
     max_depth: int,
+    max_entries: int,
 ) -> VolumeTreeResponse:
     """Load a normalized runtime volume tree for the selected provider."""
     normalized_root_path = normalize_volume_tree_path(root_path)
     backend = _resolve_volume_backend(config_deps=config_deps, identity=identity, provider=provider)
-    result = await _run_volume_operation(
+    result = await _run_volume_tree_operation(
         operation=backend.list_tree,
         volume_name=backend.volume_name,
         path=normalized_root_path,
-        limit=max_depth,
-        timeout_detail="Volume listing timed out.",
-        error_prefix="Volume listing failed",
+        max_depth=max_depth,
+        max_entries=max_entries,
     )
     return VolumeTreeResponse(provider=backend.provider, **result)
 

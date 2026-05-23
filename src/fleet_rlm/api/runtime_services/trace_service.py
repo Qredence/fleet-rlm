@@ -170,13 +170,15 @@ class TraceService:
                 },
             )
         except Exception as exc:
-            # Best-effort: MLflow write already succeeded, so do not fail the
-            # request if the persistence mirror write errors.
             logger.warning(
                 "trace_feedback_persist_failed",
                 extra={"trace_id": resolved_trace_id},
                 exc_info=exc,
             )
+            raise HTTPException(
+                status_code=503,
+                detail="Failed to persist trace feedback.",
+            ) from exc
 
         return TraceFeedbackResponse(
             trace_id=resolved_trace_id,

@@ -672,14 +672,14 @@ class ChatRepository(RepositoryContextMixin):
 
             breakdown_stmt = (
                 select(
-                    func.coalesce(ChatTurn.model_name, "unknown"),
+                    ChatTurn.model_name,
                     func.count(),
                 )
                 .where(turn_filter)
-                .group_by(func.coalesce(ChatTurn.model_name, "unknown"))
+                .group_by(ChatTurn.model_name)
             )
             breakdown_rows = (await session.execute(breakdown_stmt)).all()
-            model_breakdown = {str(name): int(cnt) for name, cnt in breakdown_rows}
+            model_breakdown = {(str(name) if name is not None else "unknown"): int(cnt) for name, cnt in breakdown_rows}
 
             return {
                 "total_tokens_in": int(agg_row[0]),
