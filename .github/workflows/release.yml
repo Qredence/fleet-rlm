@@ -291,7 +291,7 @@ jobs:
           from pathlib import Path
 
           payload = json.loads(Path("/tmp/fleet-health.json").read_text(encoding="utf-8"))
-          assert payload["ok"] is True
+          assert payload["status"] == "live", f"unexpected status: {payload}"
           assert payload["version"]
           print("✅ /health is reachable")
           PY
