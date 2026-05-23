@@ -755,4 +755,4 @@ def _persist_child_trace(
             logger.warning("Failed to persist RLM child trace: %s", exc)
 
 
-__all__ = ["delegate_to_rlm", "delegate_to_rlm_batched", "_persist_child_trace_error"]
+__all__ = ["delegate_to_rlm", "delegate_to_rlm_batched"]
