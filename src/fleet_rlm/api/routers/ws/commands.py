@@ -131,6 +131,22 @@ async def _handle_command(
         await websocket.send_json(_command_response(command=command, result=args_error))
         return
 
+    # Explicit allow-list guard: _validate_command_args() already rejects unknown
+    # commands above, but we enforce the invariant here too so any future code path
+    # that skips that check cannot reach dispatch with an unlisted command.
+    if command not in _ALLOWED_COMMAND_SCHEMAS:
+        await websocket.send_json(
+            _command_response(
+                command=command,
+                result={
+                    "status": "error",
+                    "error": f"Unsupported websocket command: {command}",
+                    "code": "unsupported_command",
+                },
+            )
+        )
+        return
+
     try:
         if command == "resolve_hitl":
             result = {

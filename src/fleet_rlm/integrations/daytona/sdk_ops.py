@@ -67,7 +67,7 @@ def _detect_binary_content(data: bytes) -> bool:
     sample = data[:_BINARY_SAMPLE_BYTES]
     if not sample:
         return False
-    if b"\x00" in sample:
+    if sample.count(0) >= _BINARY_NUL_THRESHOLD:
         return True
     non_text = sum(1 for byte in sample if byte < 0x09 or (0x0E <= byte <= 0x1F and byte != 0x1B))
     return non_text / len(sample) > _BINARY_NONTEXT_RATIO

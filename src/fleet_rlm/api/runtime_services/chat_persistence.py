@@ -373,7 +373,6 @@ async def load_manifest_from_volume(agent: Any, path: str) -> dict[str, Any]:
             return parsed if isinstance(parsed, dict) else {}
         except json.JSONDecodeError:
             return {}
-        return {}
     result = await interpreter.aexecute(
         "text = load_from_volume(path)\nSUBMIT(text=text)",
         variables={"path": path},

@@ -233,7 +233,7 @@ async def upload_dataset(
             raise HTTPException(status_code=400, detail=f"Unknown module slug: {module_slug!r}")
         required_keys = set(spec.required_dataset_keys)
         for row_index, row in enumerate(object_rows):
-            missing = required_keys - set(row.keys())
+            missing = required_keys - row.keys()
             if missing:
                 raise HTTPException(
                     status_code=400,

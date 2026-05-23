@@ -39,7 +39,7 @@ def _map_daytona_error(exc: BaseException) -> HTTPException:
     if isinstance(exc, _DAYTONA_UNAVAILABLE_ERRORS):
         return HTTPException(
             status_code=503,
-            detail=f"Sandbox service unavailable: {sanitize_error(Exception(str(exc)))}",
+            detail=f"Sandbox service unavailable: {sanitize_error(exc)}",
         )
     raise exc
 
