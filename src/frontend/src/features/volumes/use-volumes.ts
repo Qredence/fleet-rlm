@@ -348,10 +348,14 @@ export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
         };
       }
 
-      const url = new URL("/api/v1/runtime/volume/tree", window.location.origin);
-      url.searchParams.set("max_depth", "4");
-      url.searchParams.set("provider", provider);
-      const resp = await rlmApiClient.get<VolumeTreeResponse>(url.pathname + url.search, signal);
+      const params = new URLSearchParams({
+        max_depth: "4",
+        provider,
+      });
+      const resp = await rlmApiClient.get<VolumeTreeResponse>(
+        `/api/v1/runtime/volume/tree?${params.toString()}`,
+        signal,
+      );
       return {
         volumes: resp.nodes.map((node) => toFsNode(node, resp.provider)),
         dataSource: "api",
