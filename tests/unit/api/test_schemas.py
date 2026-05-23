@@ -178,11 +178,7 @@ ROUNDTRIP_CASES = [
     (
         "fleet_rlm.api.schemas.sessions",
         "SessionStateResponse",
-        {
-            "sessions": [
-                {"key": "owner:abc:__default__", "workspace_id": "workspace-a", "user_id": "user-a"}
-            ]
-        },
+        {"sessions": [{"key": "owner:abc:__default__", "workspace_id": "workspace-a", "user_id": "user-a"}]},
     ),
     (
         "fleet_rlm.api.schemas.sessions",
@@ -543,9 +539,7 @@ ROUNDTRIP_CASES = [
                     "name": "root",
                     "path": "/",
                     "type": "volume",
-                    "children": [
-                        {"id": "file-1", "name": "README.md", "path": "/README.md", "type": "file"}
-                    ],
+                    "children": [{"id": "file-1", "name": "README.md", "path": "/README.md", "type": "file"}],
                 }
             ],
             "max_depth": 3,
@@ -611,7 +605,6 @@ def test_schema_models_roundtrip(module_path, model_name, payload):
     roundtripped = model.model_validate_json(validated.model_dump_json())
 
     assert roundtripped.model_dump(mode="json") == validated.model_dump(mode="json")
-
 
 
 def test_ws_message_accepts_canonical_message_payload():

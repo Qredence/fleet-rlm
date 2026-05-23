@@ -8,8 +8,7 @@ from starlette.requests import Request
 
 def _build_request(headers: dict[str, str] | None = None) -> Request:
     encoded_headers = [
-        (key.lower().encode("latin-1"), value.encode("latin-1"))
-        for key, value in (headers or {}).items()
+        (key.lower().encode("latin-1"), value.encode("latin-1")) for key, value in (headers or {}).items()
     ]
     scope = {
         "type": "http",
@@ -58,7 +57,6 @@ async def test_dev_auth_provider_rejects_missing_http_credentials():
         await provider.authenticate_http(_build_request())
 
 
-
 def test_normalized_identity_preserves_claim_values():
     auth_module = importlib.import_module("fleet_rlm.api.auth")
 
@@ -77,7 +75,6 @@ def test_normalized_identity_preserves_claim_values():
     assert identity.raw_claims == {"tid": "tenant-a", "oid": "user-a"}
 
 
-
 def test_build_auth_provider_returns_expected_provider_types():
     auth_module = importlib.import_module("fleet_rlm.api.auth")
 
@@ -92,7 +89,6 @@ def test_build_auth_provider_returns_expected_provider_types():
 
     assert isinstance(dev_provider, auth_module.DevAuthProvider)
     assert isinstance(entra_provider, auth_module.EntraAuthProvider)
-
 
 
 def test_build_auth_provider_rejects_unknown_mode():

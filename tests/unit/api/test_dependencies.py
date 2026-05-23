@@ -18,7 +18,6 @@ def _build_request(app) -> Request:
     )
 
 
-
 def test_session_key_uses_owner_fingerprint_and_default_session():
     dependencies_module = importlib.import_module("fleet_rlm.api.dependencies")
     identity_module = importlib.import_module("fleet_rlm.utils.identity")
@@ -29,7 +28,6 @@ def test_session_key_uses_owner_fingerprint_and_default_session():
     owner_id = identity_module.owner_fingerprint("tenant-a", "user-a")
     assert key == f"owner:{owner_id}:__default__"
     assert explicit_key == f"owner:{owner_id}:session-1"
-
 
 
 def test_compose_server_state_preserves_dependency_slices(clean_runtime_env):
@@ -61,7 +59,6 @@ def test_compose_server_state_preserves_dependency_slices(clean_runtime_env):
 
     state.planner_lm = object()
     assert state.is_ready is True
-
 
 
 def test_dependency_getters_use_direct_state_slices_and_server_state_fallback(clean_runtime_env):
@@ -107,7 +104,6 @@ def test_dependency_getters_use_direct_state_slices_and_server_state_fallback(cl
     assert dependencies_module.get_config_deps(fallback_request) is config_deps
     assert dependencies_module.get_persistence_deps(fallback_request) is persistence_deps
     assert dependencies_module.get_diagnostics_deps(fallback_request) is diagnostics_deps
-
 
 
 def test_get_persistence_prefers_repository_then_local_store(clean_runtime_env):

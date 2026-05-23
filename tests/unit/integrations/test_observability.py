@@ -111,9 +111,7 @@ def test_posthog_callback_sanitizes_generation_payloads(monkeypatch: pytest.Monk
 def test_redact_sensitive_masks_keys_tokens_and_bearer_headers() -> None:
     from fleet_rlm.integrations.observability.sanitization import redact_sensitive
 
-    redacted = redact_sensitive(
-        "api_key=sk-abc12345DEF token=my-secret-token Authorization: Bearer abc.def.ghi"
-    )
+    redacted = redact_sensitive("api_key=sk-abc12345DEF token=my-secret-token Authorization: Bearer abc.def.ghi")
 
     assert "api_key=***REDACTED***" in redacted
     assert "token=***REDACTED***" in redacted

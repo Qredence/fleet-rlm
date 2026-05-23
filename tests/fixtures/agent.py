@@ -63,10 +63,13 @@ class FakeInterpreter:
     async def aexecute(self, code: str, variables: dict[str, Any] | None = None, **kwargs: Any):
         return self.execute(code, variables, **kwargs)
 
-    def configure_workspace(self, *, repo_url, repo_ref, context_paths, volume_name, sandbox_labels=None, force_new_session=False):
+    def configure_workspace(
+        self, *, repo_url, repo_ref, context_paths, volume_name, sandbox_labels=None, force_new_session=False
+    ):
         _ = force_new_session
         payload = {
-            "repo_url": repo_url, "repo_ref": repo_ref,
+            "repo_url": repo_url,
+            "repo_ref": repo_ref,
             "context_paths": list(context_paths or []),
             "volume_name": volume_name,
             "sandbox_labels": dict(sandbox_labels or {}),
@@ -113,6 +116,7 @@ class FakeChatAgent:
         for event in self._events:
             if cancel_check is not None and cancel_check():
                 from fleet_rlm.runtime.schemas import StreamEvent
+
                 yield StreamEvent(kind="done", text="[cancelled]", payload={"cancelled": True}, timestamp=ts())
                 return
             await asyncio.sleep(0.001)

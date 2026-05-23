@@ -29,7 +29,6 @@ def test_build_server_state_creates_ready_compatible_state(clean_runtime_env):
     assert state.is_ready is True
 
 
-
 def test_prime_runtime_env_loads_env_file_in_local_mode(clean_runtime_env, tmp_path, monkeypatch):
     bootstrap_module = importlib.import_module("fleet_rlm.api.bootstrap")
     config_module = importlib.import_module("fleet_rlm.api.config")
@@ -42,7 +41,6 @@ def test_prime_runtime_env_loads_env_file_in_local_mode(clean_runtime_env, tmp_p
     bootstrap_module.prime_runtime_env(cfg)
 
     assert os.getenv("FEATURE_FLAG") == "from-file"
-
 
 
 def test_prime_runtime_env_preserves_existing_values_outside_local(clean_runtime_env, tmp_path, monkeypatch):

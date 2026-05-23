@@ -98,7 +98,6 @@ async def test_execution_event_emitter_filters_non_matching_subscriptions():
     assert other_websocket.sent_payloads == []
 
 
-
 def test_sanitize_event_payload_redacts_sensitive_values_and_truncates(monkeypatch):
     sanitizer_module = importlib.import_module("fleet_rlm.api.events.sanitizer")
 
@@ -120,7 +119,6 @@ def test_sanitize_event_payload_redacts_sensitive_values_and_truncates(monkeypat
     assert sanitized["nested"]["text"] == "abcde...[truncated]"
     assert sanitized["blob"] == "<bytes:3>"
     assert truncated_items[-1] == "<truncated:1>"
-
 
 
 def test_summarize_code_for_event_returns_stable_preview(monkeypatch):

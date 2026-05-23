@@ -10,11 +10,7 @@ from tests.fixtures.env import write_env_file
 def _snapshot_fields(snapshot: dict[str, object]) -> dict[str, dict[str, object]]:
     categories = snapshot["categories"]
     assert isinstance(categories, list)
-    return {
-        field["key"]: field
-        for category in categories
-        for field in category["fields"]
-    }
+    return {field["key"]: field for category in categories for field in category["fields"]}
 
 
 def test_resolve_env_path_prefers_explicit_override(clean_runtime_env: pytest.MonkeyPatch, tmp_path: Path) -> None:

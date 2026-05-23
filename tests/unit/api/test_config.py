@@ -28,7 +28,6 @@ def test_server_runtime_config_defaults_and_computed_lists(clean_runtime_env):
     assert cfg.entra_allowed_group_ids_list == ["group-1", "group-2"]
 
 
-
 def test_server_runtime_config_applies_environment_aware_defaults(clean_runtime_env, monkeypatch):
     config_module = importlib.import_module("fleet_rlm.api.config")
 
@@ -51,13 +50,11 @@ def test_server_runtime_config_applies_environment_aware_defaults(clean_runtime_
     assert entra.expose_root is False
 
 
-
 def test_server_runtime_config_rejects_invalid_model_identifier(clean_runtime_env):
     config_module = importlib.import_module("fleet_rlm.api.config")
 
     with pytest.raises(ValueError, match="provider prefix"):
         config_module.ServerRuntimeConfig(agent_model="gpt-4o")
-
 
 
 def test_validate_startup_or_raise_requires_database_url_when_database_is_required(clean_runtime_env):
@@ -67,7 +64,6 @@ def test_validate_startup_or_raise_requires_database_url_when_database_is_requir
 
     with pytest.raises(ValueError, match="DATABASE_URL is required"):
         cfg.validate_startup_or_raise()
-
 
 
 def test_validate_startup_or_raise_rejects_insecure_staging_configuration(clean_runtime_env):
@@ -86,7 +82,6 @@ def test_validate_startup_or_raise_rejects_insecure_staging_configuration(clean_
 
     with pytest.raises(ValueError, match=r"CORS_ALLOWED_ORIGINS cannot contain '\*'"):
         cfg.validate_startup_or_raise()
-
 
 
 def test_validate_startup_or_raise_requires_entra_configuration(clean_runtime_env):
@@ -110,7 +105,6 @@ def test_validate_startup_or_raise_requires_entra_configuration(clean_runtime_en
 
     with pytest.raises(ValueError, match=r"ENTRA_ISSUER_URL must be a fixed issuer URL"):
         cfg.validate_startup_or_raise()
-
 
 
 def test_validate_startup_or_raise_accepts_valid_entra_configuration(clean_runtime_env):

@@ -113,17 +113,14 @@ class FakeDaytonaWorkspaceSession:
         for file_path in self.files:
             if not file_path.startswith(prefix):
                 continue
-            remainder = file_path[len(prefix):]
+            remainder = file_path[len(prefix) :]
             if not remainder:
                 continue
             segment, _, tail = remainder.partition("/")
             items.setdefault(segment, bool(tail))
         if not items:
             raise FileNotFoundError(resolved)
-        return [
-            type("Entry", (), {"name": name, "is_dir": is_dir})()
-            for name, is_dir in sorted(items.items())
-        ]
+        return [type("Entry", (), {"name": name, "is_dir": is_dir})() for name, is_dir in sorted(items.items())]
 
 
 class FakeDaytonaRuntime:

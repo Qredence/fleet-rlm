@@ -13,7 +13,6 @@ def _build_request() -> Request:
     return Request({"type": "http", "method": "GET", "path": "/", "headers": []})
 
 
-
 def test_build_error_response_uses_canonical_envelope():
     errors_module = importlib.import_module("fleet_rlm.api.errors")
 

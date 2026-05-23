@@ -50,9 +50,7 @@ def test_database_manager_creates_engine_with_expected_pool_settings(monkeypatch
     assert engine is manager.engine
     assert len(created) == 1
     url, kwargs = created[0]
-    assert url.startswith(
-        "postgresql+asyncpg://user:pass@ep-test-pooler.us-east-2.aws.neon.tech/neondb"
-    )
+    assert url.startswith("postgresql+asyncpg://user:pass@ep-test-pooler.us-east-2.aws.neon.tech/neondb")
     assert "channel_binding" not in url
     assert "ssl=require" in url
     assert "prepared_statement_cache_size=0" in url

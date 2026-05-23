@@ -179,7 +179,9 @@ def test_run_module_optimization_writes_artifacts_and_manifest(tmp_path, monkeyp
     persisted: list[object] = []
 
     with monkeypatch.context() as patch_context:
-        patch_context.setattr(optimization_runner, "_resolve_reflection_lm", lambda: SimpleNamespace(model="delegate-model"))
+        patch_context.setattr(
+            optimization_runner, "_resolve_reflection_lm", lambda: SimpleNamespace(model="delegate-model")
+        )
         patch_context.setattr(optimization_runner, "_persist_run_artifacts", lambda *args: persisted.append(args))
         result = optimization_runner.run_module_optimization(
             _make_spec(),
