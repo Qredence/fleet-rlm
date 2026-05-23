@@ -37,7 +37,6 @@ Read these after you've seen the product:
 
 - [Sandbox API](reference/sandbox-api.md) — Daytona sandbox lifecycle management
 - [Runs API](reference/runs-api.md) — Execution trace step browsing
-- [Memory API](reference/retired/memory-api.md) — Retired product surface
 
 ## Complete Table Of Contents
 

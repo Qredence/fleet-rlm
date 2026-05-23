@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.5.31
+  version: 0.5.40
 paths:
   /health:
     get:
@@ -2076,7 +2076,7 @@ components:
           type: string
           title: Version
           description: Package version currently serving the API.
-          default: 0.5.31
+          default: 0.5.40
       type: object
       title: HealthResponse
       description: Response body for the lightweight health endpoint.
@@ -2895,7 +2895,7 @@ components:
           type: string
           title: Version
           description: Package version currently serving the API.
-          default: 0.5.31
+          default: 0.5.40
         app_env:
           type: string
           enum:

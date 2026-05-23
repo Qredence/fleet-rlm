@@ -61,7 +61,6 @@
   * [Database Architecture](reference/database.md)
   * [Sandbox API](reference/sandbox-api.md)
   * [Runs API](reference/runs-api.md)
-  * [Memory API](reference/retired/memory-api.md)
   * [Sandbox File System](reference/sandbox-fs.md)
   * [Source Layout](reference/source-layout.md)
   * [Frontend Architecture](reference/frontend-architecture.md)
