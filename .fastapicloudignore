@@ -1,0 +1,19 @@
+# Exclude heavy development/tooling directories not needed at runtime
+output/
+tests/
+oolong_rlm/
+docs/
+scripts/
+blogs/
+.codex/
+.vscode/
+.github/
+.azure/
+.matter/
+migrations/
+
+# Exclude frontend source (built assets are in src/fleet_rlm/ui/dist)
+src/frontend/
+
+# Re-include the packaged UI dist so the server can serve it
+!src/fleet_rlm/ui/dist/

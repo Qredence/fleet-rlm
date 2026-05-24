@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 
 from fleet_rlm import __version__
 
@@ -22,8 +22,18 @@ from .docs import mount_scalar_docs
 from .errors import add_exception_handlers
 from .middleware import add_middlewares
 from .openapi import annotate_validation_error_schemas
-from .routers import health
-from .routers._composition import build_api_router
+from .routers import (
+    auth,
+    health,
+    info,
+    optimization,
+    runs,
+    runtime,
+    sandboxes,
+    sessions,
+    traces,
+    ws,
+)
 from .spa import mount_frontend_routes
 
 
@@ -32,19 +42,33 @@ def _register_api_routes(app: FastAPI) -> None:
 
     Must be called before ``mount_spa`` so the SPA catch-all does not
     shadow API or docs paths.
+
+    Inclusion order is intentional — FastAPI resolves routes in registration
+    order, so changing this list can alter matching behaviour for overlapping
+    paths.
     """
     app.include_router(health.router)
-    app.include_router(build_api_router())
+
+    api_v1 = APIRouter(prefix="/api/v1")
+    api_v1.include_router(auth.router)
+    api_v1.include_router(info.router)
+    api_v1.include_router(ws.router)
+    api_v1.include_router(sessions.router)
+    api_v1.include_router(runtime.router)
+    api_v1.include_router(sandboxes.router)
+    api_v1.include_router(runs.router)
+    api_v1.include_router(optimization.router)
+    api_v1.include_router(traces.router)
+    app.include_router(api_v1)
 
 
 def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     """Create the FastAPI application instance."""
     cfg = resolve_runtime_config(config)
 
-    cfg.validate_startup_or_raise()
-
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        cfg.validate_startup_or_raise()
         state = build_server_state(cfg)
         attach_server_state(app, state)
         try:

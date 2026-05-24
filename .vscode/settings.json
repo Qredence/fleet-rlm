@@ -7,8 +7,10 @@
   },
   "python.analysis.languageServerMode": "default",
   "python.analysis.typeCheckingMode": "standard",
-  "python.analysis.extraPaths": ["src"],
-  "fastapi.appPath": "src/fleet_rlm/api/main.py",
+  "python.analysis.extraPaths": [
+    "src"
+  ],
+  "fastapi.entryPoint": "src.fleet_rlm.api.main:app",
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true,
@@ -27,5 +29,6 @@
     "**/.pytest_cache": true,
     "**/.ruff_cache": true,
     "**/.ty_cache": true
-  }
+  },
+  "windsurfPyright.disableLanguageServices": true
 }
