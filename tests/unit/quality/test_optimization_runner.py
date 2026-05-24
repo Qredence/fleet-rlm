@@ -88,10 +88,10 @@ def _install_fake_dspy(monkeypatch: pytest.MonkeyPatch) -> None:
     gepa_module = types.ModuleType("dspy.teleprompt.gepa")
     gepa_utils_module = types.ModuleType("dspy.teleprompt.gepa.gepa_utils")
 
-    dspy_module.settings = SimpleNamespace(lm=None)
-    dspy_module.Evaluate = _FakeEvaluate
-    teleprompt_module.GEPA = _FakeGEPA
-    gepa_utils_module.ScoreWithFeedback = _FakeScoreWithFeedback
+    dspy_module.settings = SimpleNamespace(lm=None)  # ty: ignore[unresolved-attribute]
+    dspy_module.Evaluate = _FakeEvaluate  # ty: ignore[unresolved-attribute]
+    teleprompt_module.GEPA = _FakeGEPA  # ty: ignore[unresolved-attribute]
+    gepa_utils_module.ScoreWithFeedback = _FakeScoreWithFeedback  # ty: ignore[unresolved-attribute]
 
     monkeypatch.setitem(sys.modules, "dspy", dspy_module)
     monkeypatch.setitem(sys.modules, "dspy.teleprompt", teleprompt_module)
@@ -150,6 +150,8 @@ def _write_dataset(tmp_path: Path) -> Path:
 
 @pytest.fixture(autouse=True)
 def _stub_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    _FakeGEPA.last_init = None
+    _FakeGEPA.last_compile = None
     _install_fake_dspy(monkeypatch)
     monkeypatch.setattr(optimization_runner, "_ensure_dspy_configured", lambda: None)
 
@@ -211,16 +213,18 @@ def test_run_module_optimization_writes_artifacts_and_manifest(tmp_path, monkeyp
     assert manifest["artifact"]["path"] == str(output_path)
     assert manifest["review_bundle"]["reflection_model"]["model"] == "delegate-model"
     assert len(persisted) == 1
-    assert persisted[0][0] == 7
+    assert persisted[0][0] == 7  # ty: ignore[not-subscriptable]
+    assert _FakeGEPA.last_init is not None
+    assert _FakeGEPA.last_compile is not None
     assert _FakeGEPA.last_init["auto"] == "medium"
-    assert len(_FakeGEPA.last_compile["trainset"]) == 2
-    assert len(_FakeGEPA.last_compile["valset"]) == 2
+    assert len(_FakeGEPA.last_compile["trainset"]) == 2  # ty: ignore[invalid-argument-type]
+    assert len(_FakeGEPA.last_compile["valset"]) == 2  # ty: ignore[invalid-argument-type]
 
 
 def test_resolve_reflection_lm_raises_when_no_models_are_configured(clean_runtime_env, monkeypatch) -> None:
     fake_runtime_config = types.ModuleType("fleet_rlm.runtime.config")
-    fake_runtime_config.get_delegate_lm_from_env = lambda: None
-    fake_runtime_config.get_planner_lm_from_env = lambda: None
+    fake_runtime_config.get_delegate_lm_from_env = lambda: None  # ty: ignore[unresolved-attribute]
+    fake_runtime_config.get_planner_lm_from_env = lambda: None  # ty: ignore[unresolved-attribute]
     monkeypatch.setitem(sys.modules, "fleet_rlm.runtime.config", fake_runtime_config)
 
     with pytest.raises(RuntimeError, match="No DSPy LM configured"):

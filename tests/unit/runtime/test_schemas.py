@@ -102,8 +102,8 @@ def test_turn_state_apply_handles_cancelled_and_error_turns() -> None:
 def test_profile_and_session_config_validation() -> None:
     from fleet_rlm.runtime.schemas import ProfileConfig, SessionConfig
 
-    profile = ProfileConfig(name="workbench", timeout="120", react_max_iters="5")
-    session = SessionConfig(profile_name="dev", trace_mode="verbose", stream_refresh_ms="25")
+    profile = ProfileConfig(name="workbench", timeout="120", react_max_iters="5")  # ty: ignore[invalid-argument-type]
+    session = SessionConfig(profile_name="dev", trace_mode="verbose", stream_refresh_ms="25")  # ty: ignore[invalid-argument-type]
 
     assert profile.timeout == 120
     assert profile.react_max_iters == 5
@@ -111,7 +111,7 @@ def test_profile_and_session_config_validation() -> None:
     assert session.stream_refresh_ms == 25
 
     with pytest.raises(ValidationError):
-        SessionConfig(trace_mode="chatty")
+        SessionConfig(trace_mode="chatty")  # ty: ignore[invalid-argument-type]
 
 
 def test_stream_event_kind_values_are_stable() -> None:

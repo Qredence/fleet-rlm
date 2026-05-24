@@ -6,7 +6,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Sequence, cast
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def load_dataset_rows(dataset_path: str | Path) -> list[DatasetRow]:
 
 
 def validate_required_keys(
-    rows: list[DatasetRow],
+    rows: Sequence[object],
     required_keys: list[str] | tuple[str, ...],
     module_name: str,
 ) -> list[DatasetRow]:
@@ -86,7 +86,7 @@ def validate_required_keys(
                 missing,
             )
             continue
-        valid.append(row)
+        valid.append(cast(DatasetRow, row))
 
     if not valid:
         raise ValueError(

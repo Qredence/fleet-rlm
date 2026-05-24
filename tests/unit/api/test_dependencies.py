@@ -37,7 +37,7 @@ def test_compose_server_state_preserves_dependency_slices(clean_runtime_env):
     cfg = config_module.ServerRuntimeConfig(database_required=False)
     config_deps = dependencies_module.ConfigDeps(config=cfg)
     lm_deps = dependencies_module.LmDeps(planner_lm=None, delegate_lm=None)
-    auth_deps = dependencies_module.AuthDeps(auth_provider=object())
+    auth_deps = dependencies_module.AuthDeps(auth_provider=object())  # ty: ignore[invalid-argument-type]
     session_cache_deps = dependencies_module.SessionCacheDeps(sessions={"owner:abc:__default__": {"history": []}})
     persistence_deps = dependencies_module.PersistenceDeps(local_store=object())
     diagnostics_deps = dependencies_module.DiagnosticsDeps()
@@ -68,7 +68,7 @@ def test_dependency_getters_use_direct_state_slices_and_server_state_fallback(cl
     cfg = config_module.ServerRuntimeConfig(database_required=False)
     config_deps = dependencies_module.ConfigDeps(config=cfg)
     lm_deps = dependencies_module.LmDeps(planner_lm=object())
-    auth_deps = dependencies_module.AuthDeps(auth_provider=object())
+    auth_deps = dependencies_module.AuthDeps(auth_provider=object())  # ty: ignore[invalid-argument-type]
     session_cache_deps = dependencies_module.SessionCacheDeps(sessions={})
     persistence_deps = dependencies_module.PersistenceDeps(local_store=object())
     diagnostics_deps = dependencies_module.DiagnosticsDeps()
@@ -113,7 +113,7 @@ def test_get_persistence_prefers_repository_then_local_store(clean_runtime_env):
     local_store = object()
     app = SimpleNamespace(
         state=SimpleNamespace(
-            persistence_deps=dependencies_module.PersistenceDeps(repository=repository, local_store=local_store)
+            persistence_deps=dependencies_module.PersistenceDeps(repository=repository, local_store=local_store)  # ty: ignore[invalid-argument-type]
         )
     )
     request = _build_request(app)

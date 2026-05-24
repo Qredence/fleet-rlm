@@ -155,10 +155,10 @@ def test_run_long_context_invokes_interpreter_and_rlm(monkeypatch: pytest.Monkey
     )
 
     assert captured["interpreter_kwargs"] == {"timeout": 12, "volume_name": "shared-volume"}
-    assert captured["rlm_init"]["interpreter"] == "fake-interpreter"
-    assert captured["rlm_init"]["max_iterations"] == 4
-    assert captured["rlm_init"]["max_llm_calls"] == 7
-    assert captured["rlm_init"]["verbose"] is False
+    assert captured["rlm_init"]["interpreter"] == "fake-interpreter"  # ty: ignore[not-subscriptable]
+    assert captured["rlm_init"]["max_iterations"] == 4  # ty: ignore[not-subscriptable]
+    assert captured["rlm_init"]["max_llm_calls"] == 7  # ty: ignore[not-subscriptable]
+    assert captured["rlm_init"]["verbose"] is False  # ty: ignore[not-subscriptable]
     assert captured["rlm_call"] == {"document": "Document body", "focus": "What matters?"}
     assert result["summary"] == "summary"
     assert result["trajectory_steps"] == 1

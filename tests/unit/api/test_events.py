@@ -29,7 +29,7 @@ async def test_execution_event_emitter_delivers_events_to_matching_subscribers()
         user_id="user-a",
         session_id="session-a",
     )
-    await emitter.connect(websocket, subscription)
+    await emitter.connect(websocket, subscription)  # ty: ignore[invalid-argument-type]
 
     event = events_module.ExecutionEvent(
         type="execution_step",
@@ -48,12 +48,12 @@ async def test_execution_event_emitter_delivers_events_to_matching_subscribers()
 
     await emitter.emit(event)
     await asyncio.sleep(0.01)
-    await emitter.disconnect(websocket)
+    await emitter.disconnect(websocket)  # ty: ignore[invalid-argument-type]
 
     assert websocket.accept_calls == 1
     assert len(websocket.sent_payloads) == 1
     assert websocket.sent_payloads[0]["run_id"] == "run-1"
-    assert websocket.sent_payloads[0]["step"]["label"] == "Search code"
+    assert websocket.sent_payloads[0]["step"]["label"] == "Search code"  # ty: ignore[not-subscriptable]
 
 
 @pytest.mark.asyncio
@@ -64,7 +64,7 @@ async def test_execution_event_emitter_filters_non_matching_subscriptions():
     matching_websocket = DummyWebSocket()
     other_websocket = DummyWebSocket()
     await emitter.connect(
-        matching_websocket,
+        matching_websocket,  # ty: ignore[invalid-argument-type]
         events_module.ExecutionSubscription(
             workspace_id="workspace-a",
             user_id="user-a",
@@ -72,7 +72,7 @@ async def test_execution_event_emitter_filters_non_matching_subscriptions():
         ),
     )
     await emitter.connect(
-        other_websocket,
+        other_websocket,  # ty: ignore[invalid-argument-type]
         events_module.ExecutionSubscription(
             workspace_id="workspace-a",
             user_id="user-a",
@@ -91,8 +91,8 @@ async def test_execution_event_emitter_filters_non_matching_subscriptions():
 
     await emitter.emit(event)
     await asyncio.sleep(0.01)
-    await emitter.disconnect(matching_websocket)
-    await emitter.disconnect(other_websocket)
+    await emitter.disconnect(matching_websocket)  # ty: ignore[invalid-argument-type]
+    await emitter.disconnect(other_websocket)  # ty: ignore[invalid-argument-type]
 
     assert len(matching_websocket.sent_payloads) == 1
     assert other_websocket.sent_payloads == []

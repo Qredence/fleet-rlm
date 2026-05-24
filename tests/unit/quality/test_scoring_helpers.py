@@ -26,7 +26,7 @@ def _install_fake_dspy(monkeypatch: pytest.MonkeyPatch) -> None:
     teleprompt_module = types.ModuleType("dspy.teleprompt")
     gepa_module = types.ModuleType("dspy.teleprompt.gepa")
     gepa_utils_module = types.ModuleType("dspy.teleprompt.gepa.gepa_utils")
-    gepa_utils_module.ScoreWithFeedback = _FakeScoreWithFeedback
+    gepa_utils_module.ScoreWithFeedback = _FakeScoreWithFeedback  # ty: ignore[unresolved-attribute]
 
     monkeypatch.setitem(sys.modules, "dspy", dspy_module)
     monkeypatch.setitem(sys.modules, "dspy.teleprompt", teleprompt_module)

@@ -89,7 +89,7 @@ def test_handle_slash_command_dispatches_help(monkeypatch: pytest.MonkeyPatch) -
     agent = _FakeAgent()
     help_calls: list[tuple[object, object, str]] = []
     fake_chat = ModuleType("fleet_rlm.cli.terminal.chat")
-    fake_chat._COMMAND_SPECS = ("fake-spec",)
+    fake_chat._COMMAND_SPECS = ("fake-spec",)  # ty: ignore[unresolved-attribute]
     monkeypatch.setitem(sys.modules, "fleet_rlm.cli.terminal.chat", fake_chat)
     monkeypatch.setattr(
         commands,

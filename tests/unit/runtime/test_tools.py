@@ -52,9 +52,9 @@ def test_tool_marker_collection_and_name_listing() -> None:
     def helper() -> str:
         return "helper"
 
-    module.alpha_tool = alpha_tool
-    module.beta_tool = beta_tool
-    module.helper = helper
+    module.alpha_tool = alpha_tool  # ty: ignore[unresolved-attribute]
+    module.beta_tool = beta_tool  # ty: ignore[unresolved-attribute]
+    module.helper = helper  # ty: ignore[unresolved-attribute]
 
     tools = _collect_tools_from_modules([module])
 

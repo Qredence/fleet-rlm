@@ -104,8 +104,8 @@ def test_posthog_callback_sanitizes_generation_payloads(monkeypatch: pytest.Monk
     callback.on_lm_end("call-1", {"choices": [{"text": "token=my-secret-token"}]}, None)
 
     props = fake_client.calls[0]["properties"]
-    assert props["$ai_input"] == "Authorization: Bearer ***REDACTED*** api_key=***REDACTED***"
-    assert props["$ai_output_choices"] == ["token=***REDACTED***"]
+    assert props["$ai_input"] == "Authorization: Bearer ***REDACTED*** api_key=***REDACTED***"  # ty: ignore[not-subscriptable]
+    assert props["$ai_output_choices"] == ["token=***REDACTED***"]  # ty: ignore[not-subscriptable]
 
 
 def test_redact_sensitive_masks_keys_tokens_and_bearer_headers() -> None:

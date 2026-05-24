@@ -66,9 +66,9 @@ def test_main_parses_args_and_runs_terminal_chat(monkeypatch: pytest.MonkeyPatch
     options = captured["options"]
     assert captured["overrides"] == []
     assert isinstance(captured["config"], AppConfig)
-    assert options.docs_path == Path("README.md")
-    assert options.trace_mode == "verbose"
-    assert options.volume_name == "volume-a"
+    assert options.docs_path == Path("README.md")  # ty: ignore[unresolved-attribute]
+    assert options.trace_mode == "verbose"  # ty: ignore[unresolved-attribute]
+    assert options.volume_name == "volume-a"  # ty: ignore[unresolved-attribute]
 
 
 def test_run_web_ui_rewrites_argv_to_serve_api(monkeypatch: pytest.MonkeyPatch) -> None:

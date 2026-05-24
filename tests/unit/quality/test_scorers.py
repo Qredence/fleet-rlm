@@ -39,14 +39,19 @@ class _FakeLM:
         return ['```json\n{"score": 5, "reason": "Clear step-by-step logic."}\n```']
 
 
+@pytest.fixture(autouse=True)
+def _reset_fake_lm_state() -> None:
+    _FakeLM.last_messages = None
+
+
 def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> None:
     mlflow_module = types.ModuleType("mlflow")
     entities_module = types.ModuleType("mlflow.entities")
     genai_module = types.ModuleType("mlflow.genai")
     scorers_module = types.ModuleType("mlflow.genai.scorers")
 
-    entities_module.AssessmentSource = _FakeAssessmentSource
-    entities_module.Feedback = _FakeFeedback
+    entities_module.AssessmentSource = _FakeAssessmentSource  # ty: ignore[unresolved-attribute]
+    entities_module.Feedback = _FakeFeedback  # ty: ignore[unresolved-attribute]
 
     def _fake_scorer(*, name: str):
         def decorator(fn):
@@ -67,11 +72,11 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> None:
     class ToolCallEfficiency(_FakeJudge):
         pass
 
-    scorers_module.RelevanceToQuery = RelevanceToQuery
-    scorers_module.RetrievalGroundedness = RetrievalGroundedness
-    scorers_module.ToolCallCorrectness = ToolCallCorrectness
-    scorers_module.ToolCallEfficiency = ToolCallEfficiency
-    scorers_module.scorer = _fake_scorer
+    scorers_module.RelevanceToQuery = RelevanceToQuery  # ty: ignore[unresolved-attribute]
+    scorers_module.RetrievalGroundedness = RetrievalGroundedness  # ty: ignore[unresolved-attribute]
+    scorers_module.ToolCallCorrectness = ToolCallCorrectness  # ty: ignore[unresolved-attribute]
+    scorers_module.ToolCallEfficiency = ToolCallEfficiency  # ty: ignore[unresolved-attribute]
+    scorers_module.scorer = _fake_scorer  # ty: ignore[unresolved-attribute]
 
     monkeypatch.setitem(sys.modules, "mlflow", mlflow_module)
     monkeypatch.setitem(sys.modules, "mlflow.entities", entities_module)
@@ -81,7 +86,7 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _install_fake_dspy(monkeypatch: pytest.MonkeyPatch) -> None:
     dspy_module = types.ModuleType("dspy")
-    dspy_module.LM = _FakeLM
+    dspy_module.LM = _FakeLM  # ty: ignore[unresolved-attribute]
     monkeypatch.setitem(sys.modules, "dspy", dspy_module)
 
 
@@ -122,6 +127,7 @@ def test_reasoning_quality_scorer_parses_feedback_and_redacts_trace_inputs(clean
         rationale="Clear step-by-step logic.",
         source=_FakeAssessmentSource(source_type="LLM_JUDGE", source_id="demo-model"),
     )
+    assert _FakeLM.last_messages is not None
     prompt = _FakeLM.last_messages[0]["content"]
     assert "***" in prompt
     assert "super-secret" not in prompt

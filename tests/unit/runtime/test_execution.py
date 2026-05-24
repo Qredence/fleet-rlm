@@ -9,7 +9,7 @@ def test_storage_paths_normalize_mount_layouts() -> None:
 
     legacy = mounted_storage_roots("/data/memory")
     current = mounted_storage_roots("/home/daytona/memory")
-    interpreter_roots = runtime_storage_roots(SimpleNamespace(volume_mount_path="/srv/runtime/memory"))
+    interpreter_roots = runtime_storage_roots(SimpleNamespace(volume_mount_path="/srv/runtime/memory"))  # ty: ignore[invalid-argument-type]
 
     assert legacy.mounted_root == "/data"
     assert legacy.memory_root == "/data/memory"
@@ -129,7 +129,7 @@ def test_build_final_payload_collects_sources_citations_and_human_review() -> No
     )
 
     payload = _build_final_payload(
-        final_prediction=final_prediction,
+        final_prediction=final_prediction,  # ty: ignore[invalid-argument-type]
         trajectory={"steps": _normalize_trajectory(trajectory)},
         history_turns=4,
         guardrail_warnings=["watch output size"],

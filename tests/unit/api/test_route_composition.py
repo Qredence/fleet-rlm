@@ -7,7 +7,7 @@ def test_build_api_router_includes_expected_route_tree():
     composition_module = importlib.import_module("fleet_rlm.api.routers._composition")
 
     router = composition_module.build_api_router()
-    route_paths = {route.path for route in router.routes}
+    route_paths = {route.path for route in router.routes}  # ty: ignore[unresolved-attribute]
 
     assert router.prefix == "/api/v1"
     assert {

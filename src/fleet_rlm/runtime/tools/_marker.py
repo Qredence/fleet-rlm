@@ -29,7 +29,7 @@ def tool_fn(func: F) -> F:
     Returns:
         The callable, unchanged except for the ``__is_fleet_tool__`` attribute.
     """
-    func.__is_fleet_tool__ = True  # type: ignore[attr-defined]
+    setattr(func, "__is_fleet_tool__", True)
     return func
 
 

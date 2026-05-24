@@ -23,10 +23,10 @@ def no_db_app(monkeypatch):
         config=ServerRuntimeConfig(
             app_env="local",
             database_required=False,
-            database_url=None,
+            database_url=None,  # ty: ignore[unknown-argument] — populate_by_name=True lets callers use the Python field name; ty doesn't model this
             db_validate_on_startup=False,
-            serve_ui=False,
-            expose_root=False,
+            serve_ui=False,  # ty: ignore[unknown-argument]
+            expose_root=False,  # ty: ignore[unknown-argument]
         )
     )
     return app

@@ -20,7 +20,7 @@ RETIRED_PREFIXES = (
 
 
 def _route_paths(app: FastAPI) -> set[str]:
-    return {route.path for route in app.routes if hasattr(route, "path")}
+    return {route.path for route in app.routes if hasattr(route, "path")}  # ty: ignore[invalid-return-type]
 
 
 def test_canonical_http_routes_return_stable_status_codes(no_db_client, auth_headers: dict[str, str]) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Generator
 from types import ModuleType
 
 import pytest
@@ -8,7 +9,7 @@ import typer
 
 
 @pytest.fixture(autouse=True)
-def _reset_current_app_config() -> None:
+def _reset_current_app_config() -> Generator[None, None, None]:
     from fleet_rlm.cli.config import set_current_app_config
 
     set_current_app_config(None)
@@ -54,8 +55,8 @@ def test_initialize_and_get_current_app_config_lifecycle(
         compose_calls["overrides"] = list(overrides)
         return object()
 
-    fake_hydra.compose = fake_compose
-    fake_hydra.initialize_config_module = lambda **_: _HydraContext()
+    fake_hydra.compose = fake_compose  # ty: ignore[unresolved-attribute]
+    fake_hydra.initialize_config_module = lambda **_: _HydraContext()  # ty: ignore[unresolved-attribute]
     monkeypatch.setitem(sys.modules, "hydra", fake_hydra)
     monkeypatch.setattr(
         config_module.OmegaConf,
