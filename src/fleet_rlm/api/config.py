@@ -86,7 +86,18 @@ class ServerRuntimeConfig(BaseSettings):
     rlm_child_fork_fallback: Literal["clean", "fail"] = Field(default="clean", alias="RLM_CHILD_FORK_FALLBACK")
     delegate_max_calls_per_turn: int = 8
     delegate_result_truncation_chars: int = 8000
+    delegate_execution_timeout: int = Field(default=300, alias="RLM_DELEGATE_EXECUTION_TIMEOUT")
+    delegate_max_iterations: int = Field(default=8, alias="RLM_DELEGATE_MAX_ITERATIONS")
+    delegate_adapter: str = Field(default="json", alias="RLM_DELEGATE_ADAPTER")
+    daytona_broker_health_timeout: float = Field(default=20.0, alias="DAYTONA_BROKER_HEALTH_TIMEOUT")
+    daytona_broker_tool_call_timeout: float = Field(default=180.0, alias="DAYTONA_BROKER_TOOL_CALL_TIMEOUT")
+    daytona_broker_start_retries: int = Field(default=1, alias="DAYTONA_BROKER_START_RETRIES")
     interpreter_async_execute: bool = True
+    # Interpreter pool settings
+    interpreter_pool_size: int = Field(default=2, alias="INTERPRETER_POOL_SIZE")
+    interpreter_pool_overflow_max: int = Field(default=4, alias="INTERPRETER_POOL_OVERFLOW_MAX")
+    interpreter_pool_acquire_timeout: float = Field(default=30.0, alias="INTERPRETER_POOL_ACQUIRE_TIMEOUT")
+    interpreter_pool_health_interval: float = Field(default=30.0, alias="INTERPRETER_POOL_HEALTH_INTERVAL")
     agent_guardrail_mode: Literal["off", "warn", "strict"] = "off"
     agent_min_substantive_chars: int = 20
     agent_max_output_chars: int = 10000
@@ -170,6 +181,12 @@ class ServerRuntimeConfig(BaseSettings):
             "rlm_child_fork_fallback": config.rlm_settings.child_fork_fallback,
             "delegate_max_calls_per_turn": config.rlm_settings.delegate_max_calls_per_turn,
             "delegate_result_truncation_chars": config.rlm_settings.delegate_result_truncation_chars,
+            "delegate_execution_timeout": config.rlm_settings.delegate_execution_timeout,
+            "delegate_max_iterations": config.rlm_settings.delegate_max_iterations,
+            "delegate_adapter": config.rlm_settings.delegate_adapter,
+            "daytona_broker_health_timeout": config.rlm_settings.daytona_broker_health_timeout,
+            "daytona_broker_tool_call_timeout": config.rlm_settings.daytona_broker_tool_call_timeout,
+            "daytona_broker_start_retries": config.rlm_settings.daytona_broker_start_retries,
             "interpreter_async_execute": config.sandbox.async_execute,
             "agent_guardrail_mode": config.llm.guardrail_mode,
             "agent_min_substantive_chars": config.llm.min_substantive_chars,

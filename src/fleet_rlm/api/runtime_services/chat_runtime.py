@@ -327,11 +327,12 @@ class _ManagedAgentContext:
         return False
 
 
-async def build_chat_agent_context(runtime: PreparedChatRuntime) -> Any:
+async def build_chat_agent_context(runtime: PreparedChatRuntime, *, pool: Any | None = None) -> Any:
     kwargs = _chat_agent_builder_kwargs(runtime)
-    from .interpreter_pool import InterpreterPool
+    if pool is None:
+        from .interpreter_pool import InterpreterPool
 
-    pool = InterpreterPool()
+        pool = InterpreterPool(runtime.cfg)
     interpreter = await pool.acquire(runtime.cfg)
     if interpreter is not None:
         kwargs["interpreter"] = interpreter

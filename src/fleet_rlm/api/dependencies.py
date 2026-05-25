@@ -99,6 +99,13 @@ class DiagnosticsDeps:
     optional_startup_task: asyncio.Task[None] | None = None
 
 
+@dataclass
+class InterpreterPoolDeps:
+    """Interpreter pool dependency slice."""
+
+    pool: Any | None = None
+
+
 _SERVER_STATE_PROXY_ATTRS: dict[str, tuple[str, str]] = {
     "config": ("config_deps", "config"),
     "planner_lm": ("lm_deps", "planner_lm"),
@@ -115,6 +122,7 @@ _SERVER_STATE_PROXY_ATTRS: dict[str, tuple[str, str]] = {
     "optional_service_errors": ("diagnostics_deps", "optional_service_errors"),
     "mlflow_server_process": ("diagnostics_deps", "mlflow_server_process"),
     "optional_startup_task": ("diagnostics_deps", "optional_startup_task"),
+    "interpreter_pool": ("interpreter_pool_deps", "pool"),
 }
 
 
@@ -136,6 +144,7 @@ class ServerState:
         session_cache_deps: SessionCacheDeps | None = None,
         persistence_deps: PersistenceDeps | None = None,
         diagnostics_deps: DiagnosticsDeps | None = None,
+        interpreter_pool_deps: InterpreterPoolDeps | None = None,
     ) -> None:
         self.config_deps = config_deps or ConfigDeps(config=config or ServerRuntimeConfig())
         self.lm_deps = lm_deps or LmDeps()
@@ -145,6 +154,7 @@ class ServerState:
         self.diagnostics_deps = diagnostics_deps or DiagnosticsDeps(
             events_event_emitter=execution_event_emitter or ExecutionEventEmitter(),
         )
+        self.interpreter_pool_deps = interpreter_pool_deps or InterpreterPoolDeps()
 
     def __getattr__(self, name: str) -> Any:
         if target := _SERVER_STATE_PROXY_ATTRS.get(name):
@@ -214,6 +224,7 @@ def _require_dep(app: Any, attr: str) -> Any:
             "session_cache_deps": server_state.session_cache_deps,
             "persistence_deps": server_state.persistence_deps,
             "diagnostics_deps": server_state.diagnostics_deps,
+            "interpreter_pool_deps": server_state.interpreter_pool_deps,
         }
         dep = mapping.get(attr)
         if dep is not None:
@@ -294,6 +305,18 @@ def get_persistence_deps_from_websocket(websocket: WebSocket) -> PersistenceDeps
 
 def get_diagnostics_deps_from_websocket(websocket: WebSocket) -> DiagnosticsDeps:
     return _require_dep(websocket.app, "diagnostics_deps")
+
+
+def get_interpreter_pool_deps(request: Request) -> InterpreterPoolDeps:
+    """Resolve interpreter pool dependencies."""
+    return _require_dep(request.app, "interpreter_pool_deps")
+
+
+InterpreterPoolDepsDep = Annotated[InterpreterPoolDeps, Depends(get_interpreter_pool_deps)]
+
+
+def get_interpreter_pool_deps_from_websocket(websocket: WebSocket) -> InterpreterPoolDeps:
+    return _require_dep(websocket.app, "interpreter_pool_deps")
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +439,7 @@ def compose_server_state(
     session_cache_deps: SessionCacheDeps,
     persistence_deps: PersistenceDeps,
     diagnostics_deps: DiagnosticsDeps,
+    interpreter_pool_deps: InterpreterPoolDeps | None = None,
 ) -> ServerState:
     """Assemble a backward-compatible ServerState from focused dependency slices."""
     return ServerState(
@@ -425,6 +449,7 @@ def compose_server_state(
         session_cache_deps=session_cache_deps,
         persistence_deps=persistence_deps,
         diagnostics_deps=diagnostics_deps,
+        interpreter_pool_deps=interpreter_pool_deps,
     )
 
 

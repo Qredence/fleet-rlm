@@ -15,12 +15,12 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 COMMAND_DISPATCH: dict[str, tuple[str, list[str], list[str]]] = {
-    "load_document": ("load_document", ["path"], ["alias"]),
+    "load_document": ("load_document", ["source"], ["alias"]),
     "fetch_web_document": ("fetch_web_document", ["url"], ["alias"]),
     "set_active_document": ("set_active_document", ["alias"], []),
     "list_documents": ("list_documents", [], []),
     "list_files": ("list_files", [], ["path", "pattern"]),
-    "read_file_slice": ("read_file_slice", ["path"], ["start_line", "num_lines"]),
+    "read_file_slice": ("read_file_slice", ["path"], ["start_line", "num_lines", "end_line"]),
     "find_files": ("find_files", ["pattern"], ["path", "include"]),
     "chunk_host": (
         "chunk_host",

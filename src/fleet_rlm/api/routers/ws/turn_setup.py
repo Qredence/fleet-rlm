@@ -235,6 +235,7 @@ def _build_trace_context(
     user_id: str,
     sess_id: str,
     turn_index: int,
+    run_id: str | None,
     message: str,
     execution_mode: str,
 ):
@@ -243,18 +244,27 @@ def _build_trace_context(
         new_client_request_id,
     )
 
+    client_request_id = new_client_request_id(prefix="chat")
+    metadata = {
+        "fleet_rlm.workspace_id": workspace_id,
+        "fleet_rlm.turn_index": str(turn_index),
+        "fleet_rlm.predicted_turn_index": str(turn_index),
+        "fleet_rlm.turn_index_source": "agent_history",
+        "fleet_rlm.turn_attempt_id": client_request_id,
+        "fleet_rlm.client_request_id": client_request_id,
+        "fleet_rlm.runtime_mode": "daytona_pilot",
+        "fleet_rlm.events_mode": execution_mode,
+    }
+    if run_id:
+        metadata["fleet_rlm.run_id"] = run_id
+
     return MlflowTraceRequestContext(
-        client_request_id=new_client_request_id(prefix="chat"),
+        client_request_id=client_request_id,
         session_id=f"{workspace_id}:{user_id}:{sess_id}",
         user_id=user_id,
         app_env=runtime.cfg.app_env,
         request_preview=message,
-        metadata={
-            "fleet_rlm.workspace_id": workspace_id,
-            "fleet_rlm.turn_index": str(turn_index),
-            "fleet_rlm.runtime_mode": "daytona_pilot",
-            "fleet_rlm.events_mode": execution_mode,
-        },
+        metadata=metadata,
     )
 
 
@@ -321,6 +331,7 @@ async def prepare_chat_message_turn(
         user_id=user_id,
         sess_id=sess_id,
         turn_index=turn_index,
+        run_id=_run_id,
         message=message,
         execution_mode=execution_mode,
     )

@@ -283,7 +283,9 @@ class _ExecutionWebSocketConnection:
                 if initial_msg is None:
                     return
                 startup_status_task = asyncio.ensure_future(self._emit_delayed_startup_status())
-                agent_context = await _build_chat_agent_context(runtime)
+                pool_deps = getattr(self.websocket.app.state, "interpreter_pool_deps", None)
+                shared_pool = getattr(pool_deps, "pool", None) if pool_deps is not None else None
+                agent_context = await _build_chat_agent_context(runtime, pool=shared_pool)
                 async with agent_context as agent:
                     await self._cancel_startup_status_task(startup_status_task)
                     startup_status_task = None

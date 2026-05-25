@@ -113,11 +113,16 @@ def build_child_interpreter(
     child_volume_subpath = (
         getattr(interpreter, "volume_subpath", None) if volume_subpath is _UNSET else cast(str | None, volume_subpath)
     )
+    interpreter_execute_timeout = int(getattr(interpreter, "execute_timeout", None) or interpreter.timeout)
+    delegate_execution_timeout = int(
+        getattr(interpreter, "delegate_execution_timeout", interpreter_execute_timeout) or interpreter_execute_timeout
+    )
+    child_execute_timeout = max(1, min(interpreter_execute_timeout, delegate_execution_timeout))
     return interpreter.__class__(
         runtime=runtime,
         owns_runtime=owns_runtime,
         timeout=interpreter.timeout,
-        execute_timeout=interpreter.execute_timeout,
+        execute_timeout=child_execute_timeout,
         volume_name=child_volume_name,
         volume_subpath=child_volume_subpath,
         repo_url=interpreter.repo_url,
@@ -135,6 +140,10 @@ def build_child_interpreter(
         child_fork_fallback=getattr(interpreter, "child_fork_fallback", "clean"),
         delegate_max_calls_per_turn=getattr(interpreter, "delegate_max_calls_per_turn", 8),
         delegate_result_truncation_chars=getattr(interpreter, "delegate_result_truncation_chars", 8000),
+        delegate_execution_timeout=delegate_execution_timeout,
+        broker_health_timeout=getattr(interpreter, "broker_health_timeout", 20.0),
+        broker_tool_call_timeout=getattr(interpreter, "broker_tool_call_timeout", 180.0),
+        broker_start_retries=getattr(interpreter, "broker_start_retries", 1),
         llm_call_timeout=interpreter.llm_call_timeout,
         default_execution_profile=ExecutionProfile.RLM_DELEGATE,
         async_execute=interpreter.async_execute,
@@ -482,11 +491,16 @@ class ChildDelegation:
         child_volume_name = owner.volume_name if volume_name is _UNSET else cast(str | None, volume_name)
         child_volume_subpath = owner.volume_subpath if volume_subpath is _UNSET else cast(str | None, volume_subpath)
         child_cls = cast(Callable[..., Any], owner.__class__)
+        owner_execute_timeout = int(owner.execute_timeout or owner.timeout)
+        delegate_execution_timeout = int(
+            getattr(owner, "delegate_execution_timeout", owner_execute_timeout) or owner_execute_timeout
+        )
+        child_execute_timeout = max(1, min(owner_execute_timeout, delegate_execution_timeout))
         return child_cls(
             runtime=runtime,
             owns_runtime=owns_runtime,
             timeout=owner.timeout,
-            execute_timeout=owner.execute_timeout,
+            execute_timeout=child_execute_timeout,
             volume_name=child_volume_name,
             volume_subpath=child_volume_subpath,
             repo_url=owner.repo_url,
@@ -504,6 +518,10 @@ class ChildDelegation:
             child_fork_fallback=owner.child_fork_fallback,
             delegate_max_calls_per_turn=owner.delegate_max_calls_per_turn,
             delegate_result_truncation_chars=owner.delegate_result_truncation_chars,
+            delegate_execution_timeout=delegate_execution_timeout,
+            broker_health_timeout=getattr(owner, "broker_health_timeout", 20.0),
+            broker_tool_call_timeout=getattr(owner, "broker_tool_call_timeout", 180.0),
+            broker_start_retries=getattr(owner, "broker_start_retries", 1),
             llm_call_timeout=owner.llm_call_timeout,
             default_execution_profile=ExecutionProfile.RLM_DELEGATE,
             async_execute=owner.async_execute,

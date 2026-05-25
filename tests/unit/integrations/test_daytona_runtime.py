@@ -71,6 +71,25 @@ def test_daytona_interpreter_default_execution_profile_switches_executor(daytona
     assert interpreter._active_executor.default_execution_profile is ExecutionProfile.ROOT_INTERLOCUTOR
 
 
+def test_daytona_interpreter_applies_delegate_timeout_and_broker_settings(daytona_runtime) -> None:
+    from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
+
+    interpreter = DaytonaInterpreter(
+        runtime=daytona_runtime,
+        timeout=900,
+        execute_timeout=900,
+        delegate_execution_timeout=45,
+        broker_health_timeout=7.5,
+        broker_start_retries=2,
+    )
+
+    assert interpreter.delegate_execution_timeout == 45
+    assert interpreter.broker_health_timeout == 7.5
+    assert interpreter.broker_start_retries == 2
+    assert interpreter._active_executor.broker_health_timeout == 7.5
+    assert interpreter._active_executor.broker_start_retries == 2
+
+
 def test_store_evidence_redacts_credentials_from_bridge_errors() -> None:
     from fleet_rlm.integrations.daytona.isolation import store_evidence
 

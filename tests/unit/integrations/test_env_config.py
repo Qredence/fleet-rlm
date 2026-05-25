@@ -105,20 +105,18 @@ def test_apply_env_updates_ignores_masked_secret_round_trip(
 def test_app_config_syncs_legacy_llm_and_interpreter_sections() -> None:
     from fleet_rlm.integrations.config.env import AppConfig
 
-    config = AppConfig.model_validate(
-        {
-            "llm": {
-                "model": "openai/gpt-4.1",
-                "delegate_model": "openai/gpt-4.1-mini",
-                "delegate_max_tokens": 2048,
-            },
-            "sandbox": {
-                "timeout": 321,
-                "async_execute": False,
-            },
-            "volumes": {"name": "tenant-volume"},
-        }
-    )
+    config = AppConfig.model_validate({
+        "llm": {
+            "model": "openai/gpt-4.1",
+            "delegate_model": "openai/gpt-4.1-mini",
+            "delegate_max_tokens": 2048,
+        },
+        "sandbox": {
+            "timeout": 321,
+            "async_execute": False,
+        },
+        "volumes": {"name": "tenant-volume"},
+    })
 
     assert config.agent.model == "openai/gpt-4.1"
     assert config.agent.delegate_model == "openai/gpt-4.1-mini"
@@ -126,3 +124,22 @@ def test_app_config_syncs_legacy_llm_and_interpreter_sections() -> None:
     assert config.interpreter.timeout == 321
     assert config.interpreter.async_execute is False
     assert config.interpreter.volume_name == "tenant-volume"
+
+
+def test_server_runtime_config_carries_delegate_timeout_settings() -> None:
+    from fleet_rlm.api.config import ServerRuntimeConfig
+    from fleet_rlm.integrations.config.env import AppConfig
+
+    config = AppConfig.model_validate({
+        "rlm_settings": {
+            "delegate_execution_timeout": 45,
+            "daytona_broker_health_timeout": 7.5,
+            "daytona_broker_start_retries": 2,
+        }
+    })
+
+    runtime_config = ServerRuntimeConfig.from_app_config(config)
+
+    assert runtime_config.delegate_execution_timeout == 45
+    assert runtime_config.daytona_broker_health_timeout == 7.5
+    assert runtime_config.daytona_broker_start_retries == 2

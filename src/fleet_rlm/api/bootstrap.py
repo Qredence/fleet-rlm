@@ -94,6 +94,9 @@ def build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
     Constructs focused dependency slices individually and composes them into
     the backward-compatible ServerState wrapper.
     """
+    from .dependencies import InterpreterPoolDeps
+    from .runtime_services.interpreter_pool import InterpreterPool
+
     config_deps = ConfigDeps(config=cfg)
     lm_deps = LmDeps()
     auth_deps = AuthDeps(
@@ -118,6 +121,7 @@ def build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
             drop_policy=cfg.ws_execution_drop_policy,
         ),
     )
+    interpreter_pool_deps = InterpreterPoolDeps(pool=InterpreterPool(cfg))
 
     # Compose into the backward-compatible ServerState wrapper.
     state = ServerState.__new__(ServerState)
@@ -127,6 +131,7 @@ def build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
     state.session_cache_deps = session_cache_deps
     state.persistence_deps = persistence_deps
     state.diagnostics_deps = diagnostics_deps
+    state.interpreter_pool_deps = interpreter_pool_deps
     return state
 
 
@@ -139,6 +144,7 @@ def attach_server_state(app: FastAPI, state: ServerState) -> None:
     app.state.session_cache_deps = state.session_cache_deps
     app.state.persistence_deps = state.persistence_deps
     app.state.diagnostics_deps = state.diagnostics_deps
+    app.state.interpreter_pool_deps = state.interpreter_pool_deps
 
 
 async def initialize_persistence(persistence_deps: PersistenceDeps, cfg: ServerRuntimeConfig) -> None:
@@ -324,6 +330,15 @@ async def startup_server_state(state: ServerState) -> None:
     prime_runtime_env(cfg)
 
     await initialize_persistence(state.persistence_deps, cfg)
+
+    # Start the warm interpreter pool (non-fatal if Daytona is unconfigured).
+    pool = state.interpreter_pool_deps.pool
+    if pool is not None:
+        try:
+            await pool.start()
+        except Exception:
+            logger.warning("Interpreter pool startup failed; requests will cold-start", exc_info=True)
+
     schedule_optional_runtime_startup(state)
 
 
@@ -349,6 +364,14 @@ async def recover_stale_optimization_runs(state: ServerState) -> None:
 
 async def shutdown_server_state(state: ServerState) -> None:
     """Tear down runtime services and persistence resources."""
+
+    # Drain the interpreter pool before tearing down other services.
+    pool = state.interpreter_pool_deps.pool
+    if pool is not None:
+        try:
+            await pool.drain()
+        except Exception:
+            logger.warning("Interpreter pool drain failed", exc_info=True)
 
     await cancel_optional_runtime_startup(state)
 

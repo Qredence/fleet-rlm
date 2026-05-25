@@ -100,6 +100,12 @@ class DaytonaInterpreter(
         child_fork_fallback: ChildForkFallback | str = "clean",
         delegate_max_calls_per_turn: int = 8,
         delegate_result_truncation_chars: int = 8000,
+        delegate_max_iterations: int = 8,
+        delegate_execution_timeout: int | None = 300,
+        broker_health_timeout: float = 20.0,
+        broker_tool_call_timeout: float = 180.0,
+        broker_start_retries: int = 1,
+        delegate_adapter: str = "json",
         llm_call_timeout: int = 60,
         default_execution_profile: ExecutionProfile = ExecutionProfile.RLM_DELEGATE,
         async_execute: bool = True,
@@ -121,8 +127,17 @@ class DaytonaInterpreter(
         self.rlm_max_iterations = max(1, int(rlm_max_iterations))
         self.child_isolation_mode = normalize_child_isolation_mode(child_isolation_mode)
         self.child_fork_fallback = normalize_child_fork_fallback(child_fork_fallback)
+        self.delegate_max_iterations = max(1, int(delegate_max_iterations))
         self.delegate_max_calls_per_turn = max(1, int(delegate_max_calls_per_turn))
         self.delegate_result_truncation_chars = max(0, int(delegate_result_truncation_chars))
+        resolved_delegate_timeout = (
+            self.execute_timeout if delegate_execution_timeout is None else delegate_execution_timeout
+        )
+        self.delegate_execution_timeout = max(1, min(int(resolved_delegate_timeout), int(self.execute_timeout)))
+        self.broker_health_timeout = max(1.0, float(broker_health_timeout))
+        self.broker_tool_call_timeout = max(1.0, float(broker_tool_call_timeout))
+        self.broker_start_retries = max(0, int(broker_start_retries))
+        self.delegate_adapter = delegate_adapter
         self.child_isolation_metadata: dict[str, Any] | None = None
 
         initialize_llm_query_state(
@@ -170,6 +185,9 @@ class DaytonaInterpreter(
             async_execute=self.async_execute,
             timeout=self.timeout,
             execute_timeout=self.execute_timeout,
+            broker_health_timeout=self.broker_health_timeout,
+            broker_tool_call_timeout=self.broker_tool_call_timeout,
+            broker_start_retries=self.broker_start_retries,
             output_fields=self.output_fields,
             volume_mount_path=self.volume_mount_path,
             default_execution_profile=self.default_execution_profile,
@@ -448,6 +466,24 @@ class DaytonaInterpreter(
 
     def build_delegate_child(self, *, remaining_llm_budget: int) -> Any:
         return self._delegation.build_delegate_child(remaining_llm_budget=remaining_llm_budget)
+
+    async def areset_for_pool(self) -> None:
+        """Lightweight reset for interpreter pool reuse.
+
+        Preserves the sandbox VM and broker process (expensive to recreate).
+        Clears per-request metadata and REPL state so the next request
+        gets a fresh execution context.
+        """
+        self._host_repository = None
+        self._host_identity = None
+        self._host_run_id = None
+        self.execution_event_callback = None
+        self.child_isolation_metadata = None
+        self.output_fields = None
+        self._llm_call_count = 0
+
+        if self._executor is not None:
+            await self._executor.asoft_reset()
 
     def _reject_unsupported_recursive_callbacks(self, code: str) -> None:
         self._active_executor._reject_unsupported_recursive_callbacks(code)

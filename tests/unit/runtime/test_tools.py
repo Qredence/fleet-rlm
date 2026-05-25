@@ -26,7 +26,11 @@ class _FakeChild:
         self.session = _FakeSession()
         self._session = self.session
         self.child_isolation_metadata: dict[str, Any] = {}
+        self.execute_timeout = 45
+        self.broker_health_timeout = 7.5
+        self.broker_start_retries = 2
         self.start_calls = 0
+        self.shutdown_calls = 0
 
     def start(self) -> None:
         self._started = True
@@ -34,6 +38,9 @@ class _FakeChild:
 
     def _ensure_session_sync(self) -> _FakeSession:
         return self.session
+
+    def shutdown(self) -> None:
+        self.shutdown_calls += 1
 
 
 def test_tool_marker_collection_and_name_listing() -> None:
@@ -107,6 +114,47 @@ def test_bind_runtime_tools_passes_active_interpreter_to_delegate(monkeypatch: p
 
     assert result == {"status": "ok", "answer": "summarize"}
     assert captured == [("summarize", interpreter)]
+
+
+def test_delegate_to_rlm_marks_broker_failure_as_degraded(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.runtime.tools import rlm_delegate
+
+    child = _FakeChild()
+
+    class FakeInterpreter:
+        max_llm_calls = 8
+        execute_timeout = 900
+        delegate_execution_timeout = 45
+        broker_health_timeout = 7.5
+        broker_start_retries = 2
+
+        def build_delegate_child(self, *, remaining_llm_budget: int) -> _FakeChild:
+            assert remaining_llm_budget == 8
+            return child
+
+    def fake_build_recursive_subquery_rlm(**_kwargs: Any):
+        def _run(*, prompt: str, context: str) -> Any:
+            assert prompt == "compare Fleet RLM"
+            assert "Local workspace snapshot" in context
+            return types.SimpleNamespace(
+                answer="partial answer",
+                trajectory={"observation": "Broker server failed to start within timeout"},
+            )
+
+        return _run
+
+    monkeypatch.setattr(rlm_delegate, "build_recursive_subquery_rlm", fake_build_recursive_subquery_rlm)
+
+    result = rlm_delegate.delegate_to_rlm("compare Fleet RLM", interpreter=FakeInterpreter())
+
+    assert result["status"] == "needs_human_review"
+    assert result["degraded"] is True
+    assert result["reason"] == "broker_unavailable"
+    assert result["delegate_execution_timeout_s"] == 45
+    assert result["parent_execute_timeout_s"] == 900
+    assert result["broker_health_timeout_s"] == 7.5
+    assert result["broker_start_retries"] == 2
+    assert child.shutdown_calls == 1
 
 
 def test_list_files_scopes_default_search_to_repo_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

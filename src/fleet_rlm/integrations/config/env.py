@@ -284,6 +284,30 @@ class RlmSettings(BaseModel):
         default=8000,
         description="Maximum delegate response size before truncating for safety.",
     )
+    delegate_execution_timeout: int = Field(
+        default=300,
+        description="Maximum seconds for an isolated delegate child execution before it is treated as unavailable. URL-fetch delegates may legitimately exceed 120s due to network I/O and multi-pass analysis.",
+    )
+    delegate_max_iterations: int = Field(
+        default=8,
+        description="Maximum REPL iterations for child RLM delegates. Lower values prevent context bloat on simple tasks.",
+    )
+    delegate_adapter: str = Field(
+        default="json",
+        description="DSPy adapter for child RLM delegates. 'json' avoids ChatAdapter parse failures with models that produce REPL-style output.",
+    )
+    daytona_broker_health_timeout: float = Field(
+        default=20.0,
+        description="Maximum seconds to wait for the Daytona tool broker health check.",
+    )
+    daytona_broker_tool_call_timeout: float = Field(
+        default=180.0,
+        description="Maximum seconds the in-sandbox broker waits for a host tool-call response before 504.",
+    )
+    daytona_broker_start_retries: int = Field(
+        default=1,
+        description="Number of Daytona tool broker restart attempts before failing delegate execution.",
+    )
     child_isolation_mode: Literal["auto", "context"] = Field(
         default="auto",
         description=(

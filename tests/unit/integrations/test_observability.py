@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import sys
 import threading
+import types
 from types import SimpleNamespace
 
 import pytest
@@ -37,6 +39,7 @@ def test_mlflow_config_from_env_parses_runtime_flags(
     clean_runtime_env.setenv("MLFLOW_ENABLE_SPAN_PROCESSORS", "false")
     clean_runtime_env.setenv("FLEET_RLM_ENABLE_AUTO_ASSESSMENT", "true")
     clean_runtime_env.setenv("FLEET_RLM_AUTO_ASSESSMENT_SCORERS", "safety, custom")
+    clean_runtime_env.setenv("FLEET_RLM_AUTO_ASSESSMENT_JUDGE_MODEL", "openai/custom-judge")
 
     config = MlflowConfig.from_env()
 
@@ -48,7 +51,85 @@ def test_mlflow_config_from_env_parses_runtime_flags(
     assert config.dspy_log_traces_from_eval is False
     assert config.enable_auto_assessment is True
     assert config.auto_assessment_scorers == ["safety", "custom"]
+    assert config.auto_assessment_judge_model == "openai/custom-judge"
     assert config.enable_span_processors is False
+
+
+def test_configure_auto_assessment_passes_explicit_judge_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.integrations.observability import auto_assessment
+    from fleet_rlm.integrations.observability.config import MlflowConfig
+
+    created_schedules: list[dict[str, object]] = []
+
+    class FakeScorer:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    class FakeSchedule:
+        def __init__(self, **kwargs: object) -> None:
+            created_schedules.append(kwargs)
+
+    scorers_module = types.ModuleType("mlflow.genai.scorers")
+    for name in (
+        "Correctness",
+        "Guidelines",
+        "RelevanceToQuery",
+        "Safety",
+        "ToolCallCorrectness",
+        "ToolCallEfficiency",
+    ):
+        setattr(scorers_module, name, FakeScorer)
+
+    monkeypatch.setitem(sys.modules, "mlflow", types.ModuleType("mlflow"))
+    monkeypatch.setitem(sys.modules, "mlflow.genai", types.ModuleType("mlflow.genai"))
+    monkeypatch.setitem(sys.modules, "mlflow.genai.scorers", scorers_module)
+    monkeypatch.setattr(auto_assessment, "_ScorerScheduleConfig", FakeSchedule)
+    auto_assessment._SCORER_REGISTRY.clear()
+
+    configured = auto_assessment.configure_auto_assessment(
+        MlflowConfig(
+            enable_auto_assessment=True,
+            auto_assessment_scorers=["tool_efficiency"],
+            auto_assessment_judge_model="openai/custom-judge",
+            auto_assessment_sample_rate=0.5,
+        )
+    )
+
+    assert configured is True
+    assert len(created_schedules) == 1
+    scorer = created_schedules[0]["scorer"]
+    assert isinstance(scorer, FakeScorer)
+    assert scorer.kwargs["model"] == "openai/custom-judge"
+    assert created_schedules[0]["scheduled_scorer_name"] == "fleet_rlm_tool_efficiency"
+    assert created_schedules[0]["sample_rate"] == 0.5
+
+
+def test_mlflow_callback_sets_lm_span_token_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.integrations.observability import mlflow_runtime
+
+    captured_attributes: dict[str, object] = {}
+
+    class FakeSpan:
+        def set_attributes(self, attributes: dict[str, object]) -> None:
+            captured_attributes.update(attributes)
+
+    fake_mlflow = SimpleNamespace(get_current_active_span=lambda: FakeSpan())
+    monkeypatch.setattr(mlflow_runtime, "_import_mlflow", lambda: fake_mlflow)
+
+    callback = mlflow_runtime.FleetMlflowTraceCallback()
+    callback.on_lm_end(
+        "call-1",
+        {"usage": {"prompt_tokens": 12, "completion_tokens": 5}, "choices": [{"text": "done"}]},
+        None,
+    )
+
+    assert captured_attributes["mlflow.chat.tokenUsage"] == {
+        "input_tokens": 12,
+        "output_tokens": 5,
+        "total_tokens": 17,
+    }
+    assert captured_attributes["mlflow.chat.inputTokens"] == 12
+    assert captured_attributes["mlflow.chat.outputTokens"] == 5
 
 
 def test_posthog_config_from_env_and_configure_analytics_is_idempotent(

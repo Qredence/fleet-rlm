@@ -276,12 +276,18 @@ def build_filesystem_tools(agent: Any) -> list[Any]:
     def list_files(path: str = ".", pattern: str = "**/*") -> dict[str, Any]:
         return _list_files_impl(ctx, path=path, pattern=pattern)
 
-    def read_file_slice(path: str, start_line: int = 1, num_lines: int = 100) -> dict[str, Any]:
+    def read_file_slice(
+        path: str,
+        start_line: int = 1,
+        num_lines: int = 100,
+        end_line: int | None = None,
+    ) -> dict[str, Any]:
+        resolved_num_lines = (end_line - start_line + 1) if end_line is not None else num_lines
         return _read_file_slice_impl(
             ctx,
             path=path,
             start_line=start_line,
-            num_lines=num_lines,
+            num_lines=resolved_num_lines,
         )
 
     def find_files(pattern: str, path: str = ".", include: str = "") -> dict[str, Any]:
@@ -323,10 +329,12 @@ def read_file_slice(
     path: str,
     start_line: int = 1,
     num_lines: int = 100,
+    end_line: int | None = None,
 ) -> dict[str, Any]:
     """Read a line range from a host file."""
+    resolved_num_lines = (end_line - start_line + 1) if end_line is not None else num_lines
     _ctx = _FilesystemToolContext(agent=None)  # type: ignore[arg-type]
-    return _read_file_slice_impl(_ctx, path=path, start_line=start_line, num_lines=num_lines)
+    return _read_file_slice_impl(_ctx, path=path, start_line=start_line, num_lines=resolved_num_lines)
 
 
 @tool_fn

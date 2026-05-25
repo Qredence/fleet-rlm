@@ -172,14 +172,14 @@ def _download_url(url: str) -> Path:
 
 
 @tool_fn
-def load_document(path: str, alias: str = "active") -> dict[str, Any]:
+def load_document(source: str, alias: str = "active") -> dict[str, Any]:
     """Load a local file, directory listing, or public URL into document context."""
     from fleet_rlm.runtime.content.ingestion import (
         read_document_content as _read_document_content,
     )
 
     # Handle HTTP(S) URLs
-    stripped = path.strip()
+    stripped = source.strip()
     if stripped.startswith(("http://", "https://")):
         tmp_path = _download_url(stripped)
         try:
@@ -195,7 +195,7 @@ def load_document(path: str, alias: str = "active") -> dict[str, Any]:
         finally:
             tmp_path.unlink(missing_ok=True)
 
-    file_path = Path(path)
+    file_path = Path(source)
 
     if file_path.is_dir():
         files = sorted(str(p.relative_to(file_path)) for p in file_path.rglob("*") if p.is_file())

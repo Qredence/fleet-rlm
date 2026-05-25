@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 from threading import Lock
@@ -355,6 +356,68 @@ def _set_span_error_description(exception: Exception) -> None:
         logger.debug("Failed to update MLflow span status", exc_info=True)
 
 
+def _set_active_span_token_usage(input_tokens: int | None, output_tokens: int | None) -> None:
+    if input_tokens is None and output_tokens is None:
+        return
+    mlflow = _import_mlflow()
+    if mlflow is None:
+        return
+    try:
+        span = mlflow.get_current_active_span()
+    except Exception:
+        logger.debug("Failed to inspect current MLflow span for token usage", exc_info=True)
+        return
+    if span is None:
+        return
+
+    usage: dict[str, int] = {}
+    if input_tokens is not None:
+        usage["input_tokens"] = input_tokens
+    if output_tokens is not None:
+        usage["output_tokens"] = output_tokens
+    if input_tokens is not None or output_tokens is not None:
+        usage["total_tokens"] = int(input_tokens or 0) + int(output_tokens or 0)
+
+    attributes: dict[str, Any] = {
+        "mlflow.chat.tokenUsage": usage,
+        "mlflow.chat.tokenUsageJson": json.dumps(usage, sort_keys=True),
+    }
+    if input_tokens is not None:
+        attributes["mlflow.chat.inputTokens"] = input_tokens
+    if output_tokens is not None:
+        attributes["mlflow.chat.outputTokens"] = output_tokens
+    if usage.get("total_tokens") is not None:
+        attributes["mlflow.chat.totalTokens"] = usage["total_tokens"]
+
+    for candidate in (span, getattr(span, "_span", None)):
+        if candidate is None:
+            continue
+        set_attributes = getattr(candidate, "set_attributes", None)
+        if callable(set_attributes):
+            try:
+                set_attributes(attributes)
+                return
+            except Exception:
+                logger.debug("Failed to set MLflow span token usage attributes in bulk", exc_info=True)
+        set_attribute = getattr(candidate, "set_attribute", None)
+        if not callable(set_attribute):
+            continue
+        wrote_attribute = False
+        for key, value in attributes.items():
+            try:
+                set_attribute(key, value)
+                wrote_attribute = True
+            except Exception:
+                if key == "mlflow.chat.tokenUsage":
+                    try:
+                        set_attribute(key, attributes["mlflow.chat.tokenUsageJson"])
+                        wrote_attribute = True
+                    except Exception:
+                        logger.debug("Failed to set MLflow token usage span attribute", exc_info=True)
+        if wrote_attribute:
+            return
+
+
 class FleetMlflowTraceCallback(BaseCallback):
     """DSPy callback that propagates per-request context into MLflow traces."""
 
@@ -399,6 +462,7 @@ class FleetMlflowTraceCallback(BaseCallback):
                     )
         # Accumulate token usage on the per-request context.
         input_tokens, output_tokens = _extract_token_usage(outputs)
+        _set_active_span_token_usage(input_tokens, output_tokens)
         ctx = current_request_context()
         if ctx is not None:
             if input_tokens is not None:

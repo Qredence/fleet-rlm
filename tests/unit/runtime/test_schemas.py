@@ -14,7 +14,7 @@ def test_stream_event_construction_and_serialization() -> None:
     ts = datetime(2025, 1, 1, tzinfo=timezone.utc)
     event = StreamEvent(
         kind="tool_call",
-        text="load_document(path='README.md')",
+        text="load_document(source='README.md')",
         payload={"tool_name": "load_document"},
         timestamp=ts,
         flush_tokens=True,
@@ -22,7 +22,7 @@ def test_stream_event_construction_and_serialization() -> None:
 
     assert asdict(event) == {
         "kind": "tool_call",
-        "text": "load_document(path='README.md')",
+        "text": "load_document(source='README.md')",
         "payload": {"tool_name": "load_document"},
         "timestamp": ts,
         "flush_tokens": True,

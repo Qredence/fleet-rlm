@@ -3,7 +3,7 @@ defaults:
 
 llm:
   max_iters: 60
-  model: ${oc.env:DSPY_LM_MODEL,openai/gemini-3-flash-preview}
+  model: ${oc.env:DSPY_LM_MODEL,openai/gemini/gemini-flash-lite-latest}
   temperature: 1
   delegate_model: ${oc.env:DSPY_DELEGATE_LM_MODEL,null}
   delegate_small_model: ${oc.env:DSPY_DELEGATE_LM_SMALL_MODEL,null}
@@ -59,6 +59,12 @@ rlm_settings:
   max_output_chars: 100000
   delegate_max_calls_per_turn: 8
   delegate_result_truncation_chars: 8000
+  delegate_execution_timeout: ${oc.env:RLM_DELEGATE_EXECUTION_TIMEOUT,300}
+  delegate_max_iterations: ${oc.env:RLM_DELEGATE_MAX_ITERATIONS,8}
+  delegate_adapter: ${oc.env:RLM_DELEGATE_ADAPTER,json}
+  daytona_broker_health_timeout: ${oc.env:DAYTONA_BROKER_HEALTH_TIMEOUT,20.0}
+  daytona_broker_tool_call_timeout: ${oc.env:DAYTONA_BROKER_TOOL_CALL_TIMEOUT,180.0}
+  daytona_broker_start_retries: ${oc.env:DAYTONA_BROKER_START_RETRIES,1}
   child_isolation_mode: ${oc.env:RLM_CHILD_ISOLATION_MODE,auto}
   child_fork_fallback: ${oc.env:RLM_CHILD_FORK_FALLBACK,clean}
   stdout_summary_threshold: 10000

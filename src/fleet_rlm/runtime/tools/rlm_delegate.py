@@ -35,6 +35,31 @@ _BROKER_ERROR_MARKER = "Broker server failed to start"
 _DELEGATE_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="delegate_rlm")
 
 
+def _resolve_delegate_adapter(interpreter: Any) -> Any | None:
+    """Build the DSPy adapter for child RLM delegates."""
+    adapter_name = getattr(interpreter, "delegate_adapter", "json")
+    if not adapter_name or adapter_name in ("none", "off", "auto"):
+        return None
+    import dspy
+
+    if adapter_name == "json":
+        return dspy.JSONAdapter()
+    if adapter_name == "chat":
+        return dspy.ChatAdapter()
+    return dspy.JSONAdapter()
+
+
+def _run_with_delegate_adapter(rlm: Any, interpreter: Any, *, prompt: str, context: str) -> Any:
+    """Execute the child RLM with the configured delegate adapter."""
+    import dspy
+
+    adapter = _resolve_delegate_adapter(interpreter)
+    if adapter is not None:
+        with dspy.context(adapter=adapter):
+            return rlm(prompt=prompt, context=context)
+    return rlm(prompt=prompt, context=context)
+
+
 @tool_fn
 def delegate_to_rlm(
     query: str,
@@ -201,6 +226,7 @@ def _run_delegate_child(
     started_at = time.time()
     try:
         child = interpreter.build_delegate_child(remaining_llm_budget=llm_budget)
+        _annotate_delegate_runtime_metadata(interpreter, child, llm_budget)
         _install_delegate_budget_lease(interpreter, child, llm_budget)
         resolved_context = _resolve_delegate_context(
             child=child,
@@ -213,10 +239,11 @@ def _run_delegate_child(
             child.start()
         _record_child_sandbox_id(child)
 
+        delegate_iter_cap = int(getattr(interpreter, "delegate_max_iterations", 8))
         max_iterations = max(
             1,
             min(
-                int(getattr(child, "rlm_max_iterations", 20)),
+                delegate_iter_cap,
                 int(llm_budget),
             ),
         )
@@ -232,30 +259,43 @@ def _run_delegate_child(
             "delegate_to_rlm: running child RLM with isolation=%s",
             getattr(child, "child_isolation_metadata", {}),
         )
-        prediction = rlm(prompt=query, context=resolved_context)
+        prediction = _run_with_delegate_adapter(rlm, interpreter, prompt=query, context=resolved_context)
         raw_answer = getattr(prediction, "answer", None)
         answer = "" if raw_answer is None else str(raw_answer)
 
-        _persist_child_trace(
-            interpreter,
-            query,
-            answer,
-            prediction,
-            started_at,
-        )
         duration_ms = int((time.time() - started_at) * 1000)
         metadata = getattr(child, "child_isolation_metadata", None)
         if isinstance(metadata, dict):
             metadata["child_duration_ms"] = duration_ms
             metadata["max_iterations"] = max_iterations
             metadata["iteration_pressure"] = max_iterations >= llm_budget
+        _persist_child_trace(
+            interpreter,
+            query,
+            answer,
+            prediction,
+            started_at,
+            metadata=_safe_child_metadata(child),
+        )
     except Exception as exc:
+        duration_ms = int((time.time() - started_at) * 1000)
+        error_text = str(exc)
+        reason = "broker_unavailable" if _is_broker_failure(error_text) else "child_error"
+        metadata = _safe_child_metadata(child)
+        metadata["error_reason"] = reason
+        metadata["child_duration_ms"] = duration_ms
         logger.warning("delegate_to_rlm execution failed: %s", exc)
         # Persist the error outcome so degraded/failed child results are never
         # silently discarded — callers can look up the child trace after the
         # parent returns (VAL-RLM-010).
-        _persist_child_trace_error(interpreter, query, str(exc), started_at)
-        return {"status": "error", "error": str(exc)}
+        _persist_child_trace_error(interpreter, query, error_text, started_at, metadata=metadata)
+        return {
+            "status": "error",
+            "reason": reason,
+            "error": error_text,
+            "duration_ms": duration_ms,
+            **_delegate_result_metadata(metadata),
+        }
     finally:
         if child is not None:
             try:
@@ -288,8 +328,9 @@ def _run_delegate_child(
                 "degradation_reason": failure["reason"],
                 "degradation_error": failure["error"],
                 "duration_ms": duration_ms,
+                **_delegate_result_metadata(metadata),
             }
-        return {"status": "error", **failure}
+        return {"status": "error", **failure, "duration_ms": duration_ms, **_delegate_result_metadata(metadata)}
 
     return {"status": "ok", "answer": answer}
 
@@ -331,6 +372,44 @@ def _install_delegate_budget_lease(
         metadata["llm_budget_lease"] = max(1, int(lease))
 
 
+def _annotate_delegate_runtime_metadata(interpreter: Any, child: Any, llm_budget: int) -> None:
+    metadata = getattr(child, "child_isolation_metadata", None)
+    if not isinstance(metadata, dict):
+        return
+    metadata.setdefault("llm_budget_lease", max(1, int(llm_budget)))
+    metadata.setdefault("delegate_execution_timeout_s", int(getattr(child, "execute_timeout", 0) or 0))
+    metadata.setdefault("parent_execute_timeout_s", int(getattr(interpreter, "execute_timeout", 0) or 0))
+    metadata.setdefault("broker_health_timeout_s", float(getattr(child, "broker_health_timeout", 0.0) or 0.0))
+    metadata.setdefault("broker_start_retries", int(getattr(child, "broker_start_retries", 0) or 0))
+
+
+def _safe_child_metadata(child: Any | None) -> dict[str, Any]:
+    metadata = getattr(child, "child_isolation_metadata", None) if child is not None else None
+    return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+def _delegate_result_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    if not metadata:
+        return {}
+    result: dict[str, Any] = {}
+    for key in (
+        "delegate_execution_timeout_s",
+        "parent_execute_timeout_s",
+        "broker_health_timeout_s",
+        "broker_start_retries",
+        "child_sandbox_id",
+        "cleanup_status",
+    ):
+        value = metadata.get(key)
+        if value is not None:
+            result[key] = value
+    return result
+
+
+def _is_broker_failure(value: Any) -> bool:
+    return contains_marker(value, _BROKER_ERROR_MARKER)
+
+
 def _resolve_delegate_context(
     *,
     child: Any,
@@ -345,6 +424,13 @@ def _resolve_delegate_context(
         if not _uses_local_host_checkout(child):
             return resolved_context
         return _append_local_workspace_context(
+            child=child,
+            query=query,
+            resolved_context=resolved_context,
+        )
+
+    if _uses_local_host_checkout(child):
+        resolved_context = _append_local_workspace_context(
             child=child,
             query=query,
             resolved_context=resolved_context,
@@ -416,7 +502,7 @@ def _delegate_failure(
     prediction: Any,
     raw_answer: Any,
 ) -> dict[str, str] | None:
-    if contains_marker(prediction, _BROKER_ERROR_MARKER):
+    if _is_broker_failure(prediction):
         return {
             "reason": "broker_unavailable",
             "error": "Daytona broker unavailable during child RLM execution.",
@@ -636,6 +722,8 @@ def _persist_child_trace_error(
     query: str,
     error: str,
     started_at: float,
+    *,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     """Persist a failed child RLM execution trace (best-effort).
 
@@ -655,6 +743,8 @@ def _persist_child_trace_error(
     latency_ms = int((time.time() - started_at) * 1000)
     trace_id = f"rlm-child-err-{_uuid.uuid4().hex[:12]}"
     payload: dict[str, Any] = {"query": query, "error": error, "status": "error"}
+    if metadata:
+        payload["metadata"] = metadata
     summary_text = f"Error: {error[:200]}"
 
     async def _store_coro() -> None:
@@ -691,6 +781,8 @@ def _persist_child_trace(
     answer: str,
     prediction: Any,
     started_at: float,
+    *,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     """Persist child RLM trajectory to NeonDB via the host repository.
 
@@ -718,6 +810,8 @@ def _persist_child_trace(
         payload["trajectory"] = trajectory
     elif isinstance(trajectory, list):
         payload["trajectory"] = trajectory
+    if metadata:
+        payload["metadata"] = metadata
 
     latency_ms = int((time.time() - started_at) * 1000)
     trace_id = f"rlm-child-{_uuid.uuid4().hex[:12]}"

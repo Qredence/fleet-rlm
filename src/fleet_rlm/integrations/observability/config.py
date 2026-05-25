@@ -63,6 +63,7 @@ class MlflowConfig(BaseModel):
     dspy_log_compiles: bool = Field(default=False)
     dspy_log_evals: bool = Field(default=False)
     enable_auto_assessment: bool = Field(default=False)
+    auto_assessment_judge_model: str | None = Field(default=None)
     auto_assessment_sample_rate: float = Field(default=1.0)
     auto_assessment_scorers: list[str] = Field(default_factory=lambda: ["safety", "guidelines"])
     enable_span_processors: bool = Field(default=True)
@@ -76,6 +77,12 @@ class MlflowConfig(BaseModel):
         ).strip()
         experiment = (os.getenv("MLFLOW_EXPERIMENT") or "fleet-rlm").strip()
         active_model_id = (os.getenv("MLFLOW_ACTIVE_MODEL_ID") or "").strip() or None
+        auto_assessment_judge_model = (
+            os.getenv("FLEET_RLM_AUTO_ASSESSMENT_JUDGE_MODEL")
+            or os.getenv("MLFLOW_GENAI_JUDGE_MODEL")
+            or os.getenv("DSPY_LM_MODEL")
+            or ""
+        ).strip() or None
         enabled_raw = os.getenv("MLFLOW_ENABLED")
         return cls(
             enabled=_env_bool(enabled_raw, default=True),
@@ -103,6 +110,7 @@ class MlflowConfig(BaseModel):
                 os.getenv("FLEET_RLM_ENABLE_AUTO_ASSESSMENT"),
                 default=False,
             ),
+            auto_assessment_judge_model=auto_assessment_judge_model,
             auto_assessment_sample_rate=float(os.getenv("FLEET_RLM_AUTO_ASSESSMENT_SAMPLE_RATE", "1.0")),
             auto_assessment_scorers=[
                 s.strip()

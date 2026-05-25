@@ -364,6 +364,9 @@ _PYTHON_FENCE_RE = re.compile(
 class DaytonaExecutionOwner(SupportsExecutionEventCallback, Protocol):
     timeout: int
     execute_timeout: int | None
+    broker_health_timeout: float
+    broker_tool_call_timeout: float
+    broker_start_retries: int
     output_fields: list[dict[str, Any]] | None
     volume_mount_path: str
     _setup_context_id: str | None
@@ -562,6 +565,9 @@ def _ensure_bridge(
         bridge = bridge_cls(
             sandbox=session.sandbox,
             context=context,
+            broker_health_timeout=float(getattr(owner, "broker_health_timeout", 60.0)),
+            broker_tool_call_timeout=float(getattr(owner, "broker_tool_call_timeout", 180.0)),
+            broker_start_retries=int(getattr(owner, "broker_start_retries", 1)),
         )
         owner._bridge = bridge
         owner._bridge_sandbox_id = sandbox_id
@@ -1070,6 +1076,9 @@ class SandboxExecutor:
         async_execute: bool,
         timeout: int,
         execute_timeout: int,
+        broker_health_timeout: float,
+        broker_tool_call_timeout: float = 180.0,
+        broker_start_retries: int,
         output_fields: list[dict[str, Any]] | None,
         volume_mount_path: str,
         default_execution_profile: ExecutionProfile,
@@ -1081,6 +1090,9 @@ class SandboxExecutor:
         self.async_execute = async_execute
         self.timeout = timeout
         self.execute_timeout = execute_timeout
+        self.broker_health_timeout = max(1.0, float(broker_health_timeout))
+        self.broker_tool_call_timeout = max(1.0, float(broker_tool_call_timeout))
+        self.broker_start_retries = max(0, int(broker_start_retries))
         self.output_fields = output_fields
         self.volume_mount_path = volume_mount_path
         self.default_execution_profile = default_execution_profile
@@ -1103,6 +1115,24 @@ class SandboxExecutor:
     def tools(self, value: dict[str, Callable[..., Any]]) -> None:
         self._tools = dict(value)
         self._callback_owner._tools = self._tools
+
+    def soft_reset(self) -> None:
+        """Reset execution state for pool reuse WITHOUT closing the broker.
+
+        Clears cached setup tracking so the next execution re-runs base setup
+        and re-registers SUBMIT. Clears injected tools on the bridge (they
+        exist in the old REPL context) but preserves the broker process.
+        """
+        self._setup_context_id = None
+        self._setup_workspace_path = None
+        self._submit_signature_key = None
+        if self._bridge is not None:
+            self._bridge._injected_tools.clear()
+            self._bridge_context_id = None
+
+    async def asoft_reset(self) -> None:
+        """Async wrapper for soft_reset."""
+        await _run_sync_in_thread(self.soft_reset)
 
     def reset(self) -> None:
         self.close_bridge()

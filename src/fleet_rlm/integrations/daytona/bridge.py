@@ -15,7 +15,6 @@ from __future__ import annotations
 import inspect
 import json
 import keyword
-import os
 import time
 import urllib.error
 import urllib.request
@@ -155,13 +154,10 @@ if __name__ == "__main__":
     app.run(host="0.0.0.0", port=3000, threaded=True)
 """.strip()
 
-# Allow the broker tool-call polling timeout to be tuned via the host env.
-# The value is injected directly into the embedded server code at import time.
-_DAYTONA_BROKER_TOOL_CALL_TIMEOUT: float = float(os.environ.get("DAYTONA_BROKER_TIMEOUT", "120.0"))
-_BROKER_SERVER_CODE = _BROKER_SERVER_CODE.replace(
-    "__DAYTONA_TOOL_CALL_TIMEOUT_S__",
-    repr(_DAYTONA_BROKER_TOOL_CALL_TIMEOUT),
-)
+# Default broker tool-call polling timeout (used as fallback when no instance
+# value is provided).  The placeholder ``__DAYTONA_TOOL_CALL_TIMEOUT_S__``
+# in _BROKER_SERVER_CODE is replaced at instance level in ensure_started().
+_DAYTONA_BROKER_TOOL_CALL_TIMEOUT_DEFAULT: float = 180.0
 
 _TOOL_WRAPPER_TEMPLATE = """
 def {tool_name}({signature}):
@@ -291,6 +287,7 @@ class DaytonaToolBridge:
         max_concurrent_tool_calls: int = 32,
         tool_claim_lease_seconds: float = 60.0,
         broker_health_timeout: float = 60.0,
+        broker_tool_call_timeout: float = 180.0,
         broker_start_retries: int = 1,
     ) -> None:
         if max_concurrent_tool_calls < 1:
@@ -299,6 +296,8 @@ class DaytonaToolBridge:
             raise ValueError("tool_claim_lease_seconds must be >= 1")
         if broker_health_timeout < 1:
             raise ValueError("broker_health_timeout must be >= 1")
+        if broker_tool_call_timeout < 1:
+            raise ValueError("broker_tool_call_timeout must be >= 1")
         if broker_start_retries < 0:
             raise ValueError("broker_start_retries must be >= 0")
         self.sandbox = sandbox
@@ -306,6 +305,7 @@ class DaytonaToolBridge:
         self.max_concurrent_tool_calls = max_concurrent_tool_calls
         self.tool_claim_lease_seconds = float(tool_claim_lease_seconds)
         self.broker_health_timeout = float(broker_health_timeout)
+        self.broker_tool_call_timeout = float(broker_tool_call_timeout)
         self.broker_start_retries = int(broker_start_retries)
         self._broker_url: str | None = None
         self._broker_token: str | None = None
@@ -320,8 +320,12 @@ class DaytonaToolBridge:
     def ensure_started(self) -> None:
         if self._broker_url is not None:
             return
+        server_code = _BROKER_SERVER_CODE.replace(
+            "__DAYTONA_TOOL_CALL_TIMEOUT_S__",
+            repr(self.broker_tool_call_timeout),
+        )
         self.sandbox.fs.upload_file(
-            _BROKER_SERVER_CODE.encode("utf-8"),
+            server_code.encode("utf-8"),
             _BROKER_SERVER_PATH,
         )
         from daytona import SessionExecuteRequest
