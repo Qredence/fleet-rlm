@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import threading
 from typing import Any
 
 from .async_compat import _run_async_compat, _run_sync_in_thread
+from .concurrency import acquire_sandbox_slot, attach_slot_release_handler, release_sandbox_slot
 from .config import ResolvedDaytonaConfig, resolve_daytona_config
 from .config import build_daytona_client as _build_daytona_client
+from .config import (
+    daytona_import_error as _daytona_import_error,
+)
+from .config import (
+    format_daytona_sdk_error as _format_daytona_sdk_error,
+)
+from .diagnostics import DaytonaDiagnosticError
 from .models import (
     ContextSource,
     SandboxSpec,
@@ -28,6 +38,7 @@ from .sdk_ops import (
     acreate_snapshot,
     aget_snapshot,
     alist_snapshots,
+    aresolve_sandbox_spec_snapshot,
     aresolve_snapshot,
 )
 from .sdk_ops import (
@@ -43,6 +54,9 @@ from .sdk_ops import (
     aresume_workspace_session as _aresume_workspace_session,
 )
 from .sdk_ops import (
+    await_volume_ready as _await_volume_ready,
+)
+from .sdk_ops import (
     fallback_to_declarative_image as _fallback_to_declarative_image,
 )
 from .sdk_ops import (
@@ -54,17 +68,13 @@ from .workspace_runtime import (
     WorkspaceSessionReconcileRequest,
 )
 from .workspace_runtime import (
-    acreate_sandbox as _acreate_sandbox_helper,
-)
-from .workspace_runtime import (
-    acreate_sandbox_from_spec as _acreate_sandbox_from_spec_helper,
-)
-from .workspace_runtime import (
     acreate_workspace_session as _acreate_workspace_session_helper,
 )
 from .workspace_runtime import (
     areconcile_workspace_session as _areconcile_workspace_session_helper,
 )
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # DaytonaSandboxRuntime
@@ -190,6 +200,54 @@ class DaytonaSandboxRuntime:
             network_allow_list=network_allow_list,
         )
 
+    # ------------------------------------------------------------------
+    # Sandbox creation (inlined from sandbox_lifecycle)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _ignore_snapshot_create_logs(_message: Any) -> None:
+        return None
+
+    def _resolve_volume_id(self, spec: SandboxSpec) -> str | None:
+        """Resolve a volume ID for the given spec, creating the volume if needed."""
+        if not spec.volume_name:
+            return None
+        client = self._get_client()
+        volume = client.volume.get(spec.volume_name, create=True)
+        volume = _await_volume_ready(client, spec.volume_name, volume)
+        return str(volume.id)
+
+    def _create_sandbox_from_spec_impl(self, spec: SandboxSpec) -> Any:
+        """Internal sync implementation: create a sandbox from a ``SandboxSpec``."""
+        try:
+            from daytona import (
+                CreateSandboxFromImageParams,
+                CreateSandboxFromSnapshotParams,
+                Resources,
+                VolumeMount,
+            )
+        except ImportError as exc:  # pragma: no cover - environment specific
+            raise _daytona_import_error(exc) from exc
+
+        client = self._get_client()
+        volume_id = self._resolve_volume_id(spec)
+        params = spec.to_daytona_create_params(
+            volume_id=volume_id,
+            create_image_params_cls=CreateSandboxFromImageParams,
+            create_snapshot_params_cls=CreateSandboxFromSnapshotParams,
+            volume_mount_cls=VolumeMount,
+            resources_cls=Resources,
+        )
+
+        if spec.uses_declarative_image:
+            return client.create(
+                params,
+                timeout=0,
+                on_snapshot_create_logs=self._ignore_snapshot_create_logs,
+            )
+
+        return client.create(params)
+
     def create_sandbox_from_spec(self, spec: SandboxSpec) -> Any:
         """Create a sandbox from a declarative ``SandboxSpec`` (sync).
 
@@ -201,7 +259,7 @@ class DaytonaSandboxRuntime:
         Note: This does NOT acquire a concurrency slot. Use
         ``create_sandbox`` for the full lifecycle with slot management.
         """
-        return _acreate_sandbox_from_spec_helper(runtime=self, spec=spec)
+        return self._create_sandbox_from_spec_impl(spec)
 
     async def acreate_sandbox_from_spec(self, spec: SandboxSpec) -> Any:
         """Create a sandbox from a declarative ``SandboxSpec`` (async).
@@ -209,7 +267,7 @@ class DaytonaSandboxRuntime:
         Runs the synchronous Daytona SDK call in a thread to avoid
         blocking the event loop.
         """
-        return await _run_sync_in_thread(self.create_sandbox_from_spec, spec)
+        return await _run_sync_in_thread(self._create_sandbox_from_spec_impl, spec)
 
     def create_sandbox(
         self,
@@ -223,8 +281,7 @@ class DaytonaSandboxRuntime:
         and attaches a slot-release handler to the resulting sandbox.
         """
         return _run_async_compat(
-            _acreate_sandbox_helper,
-            runtime=self,
+            self.acreate_sandbox,
             volume_name=volume_name,
             spec=spec,
         )
@@ -235,12 +292,44 @@ class DaytonaSandboxRuntime:
         *,
         spec: SandboxSpec | None = None,
     ) -> Any:
-        """Create a sandbox with concurrency control and snapshot fallback (async)."""
-        return await _acreate_sandbox_helper(
-            runtime=self,
-            volume_name=volume_name,
-            spec=spec,
-        )
+        """Create a sandbox with concurrency control and snapshot fallback (async).
+
+        Acquires a global concurrency slot before creating. If the semaphore is
+        at capacity, waits up to 60 seconds before raising a busy error.
+        """
+        slot_acquired = False
+        try:
+            await acquire_sandbox_slot(timeout=60.0)
+            slot_acquired = True
+        except asyncio.TimeoutError as exc:
+            raise DaytonaDiagnosticError(
+                "Sandbox concurrency limit reached: all slots occupied. Wait briefly and retry.",
+                category="sandbox_concurrency_busy",
+                phase="sandbox_create",
+            ) from exc
+
+        try:
+            resolved_spec = spec or self.build_sandbox_spec(volume_name=volume_name)
+            resolved_spec = aresolve_sandbox_spec_snapshot(
+                resolved_spec,
+                config=self._resolved_config,
+            )
+            sandbox = self._create_sandbox_from_spec_impl(resolved_spec)
+            # Attach semaphore release callback to sandbox for cleanup
+            if sandbox is not None:
+                attach_slot_release_handler(sandbox)
+            else:
+                release_sandbox_slot()
+            return sandbox
+        except Exception as exc:
+            # Release slot on failure since sandbox won't be returned
+            if slot_acquired:
+                release_sandbox_slot()
+            raise DaytonaDiagnosticError(
+                f"Daytona sandbox create failure: {_format_daytona_sdk_error(exc)}",
+                category="sandbox_create_clone_error",
+                phase="sandbox_create",
+            ) from exc
 
     @staticmethod
     def _fallback_to_declarative_image(spec: SandboxSpec) -> SandboxSpec:

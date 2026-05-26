@@ -7,12 +7,15 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .async_compat import _run_async_compat, _run_sync_in_thread
 from .diagnostics import DaytonaDiagnosticError
 from .models import ContextSource
 from .sdk_ops import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
+
+if TYPE_CHECKING:
+    from .protocols import DaytonaSandbox
 
 
 # ---------------------------------------------------------------------------
@@ -20,7 +23,7 @@ from .sdk_ops import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
 # ---------------------------------------------------------------------------
 def _run_admin_code(
     *,
-    sandbox: Any,
+    sandbox: DaytonaSandbox,
     code: str,
     phase: str,
     error_prefix: str,
@@ -68,7 +71,7 @@ def _run_admin_code(
 
 async def _arun_admin_code(
     *,
-    sandbox: Any,
+    sandbox: DaytonaSandbox,
     code: str,
     phase: str,
     error_prefix: str,
