@@ -48,6 +48,7 @@ class KnowledgeResult(BaseModel):
     source: str
     path: str
     alias: str
+    tags: list[str] = []
 
 
 class SearchKnowledgeOutput(BaseModel):

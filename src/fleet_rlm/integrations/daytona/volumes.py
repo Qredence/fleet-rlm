@@ -6,7 +6,7 @@ import logging
 import time as _time
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from fleet_rlm.runtime.execution.storage_paths import mounted_storage_roots
@@ -20,6 +20,39 @@ from .config import (
 )
 from .errors import DaytonaDiagnosticError, VolumeNotReadyError
 from .memory_db import init_memory_db
+
+
+def seed_system_skills(mounted_root: str) -> None:
+    """Seed bundled scaffold skills into the volume's skills/system/ directory.
+
+    Idempotent — skips any skill file that already exists.
+    Uses importlib.resources to read bundled SKILL.md files.
+    """
+    import importlib.resources as _importlib_resources
+
+    dest_dir = Path(mounted_root) / "skills" / "system"
+    if not dest_dir.exists():
+        logger.debug("seed_system_skills: skills/system not found, skipping seed")
+        return
+
+    try:
+        skills_pkg = _importlib_resources.files("fleet_rlm.scaffold") / "skills"
+        for skill_entry in skills_pkg.iterdir():
+            skill_name = skill_entry.name  # e.g. "rlm-long-context"
+            skill_md = skill_entry / "SKILL.md"
+            try:
+                if not skill_md.is_file():
+                    continue
+                dest_file = dest_dir / f"{skill_name}.md"
+                if dest_file.exists():
+                    continue  # idempotent
+                dest_file.write_text(skill_md.read_text(encoding="utf-8"), encoding="utf-8")
+                logger.debug("seed_system_skills: seeded %s", skill_name)
+            except Exception as exc:
+                logger.warning("seed_system_skills: skipped %s: %s", skill_name, exc)
+    except Exception as exc:
+        logger.warning("seed_system_skills: skill seeding failed (non-fatal): %s", exc)
+
 
 if TYPE_CHECKING:
     from .protocols import DaytonaClient, DaytonaSandbox
@@ -206,6 +239,11 @@ def ensure_daytona_volume_layout(
     except Exception as exc:
         logger.warning("ensure_daytona_volume_layout: core.db init failed (non-fatal): %s", exc)
 
+    try:
+        seed_system_skills(mounted_root)
+    except Exception as exc:
+        logger.warning("ensure_daytona_volume_layout: skill seeding failed (non-fatal): %s", exc)
+
 
 async def aensure_daytona_volume_layout(
     *,
@@ -317,6 +355,7 @@ __all__ = [
     "await_volume_ready",
     "canonicalize_volume_state_token",
     "raise_if_volume_error",
+    "seed_system_skills",
     "volume_state_details",
     "volume_state_missing",
 ]

@@ -52,6 +52,7 @@ def persist_knowledge_document(
     metadata: dict[str, Any] | None,
     volume_mount_path: str,
     alias: str = "active",
+    tags: list[str] | None = None,
 ) -> KnowledgePersistResult:
     root = knowledge_root(volume_mount_path)
     if root is None:
@@ -68,6 +69,7 @@ def persist_knowledge_document(
         "alias": alias,
         "file": f"ingested/{doc_id}.txt",
         "char_count": len(text),
+        "tags": tags or [],
         "metadata": metadata or {},
         "ingested_at": datetime.now(UTC).isoformat(),
     }
@@ -115,6 +117,7 @@ def _search_knowledge_impl(
                     source=str(entry.get("source", "")),
                     path=str(file_path),
                     alias=str(entry.get("alias", "")),
+                    tags=list(entry.get("tags", [])),
                 )
             )
         if len(results) >= max_results:
