@@ -174,19 +174,28 @@ def _aclone_repo(
     repo_url: str,
     ref: str | None,
     workspace_path: str,
+    shallow: bool = False,
 ) -> None:
     try:
         _aensure_remote_directory(
             sandbox.fs,
             PurePosixPath(workspace_path).parent,
         )
-        sandbox.git.clone(
-            **_build_clone_kwargs(
-                repo_url=repo_url,
-                ref=ref,
-                workspace_path=workspace_path,
-            )
+        clone_kwargs = _build_clone_kwargs(
+            repo_url=repo_url,
+            ref=ref,
+            workspace_path=workspace_path,
         )
+        if shallow:
+            try:
+                sandbox.git.clone(**clone_kwargs, depth=1)
+            except TypeError:
+                # SDK doesn't support depth kwarg; fall back to exec
+                branch_args = f" --branch {clone_kwargs['branch']}" if "branch" in clone_kwargs else ""
+                cmd = f"git clone --depth=1{branch_args} {repo_url} {workspace_path}"
+                sandbox.process.exec(cmd)
+        else:
+            sandbox.git.clone(**clone_kwargs)
     except Exception as exc:
         raise DaytonaDiagnosticError(
             f"Daytona repo clone failure: {exc}",

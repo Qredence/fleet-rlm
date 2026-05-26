@@ -304,19 +304,37 @@ def _serialize_daytona_volume(volume: Any) -> dict[str, Any]:
     }
 
 
-def list_daytona_volumes() -> list[dict[str, Any]]:
-    """List all Daytona persistent volumes."""
+def list_daytona_volumes(*, limit: int = 100) -> list[dict[str, Any]]:
+    """List Daytona persistent volumes with pagination support.
+
+    Uses cursor-based pagination (Daytona 0.180+) when available,
+    falling back to unbounded listing for older runners.
+    """
     client = _build_daytona_client(resolve_daytona_config())
     try:
-        volumes = client.volume.list()
+        try:
+            all_volumes: list[Any] = []
+            page = 1
+            while True:
+                result = client.volume.list(page=page, limit=limit)
+                items = getattr(result, "items", result) if result else []
+                if not items:
+                    break
+                all_volumes.extend(items)
+                if len(items) < limit:
+                    break
+                page += 1
+            volumes = all_volumes
+        except TypeError:
+            volumes = client.volume.list()
     finally:
         with suppress(Exception):
             client.close()
     return [_serialize_daytona_volume(volume) for volume in volumes]
 
 
-async def alist_daytona_volumes() -> list[dict[str, Any]]:
-    return await _run_sync_in_thread(list_daytona_volumes)
+async def alist_daytona_volumes(*, limit: int = 100) -> list[dict[str, Any]]:
+    return await _run_sync_in_thread(list_daytona_volumes, limit=limit)
 
 
 @dataclass(frozen=True)

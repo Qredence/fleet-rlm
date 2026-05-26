@@ -30,6 +30,9 @@ def _mock_cfg(**overrides):
         "daytona_broker_tool_call_timeout": 180.0,
         "daytona_broker_start_retries": 1,
         "interpreter_async_execute": True,
+        "interpreter_pool_auto_size": False,
+        "interpreter_pool_cpu_per_sandbox": 2,
+        "daytona_runner_tags": None,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)

@@ -272,6 +272,8 @@ class SandboxSpec:
     cpu: int | None = None
     memory: int | None = None
     disk: int | None = None
+    recoverable: bool = True
+    runner_tags: list[str] | None = None
     network_block_all: bool | None = None
     network_allow_list: str | None = None
 
@@ -289,6 +291,10 @@ class SandboxSpec:
             params["labels"] = dict(self.labels)
         if self.ephemeral is not None:
             params["ephemeral"] = self.ephemeral
+        if self.recoverable is not None:
+            params["recoverable"] = self.recoverable
+        if self.runner_tags:
+            params["runner_tags"] = list(self.runner_tags)
         params.update(self._daytona_lifecycle_params())
         if self.snapshot and not self.image:
             params["snapshot"] = self.snapshot
@@ -393,6 +399,8 @@ def build_sandbox_spec(
     cpu: int | None = None,
     memory: int | None = None,
     disk: int | None = None,
+    recoverable: bool = True,
+    runner_tags: list[str] | None = None,
     auto_stop_interval: int | None = 30,
     auto_archive_interval: int | None = 60,
     auto_delete_interval: int | None = None,
@@ -419,6 +427,8 @@ def build_sandbox_spec(
         cpu=cpu,
         memory=memory,
         disk=disk,
+        recoverable=recoverable,
+        runner_tags=runner_tags,
         network_block_all=network_block_all,
         network_allow_list=network_allow_list,
     )

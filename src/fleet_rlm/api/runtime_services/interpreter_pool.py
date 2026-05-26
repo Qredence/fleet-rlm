@@ -2,17 +2,24 @@
 
 Maintains a configurable number of pre-warmed interpreters so incoming
 requests avoid the full cold-start cost (sandbox creation + broker startup).
+
+Leverages Daytona 0.177+ recoverable sandboxes: on drain, sandboxes are
+archived rather than destroyed, allowing fast recovery on next startup.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from ..config import ServerRuntimeConfig
 
 logger = logging.getLogger(__name__)
+
+_POOL_MANIFEST_PATH = Path(tempfile.gettempdir()) / "fleet-rlm-pool-manifest.json"
 
 
 class InterpreterPool:
@@ -65,32 +72,39 @@ class InterpreterPool:
         return len(self._in_use)
 
     async def start(self) -> None:
-        """Pre-warm the pool by creating pool_size interpreters.
+        """Pre-warm the pool, recovering archived sandboxes when possible.
 
-        Called during server lifespan startup. Non-fatal: logs warnings
-        if some interpreters fail to create but continues with fewer.
+        Called during server lifespan startup. Attempts to recover sandboxes
+        from a previous drain (via the pool manifest) before cold-creating
+        new ones. Non-fatal: logs warnings if some fail.
         """
         if self._started:
             return
         self._started = True
 
-        warmup_tasks = [
-            asyncio.create_task(self._create_interpreter(), name=f"pool-warmup-{i}") for i in range(self._pool_size)
-        ]
-        results = await asyncio.gather(*warmup_tasks, return_exceptions=True)
+        if self._cfg.interpreter_pool_auto_size:
+            self._pool_size = await self._compute_auto_pool_size()
 
-        warmed = 0
-        for result in results:
-            if isinstance(result, Exception):
-                logger.warning("Pool warmup failed for one interpreter: %s", result)
-            elif result is not None:
-                self._register(result)
-                await self._ready.put(result)
-                warmed += 1
+        recovered = await self._recover_from_manifest()
+        remaining = self._pool_size - recovered
+
+        if remaining > 0:
+            warmup_tasks = [
+                asyncio.create_task(self._create_interpreter(), name=f"pool-warmup-{i}") for i in range(remaining)
+            ]
+            results = await asyncio.gather(*warmup_tasks, return_exceptions=True)
+
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.warning("Pool warmup failed for one interpreter: %s", result)
+                elif result is not None:
+                    self._register(result)
+                    await self._ready.put(result)
+                    recovered += 1
 
         logger.info(
-            "Interpreter pool started: %d/%d warm interpreters ready",
-            warmed,
+            "Interpreter pool started: %d/%d warm interpreters ready (recovered from manifest: included)",
+            recovered,
             self._pool_size,
         )
 
@@ -174,7 +188,12 @@ class InterpreterPool:
             self._replenish_event.set()
 
     async def drain(self) -> None:
-        """Graceful shutdown: wait for in-flight, then destroy all."""
+        """Graceful shutdown: wait for in-flight, then archive sandboxes.
+
+        Archives recoverable sandboxes to a manifest file so the next
+        startup can recover them cheaply instead of cold-creating.
+        Falls back to destroy for non-recoverable interpreters.
+        """
         self._draining = True
 
         if self._health_task is not None:
@@ -192,22 +211,27 @@ class InterpreterPool:
         if self._in_use:
             logger.warning("Drain timeout: %d interpreters still in use", len(self._in_use))
 
-        # Destroy all remaining
+        # Archive all idle interpreters (persist sandbox IDs for recovery)
+        archived_ids: list[str] = []
         while not self._ready.empty():
             try:
                 interp = self._ready.get_nowait()
-                await self._destroy(interp)
+                sandbox_id = await self._archive_interpreter(interp)
+                if sandbox_id:
+                    archived_ids.append(sandbox_id)
             except asyncio.QueueEmpty:
                 break
 
-        # Force-destroy any still tracked
+        # Force-destroy any still in-use (cannot safely archive)
         for interp in list(self._all_refs.values()):
             await self._destroy(interp)
 
         self._all.clear()
         self._all_refs.clear()
         self._in_use.clear()
-        logger.info("Interpreter pool drained")
+
+        self._save_manifest(archived_ids)
+        logger.info("Interpreter pool drained (%d sandboxes archived for recovery)", len(archived_ids))
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -224,11 +248,42 @@ class InterpreterPool:
         self._all_refs.pop(interp_id, None)
         self._in_use.discard(interp_id)
 
+    async def _compute_auto_pool_size(self) -> int:
+        """Query local CPU count and compute pool size from cpu_per_sandbox."""
+        import os
+
+        cfg = self._cfg
+        cpu_per_sandbox = max(1, cfg.interpreter_pool_cpu_per_sandbox)
+        available_cpus = os.cpu_count() or 4
+        computed = max(1, available_cpus // cpu_per_sandbox)
+        computed = min(computed, cfg.interpreter_pool_overflow_max)
+        logger.info(
+            "Auto pool sizing: %d CPUs available / %d per sandbox = %d interpreters (capped at overflow_max=%d)",
+            available_cpus,
+            cpu_per_sandbox,
+            computed,
+            cfg.interpreter_pool_overflow_max,
+        )
+        return computed
+
+    def _build_pool_sandbox_spec(self) -> Any | None:
+        """Build a SandboxSpec with pool-level defaults (runner_tags, recoverable)."""
+        cfg = self._cfg
+        try:
+            from fleet_rlm.integrations.daytona.models import build_sandbox_spec
+
+            return build_sandbox_spec(
+                volume_name=cfg.volume_name,
+                recoverable=True,
+                runner_tags=cfg.daytona_runner_tags,
+            )
+        except Exception:
+            return None
+
     async def _create_interpreter(self) -> Any | None:
         """Create a fresh DaytonaInterpreter with the pool's config."""
         cfg = self._cfg
         try:
-            from fleet_rlm.integrations.daytona.config import DaytonaConfigError
             from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
             interpreter = DaytonaInterpreter(
@@ -248,6 +303,7 @@ class InterpreterPool:
                 broker_tool_call_timeout=cfg.daytona_broker_tool_call_timeout,
                 broker_start_retries=cfg.daytona_broker_start_retries,
                 async_execute=cfg.interpreter_async_execute,
+                sandbox_spec=self._build_pool_sandbox_spec(),
             )
             interpreter._host_repository = None
             interpreter._host_identity = None
@@ -338,6 +394,134 @@ class InterpreterPool:
                 self._register(interp)
                 await self._ready.put(interp)
                 logger.info("Pool replenished interpreter (now %d/%d)", len(self._all), self._pool_size)
+
+    # ------------------------------------------------------------------
+    # Recoverable sandbox helpers (Daytona 0.177+)
+    # ------------------------------------------------------------------
+
+    async def _archive_interpreter(self, interpreter: Any) -> str | None:
+        """Archive an interpreter's sandbox and return its ID for recovery."""
+        self._unregister(interpreter)
+        sandbox_id = getattr(interpreter, "_persisted_sandbox_id", None)
+        if not sandbox_id:
+            await self._destroy_raw(interpreter)
+            return None
+        try:
+            workspace = getattr(interpreter, "_workspace", None)
+            session = getattr(workspace, "_session", None) if workspace else None
+            if session is not None:
+                aarchive = getattr(session, "aarchive", None)
+                if callable(aarchive):
+                    await aarchive()
+                    logger.debug("Archived sandbox %s for pool recovery", sandbox_id)
+                    return sandbox_id
+            await self._destroy_raw(interpreter)
+            return None
+        except Exception as exc:
+            logger.warning("Failed to archive sandbox %s, destroying: %s", sandbox_id, exc)
+            await self._destroy_raw(interpreter)
+            return None
+
+    async def _destroy_raw(self, interpreter: Any) -> None:
+        """Shutdown without unregister (already done by caller)."""
+        try:
+            ashutdown = getattr(interpreter, "ashutdown", None)
+            if callable(ashutdown):
+                await ashutdown()
+                return
+            shutdown = getattr(interpreter, "shutdown", None)
+            if callable(shutdown):
+                await asyncio.to_thread(shutdown)
+        except Exception as exc:
+            logger.warning("Interpreter destroy failed: %s", exc)
+
+    async def _recover_from_manifest(self) -> int:
+        """Attempt to recover archived sandboxes from a previous drain."""
+        import json
+        from contextlib import suppress
+
+        if not _POOL_MANIFEST_PATH.exists():
+            return 0
+
+        try:
+            manifest = json.loads(_POOL_MANIFEST_PATH.read_text())
+            sandbox_ids: list[str] = manifest.get("archived_sandbox_ids", [])
+        except (json.JSONDecodeError, OSError):
+            with suppress(OSError):
+                _POOL_MANIFEST_PATH.unlink()
+            return 0
+
+        # Clear manifest immediately to prevent double-recovery
+        with suppress(OSError):
+            _POOL_MANIFEST_PATH.unlink()
+
+        if not sandbox_ids:
+            return 0
+
+        recovered = 0
+        for sandbox_id in sandbox_ids[: self._pool_size]:
+            interp = await self._recover_sandbox(sandbox_id)
+            if interp is not None:
+                self._register(interp)
+                await self._ready.put(interp)
+                recovered += 1
+
+        if recovered:
+            logger.info("Recovered %d/%d sandboxes from pool manifest", recovered, len(sandbox_ids))
+        return recovered
+
+    async def _recover_sandbox(self, sandbox_id: str) -> Any | None:
+        """Recover a single archived sandbox into a fresh interpreter."""
+        cfg = self._cfg
+        try:
+            from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
+
+            interpreter = DaytonaInterpreter(
+                volume_name=cfg.volume_name,
+                timeout=cfg.timeout,
+                max_llm_calls=cfg.rlm_max_llm_calls,
+                max_recursion_depth=cfg.rlm_max_depth,
+                rlm_max_iterations=cfg.rlm_max_iterations,
+                child_isolation_mode=cfg.rlm_child_isolation_mode,
+                child_fork_fallback=cfg.rlm_child_fork_fallback,
+                delegate_max_calls_per_turn=cfg.delegate_max_calls_per_turn,
+                delegate_result_truncation_chars=cfg.delegate_result_truncation_chars,
+                delegate_execution_timeout=cfg.delegate_execution_timeout,
+                delegate_max_iterations=cfg.delegate_max_iterations,
+                delegate_adapter=cfg.delegate_adapter,
+                broker_health_timeout=cfg.daytona_broker_health_timeout,
+                broker_tool_call_timeout=cfg.daytona_broker_tool_call_timeout,
+                broker_start_retries=cfg.daytona_broker_start_retries,
+                async_execute=cfg.interpreter_async_execute,
+                sandbox_spec=self._build_pool_sandbox_spec(),
+            )
+            interpreter._host_repository = None
+            interpreter._host_identity = None
+            interpreter._host_run_id = None
+            interpreter._persisted_sandbox_id = sandbox_id
+
+            workspace = getattr(interpreter, "_workspace", None)
+            if workspace is not None:
+                workspace._persisted_sandbox_id = sandbox_id
+
+            return interpreter
+        except Exception as exc:
+            logger.warning("Failed to recover sandbox %s: %s", sandbox_id, exc)
+            return None
+
+    def _save_manifest(self, sandbox_ids: list[str]) -> None:
+        """Persist archived sandbox IDs to disk for next startup."""
+        import json
+        from contextlib import suppress
+
+        if not sandbox_ids:
+            with suppress(OSError):
+                _POOL_MANIFEST_PATH.unlink()
+            return
+        try:
+            _POOL_MANIFEST_PATH.write_text(json.dumps({"archived_sandbox_ids": sandbox_ids}))
+        except OSError as exc:
+            logger.warning("Failed to save pool manifest: %s", exc)
 
 
 __all__ = ["InterpreterPool"]

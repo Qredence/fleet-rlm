@@ -98,6 +98,11 @@ class ServerRuntimeConfig(BaseSettings):
     interpreter_pool_overflow_max: int = Field(default=4, alias="INTERPRETER_POOL_OVERFLOW_MAX")
     interpreter_pool_acquire_timeout: float = Field(default=30.0, alias="INTERPRETER_POOL_ACQUIRE_TIMEOUT")
     interpreter_pool_health_interval: float = Field(default=30.0, alias="INTERPRETER_POOL_HEALTH_INTERVAL")
+    # Daytona runner routing (0.177+): comma-separated tags to target specific runners
+    daytona_runner_tags: list[str] | None = Field(default=None, alias="DAYTONA_RUNNER_TAGS")
+    # Auto pool sizing (0.177+): compute pool_size from runner CPU capacity
+    interpreter_pool_auto_size: bool = Field(default=False, alias="INTERPRETER_POOL_AUTO_SIZE")
+    interpreter_pool_cpu_per_sandbox: int = Field(default=2, alias="INTERPRETER_POOL_CPU_PER_SANDBOX")
     agent_guardrail_mode: Literal["off", "warn", "strict"] = "off"
     agent_min_substantive_chars: int = 20
     agent_max_output_chars: int = 10000
