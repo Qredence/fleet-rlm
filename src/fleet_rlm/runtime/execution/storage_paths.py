@@ -21,6 +21,12 @@ class RuntimeStorageRoots:
     artifacts_root: str
     buffers_root: str
     meta_root: str
+    memories_root: str
+    knowledge_root: str
+    skills_root: str
+    sessions_root: str
+    logs_root: str
+    uploads_root: str
 
     @property
     def allowed_root(self) -> str:
@@ -40,6 +46,12 @@ def mounted_storage_roots(mounted_root: str) -> RuntimeStorageRoots:
         artifacts_root=str(base / "artifacts"),
         buffers_root=str(base / "buffers"),
         meta_root=str(base / "meta"),
+        memories_root=str(base / "memories"),
+        knowledge_root=str(base / "knowledge"),
+        skills_root=str(base / "skills"),
+        sessions_root=str(base / "sessions"),
+        logs_root=str(base / "logs"),
+        uploads_root=str(base / "uploads"),
     )
 
 

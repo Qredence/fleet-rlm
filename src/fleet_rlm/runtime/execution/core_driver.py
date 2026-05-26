@@ -234,9 +234,7 @@ def sandbox_driver() -> None:
         from fleet_rlm.runtime.execution.sandbox_assets import (
             add_buffer,
             chunk_by_headers,
-            chunk_by_json_keys,
             chunk_by_size,
-            chunk_by_timestamps,
             clear_buffer,
             get_buffer,
             grep,
@@ -256,9 +254,7 @@ def sandbox_driver() -> None:
         g: dict[str, Any] = globals()
         add_buffer = cast(Any, g.get("add_buffer"))
         chunk_by_headers = cast(Any, g.get("chunk_by_headers"))
-        chunk_by_json_keys = cast(Any, g.get("chunk_by_json_keys"))
         chunk_by_size = cast(Any, g.get("chunk_by_size"))
-        chunk_by_timestamps = cast(Any, g.get("chunk_by_timestamps"))
         clear_buffer = cast(Any, g.get("clear_buffer"))
         get_buffer = cast(Any, g.get("get_buffer"))
         grep = cast(Any, g.get("grep"))
@@ -302,8 +298,6 @@ def sandbox_driver() -> None:
             "grep": grep,
             "chunk_by_size": chunk_by_size,
             "chunk_by_headers": chunk_by_headers,
-            "chunk_by_timestamps": chunk_by_timestamps,
-            "chunk_by_json_keys": chunk_by_json_keys,
             "add_buffer": add_buffer,
             "get_buffer": get_buffer,
             "clear_buffer": clear_buffer,

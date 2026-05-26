@@ -397,6 +397,21 @@ class PlanRecursiveRepair(dspy.Signature):
     )
 
 
+class ConversationSummarySignature(dspy.Signature):
+    """Compress a conversation history into a concise context summary.
+
+    Used by the escalating agent module to maintain a compact session context
+    without passing raw history into the prompt on every turn.
+    """
+
+    conversation_history: str = dspy.InputField(
+        desc="Recent conversation turns formatted as alternating user/assistant pairs"
+    )
+    summary: str = dspy.OutputField(
+        desc="Concise summary of the conversation capturing key facts, decisions, and open questions"
+    )
+
+
 class RLMVariableSignature(dspy.Signature):
     """Explore and answer questions about an arbitrarily long prompt.
 
@@ -435,6 +450,7 @@ class RLMLargeDocSignature(dspy.Signature):
 __all__ = [
     "AssembleRecursiveWorkspaceContext",
     "ClarificationQuestionSignature",
+    "ConversationSummarySignature",
     "CodeChangePlan",
     "CoreMemoryUpdateProposal",
     "ExtractFromLogs",

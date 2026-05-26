@@ -16,6 +16,13 @@ llm:
   guardrail_mode: "off"
   min_substantive_chars: 20
 
+api_keys:
+  llm_api_key: ${oc.env:DSPY_LLM_API_KEY,null}
+  legacy_lm_api_key: ${oc.env:DSPY_LM_API_KEY,null}
+  delegate_lm_api_key: ${oc.env:DSPY_DELEGATE_LM_API_KEY,null}
+  daytona_api_key: ${oc.env:DAYTONA_API_KEY,null}
+  posthog_api_key: ${oc.env:POSTHOG_API_KEY,null}
+
 sandbox:
   provider: "daytona"
   image: "python:3.13-slim-bookworm"
@@ -27,6 +34,20 @@ sandbox:
 
 volumes:
   name: ${oc.env:VOLUME_NAME,null}
+
+database:
+  url: ${oc.env:DATABASE_URL,null}
+  admin_url: ${oc.env:DATABASE_ADMIN_URL,null}
+  required: ${oc.env:DATABASE_REQUIRED,false}
+  echo: ${oc.env:DB_ECHO,false}
+  validate_on_startup: ${oc.env:DB_VALIDATE_ON_STARTUP,false}
+
+memory:
+  core_memory_limits:
+    persona: 2000
+    human: 2000
+    scratchpad: 1000
+  archival_path: "/data/memory"
 
 rlm_settings:
   max_depth: 2
@@ -49,3 +70,24 @@ rlm_settings:
   stdout_summary_threshold: 10000
   stdout_summary_prefix_len: 200
   verbose: True
+
+analytics:
+  posthog:
+    enabled: ${oc.env:POSTHOG_ENABLED,true}
+    api_key: ${oc.env:POSTHOG_API_KEY,null}
+    host: ${oc.env:POSTHOG_HOST,https://eu.i.posthog.com}
+    flush_interval: ${oc.env:POSTHOG_FLUSH_INTERVAL,10.0}
+    flush_at: ${oc.env:POSTHOG_FLUSH_AT,10}
+    enable_dspy_optimization: ${oc.env:POSTHOG_ENABLE_DSPY_OPTIMIZATION,false}
+    input_truncation_chars: ${oc.env:POSTHOG_INPUT_TRUNCATION,10000}
+    output_truncation_chars: ${oc.env:POSTHOG_OUTPUT_TRUNCATION,5000}
+    redact_sensitive: ${oc.env:POSTHOG_REDACT_SENSITIVE,true}
+  mlflow:
+    enabled: ${oc.env:MLFLOW_ENABLED,true}
+    tracking_uri: ${oc.env:MLFLOW_TRACKING_URI,http://127.0.0.1:5001}
+    experiment: ${oc.env:MLFLOW_EXPERIMENT,fleet-rlm}
+    active_model_id: ${oc.env:MLFLOW_ACTIVE_MODEL_ID,null}
+    dspy_log_traces_from_compile: ${oc.env:MLFLOW_DSPY_LOG_TRACES_FROM_COMPILE,false}
+    dspy_log_traces_from_eval: ${oc.env:MLFLOW_DSPY_LOG_TRACES_FROM_EVAL,true}
+    dspy_log_compiles: ${oc.env:MLFLOW_DSPY_LOG_COMPILES,false}
+    dspy_log_evals: ${oc.env:MLFLOW_DSPY_LOG_EVALS,false}

@@ -90,6 +90,33 @@ def test_daytona_interpreter_applies_delegate_timeout_and_broker_settings(dayton
     assert interpreter._active_executor.broker_start_retries == 2
 
 
+def test_daytona_volume_layout_matches_phase_one_skeleton() -> None:
+    from fleet_rlm.integrations.daytona.sdk_ops import ensure_daytona_volume_layout
+
+    created: list[str] = []
+    sandbox = SimpleNamespace(
+        fs=SimpleNamespace(create_folder=lambda directory, mode: created.append(directory)),
+        process=SimpleNamespace(exec=lambda cmd: None),
+    )
+
+    ensure_daytona_volume_layout(sandbox=sandbox, mounted_root="/data")
+
+    assert {
+        "/data/memory",
+        "/data/artifacts",
+        "/data/buffers",
+        "/data/meta",
+        "/data/memories",
+        "/data/knowledge/ingested",
+        "/data/knowledge/summaries",
+        "/data/skills/system",
+        "/data/skills/user",
+        "/data/sessions",
+        "/data/logs",
+        "/data/uploads",
+    } <= set(created)
+
+
 def test_store_evidence_redacts_credentials_from_bridge_errors() -> None:
     from fleet_rlm.integrations.daytona.isolation import store_evidence
 

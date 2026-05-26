@@ -9,9 +9,7 @@ import dspy
 from fleet_rlm.runtime.agent.signatures import GroundedAnswerWithCitations
 from fleet_rlm.runtime.content.chunking import (
     chunk_by_headers,
-    chunk_by_json_keys,
     chunk_by_size,
-    chunk_by_timestamps,
 )
 from fleet_rlm.runtime.modules.factory import (
     _create_configured_runtime_rlm,
@@ -26,13 +24,9 @@ def _normalize_chunk_strategy(strategy: str) -> str:
         "size": "size",
         "headers": "headers",
         "header": "headers",
-        "timestamps": "timestamps",
-        "timestamp": "timestamps",
-        "json": "json_keys",
-        "json_keys": "json_keys",
     }
     if normalized not in mapping:
-        raise ValueError("Unsupported strategy. Choose one of: size, headers, timestamps, json_keys")
+        raise ValueError("Unsupported strategy. Choose one of: size, headers")
     return mapping[normalized]
 
 
@@ -41,11 +35,7 @@ def _chunk_document(text: str, strategy: str) -> list[Any]:
     strategy_norm = _normalize_chunk_strategy(strategy)
     if strategy_norm == "size":
         return chunk_by_size(text, size=80_000, overlap=1_000)
-    if strategy_norm == "headers":
-        return chunk_by_headers(text, pattern=r"^#{1,3} ")
-    if strategy_norm == "timestamps":
-        return chunk_by_timestamps(text, pattern=r"^\d{4}-\d{2}-\d{2}[T ]")
-    return chunk_by_json_keys(text)
+    return chunk_by_headers(text, pattern=r"^#{1,3} ")
 
 
 def _chunk_to_text(chunk: Any) -> str:
@@ -56,10 +46,6 @@ def _chunk_to_text(chunk: Any) -> str:
         return str(chunk)
     if "header" in chunk:
         return f"{chunk.get('header', '')}\n{chunk.get('content', '')}".strip()
-    if "timestamp" in chunk:
-        return str(chunk.get("content", ""))
-    if "key" in chunk:
-        return f"{chunk.get('key', '')}\n{chunk.get('content', '')}".strip()
     return str(chunk)
 
 

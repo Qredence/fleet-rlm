@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import posixpath
+import shlex
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -30,6 +31,11 @@ from fleet_rlm.api.events import (
 from fleet_rlm.api.runtime_services.common import (
     parse_model_identity,
     resolve_sandbox_provider,
+)
+from fleet_rlm.api.runtime_services.session_paths import (
+    session_conversation_path,
+    session_scratchpad_path,
+    session_workspace_link_path,
 )
 from fleet_rlm.integrations.database import (
     FleetRepository,
@@ -317,6 +323,10 @@ def _is_final_output(result: Any) -> bool:
 
 
 def _manifest_path(workspace_id: str, user_id: str, session_id: str) -> str:
+    _ = workspace_id, user_id
+    conversation_path = session_conversation_path(session_id)
+    if conversation_path is not None:
+        return conversation_path
     safe_session_id = _sanitize_id(session_id, "default-session")
     return f"meta/workspaces/{workspace_id}/users/{user_id}/react-session-{safe_session_id}.json"
 
@@ -349,40 +359,106 @@ def _persistent_storage_path(interpreter: Any, path: str) -> str:
     return resolved
 
 
-async def load_manifest_from_volume(agent: Any, path: str) -> dict[str, Any]:
-    """Best-effort manifest load from interpreter volume storage."""
+def _session_workspace_target(daytona_session: Any, interpreter: Any) -> str:
+    return str(
+        getattr(daytona_session, "workspace_path", None)
+        or getattr(interpreter, "workspace_path", None)
+        or getattr(interpreter, "repo_path", None)
+        or ""
+    ).strip()
+
+
+def _ensure_session_layout_command(*, scratchpad_path: str, workspace_link_path: str, workspace_target: str) -> str:
+    return " ".join(
+        [
+            "mkdir",
+            "-p",
+            shlex.quote(scratchpad_path),
+            "&&",
+            "rm",
+            "-rf",
+            shlex.quote(workspace_link_path),
+            "&&",
+            "ln",
+            "-s",
+            shlex.quote(workspace_target),
+            shlex.quote(workspace_link_path),
+        ]
+    )
+
+
+async def ensure_session_volume_layout(agent: Any, session_id: str) -> dict[str, str]:
+    """Ensure Phase 1 per-session scratchpad and workspace mapping exist on the volume."""
     interpreter = agent.interpreter
     if interpreter is None:
         return {}
+    scratchpad_path = session_scratchpad_path(session_id)
+    workspace_link_path = session_workspace_link_path(session_id)
+    if scratchpad_path is None or workspace_link_path is None:
+        return {}
+    storage_scratchpad_path = _persistent_storage_path(interpreter, scratchpad_path)
+    storage_workspace_link_path = _persistent_storage_path(interpreter, workspace_link_path)
     daytona_session = await _aget_daytona_session(agent)
+    workspace_target = _session_workspace_target(daytona_session, interpreter)
+    if not workspace_target:
+        return {
+            "scratchpad_path": storage_scratchpad_path,
+            "workspace_link_path": storage_workspace_link_path,
+        }
     if daytona_session is not None:
-        storage_path = _persistent_storage_path(interpreter, path)
-        try:
-            text = await daytona_session.aread_file(storage_path)
-        except Exception:
-            logger.debug(
-                "manifest_load_daytona_read_error",
-                extra={"path": storage_path},
-                exc_info=True,
-            )
-            return {}
-        if not text:
-            return {}
-        try:
-            parsed = json.loads(text)
-            return parsed if isinstance(parsed, dict) else {}
-        except json.JSONDecodeError:
-            return {}
-    result = await interpreter.aexecute(
-        "text = load_from_volume(path)\nSUBMIT(text=text)",
-        variables={"path": path},
+        process = getattr(getattr(daytona_session, "sandbox", None), "process", None)
+        exec_command = getattr(process, "exec", None)
+        if callable(exec_command):
+            try:
+                exec_command(
+                    _ensure_session_layout_command(
+                        scratchpad_path=storage_scratchpad_path,
+                        workspace_link_path=storage_workspace_link_path,
+                        workspace_target=workspace_target,
+                    )
+                )
+                return {
+                    "scratchpad_path": storage_scratchpad_path,
+                    "workspace_link_path": storage_workspace_link_path,
+                }
+            except Exception as exc:
+                logger.warning(
+                    "ensure_session_volume_layout: Daytona exec_command failed, falling back to interpreter aexecute: %s",
+                    exc,
+                )
+    await interpreter.aexecute(
+        "\n".join(
+            [
+                "import os",
+                "os.makedirs(scratchpad_path, exist_ok=True)",
+                "if os.path.isdir(workspace_target):",
+                "    if os.path.lexists(workspace_link_path):",
+                "        if os.path.isdir(workspace_link_path) and not os.path.islink(workspace_link_path):",
+                "            import shutil",
+                "            shutil.rmtree(workspace_link_path)",
+                "        else:",
+                "            os.unlink(workspace_link_path)",
+                "    os.symlink(workspace_target, workspace_link_path)",
+                "else:",
+                "    import warnings",
+                "    warnings.warn(f'Workspace target {workspace_target} does not exist, skipping symlink creation')",
+                "SUBMIT(scratchpad_path=scratchpad_path, workspace_link_path=workspace_link_path)",
+            ]
+        ),
+        variables={
+            "scratchpad_path": storage_scratchpad_path,
+            "workspace_link_path": storage_workspace_link_path,
+            "workspace_target": workspace_target,
+        },
         execution_profile=ExecutionProfile.MAINTENANCE,
     )
-    if not _is_final_output(result):
-        return {}
-    output = getattr(result, "output", None)
-    output = output if isinstance(output, dict) else {}
-    text = str(output.get("text", ""))
+    return {
+        "scratchpad_path": storage_scratchpad_path,
+        "workspace_link_path": storage_workspace_link_path,
+    }
+
+
+def _parse_manifest_text(text: str) -> dict[str, Any]:
     if not text or text.startswith("[file not found:") or text.startswith("[error:"):
         return {}
     try:
@@ -390,6 +466,44 @@ async def load_manifest_from_volume(agent: Any, path: str) -> dict[str, Any]:
         return parsed if isinstance(parsed, dict) else {}
     except json.JSONDecodeError:
         return {}
+
+
+async def load_manifest_from_volume(agent: Any, path: str, fallback_paths: list[str] | None = None) -> dict[str, Any]:
+    """Best-effort manifest load from interpreter volume storage."""
+    interpreter = agent.interpreter
+    if interpreter is None:
+        return {}
+    candidate_paths = [path, *(fallback_paths or [])]
+    daytona_session = await _aget_daytona_session(agent)
+    if daytona_session is not None:
+        for candidate_path in candidate_paths:
+            storage_path = _persistent_storage_path(interpreter, candidate_path)
+            try:
+                text = await daytona_session.aread_file(storage_path)
+            except Exception:
+                logger.debug(
+                    "manifest_load_daytona_read_error",
+                    extra={"path": storage_path},
+                    exc_info=True,
+                )
+                continue
+            parsed = _parse_manifest_text(text)
+            if parsed:
+                return parsed
+        return {}
+    for candidate_path in candidate_paths:
+        result = await interpreter.aexecute(
+            "text = load_from_volume(path)\nSUBMIT(text=text)",
+            variables={"path": candidate_path},
+            execution_profile=ExecutionProfile.MAINTENANCE,
+        )
+        if not _is_final_output(result):
+            continue
+        output = getattr(result, "output", None)
+        output = output if isinstance(output, dict) else {}
+        parsed = _parse_manifest_text(str(output.get("text", "")))
+        if parsed:
+            return parsed
     return {}
 
 

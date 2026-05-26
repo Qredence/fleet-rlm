@@ -40,6 +40,7 @@ from .config import (
 )
 from .config import format_daytona_sdk_error as _format_daytona_sdk_error
 from .errors import DaytonaDiagnosticError, VolumeNotReadyError
+from .memory_db import init_memory_db
 from .models import SandboxSpec
 
 logger = logging.getLogger(__name__)
@@ -233,6 +234,14 @@ def ensure_daytona_volume_layout(
             roots.artifacts_root,
             roots.buffers_root,
             roots.meta_root,
+            roots.memories_root,
+            PurePosixPath(roots.knowledge_root) / "ingested",
+            PurePosixPath(roots.knowledge_root) / "summaries",
+            PurePosixPath(roots.skills_root) / "system",
+            PurePosixPath(roots.skills_root) / "user",
+            roots.sessions_root,
+            roots.logs_root,
+            roots.uploads_root,
         ):
             ensure_remote_directory(sandbox.fs, PurePosixPath(path))
     except Exception as exc:
@@ -241,6 +250,11 @@ def ensure_daytona_volume_layout(
             category="sandbox_create_clone_error",
             phase="sandbox_create",
         ) from exc
+
+    try:
+        init_memory_db(mounted_root)
+    except Exception as exc:
+        logger.warning("ensure_daytona_volume_layout: core.db init failed (non-fatal): %s", exc)
 
 
 aensure_daytona_volume_layout = ensure_daytona_volume_layout

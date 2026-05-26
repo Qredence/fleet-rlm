@@ -21,10 +21,10 @@ from contextvars import copy_context
 from pathlib import Path
 from typing import Any, cast
 
-from fleet_rlm.runtime.content.preview import head_tail_preview
 from fleet_rlm.runtime.modules.factory import build_recursive_subquery_rlm
 from fleet_rlm.runtime.tools._marker import tool_fn
 from fleet_rlm.utils.marker_search import contains_marker
+from fleet_rlm.utils.preview import head_tail_preview
 
 logger = logging.getLogger(__name__)
 

@@ -27,7 +27,7 @@ from fleet_rlm.runtime.tools import discover_tools
 from fleet_rlm.runtime.tools.binding import bind_runtime_tools, execute_sandbox_tool
 
 if TYPE_CHECKING:
-    from .agent import FleetAgent
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +189,8 @@ class AgentRuntime:
         history_max_turns: int | None = 6,
         extra_tools: list[Any] | None = None,
         repository: Any | None = None,
+        use_escalation: bool = False,
+        summary_interval: int = 10,
     ) -> None:
         from .agent import FleetAgent
 
@@ -207,6 +209,12 @@ class AgentRuntime:
         self.loaded_document_paths: list[str] = []
         self.batch_concurrency: int | None = None
 
+        # Conversation summary for context compression (Phase 2)
+        self.conversation_summary: str = ""
+        self._summary_interval: int = summary_interval
+        self._turns_since_summary: int = 0
+        self._use_escalation: bool = use_escalation
+
         # Discover tools from the registry; append any extra tools
         base_tools = discover_tools()
         base_tools = bind_runtime_tools(
@@ -218,15 +226,52 @@ class AgentRuntime:
         self.tools: list[Any] = base_tools + list(extra_tools or [])
         self.react_tools: list[Any] = self.tools
 
-        # Initialise agent with the discovered tool set
-        self.agent: FleetAgent = FleetAgent(
-            tools=self.tools,
-            max_iters=max_iters,
-        )
+        if use_escalation:
+            from fleet_rlm.runtime.modules.escalating import EscalatingFleetModule
+
+            self.agent: Any = EscalatingFleetModule(
+                interpreter=interpreter,
+                tools=self.tools,
+                max_iterations=max_iters,
+                summary_interval=summary_interval,
+            )
+        else:
+            self.agent: Any = FleetAgent(
+                tools=self.tools,
+                max_iters=max_iters,
+            )
 
     # -----------------------------------------------------------------
     # Chat API
     # -----------------------------------------------------------------
+
+    def _maybe_refresh_summary(self) -> None:
+        """Regenerate conversation_summary every ``_summary_interval`` turns."""
+        if not self._use_escalation:
+            return
+        self._turns_since_summary += 1
+        if self._turns_since_summary >= self._summary_interval:
+            escalating = self.agent
+            if hasattr(escalating, "compress_history"):
+                try:
+                    self.conversation_summary = escalating.compress_history(self.history)
+                    self._turns_since_summary = 0
+                    logger.debug("AgentRuntime: conversation summary refreshed")
+                except Exception as exc:
+                    logger.warning("AgentRuntime: summary refresh failed: %s", exc)
+
+    def _escalation_call_args(self, user_message: str) -> dict[str, Any]:
+        """Build call args for EscalatingFleetModule vs legacy FleetAgent."""
+        if not self._use_escalation:
+            return {"chat_history": self.history, "user_message": user_message}
+        core_memory_str = "\n".join(f"[{k.upper()}]\n{v}" for k, v in self.core_memory.items() if v)
+        return {
+            "user_request": user_message,
+            "core_memory": core_memory_str,
+            "history": self.history,
+            "execution_mode": self.execution_mode,
+            "conversation_summary": self.conversation_summary,
+        }
 
     def chat_turn(self, user_message: str) -> dspy.Prediction:
         """Run one synchronous chat turn and accumulate history.
@@ -237,17 +282,19 @@ class AgentRuntime:
         Returns:
             A :class:`dspy.Prediction` with at least a ``response`` field.
         """
-        result = self.agent(
-            chat_history=self.history,
-            user_message=user_message,
+        result = self.agent(**self._escalation_call_args(user_message))
+        response = str(
+            getattr(result, "response", None)
+            or getattr(result, "assistant_response", None)
+            or getattr(result, "answer", "")
         )
-        response = str(getattr(result, "response", ""))
         self.history = _append_turn_to_history(
             self.history,
             user_message=user_message,
             response=response,
             history_max_turns=self.history_max_turns,
         )
+        self._maybe_refresh_summary()
         return result
 
     async def achat_turn(self, user_message: str) -> dspy.Prediction:
@@ -274,8 +321,7 @@ class AgentRuntime:
         try:
             result = await asyncio.to_thread(
                 self.agent,
-                chat_history=self.history,
-                user_message=message,
+                **self._escalation_call_args(message),
             )
         except Exception as exc:
             yield StreamEvent(
@@ -470,6 +516,8 @@ class AgentRuntime:
         self.core_memory = self.default_core_memory()
         self.loaded_document_paths = []
         self.batch_concurrency = None
+        self.conversation_summary = ""
+        self._turns_since_summary = 0
         return {"status": "ok", "buffers_cleared": clear_sandbox_buffers}
 
     async def areset(self, *, clear_sandbox_buffers: bool = True) -> dict[str, Any]:

@@ -11,14 +11,6 @@ logger = logging.getLogger(__name__)
 # File suffixes supported by MarkItDown for document conversion
 MARKITDOWN_SUFFIXES = {
     ".pdf",
-    ".doc",
-    ".docx",
-    ".ppt",
-    ".pptx",
-    ".xls",
-    ".xlsx",
-    ".rtf",
-    ".epub",
     ".html",
     ".htm",
 }

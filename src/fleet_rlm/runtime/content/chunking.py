@@ -10,19 +10,15 @@ These functions are designed to be:
 Chunking strategies:
     - chunk_by_size: Fixed-size chunking with optional overlap
     - chunk_by_headers: Split markdown/structured text by header boundaries
-    - chunk_by_timestamps: Split log files by timestamp patterns
-    - chunk_by_json_keys: Split JSON objects into per-key chunks
 """
 
 from __future__ import annotations
 
-import json
 import re
 
 # Pre-compiled regexes for default chunking patterns to avoid recompilation
 # on every function call.
 _DEFAULT_HEADER_PATTERN = re.compile(r"^#{1,3} ", re.MULTILINE)
-_DEFAULT_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]", re.MULTILINE)
 
 # ═══════════════════════════════════════════════════════════════════════
 # Fixed-size chunking
@@ -142,126 +138,7 @@ def chunk_by_headers(
     return chunks
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# Timestamp-based chunking
-# ═══════════════════════════════════════════════════════════════════════
-
-
-def chunk_by_timestamps(
-    text: str,
-    pattern: str | re.Pattern[str] | None = None,
-    flags: int = re.MULTILINE,
-) -> list[dict]:
-    """Split log-style text by timestamp boundaries.
-
-    Splits text at lines starting with a timestamp pattern. Each chunk
-    contains all log entries from one timestamp boundary to the next.
-
-    Args:
-        text: The log text to split.
-        pattern: Regex pattern matching timestamp line starts. Accepts a
-            pre-compiled ``re.Pattern`` or a string. Default: ISO-8601 style.
-        flags: Regex flags. Default: ``re.MULTILINE``.
-
-    Returns:
-        List of dicts with keys:
-            - ``timestamp``: The matched timestamp prefix
-            - ``content``: Full log entry/entries for this boundary
-            - ``start_pos``: Character offset in original text
-
-    Example:
-        >>> logs = "2026-01-01 INFO Start\\n2026-01-02 ERROR Fail"
-        >>> chunks = chunk_by_timestamps(logs)
-        >>> len(chunks)
-        2
-    """
-    if not text:
-        return []
-
-    if isinstance(pattern, re.Pattern):
-        compiled = pattern
-    elif pattern is None:
-        compiled = _DEFAULT_TIMESTAMP_PATTERN
-    else:
-        compiled = re.compile(pattern, flags)
-    matches = list(compiled.finditer(text))
-
-    if not matches:
-        return [{"timestamp": "", "content": text, "start_pos": 0}]
-
-    chunks: list[dict] = []
-
-    if matches[0].start() > 0:
-        preamble = text[: matches[0].start()].strip()
-        if preamble:
-            chunks.append({"timestamp": "", "content": preamble, "start_pos": 0})
-
-    for i, match in enumerate(matches):
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        content = text[match.start() : end].strip()
-        timestamp = match.group(0).strip()
-        chunks.append({"timestamp": timestamp, "content": content, "start_pos": match.start()})
-
-    return chunks
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# JSON key-based chunking
-# ═══════════════════════════════════════════════════════════════════════
-
-
-def chunk_by_json_keys(text: str) -> list[dict]:
-    """Split a JSON object into per-key chunks.
-
-    Parses the text as JSON and creates one chunk per top-level key.
-    Useful for exploring large JSON configurations or API responses.
-
-    Args:
-        text: JSON string to split. Must be a JSON object (dict) at
-            the top level.
-
-    Returns:
-        List of dicts with keys:
-            - ``key``: The top-level JSON key
-            - ``content``: JSON-serialized value for that key
-            - ``value_type``: Python type name of the value
-
-    Raises:
-        ValueError: If text is not valid JSON or not a JSON object.
-
-    Example:
-        >>> text = '{"users": [1,2], "config": {"debug": true}}'
-        >>> chunks = chunk_by_json_keys(text)
-        >>> chunks[0]["key"]
-        'users'
-    """
-    if not text or not text.strip():
-        return []
-
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid JSON: {exc}") from exc
-
-    if not isinstance(data, dict):
-        raise ValueError(f"Expected JSON object, got {type(data).__name__}")
-
-    chunks: list[dict] = []
-    for key, value in data.items():
-        chunks.append(
-            {
-                "key": key,
-                "content": json.dumps(value, indent=2, default=str),
-                "value_type": type(value).__name__,
-            }
-        )
-
-    return chunks
-
-
 __all__ = [
     "chunk_by_size",
     "chunk_by_headers",
-    "chunk_by_timestamps",
-    "chunk_by_json_keys",
 ]

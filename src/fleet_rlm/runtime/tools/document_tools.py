@@ -23,6 +23,11 @@ from pathlib import Path
 from typing import IO, Any
 
 from fleet_rlm.runtime.tools._marker import tool_fn
+from fleet_rlm.runtime.tools.schemas import (
+    LoadDocumentDirectoryOutput,
+    LoadDocumentInput,
+    LoadDocumentOutput,
+)
 
 _MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MiB
 _DOWNLOAD_TIMEOUT_S = 30
@@ -32,8 +37,6 @@ _CONTENT_TYPE_SUFFIX_MAP = {
     "text/plain": ".txt",
     "application/json": ".json",
     "text/markdown": ".md",
-    "application/msword": ".doc",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
 }
 
 
@@ -65,21 +68,20 @@ def _validate_download_url(url: str) -> None:
         raise ValueError("Document download URL targets a private network address.")
 
     try:
-        if _is_private_download_address(hostname):
-            raise ValueError("Document download URL targets a private network address.")
-        return
-    except ValueError as exc:
-        if "private network" in str(exc):
-            raise
-
-    try:
         resolved = socket.getaddrinfo(hostname, parsed.port, type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
         raise ValueError(f"Unable to resolve document download host: {hostname}") from exc
 
     for result in resolved:
+        af = result[0]
         sockaddr = result[4]
-        if sockaddr and _is_private_download_address(str(sockaddr[0])):
+        if af == socket.AF_INET and sockaddr:
+            ip_str = str(sockaddr[0])
+        elif af == socket.AF_INET6 and sockaddr:
+            ip_str = str(sockaddr[0])
+        else:
+            continue
+        if _is_private_download_address(ip_str):
             raise ValueError("Document download URL targets a private network address.")
 
 
@@ -112,14 +114,6 @@ def _suffix_from_url(url: str, headers: dict[str, str]) -> str:
         ".md",
         ".json",
         ".pdf",
-        ".doc",
-        ".docx",
-        ".ppt",
-        ".pptx",
-        ".xls",
-        ".xlsx",
-        ".rtf",
-        ".epub",
     }:
         url_suffix = ""
     if url_suffix:
@@ -164,15 +158,27 @@ def _download_url(url: str) -> Path:
                 cleanup_tmp = True
                 raise
         finally:
-            os.close(fd)
             if cleanup_tmp:
                 Path(tmp_path).unlink(missing_ok=True)
+            os.close(fd)
 
     return Path(tmp_path)
 
 
 @tool_fn
 def load_document(source: str, alias: str = "active") -> dict[str, Any]:
+    """Load a local file, directory listing, or public URL into document context."""
+    validated = LoadDocumentInput(source=source, alias=alias)
+    output = _load_document_impl(validated.source, alias=validated.alias)
+    return output.model_dump()
+
+
+def _load_document_impl(
+    source: str,
+    alias: str = "active",
+    *,
+    volume_mount_path: str | None = None,
+) -> LoadDocumentOutput | LoadDocumentDirectoryOutput:
     """Load a local file, directory listing, or public URL into document context."""
     from fleet_rlm.runtime.content.ingestion import (
         read_document_content as _read_document_content,
@@ -184,14 +190,25 @@ def load_document(source: str, alias: str = "active") -> dict[str, Any]:
         tmp_path = _download_url(stripped)
         try:
             content, metadata = _read_document_content(tmp_path)
-            return {
-                "status": "ok",
-                "alias": alias,
-                "path": stripped,
-                "char_count": len(content),
-                "line_count": len(content.splitlines()),
-                "metadata": metadata or {},
-            }
+            output = LoadDocumentOutput(
+                status="ok",
+                alias=alias,
+                path=stripped,
+                char_count=len(content),
+                line_count=len(content.splitlines()),
+                metadata=metadata or {},
+            )
+            if volume_mount_path:
+                from fleet_rlm.runtime.tools.knowledge_tools import persist_knowledge_document
+
+                output.knowledge = persist_knowledge_document(
+                    source=stripped,
+                    text=content,
+                    metadata=metadata,
+                    volume_mount_path=volume_mount_path,
+                    alias=alias,
+                )
+            return output
         finally:
             tmp_path.unlink(missing_ok=True)
 
@@ -199,27 +216,38 @@ def load_document(source: str, alias: str = "active") -> dict[str, Any]:
 
     if file_path.is_dir():
         files = sorted(str(p.relative_to(file_path)) for p in file_path.rglob("*") if p.is_file())
-        return {
-            "status": "directory",
-            "alias": alias,
-            "path": str(file_path),
-            "files": files[:100],
-            "total_count": len(files),
-            "hint": "Use load_document with a specific file path from this listing.",
-        }
+        return LoadDocumentDirectoryOutput(
+            status="directory",
+            alias=alias,
+            path=str(file_path),
+            files=files[:100],
+            total_count=len(files),
+            hint="Use load_document with a specific file path from this listing.",
+        )
 
     if not file_path.exists():
         raise FileNotFoundError(f"Document not found: {file_path}")
 
     content, metadata = _read_document_content(file_path)
-    return {
-        "status": "ok",
-        "alias": alias,
-        "path": str(file_path),
-        "char_count": len(content),
-        "line_count": len(content.splitlines()),
-        "metadata": metadata or {},
-    }
+    output = LoadDocumentOutput(
+        status="ok",
+        alias=alias,
+        path=str(file_path),
+        char_count=len(content),
+        line_count=len(content.splitlines()),
+        metadata=metadata or {},
+    )
+    if volume_mount_path:
+        from fleet_rlm.runtime.tools.knowledge_tools import persist_knowledge_document
+
+        output.knowledge = persist_knowledge_document(
+            source=str(file_path),
+            text=content,
+            metadata=metadata,
+            volume_mount_path=volume_mount_path,
+            alias=alias,
+        )
+    return output
 
 
 @tool_fn
@@ -299,4 +327,5 @@ __all__ = [
     "list_documents",
     "load_document",
     "set_active_document",
+    "_load_document_impl",
 ]

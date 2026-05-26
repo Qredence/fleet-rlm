@@ -15,8 +15,8 @@ from urllib.parse import urlparse
 import dspy
 from dspy.streaming.messages import StatusMessageProvider
 
-from fleet_rlm.runtime.content.preview import head_tail_preview
 from fleet_rlm.runtime.schemas import StreamEvent
+from fleet_rlm.utils.preview import head_tail_preview
 
 # Pre-compiled regexes for hot-path status parsing
 _CALLING_TOOL_RE = re.compile(r"^Calling tool:\s*(.+)$")

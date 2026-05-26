@@ -14,6 +14,9 @@ def test_storage_paths_normalize_mount_layouts() -> None:
     assert legacy.mounted_root == "/data"
     assert legacy.memory_root == "/data/memory"
     assert legacy.artifacts_root == "/data/artifacts"
+    assert legacy.memories_root == "/data/memories"
+    assert legacy.knowledge_root == "/data/knowledge"
+    assert legacy.sessions_root == "/data/sessions"
     assert legacy.allowed_root == "/data"
 
     assert current.mounted_root == "/home/daytona/memory"
