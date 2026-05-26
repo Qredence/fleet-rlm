@@ -221,6 +221,13 @@ Daytona-specific boundaries:
   - `auto_stop_interval=30`
   - `auto_archive_interval=60`
   - treat these values as provider minutes, not seconds
+- Sandbox concurrency control:
+  - Global `asyncio.Semaphore` caps total active sandboxes (root + child RLMs)
+  - Configured via `FLEET_MAX_CONCURRENT_SANDBOXES` env var (default: 5, range: 1–50)
+  - Acquisition timeout is 60 seconds; exceeding raises `DaytonaDiagnosticError(category="sandbox_concurrency_busy")`
+  - Slots are auto-released when `sandbox.delete()` or `sandbox.stop()` is called
+  - Pydantic models: `ConcurrencyConfig` (config) and `SandboxUsageStats` (diagnostics) in `integrations/daytona/concurrency.py`
+  - `get_current_sandbox_usage()` returns `SandboxUsageStats` for runtime diagnostics
 
 Tooling boundaries:
 

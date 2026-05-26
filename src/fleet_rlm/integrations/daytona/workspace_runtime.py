@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import shlex
@@ -13,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .async_compat import _run_async_compat
+from .concurrency import acquire_sandbox_slot, attach_slot_release_handler, release_sandbox_slot
 from .config import (
     daytona_import_error as _daytona_import_error,
 )
@@ -630,21 +633,45 @@ def acreate_sandbox_from_spec(
     return client.create(params)
 
 
-def acreate_sandbox(
+async def acreate_sandbox(
     *,
     runtime: Any,
     volume_name: str | None = None,
     spec: SandboxSpec | None = None,
 ) -> Any:
-    """Create a sandbox, falling back from inactive snapshots when needed."""
+    """Create a sandbox, falling back from inactive snapshots when needed.
+
+    Acquires a global concurrency slot before creating. If the semaphore is at
+    capacity, waits up to 60 seconds before raising a busy error.
+    """
+    slot_acquired = False
+    try:
+        await acquire_sandbox_slot(timeout=60.0)
+        slot_acquired = True
+    except asyncio.TimeoutError as exc:
+        raise DaytonaDiagnosticError(
+            "Sandbox concurrency limit reached: all slots occupied. Wait briefly and retry.",
+            category="sandbox_concurrency_busy",
+            phase="sandbox_create",
+        ) from exc
+
     try:
         resolved_spec = spec or runtime.build_sandbox_spec(volume_name=volume_name)
         resolved_spec = aresolve_sandbox_spec_snapshot(
             resolved_spec,
             config=runtime._resolved_config,
         )
-        return acreate_sandbox_from_spec(runtime=runtime, spec=resolved_spec)
+        sandbox = acreate_sandbox_from_spec(runtime=runtime, spec=resolved_spec)
+        # Attach semaphore release callback to sandbox for cleanup
+        if sandbox is not None:
+            attach_slot_release_handler(sandbox)
+        else:
+            release_sandbox_slot()
+        return sandbox
     except Exception as exc:
+        # Release slot on failure since sandbox won't be returned
+        if slot_acquired:
+            release_sandbox_slot()
         raise DaytonaDiagnosticError(
             f"Daytona sandbox create failure: {_format_daytona_sdk_error(exc)}",
             category="sandbox_create_clone_error",
@@ -652,7 +679,7 @@ def acreate_sandbox(
         ) from exc
 
 
-def acreate_workspace_session(
+async def acreate_workspace_session(
     *,
     runtime: Any,
     request: WorkspaceSessionCreateRequest,
@@ -665,7 +692,7 @@ def acreate_workspace_session(
     resolved_spec = request.spec or runtime.build_sandbox_spec(volume_name=request.volume_name)
     try:
         create_started = time.perf_counter()
-        sandbox = acreate_sandbox(runtime=runtime, spec=resolved_spec)
+        sandbox = await acreate_sandbox(runtime=runtime, spec=resolved_spec)
         timings["sandbox_create"] = int((time.perf_counter() - create_started) * 1000)
 
         effective_volume = resolved_spec.volume_name or request.volume_name
@@ -716,8 +743,13 @@ def acreate_workspace_session(
         raise
 
 
-# Backward-compat alias
-create_workspace_session = acreate_workspace_session
+# Backward-compat alias (sync wrapper for async function)
+def create_workspace_session(
+    *,
+    runtime: Any,
+    request: WorkspaceSessionCreateRequest,
+) -> DaytonaSandboxSession:
+    return _run_async_compat(acreate_workspace_session, runtime=runtime, request=request)
 
 
 def areconcile_workspace_session(

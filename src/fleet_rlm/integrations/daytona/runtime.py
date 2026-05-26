@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from .async_compat import _run_sync_in_thread
+from .async_compat import _run_async_compat, _run_sync_in_thread
 from .config import ResolvedDaytonaConfig, resolve_daytona_config
 from .config import build_daytona_client as _build_daytona_client
 from .models import (
@@ -153,7 +153,7 @@ class DaytonaSandboxRuntime:
         start with pre-installed core packages (dspy-ai, numpy, pandas,
         httpx, pydantic).  If the snapshot has not been created yet, the
         runtime falls back to a declarative image build at sandbox
-        creation time (see ``_create_sandbox``).
+        creation time (see ``create_sandbox``).
 
         Cost-saving lifecycle defaults:
 
@@ -190,46 +190,57 @@ class DaytonaSandboxRuntime:
             network_allow_list=network_allow_list,
         )
 
-    def _create_sandbox_from_spec(self, spec: SandboxSpec) -> Any:
-        """Create a sandbox using a declarative ``SandboxSpec``.
+    def create_sandbox_from_spec(self, spec: SandboxSpec) -> Any:
+        """Create a sandbox from a declarative ``SandboxSpec`` (sync).
 
         When the spec carries a ``daytona.Image`` declarative builder,
         the sandbox is created via ``CreateSandboxFromImageParams`` and
-        Daytona caches the built image for 24 hours.  Otherwise a
+        Daytona caches the built image for 24 hours. Otherwise a
         snapshot-based sandbox is created.
+
+        Note: This does NOT acquire a concurrency slot. Use
+        ``create_sandbox`` for the full lifecycle with slot management.
         """
         return _acreate_sandbox_from_spec_helper(runtime=self, spec=spec)
 
-    async def _acreate_sandbox_from_spec(self, spec: SandboxSpec) -> Any:
-        return await _run_sync_in_thread(self._create_sandbox_from_spec, spec)
+    async def acreate_sandbox_from_spec(self, spec: SandboxSpec) -> Any:
+        """Create a sandbox from a declarative ``SandboxSpec`` (async).
 
-    def _create_sandbox(
+        Runs the synchronous Daytona SDK call in a thread to avoid
+        blocking the event loop.
+        """
+        return await _run_sync_in_thread(self.create_sandbox_from_spec, spec)
+
+    def create_sandbox(
         self,
         volume_name: str | None = None,
         *,
         spec: SandboxSpec | None = None,
     ) -> Any:
-        """Create a sandbox, optionally from a declarative spec.
+        """Create a sandbox with concurrency control and snapshot fallback (sync).
 
-        When the spec requests a named snapshot, the runtime first checks
-        whether that snapshot is ``ACTIVE``.  If it is not available, the
-        runtime transparently falls back to a declarative image build
-        using ``DEFAULT_SNAPSHOT_PACKAGES`` so the sandbox still starts
-        with the expected packages pre-installed.
+        Acquires a global semaphore slot, resolves snapshot availability,
+        and attaches a slot-release handler to the resulting sandbox.
         """
-        return _acreate_sandbox_helper(
+        return _run_async_compat(
+            _acreate_sandbox_helper,
             runtime=self,
             volume_name=volume_name,
             spec=spec,
         )
 
-    async def _acreate_sandbox(
+    async def acreate_sandbox(
         self,
         volume_name: str | None = None,
         *,
         spec: SandboxSpec | None = None,
     ) -> Any:
-        return await _run_sync_in_thread(self._create_sandbox, volume_name, spec=spec)
+        """Create a sandbox with concurrency control and snapshot fallback (async)."""
+        return await _acreate_sandbox_helper(
+            runtime=self,
+            volume_name=volume_name,
+            spec=spec,
+        )
 
     @staticmethod
     def _fallback_to_declarative_image(spec: SandboxSpec) -> SandboxSpec:
@@ -282,7 +293,8 @@ class DaytonaSandboxRuntime:
         volume_name: str | None = None,
         spec: SandboxSpec | None = None,
     ) -> DaytonaSandboxSession:
-        return _acreate_workspace_session_helper(
+        return _run_async_compat(
+            _acreate_workspace_session_helper,
             runtime=self,
             request=WorkspaceSessionCreateRequest(
                 repo_url=repo_url,
@@ -302,13 +314,15 @@ class DaytonaSandboxRuntime:
         volume_name: str | None = None,
         spec: SandboxSpec | None = None,
     ) -> DaytonaSandboxSession:
-        return await _run_sync_in_thread(
-            self.create_workspace_session,
-            repo_url=repo_url,
-            ref=ref,
-            context_paths=context_paths,
-            volume_name=volume_name,
-            spec=spec,
+        return await _acreate_workspace_session_helper(
+            runtime=self,
+            request=WorkspaceSessionCreateRequest(
+                repo_url=repo_url,
+                ref=ref,
+                context_paths=context_paths or [],
+                volume_name=volume_name,
+                spec=spec,
+            ),
         )
 
     def resume_workspace_session(
