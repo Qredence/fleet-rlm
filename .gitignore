@@ -54,6 +54,8 @@ docs/superpowers/
 docs/plans/
 docs/archive/
 
+plan/
+
 # Frontend
 src/frontend/node_modules/
 src/frontend/dist/
