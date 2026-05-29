@@ -11,13 +11,13 @@ Usage (from repo root):
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import os
 import sys
 import time
 import uuid
-from typing import Any
 
 # Ensure repo root is on path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,7 +25,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fleet_rlm.api.runtime_services.chat_persistence import (
     ensure_session_volume_layout,
     load_manifest_from_volume,
-    save_manifest_to_volume,
 )
 from fleet_rlm.api.runtime_services.session_paths import (
     session_conversation_path,
@@ -37,9 +36,15 @@ from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxRuntime
 from fleet_rlm.integrations.daytona.sdk_ops import ensure_daytona_volume_layout
 
-
 TEST_SESSION_ID = f"live-verify-{uuid.uuid4().hex[:8]}"
 VOLUME_NAME = f"live-verify-vol-{uuid.uuid4().hex[:8]}"
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run live Daytona persistent-volume/session restore verification.",
+    )
+    return parser.parse_args(argv)
 
 
 async def _main() -> int:
@@ -181,4 +186,5 @@ async def _main() -> int:
 
 
 if __name__ == "__main__":
+    _parse_args()
     sys.exit(asyncio.run(_main()))

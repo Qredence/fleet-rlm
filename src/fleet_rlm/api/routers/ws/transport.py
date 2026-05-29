@@ -245,7 +245,7 @@ async def handle_chat_loop_exception(
         ),
     )
     try:
-        await local_persist(include_volume_save=True)
+        await local_persist(include_volume_save=True, allow_volume_session_create=False)
     except PersistenceRequiredError as persist_exc:
         logger.warning(
             "Session persistence failed after stream error: %s",

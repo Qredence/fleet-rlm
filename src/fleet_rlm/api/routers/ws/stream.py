@@ -38,6 +38,7 @@ from ...events.event_adapter import (
 from ...runtime_services.chat_persistence import (
     ExecutionLifecycleManager,
     build_local_persist_fn,
+    build_startup_status_event,
     build_workspace_task_request,
     classify_stream_failure,
     enqueue_latest_nonblocking,
@@ -1133,6 +1134,17 @@ class _ExecutionConnectionLoop:
                         user_id=user_id,
                         session_id=sess_id,
                     ),
+                )
+                startup_event = build_startup_status_event()
+                await _try_send_json(
+                    self.websocket,
+                    {
+                        "type": "event",
+                        "data": build_stream_event_dict(
+                            event=startup_event,
+                            payload=startup_event.payload,
+                        ),
+                    },
                 )
                 self.stream_task = asyncio.create_task(
                     _background_execution_task(

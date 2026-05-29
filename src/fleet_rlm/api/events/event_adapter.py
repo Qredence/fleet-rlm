@@ -131,10 +131,20 @@ def adapt_stream_event(
 
 def build_chat_event_payload(event: BackendEvent) -> dict[str, Any]:
     payload = dict(event.payload)
+    payload.setdefault("source_type", event.kind)
     if event.runtime is not None:
         payload["runtime"] = event.runtime.model_dump(mode="json", exclude_none=True)
+
+    if event.kind == "turn_started":
+        kind = "execution_started"
+    elif event.kind in {"turn_completed", "turn_failed"}:
+        kind = "execution_completed"
+        payload.setdefault("status", "failed" if event.kind == "turn_failed" else "completed")
+    else:
+        kind = "execution_step"
+
     return {
-        "kind": "done" if event.kind == "turn_completed" else "error" if event.kind == "turn_failed" else event.kind,
+        "kind": kind,
         "text": event.text,
         "payload": payload,
         "timestamp": event.timestamp.isoformat(),

@@ -129,3 +129,32 @@ def test_summarize_code_for_event_returns_stable_preview(monkeypatch):
 
     assert summary["code_hash"]
     assert summary["code_preview"] == "print( 'hell...[truncated]"
+
+
+def test_startup_status_projects_to_canonical_execution_started_frame():
+    persistence_module = importlib.import_module("fleet_rlm.api.runtime_services.chat_persistence")
+    stream_module = importlib.import_module("fleet_rlm.api.routers.ws.stream")
+
+    event = persistence_module.build_startup_status_event()
+    frame = stream_module.build_stream_event_dict(event=event, payload=event.payload)
+
+    assert event.kind == "turn_started"
+    assert frame["kind"] == "execution_started"
+    assert frame["text"] == "Preparing Daytona workspace..."
+    assert frame["payload"]["phase"] == "startup"
+    assert frame["payload"]["source_type"] == "turn_started"
+
+
+def test_backend_status_projects_to_canonical_execution_step_frame():
+    event_adapter = importlib.import_module("fleet_rlm.api.events.event_adapter")
+
+    event = event_adapter.adapt_stream_event(
+        kind="status",
+        text="Working",
+        payload={"phase": "startup"},
+        timestamp=None,
+    )
+    frame = event_adapter.build_chat_event_payload(event)
+
+    assert frame["kind"] == "execution_step"
+    assert frame["payload"]["source_type"] == "status"

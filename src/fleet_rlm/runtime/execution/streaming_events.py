@@ -225,17 +225,19 @@ def _build_flat_trajectory_step(raw: dict[str, Any], index: int) -> dict[str, An
     return step
 
 
-def _normalize_trajectory(raw: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _normalize_trajectory(raw: Any | None) -> list[dict[str, Any]]:
     """Convert DSPy ReAct flat trajectory to structured step list."""
     if not raw:
         return []
 
     steps: list[dict[str, Any]] = []
-    if "steps" in raw and isinstance(raw["steps"], list):
+    if isinstance(raw, list):
+        steps = raw
+    elif isinstance(raw, dict) and "steps" in raw and isinstance(raw["steps"], list):
         steps = raw["steps"]
-    elif "trajectory" in raw and isinstance(raw["trajectory"], list):
+    elif isinstance(raw, dict) and "trajectory" in raw and isinstance(raw["trajectory"], list):
         steps = raw["trajectory"]
-    else:
+    elif isinstance(raw, dict):
         steps = [_build_flat_trajectory_step(raw, index) for index in _extract_step_indices(raw)]
 
     result: list[dict[str, Any]] = []

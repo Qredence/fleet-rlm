@@ -1,6 +1,6 @@
 """Global concurrency control for Daytona sandbox creation.
 
-Provides a module-level asyncio.Semaphore to cap total active sandboxes
+Provides a module-level asyncio.BoundedSemaphore to cap total active sandboxes
 (root sessions + child RLMs) across the entire fleet-rlm runtime.
 """
 
@@ -72,19 +72,19 @@ class SandboxUsageStats(BaseModel):
 # Module-level semaphore state
 # ---------------------------------------------------------------------------
 
-_GLOBAL_SEMAPHORE: asyncio.Semaphore | None = None
+_GLOBAL_SEMAPHORE: asyncio.BoundedSemaphore | None = None
 _SEMAPHORE_LOCK = asyncio.Lock()
 _INITIALIZED_CONFIG: ConcurrencyConfig | None = None
 
 
-async def _get_global_semaphore() -> asyncio.Semaphore:
+async def _get_global_semaphore() -> asyncio.BoundedSemaphore:
     """Get or initialize the global sandbox semaphore lazily."""
     global _GLOBAL_SEMAPHORE, _INITIALIZED_CONFIG
     if _GLOBAL_SEMAPHORE is None:
         async with _SEMAPHORE_LOCK:
             if _GLOBAL_SEMAPHORE is None:
                 config = ConcurrencyConfig.from_env()
-                _GLOBAL_SEMAPHORE = asyncio.Semaphore(config.max_sandboxes)
+                _GLOBAL_SEMAPHORE = asyncio.BoundedSemaphore(config.max_sandboxes)
                 _INITIALIZED_CONFIG = config
                 logger.info(
                     "Initialized global sandbox semaphore with limit=%d",
@@ -136,8 +136,8 @@ def release_sandbox_slot() -> None:
     Call this when a sandbox is destroyed or stopped.
 
     Note:
-        Over-releasing (calling without a prior acquire) is caught and logged
-        as a warning. It does NOT raise.
+        Over-releasing (calling without a prior acquire) is prevented by the
+        bounded semaphore and logged as a warning. It does NOT raise.
     """
     if _GLOBAL_SEMAPHORE is not None:
         try:
@@ -145,6 +145,14 @@ def release_sandbox_slot() -> None:
             logger.debug("Released sandbox slot (available=%d)", _GLOBAL_SEMAPHORE._value)
         except ValueError:
             logger.warning("Attempted to release unheld sandbox slot (over-release)")
+
+
+def _set_sandbox_attr(sandbox: Any, name: str, value: Any) -> None:
+    """Set SDK object attributes, bypassing validated assignment when needed."""
+    try:
+        setattr(sandbox, name, value)
+    except Exception:
+        object.__setattr__(sandbox, name, value)
 
 
 # ---------------------------------------------------------------------------
@@ -156,13 +164,12 @@ def attach_slot_release_handler(sandbox: Any) -> None:
     """Patch sandbox.delete() and sandbox.stop() to auto-release the slot.
 
     The Daytona Python SDK exposes ``sandbox.delete()`` and ``sandbox.stop()``
-    as the only teardown methods. This function monkey-patches both to ensure
-    the global concurrency slot is released exactly once when the sandbox is
-    torn down -- whether by explicit cleanup or by SDK-initiated auto-stop.
+    as the only teardown methods. This function monkey-patches both to release
+    the global concurrency slot exactly once after a teardown call succeeds.
 
     A ``_fleet_slot_released`` flag prevents double-release.
     """
-    sandbox._fleet_slot_released = False
+    _set_sandbox_attr(sandbox, "_fleet_slot_released", False)
 
     original_delete = getattr(sandbox, "delete", None)
     original_stop = getattr(sandbox, "stop", None)
@@ -170,8 +177,12 @@ def attach_slot_release_handler(sandbox: Any) -> None:
     def _make_release_wrapper(original: Any) -> Any:
         def _wrapper(*args: Any, **kwargs: Any) -> Any:
             if not getattr(sandbox, "_fleet_slot_released", False):
+                result = None
+                if original is not None:
+                    result = original(*args, **kwargs)
                 release_sandbox_slot()
-                sandbox._fleet_slot_released = True
+                _set_sandbox_attr(sandbox, "_fleet_slot_released", True)
+                return result
             if original is not None:
                 return original(*args, **kwargs)
             return None
@@ -179,9 +190,9 @@ def attach_slot_release_handler(sandbox: Any) -> None:
         return _wrapper
 
     if original_delete is not None:
-        sandbox.delete = _make_release_wrapper(original_delete)
+        _set_sandbox_attr(sandbox, "delete", _make_release_wrapper(original_delete))
     if original_stop is not None:
-        sandbox.stop = _make_release_wrapper(original_stop)
+        _set_sandbox_attr(sandbox, "stop", _make_release_wrapper(original_stop))
 
 
 # ---------------------------------------------------------------------------

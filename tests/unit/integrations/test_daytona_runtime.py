@@ -1,10 +1,195 @@
 from __future__ import annotations
 
+import asyncio
+import datetime
+import re
+import time
 import uuid
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _reset_sandbox_semaphore():
+    """Reset Daytona sandbox slot state between runtime tests."""
+    import fleet_rlm.integrations.daytona.concurrency as mod
+
+    mod._GLOBAL_SEMAPHORE = None
+    mod._INITIALIZED_CONFIG = None
+    yield
+    mod._GLOBAL_SEMAPHORE = None
+    mod._INITIALIZED_CONFIG = None
+
+
+def test_default_sandbox_name_keeps_timestamp_prefix_and_adds_unique_suffix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.integrations.daytona import models
+
+    fixed = datetime.datetime(2026, 5, 29, 4, 11, 13, tzinfo=datetime.timezone.utc)
+    ids = iter(
+        [
+            SimpleNamespace(hex="11111111aaaaaaaaaaaaaaaaaaaaaaaa"),
+            SimpleNamespace(hex="22222222bbbbbbbbbbbbbbbbbbbbbbbb"),
+        ]
+    )
+    monkeypatch.setattr(models.uuid, "uuid4", lambda: next(ids))
+
+    first = models.default_sandbox_name(now=fixed)
+    second = models.default_sandbox_name(now=fixed)
+
+    assert first == "fleet-rlm-20260529-041113-11111111"
+    assert second == "fleet-rlm-20260529-041113-22222222"
+    assert first != second
+    assert re.fullmatch(r"fleet-rlm-\d{8}-\d{6}-[0-9a-f]{8}", first)
+
+
+class DaytonaConflictError(Exception):
+    pass
+
+
+def _daytona_name_conflict(name: str) -> DaytonaConflictError:
+    return DaytonaConflictError(
+        f"Daytona provider failure (HTTP 409): Failed to create sandbox: Sandbox with name {name} already exists"
+    )
+
+
+def _sandbox_runtime():
+    from fleet_rlm.integrations.daytona.config import ResolvedDaytonaConfig
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxRuntime
+
+    return DaytonaSandboxRuntime(config=ResolvedDaytonaConfig(api_key="key", api_url="https://daytona.local"))
+
+
+@pytest.mark.asyncio
+async def test_sandbox_create_retries_generated_name_conflict(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.integrations.daytona import runtime as runtime_module
+    from fleet_rlm.integrations.daytona.concurrency import get_current_sandbox_usage
+    from fleet_rlm.integrations.daytona.models import SandboxSpec
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxRuntime
+
+    sandbox = SimpleNamespace(delete=MagicMock(), stop=MagicMock())
+    calls: list[str | None] = []
+    fresh_names = iter(["fleet-rlm-20260529-041114-deadbeef"])
+
+    def fake_create(self: DaytonaSandboxRuntime, spec: SandboxSpec):
+        _ = self
+        calls.append(spec.name)
+        if len(calls) == 1:
+            raise _daytona_name_conflict(str(spec.name))
+        return sandbox
+
+    monkeypatch.setattr(runtime_module, "aresolve_sandbox_spec_snapshot", lambda spec, config: spec)
+    monkeypatch.setattr(runtime_module, "_default_sandbox_name_helper", lambda: next(fresh_names))
+    monkeypatch.setattr(DaytonaSandboxRuntime, "_create_sandbox_from_spec_impl", fake_create)
+
+    result = await _sandbox_runtime().acreate_sandbox(spec=SandboxSpec(name="fleet-rlm-20260529-041113-11111111"))
+
+    assert result is sandbox
+    assert calls == [
+        "fleet-rlm-20260529-041113-11111111",
+        "fleet-rlm-20260529-041114-deadbeef",
+    ]
+    assert get_current_sandbox_usage().active_count == 1
+
+    result.delete()
+
+    assert get_current_sandbox_usage().active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_sandbox_create_does_not_retry_explicit_non_generated_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.integrations.daytona import runtime as runtime_module
+    from fleet_rlm.integrations.daytona.concurrency import get_current_sandbox_usage
+    from fleet_rlm.integrations.daytona.errors import DaytonaDiagnosticError
+    from fleet_rlm.integrations.daytona.models import SandboxSpec
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxRuntime
+
+    calls: list[str | None] = []
+
+    def fake_create(self: DaytonaSandboxRuntime, spec: SandboxSpec):
+        _ = self
+        calls.append(spec.name)
+        raise _daytona_name_conflict(str(spec.name))
+
+    monkeypatch.setattr(runtime_module, "aresolve_sandbox_spec_snapshot", lambda spec, config: spec)
+    monkeypatch.setattr(DaytonaSandboxRuntime, "_create_sandbox_from_spec_impl", fake_create)
+
+    with pytest.raises(DaytonaDiagnosticError, match="already exists"):
+        await _sandbox_runtime().acreate_sandbox(spec=SandboxSpec(name="custom-sandbox"))
+
+    assert calls == ["custom-sandbox"]
+    assert get_current_sandbox_usage().active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_sandbox_create_releases_slot_after_retry_exhaustion(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.integrations.daytona import runtime as runtime_module
+    from fleet_rlm.integrations.daytona.concurrency import get_current_sandbox_usage
+    from fleet_rlm.integrations.daytona.errors import DaytonaDiagnosticError
+    from fleet_rlm.integrations.daytona.models import SandboxSpec
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxRuntime
+
+    calls: list[str | None] = []
+    retry_count = 0
+
+    def fake_fresh_name() -> str:
+        nonlocal retry_count
+        retry_count += 1
+        return f"fleet-rlm-20260529-04111{retry_count}-deadbee{retry_count}"
+
+    def fake_create(self: DaytonaSandboxRuntime, spec: SandboxSpec):
+        _ = self
+        calls.append(spec.name)
+        raise _daytona_name_conflict(str(spec.name))
+
+    monkeypatch.setattr(runtime_module, "aresolve_sandbox_spec_snapshot", lambda spec, config: spec)
+    monkeypatch.setattr(runtime_module, "_default_sandbox_name_helper", fake_fresh_name)
+    monkeypatch.setattr(DaytonaSandboxRuntime, "_create_sandbox_from_spec_impl", fake_create)
+
+    with pytest.raises(DaytonaDiagnosticError, match="already exists"):
+        await _sandbox_runtime().acreate_sandbox(spec=SandboxSpec(name="fleet-rlm-20260529-041113-11111111"))
+
+    assert len(calls) == 4
+    assert get_current_sandbox_usage().active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_async_sandbox_create_does_not_block_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.integrations.daytona import runtime as runtime_module
+    from fleet_rlm.integrations.daytona.models import SandboxSpec
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxRuntime
+
+    events: list[str] = []
+    sandbox = SimpleNamespace(delete=MagicMock(), stop=MagicMock())
+
+    def fake_create(self: DaytonaSandboxRuntime, spec: SandboxSpec):
+        _ = (self, spec)
+        events.append("create_start")
+        time.sleep(0.05)
+        events.append("create_end")
+        return sandbox
+
+    async def probe_loop() -> None:
+        await asyncio.sleep(0.01)
+        events.append("probe")
+
+    monkeypatch.setattr(runtime_module, "aresolve_sandbox_spec_snapshot", lambda spec, config: spec)
+    monkeypatch.setattr(DaytonaSandboxRuntime, "_create_sandbox_from_spec_impl", fake_create)
+
+    result, _ = await asyncio.gather(
+        _sandbox_runtime().acreate_sandbox(spec=SandboxSpec(name="custom-sandbox")),
+        probe_loop(),
+    )
+
+    assert result is sandbox
+    assert events == ["create_start", "probe", "create_end"]
+
+    result.delete()
 
 
 @pytest.mark.asyncio
@@ -94,9 +279,17 @@ def test_daytona_volume_layout_matches_phase_one_skeleton() -> None:
     from fleet_rlm.integrations.daytona.sdk_ops import ensure_daytona_volume_layout
 
     created: list[str] = []
+    code_runs: list[str] = []
+    uploads: list[tuple[bytes, str]] = []
     sandbox = SimpleNamespace(
-        fs=SimpleNamespace(create_folder=lambda directory, mode: created.append(directory)),
-        process=SimpleNamespace(exec=lambda cmd: None),
+        fs=SimpleNamespace(
+            create_folder=lambda directory, mode: created.append(directory),
+            list_files=lambda directory: [],
+            upload_file=lambda payload, path: uploads.append((payload, path)),
+        ),
+        process=SimpleNamespace(
+            code_run=lambda code, **kwargs: code_runs.append(code) or SimpleNamespace(exit_code=0, stdout="")
+        ),
     )
 
     ensure_daytona_volume_layout(sandbox=sandbox, mounted_root="/data")
@@ -115,6 +308,8 @@ def test_daytona_volume_layout_matches_phase_one_skeleton() -> None:
         "/data/logs",
         "/data/uploads",
     } <= set(created)
+    assert any("sqlite3" in code and "core.db" in code for code in code_runs)
+    assert any(path.startswith("/data/skills/system/") and path.endswith(".md") for _, path in uploads)
 
 
 def test_store_evidence_redacts_credentials_from_bridge_errors() -> None:

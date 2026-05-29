@@ -34,8 +34,12 @@ logger = logging.getLogger(__name__)
 
 def _default_core_memory() -> dict[str, str]:
     return {
-        "persona": "I am a helpful AI assistant focused on writing high-quality code.",
-        "human": "The user is a developer working on this project.",
+        "persona": (
+            "I am a helpful AI assistant embedded in fleet-rlm, a recursive long-chain-of-thought "
+            "agent system that delegates complex tasks to a fleet of specialised sub-agents via "
+            "Daytona sandboxes. I am focused on helping developers understand and extend this system."
+        ),
+        "human": "The user is a developer working on the fleet-rlm project.",
         "scratchpad": "",
     }
 
@@ -52,6 +56,43 @@ def _append_turn_to_history(
     if history_max_turns is not None and len(messages) > history_max_turns:
         messages = messages[-history_max_turns:]
     return dspy.History(messages=messages)
+
+
+def _prediction_value(result: Any, name: str) -> Any:
+    if isinstance(result, dict) and name in result:
+        return result.get(name)
+    return getattr(result, name, None)
+
+
+def _prediction_response_text(result: Any) -> str:
+    for field_name in ("response", "assistant_response", "answer"):
+        value = _prediction_value(result, field_name)
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _runtime_degradation_payload(result: Any) -> dict[str, Any]:
+    runtime_degraded = bool(_prediction_value(result, "runtime_degraded") or _prediction_value(result, "degraded"))
+    if not runtime_degraded:
+        return {}
+
+    payload: dict[str, Any] = {"runtime_degraded": True}
+    for key in (
+        "runtime_failure_category",
+        "runtime_failure_phase",
+        "runtime_fallback_used",
+        "runtime_warning",
+    ):
+        value = _prediction_value(result, key)
+        if value not in (None, ""):
+            payload[key] = value
+
+    payload.setdefault("runtime_failure_category", "rlm_fallback")
+    payload.setdefault("runtime_failure_phase", "escalating_rlm")
+    payload.setdefault("runtime_fallback_used", True)
+    payload.setdefault("runtime_warning", "RLM escalation fell back to the lightweight response path.")
+    return payload
 
 
 def _get_streamable_react_program(program: Any) -> Any | None:
@@ -189,7 +230,7 @@ class AgentRuntime:
         history_max_turns: int | None = 6,
         extra_tools: list[Any] | None = None,
         repository: Any | None = None,
-        use_escalation: bool = False,
+        use_escalation: bool = True,
         summary_interval: int = 10,
     ) -> None:
         from .agent import FleetAgent
@@ -273,6 +314,16 @@ class AgentRuntime:
             "conversation_summary": self.conversation_summary,
         }
 
+    def _runtime_observability_payload(self) -> dict[str, Any]:
+        """Return runtime metadata shared by streamed completion events."""
+        return {
+            "execution_mode": self.execution_mode,
+            "runtime_module": type(self.agent).__name__,
+            "escalation_enabled": self._use_escalation,
+            "conversation_summary_available": bool(self.conversation_summary),
+            "loaded_document_count": len(self.loaded_document_paths),
+        }
+
     def chat_turn(self, user_message: str) -> dspy.Prediction:
         """Run one synchronous chat turn and accumulate history.
 
@@ -283,11 +334,7 @@ class AgentRuntime:
             A :class:`dspy.Prediction` with at least a ``response`` field.
         """
         result = self.agent(**self._escalation_call_args(user_message))
-        response = str(
-            getattr(result, "response", None)
-            or getattr(result, "assistant_response", None)
-            or getattr(result, "answer", "")
-        )
+        response = _prediction_response_text(result)
         self.history = _append_turn_to_history(
             self.history,
             user_message=user_message,
@@ -339,9 +386,10 @@ class AgentRuntime:
             )
             return
 
-        response = str(getattr(result, "response", ""))
+        response = _prediction_response_text(result)
         trajectory_raw = getattr(result, "trajectory", None) or {}
         trajectory = _normalize_trajectory(trajectory_raw)
+        degradation_payload = _runtime_degradation_payload(result)
 
         for step in trajectory:
             thought = step.get("thought")
@@ -391,6 +439,13 @@ class AgentRuntime:
                         },
                     )
 
+        if degradation_payload:
+            yield StreamEvent(
+                kind="warning",
+                text=str(degradation_payload["runtime_warning"]),
+                payload=degradation_payload,
+            )
+
         if response:
             yield StreamEvent(kind="text", text=response)
 
@@ -400,11 +455,14 @@ class AgentRuntime:
             response=response,
             history_max_turns=self.history_max_turns,
         )
+        self._maybe_refresh_summary()
 
         done_payload: dict[str, Any] = {
             "trajectory": {"steps": trajectory},
             "history_turns": self.history_turns(),
         }
+        done_payload.update(self._runtime_observability_payload())
+        done_payload.update(degradation_payload)
         yield StreamEvent(kind="done", text=response, payload=done_payload)
 
     # -----------------------------------------------------------------
@@ -771,11 +829,13 @@ class AgentRuntime:
             response=response,
             history_max_turns=self.history_max_turns,
         )
+        self._maybe_refresh_summary()
 
         done_payload: dict[str, Any] = {
             "trajectory": {"steps": trajectory},
             "history_turns": self.history_turns(),
         }
+        done_payload.update(self._runtime_observability_payload())
         if recursive_child_review is not None:
             done_payload.update(
                 {

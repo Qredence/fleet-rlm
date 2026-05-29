@@ -106,6 +106,31 @@ def test_normalize_trajectory_truncates_long_output_and_drops_terminal_thought()
     assert trajectory[1]["tool_name"] == "finish"
 
 
+def test_normalize_trajectory_accepts_structured_step_list() -> None:
+    from fleet_rlm.runtime.execution.streaming_events import _normalize_trajectory
+
+    trajectory = _normalize_trajectory(
+        [
+            {
+                "thought": "Run code",
+                "tool_name": "repl_execute",
+                "input": {"code_preview": "print(1)"},
+                "observation": {"success": True},
+            },
+            {
+                "thought": "Final hidden reasoning",
+                "tool_name": "finish",
+                "output": "done",
+            },
+        ]
+    )
+
+    assert trajectory[0]["tool_name"] == "repl_execute"
+    assert trajectory[0]["observation"] == {"success": True}
+    assert "thought" not in trajectory[1]
+    assert trajectory[1]["tool_name"] == "finish"
+
+
 def test_build_final_payload_collects_sources_citations_and_human_review() -> None:
     from fleet_rlm.runtime.execution.streaming_events import _build_final_payload, _normalize_trajectory
 

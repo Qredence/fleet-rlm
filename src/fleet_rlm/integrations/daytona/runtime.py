@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
+from dataclasses import replace
 from typing import Any
 
 from .async_compat import _run_async_compat, _run_sync_in_thread
@@ -76,9 +78,31 @@ from .workspace_runtime import (
 
 logger = logging.getLogger(__name__)
 
+_GENERATED_SANDBOX_NAME_RE = re.compile(r"^fleet-rlm-\d{8}-\d{6}(?:-[0-9a-f]{8})?$")
+_SANDBOX_NAME_CONFLICT_RETRIES = 3
+
 # ---------------------------------------------------------------------------
 # DaytonaSandboxRuntime
 # ---------------------------------------------------------------------------
+
+
+def _is_generated_fleet_sandbox_name(name: str | None) -> bool:
+    return bool(name and _GENERATED_SANDBOX_NAME_RE.fullmatch(name))
+
+
+def _is_sandbox_name_conflict(exc: BaseException) -> bool:
+    """Return True for Daytona's HTTP 409 sandbox-name collision shape."""
+    exc_name = type(exc).__name__
+    message = str(exc)
+    return (
+        exc_name == "DaytonaConflictError"
+        or "HTTP 409" in message
+        or "already exists" in message
+    ) and "Sandbox with name" in message
+
+
+def _spec_with_fresh_generated_name(spec: SandboxSpec) -> SandboxSpec:
+    return replace(spec, name=_default_sandbox_name_helper())
 
 
 class DaytonaSandboxRuntime:
@@ -177,7 +201,7 @@ class DaytonaSandboxRuntime:
 
         A human-readable ``name`` is generated automatically when not
         supplied, producing dashboard-friendly labels like
-        ``fleet-rlm-20260404-090700`` instead of random hex IDs.
+        ``fleet-rlm-20260404-090700-a1b2c3d4`` instead of opaque UUIDs.
         """
         return _build_sandbox_spec_helper(
             default_labels=self.DEFAULT_LABELS,
@@ -308,13 +332,36 @@ class DaytonaSandboxRuntime:
                 phase="sandbox_create",
             ) from exc
 
+        sandbox = None
         try:
             resolved_spec = spec or self.build_sandbox_spec(volume_name=volume_name)
             resolved_spec = aresolve_sandbox_spec_snapshot(
                 resolved_spec,
                 config=self._resolved_config,
             )
-            sandbox = self._create_sandbox_from_spec_impl(resolved_spec)
+            attempts = 0
+            while True:
+                try:
+                    sandbox = await self.acreate_sandbox_from_spec(resolved_spec)
+                    break
+                except Exception as create_exc:
+                    attempts += 1
+                    if (
+                        attempts > _SANDBOX_NAME_CONFLICT_RETRIES
+                        or not _is_generated_fleet_sandbox_name(resolved_spec.name)
+                        or not _is_sandbox_name_conflict(create_exc)
+                    ):
+                        raise
+                    old_name = resolved_spec.name
+                    resolved_spec = _spec_with_fresh_generated_name(resolved_spec)
+                    logger.warning(
+                        "Daytona generated sandbox name conflicted; retrying with a fresh name "
+                        "(old_name=%s, new_name=%s, attempt=%d/%d)",
+                        old_name,
+                        resolved_spec.name,
+                        attempts,
+                        _SANDBOX_NAME_CONFLICT_RETRIES,
+                    )
             # Attach semaphore release callback to sandbox for cleanup
             if sandbox is not None:
                 attach_slot_release_handler(sandbox)
@@ -324,7 +371,15 @@ class DaytonaSandboxRuntime:
         except Exception as exc:
             # Release slot on failure since sandbox won't be returned
             if slot_acquired:
-                release_sandbox_slot()
+                if sandbox is not None:
+                    delete = getattr(sandbox, "delete", None)
+                    if callable(delete):
+                        try:
+                            await _run_sync_in_thread(delete)
+                        except Exception:
+                            logger.warning("Failed to delete sandbox after create failure", exc_info=True)
+                if not bool(getattr(sandbox, "_fleet_slot_released", False)):
+                    release_sandbox_slot()
             raise DaytonaDiagnosticError(
                 f"Daytona sandbox create failure: {_format_daytona_sdk_error(exc)}",
                 category="sandbox_create_clone_error",

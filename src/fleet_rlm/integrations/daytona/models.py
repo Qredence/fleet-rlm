@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import json
 import re
+import uuid
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Mapping
@@ -371,7 +372,7 @@ DEFAULT_SANDBOX_LABELS: dict[str, str] = {"managed-by": "fleet-rlm"}
 def default_sandbox_name(*, now: datetime.datetime | None = None) -> str:
     """Return the dashboard-friendly default sandbox name."""
     timestamp = now or datetime.datetime.now(datetime.timezone.utc)
-    return f"fleet-rlm-{timestamp:%Y%m%d-%H%M%S}"
+    return f"fleet-rlm-{timestamp:%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}"
 
 
 def merge_sandbox_labels(

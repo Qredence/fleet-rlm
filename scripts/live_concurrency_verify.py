@@ -14,6 +14,7 @@ Usage (from repo root):
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import os
 import sys
@@ -34,6 +35,13 @@ def _print_section(title: str) -> None:
     print(f"\n{'=' * 60}")
     print(f"  {title}")
     print(f"{'=' * 60}")
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run live Daytona sandbox concurrency verification.",
+    )
+    return parser.parse_args(argv)
 
 
 async def main() -> int:
@@ -164,4 +172,5 @@ async def main() -> int:
 
 
 if __name__ == "__main__":
+    _parse_args()
     sys.exit(asyncio.run(main()))

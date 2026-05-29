@@ -29,6 +29,19 @@ def _reset_semaphore():
     mod._INITIALIZED_CONFIG = None
 
 
+class _ValidatedAssignmentSandbox:
+    def __init__(self) -> None:
+        object.__setattr__(self, "delete_calls", 0)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in {"delete", "stop"}:
+            raise ValueError(f"cannot assign {name}")
+        object.__setattr__(self, name, value)
+
+    def delete(self) -> None:
+        self.delete_calls += 1
+
+
 # ---------------------------------------------------------------------------
 # ConcurrencyConfig model tests
 # ---------------------------------------------------------------------------
@@ -97,6 +110,19 @@ async def test_acquire_slot_timeout() -> None:
 @pytest.mark.asyncio
 async def test_release_without_acquire() -> None:
     release_sandbox_slot()  # Should not raise
+
+
+@pytest.mark.asyncio
+async def test_over_release_does_not_increase_available_slots(caplog: pytest.LogCaptureFixture) -> None:
+    await acquire_sandbox_slot(timeout=1.0)
+    release_sandbox_slot()
+
+    release_sandbox_slot()
+
+    usage = get_current_sandbox_usage()
+    assert usage.available_slots == usage.limit
+    assert usage.active_count == 0
+    assert "over-release" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +223,39 @@ async def test_double_release_prevented() -> None:
     # Flag should still be True and only one release should have happened
     assert mock_sandbox._fleet_slot_released is True
     release_sandbox_slot()
+
+
+@pytest.mark.asyncio
+async def test_slot_not_released_when_delete_fails() -> None:
+    mock_sandbox = MagicMock()
+    original_delete = MagicMock(side_effect=RuntimeError("delete failed"))
+    mock_sandbox.delete = original_delete
+    mock_sandbox.stop = None
+
+    attach_slot_release_handler(mock_sandbox)
+    await acquire_sandbox_slot(timeout=1.0)
+
+    with pytest.raises(RuntimeError, match="delete failed"):
+        mock_sandbox.delete()
+
+    usage = get_current_sandbox_usage()
+    assert usage.active_count == 1
+    assert mock_sandbox._fleet_slot_released is False
+    release_sandbox_slot()
+
+
+@pytest.mark.asyncio
+async def test_release_handler_supports_validated_sdk_models() -> None:
+    sandbox = _ValidatedAssignmentSandbox()
+
+    attach_slot_release_handler(sandbox)
+    await acquire_sandbox_slot(timeout=1.0)
+    sandbox.delete()
+
+    usage = get_current_sandbox_usage()
+    assert sandbox.delete_calls == 1
+    assert usage.active_count == 0
+    assert sandbox._fleet_slot_released is True
 
 
 # ---------------------------------------------------------------------------

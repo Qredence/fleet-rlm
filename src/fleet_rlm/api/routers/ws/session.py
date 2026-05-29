@@ -234,22 +234,29 @@ async def switch_session_if_needed(
 
     cached: dict[str, Any] | None = session_cache.sessions.get(key)
     if cached is None:
-        from ...runtime_services.chat_persistence import load_manifest_from_volume
+        from ...runtime_services.chat_persistence import (
+            _restore_manifest_from_local_store,
+            load_manifest_from_volume,
+        )
 
         legacy_manifest_path = _legacy_switch_manifest_path(
             owner_id=owner_id,
             workspace_id=workspace_id,
             session_id=sess_id,
         )
-        manifest = (
-            await load_manifest_from_volume(
+        if interpreter is not None:
+            manifest = await load_manifest_from_volume(
                 agent,
                 manifest_path,
                 fallback_paths=[legacy_manifest_path] if legacy_manifest_path else [],
             )
-            if interpreter is not None
-            else {}
-        )
+        else:
+            # No Daytona volume — attempt to restore from local store so that
+            # session history survives process restarts between WS connections.
+            manifest = await _restore_manifest_from_local_store(
+                persistence=persistence,
+                sess_id=sess_id,
+            )
         cached = {
             "key": key,
             "workspace_id": workspace_id,

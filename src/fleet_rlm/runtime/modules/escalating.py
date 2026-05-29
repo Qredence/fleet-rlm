@@ -6,7 +6,7 @@ dspy.RLM loop when the situation demands it.
 
 Escalation is triggered when:
 - The ChainOfThought reasoning output contains the sentinel ``[TOOLS NEEDED]``.
-- The caller sets ``execution_mode="rlm"`` explicitly.
+- The caller sets ``execution_mode="rlm"`` or ``"rlm_only"`` explicitly.
 - The caller sets ``force_escalate=True``.
 """
 
@@ -25,6 +25,35 @@ from fleet_rlm.runtime.agent.signatures import (
 logger = logging.getLogger(__name__)
 
 ESCALATION_SENTINEL = "[TOOLS NEEDED]"
+_RLM_FALLBACK_WARNING = "RLM escalation failed; returned a lightweight fallback response."
+
+
+def _is_rlm_execution_mode(execution_mode: str) -> bool:
+    return execution_mode in {"rlm", "rlm_only"}
+
+
+def _history_value(message: Any, *keys: str) -> str:
+    if isinstance(message, dict):
+        for key in keys:
+            value = message.get(key)
+            if value not in (None, ""):
+                return str(value)
+    for key in keys:
+        value = getattr(message, key, None)
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _format_history_turn(message: Any) -> str:
+    user_text = _history_value(message, "user_message", "user_request")
+    assistant_text = _history_value(message, "response", "assistant_response", "answer")
+    parts: list[str] = []
+    if user_text:
+        parts.append(f"User: {user_text}")
+    if assistant_text:
+        parts.append(f"Assistant: {assistant_text}")
+    return "\n".join(parts)
 
 
 class EscalatingFleetModule(dspy.Module):
@@ -98,7 +127,7 @@ class EscalatingFleetModule(dspy.Module):
     ) -> bool:
         if force_escalate:
             return True
-        if execution_mode == "rlm":
+        if _is_rlm_execution_mode(execution_mode):
             return True
         reasoning = str(getattr(prediction, "reasoning", "") or "")
         return ESCALATION_SENTINEL in reasoning
@@ -109,8 +138,10 @@ class EscalatingFleetModule(dspy.Module):
         if not messages:
             return ""
         history_text = "\n".join(
-            f"User: {m.get('user_message', '')}\nAssistant: {m.get('response', '')}" for m in messages
+            turn_text for turn_text in (_format_history_turn(message) for message in messages) if turn_text
         )
+        if not history_text:
+            return ""
         try:
             result = self.summarize(conversation_history=history_text)
             return str(getattr(result, "summary", "") or "")
@@ -152,7 +183,7 @@ class EscalatingFleetModule(dspy.Module):
 
         self._turn_count += 1
 
-        if execution_mode == "rlm" or force_escalate:
+        if _is_rlm_execution_mode(execution_mode) or force_escalate:
             logger.debug("EscalatingFleetModule: forced RLM path (mode=%s)", execution_mode)
             return self._run_rlm(
                 user_request=user_request,
@@ -200,11 +231,19 @@ class EscalatingFleetModule(dspy.Module):
             )
         except Exception as exc:
             logger.warning("EscalatingFleetModule: RLM path failed (%s), falling back to ChainOfThought", exc)
-            return self.respond(
+            fallback = self.respond(
                 user_request=user_request,
                 core_memory=core_memory,
                 history=history,
             )
+            fallback["degraded"] = True
+            fallback["warning"] = _RLM_FALLBACK_WARNING
+            fallback["runtime_degraded"] = True
+            fallback["runtime_failure_category"] = "rlm_fallback"
+            fallback["runtime_failure_phase"] = "escalating_rlm"
+            fallback["runtime_fallback_used"] = True
+            fallback["runtime_warning"] = _RLM_FALLBACK_WARNING
+            return fallback
 
 
 __all__ = [
