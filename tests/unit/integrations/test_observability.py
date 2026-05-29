@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 import threading
 import types
@@ -102,6 +103,54 @@ def test_configure_auto_assessment_passes_explicit_judge_model(monkeypatch: pyte
     assert scorer.kwargs["model"] == "openai/custom-judge"
     assert created_schedules[0]["scheduled_scorer_name"] == "fleet_rlm_tool_efficiency"
     assert created_schedules[0]["sample_rate"] == 0.5
+
+
+def test_warn_if_persisted_scorers_active_logs_actionable_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from fleet_rlm.integrations.observability.auto_assessment import warn_if_persisted_scorers_active
+    from fleet_rlm.integrations.observability.config import MlflowConfig
+
+    list_calls: list[str | None] = []
+
+    def list_scorers(*, experiment_id: str | None = None) -> list[object]:
+        list_calls.append(experiment_id)
+        return [SimpleNamespace(name="Trace Judge"), {"scorer_name": "legacy-scorer"}]
+
+    fake_mlflow = SimpleNamespace(
+        genai=SimpleNamespace(list_scorers=list_scorers),
+        get_experiment_by_name=lambda name: SimpleNamespace(experiment_id="exp-123"),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        count = warn_if_persisted_scorers_active(
+            MlflowConfig(enable_auto_assessment=False, experiment="fleet-rlm-test"),
+            mlflow=fake_mlflow,
+        )
+
+    assert count == 2
+    assert list_calls == ["exp-123"]
+    assert "Trace Judge" in caplog.text
+    assert "legacy-scorer" in caplog.text
+    assert "scripts/mlflow_cli.py scorers list" in caplog.text
+    assert "FLEET_RLM_ENABLE_AUTO_ASSESSMENT" in caplog.text
+
+
+def test_warn_if_persisted_scorers_active_skips_when_auto_assessment_enabled() -> None:
+    from fleet_rlm.integrations.observability.auto_assessment import warn_if_persisted_scorers_active
+    from fleet_rlm.integrations.observability.config import MlflowConfig
+
+    def list_scorers(*, experiment_id: str | None = None) -> list[object]:
+        raise AssertionError("list_scorers should not run when Fleet auto-assessment is enabled")
+
+    fake_mlflow = SimpleNamespace(genai=SimpleNamespace(list_scorers=list_scorers))
+
+    count = warn_if_persisted_scorers_active(
+        MlflowConfig(enable_auto_assessment=True),
+        mlflow=fake_mlflow,
+    )
+
+    assert count == 0
 
 
 def test_mlflow_callback_sets_lm_span_token_usage(monkeypatch: pytest.MonkeyPatch) -> None:

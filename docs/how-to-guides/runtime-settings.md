@@ -94,6 +94,52 @@ Checks Daytona configuration and API connectivity using the current
 
 Checks LM configuration using the current planner model and key settings.
 
+## Daytona Volume Backup and Restore
+
+The durable Daytona volume layout keeps user/session state under
+`/home/daytona/memory`. Back up these paths together so memory, skills,
+knowledge, and session continuity remain consistent:
+
+| Path | Purpose |
+| --- | --- |
+| `memories/core.db` | Versioned SQLite memory store. Remote bootstrap stages migrations under `/tmp` before copying the DB back to the volume because Daytona-mounted volumes do not support direct SQLite DDL reliably. |
+| `knowledge/index.json` | Versioned knowledge index envelope. |
+| `knowledge/ingested/` | Persisted source text for knowledge search. |
+| `skills/system/` and `skills/user/` | Bundled and human-curated skills. |
+| `sessions/` | Conversation manifests, scratchpads, and workspace links. |
+| `buffers/`, `artifacts/`, and `meta/` | Runtime buffers, outputs, and metadata. |
+
+Create backups from a maintenance shell or script running inside the sandbox:
+
+```bash
+tar -czf /tmp/fleet-volume-backup.tgz -C /home/daytona/memory \
+  memories/core.db \
+  knowledge/index.json knowledge/ingested \
+  skills/system skills/user \
+  sessions buffers artifacts meta
+```
+
+Restore by unpacking into the mounted volume, then run:
+
+```bash
+uv run python scripts/live_daytona_verify.py
+```
+
+Use the live concurrency lane after changing sandbox cleanup or retry behavior:
+
+```bash
+FLEET_MAX_CONCURRENT_SANDBOXES=2 uv run python scripts/live_concurrency_verify.py
+```
+
+Expected retry/failure behavior:
+
+- Sandbox creation waits for a bounded slot and returns
+  `sandbox_concurrency_busy` when the slot timeout is reached.
+- Slots are released only after `delete()` or `stop()` succeeds, and duplicate
+  release attempts are logged without increasing capacity.
+- Failed sandbox creation releases the acquired slot and attempts to delete any
+  sandbox created before the failure surfaced.
+
 ## Troubleshooting
 
 ### Daytona test failing

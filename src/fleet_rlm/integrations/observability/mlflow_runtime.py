@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from threading import Lock
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -249,17 +250,23 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
                 except Exception:
                     logger.debug("Failed to configure span processors", exc_info=True)
 
-            if resolved.enable_auto_assessment:
-                try:
-                    from .auto_assessment import configure_auto_assessment
+            try:
+                from .auto_assessment import configure_auto_assessment, warn_if_persisted_scorers_active
 
+                if resolved.enable_auto_assessment:
                     configure_auto_assessment(resolved)
-                except Exception:
-                    logger.debug("Failed to configure auto-assessment", exc_info=True)
+                else:
+                    warn_if_persisted_scorers_active(resolved, mlflow=mlflow)
+            except Exception:
+                logger.debug("Failed to inspect/configure MLflow auto-assessment", exc_info=True)
 
             if _existing_trace_callback() is None:
                 callbacks = list(getattr(dspy.settings, "callbacks", []) or [])
-                dspy.configure(callbacks=[*callbacks, FleetMlflowTraceCallback()])
+                new_callbacks: list[Any] = []
+                if not any(isinstance(cb, ThinkTagStripCallback) for cb in callbacks):
+                    new_callbacks.append(ThinkTagStripCallback())
+                new_callbacks.append(FleetMlflowTraceCallback())
+                dspy.configure(callbacks=[*callbacks, *new_callbacks])
 
             _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity
@@ -473,6 +480,55 @@ class FleetMlflowTraceCallback(BaseCallback):
         capture_last_active_trace_id()
 
 
+# Matches the full <think>...</think> block that reasoning models like DeepSeek
+# emit when they externalise chain-of-thought. The block must be stripped *before*
+# DSPy's ChatAdapter scans for [[ ## field ## ]] delimiters, otherwise the
+# closing </think> tag interrupts field parsing and forces an expensive JSONAdapter
+# retry (adds ~8 s per turn).
+_THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_think_tags(text: str) -> str:
+    return _THINK_TAG_RE.sub("", text).lstrip("\n")
+
+
+class ThinkTagStripCallback(BaseCallback):
+    """Strip <think>…</think> blocks from LM completions before adapter parsing.
+
+    DeepSeek-V4-Pro (and other reasoning models) emit a chain-of-thought block
+    wrapped in ``<think>…</think>`` tags. When the closing tag appears inside a
+    DSPy ``[[ ## field ## ]]`` block the ``ChatAdapter`` cannot locate subsequent
+    output fields and raises ``AdapterParseError``, silently falling back to a
+    second LM call via ``JSONAdapter``.  This callback removes the think block
+    in-place on the raw LiteLLM response dict so no adapter ever sees it.
+    """
+
+    def on_lm_end(
+        self,
+        call_id: str,
+        outputs: dict[str, Any] | None,
+        exception: Exception | None = None,
+    ) -> None:
+        _ = call_id, exception
+        if not isinstance(outputs, dict):
+            return
+        choices = outputs.get("choices")
+        if not isinstance(choices, list):
+            return
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            message = choice.get("message")
+            if isinstance(message, dict):
+                content = message.get("content")
+                if isinstance(content, str) and _THINK_TAG_RE.search(content):
+                    message["content"] = _strip_think_tags(content)
+            # text-completion style
+            text = choice.get("text")
+            if isinstance(text, str) and _THINK_TAG_RE.search(text):
+                choice["text"] = _strip_think_tags(text)
+
+
 def resolve_trace_by_client_request_id(
     client_request_id: str,
     *,
@@ -542,6 +598,7 @@ def search_annotated_trace_rows(
 
 __all__ = [
     "FleetMlflowTraceCallback",
+    "ThinkTagStripCallback",
     "MlflowTraceRequestContext",
     "capture_last_active_trace_id",
     "current_request_context",
