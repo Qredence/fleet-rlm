@@ -101,9 +101,7 @@ def _is_sandbox_name_conflict(exc: BaseException) -> bool:
     exc_name = type(exc).__name__
     message = str(exc)
     return (
-        exc_name == "DaytonaConflictError"
-        or "HTTP 409" in message
-        or "already exists" in message
+        exc_name == "DaytonaConflictError" or "HTTP 409" in message or "already exists" in message
     ) and "Sandbox with name" in message
 
 

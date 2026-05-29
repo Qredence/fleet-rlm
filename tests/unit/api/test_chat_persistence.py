@@ -307,6 +307,7 @@ async def test_persist_session_state_releases_idle_daytona_session_after_save(
         "session": {},
         "manifest": {"rev": 0},
     }
+
     async def fake_get_daytona_session(agent: Any, allow_create: bool = True) -> Any:
         _ = agent, allow_create
         return session
@@ -457,6 +458,7 @@ async def test_switch_session_layout_initialization_does_not_create_daytona_sess
         "fleet_rlm.api.runtime_services.chat_persistence.load_manifest_from_volume",
         fake_load_manifest,
     )
+
     async def fake_link_database_session(**kwargs: Any) -> None:
         _ = kwargs
 

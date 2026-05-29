@@ -34,13 +34,9 @@ async def test_switch_session_restores_phase_one_conversation_from_recreated_vol
                 }
             )
 
-    async def fake_get_session(self):
-        return FakeDaytonaSession()
-
     async def fake_link_database_session(**kwargs):
         return None
 
-    monkeypatch.setattr(DaytonaInterpreter, "aget_session", fake_get_session)
     monkeypatch.setattr(ws_session, "_link_database_session", fake_link_database_session)
 
     async def fake_import_session_state(state: dict[str, Any]) -> None:
@@ -51,6 +47,15 @@ async def test_switch_session_restores_phase_one_conversation_from_recreated_vol
 
     interpreter = DaytonaInterpreter.__new__(DaytonaInterpreter)
     interpreter.volume_mount_path = "/data"
+    interpreter._workspace = SimpleNamespace(_session=None)
+
+    async def fake_get_session(self):
+        session = FakeDaytonaSession()
+        self._workspace._session = session
+        return session
+
+    monkeypatch.setattr(DaytonaInterpreter, "aget_session", fake_get_session)
+
     agent = SimpleNamespace(
         interpreter=interpreter,
         aimport_session_state=fake_import_session_state,

@@ -1200,8 +1200,7 @@ async def _persist_session_state_impl(
                     logger.warning(message)
         else:
             logger.debug(
-                "Skipping Daytona volume persistence because cleanup has no active session "
-                "(path=%s)",
+                "Skipping Daytona volume persistence because cleanup has no active session (path=%s)",
                 active_manifest_path,
             )
     elif include_volume_save and interpreter is None and persistence is not None:

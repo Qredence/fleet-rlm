@@ -71,9 +71,7 @@ def test_scorers_delete_requires_explicit_yes(
 ) -> None:
     cli = _load_cli_module()
 
-    result = cli.do_scorers_delete(
-        SimpleNamespace(name="Trace Judge", experiment_id=None, version=None, yes=False)
-    )
+    result = cli.do_scorers_delete(SimpleNamespace(name="Trace Judge", experiment_id=None, version=None, yes=False))
 
     assert result == 2
     assert "Refusing to delete scorer without --yes." in capsys.readouterr().out
