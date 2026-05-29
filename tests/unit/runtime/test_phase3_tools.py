@@ -5,6 +5,8 @@ import types
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 
 def _tool_func(tool: Any) -> Any:
     return getattr(tool, "func", tool)
@@ -81,6 +83,57 @@ def test_bind_runtime_tools_binds_phase3_volume_tools(tmp_path: Path) -> None:
     assert loaded["status"] == "ok"
     assert searched["count"] == 1
     assert skill["instructions"] == "alpha instructions"
+
+
+def test_phase3_volume_tools_use_env_volume_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.runtime.tools.knowledge_tools import persist_knowledge_document, search_knowledge
+    from fleet_rlm.runtime.tools.skill_tools import load_skill
+
+    volume = tmp_path / "volume"
+    (volume / "knowledge" / "ingested").mkdir(parents=True)
+    (volume / "skills" / "user").mkdir(parents=True)
+    (volume / "skills" / "user" / "phase3.md").write_text("phase3 skill instructions", encoding="utf-8")
+    persist_knowledge_document(
+        source="unit://phase3",
+        text="phase3 env fallback searchable text",
+        metadata={"kind": "unit"},
+        volume_mount_path=str(volume),
+    )
+    monkeypatch.setenv("FLEET_RLM_VOLUME_MOUNT_PATH", str(volume))
+    monkeypatch.delenv("DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH", raising=False)
+
+    searched = search_knowledge("env fallback")
+    skill = load_skill("phase3")
+
+    assert searched["status"] == "ok"
+    assert searched["count"] == 1
+    assert searched["results"][0]["source"] == "unit://phase3"
+    assert skill["status"] == "ok"
+    assert skill["scope"] == "user"
+    assert skill["instructions"] == "phase3 skill instructions"
+
+
+def test_memory_tools_require_runtime_binding() -> None:
+    from fleet_rlm.runtime.tools.volume_memory_tools import recall, remember
+
+    with pytest.raises(RuntimeError, match="bound volume_mount_path"):
+        remember("phase3", "root-only")
+    with pytest.raises(RuntimeError, match="bound volume_mount_path"):
+        recall("phase3")
+
+
+def test_web_search_reports_missing_brave_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.runtime.tools import web_tools
+
+    monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+
+    result = web_tools.web_search("fleet rlm")
+
+    assert result["status"] == "error"
+    assert result["provider"] == "brave"
+    assert result["count"] == 0
+    assert "BRAVE_SEARCH_API_KEY or BRAVE_API_KEY" in result["error"]
 
 
 def test_web_search_uses_brave_api(monkeypatch: Any) -> None:

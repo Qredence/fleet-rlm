@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from fleet_rlm.integrations.daytona.memory_db import init_memory_db
+from fleet_rlm.integrations.daytona.memory_db import MEMORY_SCHEMA_VERSION, init_memory_db, memory_db_bootstrap_script
 
 
 def test_creates_core_db(tmp_path: Path) -> None:
@@ -16,8 +16,10 @@ def test_creates_core_db(tmp_path: Path) -> None:
     assert db_path.exists()
     conn = sqlite3.connect(str(db_path))
     rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memory'").fetchall()
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
     conn.close()
     assert len(rows) == 1
+    assert version == MEMORY_SCHEMA_VERSION
 
 
 def test_idempotent(tmp_path: Path) -> None:
@@ -29,8 +31,10 @@ def test_idempotent(tmp_path: Path) -> None:
     assert db_path.exists()
     conn = sqlite3.connect(str(db_path))
     rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memory'").fetchall()
+    migration_rows = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
     conn.close()
     assert len(rows) == 1
+    assert [row[0] for row in migration_rows] == [1, MEMORY_SCHEMA_VERSION]
 
 
 def test_missing_memories_dir_logs_warning(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -52,4 +56,58 @@ def test_db_has_correct_schema(tmp_path: Path) -> None:
     col_names = [row[1] for row in columns]
     assert "key" in col_names
     assert "value" in col_names
+    assert "scope" in col_names
+    assert "writer_agent_depth" in col_names
     assert "created_at" in col_names
+    assert "updated_at" in col_names
+
+
+def test_migrates_legacy_db_with_rows_idempotently(tmp_path: Path) -> None:
+    memories = tmp_path / "memories"
+    memories.mkdir()
+    db_path = memories / "core.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "CREATE TABLE memory "
+        "(key TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+    conn.execute("INSERT INTO memory(key, value) VALUES ('legacy', 'kept')")
+    conn.commit()
+    conn.close()
+
+    init_memory_db(str(tmp_path))
+    init_memory_db(str(tmp_path))
+
+    conn = sqlite3.connect(str(db_path))
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(memory)").fetchall()}
+    row = conn.execute(
+        "SELECT key, value, scope, writer_agent_depth, updated_at FROM memory WHERE key = 'legacy'"
+    ).fetchone()
+    migration_rows = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    conn.close()
+
+    assert {"scope", "writer_agent_depth", "updated_at"} <= columns
+    assert row[0] == "legacy"
+    assert row[1] == "kept"
+    assert row[2] == "core"
+    assert row[3] == 0
+    assert row[4]
+    assert [migration[0] for migration in migration_rows] == [1, MEMORY_SCHEMA_VERSION]
+    assert version == MEMORY_SCHEMA_VERSION
+
+
+def test_remote_bootstrap_script_uses_current_schema(tmp_path: Path) -> None:
+    script = memory_db_bootstrap_script(str(tmp_path))
+    namespace: dict[str, object] = {}
+
+    exec(script, namespace)
+
+    db_path = tmp_path / "memories" / "core.db"
+    conn = sqlite3.connect(str(db_path))
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(memory)").fetchall()}
+    conn.close()
+
+    assert version == MEMORY_SCHEMA_VERSION
+    assert {"scope", "writer_agent_depth", "updated_at"} <= columns

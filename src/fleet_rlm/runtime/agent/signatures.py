@@ -59,7 +59,7 @@ class RLMReActChatSignature(dspy.Signature):
     core_memory: str = dspy.InputField(
         desc="Persistent memory blocks (Persona, Human, Scratchpad) that define your identity and context"
     )
-    history: dspy.History = dspy.InputField(desc="Prior chat turns using keys user_request and assistant_response")
+    history: dspy.History = dspy.InputField(desc="Prior chat turns using keys user_message and response")
     assistant_response: str = dspy.OutputField(desc="Final assistant response to user")
 
 

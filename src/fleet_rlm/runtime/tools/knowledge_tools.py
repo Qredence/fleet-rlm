@@ -16,6 +16,8 @@ from fleet_rlm.runtime.tools.schemas import (
     SearchKnowledgeOutput,
 )
 
+_KNOWLEDGE_INDEX_SCHEMA_VERSION = 1
+
 
 def _index_path(volume_mount_path: str | None = None) -> Path | None:
     root = knowledge_root(volume_mount_path)
@@ -32,7 +34,12 @@ def _load_index(volume_mount_path: str | None = None) -> dict[str, Any]:
         loaded = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
-    return loaded if isinstance(loaded, dict) else {}
+    if not isinstance(loaded, dict):
+        return {}
+    documents = loaded.get("documents")
+    if isinstance(documents, dict):
+        return documents
+    return loaded
 
 
 def _write_index(index: dict[str, Any], volume_mount_path: str) -> None:
@@ -41,7 +48,11 @@ def _write_index(index: dict[str, Any], volume_mount_path: str) -> None:
         raise RuntimeError("Volume mount path is required to write the knowledge index.")
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(".json.tmp")
-    tmp_path.write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
+    payload = {
+        "schema_version": _KNOWLEDGE_INDEX_SCHEMA_VERSION,
+        "documents": index,
+    }
+    tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     tmp_path.replace(path)
 
 

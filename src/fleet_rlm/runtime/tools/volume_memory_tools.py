@@ -17,21 +17,26 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from fleet_rlm.integrations.daytona.memory_db import configure_memory_connection, init_memory_db
 from fleet_rlm.runtime.tools._marker import tool_fn
 
 logger = logging.getLogger(__name__)
 
 _UPSERT_SQL = """
-INSERT INTO memory (key, value, created_at)
-VALUES (?, ?, CURRENT_TIMESTAMP)
-ON CONFLICT(key) DO UPDATE SET value = excluded.value
+INSERT INTO memory (key, value, scope, writer_agent_depth, created_at, updated_at)
+VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT(key) DO UPDATE SET
+    value = excluded.value,
+    scope = excluded.scope,
+    writer_agent_depth = excluded.writer_agent_depth,
+    updated_at = CURRENT_TIMESTAMP
 """
 
 _RECALL_SQL = """
-SELECT key, value, created_at
+SELECT key, value, scope, writer_agent_depth, created_at, updated_at
 FROM memory
 WHERE key LIKE ? OR value LIKE ?
-ORDER BY created_at DESC
+ORDER BY updated_at DESC, created_at DESC
 LIMIT 50
 """
 
@@ -49,13 +54,15 @@ def _remember_impl(key: str, value: str, *, volume_mount_path: str, agent_depth:
     if not os.access(db.parent, os.W_OK):
         return {"status": "error", "reason": f"memories directory not writable at {db.parent}"}
     try:
+        init_memory_db(volume_mount_path)
         conn = sqlite3.connect(str(db))
         try:
-            conn.execute(_UPSERT_SQL, (key, value))
+            configure_memory_connection(conn)
+            conn.execute(_UPSERT_SQL, (key, value, "core", agent_depth))
             conn.commit()
         finally:
             conn.close()
-        return {"status": "ok", "key": key}
+        return {"status": "ok", "key": key, "scope": "core", "writer_agent_depth": agent_depth}
     except Exception as exc:
         logger.warning("remember: write failed for key=%r: %s", key, exc)
         return {"status": "error", "reason": str(exc)}
@@ -66,13 +73,25 @@ def _recall_impl(query: str, *, volume_mount_path: str) -> dict[str, Any]:
     if not db.exists():
         return {"status": "ok", "results": [], "note": "memory DB not yet initialized"}
     try:
+        init_memory_db(volume_mount_path)
         pattern = f"%{query}%"
         conn = sqlite3.connect(str(db))
         try:
+            configure_memory_connection(conn)
             rows = conn.execute(_RECALL_SQL, (pattern, pattern)).fetchall()
         finally:
             conn.close()
-        results = [{"key": r[0], "value": r[1], "created_at": r[2]} for r in rows]
+        results = [
+            {
+                "key": r[0],
+                "value": r[1],
+                "scope": r[2],
+                "writer_agent_depth": r[3],
+                "created_at": r[4],
+                "updated_at": r[5],
+            }
+            for r in rows
+        ]
         return {"status": "ok", "results": results, "count": len(results)}
     except Exception as exc:
         logger.warning("recall: read failed for query=%r: %s", query, exc)

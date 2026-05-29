@@ -46,10 +46,16 @@ class TestRememberImpl:
         _remember_impl("fact", "sky is blue", volume_mount_path=str(mem_dir))
         db_path = mem_dir / "memories" / "core.db"
         conn = sqlite3.connect(str(db_path))
-        row = conn.execute("SELECT value FROM memory WHERE key = ?", ("fact",)).fetchone()
+        row = conn.execute(
+            "SELECT value, scope, writer_agent_depth, updated_at FROM memory WHERE key = ?",
+            ("fact",),
+        ).fetchone()
         conn.close()
         assert row is not None
         assert row[0] == "sky is blue"
+        assert row[1] == "core"
+        assert row[2] == 0
+        assert row[3]
 
     def test_remember_upserts_on_duplicate_key(self, mem_dir: Path) -> None:
         _remember_impl("k", "v1", volume_mount_path=str(mem_dir))
@@ -73,6 +79,7 @@ class TestRememberImpl:
     def test_remember_depth_zero_allows_write(self, mem_dir: Path) -> None:
         result = _remember_impl("allowed", "yes", volume_mount_path=str(mem_dir), agent_depth=0)
         assert result["status"] == "ok"
+        assert result["writer_agent_depth"] == 0
 
     def test_remember_missing_memories_dir_returns_error(self, tmp_path: Path) -> None:
         result = _remember_impl("k", "v", volume_mount_path=str(tmp_path))
@@ -91,6 +98,7 @@ class TestRecallImpl:
         assert result["status"] == "ok"
         assert result["count"] == 1
         assert result["results"][0]["key"] == "project_name"
+        assert result["results"][0]["scope"] == "core"
 
     def test_recall_finds_by_value_substring(self, mem_dir: Path) -> None:
         _remember_impl("bio", "I work on AI agents", volume_mount_path=str(mem_dir))

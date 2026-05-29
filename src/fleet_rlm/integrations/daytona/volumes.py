@@ -10,8 +10,9 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from fleet_rlm.runtime.execution.storage_paths import mounted_storage_roots
+from fleet_rlm.utils.volume_tree import entry_name
 
-from .async_compat import _run_sync_in_thread
+from .async_compat import _run_async_compat, _run_sync_in_thread
 from .config import (
     build_daytona_client as _build_daytona_client,
 )
@@ -19,7 +20,18 @@ from .config import (
     resolve_daytona_config,
 )
 from .errors import DaytonaDiagnosticError, VolumeNotReadyError
-from .memory_db import init_memory_db
+from .memory_db import init_memory_db, memory_db_bootstrap_script
+
+
+def _iter_scaffold_skill_markdown() -> Iterator[tuple[str, str]]:
+    import importlib.resources as _importlib_resources
+
+    skills_pkg = _importlib_resources.files("fleet_rlm.scaffold") / "skills"
+    for skill_entry in skills_pkg.iterdir():
+        skill_md = skill_entry / "SKILL.md"
+        if not skill_md.is_file():
+            continue
+        yield skill_entry.name, skill_md.read_text(encoding="utf-8")
 
 
 def seed_system_skills(mounted_root: str) -> None:
@@ -28,30 +40,87 @@ def seed_system_skills(mounted_root: str) -> None:
     Idempotent — skips any skill file that already exists.
     Uses importlib.resources to read bundled SKILL.md files.
     """
-    import importlib.resources as _importlib_resources
-
     dest_dir = Path(mounted_root) / "skills" / "system"
     if not dest_dir.exists():
         logger.debug("seed_system_skills: skills/system not found, skipping seed")
         return
 
     try:
-        skills_pkg = _importlib_resources.files("fleet_rlm.scaffold") / "skills"
-        for skill_entry in skills_pkg.iterdir():
-            skill_name = skill_entry.name  # e.g. "rlm-long-context"
-            skill_md = skill_entry / "SKILL.md"
+        for skill_name, instructions in _iter_scaffold_skill_markdown():
             try:
-                if not skill_md.is_file():
-                    continue
                 dest_file = dest_dir / f"{skill_name}.md"
                 if dest_file.exists():
                     continue  # idempotent
-                dest_file.write_text(skill_md.read_text(encoding="utf-8"), encoding="utf-8")
+                dest_file.write_text(instructions, encoding="utf-8")
                 logger.debug("seed_system_skills: seeded %s", skill_name)
             except Exception as exc:
                 logger.warning("seed_system_skills: skipped %s: %s", skill_name, exc)
     except Exception as exc:
         logger.warning("seed_system_skills: skill seeding failed (non-fatal): %s", exc)
+
+
+def _result_detail(result: Any) -> str:
+    return str(
+        getattr(result, "stderr", "")
+        or getattr(result, "result", "")
+        or getattr(getattr(result, "artifacts", None), "stdout", "")
+        or getattr(result, "output", "")
+        or ""
+    )
+
+
+def _run_remote_python(sandbox: DaytonaSandbox, code: str, *, error_prefix: str) -> None:
+    """Run a small administrative Python snippet inside the Daytona sandbox."""
+
+    try:
+        try:
+            from daytona.common.process import CodeRunParams
+
+            kwargs: dict[str, Any] = {"params": CodeRunParams()}
+        except ImportError:
+            kwargs = {}
+        result = _run_async_compat(sandbox.process.code_run, code, **kwargs)
+    except Exception as exc:
+        raise DaytonaDiagnosticError(
+            f"{error_prefix}: {exc}",
+            category="sandbox_create_clone_error",
+            phase="sandbox_create",
+        ) from exc
+
+    exit_code = int(getattr(result, "exit_code", 0) or 0)
+    if exit_code:
+        detail = _result_detail(result) or f"process exited with status {exit_code}"
+        raise DaytonaDiagnosticError(
+            f"{error_prefix}: {detail}",
+            category="sandbox_create_clone_error",
+            phase="sandbox_create",
+        )
+
+
+def _init_remote_memory_db(sandbox: DaytonaSandbox, mounted_root: str) -> None:
+    code = memory_db_bootstrap_script(mounted_root)
+    _run_remote_python(sandbox, code, error_prefix="Daytona memory DB init failure")
+
+
+def seed_remote_system_skills(sandbox: DaytonaSandbox, mounted_root: str) -> None:
+    """Seed bundled scaffold skills into a remote Daytona volume."""
+
+    dest_dir = PurePosixPath(mounted_root) / "skills" / "system"
+    try:
+        entries = _run_async_compat(sandbox.fs.list_files, str(dest_dir))
+    except Exception:
+        entries = []
+    existing = {entry_name(str(getattr(entry, "name", "") or getattr(entry, "path", "") or entry)) for entry in entries}
+    for skill_name, instructions in _iter_scaffold_skill_markdown():
+        dest_name = f"{skill_name}.md"
+        if dest_name in existing:
+            continue
+        _run_async_compat(
+            sandbox.fs.upload_file,
+            instructions.encode("utf-8"),
+            str(dest_dir / dest_name),
+        )
+        logger.debug("seed_remote_system_skills: seeded %s", skill_name)
 
 
 if TYPE_CHECKING:
@@ -234,15 +303,27 @@ def ensure_daytona_volume_layout(
             phase="sandbox_create",
         ) from exc
 
-    try:
-        init_memory_db(mounted_root)
-    except Exception as exc:
-        logger.warning("ensure_daytona_volume_layout: core.db init failed (non-fatal): %s", exc)
+    if Path(mounted_root).exists():
+        try:
+            init_memory_db(mounted_root)
+        except Exception as exc:
+            logger.warning("ensure_daytona_volume_layout: core.db init failed (non-fatal): %s", exc)
+
+        try:
+            seed_system_skills(mounted_root)
+        except Exception as exc:
+            logger.warning("ensure_daytona_volume_layout: skill seeding failed (non-fatal): %s", exc)
+        return
 
     try:
-        seed_system_skills(mounted_root)
+        _init_remote_memory_db(sandbox, mounted_root)
     except Exception as exc:
-        logger.warning("ensure_daytona_volume_layout: skill seeding failed (non-fatal): %s", exc)
+        logger.warning("ensure_daytona_volume_layout: remote core.db init failed (non-fatal): %s", exc)
+
+    try:
+        seed_remote_system_skills(sandbox, mounted_root)
+    except Exception as exc:
+        logger.warning("ensure_daytona_volume_layout: remote skill seeding failed (non-fatal): %s", exc)
 
 
 async def aensure_daytona_volume_layout(
@@ -355,6 +436,7 @@ __all__ = [
     "await_volume_ready",
     "canonicalize_volume_state_token",
     "raise_if_volume_error",
+    "seed_remote_system_skills",
     "seed_system_skills",
     "volume_state_details",
     "volume_state_missing",

@@ -30,8 +30,9 @@ def test_persist_creates_index(vol: Path) -> None:
     index_path = vol / "knowledge" / "index.json"
     assert index_path.exists()
     index = json.loads(index_path.read_text())
-    assert result.doc_id in index
-    entry = index[result.doc_id]
+    assert index["schema_version"] == 1
+    assert result.doc_id in index["documents"]
+    entry = index["documents"][result.doc_id]
     assert entry["source"] == "https://example.com/doc"
     assert entry["alias"] == "active"
     assert entry["char_count"] == len("Hello world")
@@ -74,7 +75,7 @@ def test_persist_includes_tags(vol: Path) -> None:
         tags=["python", "api"],
     )
     index = json.loads((vol / "knowledge" / "index.json").read_text())
-    assert index[result.doc_id]["tags"] == ["python", "api"]
+    assert index["documents"][result.doc_id]["tags"] == ["python", "api"]
 
 
 def test_persist_deduplicates_by_source_text_hash(vol: Path) -> None:
@@ -178,3 +179,63 @@ def test_search_path_traversal_blocked(vol: Path) -> None:
     assert output.status == "ok"
     for r in output.results:
         assert "etc/passwd" not in r.path or str(vol / "knowledge").lower() in r.path.lower()
+
+
+def test_search_reads_legacy_plain_index(vol: Path) -> None:
+    doc_id = "doc_legacy"
+    (vol / "knowledge" / "ingested" / f"{doc_id}.txt").write_text("legacy searchable text", encoding="utf-8")
+    (vol / "knowledge" / "index.json").write_text(
+        json.dumps(
+            {
+                doc_id: {
+                    "source": "legacy://doc",
+                    "alias": "legacy",
+                    "file": f"ingested/{doc_id}.txt",
+                    "char_count": 22,
+                    "tags": ["legacy"],
+                    "metadata": {},
+                    "ingested_at": "2024-01-01T00:00:00+00:00",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    output = _search_knowledge_impl("legacy", volume_mount_path=str(vol))
+
+    assert output.status == "ok"
+    assert output.count == 1
+    assert output.results[0].doc_id == doc_id
+
+
+def test_legacy_index_is_rewritten_as_versioned_envelope(vol: Path) -> None:
+    legacy_doc_id = "doc_legacy"
+    (vol / "knowledge" / "ingested" / f"{legacy_doc_id}.txt").write_text("legacy text", encoding="utf-8")
+    (vol / "knowledge" / "index.json").write_text(
+        json.dumps(
+            {
+                legacy_doc_id: {
+                    "source": "legacy://doc",
+                    "alias": "legacy",
+                    "file": f"ingested/{legacy_doc_id}.txt",
+                    "char_count": 11,
+                    "tags": ["legacy"],
+                    "metadata": {},
+                    "ingested_at": "2024-01-01T00:00:00+00:00",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    new_doc = persist_knowledge_document(
+        source="new://doc",
+        text="new searchable text",
+        metadata=None,
+        volume_mount_path=str(vol),
+    )
+    index = json.loads((vol / "knowledge" / "index.json").read_text())
+
+    assert index["schema_version"] == 1
+    assert legacy_doc_id in index["documents"]
+    assert new_doc.doc_id in index["documents"]
