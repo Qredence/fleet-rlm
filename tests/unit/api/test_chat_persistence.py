@@ -226,7 +226,13 @@ async def test_disconnect_cleanup_disallows_volume_session_creation() -> None:
     )
 
     assert cancel_flag["cancelled"] is True
-    assert calls == [{"include_volume_save": True, "allow_volume_session_create": False}]
+    assert calls == [
+        {
+            "include_volume_save": True,
+            "allow_volume_session_create": False,
+            "release_idle_session": True,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -253,7 +259,143 @@ async def test_stream_error_cleanup_disallows_volume_session_creation() -> None:
     )
 
     assert sent[0]["type"] == "error"
-    assert calls == [{"include_volume_save": True, "allow_volume_session_create": False}]
+    assert calls == [
+        {
+            "include_volume_save": True,
+            "allow_volume_session_create": False,
+            "release_idle_session": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_persist_session_state_releases_idle_daytona_session_after_save(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.api.dependencies import SessionCacheDeps
+    from fleet_rlm.api.runtime_services.chat_persistence import persist_session_state
+
+    class FakeSession:
+        async def aread_file(self, path: str) -> str:
+            _ = path
+            return json.dumps({"rev": 0, "state": {}})
+
+        async def awrite_file(self, path: str, content: str) -> str:
+            _ = content
+            return path
+
+    class FakeInterpreter:
+        volume_mount_path = "/data"
+
+        def __init__(self) -> None:
+            self._workspace = SimpleNamespace(_session=FakeSession())
+            self.released = 0
+
+        async def arelease_idle_session(self) -> None:
+            self.released += 1
+            self._workspace._session = None
+
+    interpreter = FakeInterpreter()
+    session = interpreter._workspace._session
+    agent = SimpleNamespace(
+        interpreter=interpreter,
+        export_session_state=lambda: {"history": [], "documents": {}},
+    )
+    session_record = {
+        "session_id": "session-1",
+        "key": "workspace:user:session-1",
+        "session": {},
+        "manifest": {"rev": 0},
+    }
+    async def fake_get_daytona_session(agent: Any, allow_create: bool = True) -> Any:
+        _ = agent, allow_create
+        return session
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.chat_persistence._aget_daytona_session",
+        fake_get_daytona_session,
+    )
+
+    await persist_session_state(
+        session_cache=SessionCacheDeps(),
+        agent=agent,
+        session_record=session_record,
+        active_manifest_path="sessions/session-1/conversation.json",
+        active_run_db_id=None,
+        interpreter=interpreter,
+        repository=None,
+        identity_rows=None,
+        persistence_required=True,
+        include_volume_save=True,
+        release_idle_session=True,
+    )
+
+    assert interpreter.released == 1
+    assert interpreter._workspace._session is None
+
+
+@pytest.mark.asyncio
+async def test_persist_session_state_releases_idle_daytona_session_after_save_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.api.dependencies import SessionCacheDeps
+    from fleet_rlm.api.runtime_services.chat_persistence import PersistenceRequiredError, persist_session_state
+
+    class FakeSession:
+        async def aread_file(self, path: str) -> str:
+            _ = path
+            return json.dumps({"rev": 10, "state": {}})
+
+    class FakeInterpreter:
+        volume_mount_path = "/data"
+
+        def __init__(self) -> None:
+            self._workspace = SimpleNamespace(_session=FakeSession())
+            self.released = 0
+
+        async def arelease_idle_session(self) -> None:
+            self.released += 1
+            self._workspace._session = None
+
+    interpreter = FakeInterpreter()
+    session = interpreter._workspace._session
+    agent = SimpleNamespace(
+        interpreter=interpreter,
+        export_session_state=lambda: {"history": [], "documents": {}},
+    )
+    session_record = {
+        "session_id": "session-1",
+        "key": "workspace:user:session-1",
+        "session": {},
+        "manifest": {"rev": 0},
+    }
+
+    async def fake_get_daytona_session(agent: Any, allow_create: bool = True) -> Any:
+        _ = agent, allow_create
+        return session
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.chat_persistence._aget_daytona_session",
+        fake_get_daytona_session,
+    )
+
+    with pytest.raises(PersistenceRequiredError):
+        await persist_session_state(
+            session_cache=SessionCacheDeps(),
+            agent=agent,
+            session_record=session_record,
+            active_manifest_path="sessions/session-1/conversation.json",
+            active_run_db_id=None,
+            interpreter=interpreter,
+            repository=None,
+            identity_rows=None,
+            persistence_required=True,
+            include_volume_save=True,
+            release_idle_session=True,
+        )
+
+    assert interpreter.released == 1
+    assert interpreter._workspace._session is None
 
 
 @pytest.mark.asyncio
@@ -287,3 +429,64 @@ async def test_ensure_session_volume_layout_creates_scratchpad_and_workspace_lin
     assert commands == [
         "mkdir -p /data/sessions/session-1/scratchpad && rm -rf /data/sessions/session-1/workspace && ln -s /workspace/repo /data/sessions/session-1/workspace"
     ]
+
+
+@pytest.mark.asyncio
+async def test_switch_session_layout_initialization_does_not_create_daytona_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.api.dependencies import SessionCacheDeps
+    from fleet_rlm.api.routers.ws import session as ws_session
+
+    layout_calls: list[bool] = []
+
+    async def fake_layout(agent: Any, session_id: str, *, allow_session_create: bool = True) -> dict[str, str]:
+        _ = agent, session_id
+        layout_calls.append(allow_session_create)
+        return {"scratchpad_path": "/data/scratch", "workspace_link_path": "/data/workspace"}
+
+    async def fake_load_manifest(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        _ = args, kwargs
+        return {"rev": 0, "state": {}}
+
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.chat_persistence.ensure_session_volume_layout",
+        fake_layout,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.api.runtime_services.chat_persistence.load_manifest_from_volume",
+        fake_load_manifest,
+    )
+    async def fake_link_database_session(**kwargs: Any) -> None:
+        _ = kwargs
+
+    monkeypatch.setattr(ws_session, "_link_database_session", fake_link_database_session)
+
+    agent = SimpleNamespace(
+        areset=lambda clear_sandbox_buffers=True: None,
+        aimport_session_state=lambda state: None,
+    )
+
+    async def areset(*, clear_sandbox_buffers: bool = True) -> None:
+        _ = clear_sandbox_buffers
+
+    agent.areset = areset
+
+    await ws_session.switch_session_if_needed(
+        session_cache=SessionCacheDeps(),
+        agent=agent,
+        interpreter=object(),
+        workspace_id="workspace",
+        user_id="user",
+        sess_id="session-1",
+        owner_tenant_claim="tenant",
+        owner_user_claim="user",
+        active_key=None,
+        session_record=None,
+        last_loaded_docs_path=None,
+        local_persist=lambda **kwargs: None,
+        persistence=None,
+        identity_rows=None,
+    )
+
+    assert layout_calls == [False]

@@ -262,7 +262,11 @@ async def handle_chat_disconnect(
     await cancel_task(pending_receive_task)
     await cancel_task(stream_task)
     try:
-        await local_persist(include_volume_save=True, allow_volume_session_create=False)
+        await local_persist(
+            include_volume_save=True,
+            allow_volume_session_create=False,
+            release_idle_session=True,
+        )
     except PersistenceRequiredError as exc:
         logger.warning(
             "Session persistence failed during disconnect: %s",
@@ -354,6 +358,21 @@ async def _aget_daytona_session(agent: Any, *, allow_create: bool = True) -> Any
     if aget_session is None or not callable(aget_session):
         return None
     return await aget_session()
+
+
+async def release_idle_daytona_session(agent: Any) -> None:
+    """Best-effort release of an already-created Daytona sandbox session."""
+    interpreter = getattr(agent, "interpreter", None)
+    if interpreter is None:
+        return
+    if _get_existing_daytona_session(agent) is None:
+        return
+    release_idle = getattr(interpreter, "arelease_idle_session", None)
+    if callable(release_idle):
+        try:
+            await release_idle()
+        except Exception:
+            logger.warning("Failed to release idle Daytona session", exc_info=True)
 
 
 def _persistent_storage_path(interpreter: Any, path: str) -> str:
@@ -1082,6 +1101,45 @@ async def persist_session_state(
     latest_user_message: str = "",
     persistence: Any = None,
     allow_volume_session_create: bool = True,
+    release_idle_session: bool = False,
+) -> None:
+    """Persist current session state and optionally release the live Daytona sandbox."""
+    try:
+        await _persist_session_state_impl(
+            session_cache=session_cache,
+            agent=agent,
+            session_record=session_record,
+            active_manifest_path=active_manifest_path,
+            active_run_db_id=active_run_db_id,
+            interpreter=interpreter,
+            repository=repository,
+            identity_rows=identity_rows,
+            persistence_required=persistence_required,
+            include_volume_save=include_volume_save,
+            latest_user_message=latest_user_message,
+            persistence=persistence,
+            allow_volume_session_create=allow_volume_session_create,
+        )
+    finally:
+        if release_idle_session:
+            await release_idle_daytona_session(agent)
+
+
+async def _persist_session_state_impl(
+    *,
+    session_cache: SessionCacheDeps,
+    agent: Any,
+    session_record: dict[str, Any] | None,
+    active_manifest_path: str | None,
+    active_run_db_id: uuid.UUID | None,
+    interpreter: Any | None,
+    repository: FleetRepository | None,
+    identity_rows: IdentityUpsertResult | None,
+    persistence_required: bool,
+    include_volume_save: bool = True,
+    latest_user_message: str = "",
+    persistence: Any = None,
+    allow_volume_session_create: bool = True,
 ) -> None:
     """Persist current session state to in-memory cache, volume, and DB."""
     if session_record is None:
@@ -1179,22 +1237,28 @@ def build_local_persist_fn(
         include_volume_save: bool = True,
         latest_user_message: str = "",
         allow_volume_session_create: bool = True,
+        release_idle_session: bool = False,
     ) -> None:
-        await persist_session_state(
-            session_cache=session_cache,
-            agent=agent,
-            session_record=session.session_record,
-            active_manifest_path=session.active_manifest_path,
-            active_run_db_id=session.active_run_db_id,
-            interpreter=interpreter,
-            repository=runtime.repository,
-            identity_rows=runtime.identity_rows,
-            persistence_required=runtime.persistence_required,
-            include_volume_save=include_volume_save,
-            latest_user_message=latest_user_message,
-            persistence=runtime.persistence,
-            allow_volume_session_create=allow_volume_session_create,
-        )
+        try:
+            await persist_session_state(
+                session_cache=session_cache,
+                agent=agent,
+                session_record=session.session_record,
+                active_manifest_path=session.active_manifest_path,
+                active_run_db_id=session.active_run_db_id,
+                interpreter=interpreter,
+                repository=runtime.repository,
+                identity_rows=runtime.identity_rows,
+                persistence_required=runtime.persistence_required,
+                include_volume_save=include_volume_save,
+                latest_user_message=latest_user_message,
+                persistence=runtime.persistence,
+                allow_volume_session_create=allow_volume_session_create,
+                release_idle_session=False,
+            )
+        finally:
+            if release_idle_session:
+                await release_idle_daytona_session(agent)
 
     return local_persist
 
@@ -1217,6 +1281,7 @@ __all__ = [
     "build_workspace_task_request",
     "load_manifest_from_volume",
     "save_manifest_to_volume",
+    "release_idle_daytona_session",
     "_persist_manifest_to_local_store",
     "_restore_manifest_from_local_store",
     "_manifest_path",

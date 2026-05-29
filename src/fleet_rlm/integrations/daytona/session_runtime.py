@@ -10,6 +10,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from .async_compat import _run_async_compat, _run_sync_in_thread
+from .concurrency import release_sandbox_slot_for
 from .diagnostics import DaytonaDiagnosticError
 from .models import ContextSource
 from .sdk_ops import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
@@ -272,11 +273,14 @@ class DaytonaSandboxSession:
     def delete(self) -> None:
         self.delete_context()
         # Graceful stop before delete lets sandbox processes flush if possible.
-        with suppress(Exception):
-            _run_async_compat(self.sandbox.stop, timeout=10)
-        with suppress(Exception):
-            _run_async_compat(self.sandbox.delete)
-        self._driver_started = False
+        try:
+            with suppress(Exception):
+                _run_async_compat(self.sandbox.stop, timeout=10)
+            with suppress(Exception):
+                _run_async_compat(self.sandbox.delete)
+        finally:
+            release_sandbox_slot_for(self.sandbox)
+            self._driver_started = False
 
     async def adelete(self) -> None:
         await _run_sync_in_thread(self.delete)

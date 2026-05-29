@@ -10,7 +10,13 @@ from dataclasses import replace
 from typing import Any
 
 from .async_compat import _run_async_compat, _run_sync_in_thread
-from .concurrency import acquire_sandbox_slot, attach_slot_release_handler, release_sandbox_slot
+from .concurrency import (
+    acquire_sandbox_slot,
+    attach_slot_release_handler,
+    get_current_sandbox_usage,
+    release_sandbox_slot,
+    release_sandbox_slot_for,
+)
 from .config import ResolvedDaytonaConfig, resolve_daytona_config
 from .config import build_daytona_client as _build_daytona_client
 from .config import (
@@ -326,8 +332,11 @@ class DaytonaSandboxRuntime:
             await acquire_sandbox_slot(timeout=60.0)
             slot_acquired = True
         except asyncio.TimeoutError as exc:
+            usage = get_current_sandbox_usage()
             raise DaytonaDiagnosticError(
-                "Sandbox concurrency limit reached: all slots occupied. Wait briefly and retry.",
+                "Sandbox concurrency limit reached: "
+                f"{usage.active_count}/{usage.limit} Fleet sandbox slots are occupied "
+                f"({usage.available_slots} available). Wait briefly, retry, or clean up idle sessions.",
                 category="sandbox_concurrency_busy",
                 phase="sandbox_create",
             ) from exc
@@ -378,7 +387,9 @@ class DaytonaSandboxRuntime:
                             await _run_sync_in_thread(delete)
                         except Exception:
                             logger.warning("Failed to delete sandbox after create failure", exc_info=True)
-                if not bool(getattr(sandbox, "_fleet_slot_released", False)):
+                if sandbox is not None:
+                    release_sandbox_slot_for(sandbox)
+                else:
                     release_sandbox_slot()
             raise DaytonaDiagnosticError(
                 f"Daytona sandbox create failure: {_format_daytona_sdk_error(exc)}",

@@ -297,7 +297,11 @@ async def switch_session_if_needed(
             from ...runtime_services.chat_persistence import ensure_session_volume_layout
 
             try:
-                layout_paths = await ensure_session_volume_layout(agent, sess_id)
+                layout_paths = await ensure_session_volume_layout(
+                    agent,
+                    sess_id,
+                    allow_session_create=False,
+                )
             except (OSError, TimeoutError, asyncio.TimeoutError):
                 logger.warning("Best-effort Daytona session layout initialization failed", exc_info=True)
             except Exception:

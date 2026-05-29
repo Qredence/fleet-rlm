@@ -177,6 +177,10 @@ class WorkspaceManager:
             self._started = False
             await self._aclose_runtime()
 
+    async def arelease_idle_session(self) -> None:
+        """Delete the active sandbox session without closing the runtime client."""
+        await self._adetach_session(delete=True)
+
     def ensure_session(self) -> DaytonaSandboxSession:
         return self._ensure_session_sync()
 

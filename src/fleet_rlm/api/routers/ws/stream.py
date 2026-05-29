@@ -195,7 +195,7 @@ async def handle_terminal_stream_event(
 
     if event.kind == "done":
         try:
-            await persist_session_state(include_volume_save=True)
+            await persist_session_state(include_volume_save=True, release_idle_session=True)
         except Exception:
             logger.debug(
                 "Failed to persist session state before final event; continuing",
@@ -209,7 +209,7 @@ async def handle_terminal_stream_event(
         return
 
     try:
-        await persist_session_state(include_volume_save=True)
+        await persist_session_state(include_volume_save=True, release_idle_session=True)
     except Exception:
         logger.debug(
             "Failed to persist session state after %s event; completing run anyway",
@@ -624,6 +624,14 @@ async def run_streaming_turn(
     except WebSocketDisconnect:
         raise
     except Exception as exc:
+        try:
+            await persist_session_state(
+                include_volume_save=True,
+                allow_volume_session_create=False,
+                release_idle_session=True,
+            )
+        except Exception:
+            logger.debug("Failed to persist session state after stream exception", exc_info=True)
         await handle_stream_error(
             websocket=websocket,
             lifecycle=lifecycle,

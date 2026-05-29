@@ -14,6 +14,7 @@ from fleet_rlm.integrations.daytona.concurrency import (
     attach_slot_release_handler,
     get_current_sandbox_usage,
     release_sandbox_slot,
+    release_sandbox_slot_for,
 )
 
 
@@ -241,6 +242,32 @@ async def test_slot_not_released_when_delete_fails() -> None:
     usage = get_current_sandbox_usage()
     assert usage.active_count == 1
     assert mock_sandbox._fleet_slot_released is False
+    release_sandbox_slot()
+
+
+@pytest.mark.asyncio
+async def test_explicit_release_helper_releases_failed_teardown_once() -> None:
+    mock_sandbox = MagicMock()
+    mock_sandbox._fleet_slot_managed = True
+    mock_sandbox._fleet_slot_released = False
+    await acquire_sandbox_slot(timeout=1.0)
+
+    release_sandbox_slot_for(mock_sandbox)
+    release_sandbox_slot_for(mock_sandbox)
+
+    usage = get_current_sandbox_usage()
+    assert usage.active_count == 0
+    assert mock_sandbox._fleet_slot_released is True
+
+
+@pytest.mark.asyncio
+async def test_explicit_release_helper_ignores_unmanaged_sandbox() -> None:
+    mock_sandbox = MagicMock()
+    await acquire_sandbox_slot(timeout=1.0)
+
+    release_sandbox_slot_for(mock_sandbox)
+
+    assert get_current_sandbox_usage().active_count == 1
     release_sandbox_slot()
 
 

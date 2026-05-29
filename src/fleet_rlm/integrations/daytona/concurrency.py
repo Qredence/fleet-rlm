@@ -147,6 +147,16 @@ def release_sandbox_slot() -> None:
             logger.warning("Attempted to release unheld sandbox slot (over-release)")
 
 
+def release_sandbox_slot_for(sandbox: Any) -> None:
+    """Release the Fleet slot associated with an SDK sandbox exactly once."""
+    if not bool(getattr(sandbox, "_fleet_slot_managed", False)):
+        return
+    if bool(getattr(sandbox, "_fleet_slot_released", False)):
+        return
+    release_sandbox_slot()
+    _set_sandbox_attr(sandbox, "_fleet_slot_released", True)
+
+
 def _set_sandbox_attr(sandbox: Any, name: str, value: Any) -> None:
     """Set SDK object attributes, bypassing validated assignment when needed."""
     try:
@@ -169,6 +179,7 @@ def attach_slot_release_handler(sandbox: Any) -> None:
 
     A ``_fleet_slot_released`` flag prevents double-release.
     """
+    _set_sandbox_attr(sandbox, "_fleet_slot_managed", True)
     _set_sandbox_attr(sandbox, "_fleet_slot_released", False)
 
     original_delete = getattr(sandbox, "delete", None)
@@ -180,8 +191,7 @@ def attach_slot_release_handler(sandbox: Any) -> None:
                 result = None
                 if original is not None:
                     result = original(*args, **kwargs)
-                release_sandbox_slot()
-                _set_sandbox_attr(sandbox, "_fleet_slot_released", True)
+                release_sandbox_slot_for(sandbox)
                 return result
             if original is not None:
                 return original(*args, **kwargs)

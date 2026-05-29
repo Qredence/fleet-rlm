@@ -210,6 +210,26 @@ async def test_daytona_interpreter_session_lifecycle_uses_fake_runtime(daytona_r
 
 
 @pytest.mark.asyncio
+async def test_daytona_interpreter_release_idle_session_deletes_session_without_closing_runtime(
+    daytona_runtime,
+    daytona_session,
+) -> None:
+    from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
+
+    interpreter = DaytonaInterpreter(runtime=daytona_runtime)
+
+    first = await interpreter.aget_session()
+    await interpreter.arelease_idle_session()
+    second = await interpreter.aget_session()
+
+    assert first is daytona_session
+    assert second is daytona_session
+    assert daytona_session.deleted == 1
+    assert daytona_runtime.close_calls == 0
+    assert len(daytona_runtime.create_calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_workspace_manager_exports_state_and_resumes_with_fake_runtime(daytona_runtime, daytona_session) -> None:
     from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
