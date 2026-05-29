@@ -190,7 +190,7 @@ def test_fetch_page_extracts_text(monkeypatch: Any) -> None:
             return b"<html><script>ignore()</script><body><h1>Title</h1><p>Hello world</p></body></html>"
 
     monkeypatch.setattr(web_tools, "_validate_download_url", lambda url: None)
-    monkeypatch.setattr(web_tools.urllib.request, "urlopen", lambda request, timeout, context=None: _Response())
+    monkeypatch.setattr(web_tools, "_open_fetch_request", lambda request, timeout, context: _Response())
 
     result = web_tools.fetch_page("https://example.com")
 
@@ -198,3 +198,44 @@ def test_fetch_page_extracts_text(monkeypatch: Any) -> None:
     assert "Title" in result["text"]
     assert "Hello world" in result["text"]
     assert "ignore" not in result["text"]
+
+
+def test_fetch_page_uses_validating_redirect_handler(monkeypatch: Any) -> None:
+    from fleet_rlm.runtime.tools import web_tools
+
+    class _Headers(dict[str, str]):
+        def get(self, key: str, default: str = "") -> str:
+            return super().get(key, default)
+
+    class _Response:
+        headers = _Headers({"Content-Type": "text/html; charset=utf-8"})
+
+        def __enter__(self) -> "_Response":
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+            return None
+
+        def read(self, size: int) -> bytes:
+            _ = size
+            return b"<html><body><p>Safe page</p></body></html>"
+
+    class _Opener:
+        def open(self, request: Any, timeout: int) -> _Response:
+            _ = request, timeout
+            return _Response()
+
+    handlers: list[Any] = []
+
+    def fake_build_opener(*args: Any) -> _Opener:
+        handlers.extend(args)
+        return _Opener()
+
+    monkeypatch.setattr(web_tools, "_validate_download_url", lambda url: None)
+    monkeypatch.setattr(web_tools.urllib.request, "build_opener", fake_build_opener)
+    monkeypatch.setattr(web_tools.urllib.request, "HTTPSHandler", lambda context: ("https-handler", context))
+
+    result = web_tools.fetch_page("https://example.com")
+
+    assert result["status"] == "ok"
+    assert any(isinstance(handler, web_tools._ValidatingRedirectHandler) for handler in handlers)

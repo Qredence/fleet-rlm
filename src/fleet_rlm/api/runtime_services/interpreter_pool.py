@@ -10,7 +10,10 @@ archived rather than destroyed, allowing fast recovery on next startup.
 from __future__ import annotations
 
 import asyncio
+import getpass
 import logging
+import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -19,7 +22,16 @@ from ..config import ServerRuntimeConfig
 
 logger = logging.getLogger(__name__)
 
-_POOL_MANIFEST_PATH = Path(tempfile.gettempdir()) / "fleet-rlm-pool-manifest.json"
+
+def _pool_manifest_user_token() -> str:
+    getuid = getattr(os, "getuid", None)
+    if callable(getuid):
+        return f"uid-{getuid()}"
+    username = getpass.getuser() or "unknown"
+    return "user-" + re.sub(r"[^A-Za-z0-9_.-]+", "-", username)
+
+
+_POOL_MANIFEST_PATH = Path(tempfile.gettempdir()) / f"fleet-rlm-pool-manifest-{_pool_manifest_user_token()}.json"
 
 
 class InterpreterPool:

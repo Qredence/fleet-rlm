@@ -158,9 +158,9 @@ def _download_url(url: str) -> Path:
                 cleanup_tmp = True
                 raise
         finally:
+            os.close(fd)
             if cleanup_tmp:
                 Path(tmp_path).unlink(missing_ok=True)
-            os.close(fd)
 
     return Path(tmp_path)
 

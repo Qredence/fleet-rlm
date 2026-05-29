@@ -51,6 +51,16 @@ def _mock_interpreter():
     return interp
 
 
+def test_pool_manifest_path_is_user_specific():
+    from fleet_rlm.api.runtime_services.interpreter_pool import _POOL_MANIFEST_PATH, _pool_manifest_user_token
+
+    token = _pool_manifest_user_token()
+
+    assert token
+    assert _POOL_MANIFEST_PATH.name == f"fleet-rlm-pool-manifest-{token}.json"
+    assert _POOL_MANIFEST_PATH.name != "fleet-rlm-pool-manifest.json"
+
+
 @pytest.mark.asyncio
 async def test_pool_start_warms_interpreters():
     """start() creates pool_size interpreters, all available."""

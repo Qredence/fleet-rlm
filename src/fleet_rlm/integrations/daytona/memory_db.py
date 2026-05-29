@@ -8,7 +8,9 @@ session from :func:`~fleet_rlm.integrations.daytona.sdk_ops.ensure_daytona_volum
 from __future__ import annotations
 
 import logging
+import shutil
 import sqlite3
+import tempfile
 import textwrap
 from pathlib import Path
 
@@ -110,11 +112,18 @@ def init_memory_db(volume_mount_path: str) -> None:
 
     db_path = memories_dir / "core.db"
     try:
-        conn = sqlite3.connect(str(db_path))
-        try:
-            apply_memory_migrations(conn)
-        finally:
-            conn.close()
+        with tempfile.TemporaryDirectory(prefix="fleet-rlm-memory-db-") as tmp_dir_name:
+            tmp_db = Path(tmp_dir_name) / "core.db"
+            if db_path.exists():
+                shutil.copyfile(db_path, tmp_db)
+
+            conn = sqlite3.connect(str(tmp_db))
+            try:
+                apply_memory_migrations(conn)
+            finally:
+                conn.close()
+
+            shutil.copyfile(tmp_db, db_path)
         logger.info("memory_db: initialized/migrated core.db at %s", db_path)
     except Exception as exc:
         logger.warning("memory_db: could not initialize core.db at %s: %s", db_path, exc)

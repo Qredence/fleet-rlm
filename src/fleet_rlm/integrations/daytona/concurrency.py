@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -73,7 +74,7 @@ class SandboxUsageStats(BaseModel):
 # ---------------------------------------------------------------------------
 
 _GLOBAL_SEMAPHORE: asyncio.BoundedSemaphore | None = None
-_SEMAPHORE_LOCK = asyncio.Lock()
+_SEMAPHORE_LOCK = threading.Lock()
 _INITIALIZED_CONFIG: ConcurrencyConfig | None = None
 
 
@@ -81,7 +82,7 @@ async def _get_global_semaphore() -> asyncio.BoundedSemaphore:
     """Get or initialize the global sandbox semaphore lazily."""
     global _GLOBAL_SEMAPHORE, _INITIALIZED_CONFIG
     if _GLOBAL_SEMAPHORE is None:
-        async with _SEMAPHORE_LOCK:
+        with _SEMAPHORE_LOCK:
             if _GLOBAL_SEMAPHORE is None:
                 config = ConcurrencyConfig.from_env()
                 _GLOBAL_SEMAPHORE = asyncio.BoundedSemaphore(config.max_sandboxes)

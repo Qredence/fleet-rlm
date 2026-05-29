@@ -39,12 +39,6 @@ from ...runtime_services.chat_persistence import (
     build_local_persist_fn as _build_local_persist_fn,
 )
 from ...runtime_services.chat_persistence import (
-    cancel_startup_status_task as _cancel_startup_status_task,
-)
-from ...runtime_services.chat_persistence import (
-    emit_delayed_startup_status as _emit_delayed_startup_status,
-)
-from ...runtime_services.chat_persistence import (
     get_execution_emitter,
 )
 from ...runtime_services.chat_runtime import (
@@ -62,7 +56,7 @@ from ...runtime_services.chat_runtime import (
 from ...runtime_services.chat_runtime import (
     set_interpreter_default_profile as _set_interpreter_default_profile,
 )
-from .stream import WorkspaceEvent, _chat_message_loop, build_stream_event_dict
+from .stream import _chat_message_loop
 from .transport import (
     _authenticate_websocket,
     _close_websocket_safely,
@@ -107,9 +101,6 @@ async def _prepare_chat_runtime(
         send_error=_send_error,
         close_websocket=_close_websocket_safely,
     )
-
-
-_EXECUTION_STARTUP_STATUS_DELAY_SECONDS = 0.25
 
 
 @dataclass(slots=True)
@@ -218,27 +209,6 @@ class _ExecutionWebSocketConnection:
         self.session_cache = session_cache
         self.identity = identity
 
-    async def _emit_delayed_startup_status(self) -> None:
-        async def _emit_event(event: WorkspaceEvent) -> None:
-            await _try_send_json(
-                self.websocket,
-                {
-                    "type": "event",
-                    "data": build_stream_event_dict(
-                        event=event,
-                        payload=event.payload,
-                    ),
-                },
-            )
-
-        await _emit_delayed_startup_status(
-            delay_seconds=_EXECUTION_STARTUP_STATUS_DELAY_SECONDS,
-            emit_event=_emit_event,
-        )
-
-    async def _cancel_startup_status_task(self, task: asyncio.Task[None] | None) -> None:
-        await _cancel_startup_status_task(task)
-
     async def _receive_initial_message(self):
         initial_msg = None
         while initial_msg is None:
@@ -273,7 +243,6 @@ class _ExecutionWebSocketConnection:
             return
 
         analytics_distinct_id = (self.identity.user_claim or "").strip() or None
-        startup_status_task: asyncio.Task[None] | None = None
         try:
             with (
                 runtime_distinct_id_context(analytics_distinct_id),
@@ -320,13 +289,9 @@ class _ExecutionWebSocketConnection:
                         )
                     finally:
                         await emitter.disconnect(self.websocket)
-                        await self._cancel_startup_status_task(startup_status_task)
-                        startup_status_task = None
         except (asyncio.CancelledError, WebSocketDisconnect):
-            await self._cancel_startup_status_task(startup_status_task)
             return
         except Exception as exc:
-            await self._cancel_startup_status_task(startup_status_task)
             logger.exception("WebSocket execution startup failed: %s", _sanitize_for_log(exc))
             if await _try_send_json(self.websocket, chat_startup_error_payload(exc)):
                 await _close_websocket_safely(self.websocket, code=1011)

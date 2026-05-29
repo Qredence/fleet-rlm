@@ -560,9 +560,9 @@ def _try_solve_extraction_locally(query: str, context: str) -> str | None:
     level = match.group(1)
     service = match.group(2)
 
-    level_token = f"[{level}]"
-    service_token = f" {service}:"
-    count = sum(1 for line in context.splitlines() if level_token in line and service_token in line)
+    level_token = f"[{level}]".lower()
+    service_token = f" {service}:".lower()
+    count = sum(1 for line in context.splitlines() if level_token in line.lower() and service_token in line.lower())
     logger.info(
         "delegate_to_rlm: extraction task solved locally: level=%s service=%s count=%d",
         level,

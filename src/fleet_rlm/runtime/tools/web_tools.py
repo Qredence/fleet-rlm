@@ -10,7 +10,7 @@ from html.parser import HTMLParser
 from typing import Any
 
 from fleet_rlm.runtime.tools._marker import tool_fn
-from fleet_rlm.runtime.tools.document_tools import _validate_download_url
+from fleet_rlm.runtime.tools.document_tools import _validate_download_url, _ValidatingRedirectHandler
 from fleet_rlm.runtime.tools.schemas import (
     FetchPageInput,
     FetchPageOutput,
@@ -80,6 +80,14 @@ def _brave_search(query: str, max_results: int) -> list[WebSearchResult]:
     return results
 
 
+def _open_fetch_request(request: urllib.request.Request, *, timeout: int, context: ssl.SSLContext) -> Any:
+    opener = urllib.request.build_opener(
+        _ValidatingRedirectHandler(),
+        urllib.request.HTTPSHandler(context=context),
+    )
+    return opener.open(request, timeout=timeout)
+
+
 @tool_fn
 def web_search(query: str, max_results: int = 5) -> dict[str, Any]:
     """Search the public web and return result URLs, titles, and snippets."""
@@ -101,7 +109,7 @@ def fetch_page(url: str) -> dict[str, Any]:
         _validate_download_url(validated.url)
         request = urllib.request.Request(validated.url, headers={"User-Agent": "fleet-rlm/1.0"}, method="GET")
         ssl_ctx = ssl.create_default_context()
-        with urllib.request.urlopen(request, timeout=_FETCH_TIMEOUT_S, context=ssl_ctx) as response:  # noqa: S310
+        with _open_fetch_request(request, timeout=_FETCH_TIMEOUT_S, context=ssl_ctx) as response:
             content_type = response.headers.get("Content-Type", "")
             raw = response.read(_MAX_PAGE_BYTES + 1)
         if len(raw) > _MAX_PAGE_BYTES:

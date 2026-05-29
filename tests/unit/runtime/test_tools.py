@@ -76,6 +76,70 @@ def test_discover_tools_exposes_delegate_and_chunking_tools() -> None:
     assert {"delegate_to_rlm", "delegate_to_rlm_batched", "chunk_document", "load_document"} <= names
 
 
+def test_download_url_closes_temp_fd_before_unlink_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.runtime.tools import document_tools
+
+    class _Response:
+        headers: dict[str, str] = {}
+
+        def __enter__(self) -> "_Response":
+            return self
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+            return None
+
+        def read(self, size: int) -> bytes:
+            _ = size
+            return b"payload"
+
+    class _Opener:
+        def open(self, request: object, timeout: int) -> _Response:
+            _ = request, timeout
+            return _Response()
+
+    class _FailingHandle:
+        def __enter__(self) -> "_FailingHandle":
+            return self
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+            return None
+
+        def write(self, chunk: bytes) -> None:
+            _ = chunk
+            raise RuntimeError("write failed")
+
+    events: list[str] = []
+    tmp_path = "/tmp/fleet-rlm-download-test.txt"
+
+    monkeypatch.setattr(document_tools, "_validate_download_url", lambda url: None)
+    monkeypatch.setattr(document_tools.urllib.request, "build_opener", lambda *handlers: _Opener())
+    monkeypatch.setattr(document_tools.tempfile, "mkstemp", lambda suffix: (42, tmp_path))
+    monkeypatch.setattr(document_tools.os, "fdopen", lambda fd, mode, closefd=False: _FailingHandle())
+    monkeypatch.setattr(document_tools.os, "close", lambda fd: events.append(f"close:{fd}"))
+    monkeypatch.setattr(document_tools.Path, "unlink", lambda self, missing_ok=False: events.append(f"unlink:{self}"))
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        document_tools._download_url("https://example.com/doc.txt")
+
+    assert events == ["close:42", f"unlink:{tmp_path}"]
+
+
+def test_log_extraction_fast_path_is_case_insensitive() -> None:
+    from fleet_rlm.runtime.tools.rlm_delegate import _try_solve_extraction_locally
+
+    context = "\n".join(
+        [
+            "2026-01-01T00:00:00Z [INFO] Api: first",
+            "2026-01-01T00:00:01Z [info] api: second",
+            "2026-01-01T00:00:02Z [ERROR] api: ignored",
+        ]
+    )
+
+    answer = _try_solve_extraction_locally("How many log lines have level 'info' AND service 'api'?", context)
+
+    assert answer == "2"
+
+
 def test_bind_runtime_tools_binds_memory_tools_and_skips_interpreter_only_without_interpreter() -> None:
     from fleet_rlm.runtime.tools.binding import bind_runtime_tools
     from fleet_rlm.runtime.tools.rlm_delegate import delegate_to_rlm

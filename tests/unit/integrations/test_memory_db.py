@@ -97,6 +97,28 @@ def test_migrates_legacy_db_with_rows_idempotently(tmp_path: Path) -> None:
     assert version == MEMORY_SCHEMA_VERSION
 
 
+def test_host_init_migrates_staged_temp_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.integrations.daytona import memory_db
+
+    memories = tmp_path / "memories"
+    memories.mkdir()
+    db_path = memories / "core.db"
+    original_connect = memory_db.sqlite3.connect
+    connected_paths: list[Path] = []
+
+    def spy_connect(path: str, *args: object, **kwargs: object) -> sqlite3.Connection:
+        connected_paths.append(Path(path))
+        return original_connect(path, *args, **kwargs)
+
+    monkeypatch.setattr(memory_db.sqlite3, "connect", spy_connect)
+
+    init_memory_db(str(tmp_path))
+
+    assert db_path.exists()
+    assert connected_paths
+    assert db_path not in connected_paths
+
+
 def test_remote_bootstrap_script_uses_current_schema(tmp_path: Path) -> None:
     script = memory_db_bootstrap_script(str(tmp_path))
     namespace: dict[str, object] = {}
