@@ -44,8 +44,9 @@ from one-shot validation actions.
 
 ## Hooks
 
-`.codex/config.toml` enables Codex `hooks`, and `.codex/hooks.json` declares the
-repo-owned lifecycle hooks:
+`.codex/config.toml` is the repo-owned source of truth for Codex lifecycle
+hooks. This repo keeps hook definitions inline under `[hooks]` to avoid loading
+both `hooks.json` and TOML hooks from the same `.codex/` layer.
 
 - `PreToolUse` on `Edit|Write`: blocks direct edits to `.env`; edit
   `.env.example` or docs instead.
@@ -83,8 +84,9 @@ After changing `.codex/`, run:
 
 ```bash
 # from repo root
-uv run python -c "import json, pathlib, tomllib; [tomllib.loads(p.read_text()) for p in pathlib.Path('.codex').rglob('*.toml')]; json.loads(pathlib.Path('.codex/hooks.json').read_text()); print('codex-config-ok')"
+uv run python -c "import pathlib, tomllib; [tomllib.loads(p.read_text()) for p in pathlib.Path('.codex').rglob('*.toml')]; print('codex-config-ok')"
 zsh -n .codex/workspace-bootstrap.zsh .codex/hooks/*.zsh
+uv run python scripts/check_harness_engineering.py
 uv run python scripts/check_agents_md_freshness.py
 uv run python scripts/check_docs_quality.py
 make format-check
