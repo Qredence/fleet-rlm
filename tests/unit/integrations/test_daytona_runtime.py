@@ -10,17 +10,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from fleet_rlm.integrations.daytona import concurrency
+
 
 @pytest.fixture(autouse=True)
 def _reset_sandbox_semaphore():
     """Reset Daytona sandbox slot state between runtime tests."""
-    import fleet_rlm.integrations.daytona.concurrency as mod
-
-    mod._GLOBAL_SEMAPHORE = None
-    mod._INITIALIZED_CONFIG = None
+    concurrency._GLOBAL_SEMAPHORE = None
+    concurrency._INITIALIZED_CONFIG = None
     yield
-    mod._GLOBAL_SEMAPHORE = None
-    mod._INITIALIZED_CONFIG = None
+    concurrency._GLOBAL_SEMAPHORE = None
+    concurrency._INITIALIZED_CONFIG = None
 
 
 def test_default_sandbox_name_keeps_timestamp_prefix_and_adds_unique_suffix(
@@ -66,7 +66,6 @@ def _sandbox_runtime():
 @pytest.mark.asyncio
 async def test_sandbox_create_retries_generated_name_conflict(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.integrations.daytona import runtime as runtime_module
-    from fleet_rlm.integrations.daytona.concurrency import get_current_sandbox_usage
     from fleet_rlm.integrations.daytona.models import SandboxSpec
     from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxRuntime
 
@@ -92,11 +91,11 @@ async def test_sandbox_create_retries_generated_name_conflict(monkeypatch: pytes
         "fleet-rlm-20260529-041113-11111111",
         "fleet-rlm-20260529-041114-deadbeef",
     ]
-    assert get_current_sandbox_usage().active_count == 1
+    assert concurrency.get_current_sandbox_usage().active_count == 1
 
     result.delete()
 
-    assert get_current_sandbox_usage().active_count == 0
+    assert concurrency.get_current_sandbox_usage().active_count == 0
 
 
 @pytest.mark.asyncio
@@ -104,7 +103,6 @@ async def test_sandbox_create_does_not_retry_explicit_non_generated_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleet_rlm.integrations.daytona import runtime as runtime_module
-    from fleet_rlm.integrations.daytona.concurrency import get_current_sandbox_usage
     from fleet_rlm.integrations.daytona.errors import DaytonaDiagnosticError
     from fleet_rlm.integrations.daytona.models import SandboxSpec
     from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxRuntime
@@ -123,13 +121,12 @@ async def test_sandbox_create_does_not_retry_explicit_non_generated_name(
         await _sandbox_runtime().acreate_sandbox(spec=SandboxSpec(name="custom-sandbox"))
 
     assert calls == ["custom-sandbox"]
-    assert get_current_sandbox_usage().active_count == 0
+    assert concurrency.get_current_sandbox_usage().active_count == 0
 
 
 @pytest.mark.asyncio
 async def test_sandbox_create_releases_slot_after_retry_exhaustion(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.integrations.daytona import runtime as runtime_module
-    from fleet_rlm.integrations.daytona.concurrency import get_current_sandbox_usage
     from fleet_rlm.integrations.daytona.errors import DaytonaDiagnosticError
     from fleet_rlm.integrations.daytona.models import SandboxSpec
     from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxRuntime
@@ -155,7 +152,7 @@ async def test_sandbox_create_releases_slot_after_retry_exhaustion(monkeypatch: 
         await _sandbox_runtime().acreate_sandbox(spec=SandboxSpec(name="fleet-rlm-20260529-041113-11111111"))
 
     assert len(calls) == 4
-    assert get_current_sandbox_usage().active_count == 0
+    assert concurrency.get_current_sandbox_usage().active_count == 0
 
 
 @pytest.mark.asyncio

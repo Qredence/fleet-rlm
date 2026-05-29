@@ -7,27 +7,25 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fleet_rlm.integrations.daytona.concurrency import (
-    ConcurrencyConfig,
-    SandboxUsageStats,
-    acquire_sandbox_slot,
-    attach_slot_release_handler,
-    get_current_sandbox_usage,
-    release_sandbox_slot,
-    release_sandbox_slot_for,
-)
+from fleet_rlm.integrations.daytona import concurrency
+
+ConcurrencyConfig = concurrency.ConcurrencyConfig
+SandboxUsageStats = concurrency.SandboxUsageStats
+acquire_sandbox_slot = concurrency.acquire_sandbox_slot
+attach_slot_release_handler = concurrency.attach_slot_release_handler
+get_current_sandbox_usage = concurrency.get_current_sandbox_usage
+release_sandbox_slot = concurrency.release_sandbox_slot
+release_sandbox_slot_for = concurrency.release_sandbox_slot_for
 
 
 @pytest.fixture(autouse=True)
 def _reset_semaphore():
     """Reset global semaphore state between tests."""
-    import fleet_rlm.integrations.daytona.concurrency as mod
-
-    mod._GLOBAL_SEMAPHORE = None
-    mod._INITIALIZED_CONFIG = None
+    concurrency._GLOBAL_SEMAPHORE = None
+    concurrency._INITIALIZED_CONFIG = None
     yield
-    mod._GLOBAL_SEMAPHORE = None
-    mod._INITIALIZED_CONFIG = None
+    concurrency._GLOBAL_SEMAPHORE = None
+    concurrency._INITIALIZED_CONFIG = None
 
 
 class _ValidatedAssignmentSandbox:
