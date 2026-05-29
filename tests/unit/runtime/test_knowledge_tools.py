@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -113,7 +114,7 @@ def test_search_finds_by_source(vol: Path) -> None:
     output = _search_knowledge_impl("mysite.io", volume_mount_path=str(vol))
     assert output.status == "ok"
     assert output.count >= 1
-    assert any("mysite.io" in r.source for r in output.results)
+    assert any(urlparse(r.source).netloc == "mysite.io" for r in output.results)
 
 
 def test_search_finds_by_text_content(vol: Path) -> None:
