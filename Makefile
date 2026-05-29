@@ -140,7 +140,7 @@ check-deps:
 
 check-frontend:
 	@if [ -f src/frontend/package.json ]; then \
-		cd src/frontend && pnpm install --frozen-lockfile && pnpm run api:check && pnpm run type-check && pnpm run lint:robustness && pnpm run test:unit && pnpm run build; \
+		cd src/frontend && pnpm install --frozen-lockfile && pnpm run api:check && pnpm run type-check && pnpm run lint:robustness && pnpm run test:unit && CI=true pnpm run build; \
 	else \
 		echo "No src/frontend/package.json found, skipping frontend checks."; \
 	fi
@@ -168,7 +168,7 @@ sync-ui:
 	cp -R src/frontend/dist src/fleet_rlm/ui/dist
 
 build-ui:
-	cd src/frontend && pnpm install --frozen-lockfile && ./node_modules/.bin/vp build
+	cd src/frontend && pnpm install --frozen-lockfile && CI=true ./node_modules/.bin/vp build
 	uv run python scripts/ensure_frontend_entrypoint.py
 	$(MAKE) sync-ui
 

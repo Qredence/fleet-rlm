@@ -37,6 +37,10 @@ function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<UserProfile | null>(null);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
     let cancelled = false;
     void (async () => {
       try {
@@ -47,10 +51,23 @@ function AuthProvider({ children }: AuthProviderProps) {
           if (!cancelled) setUser(null);
           return;
         }
-        const me = await authEndpoints.me();
-        if (cancelled) return;
-        setUser(mapProfile(me));
-      } catch {
+        try {
+          const me = await authEndpoints.me();
+          if (cancelled) return;
+          setUser(mapProfile(me));
+        } catch (fetchError: unknown) {
+          // During prerender, network requests to the dev server may fail.
+          // Silently skip auth fetch — user will authenticate on first browser interaction.
+          if (cancelled) return;
+          const errorMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
+          if (errorMsg.includes("ECONNREFUSED") || errorMsg.includes("ETIMEDOUT")) {
+            // Expected during prerender; do not clear auth state
+            return;
+          }
+          authEndpoints.clearLocalAuth();
+          setUser(null);
+        }
+      } catch (error) {
         if (cancelled) return;
         authEndpoints.clearLocalAuth();
         setUser(null);

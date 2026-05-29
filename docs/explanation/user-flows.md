@@ -13,15 +13,11 @@ shell stores the active nav item and canvas state in Zustand.
 flowchart LR
   A["/"] --> B["/app/workspace"]
   B --> C["/app/volumes"]
-  B --> D["/app/optimization"]
-  B --> E["/app/history"]
-  B --> F["/app/settings"]
+  B --> D["/app/settings"]
 
   B --> G["RootLayout"]
   C --> G
   D --> G
-  E --> G
-  F --> G
 
   G --> H["RouteSync"]
   G --> I["Sidebar / Header / Canvas"]
@@ -30,8 +26,6 @@ flowchart LR
   J --> B
   J --> C
   J --> D
-  J --> E
-  J --> F
 ```
 
 Key behavior:
@@ -40,8 +34,8 @@ Key behavior:
 - `RootLayout` renders the sidebar, header, main content, and optional canvas.
 - `RouteSync` reads the URL and updates shell state. The reverse direction is
   handled by navigation helpers and route transitions.
-- The canvas opens automatically on Volumes, closes on Optimization, History,
-  and Settings, and stays available on Workbench.
+- The canvas opens automatically on Volumes, closes on Settings, and stays
+  available on Workbench.
 - Mobile uses a bottom tab bar and a bottom sheet for the canvas. Desktop uses a
   split panel layout.
 
@@ -90,21 +84,9 @@ The important rules are:
 - Selecting a file opens the canvas preview.
 - Leaving Volumes clears the selected file via `RouteSync`.
 
-### History
-
-- `HistoryScreen` is a first-class route at `/app/history`.
-- It shows backend session history and local conversation history.
-- Selecting a session opens the detail drawer without leaving the shell.
-
-### Optimization
-
-- `OptimizationScreen` exposes modules, datasets, runs, and compare tabs.
-- It is a separate product surface, not part of the live workbench turn flow.
-
 ### Settings
 
 - `SettingsScreen` opens as a dialog first and falls back to the routed page.
-- Sections are `appearance`, `telemetry`, `litellm`, `runtime`, and
-  `optimization`.
+- Sections are `appearance`, `telemetry`, `litellm`, `runtime`, and `about`.
 - Runtime settings and connectivity checks are handled in the settings feature
   tree, not in the workspace runtime.

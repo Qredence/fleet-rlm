@@ -21,9 +21,7 @@ export function LayoutHeader() {
   const titleMap: Record<string, string> = {
     workspace: "Workbench",
     volumes: "Volumes",
-    optimization: "Optimization",
     settings: "Settings",
-    history: "History",
   };
   const title = titleMap[activeNav] || "Dashboard";
 

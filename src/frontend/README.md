@@ -23,16 +23,17 @@ The development server runs on `http://localhost:5173` and proxies `/api/v1` and
 This frontend targets the current FastAPI surface:
 
 - REST: `/health`, `/ready`, `GET /api/v1/auth/me`, `GET /api/v1/sessions/state`, `/api/v1/runtime/*`, `POST /api/v1/traces/feedback`
-- WebSockets: `/api/v1/ws/execution`, `/api/v1/ws/execution/events`
+- WebSockets: `/api/v1/ws/chat`, `/api/v1/ws/execution`
 
 Supported product surfaces:
 
 - `/app/workspace`
 - `/app/volumes`
-- `/app/optimization`
 - `/app/settings`
 
-Retired `/app/taxonomy*`, `/app/skills*`, `/app/memory`, and `/app/analytics` routes should fall through to `/404`.
+Retired `/app/optimization*`, `/app/history*`, `/app/taxonomy*`,
+`/app/skills*`, `/app/memory`, and `/app/analytics` routes should fall
+through to `/404`.
 
 ## Environment
 
@@ -51,7 +52,10 @@ Optional overrides:
 - `VITE_PUBLIC_POSTHOG_API_KEY`
 - `VITE_PUBLIC_POSTHOG_HOST`
 
-If `VITE_FLEET_WS_URL` is unset, the frontend derives `/api/v1/ws/execution` and `/api/v1/ws/execution/events` from `VITE_FLEET_API_URL`. WebSocket identity is auth-derived; `session_id` stays message-scoped for chat and query-scoped only for passive execution subscriptions.
+If `VITE_FLEET_WS_URL` is unset, the frontend derives `/api/v1/ws/chat` and
+`/api/v1/ws/execution` from `VITE_FLEET_API_URL`. WebSocket identity is
+auth-derived; `session_id` stays message-scoped for chat and query-scoped only
+for passive execution subscriptions.
 
 ### Backend Startup
 

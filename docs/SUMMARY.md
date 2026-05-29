@@ -48,7 +48,6 @@
 ## Specs
 
 * [Specs](specs/index.md)
-  * [Optimization Page Spec](specs/optimization-page.md)
   * [Frontend Simplification Design](specs/frontend-simplification-design.md)
 
 ## Reference

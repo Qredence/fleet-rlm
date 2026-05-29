@@ -12,15 +12,15 @@ Repository analysis is one supported use case, not the product identity. The pro
 
 ## Maintained Surfaces
 
-The current shell exposes five surfaces:
+The current shell exposes three maintained surfaces:
 
 - `Workbench`
 - `Volumes`
-- `Optimization`
 - `Settings`
-- `History`
 
-The first four are the primary maintained product surfaces. `History` is the supporting session browsing and replay surface.
+Session browsing remains available through workbench/session controls, but `History`
+is not a routed product surface. Offline optimization remains a backend quality
+capability, but `Optimization` is not a routed product surface.
 
 ### Workbench
 
@@ -44,16 +44,6 @@ It is where a user:
 - retrieves generated artifacts
 - understands what survived beyond the live turn
 
-### Optimization
-
-`Optimization` is the offline DSPy quality surface.
-
-It is where a user:
-
-- runs evaluation workflows
-- launches optimization or compilation paths
-- compares results across modules or datasets
-
 ### Settings
 
 `Settings` is the runtime configuration and diagnostics surface.
@@ -64,17 +54,6 @@ It is where a user:
 - validates Daytona connectivity
 - inspects runtime health and readiness
 - adjusts allowed local runtime settings
-
-### History
-
-`History` is the session browsing and replay surface.
-
-It is where a user:
-
-- reviews prior sessions
-- opens the turn transcript for a session
-- replays or inspects session output
-- exports session history into durable datasets
 
 ## Inputs and Context
 
@@ -234,7 +213,5 @@ flowchart LR
   Runtime --> Summary["execution_completed.summary"]
   Summary --> Workbench
   Summary --> Volumes["Volumes"]
-  Summary --> History["History"]
-  Workbench --> Optimize["Optimization"]
   Workbench --> Settings["Settings"]
 ```

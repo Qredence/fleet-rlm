@@ -6,8 +6,6 @@ export const SUPPORTED_SECTIONS = new Set<NavItem>([
   "workspace",
   "settings",
   "volumes",
-  "optimization",
-  "history",
 ]);
 
 export const UNSUPPORTED_SECTION_REASON =

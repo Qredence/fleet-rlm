@@ -1,4 +1,8 @@
-# Optimization Page Feature Spec
+# Retired Optimization Page Feature Spec
+
+> This routed page is not part of the current Workbench, Volumes, and Settings
+> product surface contract. Keep this document as historical design context for
+> offline quality workflows.
 
 ## Purpose
 

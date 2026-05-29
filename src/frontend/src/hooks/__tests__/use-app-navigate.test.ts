@@ -6,7 +6,6 @@ describe("useAppNavigate route truth", () => {
   it("maps supported nav items to canonical routes", () => {
     expect(navToPath("workspace")).toBe("/app/workspace");
     expect(navToPath("volumes")).toBe("/app/volumes");
-    expect(navToPath("optimization")).toBe("/app/optimization");
     expect(navToPath("settings")).toBe("/app/settings");
   });
 
@@ -14,7 +13,6 @@ describe("useAppNavigate route truth", () => {
     expect(pathToNav("/app")).toBe("workspace");
     expect(pathToNav("/app/workspace")).toBe("workspace");
     expect(pathToNav("/app/volumes")).toBe("volumes");
-    expect(pathToNav("/app/optimization")).toBe("optimization");
     expect(pathToNav("/app/settings")).toBe("settings");
   });
 
@@ -25,6 +23,8 @@ describe("useAppNavigate route truth", () => {
     expect(pathToNav("/app/skills/demo-skill")).toBeNull();
     expect(pathToNav("/app/memory")).toBeNull();
     expect(pathToNav("/app/analytics")).toBeNull();
+    expect(pathToNav("/app/optimization")).toBeNull();
+    expect(pathToNav("/app/history")).toBeNull();
   });
 
   it("ignores paths outside the app shell", () => {

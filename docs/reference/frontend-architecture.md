@@ -14,18 +14,15 @@ flowchart TB
   A["routes/"] --> B["features/layout/"]
   A --> C["features/workspace/"]
   A --> D["features/volumes/"]
-  A --> E["features/history/"]
-  A --> F["features/optimization/"]
-  A --> G["features/settings/"]
+  A --> E["features/settings/"]
 
-  C --> H["lib/workspace/"]
-  C --> I["lib/rlm-api/"]
-  D --> I
-  F --> I
-  G --> I
+  C --> F["lib/workspace/"]
+  C --> G["lib/rlm-api/"]
+  D --> G
+  E --> G
 
-  B --> J["stores/navigation-store"]
-  C --> J
+  B --> H["stores/navigation-store"]
+  C --> H
 ```
 
 ## Current Source Ownership
@@ -60,8 +57,6 @@ The live route tree is intentionally small and explicit:
 - `/app` mounts the shell layout
 - `/app/workspace` is the main workbench
 - `/app/volumes` is the mounted storage browser
-- `/app/history` is the session history surface
-- `/app/optimization` is the optimization surface
 - `/app/settings` is the settings dialog/page fallback
 - `/login`, `/logout`, `/signup`, and `/404` remain standalone routes
 - `src/routes/$.tsx` is the catchall for unsupported paths
@@ -71,8 +66,6 @@ The shell route files are thin wrappers only:
 - `src/routes/app.tsx` mounts `RootLayout`
 - `src/routes/app/workspace.tsx` lazy-loads `features/workspace/workspace-screen`
 - `src/routes/app/volumes.tsx` lazy-loads `features/volumes/volumes-screen`
-- `src/routes/app/history.tsx` lazy-loads `features/history/history-screen`
-- `src/routes/app/optimization.tsx` lazy-loads `features/optimization/optimization-screen`
 - `src/routes/app/settings.tsx` lazy-loads `features/settings/settings-screen`
 
 ## Shell And Layout Behavior
@@ -97,7 +90,7 @@ Important shell behavior:
 - Workbench keeps the inspector/canvas available.
 - Volumes opens the canvas automatically so the file preview stays adjacent to
   the browser.
-- Optimization, History, and Settings close the canvas.
+- Settings closes the canvas.
 - Mobile and desktop share the same route ownership, but the canvas is rendered
   as a bottom sheet on mobile.
 
@@ -132,8 +125,7 @@ Key stores and adapters:
 - Keep shell behavior in `features/layout/*`.
 - Keep workbench logic in `features/workspace/*` and `lib/workspace/*`.
 - Keep mounted-storage behavior in `features/volumes/*`.
-- Keep session history in `features/history/*`.
-- Keep optimization and settings logic in their own feature trees.
+- Keep settings logic in `features/settings/*`.
 - Keep websocket and REST transport details in `lib/rlm-api/*`.
 - Keep generated API files and router output out of hand-edited docs and code.
 
