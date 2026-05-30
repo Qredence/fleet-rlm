@@ -28,7 +28,7 @@ const fallbackValues: Record<string, string> = {
 
 const fallbackMaskedValues: Record<string, string> = {
   DSPY_LLM_API_KEY: "sk-...demo",
-  DSPY_LM_API_KEY: "sk-...legacy",
+  DSPY_LM_API_KEY: "sk-...alt",
   DSPY_DELEGATE_LM_API_KEY: "sk-...delegate",
   DAYTONA_API_KEY: "dyt-...demo",
   POSTHOG_API_KEY: "phc-...demo",

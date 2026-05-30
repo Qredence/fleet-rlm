@@ -287,4 +287,4 @@ The following idle lifecycle timers apply to Daytona sandboxes:
 | `auto_archive_interval` | 60 minutes | Time after stop before archiving |
 | `auto_delete_interval` | null (disabled) | Time after archive before deletion |
 
-See [Daytona Runtime Architecture](daytona-runtime-architecture.md) for provider-level details.
+See [Daytona Architecture](daytona-architecture.md) for provider-level details.

@@ -70,12 +70,12 @@ safe to run repeatedly.
 - `testing-strategist` for choosing the smallest meaningful validation lane.
 - `security-reviewer` for auth, tokens, middleware, settings, and secret risks.
 - `release-manager` for packaging, release hygiene, and bundled UI assets.
-- `daytona-runtime` for sandbox lifecycle, volumes, child isolation, and
+- `sandbox-runtime` for sandbox lifecycle, volumes, child isolation, and
   diagnostics.
 - `docs-maintainer` for AGENTS.md, PLANS.md, README, and docs consistency.
 
 These roles are Codex-native replacements for only the useful parts of older
-`.claude`, `.agents`, and `.factory` material. Do not copy legacy prompts
+`.claude`, `.agents`, and `.factory` material. Do not copy retired prompts
 wholesale unless they match the current repo contract.
 
 ## Validation

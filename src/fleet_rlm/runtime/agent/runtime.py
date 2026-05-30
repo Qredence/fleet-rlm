@@ -302,7 +302,7 @@ class AgentRuntime:
                     logger.warning("AgentRuntime: summary refresh failed: %s", exc)
 
     def _escalation_call_args(self, user_message: str) -> dict[str, Any]:
-        """Build call args for EscalatingFleetModule vs legacy FleetAgent."""
+        """Build call args for EscalatingFleetModule or FleetAgent."""
         if not self._use_escalation:
             return {"chat_history": self.history, "user_message": user_message}
         core_memory_str = "\n".join(f"[{k.upper()}]\n{v}" for k, v in self.core_memory.items() if v)

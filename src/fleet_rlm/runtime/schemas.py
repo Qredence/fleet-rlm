@@ -1,9 +1,7 @@
 """Pydantic/dataclass DTOs used by the runtime streaming and CLI layers.
 
 This module contains pure data-transfer objects — no DSPy modules, no business
-logic, no side effects. It is the canonical import path for runtime schemas;
-the legacy ``runtime.models.streaming`` re-exports from here for backward
-compatibility.
+logic, no side effects. It is the canonical import path for runtime schemas.
 """
 
 from __future__ import annotations

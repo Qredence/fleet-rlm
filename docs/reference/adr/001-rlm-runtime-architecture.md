@@ -18,19 +18,18 @@ Traditional approaches like simple LLM chains lack the reasoning depth needed fo
 
 ## Decision
 
-We adopt **dspy.RLM (Recursive Language Model)** as the core runtime architecture, wrapping it with a custom `RLMReActChatAgent` that extends `dspy.Module`.
+We adopt **dspy.RLM (Recursive Language Model)** as the core heavy-work architecture, wrapped by `AgentRuntime` and the default `EscalatingFleetModule`.
 
 The architecture consists of these layers:
 
-### 1. Core Agent: RLMReActChatAgent
+### 1. Core Agent: AgentRuntime + EscalatingFleetModule
 
-The primary agent class (`src/fleet_rlm/runtime/agent/chat_agent.py`) extends
-`dspy.Module` to provide:
+The primary runtime (`src/fleet_rlm/runtime/agent/runtime.py`) owns session state, tool binding, streaming, and persistence. Its default agent module (`src/fleet_rlm/runtime/modules/escalating.py`) extends `dspy.Module` to provide:
 
 - **Stateful conversation**: `dspy.History` for persistent chat memory
-- **ReAct reasoning**: DSPy's ReAct pattern for thought-action-observation loops
+- **Lightweight-to-heavy escalation**: `dspy.ChainOfThought` for simple turns, escalating to the Daytona-backed RLM path when needed
 - **Tool orchestration**: Dynamic tool registration and dispatch
-- **Recursive delegation**: `recursive_runtime.py` spawns child dspy.RLM instances
+- **Recursive delegation**: `runtime/tools/rlm_delegate.py` and `integrations/daytona/isolation.py` build bounded child RLM runs
 
 ### 2. Signature-Based Contracts
 
@@ -59,11 +58,11 @@ Real-time response streaming via `api/routers/ws/stream.py` and
 Long-context or specialized tasks are delegated to child RLM instances:
 
 ```text
-Parent Agent → recursive_runtime.spawn_delegate_sub_agent_async()
-    → Child dspy.RLM → Result aggregation
+Parent Agent → delegate_to_rlm() / delegate_to_rlm_batched()
+    → Daytona-isolated child dspy.RLM → Result aggregation
 ```
 
-The parent shares its LLM budget with children via `_share_llm_budget()` to enforce call limits across the delegation tree.
+The parent shares bounded runtime metadata and LLM budgets with children through the delegation tool and Daytona isolation helpers.
 
 ## Consequences
 
@@ -88,10 +87,11 @@ The parent shares its LLM budget with children via `_share_llm_budget()` to enfo
 
 ## References
 
-- `src/fleet_rlm/runtime/agent/chat_agent.py` — RLMReActChatAgent implementation
+- `src/fleet_rlm/runtime/agent/runtime.py` — AgentRuntime session, tool, streaming, and persistence wrapper
+- `src/fleet_rlm/runtime/modules/escalating.py` — EscalatingFleetModule implementation
 - `src/fleet_rlm/runtime/agent/signatures.py` — DSPy signature definitions
-- `src/fleet_rlm/runtime/agent/chat_turns.py` — Per-turn state, metrics, and result shaping
-- `src/fleet_rlm/runtime/agent/recursive_runtime.py` — Recursive delegation logic
+- `src/fleet_rlm/runtime/tools/rlm_delegate.py` — Recursive delegation tools
+- `src/fleet_rlm/integrations/daytona/isolation.py` — Child sandbox policy and isolation
 - `src/fleet_rlm/api/routers/ws/stream.py` — WebSocket streaming loop
 - `src/fleet_rlm/runtime/execution/streaming_events.py` — Event construction and streaming helpers
 - DSPy documentation: https://dspy.ai/

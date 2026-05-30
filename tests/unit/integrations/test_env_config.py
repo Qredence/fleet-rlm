@@ -102,7 +102,7 @@ def test_apply_env_updates_ignores_masked_secret_round_trip(
     assert "DSPY_LM_MODEL='openai/gpt-4.1-mini'" in text
 
 
-def test_app_config_syncs_legacy_llm_and_interpreter_sections() -> None:
+def test_app_config_syncs_agent_and_interpreter_sections() -> None:
     from fleet_rlm.integrations.config.env import AppConfig
 
     config = AppConfig.model_validate(

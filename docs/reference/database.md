@@ -19,7 +19,7 @@ tenant + workspace scoped, and all new primary keys are generated with `app.uuid
 
 `0010_target_postgres_schema` is a clean-break baseline migration:
 
-- Drops legacy `public` objects (except `alembic_version`) and recreates schema from model metadata.
+- Drops retired `public` objects (except `alembic_version`) and recreates schema from model metadata.
 - Installs `app.uuid_v7()` with compatibility fallback:
   - Uses native `uuidv7()` when available.
   - Falls back to `uuid_generate_v7()` when available.
@@ -123,7 +123,7 @@ uv run pytest -q tests/integration/test_db_migrations.py tests/integration/test_
 
 ## Notes
 
-- SQLite sidecar persistence remains available only for local legacy/import workflows; Postgres is the source of truth for durable product state.
+- SQLite sidecar persistence remains available only for local retired/import workflows; Postgres is the source of truth for durable product state.
 - Large file bytes remain in Daytona volumes/object storage; Postgres stores metadata and linkable indexes.
 - Neon guidance for this repo is: pooled URL for runtime traffic, direct non-pooler URL for migrations/admin work, and disposable branches for destructive validation before touching long-lived branches.
 - The maintained helper-script inventory for DB and operator workflows lives in [`../../scripts/README.md`](../../scripts/README.md).

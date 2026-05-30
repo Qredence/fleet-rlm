@@ -7,17 +7,17 @@ from types import SimpleNamespace
 def test_storage_paths_normalize_mount_layouts() -> None:
     from fleet_rlm.runtime.execution.storage_paths import mounted_storage_roots, runtime_storage_roots
 
-    legacy = mounted_storage_roots("/data/memory")
+    data_roots = mounted_storage_roots("/data/memory")
     current = mounted_storage_roots("/home/daytona/memory")
     interpreter_roots = runtime_storage_roots(SimpleNamespace(volume_mount_path="/srv/runtime/memory"))  # ty: ignore[invalid-argument-type]
 
-    assert legacy.mounted_root == "/data"
-    assert legacy.memory_root == "/data/memory"
-    assert legacy.artifacts_root == "/data/artifacts"
-    assert legacy.memories_root == "/data/memories"
-    assert legacy.knowledge_root == "/data/knowledge"
-    assert legacy.sessions_root == "/data/sessions"
-    assert legacy.allowed_root == "/data"
+    assert data_roots.mounted_root == "/data"
+    assert data_roots.memory_root == "/data/memory"
+    assert data_roots.artifacts_root == "/data/artifacts"
+    assert data_roots.memories_root == "/data/memories"
+    assert data_roots.knowledge_root == "/data/knowledge"
+    assert data_roots.sessions_root == "/data/sessions"
+    assert data_roots.allowed_root == "/data"
 
     assert current.mounted_root == "/home/daytona/memory"
     assert current.buffers_root == "/home/daytona/memory/buffers"

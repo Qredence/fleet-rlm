@@ -49,8 +49,8 @@
     },
     {
       "area": "scaffold",
-      "observation": "src/fleet_rlm/scaffold/skills/rlm-debug/SKILL.md:50 references the deleted `runtime/execution/streaming.py` as a relevant file for debugging.",
-      "evidence": "src/fleet_rlm/scaffold/skills/rlm-debug/SKILL.md line 50: `- src/fleet_rlm/runtime/execution/streaming.py` (streaming context)"
+      "observation": "src/fleet_rlm/scaffold/skills/diagnostics/SKILL.md:50 references the deleted `runtime/execution/streaming.py` as a relevant file for debugging.",
+      "evidence": "src/fleet_rlm/scaffold/skills/diagnostics/SKILL.md line 50: `- src/fleet_rlm/runtime/execution/streaming.py` (streaming context)"
     }
   ],
   "addressesFailureFrom": null,

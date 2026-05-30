@@ -16,6 +16,33 @@ for cleanup and remaining phase work.
 - Frontend route/navigation changes must keep retired paths falling through to
   `/404`.
 
+## Current Audit Plan
+
+This audit verifies that closed-phase claims match current code, tests, docs, and bundled
+scaffold skills.
+
+1. Build a phase-to-code evidence matrix from `plan/PLANS.md`, phase progress files,
+   runtime code, tests, and agent-harness docs.
+2. Check each phase for implementation, validation coverage, generated-artifact drift, and
+   stale documentation.
+3. Inventory `src/fleet_rlm/scaffold/skills/` and verify each skill uses current repo paths,
+   command names, Daytona volume roots, runtime defaults, and efficient helper scripts.
+4. Patch only verified gaps, then run focused tests plus docs/static lanes for touched areas.
+
+### Audit Results
+
+| Area | Result | Evidence |
+| --- | --- | --- |
+| Phase 0 | Verified | Cleanup targets remain removed or deactivated in active runtime contracts. |
+| Phase 1 | Verified | Volume layout creates legacy roots plus `memories`, `knowledge`, `skills`, `sessions`, `logs`, and `uploads`; restore paths have focused tests. |
+| Phase 2 | Verified | `build_chat_agent()` and `AgentRuntime` default to `EscalatingFleetModule`; rollback uses `FLEET_RLM_USE_ESCALATING_RUNTIME=false`. |
+| Phase 3 | Verified after docs reconciliation | Essential tools, typed schemas, memory DB, knowledge index, and skill loading exist; Brave live evidence remains skipped without provider credentials. |
+| Phase 4 | Verified after docs reconciliation | Sandbox concurrency uses `FLEET_MAX_CONCURRENT_SANDBOXES`, slot release is tested, and live concurrency verification is recorded as passed. |
+| Phase 5 | Verified with one runtime fix | Versioned `memories/core.db`, knowledge index compatibility, retired public routes, and seeded skills exist; volume browsing now authorizes all durable roots. |
+| Phase 6 | Verified | Runtime metadata and degraded fallback payloads are surfaced; analytics public routes remain retired. |
+| Phase 7 | Verified | Runtime docs cover backup/restore, retries/failures, live verification commands, and drift checks. |
+| Scaffold skills | Updated | Skills now describe current runtime defaults, durable roots, `.codex/rlm_state` helper paths, current test files, and script help behavior. |
+
 ## Phase status
 
 | Phase | Status | Current continuation |

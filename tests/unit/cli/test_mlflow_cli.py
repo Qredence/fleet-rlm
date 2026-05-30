@@ -47,7 +47,7 @@ def test_scorers_list_prints_persisted_scorers(
     fake_mlflow = _fake_mlflow_module(
         scorers=[
             SimpleNamespace(name="Trace Judge", id="s-1", version=2, model="openai/test"),
-            {"scorer_name": "legacy", "scorer_id": "s-2", "scorer_version": 1, "model_uri": "models:/judge"},
+            {"scorer_name": "retired", "scorer_id": "s-2", "scorer_version": 1, "model_uri": "models:/judge"},
         ]
     )
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
@@ -62,7 +62,7 @@ def test_scorers_list_prints_persisted_scorers(
     assert "experiment_id=exp-active" in output
     assert "scorer_count=2" in output
     assert "scorer name=Trace Judge id=s-1 version=2 model=openai/test" in output
-    assert "scorer name=legacy id=s-2 version=1 model=models:/judge" in output
+    assert "scorer name=retired id=s-2 version=1 model=models:/judge" in output
     assert fake_mlflow.list_experiment_id == "exp-active"  # type: ignore[attr-defined]
 
 

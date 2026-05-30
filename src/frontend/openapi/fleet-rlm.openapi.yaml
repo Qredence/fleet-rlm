@@ -1997,8 +1997,7 @@ components:
         available:
           type: boolean
           title: Available
-          description: Whether the legacy MLflow-backed GEPA optimization path is
-            available.
+          description: Whether the MLflow-backed GEPA optimization path is available.
         module_optimization_available:
           type: boolean
           title: Module Optimization Available

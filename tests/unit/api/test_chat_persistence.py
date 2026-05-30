@@ -8,7 +8,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_load_manifest_from_volume_falls_back_to_legacy_path(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_load_manifest_from_volume_reads_current_conversation_path(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.api.runtime_services.chat_persistence import load_manifest_from_volume
     from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
@@ -17,8 +17,6 @@ async def test_load_manifest_from_volume_falls_back_to_legacy_path(monkeypatch: 
     class FakeDaytonaSession:
         async def aread_file(self, path: str) -> str:
             reads.append(path)
-            if path.endswith("/sessions/session-1/conversation.json"):
-                raise FileNotFoundError(path)
             return json.dumps({"rev": 7, "state": {"history": []}})
 
     async def fake_get_session(self):
@@ -33,14 +31,10 @@ async def test_load_manifest_from_volume_falls_back_to_legacy_path(monkeypatch: 
     manifest = await load_manifest_from_volume(
         agent,
         "sessions/session-1/conversation.json",
-        fallback_paths=["meta/workspaces/owner/users/workspace/react-session-session-1.json"],
     )
 
     assert manifest["rev"] == 7
-    assert reads == [
-        "/data/sessions/session-1/conversation.json",
-        "/data/meta/workspaces/owner/users/workspace/react-session-session-1.json",
-    ]
+    assert reads == ["/data/sessions/session-1/conversation.json"]
 
 
 @pytest.mark.asyncio

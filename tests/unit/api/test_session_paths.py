@@ -16,7 +16,7 @@ def test_session_conversation_path_uses_phase_one_sessions_root() -> None:
 
 
 def test_switch_manifest_path_uses_phase_one_sessions_root() -> None:
-    from fleet_rlm.api.routers.ws.session import _legacy_switch_manifest_path, _switch_manifest_path
+    from fleet_rlm.api.routers.ws.session import _switch_manifest_path
 
     assert (
         _switch_manifest_path(
@@ -25,12 +25,4 @@ def test_switch_manifest_path_uses_phase_one_sessions_root() -> None:
             session_id="session-1",
         )
         == "sessions/session-1/conversation.json"
-    )
-    assert (
-        _legacy_switch_manifest_path(
-            owner_id="owner-1",
-            workspace_id="workspace-1",
-            session_id="session-1",
-        )
-        == "meta/workspaces/owner-1/users/workspace-1/react-session-session-1.json"
     )

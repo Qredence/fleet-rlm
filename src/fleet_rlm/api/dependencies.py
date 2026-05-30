@@ -181,7 +181,7 @@ class ServerState:
 
 
 # ---------------------------------------------------------------------------
-# Legacy server-state accessors (used by tests and internal ws/ code)
+# Server-state accessors used by tests and internal ws/ code
 # ---------------------------------------------------------------------------
 
 
@@ -214,21 +214,6 @@ def _require_dep(app: Any, attr: str) -> Any:
     candidate = getattr(getattr(app, "state", None), attr, None)
     if candidate is not None:
         return candidate
-    # Fallback: try to extract from legacy server_state
-    server_state = getattr(getattr(app, "state", None), "server_state", None)
-    if isinstance(server_state, ServerState):
-        mapping = {
-            "config_deps": server_state.config_deps,
-            "lm_deps": server_state.lm_deps,
-            "auth_deps": server_state.auth_deps,
-            "session_cache_deps": server_state.session_cache_deps,
-            "persistence_deps": server_state.persistence_deps,
-            "diagnostics_deps": server_state.diagnostics_deps,
-            "interpreter_pool_deps": server_state.interpreter_pool_deps,
-        }
-        dep = mapping.get(attr)
-        if dep is not None:
-            return dep
     raise RuntimeError(f"Server dependency '{attr}' is not initialized. Ensure FastAPI lifespan startup has completed.")
 
 

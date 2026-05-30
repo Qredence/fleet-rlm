@@ -57,14 +57,8 @@ def resolve_daytona_config(
 
     api_key = values.get("DAYTONA_API_KEY", "").strip()
     api_url = values.get("DAYTONA_API_URL", "").strip()
-    base_url = values.get("DAYTONA_API_BASE_URL", "").strip()
     target = values.get("DAYTONA_TARGET", "").strip() or None
 
-    if not api_url and base_url:
-        raise DaytonaConfigError(
-            "Found DAYTONA_API_BASE_URL, but the Daytona SDK expects "
-            "DAYTONA_API_URL. Rename DAYTONA_API_BASE_URL to DAYTONA_API_URL."
-        )
     if not api_key:
         raise DaytonaConfigError("Missing DAYTONA_API_KEY. Set DAYTONA_API_KEY before using Daytona commands.")
     if not api_url:

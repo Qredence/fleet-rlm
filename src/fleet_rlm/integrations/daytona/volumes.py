@@ -135,8 +135,21 @@ _VOLUME_READY_STATES = frozenset({"ready"})
 _VOLUME_ERROR_STATES = frozenset({"error", "failed", "deleted"})
 
 # Canonical VFS roots — the only first-level path components allowed in volume
-# tree and file operations.  Any other component is an authorization error.
-VFS_CANONICAL_ROOTS: frozenset[str] = frozenset({"/memory", "/artifacts", "/buffers", "/meta"})
+# tree and file operations. Any other component is an authorization error.
+VFS_CANONICAL_ROOTS: frozenset[str] = frozenset(
+    {
+        "/memory",
+        "/artifacts",
+        "/buffers",
+        "/meta",
+        "/memories",
+        "/knowledge",
+        "/skills",
+        "/sessions",
+        "/logs",
+        "/uploads",
+    }
+)
 
 
 def ensure_remote_directory(fs: Any, remote_path: PurePosixPath) -> None:

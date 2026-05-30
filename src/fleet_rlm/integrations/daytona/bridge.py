@@ -393,9 +393,6 @@ class DaytonaToolBridge:
     async def async_tools(self, tools: dict[str, Callable[..., Any]]) -> None:
         await _run_sync_in_thread(self.register_tools, tools)
 
-    # Keep legacy alias for public API compatibility
-    sync_tools = register_tools
-
     def execute_tool_call(
         self,
         *,
@@ -487,9 +484,6 @@ class DaytonaToolBridge:
             on_stdout=on_stdout,
             on_stderr=on_stderr,
         )
-
-    # Keep legacy alias for public API compatibility
-    execute = execute_tool_call
 
     def close(self) -> None:
         session_id = self._broker_session_id

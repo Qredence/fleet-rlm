@@ -120,18 +120,18 @@ def check_orphans(docs_root: Path, files: list[Path]) -> list[str]:
     return errors
 
 
-def check_legacy_paths(docs_root: Path) -> list[str]:
+def check_archived_paths(docs_root: Path) -> list[str]:
     errors: list[str] = []
 
     for dirname in LEGACY_DOC_DIRS:
         candidate = docs_root / dirname
         if candidate.exists():
-            errors.append(f"legacy docs directory still present: {candidate}")
+            errors.append(f"archived docs directory still present: {candidate}")
 
     for marker in LEGACY_EXPLANATION_MARKERS:
         candidate = docs_root / marker
         if candidate.exists():
-            errors.append(f"legacy explanation artifact still present: {candidate}")
+            errors.append(f"archived explanation artifact still present: {candidate}")
 
     return errors
 
@@ -182,7 +182,7 @@ def run_checks(repo_root: Path, *, include_contract_checks: bool = True) -> list
     errors.extend(check_internal_links(docs_root, files))
     errors.extend(check_banned_link_schemes(docs_root, files))
     errors.extend(check_orphans(docs_root, files))
-    errors.extend(check_legacy_paths(docs_root))
+    errors.extend(check_archived_paths(docs_root))
 
     if include_contract_checks:
         errors.extend(check_contract_sanity(repo_root))

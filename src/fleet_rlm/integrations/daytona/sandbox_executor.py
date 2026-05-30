@@ -574,7 +574,7 @@ def _ensure_bridge(
         owner._bridge_context_id = context_id
     else:
         bridge.bind_context(context)
-    bridge.sync_tools(tools)
+    bridge.register_tools(tools)
     return bridge
 
 
@@ -779,7 +779,7 @@ def run_prepared_execution(
             context=context,
             tools=tools,
         )
-        return bridge.execute(
+        return bridge.execute_tool_call(
             code=code,
             timeout=int(owner.execute_timeout or owner.timeout),
             tool_executor=lambda name, args, kwargs: owner._invoke_tool(name, args, kwargs),

@@ -113,8 +113,8 @@ Important rules:
 
 ## Runtime And Workbench Contract
 
-The workspace runtime is Daytona-backed and the UI treats `daytona_pilot` as
-the public runtime label.
+The workspace runtime is Daytona-backed. Request-side provider labels are not
+part of the public frontend/backend contract.
 
 The frontend keeps the following runtime controls aligned with backend requests:
 

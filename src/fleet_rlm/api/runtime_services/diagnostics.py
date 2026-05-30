@@ -91,13 +91,11 @@ def daytona_preflight(
     api_key = (os.environ.get("DAYTONA_API_KEY") or "").strip()
     api_url = (os.environ.get("DAYTONA_API_URL") or "").strip()
     target = (os.environ.get("DAYTONA_TARGET") or "").strip()
-    legacy_api_base = (os.environ.get("DAYTONA_API_BASE_URL") or "").strip()
 
     checks = {
         "api_key_set": bool(api_key),
         "api_url_set": bool(api_url),
         "target_set": bool(target),
-        "legacy_api_base_url_ok": not bool(legacy_api_base),
         "configured": False,
     }
 
@@ -109,9 +107,6 @@ def daytona_preflight(
         checks["configured"] = True
     except DaytonaConfigError as exc:
         guidance.append(str(exc))
-
-    if legacy_api_base:
-        guidance.append("DAYTONA_API_BASE_URL is not supported here. Use DAYTONA_API_URL instead.")
 
     deduped_guidance: list[str] = []
     for item in guidance:

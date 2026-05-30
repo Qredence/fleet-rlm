@@ -62,7 +62,7 @@ def test_db_has_correct_schema(tmp_path: Path) -> None:
     assert "updated_at" in col_names
 
 
-def test_migrates_legacy_db_with_rows_idempotently(tmp_path: Path) -> None:
+def test_migrates_existing_db_with_rows_idempotently(tmp_path: Path) -> None:
     memories = tmp_path / "memories"
     memories.mkdir()
     db_path = memories / "core.db"
@@ -71,7 +71,7 @@ def test_migrates_legacy_db_with_rows_idempotently(tmp_path: Path) -> None:
         "CREATE TABLE memory "
         "(key TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
     )
-    conn.execute("INSERT INTO memory(key, value) VALUES ('legacy', 'kept')")
+    conn.execute("INSERT INTO memory(key, value) VALUES ('existing', 'kept')")
     conn.commit()
     conn.close()
 
@@ -81,14 +81,14 @@ def test_migrates_legacy_db_with_rows_idempotently(tmp_path: Path) -> None:
     conn = sqlite3.connect(str(db_path))
     columns = {row[1] for row in conn.execute("PRAGMA table_info(memory)").fetchall()}
     row = conn.execute(
-        "SELECT key, value, scope, writer_agent_depth, updated_at FROM memory WHERE key = 'legacy'"
+        "SELECT key, value, scope, writer_agent_depth, updated_at FROM memory WHERE key = 'existing'"
     ).fetchone()
     migration_rows = conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     conn.close()
 
     assert {"scope", "writer_agent_depth", "updated_at"} <= columns
-    assert row[0] == "legacy"
+    assert row[0] == "existing"
     assert row[1] == "kept"
     assert row[2] == "core"
     assert row[3] == 0
