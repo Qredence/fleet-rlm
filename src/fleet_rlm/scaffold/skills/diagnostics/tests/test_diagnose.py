@@ -7,8 +7,9 @@ from pathlib import Path
 def load_script():
     path = Path(__file__).resolve().parents[1] / "scripts" / "diagnose.py"
     spec = importlib.util.spec_from_file_location("diagnose", path)
-    module = importlib.util.module_from_spec(spec)
+    assert spec is not None
     assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 

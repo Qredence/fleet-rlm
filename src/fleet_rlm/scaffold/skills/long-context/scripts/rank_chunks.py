@@ -4,12 +4,9 @@ from __future__ import annotations
 import argparse
 import re
 
-try:
-    from defaults import DEFAULT_CHUNK_SIZE, DEFAULT_CHUNKS_DIR, DEFAULT_STATE_PATH
-except ImportError:
-    DEFAULT_CHUNK_SIZE = 200_000
-    DEFAULT_STATE_PATH = ".codex/rlm_state/state.pkl"
-    DEFAULT_CHUNKS_DIR = ".codex/rlm_state/chunks"
+DEFAULT_CHUNK_SIZE = 200_000
+DEFAULT_STATE_PATH = ".codex/rlm_state/state.pkl"
+DEFAULT_CHUNKS_DIR = ".codex/rlm_state/chunks"
 
 
 def load_context(state_path: str) -> str:
@@ -53,11 +50,7 @@ def rank_chunks_by_query(
         "too",
         "use",
     }
-    keywords = [
-        w.lower()
-        for w in re.findall(r"\b\w{3,}\b", query)
-        if w.lower() not in stopwords
-    ]
+    keywords = [w.lower() for w in re.findall(r"\b\w{3,}\b", query) if w.lower() not in stopwords]
 
     if not keywords:
         scores = []
