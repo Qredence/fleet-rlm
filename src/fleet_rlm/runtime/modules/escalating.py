@@ -98,6 +98,11 @@ class EscalatingFleetModule(dspy.Module):
         self._summary_interval = summary_interval
         self._turn_count = 0
 
+        from fleet_rlm.runtime.modules.skill_selection import SkillSelectionModule
+
+        volume_mount_path = getattr(interpreter, "volume_mount_path", None) if interpreter else None
+        self._skill_selector = SkillSelectionModule(volume_mount_path=volume_mount_path)
+
         self.respond = dspy.ChainOfThought(RLMReActChatSignature)
         self.summarize = dspy.ChainOfThought(ConversationSummarySignature)
 
@@ -149,6 +154,19 @@ class EscalatingFleetModule(dspy.Module):
             logger.warning("Conversation summary failed, returning truncated history: %s", exc)
             return history_text[-4000:]
 
+    def _enrich_with_skills(self, user_request: str, core_memory: str) -> str:
+        """Select relevant skills and append their instructions to core_memory."""
+        try:
+            selection = self._skill_selector(user_request=user_request, core_memory=core_memory)
+            skill_context = str(getattr(selection, "skill_context", "") or "")
+            if skill_context:
+                selected = getattr(selection, "selected_skills", [])
+                logger.debug("SkillSelection: injected %s", selected)
+                return f"{core_memory}\n\n[Active Skills]\n{skill_context}" if core_memory else skill_context
+        except Exception as exc:
+            logger.debug("SkillSelection: skipped (%s)", exc)
+        return core_memory
+
     def forward(
         self,
         *,
@@ -182,6 +200,8 @@ class EscalatingFleetModule(dspy.Module):
             history = dspy.History(messages=[])
 
         self._turn_count += 1
+
+        core_memory = self._enrich_with_skills(user_request, core_memory)
 
         if _is_rlm_execution_mode(execution_mode) or force_escalate:
             logger.debug("EscalatingFleetModule: forced RLM path (mode=%s)", execution_mode)

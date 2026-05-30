@@ -1,24 +1,21 @@
-# fleet-rlm — Bundled Claude Code Skills
+# fleet-rlm — Bundled Agent Skills
 
 These skills ship inside the `fleet-rlm` Python package. They are reference
 documents that explain how to drive fleet-rlm's recursive DSPy + Daytona
-runtime from Claude Code (or any agent that loads skill markdown).
+runtime from Claude Code, Codex, or any agent that loads skill markdown.
 
 ## What's Here
 
-| Skill                 | Purpose                                                            |
-| --------------------- | ------------------------------------------------------------------ |
-| `rlm`                 | Top-level mental model — ReAct + `dspy.RLM` over Daytona sandboxes |
-| `daytona-runtime`     | Daytona execution path: volume layout, repo staging, smoke test    |
-| `daytona-sandbox`     | Sandbox lifecycle, interpreter surface, stateful execution         |
-| `dspy-signature`      | Writing `dspy.Signature` subclasses for RLM tasks                  |
-| `rlm-execute`         | Running Python in a Daytona sandbox with durable persistence       |
-| `rlm-long-context`    | Decomposing documents that exceed a single context window          |
-| `rlm-batch`           | Batched recursive work with a shared LLM-call budget               |
-| `rlm-memory`          | Session memory, core memory, and durable volume layout             |
-| `rlm-run`             | End-to-end RLM invocation with parent + child bounds               |
-| `rlm-test-suite`      | Regression patterns for `dspy.RLM` programs                        |
-| `rlm-debug`           | Failure diagnosis and contract debugging                           |
+| Skill               | Purpose                                                              |
+| ------------------- | -------------------------------------------------------------------- |
+| `rlm`              | Hub router — core model + decision tree pointing to the right skill  |
+| `sandbox-execution` | Execute Python in Daytona sandboxes with durable volume persistence  |
+| `delegation`        | Recursive child RLMs, batch fan-out, budget management               |
+| `dspy-programs`     | Signature design, module registry, execution mode selection           |
+| `long-context`      | Chunking strategies, variable-mode, hierarchical map-reduce          |
+| `optimization`      | GEPA/MIPROv2 optimization loops, evaluation metrics, MLflow tracking |
+| `diagnostics`       | Symptom→cause decision tree, test lane selection, error catalog       |
+| `volume-bootstrap`  | In-sandbox volume filesystem contract, CRUD helpers, persistence guarantees |
 
 Each skill is a directory containing a `SKILL.md` (with YAML frontmatter)
 plus optional `references/` and `scripts/` subdirectories.
@@ -40,12 +37,12 @@ for skill_dir in skills_root.iterdir():
         print(skill_dir.name, "->", skill_md.read_text()[:80])
 ```
 
-## How to Consume Them from Claude Code
+## How to Consume Them from an Agent
 
 There are two common patterns:
 
-1. **Point Claude Code at the package location.** After `uv add fleet-rlm`,
-   resolve the skills root once and add it to your Claude Code skills search
+1. **Point the agent at the package location.** After `uv add fleet-rlm`,
+   resolve the skills root once and add it to your agent's skills search
    path:
 
    ```bash
@@ -53,7 +50,7 @@ There are two common patterns:
        print(files('fleet_rlm.scaffold') / 'skills')"
    ```
 
-   Use the printed path in your Claude Code configuration.
+   Use the printed path in your agent configuration.
 
 2. **Copy a specific skill into your project.** If you want a skill to live
    alongside your own project's skills (for local edits), copy just the one
@@ -64,8 +61,8 @@ There are two common patterns:
    from importlib.resources import files
    from pathlib import Path
    import shutil
-   src = files('fleet_rlm.scaffold') / 'skills' / 'rlm-long-context'
-   shutil.copytree(src, Path('.claude/skills/rlm-long-context'))
+   src = files('fleet_rlm.scaffold') / 'skills' / 'long-context'
+   shutil.copytree(src, Path('.codex/skills/long-context'))
    "
    ```
 
@@ -73,18 +70,21 @@ There are two common patterns:
 
 ## When to Use Which Skill
 
-- Starting a new fleet-rlm workflow? Load `rlm` first — it frames the mental
-  model and points at the others.
-- Driving execution in a specific Daytona sandbox? `daytona-runtime` +
-  `rlm-execute`.
-- Processing a document larger than one context window? `rlm-long-context`.
-- Something broke at runtime? `rlm-debug`, then narrow from there.
+Start with `rlm` — it contains a decision tree that routes you to the right
+workflow skill based on what you're trying to accomplish:
+
+- **Execute code** → `sandbox-execution`
+- **Delegate recursively** → `delegation`
+- **Design signatures/modules** → `dspy-programs`
+- **Process large documents** → `long-context`
+- **Optimize programs** → `optimization`
+- **Diagnose failures** → `diagnostics`
 
 ## Stability
 
 These skills document `fleet-rlm`'s runtime API at the version they ship
-with. The surface they describe — `FleetAgent`, `dspy.RLM`, `DaytonaInterpreter`,
-`delegate_to_rlm()`, `sub_rlm()` — is the canonical runtime contract of the
-repo. If you find a skill referencing a module or function that no longer
-exists, file an issue: the skill is out of date relative to its shipped
-version.
+with. The surface they describe — `AgentRuntime`, `EscalatingFleetModule`,
+`dspy.RLM`, `DaytonaInterpreter`, `delegate_to_rlm()`, `sub_rlm()` — is the
+canonical runtime contract. If you find a skill referencing a module or
+function that no longer exists, file an issue: the skill is out of date
+relative to its shipped version.

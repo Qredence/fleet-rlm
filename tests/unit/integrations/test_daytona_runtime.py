@@ -329,6 +329,23 @@ def test_daytona_volume_layout_matches_phase_one_skeleton() -> None:
     assert any(path.startswith("/data/skills/system/") and path.endswith(".md") for _, path in uploads)
 
 
+def test_daytona_volume_browser_allows_durable_phase_roots() -> None:
+    from fleet_rlm.integrations.daytona.volumes import VFS_CANONICAL_ROOTS
+
+    assert {
+        "/memory",
+        "/artifacts",
+        "/buffers",
+        "/meta",
+        "/memories",
+        "/knowledge",
+        "/skills",
+        "/sessions",
+        "/logs",
+        "/uploads",
+    } <= VFS_CANONICAL_ROOTS
+
+
 def test_store_evidence_redacts_credentials_from_bridge_errors() -> None:
     from fleet_rlm.integrations.daytona.isolation import store_evidence
 

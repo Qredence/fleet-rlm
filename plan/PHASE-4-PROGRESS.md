@@ -62,7 +62,7 @@ _None_
 
 ## Pending
 
-- **Live Daytona verification**: Run `FLEET_MAX_CONCURRENT_SANDBOXES=2 uv run python scripts/live_concurrency_verify.py` against live Daytona
+_None — Phase 4 is closed._
 
 ## Validation Log
 
@@ -73,6 +73,7 @@ _None_
 - `uv run pytest tests/unit/integrations/test_daytona_runtime.py` — 6/6 pass
 - `uv run pytest tests/unit/runtime/test_tools.py tests/unit/runtime/test_phase3_tools.py` — 17/17 pass
 - `uv run pytest tests/unit/` — 71/71 pass (post-architectural deepening + dead file cleanup)
+- Live Daytona concurrency verification: `FLEET_MAX_CONCURRENT_SANDBOXES=2 uv run python scripts/live_concurrency_verify.py` — pass.
 
 ## Architecture
 

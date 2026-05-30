@@ -7,8 +7,8 @@ Phase 3 builds the essential tool set for reasoning, coding, web research, docum
 ## Phase 2 Prerequisite Check
 
 - **Escalating agent module:** `EscalatingFleetModule` exists with ChainOfThought-to-RLM escalation and focused unit coverage.
-- **Runtime wiring status:** `AgentRuntime` still defaults to `use_escalation=False`, so Phase 2 is available as an opt-in path rather than the default runtime path.
-- **Decision for Phase 3:** Keep Phase 3 focused on essential tool availability and track Phase 2 default wiring separately unless product scope changes.
+- **Runtime wiring status:** `AgentRuntime` and `build_chat_agent()` now default to `use_escalation=True`; `FLEET_RLM_USE_ESCALATING_RUNTIME=false` is the rollback toggle.
+- **Decision for Phase 3:** Tool availability remains independent from the Phase 2 default wiring, but the prerequisite is now closed.
 
 ## Completed
 
@@ -27,10 +27,7 @@ _None — initial Phase 3 tool-set slice is complete._
 
 ## Pending
 
-- **Phase 2 default wiring:** Decide whether `use_escalation=True` should become the default runtime path.
-- **Search provider configuration:** `web_search` uses environment-provided API keys and should be validated with a live provider before Phase 3 closeout.
-- **Optional parsing dependencies:** `readability-lxml`, `beautifulsoup4`, `lxml`, `pdfplumber`, and `python-docx` remain dependency candidates; Phase 3 starts with stdlib/installed dependency behavior unless richer extraction becomes required.
-- **Live Daytona verification:** Run an end-to-end Daytona session that loads a document, persists knowledge, searches it, loads a skill, and uses memory tools.
+_None — Phase 3 is closed. Live Brave provider evidence is skipped when neither `BRAVE_SEARCH_API_KEY` nor `BRAVE_API_KEY` is configured._
 
 ## Validation Log
 
@@ -39,3 +36,4 @@ _None — initial Phase 3 tool-set slice is complete._
 - `make lint` — pass.
 - `make typecheck` — pass.
 - Pydantic migration added `src/fleet_rlm/runtime/tools/schemas.py` with typed input/output models for all Phase 3 tools; updated tool implementations, binding, and tests; validation passed after reformat and import sorting.
+- Phase 3 closeout: live Daytona layout verification passed via `uv run python scripts/live_daytona_verify.py`; live Brave web-search evidence was skipped because no Brave provider key was configured locally.

@@ -11,6 +11,7 @@ Architecture:
     - ``grounded_answer`` — chunking + grounded-answer synthesis
     - ``memory`` — memory-tree priming and audit/action/migration/clarification
     - ``registry`` — name→definition mapping and cached build helpers
+    - ``skill_selection`` — proactive skill selection and context injection
     - ``variable_mode`` — variable-mode RLM execution wrapper
     - ``workspace`` — multi-pass recursive workspace orchestrator
 """
@@ -46,6 +47,10 @@ from fleet_rlm.runtime.modules.registry import (
     build_runtime_module,
     get_or_build_runtime_module,
     runtime_module_class,
+)
+from fleet_rlm.runtime.modules.skill_selection import (
+    AVAILABLE_SKILLS,
+    SkillSelectionModule,
 )
 from fleet_rlm.runtime.modules.variable_mode import (
     VARIABLE_MODE_MAX_OUTPUT_CHARS,
@@ -90,6 +95,9 @@ __all__ = [
     "build_runtime_module",
     "get_or_build_runtime_module",
     "runtime_module_class",
+    # Skill Selection
+    "AVAILABLE_SKILLS",
+    "SkillSelectionModule",
     # Variable Mode
     "RLMVariableExecutionModule",
     "VARIABLE_MODE_MAX_OUTPUT_CHARS",

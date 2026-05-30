@@ -42,7 +42,7 @@ The current implementation treats these Daytona docs as the normative baseline:
   shared `dspy.RLM` path:
   - `FleetAgent` (wrapped by `AgentRuntime`) remains the top-level conversational runtime
   - long-context and recursive execution flow through `dspy.RLM`
-  - `spawn_delegate_sub_agent_async` is the single recursive child-run path
+  - `delegate_to_rlm()` / `delegate_to_rlm_batched()` route through the single Daytona child-isolation path
   - `llm_query` and `llm_query_batched` are semantic-only sandbox callbacks
   - `rlm_query` is the shared agent-level recursive entrypoint
   - `rlm_query_batched` is a Daytona-only agent-level recursive entrypoint for now
@@ -50,11 +50,11 @@ The current implementation treats these Daytona docs as the normative baseline:
 
 ## Current Runtime Shape
 
-- `daytona_pilot` is the public runtime path built on the shared ReAct +
-  `dspy.RLM` runtime architecture.
+- The public runtime is Daytona-backed and built on `AgentRuntime` plus the
+  shared recursive DSPy runtime architecture.
 - The maintained interpreter implementation is `DaytonaInterpreter`.
 - Websocket session switching must use the async agent/session reset path (`agent.areset(...)`) when clearing Daytona sandbox buffers for a fresh or restored session without saved state.
-- `AgentRuntime` (wrapping `FleetAgent`) is the canonical shared DSPy agent and carries the
+- `AgentRuntime` (defaulting to `EscalatingFleetModule`) is the canonical shared DSPy agent and carries the
   Daytona workspace/session metadata needed by the workbench runtime.
 - The Daytona provider now exposes its canonical implementation modules directly
   at the provider root:

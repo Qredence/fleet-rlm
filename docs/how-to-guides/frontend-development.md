@@ -50,7 +50,7 @@ Frontend source lives under `src/frontend/src/`.
 - `/api/v1/ws/execution/events` is the passive execution subscription stream.
 - The workbench should hydrate from `execution_completed.summary` and
   `final_artifact`.
-- `daytona_pilot` is the public runtime label in the UI.
+- The UI treats the workbench runtime as Daytona-backed; request-side provider labels are not part of the public contract.
 - Runtime controls stay aligned with `execution_mode`, `repo_url`, `repo_ref`,
   `context_paths`, and `batch_concurrency`.
 
