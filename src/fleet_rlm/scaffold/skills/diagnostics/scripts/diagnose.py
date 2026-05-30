@@ -28,7 +28,7 @@ def check_daytona() -> bool:
     print("\n--- Daytona ---")
     api_key = status("DAYTONA_API_KEY", bool(os.environ.get("DAYTONA_API_KEY")), "hidden")
     api_url_value = os.environ.get("DAYTONA_API_URL", "")
-    api_url = status("DAYTONA_API_URL", bool(api_url_value), api_url_value)
+    api_url = status("DAYTONA_API_URL", bool(api_url_value), "set" if api_url_value else "")
     try:
         result = subprocess.run(
             ["daytona", "version"],
@@ -50,7 +50,8 @@ def check_env() -> bool:
     print("\n--- Environment ---")
     env_path = Path(".env")
     env_ok = status(".env file", env_path.exists(), f"{env_path.stat().st_size} bytes" if env_path.exists() else "")
-    model_ok = status("DSPY_LM_MODEL", bool(os.environ.get("DSPY_LM_MODEL")), os.environ.get("DSPY_LM_MODEL", ""))
+    model_value = os.environ.get("DSPY_LM_MODEL", "")
+    model_ok = status("DSPY_LM_MODEL", bool(model_value), "set" if model_value else "")
     api_key = os.environ.get("DSPY_LLM_API_KEY", "") or os.environ.get("DSPY_LM_API_KEY", "")
     key_ok = status("DSPY_LLM_API_KEY", bool(api_key), "hidden")
     return env_ok and model_ok and key_ok
