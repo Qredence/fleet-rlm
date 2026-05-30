@@ -8,27 +8,27 @@ from importlib.util import find_spec
 from pathlib import Path
 
 
-def status(label: str, ok: bool) -> bool:
-    state = "OK" if ok else "FAIL"
+def print_status(label: str, state: str) -> None:
     print(f"  {label:18s}: {state}")
-    return ok
 
 
 def secret_status(label: str, value: str) -> bool:
-    print(f"  {label:18s}: REDACTED")
+    print_status(label, "REDACTED")
     return bool(value)
 
 
 def env_presence_status(label: str, value: str) -> bool:
-    print(f"  {label:18s}: CHECKED")
+    print_status(label, "CHECKED")
     return bool(value)
 
 
 def check_fleet_rlm() -> bool:
     print("\n--- fleet-rlm ---")
     if find_spec("fleet_rlm") is None:
-        return status("package", False)
-    return status("package", True)
+        print_status("package", "FAIL")
+        return False
+    print_status("package", "OK")
+    return True
 
 
 def check_daytona() -> bool:
@@ -44,18 +44,19 @@ def check_daytona() -> bool:
             timeout=10,
             check=False,
         )
-        status("daytona cli", True)
+        print_status("daytona cli", "OK")
     except subprocess.TimeoutExpired:
-        status("daytona cli", False)
+        print_status("daytona cli", "FAIL")
     except FileNotFoundError:
-        status("daytona cli", True)
+        print_status("daytona cli", "OK")
     return api_key and api_url
 
 
 def check_env() -> bool:
     print("\n--- Environment ---")
     env_path = Path(".env")
-    env_ok = status(".env file", env_path.exists())
+    env_ok = env_path.exists()
+    print_status(".env file", "OK" if env_ok else "FAIL")
     model_value = os.environ.get("DSPY_LM_MODEL", "")
     model_ok = env_presence_status("DSPY_LM_MODEL", model_value)
     api_key = os.environ.get("DSPY_LLM_API_KEY", "") or os.environ.get("DSPY_LM_API_KEY", "")
@@ -86,11 +87,11 @@ def main() -> None:
     print("\n" + "=" * 40)
     print("Summary")
     print("=" * 40)
-    results = [status(name, passed) for name, passed in checks]
+    results = [passed for _name, passed in checks]
     if all(results):
         print("\nAll checks passed.")
         return
-    print(f"\nFailed checks: {results.count(False)}")
+    print("\nOne or more checks failed.")
     sys.exit(1)
 
 
