@@ -14,6 +14,11 @@ def status(label: str, ok: bool, detail: str = "") -> bool:
     return ok
 
 
+def secret_status(label: str, value: str) -> bool:
+    print(f"  {label:18s}: REDACTED")
+    return bool(value)
+
+
 def check_fleet_rlm() -> bool:
     print("\n--- fleet-rlm ---")
     try:
@@ -26,7 +31,7 @@ def check_fleet_rlm() -> bool:
 
 def check_daytona() -> bool:
     print("\n--- Daytona ---")
-    api_key = status("DAYTONA_API_KEY", bool(os.environ.get("DAYTONA_API_KEY")), "hidden")
+    api_key = secret_status("DAYTONA_API_KEY", os.environ.get("DAYTONA_API_KEY", ""))
     api_url_value = os.environ.get("DAYTONA_API_URL", "")
     api_url = status("DAYTONA_API_URL", bool(api_url_value), "set" if api_url_value else "")
     try:
@@ -53,7 +58,7 @@ def check_env() -> bool:
     model_value = os.environ.get("DSPY_LM_MODEL", "")
     model_ok = status("DSPY_LM_MODEL", bool(model_value), "set" if model_value else "")
     api_key = os.environ.get("DSPY_LLM_API_KEY", "") or os.environ.get("DSPY_LM_API_KEY", "")
-    key_ok = status("DSPY_LLM_API_KEY", bool(api_key), "hidden")
+    key_ok = secret_status("DSPY_LLM_API_KEY", api_key)
     return env_ok and model_ok and key_ok
 
 
