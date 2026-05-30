@@ -17,7 +17,14 @@ def test_phase3_tools_are_registered() -> None:
 
     names = set(list_react_tool_names(discover_tools()))
 
-    assert {"web_search", "fetch_page", "search_knowledge", "load_skill", "load_document"} <= names
+    assert {
+        "web_search",
+        "fetch_page",
+        "fetch_document_text",
+        "search_knowledge",
+        "load_skill",
+        "load_document",
+    } <= names
 
 
 def test_load_document_persists_and_searches_knowledge(tmp_path: Path) -> None:

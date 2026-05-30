@@ -341,6 +341,14 @@ def test_chunk_document_and_load_document_helpers_use_text_and_directories(tmp_p
     }
 
 
+def test_suffix_from_url_uses_case_insensitive_content_type_for_pdf() -> None:
+    from fleet_rlm.runtime.tools.document_tools import _suffix_from_url
+
+    suffix = _suffix_from_url("https://arxiv.org/pdf/2512.24601", {"content-type": "application/pdf"})
+
+    assert suffix == ".pdf"
+
+
 def test_download_url_removes_partial_temp_file_on_size_limit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

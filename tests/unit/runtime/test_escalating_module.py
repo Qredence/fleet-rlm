@@ -69,6 +69,19 @@ class TestEscalatingFleetModule:
         module._rlm.assert_called_once()
         assert getattr(result, "answer", None) == "deep answer"
 
+    def test_url_fetch_request_forces_rlm_before_lightweight_response(self) -> None:
+        module = _make_module()
+        _stub_respond(module, reasoning="I cannot browse the live web.", response="no web access")
+        rlm_pred = _FakePrediction(answer="fetched document")
+        module._rlm = MagicMock(return_value=rlm_pred)
+        _stub_summarize(module)
+
+        result = module(user_request="fetch https://arxiv.org/pdf/2512.24601 please", execution_mode="auto")
+
+        module.respond.assert_not_called()
+        module._rlm.assert_called_once()
+        assert getattr(result, "answer", None) == "fetched document"
+
     def test_force_escalate_skips_cot(self) -> None:
         module = _make_module()
         _stub_respond(module)

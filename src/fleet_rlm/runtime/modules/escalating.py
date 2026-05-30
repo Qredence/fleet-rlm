@@ -13,6 +13,7 @@ Escalation is triggered when:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import dspy
@@ -26,10 +27,26 @@ logger = logging.getLogger(__name__)
 
 ESCALATION_SENTINEL = "[TOOLS NEEDED]"
 _RLM_FALLBACK_WARNING = "RLM escalation failed; returned a lightweight fallback response."
+_LIVE_WEB_URL_RE = re.compile(r"https?://[^\s<>'\"]+", flags=re.IGNORECASE)
+_LIVE_WEB_REQUEST_RE = re.compile(
+    r"\b("
+    r"browse|download|fetch|open|read|retrieve|scrape|summari[sz]e"
+    r")\b.*\b("
+    r"internet|online|page|pdf|site|url|web|website"
+    r")\b",
+    flags=re.IGNORECASE,
+)
 
 
 def _is_rlm_execution_mode(execution_mode: str) -> bool:
     return execution_mode in {"rlm", "rlm_only"}
+
+
+def _requires_live_web_tools(user_request: str) -> bool:
+    """Return whether a turn should skip lightweight chat and use web-capable tools."""
+    if _LIVE_WEB_URL_RE.search(user_request):
+        return True
+    return bool(_LIVE_WEB_REQUEST_RE.search(user_request))
 
 
 def _history_value(message: Any, *keys: str) -> str:
@@ -185,6 +202,14 @@ class EscalatingFleetModule(dspy.Module):
 
         if _is_rlm_execution_mode(execution_mode) or force_escalate:
             logger.debug("EscalatingFleetModule: forced RLM path (mode=%s)", execution_mode)
+            return self._run_rlm(
+                user_request=user_request,
+                core_memory=core_memory,
+                history=history,
+                conversation_summary=conversation_summary,
+            )
+        if _requires_live_web_tools(user_request):
+            logger.debug("EscalatingFleetModule: routing live-web request to RLM path")
             return self._run_rlm(
                 user_request=user_request,
                 core_memory=core_memory,

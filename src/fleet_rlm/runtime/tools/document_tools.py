@@ -119,7 +119,8 @@ def _suffix_from_url(url: str, headers: dict[str, str]) -> str:
     if url_suffix:
         return url_suffix
 
-    content_type = headers.get("Content-Type", "").split(";")[0].strip().lower()
+    content_type_header = next((value for key, value in headers.items() if key.lower() == "content-type"), "")
+    content_type = content_type_header.split(";")[0].strip().lower()
     return _CONTENT_TYPE_SUFFIX_MAP.get(content_type, ".txt")
 
 
@@ -270,6 +271,7 @@ def list_documents() -> dict[str, Any]:
     }
 
 
+@tool_fn
 def fetch_document_text(url_or_path: str) -> dict[str, Any]:
     """Fetch and extract text from an HTTP(S) document URL.
 
