@@ -19,6 +19,11 @@ def secret_status(label: str, value: str) -> bool:
     return bool(value)
 
 
+def env_presence_status(label: str, value: str) -> bool:
+    print(f"  {label:18s}: CHECKED")
+    return bool(value)
+
+
 def check_fleet_rlm() -> bool:
     print("\n--- fleet-rlm ---")
     try:
@@ -33,7 +38,7 @@ def check_daytona() -> bool:
     print("\n--- Daytona ---")
     api_key = secret_status("DAYTONA_API_KEY", os.environ.get("DAYTONA_API_KEY", ""))
     api_url_value = os.environ.get("DAYTONA_API_URL", "")
-    api_url = status("DAYTONA_API_URL", bool(api_url_value), "set" if api_url_value else "")
+    api_url = env_presence_status("DAYTONA_API_URL", api_url_value)
     try:
         result = subprocess.run(
             ["daytona", "version"],
@@ -56,7 +61,7 @@ def check_env() -> bool:
     env_path = Path(".env")
     env_ok = status(".env file", env_path.exists(), f"{env_path.stat().st_size} bytes" if env_path.exists() else "")
     model_value = os.environ.get("DSPY_LM_MODEL", "")
-    model_ok = status("DSPY_LM_MODEL", bool(model_value), "set" if model_value else "")
+    model_ok = env_presence_status("DSPY_LM_MODEL", model_value)
     api_key = os.environ.get("DSPY_LLM_API_KEY", "") or os.environ.get("DSPY_LM_API_KEY", "")
     key_ok = secret_status("DSPY_LLM_API_KEY", api_key)
     return env_ok and model_ok and key_ok
