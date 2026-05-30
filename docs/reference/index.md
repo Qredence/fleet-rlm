@@ -19,7 +19,7 @@ Implementation-facing contracts, interfaces, and current-state facts.
 - [Sandbox API](sandbox-api.md)
 - [Runs API](runs-api.md)
 - [Sandbox File System](sandbox-fs.md)
-- [Daytona Runtime Architecture](daytona-runtime-architecture.md)
+- [Daytona Architecture](daytona-architecture.md)
 
 ## Current Maps
 

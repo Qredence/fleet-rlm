@@ -56,7 +56,7 @@ Constructs an `AgentRuntime` wrapping `FleetAgent`. The maintained surface is in
 - `sub_lm` / `delegate_lm`
 - `repository`
 
-Daytona sandbox controls such as timeout, volume, recursion limits, child isolation, and delegate budgets belong on `DaytonaInterpreter`, server runtime config, or the interpreter pool. They are no longer accepted as no-op legacy kwargs by `build_chat_agent`.
+Daytona sandbox controls such as timeout, volume, recursion limits, child isolation, and delegate budgets belong on `DaytonaInterpreter`, server runtime config, or the interpreter pool. They are no longer accepted as no-op compatibility kwargs by `build_chat_agent`.
 
 ### `run_react_chat_once(...)` and `arun_react_chat_once(...)`
 

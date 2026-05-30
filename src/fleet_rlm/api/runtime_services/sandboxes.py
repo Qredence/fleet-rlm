@@ -14,7 +14,6 @@ from fleet_rlm.integrations.daytona.async_compat import _run_sync_in_thread
 from fleet_rlm.integrations.observability.sanitization import redact_sensitive
 from fleet_rlm.utils.sandbox_ownership import (
     SANDBOX_OWNER_LABEL,
-    sandbox_has_owner_label,
     sandbox_owner_matches,
 )
 
@@ -30,7 +29,6 @@ async def load_sandbox_list(
     limit: int = 100,
     *,
     owner_labels: dict[str, str] | None = None,
-    allow_unlabeled_legacy: bool = False,
 ) -> SandboxListResponse:
     """List active Daytona sandboxes.
 
@@ -43,7 +41,6 @@ async def load_sandbox_list(
 
         labels_filter = _list_labels_filter(
             owner_labels=owner_labels,
-            allow_unlabeled_legacy=allow_unlabeled_legacy,
         )
         result = await _list_sandboxes(
             client,
@@ -58,7 +55,6 @@ async def load_sandbox_list(
             if not _sandbox_is_accessible(
                 labels,
                 owner_labels=owner_labels,
-                allow_unlabeled_legacy=allow_unlabeled_legacy,
             ):
                 continue
             items.append(_sandbox_list_item(sandbox=sandbox, labels=labels))
@@ -77,7 +73,6 @@ async def load_sandbox_detail(
     sandbox_id: str,
     *,
     owner_labels: dict[str, str] | None = None,
-    allow_unlabeled_legacy: bool = False,
 ) -> SandboxDetailResponse:
     """Get detailed information for a single Daytona sandbox by ID.
 
@@ -91,7 +86,6 @@ async def load_sandbox_detail(
         _raise_if_sandbox_inaccessible(
             sandbox,
             owner_labels=owner_labels,
-            allow_unlabeled_legacy=allow_unlabeled_legacy,
         )
         return _sandbox_detail_response(sandbox)
     finally:
@@ -102,7 +96,6 @@ async def delete_sandbox(
     sandbox_id: str,
     *,
     owner_labels: dict[str, str] | None = None,
-    allow_unlabeled_legacy: bool = False,
 ) -> None:
     """Stop and delete a Daytona sandbox by ID.
 
@@ -116,7 +109,6 @@ async def delete_sandbox(
         _raise_if_sandbox_inaccessible(
             sandbox,
             owner_labels=owner_labels,
-            allow_unlabeled_legacy=allow_unlabeled_legacy,
         )
         await _management_session(sandbox).adelete()
     finally:
@@ -127,7 +119,6 @@ async def archive_sandbox(
     sandbox_id: str,
     *,
     owner_labels: dict[str, str] | None = None,
-    allow_unlabeled_legacy: bool = False,
 ) -> None:
     """Archive a Daytona sandbox by ID to cold storage.
 
@@ -141,7 +132,6 @@ async def archive_sandbox(
         _raise_if_sandbox_inaccessible(
             sandbox,
             owner_labels=owner_labels,
-            allow_unlabeled_legacy=allow_unlabeled_legacy,
         )
         await _management_session(sandbox).aarchive()
     finally:
@@ -178,9 +168,8 @@ def _management_session(sandbox: Any) -> Any:
 def _list_labels_filter(
     *,
     owner_labels: dict[str, str] | None,
-    allow_unlabeled_legacy: bool,
 ) -> dict[str, str] | None:
-    if allow_unlabeled_legacy or not owner_labels:
+    if not owner_labels:
         return None
     owner_value = owner_labels.get(SANDBOX_OWNER_LABEL)
     return {SANDBOX_OWNER_LABEL: owner_value} if owner_value else None
@@ -366,26 +355,21 @@ def _sandbox_is_accessible(
     labels: dict[str, str],
     *,
     owner_labels: dict[str, str] | None,
-    allow_unlabeled_legacy: bool,
 ) -> bool:
     owner_label = (owner_labels or {}).get(SANDBOX_OWNER_LABEL)
     if not owner_label:
-        return bool(allow_unlabeled_legacy and not sandbox_has_owner_label(labels))
-    if sandbox_owner_matches(labels, owner_label=owner_label):
-        return True
-    return bool(allow_unlabeled_legacy and not sandbox_has_owner_label(labels))
+        return False
+    return sandbox_owner_matches(labels, owner_label=owner_label)
 
 
 def _raise_if_sandbox_inaccessible(
     sandbox: Any,
     *,
     owner_labels: dict[str, str] | None,
-    allow_unlabeled_legacy: bool,
 ) -> None:
     if _sandbox_is_accessible(
         _sandbox_labels(sandbox),
         owner_labels=owner_labels,
-        allow_unlabeled_legacy=allow_unlabeled_legacy,
     ):
         return
     raise HTTPException(status_code=404, detail="Sandbox not found or inaccessible.")

@@ -120,7 +120,7 @@ class ApiKeysConfig(BaseModel):
         default=None,
         description="Primary provider API key for planner and fallback delegate LM calls.",
     )
-    legacy_lm_api_key: str | None = Field(
+    alternate_lm_api_key: str | None = Field(
         default=None,
         description="Backward-compatible LM provider API key.",
     )
@@ -312,7 +312,7 @@ class RlmSettings(BaseModel):
         default="auto",
         description=(
             "Recursive RLM child isolation policy. 'auto' creates isolated child "
-            "sandboxes; 'context' keeps legacy same-sandbox fresh-context execution."
+            "sandboxes; 'context' keeps context-mode same-sandbox fresh-context execution."
         ),
     )
     child_fork_fallback: Literal["clean", "fail"] = Field(
@@ -358,7 +358,7 @@ class AppConfig(BaseModel):
     analytics: AnalyticsConfig = Field(default_factory=AnalyticsConfig)
 
     @model_validator(mode="after")
-    def _sync_legacy_sections(self) -> AppConfig:
+    def _sync_runtime_sections(self) -> AppConfig:
         fields_set = set(self.model_fields_set)
         if "llm" in fields_set or "agent" not in fields_set:
             self.agent = AgentConfig(

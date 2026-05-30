@@ -197,7 +197,7 @@ Then verify the runtime path:
 uv run fleet-rlm daytona-smoke --repo https://github.com/qredence/fleet-rlm.git --ref main
 ```
 
-For runtime details, see [Daytona Runtime Architecture](../reference/daytona-runtime-architecture.md).
+For runtime details, see [Daytona Architecture](../reference/daytona-architecture.md).
 
 ## 6. Frontend Setup (Optional)
 
@@ -429,4 +429,4 @@ uv run pre-commit run --hook-stage pre-push --all-files
 
 - Read [CONTRIBUTING.md](../../CONTRIBUTING.md) for contribution guidelines and testing overview
 - Review [AGENTS.md](../../AGENTS.md) for project architecture and conventions
-- Check [Daytona Runtime Architecture](../reference/daytona-runtime-architecture.md) for runtime details
+- Check [Daytona Architecture](../reference/daytona-architecture.md) for runtime details

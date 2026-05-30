@@ -37,7 +37,7 @@ describe("backend contract lock", () => {
     );
   });
 
-  it("rejects deleted legacy chat ws URLs instead of using retired routes", async () => {
+  it("rejects deleted retired chat websocket URLs instead of using retired routes", async () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/chat");
     vi.stubEnv("VITE_FLEET_API_URL", "");
 

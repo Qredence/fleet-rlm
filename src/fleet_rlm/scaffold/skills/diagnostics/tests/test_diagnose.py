@@ -17,7 +17,7 @@ def load_script():
 diagnose = load_script()
 
 
-def test_check_env_accepts_legacy_dspy_key(monkeypatch, tmp_path) -> None:
+def test_check_env_accepts_dspy_lm_key(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
     Path(".env").write_text("DSPY_LM_MODEL=test\n", encoding="utf-8")
     monkeypatch.setenv("DSPY_LM_MODEL", "test-model")

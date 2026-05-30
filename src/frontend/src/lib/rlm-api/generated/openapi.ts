@@ -656,7 +656,7 @@ export interface components {
     GEPAStatusResponse: {
       /**
        * Available
-       * @description Whether the legacy MLflow-backed GEPA optimization path is available.
+       * @description Whether the MLflow-backed GEPA optimization path is available.
        */
       available: boolean;
       /**

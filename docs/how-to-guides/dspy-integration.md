@@ -353,7 +353,7 @@ Backend environment controls:
 
 | Variable | Values | Default | Purpose |
 | --- | --- | --- | --- |
-| `RLM_CHILD_ISOLATION_MODE` | `auto`, `context` | `auto` | `auto` isolates recursive RLM work in child sandboxes; `context` uses the legacy same-sandbox fresh context. |
+| `RLM_CHILD_ISOLATION_MODE` | `auto`, `context` | `auto` | `auto` isolates recursive RLM work in child sandboxes; `context` uses the context-mode same-sandbox fresh context. |
 | `RLM_CHILD_FORK_FALLBACK` | `clean`, `fail` | `clean` | When no-volume fork creation fails, retry a clean child sandbox or fail closed. |
 
 ### Execution Profiles
@@ -564,5 +564,5 @@ agent = FleetAgent(tools=[...], max_iters=4)
 
 - [DSPy Optimization and Evaluation](dspy-optimization-and-evaluation.md) - GEPA optimization, metrics, datasets, and evaluation workflows
 - [mlflow-workflows.md](mlflow-workflows.md) - MLflow tracing and optimization
-- [../reference/daytona-runtime-architecture.md](../reference/daytona-runtime-architecture.md) - Daytona runtime configuration
+- [../reference/daytona-architecture.md](../reference/daytona-architecture.md) - Daytona runtime configuration
 - [runtime-settings.md](runtime-settings.md) - Server runtime settings

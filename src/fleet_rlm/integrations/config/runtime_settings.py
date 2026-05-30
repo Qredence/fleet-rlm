@@ -288,7 +288,7 @@ RUNTIME_SETTINGS_KEYS: tuple[str, ...] = tuple(
 RUNTIME_SETTINGS_ALLOWLIST: frozenset[str] = frozenset(RUNTIME_SETTINGS_KEYS)
 RUNTIME_SETTING_DEFINITIONS: tuple[RuntimeSettingDefinition, ...] = _RUNTIME_SETTING_DEFINITIONS
 
-_LEGACY_SECRET_KEYS = frozenset({"DSPY_LM_API_KEY"})
+_ADDITIONAL_SECRET_KEYS = frozenset({"DSPY_LM_API_KEY"})
 _NON_SECRET_KEYS = frozenset(definition.key for definition in _RUNTIME_SETTING_DEFINITIONS if not definition.secret)
 
 _SENSITIVE_KEY_MARKERS = (
@@ -388,7 +388,7 @@ def should_mask_key(key: str) -> bool:
         return definition.secret
     if normalized in _NON_SECRET_KEYS:
         return False
-    return normalized in _LEGACY_SECRET_KEYS or any(marker in normalized for marker in _SENSITIVE_KEY_MARKERS)
+    return normalized in _ADDITIONAL_SECRET_KEYS or any(marker in normalized for marker in _SENSITIVE_KEY_MARKERS)
 
 
 def _is_masked_secret_round_trip(

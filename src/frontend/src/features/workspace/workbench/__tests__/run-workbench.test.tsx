@@ -114,7 +114,7 @@ vi.mock("@/features/workspace/use-workspace", () => ({
 }));
 
 describe("RunWorkbench", () => {
-  it("renders the analyst-oriented tabs and hides legacy tree framing", () => {
+  it("renders the analyst-oriented tabs and hides retired tree framing", () => {
     const html = renderToStaticMarkup(<RunWorkbench />);
 
     expect(html).toContain("Analysis warnings");

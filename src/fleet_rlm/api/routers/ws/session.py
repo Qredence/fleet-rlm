@@ -9,7 +9,7 @@ from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from fleet_rlm.api.runtime_services.session_paths import legacy_session_manifest_path, session_conversation_path
+from fleet_rlm.api.runtime_services.session_paths import session_conversation_path
 from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.utils.identity import owner_fingerprint, session_key
@@ -40,14 +40,6 @@ def _switch_manifest_path(*, owner_id: str, workspace_id: str, session_id: str) 
     if manifest_path is None:
         raise ValueError("owner_id, workspace_id, and session_id are required")
     return manifest_path
-
-
-def _legacy_switch_manifest_path(*, owner_id: str, workspace_id: str, session_id: str) -> str | None:
-    return legacy_session_manifest_path(
-        workspace_id=owner_id,
-        user_id=workspace_id,
-        session_id=session_id,
-    )
 
 
 def _parse_uuid(value: object) -> uuid.UUID | None:
@@ -239,16 +231,10 @@ async def switch_session_if_needed(
             load_manifest_from_volume,
         )
 
-        legacy_manifest_path = _legacy_switch_manifest_path(
-            owner_id=owner_id,
-            workspace_id=workspace_id,
-            session_id=sess_id,
-        )
         if interpreter is not None:
             manifest = await load_manifest_from_volume(
                 agent,
                 manifest_path,
-                fallback_paths=[legacy_manifest_path] if legacy_manifest_path else [],
             )
         else:
             # No Daytona volume — attempt to restore from local store so that

@@ -188,7 +188,7 @@ def run_long_context(
     Args:
         docs_path: Path to the document file.
         query: The focus topic or question to summarize against.
-        mode: ``"summarize"`` or the legacy compatibility alias ``"analyze"``.
+        mode: ``"summarize"`` or the compatibility alias ``"analyze"``.
         max_iterations: Maximum RLM iterations (default: 30).
         max_llm_calls: Maximum LLM calls (default: 50).
         verbose: Enable verbose output (default: True).

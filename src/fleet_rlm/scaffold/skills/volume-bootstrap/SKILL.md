@@ -34,10 +34,10 @@ MEMORY_ROOT/                            ← /home/daytona/memory/
 │   └── conversation.json               ← Durable session manifest
 ├── logs/                               ← Runtime logs
 ├── uploads/                            ← Pre-ingestion file staging
-├── memory/                             ← (legacy) key-value items
-├── artifacts/                          ← (legacy) produced outputs
-├── buffers/                            ← (legacy) named buffer lists
-└── meta/                               ← (legacy) workspace metadata
+├── memory/                             ← (durable) key-value items
+├── artifacts/                          ← (durable) produced outputs
+├── buffers/                            ← (durable) named buffer lists
+└── meta/                               ← (durable) workspace metadata
 ```
 
 `MEMORY_ROOT` is injected as a global in sandbox code. Use it instead of hardcoding paths.

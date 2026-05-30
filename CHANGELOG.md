@@ -323,7 +323,7 @@ All notable changes to this project are documented in this file.
   **Outcome:** Project initialization is no longer a published CLI surface; contributors should follow the documented `uv`/`pnpm` setup and packaged skill guidance.
 - **Change:** Removed the dedicated `analyze_long_document` runtime/tool/manifest surface.
   **Outcome:** Long-context and document workflows now route through variable-mode RLM execution, host-side document fetching, and the remaining document/summary tool paths.
-- **Change:** Replaced the legacy Agent Framework / hosted-worker orchestration path with the simplified DSPy ReAct runtime and FleetAgent-owned session model.
+- **Change:** Replaced the retired Agent Framework / hosted-worker orchestration path with the simplified DSPy ReAct runtime and FleetAgent-owned session model.
   **Outcome:** Internal imports and extension points must use `src/fleet_rlm/runtime/*`, `src/fleet_rlm/api/runtime_services/*`, and `src/fleet_rlm/integrations/daytona/*`; old `agent_host`, `worker`, and orchestration shim assumptions are retired.
 - **Change:** Retired frontend product routes remain unsupported: `taxonomy`, `skills`, `memory`, and `analytics` continue to fall through to `/404`.
   **Outcome:** The supported shell is Workbench, History, Volumes, Optimization, and Settings. Memory remains available as an API-only surface.
@@ -377,7 +377,7 @@ All notable changes to this project are documented in this file.
 
 ### Removed
 
-- **Change:** Removed Modal setup docs, Modal-specific scaffold assets, stale hook files, legacy provider paths, old MCP server docs, and obsolete architecture/history snapshots.
+- **Change:** Removed Modal setup docs, Modal-specific scaffold assets, stale hook files, retired provider paths, old MCP server docs, and obsolete architecture/history snapshots.
   **Outcome:** The repository no longer documents or packages unsupported runtime surfaces.
 - **Change:** Removed dead API schema files, websocket helper shims, old runtime/tool modules, unreferenced frontend components, stale route shims, and unused dependency paths.
   **Outcome:** The codebase is smaller and the supported product surface is clearer.
@@ -401,16 +401,16 @@ All notable changes to this project are documented in this file.
 
 - Rebased the backend onto a clearer package layout built around `runtime/`, `integrations/`, and `scaffold/`, retiring the older `core/`, `features/`, `infrastructure/`, and `conf/` seams.
 - Split the websocket and runtime surfaces into smaller focused modules, tightened the shared execution-stream contract, and kept Modal and Daytona on the same ReAct + DSPy runtime backbone.
-- Shipped a breaking frontend cleanup that removes retired route shims, drops the legacy browser token migration path, and prunes high-confidence dead files and dependencies while keeping the supported shell surface narrow.
+- Shipped a breaking frontend cleanup that removes retired route shims, drops the retired browser token migration path, and prunes high-confidence dead files and dependencies while keeping the supported shell surface narrow.
 - Refreshed the repo’s docs, AGENTS guides, codebase maps, release metadata, and validation scripts so the published guidance matches the current implementation.
 
 ### Breaking Changes
 
-- **Change:** Removed the legacy internal Python module layout under `fleet_rlm.core`, `fleet_rlm.features`, `fleet_rlm.infrastructure`, `fleet_rlm.conf`, plus root compatibility façades like `fleet_rlm.runners` and `fleet_rlm.scaffold`.
+- **Change:** Removed the retired internal Python module layout under `fleet_rlm.core`, `fleet_rlm.features`, `fleet_rlm.infrastructure`, `fleet_rlm.conf`, plus root compatibility façades like `fleet_rlm.runners` and `fleet_rlm.scaffold`.
   **Outcome:** Internal imports must move to the canonical `fleet_rlm.runtime`, `fleet_rlm.integrations`, `fleet_rlm.scaffold`, `fleet_rlm.cli`, and `fleet_rlm.api` modules.
 - **Change:** Removed the retired `/app/skills*`, `/app/memory`, `/app/analytics`, and `/app/taxonomy*` redirect shims.
-  **Outcome:** Old legacy product URLs now resolve through the not-found flow instead of silently redirecting into supported surfaces.
-- **Change:** Removed browser auth compatibility for the legacy `fleet_access_token` localStorage key.
+  **Outcome:** Old product URLs now resolve through the not-found flow instead of silently redirecting into supported surfaces.
+- **Change:** Removed browser auth compatibility for the retired `fleet_access_token` localStorage key.
   **Outcome:** Only the canonical `fleet-rlm:access-token` storage contract is supported going forward.
 - **Change:** Removed the `fleet_rlm.cli.runtime_builders` module and the `fleet_rlm.cli.terminal` re-export surface.
   **Outcome:** Callers now import the canonical runtime factory and terminal helper modules directly.
@@ -440,7 +440,7 @@ All notable changes to this project are documented in this file.
   **Outcome:** Modal and Daytona continue to share one conversational/runtime model, with Daytona-specific logic isolated to the provider layer instead of a parallel orchestration stack.
 - **Change:** Bumped the canonical release metadata and API schema versioning to `0.4.99` across package metadata, runtime version exports, OpenAPI documents, generated frontend API types, and the lockfile.
   **Outcome:** Build metadata, generated clients, and runtime introspection stay aligned on the new release number.
-- **Change:** Reworked frontend route handling, shell navigation truth, and smoke coverage so unsupported legacy URLs fall through to `/404` instead of participating in shell navigation mappings.
+- **Change:** Reworked frontend route handling, shell navigation truth, and smoke coverage so unsupported retired URLs fall through to `/404` instead of participating in shell navigation mappings.
   **Outcome:** The supported app surface is now explicitly limited to `RLM Workspace`, `Volumes`, and `Settings`.
 - **Change:** Narrowed frontend auth storage behavior to the canonical session/local migration path only and updated the related auth/unit coverage.
   **Outcome:** The browser auth layer is easier to reason about and no longer carries a stale migration branch for obsolete storage keys.
@@ -462,10 +462,10 @@ All notable changes to this project are documented in this file.
 
 - **Change:** Deleted dead frontend route shims, mock-state files, prompt preference state, CodeMirror helpers, and unreferenced shared UI primitives identified by the current cleanup scan.
   **Outcome:** The frontend tree is smaller and clearer, with less dead code competing with the supported product surface.
-- **Change:** Removed the now-unused frontend dependency set tied to those dead files and legacy UI paths.
+- **Change:** Removed the now-unused frontend dependency set tied to those dead files and retired UI paths.
   **Outcome:** Install/build surface area is reduced and dependency intent is clearer.
 - **Change:** Removed thin Python compatibility wrappers in favor of direct imports from `fleet_rlm.runtime.factory` and concrete terminal helper modules.
-  **Outcome:** Backend CLI/runtime ownership is clearer and less dependent on legacy alias modules.
+  **Outcome:** Backend CLI/runtime ownership is clearer and less dependent on retired alias modules.
 - **Change:** Removed the duplicate scaffold/skill assets from the old `.claude` and `features/scaffold` locations in favor of the canonical packaged scaffold tree.
   **Outcome:** There is now one supported bundled scaffold surface for distributed skills, hooks, agents, and teams instead of multiple competing copies.
 
@@ -564,7 +564,7 @@ All notable changes to this project are documented in this file.
 
 ### Removed
 
-- **Change:** Removed the legacy mock skill-creation simulation stack, unused taxonomy graph modules, placeholder settings panes, stale feature-chat/artifact components, duplicated Daytona-only helper paths, orphan docs readmes, and outdated audit/code-health snapshots.
+- **Change:** Removed the retired mock skill-creation simulation stack, unused taxonomy graph modules, placeholder settings panes, stale feature-chat/artifact components, duplicated Daytona-only helper paths, orphan docs readmes, and outdated audit/code-health snapshots.
   **Outcome:** Smaller frontend/documentation surface area with less dead code, lower maintenance overhead, and fewer competing "canonical" paths to keep in sync.
 
 ### Merged Pull Requests
@@ -620,7 +620,7 @@ All notable changes to this project are documented in this file.
 - **Change:** Removed the deprecated `fleet_rlm.stateful` module tree and associated unit tests.
   **Outcome:** Reduced dead-code maintenance burden and eliminated obsolete stateful sandbox abstractions from the package.
 - **Change:** Removed unused server service package stub and request-scoped `get_react_agent` dependency provider from `server/deps.py`.
-  **Outcome:** Leaner server dependency surface with less legacy wiring.
+  **Outcome:** Leaner server dependency surface with less retired wiring.
 
 ### Merged Pull Requests
 
@@ -659,8 +659,8 @@ All notable changes to this project are documented in this file.
 
 ### Removed
 
-- **Change:** Removed deprecated HTTP chat router and legacy frontend `rlm-api` compatibility exports/types (`/api/v1/chat`, `rlmCoreEndpoints` surface).
-  **Outcome:** Smaller API/client surface area and reduced risk of accidental dependence on removed legacy paths.
+- **Change:** Removed deprecated HTTP chat router and retired frontend `rlm-api` compatibility exports/types (`/api/v1/chat`, `rlmCoreEndpoints` surface).
+  **Outcome:** Smaller API/client surface area and reduced risk of accidental dependence on removed paths.
 
 ### Merged Pull Requests
 
@@ -672,14 +672,14 @@ All notable changes to this project are documented in this file.
 ### Highlights (User Impact)
 
 - Improved ReAct responsiveness with async-first DSPy delegation and realtime reasoning stream fixes.
-- Removed deprecated legacy API surfaces and compatibility layers to reduce contract drift and maintenance overhead.
+- Removed deprecated retired API surfaces and compatibility layers to reduce contract drift and maintenance overhead.
 - Hardened config/env parsing and made server imports lazier so config modules can be imported without requiring FastAPI/uvicorn.
 
 ### Changed
 
 - **Change:** Migrated ReAct delegation/streaming paths to async-first DSPy flow and updated frontend reasoning event adapters.
   **Outcome:** More reliable realtime reasoning updates and smoother long-running interactive sessions.
-- **Change:** Consolidated on canonical backend/frontend API paths and removed obsolete legacy routes/modules.
+- **Change:** Consolidated on canonical backend/frontend API paths and removed obsolete retired routes/modules.
   **Outcome:** Smaller supported surface area with clearer runtime contracts and less accidental integration with deprecated endpoints.
 - **Change:** Centralized duplicated environment parsing helpers and reused them across analytics/core/server config modules.
   **Outcome:** Lower config drift and easier long-term maintenance.
@@ -695,7 +695,7 @@ All notable changes to this project are documented in this file.
 
 ### Merged Pull Requests
 
-- [#90](https://github.com/Qredence/fleet-rlm/pull/90): Remove deprecated legacy API surfaces and clean up unused paths.
+- [#90](https://github.com/Qredence/fleet-rlm/pull/90): Remove deprecated retired API surfaces and clean up unused paths.
 - [#91](https://github.com/Qredence/fleet-rlm/pull/91): Refactor env parsing helpers and harden config imports.
 - [#92](https://github.com/Qredence/fleet-rlm/pull/92): Async-first DSPy delegation + realtime reasoning stream fixes.
 
@@ -707,7 +707,7 @@ All notable changes to this project are documented in this file.
   **Outcome:** `__version__` now matches project metadata and static analysis tooling can resolve package exports without changing lazy import behavior.
 - **Change:** Modernized FastAPI server contracts for `fastapi>=0.134.0,<1` by introducing reusable `Annotated` dependency aliases and explicit route return/response models.
   **Outcome:** Cleaner dependency injection, tighter OpenAPI fidelity (including `/api/v1/chat` and `/api/v1/auth/*`), and improved generated frontend typing.
-- **Change:** Marked legacy SQLite compatibility CRUD endpoints (`/api/v1/tasks*`, `/api/v1/sessions*` except `/api/v1/sessions/state`) as deprecated in API schema and documented v0.5.0 removal intent.
+- **Change:** Marked retired SQLite compatibility CRUD endpoints (`/api/v1/tasks*`, `/api/v1/sessions*` except `/api/v1/sessions/state`) as deprecated in API schema and documented v0.5.0 removal intent.
   **Outcome:** Existing behavior remains intact while making migration and cleanup policy explicit for the next release cycle.
 
 ## [0.4.9] - 2026-02-27
@@ -717,8 +717,8 @@ All notable changes to this project are documented in this file.
 - **Change:** Upgraded core development and runtime dependencies: fastapi[standard] to >=0.133.1, websockets to >=16, ruff to >=0.15.4, ty to >=0.0.19.
   **Outcome:** All lint, type-check, and unit test gates pass with upgraded versions; fully backward compatible with no code changes required.
 - **Change:** Implemented Wave 7.1 structural simplification with canonical package regrouping and one-release compatibility shims (`server/routers/ws/`, `server/execution/`, `react/tools/`, `terminal/chat.py`, `server/runtime_settings.py`, `react/signatures.py`, `models/streaming.py`).
-  **Outcome:** Cleaner module ownership and reduced namespace ambiguity without intentional HTTP/WS/frontend contract drift; legacy import paths remain supported through `v0.5.0`.
-- **Change:** Completed refactor cleanup phases for server/runtime surfaces, including app/request-bound server state lifecycle, legacy SQLite isolation, and WebSocket streaming loop decomposition.
+  **Outcome:** Cleaner module ownership and reduced namespace ambiguity without intentional HTTP/WS/frontend contract drift; retired import paths remain supported through `v0.5.0`.
+- **Change:** Completed refactor cleanup phases for server/runtime surfaces, including app/request-bound server state lifecycle, retired SQLite isolation, and WebSocket streaming loop decomposition.
   **Outcome:** Lower runtime ambiguity, improved testability, and reduced complexity in `server` and websocket internals.
 - **Change:** Consolidated duplicate server schemas and removed compatibility shim modules/routes (`server/dependencies.py`, flat `server/schemas.py`, router shim files), with planned stub routes now returning explicit `501`.
   **Outcome:** Clearer canonical imports/surfaces and more truthful API behavior for unimplemented endpoints.
@@ -797,7 +797,7 @@ All notable changes to this project are documented in this file.
 
 - **Change:** Updated docs and developer-facing guidance (`README.md`, `AGENTS.md`, docs indexes/guides) to align with runtime settings, WebSocket behavior, and the Web UI-first workflow.
   **Outcome:** Reduced documentation drift and clearer onboarding for local/browser-based usage.
-- **Change:** Normalized/cleaned frontend and backend integration surfaces (including trajectory payload and legacy bridge cleanup) as part of the frontend/runtime alignment work.
+- **Change:** Normalized/cleaned frontend and backend integration surfaces (including trajectory payload and retired bridge cleanup) as part of the frontend/runtime alignment work.
   **Outcome:** Simpler maintenance of the current Web UI stack and less confusion around deprecated bridge paths.
 - **Change:** Performed maintenance-only code quality cleanup (CodeQL/unused variable/readability refactors) in TUI scripts/helpers via PR #67.
   **Outcome:** Improved code readability and static-analysis hygiene without intended user-facing behavior changes.
@@ -1038,7 +1038,7 @@ All notable changes to this project are documented in this file.
 
 ### Breaking Changes
 
-- Removed the legacy Python interactive runtimes (Textual and prompt-toolkit).
+- Removed the retired Python interactive runtimes (Textual and prompt-toolkit).
 - `fleet-rlm code-chat` is now OpenTUI-only.
 
 ### Added
@@ -1057,7 +1057,7 @@ All notable changes to this project are documented in this file.
 ### Removed
 
 - `src/fleet_rlm/interactive/textual_app.py`
-- `src/fleet_rlm/interactive/legacy_session.py`
+- `src/fleet_rlm/interactive/archived_session.py`
 - `src/fleet_rlm/interactive/config.py`
 - `src/fleet_rlm/interactive/session.py`
 - `src/fleet_rlm/interactive/ui.py`

@@ -133,12 +133,6 @@ class ServerRuntimeConfig(BaseSettings):
     dev_jwt_secret: str = "change-me"
     entra_jwks_url: str | None = None
     entra_issuer_url: str | None = Field(default=None, alias="ENTRA_ISSUER_URL")
-    entra_issuer_legacy: str | None = Field(
-        default=None,
-        alias="ENTRA_ISSUER",
-        exclude=True,
-        repr=False,
-    )
     entra_issuer_template: str | None = "https://login.microsoftonline.com/{tenantid}/v2.0"
     entra_audience: str | None = None
     entra_allowed_user_ids: list[str] | str = Field(default_factory=list, alias="ENTRA_ALLOWED_USER_IDS")
@@ -305,21 +299,6 @@ class ServerRuntimeConfig(BaseSettings):
         if explicit_issuer_template and not explicit_issuer_url and "{tenantid}" not in str(explicit_issuer_template):
             values["entra_issuer_url"] = str(explicit_issuer_template).strip()
             values["entra_issuer_template"] = None
-
-        # Backward-compatible fallback from ENTRA_ISSUER.
-        if (
-            "entra_issuer_url" not in values
-            and "ENTRA_ISSUER_URL" not in values
-            and "entra_issuer_template" not in values
-            and "ENTRA_ISSUER_TEMPLATE" not in values
-        ):
-            entra_issuer = values.get("entra_issuer_legacy") or values.get("ENTRA_ISSUER")
-            if entra_issuer:
-                normalized_issuer = str(entra_issuer).strip()
-                if "{tenantid}" in normalized_issuer:
-                    values["entra_issuer_template"] = normalized_issuer
-                else:
-                    values["entra_issuer_url"] = normalized_issuer
 
         return values
 

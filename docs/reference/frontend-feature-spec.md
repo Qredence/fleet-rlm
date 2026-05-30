@@ -17,7 +17,7 @@ Users should feel that they can:
 - resume prior work from the workbench session list
 
 Users should not feel that they are staring at a transport protocol viewer or a
-legacy screen shell.
+retired screen shell.
 
 ## Product Surfaces
 

@@ -10,7 +10,7 @@ export function getRouter() {
   });
 }
 
-// Keep a singleton export for legacy tests and non-Start entrypoints.
+// Keep a singleton export for compatibility tests and non-Start entrypoints.
 export const router = getRouter();
 
 // Register the router instance for type safety

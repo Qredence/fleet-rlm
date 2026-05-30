@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { parseWsServerFrame } from "@/lib/rlm-api/ws-frame-parser";
 
 describe("parseWsServerFrame", () => {
-  it("rejects removed legacy event envelopes", () => {
+  it("rejects removed retired event envelopes", () => {
     const frame = parseWsServerFrame({
       type: "event",
       data: {

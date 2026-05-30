@@ -66,9 +66,9 @@ description = "Release hygiene, packaging, bundled UI assets, metadata, docs, an
 config_file = "agents/release-manager.toml"
 nickname_candidates = ["Release", "Packager"]
 
-[agents.daytona-runtime]
+[agents.sandbox-runtime]
 description = "Daytona SDK integration, sandbox lifecycle, volumes, child isolation, context staging, and runtime diagnostics."
-config_file = "agents/daytona-runtime.toml"
+config_file = "agents/sandbox-runtime.toml"
 nickname_candidates = ["Daytona", "Sandbox"]
 
 [agents.docs-maintainer]

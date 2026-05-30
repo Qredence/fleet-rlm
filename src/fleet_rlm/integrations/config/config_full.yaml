@@ -18,7 +18,7 @@ llm:
 
 api_keys:
   llm_api_key: ${oc.env:DSPY_LLM_API_KEY,null}
-  legacy_lm_api_key: ${oc.env:DSPY_LM_API_KEY,null}
+  alternate_lm_api_key: ${oc.env:DSPY_LM_API_KEY,null}
   delegate_lm_api_key: ${oc.env:DSPY_DELEGATE_LM_API_KEY,null}
   daytona_api_key: ${oc.env:DAYTONA_API_KEY,null}
   posthog_api_key: ${oc.env:POSTHOG_API_KEY,null}

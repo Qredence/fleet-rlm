@@ -62,7 +62,7 @@
       "reason": "already-documented — a dedicated follow-up feature 'docs-update-stale-references' (id: docs-update-stale-references) already exists in the mission backlog to address stale Daytona and runtime module references in docs/."
     },
     {
-      "observation": "src/fleet_rlm/scaffold/skills/rlm-debug/SKILL.md:50 references deleted runtime/execution/streaming.py",
+      "observation": "src/fleet_rlm/scaffold/skills/diagnostics/SKILL.md:50 references deleted runtime/execution/streaming.py",
       "reason": "already-documented — AGENTS.md explicitly lists scaffold/ as off-limits for this mission."
     },
     {

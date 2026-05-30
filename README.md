@@ -302,7 +302,7 @@ Use this order for Daytona work:
 
 In local/default-local source checkouts, Daytona config resolution prefers repo `.env` / `.env.local` values over inherited shell exports so branch-local validation uses the checkout's intended credentials.
 
-This repo treats `DAYTONA_API_BASE_URL` as a misconfiguration. Use `DAYTONA_API_URL` instead.
+This repo requires `DAYTONA_API_URL` for Daytona API routing.
 
 ## Documentation Map
 

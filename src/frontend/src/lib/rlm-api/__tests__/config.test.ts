@@ -27,7 +27,7 @@ describe("rlmApiConfig — wsUrl derivation", () => {
     expect(rlmApiConfig.wsExecutionUrl).toBe("ws://custom-host:9000/api/v1/ws/execution/events");
   });
 
-  it("ignores a deleted legacy explicit chat websocket URL and derives canonical routes", async () => {
+  it("ignores a deleted explicit chat websocket URL and derives canonical routes", async () => {
     vi.stubEnv("VITE_FLEET_WS_URL", "ws://custom-host:9000/api/v1/ws/chat");
     vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
 

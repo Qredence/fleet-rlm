@@ -91,21 +91,6 @@ def test_dependency_getters_use_direct_state_slices_and_server_state_fallback(cl
     assert dependencies_module.get_persistence_deps(direct_request) is persistence_deps
     assert dependencies_module.get_diagnostics_deps(direct_request) is diagnostics_deps
 
-    server_state = dependencies_module.compose_server_state(
-        config_deps,
-        lm_deps,
-        auth_deps,
-        session_cache_deps,
-        persistence_deps,
-        diagnostics_deps,
-    )
-    fallback_app = SimpleNamespace(state=SimpleNamespace(server_state=server_state))
-    fallback_request = _build_request(fallback_app)
-    assert dependencies_module.get_config_deps(fallback_request) is config_deps
-    assert dependencies_module.get_persistence_deps(fallback_request) is persistence_deps
-    assert dependencies_module.get_diagnostics_deps(fallback_request) is diagnostics_deps
-
-
 def test_get_persistence_prefers_repository_then_local_store(clean_runtime_env):
     dependencies_module = importlib.import_module("fleet_rlm.api.dependencies")
 

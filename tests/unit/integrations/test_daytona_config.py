@@ -12,13 +12,6 @@ from tests.fixtures.env import write_env_file
     [
         ({"DAYTONA_API_URL": "https://api.daytona.example"}, "DAYTONA_API_KEY"),
         ({"DAYTONA_API_KEY": "key"}, "DAYTONA_API_URL"),
-        (
-            {
-                "DAYTONA_API_KEY": "key",
-                "DAYTONA_API_BASE_URL": "https://legacy.daytona.example",
-            },
-            "Rename DAYTONA_API_BASE_URL to DAYTONA_API_URL",
-        ),
     ],
 )
 def test_resolve_daytona_config_validation_failures(
@@ -94,8 +87,6 @@ def test_resolve_daytona_lm_runtime_config_uses_small_model_contract(
             "DSPY_LLM_API_KEY": "planner-key",
             "DSPY_LM_API_BASE": "https://litellm.example",
             "DSPY_LM_SMALL_MODEL": "openai/gpt-4.1-mini",
-            "DSPY_DELEGATE_LM_MODEL": "legacy-ignored",
-            "DSPY_DELEGATE_LM_API_KEY": "legacy-ignored",
         }
     )
 

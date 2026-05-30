@@ -197,6 +197,6 @@ uv run python scripts/validate_release.py metadata
 ## Next Steps
 
 - [Terminal Chat Tutorial](../tutorials/03-interactive-chat.md) - Learn to use the CLI chat interface
-- [Daytona Runtime Architecture](../reference/daytona-runtime-architecture.md) - Runtime behavior and storage model
+- [Daytona Architecture](../reference/daytona-architecture.md) - Runtime behavior and storage model
 - [CLI reference](../reference/cli.md) - Review the current `fleet` and `fleet-rlm` surfaces
 - [MLflow Workflows](mlflow-workflows.md) - DSPy tracing, evaluation, and optimization with MLflow

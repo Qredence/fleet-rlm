@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Path, Query, status
 
-from ..dependencies import ConfigDepsDep, HTTPIdentityDep
+from ..dependencies import HTTPIdentityDep
 from ..runtime_services.sandbox_service import SandboxService
 from ..schemas.sandbox import (
     SandboxArchiveResponse,
@@ -34,11 +34,6 @@ SBX_ERROR_RESPONSES: OpenAPIResponses = {
 }
 
 
-def _allow_unlabeled_legacy_sandboxes(config_deps: ConfigDepsDep) -> bool:
-    _ = config_deps
-    return False
-
-
 @router.get(
     "",
     response_model=SandboxListResponse,
@@ -47,7 +42,6 @@ def _allow_unlabeled_legacy_sandboxes(config_deps: ConfigDepsDep) -> bool:
     description="List active Daytona sandboxes with id, state, created_at, and volume info.",
 )
 async def list_sandboxes(
-    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
     page: Annotated[
         int,
@@ -68,7 +62,6 @@ async def list_sandboxes(
         limit=limit,
         tenant_claim=identity.tenant_claim,
         user_claim=identity.user_claim,
-        allow_unlabeled_legacy=_allow_unlabeled_legacy_sandboxes(config_deps),
     )
 
 
@@ -81,7 +74,6 @@ async def list_sandboxes(
 )
 async def get_sandbox_detail(
     sandbox_id: Annotated[str, Path(description="Unique sandbox identifier.")],
-    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
 ) -> SandboxDetailResponse:
     """Return detailed information for a single Daytona sandbox."""
@@ -89,7 +81,6 @@ async def get_sandbox_detail(
         sandbox_id=sandbox_id,
         tenant_claim=identity.tenant_claim,
         user_claim=identity.user_claim,
-        allow_unlabeled_legacy=_allow_unlabeled_legacy_sandboxes(config_deps),
     )
 
 
@@ -103,7 +94,6 @@ async def get_sandbox_detail(
 )
 async def delete_sandbox_endpoint(
     sandbox_id: Annotated[str, Path(description="Unique sandbox identifier.")],
-    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
 ) -> None:
     """Stop and delete a Daytona sandbox."""
@@ -111,7 +101,6 @@ async def delete_sandbox_endpoint(
         sandbox_id=sandbox_id,
         tenant_claim=identity.tenant_claim,
         user_claim=identity.user_claim,
-        allow_unlabeled_legacy=_allow_unlabeled_legacy_sandboxes(config_deps),
     )
 
 
@@ -124,7 +113,6 @@ async def delete_sandbox_endpoint(
 )
 async def archive_sandbox_endpoint(
     sandbox_id: Annotated[str, Path(description="Unique sandbox identifier.")],
-    config_deps: ConfigDepsDep,
     identity: HTTPIdentityDep,
 ) -> SandboxArchiveResponse:
     """Archive a Daytona sandbox to cold storage."""
@@ -132,5 +120,4 @@ async def archive_sandbox_endpoint(
         sandbox_id=sandbox_id,
         tenant_claim=identity.tenant_claim,
         user_claim=identity.user_claim,
-        allow_unlabeled_legacy=_allow_unlabeled_legacy_sandboxes(config_deps),
     )

@@ -71,13 +71,13 @@ describe("tokenStore", () => {
     expect(localStorage.getItem(CANONICAL_KEY)).toBeNull();
   });
 
-  it("ignores legacy localStorage tokens", async () => {
-    localStorage.setItem("fleet_access_token", "legacy-token");
+  it("ignores retired localStorage tokens", async () => {
+    localStorage.setItem("fleet_access_token", "retired-token");
 
     const { getAccessToken } = await loadTokenStore();
 
     expect(getAccessToken()).toBeNull();
     expect(sessionStorage.getItem(CANONICAL_KEY)).toBeNull();
-    expect(localStorage.getItem("fleet_access_token")).toBe("legacy-token");
+    expect(localStorage.getItem("fleet_access_token")).toBe("retired-token");
   });
 });

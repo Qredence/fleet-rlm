@@ -113,7 +113,7 @@ class GEPAStatusResponse(BaseModel):
     """Status payload for GEPA optimization availability."""
 
     available: bool = Field(
-        description="Whether the legacy MLflow-backed GEPA optimization path is available.",
+        description="Whether the MLflow-backed GEPA optimization path is available.",
     )
     module_optimization_available: bool = Field(
         default=False,

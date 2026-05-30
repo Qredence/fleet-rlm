@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import warnings
-
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
 
@@ -31,20 +29,3 @@ def session_workspace_link_path(session_id: str | None) -> str | None:
     if root is None:
         return None
     return f"{root}/workspace"
-
-
-def legacy_session_manifest_path(
-    *,
-    workspace_id: str | None,
-    user_id: str | None,
-    session_id: str | None,
-) -> str | None:
-    warnings.warn(
-        "legacy_session_manifest_path is deprecated; use session_conversation_path instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    if not workspace_id or not user_id or not session_id:
-        return None
-    safe_session_id = _sanitize_id(session_id, "default-session")
-    return f"meta/workspaces/{workspace_id}/users/{user_id}/react-session-{safe_session_id}.json"

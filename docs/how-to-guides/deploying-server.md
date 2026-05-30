@@ -671,5 +671,5 @@ Wildcards (`*`) are not allowed in staging/production.
 
 - [Auth Modes Reference](../reference/auth.md)
 - [Database Architecture](../reference/database.md)
-- [Daytona Runtime Architecture](../reference/daytona-runtime-architecture.md)
+- [Daytona Architecture](../reference/daytona-architecture.md)
 - [Runtime Settings](./runtime-settings.md)

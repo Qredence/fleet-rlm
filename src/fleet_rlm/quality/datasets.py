@@ -176,7 +176,7 @@ def split_examples_with_metadata(
 
     When every example has the requested metadata and more than one stratum is
     present, validation examples are selected from the tail of each stratum.
-    Otherwise the helper falls back to the legacy prefix split used by
+    Otherwise the helper falls back to the prefix split used by
     ``split_examples``.
     """
     if not examples:

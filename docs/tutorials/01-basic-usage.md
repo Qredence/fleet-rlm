@@ -199,7 +199,7 @@ uv python install 3.12
 - [Tutorial: Document Analysis](02-doc-analysis.md) — Analyze documents with Fleet-RLM
 - [Tutorial: Interactive Chat](03-interactive-chat.md) — Deep dive into terminal chat
 - [Installation Guide](../how-to-guides/installation.md) — Full installation details
-- [Daytona Runtime Architecture](../reference/daytona-runtime-architecture.md) — Runtime and storage model
+- [Daytona Architecture](../reference/daytona-architecture.md) — Runtime and storage model
 
 ## Getting Help
 

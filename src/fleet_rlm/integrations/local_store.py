@@ -161,7 +161,7 @@ def _migrate_chat_sessions(engine: Any) -> None:
             )
         except (OperationalError, ProgrammingError):
             # This index is an opportunistic local-store optimization; startup should
-            # not fail if a legacy SQLite version or partial schema cannot create it.
+            # not fail if a retired SQLite version or partial schema cannot create it.
             pass
         conn.commit()
 

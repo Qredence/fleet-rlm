@@ -509,7 +509,7 @@ async def handle_stream_error(
 
 
 def _is_terminal_transport_event(event: StreamEventLike) -> bool:
-    """Return websocket-terminal semantics for worker and legacy runtime events."""
+    """Return websocket-terminal semantics for worker and runtime events."""
 
     backend_event = adapt_stream_event(
         kind=event.kind,

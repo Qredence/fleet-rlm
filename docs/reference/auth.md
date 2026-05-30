@@ -206,7 +206,7 @@ Entra tokens map to normalized identity:
 | `sub` | `user_claim` | Used if `oid` is missing |
 | `preferred_username` | `email` | Primary email source |
 | `email` | `email` | Fallback |
-| `upn` | `email` | Fallback for legacy tokens |
+| `upn` | `email` | Fallback for alternate tokens |
 | `name` | `name` | Display name |
 
 ### WebSocket Authentication

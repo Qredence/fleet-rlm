@@ -79,7 +79,7 @@ def _import_mlflow() -> Any | None:
 
 
 def _sanitize_log_field(value: object) -> str:
-    """Preserve the legacy MLflow-runtime helper name for sibling modules/tests."""
+    """Preserve the MLflow-runtime helper name for sibling modules/tests."""
 
     return sanitize_for_log(value)
 

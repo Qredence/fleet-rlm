@@ -59,7 +59,6 @@ class SandboxService:
         limit: int,
         tenant_claim: str,
         user_claim: str,
-        allow_unlabeled_legacy: bool,
     ) -> SandboxListResponse:
         """Return a paginated list of active Daytona sandboxes."""
         try:
@@ -70,7 +69,6 @@ class SandboxService:
                     tenant_claim=tenant_claim,
                     user_claim=user_claim,
                 ),
-                allow_unlabeled_legacy=allow_unlabeled_legacy,
             )
         except (*_DAYTONA_NOT_FOUND_ERRORS, *_DAYTONA_UNAVAILABLE_ERRORS) as exc:
             raise _map_daytona_error(exc) from exc
@@ -81,7 +79,6 @@ class SandboxService:
         sandbox_id: str,
         tenant_claim: str,
         user_claim: str,
-        allow_unlabeled_legacy: bool,
     ) -> SandboxDetailResponse:
         """Return detailed information for a single Daytona sandbox."""
         try:
@@ -91,7 +88,6 @@ class SandboxService:
                     tenant_claim=tenant_claim,
                     user_claim=user_claim,
                 ),
-                allow_unlabeled_legacy=allow_unlabeled_legacy,
             )
         except (*_DAYTONA_NOT_FOUND_ERRORS, *_DAYTONA_UNAVAILABLE_ERRORS) as exc:
             raise _map_daytona_error(exc) from exc
@@ -102,7 +98,6 @@ class SandboxService:
         sandbox_id: str,
         tenant_claim: str,
         user_claim: str,
-        allow_unlabeled_legacy: bool,
     ) -> None:
         """Stop and delete a Daytona sandbox."""
         try:
@@ -112,7 +107,6 @@ class SandboxService:
                     tenant_claim=tenant_claim,
                     user_claim=user_claim,
                 ),
-                allow_unlabeled_legacy=allow_unlabeled_legacy,
             )
         except (*_DAYTONA_NOT_FOUND_ERRORS, *_DAYTONA_UNAVAILABLE_ERRORS) as exc:
             raise _map_daytona_error(exc) from exc
@@ -123,7 +117,6 @@ class SandboxService:
         sandbox_id: str,
         tenant_claim: str,
         user_claim: str,
-        allow_unlabeled_legacy: bool,
     ) -> SandboxArchiveResponse:
         """Archive a Daytona sandbox to cold storage."""
         try:
@@ -133,7 +126,6 @@ class SandboxService:
                     tenant_claim=tenant_claim,
                     user_claim=user_claim,
                 ),
-                allow_unlabeled_legacy=allow_unlabeled_legacy,
             )
         except (*_DAYTONA_NOT_FOUND_ERRORS, *_DAYTONA_UNAVAILABLE_ERRORS) as exc:
             raise _map_daytona_error(exc) from exc

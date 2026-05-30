@@ -115,7 +115,7 @@ def test_warn_if_persisted_scorers_active_logs_actionable_warning(
 
     def list_scorers(*, experiment_id: str | None = None) -> list[object]:
         list_calls.append(experiment_id)
-        return [SimpleNamespace(name="Trace Judge"), {"scorer_name": "legacy-scorer"}]
+        return [SimpleNamespace(name="Trace Judge"), {"scorer_name": "retired-scorer"}]
 
     fake_mlflow = SimpleNamespace(
         genai=SimpleNamespace(list_scorers=list_scorers),
@@ -131,7 +131,7 @@ def test_warn_if_persisted_scorers_active_logs_actionable_warning(
     assert count == 2
     assert list_calls == ["exp-123"]
     assert "Trace Judge" in caplog.text
-    assert "legacy-scorer" in caplog.text
+    assert "retired-scorer" in caplog.text
     assert "scripts/mlflow_cli.py scorers list" in caplog.text
     assert "FLEET_RLM_ENABLE_AUTO_ASSESSMENT" in caplog.text
 

@@ -8,10 +8,10 @@ Creates (idempotent — safe to call multiple times, never overwrites existing c
 
 ```
 /home/daytona/memory/
-├── memory/           ← legacy key-value store
+├── memory/           ← durable key-value store
 ├── artifacts/        ← produced outputs
 ├── buffers/          ← named buffer lists
-├── meta/             ← legacy workspace metadata
+├── meta/             ← durable workspace metadata
 ├── memories/         ← persistent memory DB location
 ├── knowledge/
 │   ├── ingested/     ← raw documents
@@ -55,7 +55,7 @@ without data loss or corruption.
 
 ## Legacy Root Compatibility
 
-The legacy roots (`memory/`, `artifacts/`, `buffers/`, `meta/`) still exist
+The durable roots (`memory/`, `artifacts/`, `buffers/`, `meta/`) still exist
 and are still created by the bootstrap. Code written against the old layout
 continues to work. New code should prefer:
 

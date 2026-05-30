@@ -182,18 +182,18 @@ def test_search_path_traversal_blocked(vol: Path) -> None:
         assert "etc/passwd" not in r.path or str(vol / "knowledge").lower() in r.path.lower()
 
 
-def test_search_reads_legacy_plain_index(vol: Path) -> None:
-    doc_id = "doc_legacy"
-    (vol / "knowledge" / "ingested" / f"{doc_id}.txt").write_text("legacy searchable text", encoding="utf-8")
+def test_search_reads_plain_index(vol: Path) -> None:
+    doc_id = "doc_plain"
+    (vol / "knowledge" / "ingested" / f"{doc_id}.txt").write_text("plain searchable text", encoding="utf-8")
     (vol / "knowledge" / "index.json").write_text(
         json.dumps(
             {
                 doc_id: {
-                    "source": "legacy://doc",
-                    "alias": "legacy",
+                    "source": "plain://doc",
+                    "alias": "plain",
                     "file": f"ingested/{doc_id}.txt",
                     "char_count": 22,
-                    "tags": ["legacy"],
+                    "tags": ["plain"],
                     "metadata": {},
                     "ingested_at": "2024-01-01T00:00:00+00:00",
                 }
@@ -202,25 +202,25 @@ def test_search_reads_legacy_plain_index(vol: Path) -> None:
         encoding="utf-8",
     )
 
-    output = _search_knowledge_impl("legacy", volume_mount_path=str(vol))
+    output = _search_knowledge_impl("plain", volume_mount_path=str(vol))
 
     assert output.status == "ok"
     assert output.count == 1
     assert output.results[0].doc_id == doc_id
 
 
-def test_legacy_index_is_rewritten_as_versioned_envelope(vol: Path) -> None:
-    legacy_doc_id = "doc_legacy"
-    (vol / "knowledge" / "ingested" / f"{legacy_doc_id}.txt").write_text("legacy text", encoding="utf-8")
+def test_plain_index_is_rewritten_as_versioned_envelope(vol: Path) -> None:
+    plain_doc_id = "doc_plain"
+    (vol / "knowledge" / "ingested" / f"{plain_doc_id}.txt").write_text("plain text", encoding="utf-8")
     (vol / "knowledge" / "index.json").write_text(
         json.dumps(
             {
-                legacy_doc_id: {
-                    "source": "legacy://doc",
-                    "alias": "legacy",
-                    "file": f"ingested/{legacy_doc_id}.txt",
+                plain_doc_id: {
+                    "source": "plain://doc",
+                    "alias": "plain",
+                    "file": f"ingested/{plain_doc_id}.txt",
                     "char_count": 11,
-                    "tags": ["legacy"],
+                    "tags": ["plain"],
                     "metadata": {},
                     "ingested_at": "2024-01-01T00:00:00+00:00",
                 }
@@ -238,5 +238,5 @@ def test_legacy_index_is_rewritten_as_versioned_envelope(vol: Path) -> None:
     index = json.loads((vol / "knowledge" / "index.json").read_text())
 
     assert index["schema_version"] == 1
-    assert legacy_doc_id in index["documents"]
+    assert plain_doc_id in index["documents"]
     assert new_doc.doc_id in index["documents"]

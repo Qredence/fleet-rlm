@@ -111,7 +111,6 @@ async def test_sandbox_service_maps_generic_daytona_error_to_503(monkeypatch: py
             limit=100,
             tenant_claim="tenant",
             user_claim="user",
-            allow_unlabeled_legacy=False,
         )
 
     assert exc_info.value.status_code == 503

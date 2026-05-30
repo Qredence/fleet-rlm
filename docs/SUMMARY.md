@@ -65,7 +65,7 @@
   * [Frontend Architecture](reference/frontend-architecture.md)
   * [Frontend Feature Spec](reference/frontend-feature-spec.md)
   * [Frontend Backend Integration](reference/frontend-backend-integration.md)
-  * [Daytona Runtime Architecture](reference/daytona-runtime-architecture.md)
+  * [Daytona Architecture](reference/daytona-architecture.md)
   * [LiteLLM Proxy Models](reference/litellm-models.md)
   * [Codebase Map](reference/codebase-map.md)
   * [Module Map](reference/module-map.md)

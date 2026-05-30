@@ -132,7 +132,7 @@ Upload:
 
 ```bash
 # from repo root
-uvx twine upload --repository-url https://test.pypi.org/legacy/ dist/*
+uvx twine upload --repository testpypi dist/*
 ```
 
 ## 4) Smoke test install from TestPyPI
