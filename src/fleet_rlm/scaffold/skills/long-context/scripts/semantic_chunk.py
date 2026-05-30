@@ -45,7 +45,7 @@ def regex_chunks(content: str, pattern: str, size: int):
     starts = [match.start() for match in re.finditer(pattern, content, re.MULTILINE)]
     if len(starts) < 2:
         return size_chunks(content, size)
-    bounds = [*starts, len(content)]
+    bounds = sorted({0, *starts, len(content)})
     chunks = []
     for index, start in enumerate(bounds[:-1]):
         end = bounds[index + 1]

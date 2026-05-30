@@ -39,6 +39,8 @@ def check_daytona() -> bool:
         )
         output = (result.stdout + result.stderr).strip().splitlines()
         status("daytona cli", True, output[0] if output else "installed")
+    except subprocess.TimeoutExpired:
+        status("daytona cli", False, "timeout")
     except FileNotFoundError:
         status("daytona cli", True, "optional")
     return api_key and api_url

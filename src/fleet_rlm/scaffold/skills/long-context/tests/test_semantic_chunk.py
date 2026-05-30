@@ -25,6 +25,14 @@ def test_markdown_chunking_uses_headings() -> None:
     assert [chunk[2].splitlines()[0] for chunk in chunks] == ["# One", "# Two"]
 
 
+def test_markdown_chunking_preserves_preamble() -> None:
+    content = "intro\n# One\nalpha\n# Two\nbeta\n"
+
+    chunks = semantic_chunk.chunk_content(content, "markdown", max_size=100, overlap=0)
+
+    assert [chunk[2].splitlines()[0] for chunk in chunks] == ["intro", "# One", "# Two"]
+
+
 def test_size_chunk_overlap_cannot_stall() -> None:
     chunks = semantic_chunk.size_chunks("abcdef", size=3, overlap=3)
 

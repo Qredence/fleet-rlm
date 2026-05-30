@@ -8,7 +8,7 @@ A reflective optimization loop that evolves prompts using textual feedback rathe
 
 ## Pipeline Overview
 
-```
+```text
 Dataset
   → Split (train / dev)
   → Compile (MIPROv2 or GEPA)
@@ -55,7 +55,7 @@ Each optimization run creates an MLflow run with:
 
 GEPA differs from MIPROv2 by using a verbal feedback cycle:
 
-```
+```text
 1. Initial prompt
    ↓
 2. Evaluate on train set → per-example scores

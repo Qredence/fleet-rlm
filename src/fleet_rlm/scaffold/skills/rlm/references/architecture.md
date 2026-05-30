@@ -1,5 +1,7 @@
 # Module Map
 
+Paths in this map are relative to `src/fleet_rlm/`.
+
 | File | Owns |
 |------|------|
 | `runtime/agent/runtime.py` | AgentRuntime: main orchestrator, tool discovery, history, streaming |

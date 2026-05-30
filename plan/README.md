@@ -18,7 +18,7 @@ for cleanup and remaining phase work.
 
 ## Current Audit Plan
 
-This audit verifies that closed phase claims match current code, tests, docs, and bundled
+This audit verifies that closed-phase claims match current code, tests, docs, and bundled
 scaffold skills.
 
 1. Build a phase-to-code evidence matrix from `plan/PLANS.md`, phase progress files,

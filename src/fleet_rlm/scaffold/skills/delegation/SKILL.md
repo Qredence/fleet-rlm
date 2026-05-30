@@ -104,7 +104,8 @@ SUBMIT(summaries=results)
 - `batch_concurrency` on the websocket request controls allowed parallelism.
 - `sub_rlm` and `rlm_query` are identical (alternative names, same behavior).
 - `sub_rlm_batched` and `rlm_query_batched` are identical.
-- Do **NOT** use `parallel_semantic_map` from the Daytona path.
+- Do **NOT** use `parallel_semantic_map` from the Daytona path. Use `delegate_to_rlm_batched`
+  instead so child work stays within the approved sandbox isolation and budget controls.
 
 ---
 

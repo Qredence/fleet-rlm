@@ -16,7 +16,7 @@ The OpenAPI spec is the single source of truth for REST endpoints. The frontend 
 
 ### Primary Endpoint
 
-```
+```text
 /api/v1/ws/execution
 ```
 
@@ -24,7 +24,7 @@ The main WebSocket endpoint for interactive RLM execution. Handles bidirectional
 
 ### Raw Events Endpoint
 
-```
+```text
 /api/v1/ws/execution/events
 ```
 

@@ -202,6 +202,9 @@ class SkillSelectionModule(dspy.Module):
                 )
                 selected = self._parse_skill_names(getattr(prediction, "skills", []))
                 reasoning = str(getattr(prediction, "reasoning", "") or "")
+                if not selected:
+                    selected = candidates[: self._max_skills]
+                    reasoning = ""
             except Exception as exc:
                 logger.warning("SkillSelectionModule: LLM selection failed (%s), using keyword candidates", exc)
                 selected = candidates[: self._max_skills]

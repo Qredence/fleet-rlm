@@ -6,7 +6,7 @@ Called automatically during `acreate_workspace_session()` when `volume_name` is 
 
 Creates (idempotent — safe to call multiple times, never overwrites existing content):
 
-```
+```text
 /home/daytona/memory/
 ├── memory/           ← durable key-value store
 ├── artifacts/        ← produced outputs
@@ -53,14 +53,13 @@ All three bootstrap functions are designed to be called on every session start:
 This means: volumes survive sandbox restarts, upgrades, and repeated sessions
 without data loss or corruption.
 
-## Legacy Root Compatibility
+## Durable Roots
 
-The durable roots (`memory/`, `artifacts/`, `buffers/`, `meta/`) still exist
-and are still created by the bootstrap. Code written against the old layout
-continues to work. New code should prefer:
+The durable roots (`memory/`, `artifacts/`, `buffers/`, `meta/`) are created
+by the bootstrap for current sandbox helpers and file-based outputs:
 
-| Legacy | Preferred |
-|--------|-----------|
+| Root | Current access pattern |
+|------|------------------------|
 | `memory/` (flat files) | `remember()`/`recall()` via `memories/core.db` |
 | `artifacts/` | Still canonical for file-based outputs |
 | `buffers/` | `add_buffer()`/`get_buffer()` (session-scoped) |

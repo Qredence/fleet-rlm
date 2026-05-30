@@ -20,7 +20,7 @@ You do NOT need to `mkdir` any standard directories. They exist.
 
 ## Filesystem Map
 
-```
+```text
 MEMORY_ROOT/                            ← /home/daytona/memory/
 ├── memories/
 │   └── core.db                         ← SQLite persistent memory (auto-created)

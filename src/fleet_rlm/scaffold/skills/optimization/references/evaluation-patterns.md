@@ -32,40 +32,36 @@ class MyScorer:
 
 | Scorer | What it measures | Config |
 |--------|-----------------|--------|
-| `SafetyScorer` | Output safety (toxicity, PII, prompt injection) | `safety_threshold=0.9` |
-| `GuidelineAdherenceScorer` | Whether output follows specified guidelines | `guidelines: list[str]` |
-| `LLMJudgeScorer` | Custom LLM-as-judge evaluation | `judge_prompt`, `judge_model` |
-| `ExactMatchScorer` | Exact string match against expected | — |
-| `ContainsScorer` | Output contains required substrings | `required: list[str]` |
-| `JSONValidScorer` | Output is valid JSON matching schema | `schema: dict` |
+| `RelevanceToQuery` | Whether the final answer solves the user's query | `model` |
+| `ToolCallCorrectness` | Whether tool calls match the available schemas | `model` |
+| `ToolCallEfficiency` | Whether the agent avoids redundant tool calls | `model` |
+| `RetrievalGroundedness` | Whether retrieved context supports the answer | `model` |
+| `reasoning_quality_scorer` | Optional LLM judge for reasoning trace quality | `model` |
 
 ---
 
-## Metric Composition with `dspy_evaluation.py`
+## DSPy Evaluation with `dspy_evaluation.py`
 
-The `evaluate_module()` function runs multiple scorers and aggregates results:
+The `evaluate_program()` function runs a DSPy program against a devset with a single DSPy-compatible metric:
 
 ```python
-from fleet_rlm.quality.dspy_evaluation import evaluate_module
+from fleet_rlm.quality.dspy_evaluation import evaluate_program
+from fleet_rlm.quality.workspace_metrics import workspace_score_metric
 
-results = evaluate_module(
-    module=my_module,
-    dataset=dev_examples,
-    scorers=[SafetyScorer(), GuidelineAdherenceScorer(guidelines=my_guidelines)],
-    aggregate="weighted_mean",  # or "min", "mean", "product"
-    weights={"safety": 0.3, "guideline_adherence": 0.7},
+results = evaluate_program(
+    program=my_program,
+    devset=dev_examples,
+    metric=workspace_score_metric,
+    return_all_scores=True,
+    return_outputs=True,
 )
 
-print(results.aggregate_score)   # 0.0 - 1.0
-print(results.per_scorer)        # {"safety": 0.95, "guideline_adherence": 0.82}
-print(results.per_example)       # List of per-example breakdowns
+print(results["score"])          # 0.0 - 1.0
+print(results["all_scores"])     # Per-example scores
+print(results["outputs"])        # Per-example predictions
 ```
 
-**Aggregation strategies:**
-- `mean` — simple average across scorers
-- `weighted_mean` — weighted by importance (supply `weights` dict)
-- `min` — worst scorer determines the score (strict)
-- `product` — multiply all scores (penalizes any weakness)
+For exported trace datasets, use `evaluate_program_from_dataset()` to load rows and coerce them into `dspy.Example` objects before evaluation.
 
 ---
 
@@ -105,12 +101,17 @@ class TraceAwareScorer:
         trace = prediction.trace  # Full execution trace
 
         # Check that the module used tools appropriately
-        tool_calls = [step for step in trace if step.type == "tool_call"]
+        spans = trace.search_spans()
+        tool_calls = [span for span in spans if getattr(span, "span_type", getattr(span, "type", "")) == "tool"]
         if len(tool_calls) == 0 and example.requires_tools:
             return 0.2  # Penalize skipping required tools
 
         # Check reasoning chain quality
-        reasoning_steps = [step for step in trace if step.type == "reasoning"]
+        reasoning_steps = [
+            span
+            for span in spans
+            if str(getattr(span, "name", "")).lower().startswith(("thought", "llm"))
+        ]
         if len(reasoning_steps) < 2:
             return 0.5  # Penalize shallow reasoning
 
@@ -122,38 +123,24 @@ class TraceAwareScorer:
 ```
 
 **Trace fields available:**
-- `trace.steps` — ordered list of execution steps
-- `step.type` — `"reasoning"`, `"tool_call"`, `"tool_result"`, `"delegation"`
-- `step.content` — the actual content of that step
-- `step.duration_ms` — time taken
-- `step.token_count` — tokens consumed
+- `trace.search_spans()` — ordered MLflow trace spans
+- `span.name` — span label, such as a tool or LLM operation
+- `span.inputs` / `span.outputs` — captured inputs and outputs for the span
+- `span.span_type` or `span.type` — span category when exposed by the installed MLflow version
 
 ---
 
 ## Custom LLM Judge
 
-For nuanced quality assessment, use an LLM as judge:
+For nuanced quality assessment, use the opt-in reasoning-quality scorer:
 
 ```python
-from fleet_rlm.quality.scorers import LLMJudgeScorer
+from fleet_rlm.quality.scorers import reasoning_quality_scorer
 
-judge = LLMJudgeScorer(
-    judge_prompt="""
-    Rate the following answer on a scale of 0 to 10 for:
-    1. Accuracy: Does it correctly answer the question?
-    2. Completeness: Does it cover all aspects?
-    3. Conciseness: Is it appropriately brief?
-
-    Question: {question}
-    Expected: {expected_answer}
-    Actual: {answer}
-
-    Return a JSON object: {"accuracy": N, "completeness": N, "conciseness": N}
-    """,
-    judge_model="anthropic/claude-sonnet-4-20250514",
-    normalize=True,  # Convert 0-10 to 0.0-1.0
-)
+judge = reasoning_quality_scorer("openai/gemini-3-flash-preview")
 ```
+
+For the full recommended MLflow GenAI scorer set, call `build_rlm_scorers()`.
 
 ---
 
