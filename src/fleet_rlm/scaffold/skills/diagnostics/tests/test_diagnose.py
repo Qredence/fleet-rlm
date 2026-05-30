@@ -53,4 +53,4 @@ def test_check_daytona_reports_cli_timeout(monkeypatch, capsys) -> None:
     assert diagnose.check_daytona() is True
     output = capsys.readouterr().out
     assert "daytona cli" in output
-    assert "FAIL (timeout)" in output
+    assert "FAIL" in output

@@ -4,13 +4,13 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from importlib.util import find_spec
 from pathlib import Path
 
 
-def status(label: str, ok: bool, detail: str = "") -> bool:
+def status(label: str, ok: bool) -> bool:
     state = "OK" if ok else "FAIL"
-    suffix = f" ({detail})" if detail else ""
-    print(f"  {label:18s}: {state}{suffix}")
+    print(f"  {label:18s}: {state}")
     return ok
 
 
@@ -26,12 +26,9 @@ def env_presence_status(label: str, value: str) -> bool:
 
 def check_fleet_rlm() -> bool:
     print("\n--- fleet-rlm ---")
-    try:
-        import fleet_rlm
-    except ImportError:
-        return status("package", False, "run: uv sync")
-    version = getattr(fleet_rlm, "__version__", "unknown")
-    return status("package", True, f"v{version}")
+    if find_spec("fleet_rlm") is None:
+        return status("package", False)
+    return status("package", True)
 
 
 def check_daytona() -> bool:
@@ -40,26 +37,25 @@ def check_daytona() -> bool:
     api_url_value = os.environ.get("DAYTONA_API_URL", "")
     api_url = env_presence_status("DAYTONA_API_URL", api_url_value)
     try:
-        result = subprocess.run(
+        subprocess.run(
             ["daytona", "version"],
             capture_output=True,
             text=True,
             timeout=10,
             check=False,
         )
-        output = (result.stdout + result.stderr).strip().splitlines()
-        status("daytona cli", True, output[0] if output else "installed")
+        status("daytona cli", True)
     except subprocess.TimeoutExpired:
-        status("daytona cli", False, "timeout")
+        status("daytona cli", False)
     except FileNotFoundError:
-        status("daytona cli", True, "optional")
+        status("daytona cli", True)
     return api_key and api_url
 
 
 def check_env() -> bool:
     print("\n--- Environment ---")
     env_path = Path(".env")
-    env_ok = status(".env file", env_path.exists(), f"{env_path.stat().st_size} bytes" if env_path.exists() else "")
+    env_ok = status(".env file", env_path.exists())
     model_value = os.environ.get("DSPY_LM_MODEL", "")
     model_ok = env_presence_status("DSPY_LM_MODEL", model_value)
     api_key = os.environ.get("DSPY_LLM_API_KEY", "") or os.environ.get("DSPY_LM_API_KEY", "")
