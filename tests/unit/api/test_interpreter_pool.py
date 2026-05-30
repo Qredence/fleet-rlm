@@ -30,6 +30,9 @@ def _mock_cfg(**overrides):
         "daytona_broker_tool_call_timeout": 180.0,
         "daytona_broker_start_retries": 1,
         "interpreter_async_execute": True,
+        "interpreter_pool_auto_size": False,
+        "interpreter_pool_cpu_per_sandbox": 2,
+        "daytona_runner_tags": None,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -46,6 +49,16 @@ def _mock_interpreter():
     interp._host_identity = None
     interp._host_run_id = None
     return interp
+
+
+def test_pool_manifest_path_is_user_specific():
+    from fleet_rlm.api.runtime_services.interpreter_pool import _POOL_MANIFEST_PATH, _pool_manifest_user_token
+
+    token = _pool_manifest_user_token()
+
+    assert token
+    assert _POOL_MANIFEST_PATH.name == f"fleet-rlm-pool-manifest-{token}.json"
+    assert _POOL_MANIFEST_PATH.name != "fleet-rlm-pool-manifest.json"
 
 
 @pytest.mark.asyncio

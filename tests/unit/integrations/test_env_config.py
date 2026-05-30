@@ -105,18 +105,20 @@ def test_apply_env_updates_ignores_masked_secret_round_trip(
 def test_app_config_syncs_legacy_llm_and_interpreter_sections() -> None:
     from fleet_rlm.integrations.config.env import AppConfig
 
-    config = AppConfig.model_validate({
-        "llm": {
-            "model": "openai/gpt-4.1",
-            "delegate_model": "openai/gpt-4.1-mini",
-            "delegate_max_tokens": 2048,
-        },
-        "sandbox": {
-            "timeout": 321,
-            "async_execute": False,
-        },
-        "volumes": {"name": "tenant-volume"},
-    })
+    config = AppConfig.model_validate(
+        {
+            "llm": {
+                "model": "openai/gpt-4.1",
+                "delegate_model": "openai/gpt-4.1-mini",
+                "delegate_max_tokens": 2048,
+            },
+            "sandbox": {
+                "timeout": 321,
+                "async_execute": False,
+            },
+            "volumes": {"name": "tenant-volume"},
+        }
+    )
 
     assert config.agent.model == "openai/gpt-4.1"
     assert config.agent.delegate_model == "openai/gpt-4.1-mini"
@@ -126,17 +128,35 @@ def test_app_config_syncs_legacy_llm_and_interpreter_sections() -> None:
     assert config.interpreter.volume_name == "tenant-volume"
 
 
+def test_initialize_app_config_loads_pruned_default_config(clean_runtime_env: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.cli.config import initialize_app_config
+
+    clean_runtime_env.setenv("DSPY_LM_MODEL", "openai/pruned-default")
+    clean_runtime_env.setenv("VOLUME_NAME", "rlm-volume-test")
+
+    config = initialize_app_config()
+
+    assert config.llm.model == "openai/pruned-default"
+    assert config.sandbox.provider == "daytona"
+    assert config.volumes.name == "rlm-volume-test"
+    assert config.database.url is None
+    assert config.memory.core_memory_limits["persona"] == 2000
+    assert config.analytics.posthog.enabled is False
+
+
 def test_server_runtime_config_carries_delegate_timeout_settings() -> None:
     from fleet_rlm.api.config import ServerRuntimeConfig
     from fleet_rlm.integrations.config.env import AppConfig
 
-    config = AppConfig.model_validate({
-        "rlm_settings": {
-            "delegate_execution_timeout": 45,
-            "daytona_broker_health_timeout": 7.5,
-            "daytona_broker_start_retries": 2,
+    config = AppConfig.model_validate(
+        {
+            "rlm_settings": {
+                "delegate_execution_timeout": 45,
+                "daytona_broker_health_timeout": 7.5,
+                "daytona_broker_start_retries": 2,
+            }
         }
-    })
+    )
 
     runtime_config = ServerRuntimeConfig.from_app_config(config)
 

@@ -85,6 +85,27 @@ export MLFLOW_TRACKING_PASSWORD=replace-with-password
 
 If you do not want MLflow for a given environment, set `MLFLOW_ENABLED=false` and startup will skip MLflow initialization entirely.
 
+### Persisted MLflow scorers
+
+`FLEET_RLM_ENABLE_AUTO_ASSESSMENT=false` disables Fleet's startup-time scorer
+registration, but it does not remove scorer schedules that were previously
+created in the MLflow UI or by earlier runs. Those persisted scorers can keep
+assessing traces from `.data/mlruns.db` or the configured tracking backend.
+
+Inspect active scorers before debugging unexpected assessment warnings:
+
+```bash
+# from repo root
+uv run python scripts/mlflow_cli.py scorers list
+```
+
+Remove a stale scorer only as an explicit maintenance action:
+
+```bash
+# from repo root
+uv run python scripts/mlflow_cli.py scorers delete --name "Trace Judge" --yes
+```
+
 When MLflow is enabled, its initialization runs as an optional background startup
 task. If startup cannot reach the tracking server, check `/api/v1/runtime/status`
 for the `mlflow.startup_status` and `mlflow.startup_error` fields while you verify

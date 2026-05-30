@@ -18,6 +18,7 @@ if TYPE_CHECKING:
         VolumeNotReadyError,
     )
     from .interpreter import DaytonaInterpreter
+    from .memory_db import ainit_memory_db, init_memory_db
     from .models import (
         ContextSource,
         SandboxLmRuntimeConfig,
@@ -31,6 +32,8 @@ if TYPE_CHECKING:
     from .sdk_ops import bootstrap_snapshot
 
 __all__ = [
+    "ainit_memory_db",
+    "init_memory_db",
     "ContextSource",
     "DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH",
     "DaytonaConfigError",
@@ -90,6 +93,14 @@ _IMPORT_MAP: dict[str, tuple[str, str]] = {
     "VolumeNotReadyError": (
         "fleet_rlm.integrations.daytona.errors",
         "VolumeNotReadyError",
+    ),
+    "ainit_memory_db": (
+        "fleet_rlm.integrations.daytona.memory_db",
+        "ainit_memory_db",
+    ),
+    "init_memory_db": (
+        "fleet_rlm.integrations.daytona.memory_db",
+        "init_memory_db",
     ),
     "bootstrap_snapshot": (
         "fleet_rlm.integrations.daytona.sdk_ops",

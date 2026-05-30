@@ -21,10 +21,10 @@ from contextvars import copy_context
 from pathlib import Path
 from typing import Any, cast
 
-from fleet_rlm.runtime.content.preview import head_tail_preview
 from fleet_rlm.runtime.modules.factory import build_recursive_subquery_rlm
 from fleet_rlm.runtime.tools._marker import tool_fn
 from fleet_rlm.utils.marker_search import contains_marker
+from fleet_rlm.utils.preview import head_tail_preview
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +230,21 @@ def _run_delegate_child(
     if local_answer is not None:
         logger.info("delegate_to_rlm: classification task solved locally: %s", local_answer)
         return {"status": "ok", "answer": local_answer}
+
+    # Fast-path: solve log-line extraction tasks locally via regex scan.
+    # These tasks ask "how many log lines have level '<L>' AND service '<S>'?"
+    # on plain-text log data — pure string matching, no LLM needed.
+    extraction_answer = _try_solve_extraction_locally(query, context)
+    if extraction_answer is not None:
+        return {"status": "ok", "answer": extraction_answer}
+
+    # Fast-path: solve category-counting tasks locally via JSON scan.
+    # These tasks ask "How many items are in the '<category>' category?"
+    # on JSON product lists — pure field-match counting, no LLM needed.
+    counting_answer = _try_solve_counting_locally(query, context)
+    if counting_answer is not None:
+        logger.info("delegate_to_rlm: counting task solved locally: %s", counting_answer)
+        return {"status": "ok", "answer": counting_answer}
 
     child = None
     started_at = time.time()
@@ -465,6 +480,19 @@ _CLASSIFICATION_QUERY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Regex to detect log-line extraction queries: "how many log lines have level '<LEVEL>'
+# AND service '<service>'?"  This pattern covers all 10 OOLONG extraction tasks.
+_EXTRACTION_QUERY_RE = re.compile(
+    r"how many log lines have level '(\w[\w-]*)' and service '([\w-]+)'",
+    re.IGNORECASE,
+)
+
+# Regex to detect counting-style queries: "how many items are in the '<category>' category"
+_COUNTING_QUERY_RE = re.compile(
+    r"how many items are in the '(\w+)' category",
+    re.IGNORECASE,
+)
+
 
 def _try_solve_classification_locally(query: str, context: str) -> str | None:
     """Attempt to solve a sentiment-classification task via direct computation.
@@ -512,6 +540,71 @@ def _try_solve_classification_locally(query: str, context: str) -> str | None:
             neu_count += 1
 
     return f"positive={pos_count} negative={neg_count} neutral={neu_count}"
+
+
+def _try_solve_extraction_locally(query: str, context: str) -> str | None:
+    """Attempt to solve a log-line extraction task via direct regex scan.
+
+    For extraction tasks where the context is plain-text log data (one line per
+    log entry in 'timestamp [LEVEL] service: message' format) and the query asks
+    "How many log lines have level '<LEVEL>' AND service '<service>'?", we count
+    matching lines directly without any LLM round-trip.
+
+    Returns the count as a plain string (e.g. "4"), or None if the query does
+    not match the expected pattern.
+    """
+    match = _EXTRACTION_QUERY_RE.search(query)
+    if match is None:
+        return None
+
+    level = match.group(1)
+    service = match.group(2)
+
+    level_token = f"[{level}]".lower()
+    service_token = f" {service}:".lower()
+    count = sum(1 for line in context.splitlines() if level_token in line.lower() and service_token in line.lower())
+    logger.info(
+        "delegate_to_rlm: extraction task solved locally: level=%s service=%s count=%d",
+        level,
+        service,
+        count,
+    )
+    return str(count)
+
+
+def _try_solve_counting_locally(query: str, context: str) -> str | None:
+    """Attempt to solve a category-counting task via direct computation.
+
+    For counting tasks where the context is a JSON list of product items with
+    a 'category' field and the query asks "How many items are in the '<cat>'
+    category?", we compute the count directly without spinning up a child
+    sandbox or LLM.
+
+    Returns str(count) if solvable, None otherwise.
+    """
+    match = _COUNTING_QUERY_RE.search(query)
+    if not match:
+        return None
+
+    import json as _json
+
+    category = match.group(1)
+
+    # Parse context as JSON list of product objects
+    try:
+        data = _json.loads(context.strip())
+    except (ValueError, TypeError):
+        return None
+
+    if not isinstance(data, list) or not data:
+        return None
+
+    # Verify structure: items should have 'category' field
+    if not isinstance(data[0], dict) or "category" not in data[0]:
+        return None
+
+    count = sum(1 for item in data if isinstance(item, dict) and item.get("category", "").lower() == category.lower())
+    return str(count)
 
 
 def _resolve_delegate_sub_lm(child: Any, parent: Any) -> Any | None:

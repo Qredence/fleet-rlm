@@ -26,8 +26,6 @@ Frontend source lives under `src/frontend/src/`.
 | `features/layout/` | Shell chrome, route sync, sidebar, header, dialogs, canvas host |
 | `features/workspace/` | Workbench screen, transcript, inspector, run panel, composer |
 | `features/volumes/` | Mounted volume browser and preview flow |
-| `features/history/` | Session list, detail drawer, replay surfaces |
-| `features/optimization/` | Optimization tabs and forms |
 | `features/settings/` | Settings dialog/page and runtime settings forms |
 | `lib/workspace/` | Zustand stores, runtime adapters, hydration reducers, transcript shaping |
 | `lib/rlm-api/` | REST and websocket clients plus generated API types |
@@ -39,10 +37,9 @@ Frontend source lives under `src/frontend/src/`.
 
 ## Product Surface Rules
 
-- Supported surfaces are `/app/workspace`, `/app/volumes`, `/app/history`,
-  `/app/optimization`, and `/app/settings`.
-- Retired `taxonomy`, `skills`, `memory`, and `analytics` paths should fall
-  through to `/404`.
+- Supported surfaces are `/app/workspace`, `/app/volumes`, and `/app/settings`.
+- Retired `taxonomy`, `skills`, `memory`, `analytics`, `history`, and
+  `optimization` paths should fall through to `/404`.
 - Route wrappers must stay thin and should not own page logic.
 - New work should target `features/*`, `lib/*`, or `components/product/*`, not
   a resurrected screen layer.
@@ -62,7 +59,7 @@ Frontend source lives under `src/frontend/src/`.
 - `RootLayout` owns the shell chrome and responsive split layout.
 - `RouteSync` keeps the URL and shell store aligned.
 - Volumes opens the canvas automatically.
-- Settings, Optimization, and History close the canvas.
+- Settings closes the canvas.
 - Mobile uses the bottom sheet canvas and bottom tab bar.
 
 ## Environment

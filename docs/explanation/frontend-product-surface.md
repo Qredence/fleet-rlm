@@ -13,8 +13,7 @@ The supported product flow is a chat-first execution workbench:
 3. The backend streams live reasoning, tool, status, and final frames.
 4. The transcript updates in real time.
 5. The run workbench hydrates from the execution summary and final artifact.
-6. The user can inspect volumes, history, optimization, or settings from the
-   same shell.
+6. The user can inspect volumes or settings from the same shell.
 
 ## Surface Map
 
@@ -22,8 +21,6 @@ The supported product flow is a chat-first execution workbench:
 | --- | --- | --- | --- |
 | Workbench | `/app/workspace` | `features/workspace/*` | Main execution and inspection surface |
 | Volumes | `/app/volumes` | `features/volumes/*` | Mounted Daytona volume browser |
-| History | `/app/history` | `features/history/*` | Session and conversation history |
-| Optimization | `/app/optimization` | `features/optimization/*` | GEPA prompt optimization |
 | Settings | `/app/settings` | `features/settings/*` | Dialog-first settings surface |
 
 ## Layer Structure
@@ -35,8 +32,6 @@ src/frontend/src/
 │   ├── layout/            # Shell chrome, route sync, dialogs, sidebar, header
 │   ├── workspace/         # Workbench UI, transcript, inspector, run panel
 │   ├── volumes/           # Volume browser and file preview
-│   ├── history/           # Session list, detail drawer, replay
-│   ├── optimization/      # Optimization tabs and forms
 │   └── settings/          # Settings dialog and runtime forms
 ├── lib/
 │   ├── workspace/         # Zustand stores, event adapters, hydration reducers
@@ -69,7 +64,7 @@ The shell canvas is route-aware.
 
 - On Workbench, it acts as the inspector and run workbench.
 - On Volumes, it shows the file preview.
-- On Settings, Optimization, and History, it closes.
+- On Settings, it closes.
 - On mobile, the canvas becomes a bottom sheet.
 - On desktop, the canvas is the right-hand resizable panel.
 
@@ -81,5 +76,7 @@ The current frontend does not treat these as product surfaces:
 - `skills`
 - `memory`
 - `analytics`
+- `history`
+- `optimization`
 
 New work should target `features/*`, `lib/*`, and the thin route wrappers.

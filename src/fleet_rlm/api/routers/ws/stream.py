@@ -38,6 +38,7 @@ from ...events.event_adapter import (
 from ...runtime_services.chat_persistence import (
     ExecutionLifecycleManager,
     build_local_persist_fn,
+    build_startup_status_event,
     build_workspace_task_request,
     classify_stream_failure,
     enqueue_latest_nonblocking,
@@ -194,7 +195,7 @@ async def handle_terminal_stream_event(
 
     if event.kind == "done":
         try:
-            await persist_session_state(include_volume_save=True)
+            await persist_session_state(include_volume_save=True, release_idle_session=True)
         except Exception:
             logger.debug(
                 "Failed to persist session state before final event; continuing",
@@ -208,7 +209,7 @@ async def handle_terminal_stream_event(
         return
 
     try:
-        await persist_session_state(include_volume_save=True)
+        await persist_session_state(include_volume_save=True, release_idle_session=True)
     except Exception:
         logger.debug(
             "Failed to persist session state after %s event; completing run anyway",
@@ -623,6 +624,14 @@ async def run_streaming_turn(
     except WebSocketDisconnect:
         raise
     except Exception as exc:
+        try:
+            await persist_session_state(
+                include_volume_save=True,
+                allow_volume_session_create=False,
+                release_idle_session=True,
+            )
+        except Exception:
+            logger.debug("Failed to persist session state after stream exception", exc_info=True)
         await handle_stream_error(
             websocket=websocket,
             lifecycle=lifecycle,
@@ -1133,6 +1142,17 @@ class _ExecutionConnectionLoop:
                         user_id=user_id,
                         session_id=sess_id,
                     ),
+                )
+                startup_event = build_startup_status_event()
+                await _try_send_json(
+                    self.websocket,
+                    {
+                        "type": "event",
+                        "data": build_stream_event_dict(
+                            event=startup_event,
+                            payload=startup_event.payload,
+                        ),
+                    },
                 )
                 self.stream_task = asyncio.create_task(
                     _background_execution_task(

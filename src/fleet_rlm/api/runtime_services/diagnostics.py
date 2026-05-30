@@ -13,6 +13,7 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from fleet_rlm.integrations.daytona import DaytonaConfigError
+from fleet_rlm.integrations.daytona.concurrency import get_current_sandbox_usage
 from fleet_rlm.integrations.observability.config import MlflowConfig
 
 from ..bootstrap_observability import resolve_mlflow_auto_start_enabled
@@ -362,6 +363,7 @@ def build_runtime_status_response(
     daytona_checks, daytona_guidance = daytona_preflight(
         sandbox_provider=config_deps.config.sandbox_provider,
     )
+    sandbox_usage = get_current_sandbox_usage()
 
     lm_test = connectivity_result_from_cache(diagnostics=diagnostics_deps, kind="lm")
     daytona_test = connectivity_result_from_cache(diagnostics=diagnostics_deps, kind="daytona")
@@ -439,6 +441,7 @@ def build_runtime_status_response(
         daytona={
             **daytona_checks,
             "guidance": daytona_guidance,
+            "sandbox_slots": sandbox_usage.model_dump(),
         },
         tests=RuntimeTestCache(lm=lm_test, daytona=daytona_test),
         guidance=deduped_guidance,

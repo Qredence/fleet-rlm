@@ -396,7 +396,7 @@ _ALIAS_COMMAND_SPECS: dict[str, _AliasCommandSpec] = {
     "/list": _AliasCommandSpec("list_documents", lambda session, arg_text: {}),
     "/chunk": _AliasCommandSpec(
         "chunk_host",
-        _make_chunk_payload_builder(usage="usage: /chunk <size|headers|timestamps|json> [chunk_size]"),
+        _make_chunk_payload_builder(usage="usage: /chunk <size|headers> [chunk_size]"),
     ),
     "/summarize": _AliasCommandSpec(
         "summarize_long_document",

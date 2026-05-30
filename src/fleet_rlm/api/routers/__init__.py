@@ -11,7 +11,6 @@ __all__ = [
     "runtime",
     "sandboxes",
     "runs",
-    "memory",
     "optimization",
     "traces",
 ]
@@ -26,7 +25,6 @@ _IMPORT_MAP: dict[str, str] = {
     "runtime": "fleet_rlm.api.routers.runtime",
     "sandboxes": "fleet_rlm.api.routers.sandboxes",
     "runs": "fleet_rlm.api.routers.runs",
-    "memory": "fleet_rlm.api.routers.memory",
     "optimization": "fleet_rlm.api.routers.optimization",
     "traces": "fleet_rlm.api.routers.traces",
 }

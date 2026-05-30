@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bell, Bot, Cpu, Info, Moon, Paintbrush, Sparkles, Sun } from "lucide-react";
+import { Bell, Bot, Cpu, Info, Moon, Paintbrush, Sun } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +23,6 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { telemetryClient } from "@/lib/telemetry/client";
-import { OptimizationForm } from "@/features/optimization/optimization-form";
 import { RuntimeForm } from "./runtime-form";
 import { LiteLlmForm } from "./litellm-form";
 import { ServiceInfoPanel } from "./service-info-panel";
@@ -33,7 +32,6 @@ export const settingsSections = [
   { key: "telemetry", label: "Telemetry", icon: Bell },
   { key: "litellm", label: "LiteLLM Integration", icon: Bot },
   { key: "runtime", label: "Runtime", icon: Cpu },
-  { key: "optimization", label: "Optimization", icon: Sparkles },
   { key: "about", label: "About", icon: Info },
 ] as const;
 
@@ -44,8 +42,6 @@ export const sectionDescriptions: Record<SettingsSection, string> = {
   telemetry: "Privacy and communication preferences.",
   litellm: "Set planner models, provider endpoint, and API key.",
   runtime: "Manage runtime credentials and connectivity checks.",
-  optimization:
-    "Configure GEPA prompt optimization. Use the Optimization surface for datasets, runs, and comparisons.",
   about: "Build metadata and active feature flags for this instance.",
 };
 
@@ -113,7 +109,6 @@ export function SettingsSectionContent({
   section,
 }: SettingsSectionContentProps) {
   if (section === "runtime") return <RuntimeForm />;
-  if (section === "optimization") return <OptimizationForm />;
   if (section === "about") return <AboutPane />;
   return <GroupedSettingsPane isDark={isDark} onToggleTheme={onToggleTheme} section={section} />;
 }
@@ -276,8 +271,6 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
       <LiteLlmForm showAllSections={showAllSections} section={section} />
 
       {showSection("runtime") ? <RuntimeForm /> : null}
-
-      {showSection("optimization") ? <OptimizationForm /> : null}
 
       {showSection("about") ? <AboutPane /> : null}
     </div>

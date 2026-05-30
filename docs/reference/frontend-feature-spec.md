@@ -14,7 +14,7 @@ Users should feel that they can:
 - watch the system work
 - inspect outputs and artifacts
 - tune execution settings
-- revisit prior work
+- resume prior work from the workbench session list
 
 Users should not feel that they are staring at a transport protocol viewer or a
 legacy screen shell.
@@ -25,8 +25,6 @@ legacy screen shell.
 | --- | --- | --- | --- |
 | `/app/workspace` | Workbench | `features/workspace/workspace-screen.tsx` | Primary task execution surface |
 | `/app/volumes` | Volumes | `features/volumes/volumes-screen.tsx` | Mounted Daytona volume browser |
-| `/app/history` | History | `features/history/history-screen.tsx` | Session and conversation history |
-| `/app/optimization` | Optimization | `features/optimization/optimization-screen.tsx` | GEPA prompt optimization |
 | `/app/settings` | Settings | `features/settings/settings-screen.tsx` | Runtime and app settings |
 
 ## Workbench Spec
@@ -100,27 +98,6 @@ Rules:
 - the volume tree should be treated as mounted durable storage, not the live
   workspace session
 
-## History Spec
-
-History is a first-class routed surface, not a sidebar-only concept.
-
-Rules:
-
-- it lists backend sessions and local conversations
-- it can open a detail drawer without leaving the shell
-- it supports replay/inspection of prior work
-- it is separate from the live workbench turn flow
-
-## Optimization Spec
-
-The optimization surface is a standalone product area.
-
-Rules:
-
-- it exposes modules, datasets, runs, and compare tabs
-- it does not participate in the live workspace websocket turn
-- it should reuse shared optimization form logic rather than duplicating config
-
 ## Settings Spec
 
 Settings can open as a dialog or as the routed fallback page.
@@ -131,7 +108,6 @@ Supported sections:
 - `telemetry`
 - `litellm`
 - `runtime`
-- `optimization`
 
 Rules:
 

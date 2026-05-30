@@ -7,6 +7,8 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from fleet_rlm.runtime.tools.document_tools import _load_document_impl
+from fleet_rlm.runtime.tools.knowledge_tools import _search_knowledge_impl
 from fleet_rlm.runtime.tools.rlm_delegate import (
     delegate_to_rlm as _delegate_to_rlm,
 )
@@ -26,6 +28,11 @@ from fleet_rlm.runtime.tools.sandbox_filesystem import (
     _sandbox_write_file_impl,
     _SandboxFilesystemToolContext,
 )
+from fleet_rlm.runtime.tools.skill_tools import _load_skill_impl
+from fleet_rlm.runtime.tools.volume_memory_tools import (
+    _recall_impl,
+    _remember_impl,
+)
 
 INTERPRETER_TOOL_NAMES = frozenset(
     {
@@ -33,8 +40,11 @@ INTERPRETER_TOOL_NAMES = frozenset(
         "delegate_to_rlm",
         "delegate_to_rlm_batched",
         "execute_code",
+        "load_skill",
         "read_buffer",
         "recursive_workspace",
+        "remember",
+        "recall",
         "sandbox_create_directory",
         "sandbox_delete_file",
         "sandbox_find_in_files",
@@ -45,6 +55,7 @@ INTERPRETER_TOOL_NAMES = frozenset(
         "sandbox_replace_in_files",
         "sandbox_search_files",
         "sandbox_write_file",
+        "search_knowledge",
         "write_buffer",
     }
 )
@@ -131,6 +142,35 @@ def _bound_runtime_tool_factories(
 
     factories["read_core_memory"] = read_core_memory
     factories["write_core_memory"] = write_core_memory
+
+    _interp = interpreter if interpreter is not None else getattr(runtime, "interpreter", None)
+    volume_mount_path: str = str(getattr(_interp, "volume_mount_path", "") or "")
+    agent_depth: int = int(getattr(runtime, "agent_depth", 0) or 0)
+
+    if volume_mount_path:
+
+        def remember(key: str, value: str) -> dict[str, Any]:
+            return _remember_impl(key, value, volume_mount_path=volume_mount_path, agent_depth=agent_depth)
+
+        def recall(query: str) -> dict[str, Any]:
+            return _recall_impl(query, volume_mount_path=volume_mount_path)
+
+        def load_document(source: str, alias: str = "active") -> dict[str, Any]:
+            return _load_document_impl(source, alias=alias, volume_mount_path=volume_mount_path).model_dump()
+
+        def search_knowledge(query: str, max_results: int = 20) -> dict[str, Any]:
+            return _search_knowledge_impl(
+                query, volume_mount_path=volume_mount_path, max_results=max_results
+            ).model_dump()
+
+        def load_skill(name: str) -> dict[str, Any]:
+            return _load_skill_impl(name, volume_mount_path=volume_mount_path).model_dump()
+
+        factories["load_document"] = load_document
+        factories["load_skill"] = load_skill
+        factories["remember"] = remember
+        factories["recall"] = recall
+        factories["search_knowledge"] = search_knowledge
 
     if interpreter is None:
         return factories

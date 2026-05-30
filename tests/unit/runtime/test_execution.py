@@ -14,6 +14,9 @@ def test_storage_paths_normalize_mount_layouts() -> None:
     assert legacy.mounted_root == "/data"
     assert legacy.memory_root == "/data/memory"
     assert legacy.artifacts_root == "/data/artifacts"
+    assert legacy.memories_root == "/data/memories"
+    assert legacy.knowledge_root == "/data/knowledge"
+    assert legacy.sessions_root == "/data/sessions"
     assert legacy.allowed_root == "/data"
 
     assert current.mounted_root == "/home/daytona/memory"
@@ -99,6 +102,31 @@ def test_normalize_trajectory_truncates_long_output_and_drops_terminal_thought()
     assert trajectory[0]["output_truncated"] is True
     assert trajectory[0]["output_length"] == len(long_output)
     assert "characters omitted" in trajectory[0]["output"]
+    assert "thought" not in trajectory[1]
+    assert trajectory[1]["tool_name"] == "finish"
+
+
+def test_normalize_trajectory_accepts_structured_step_list() -> None:
+    from fleet_rlm.runtime.execution.streaming_events import _normalize_trajectory
+
+    trajectory = _normalize_trajectory(
+        [
+            {
+                "thought": "Run code",
+                "tool_name": "repl_execute",
+                "input": {"code_preview": "print(1)"},
+                "observation": {"success": True},
+            },
+            {
+                "thought": "Final hidden reasoning",
+                "tool_name": "finish",
+                "output": "done",
+            },
+        ]
+    )
+
+    assert trajectory[0]["tool_name"] == "repl_execute"
+    assert trajectory[0]["observation"] == {"success": True}
     assert "thought" not in trajectory[1]
     assert trajectory[1]["tool_name"] == "finish"
 

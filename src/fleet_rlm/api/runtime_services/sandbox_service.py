@@ -6,6 +6,7 @@ from daytona import (
     DaytonaAuthenticationError,
     DaytonaAuthorizationError,
     DaytonaConnectionError,
+    DaytonaError,
     DaytonaNotFoundError,
     DaytonaTimeoutError,
 )
@@ -23,6 +24,7 @@ from . import sandboxes as _sandboxes
 
 _DAYTONA_NOT_FOUND_ERRORS: tuple[type[BaseException], ...] = (DaytonaNotFoundError,)
 _DAYTONA_UNAVAILABLE_ERRORS: tuple[type[BaseException], ...] = (
+    DaytonaError,
     DaytonaConnectionError,
     DaytonaAuthenticationError,
     DaytonaAuthorizationError,

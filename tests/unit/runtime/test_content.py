@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -8,7 +7,7 @@ import pytest
 
 def test_chunk_by_size_and_preview_cover_long_text() -> None:
     from fleet_rlm.runtime.content.chunking import chunk_by_size
-    from fleet_rlm.runtime.content.preview import head_tail_preview
+    from fleet_rlm.utils.preview import head_tail_preview
 
     chunks = chunk_by_size("abcdefghij", size=4, overlap=1)
     preview, length = head_tail_preview("X" * 10_000, max_chars=20)
@@ -20,33 +19,15 @@ def test_chunk_by_size_and_preview_cover_long_text() -> None:
     assert "characters omitted" in preview
 
 
-def test_chunk_by_headers_and_timestamps_preserve_structure() -> None:
-    from fleet_rlm.runtime.content.chunking import chunk_by_headers, chunk_by_timestamps
+def test_chunk_by_headers_preserves_structure() -> None:
+    from fleet_rlm.runtime.content.chunking import chunk_by_headers
 
     headers = chunk_by_headers("Preamble\n# Title\nBody\n## Details\nMore")
-    timestamps = chunk_by_timestamps("header\n2026-01-01 INFO Start\n2026-01-02 ERROR Fail")
 
     assert headers[0] == {"header": "", "content": "Preamble", "start_pos": 0}
     assert headers[1]["header"] == "# Title"
     assert "Body" in headers[1]["content"]
     assert headers[2]["header"] == "## Details"
-
-    assert timestamps[0] == {"timestamp": "", "content": "header", "start_pos": 0}
-    assert timestamps[1]["timestamp"] == "2026-01-01"
-    assert timestamps[2]["timestamp"] == "2026-01-02"
-
-
-def test_chunk_by_json_keys_splits_objects_and_rejects_non_objects() -> None:
-    from fleet_rlm.runtime.content.chunking import chunk_by_json_keys
-
-    chunks = chunk_by_json_keys(json.dumps({"users": [1, 2], "config": {"debug": True}}))
-
-    assert chunks[0]["key"] == "users"
-    assert json.loads(chunks[0]["content"]) == [1, 2]
-    assert chunks[1]["value_type"] == "dict"
-
-    with pytest.raises(ValueError, match="Expected JSON object"):
-        chunk_by_json_keys("[1, 2, 3]")
 
 
 def test_looks_like_binary_and_text_file_detection(tmp_path: Path) -> None:

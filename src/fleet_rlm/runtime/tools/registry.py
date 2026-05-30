@@ -9,14 +9,16 @@ from typing import Any, Iterable
 from ._marker import tool_fn
 
 TOOL_MODULE_NAMES: tuple[str, ...] = (
-    "buffer_tools",
     "chunking_tools",
     "document_tools",
     "filesystem",
-    "memory_tools",
+    "knowledge_tools",
     "rlm_delegate",
     "sandbox_filesystem",
     "sandbox_tools",
+    "skill_tools",
+    "volume_memory_tools",
+    "web_tools",
 )
 
 

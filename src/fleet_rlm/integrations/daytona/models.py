@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import json
 import re
+import uuid
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Mapping
@@ -272,6 +273,8 @@ class SandboxSpec:
     cpu: int | None = None
     memory: int | None = None
     disk: int | None = None
+    recoverable: bool = True
+    runner_tags: list[str] | None = None
     network_block_all: bool | None = None
     network_allow_list: str | None = None
 
@@ -289,6 +292,10 @@ class SandboxSpec:
             params["labels"] = dict(self.labels)
         if self.ephemeral is not None:
             params["ephemeral"] = self.ephemeral
+        if self.recoverable is not None:
+            params["recoverable"] = self.recoverable
+        if self.runner_tags:
+            params["runner_tags"] = list(self.runner_tags)
         params.update(self._daytona_lifecycle_params())
         if self.snapshot and not self.image:
             params["snapshot"] = self.snapshot
@@ -365,7 +372,7 @@ DEFAULT_SANDBOX_LABELS: dict[str, str] = {"managed-by": "fleet-rlm"}
 def default_sandbox_name(*, now: datetime.datetime | None = None) -> str:
     """Return the dashboard-friendly default sandbox name."""
     timestamp = now or datetime.datetime.now(datetime.timezone.utc)
-    return f"fleet-rlm-{timestamp:%Y%m%d-%H%M%S}"
+    return f"fleet-rlm-{timestamp:%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}"
 
 
 def merge_sandbox_labels(
@@ -393,6 +400,8 @@ def build_sandbox_spec(
     cpu: int | None = None,
     memory: int | None = None,
     disk: int | None = None,
+    recoverable: bool = True,
+    runner_tags: list[str] | None = None,
     auto_stop_interval: int | None = 30,
     auto_archive_interval: int | None = 60,
     auto_delete_interval: int | None = None,
@@ -419,6 +428,8 @@ def build_sandbox_spec(
         cpu=cpu,
         memory=memory,
         disk=disk,
+        recoverable=recoverable,
+        runner_tags=runner_tags,
         network_block_all=network_block_all,
         network_allow_list=network_allow_list,
     )

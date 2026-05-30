@@ -353,6 +353,10 @@ class DaytonaInterpreter(
     async def ashutdown(self) -> None:
         await self._workspace.ashutdown()
 
+    async def arelease_idle_session(self) -> None:
+        """Release the current Daytona sandbox while preserving volume-backed state."""
+        await self._workspace.arelease_idle_session()
+
     def execute(
         self,
         code: str,

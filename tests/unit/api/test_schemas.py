@@ -295,46 +295,6 @@ ROUNDTRIP_CASES = [
         {"trace_id": "trace-1", "client_request_id": "request-1"},
     ),
     (
-        "fleet_rlm.api.schemas.memory",
-        "MemoryItemResponse",
-        {
-            "id": "memory-1",
-            "scope": "user",
-            "scope_id": "user-a",
-            "kind": "fact",
-            "source": "agent",
-            "status": "active",
-            "content_text": "Important note",
-            "importance": 80,
-            "tags": ["project"],
-            "created_at": "2024-01-01T00:00:00Z",
-        },
-    ),
-    (
-        "fleet_rlm.api.schemas.memory",
-        "MemoryListResponse",
-        {
-            "items": [
-                {
-                    "id": "memory-1",
-                    "scope": "user",
-                    "scope_id": "user-a",
-                    "kind": "fact",
-                    "source": "agent",
-                    "status": "active",
-                    "content_text": "Important note",
-                    "importance": 80,
-                    "tags": ["project"],
-                    "created_at": "2024-01-01T00:00:00Z",
-                }
-            ],
-            "total": 1,
-            "offset": 0,
-            "limit": 100,
-            "has_more": False,
-        },
-    ),
-    (
         "fleet_rlm.api.schemas.optimization",
         "GEPAOptimizationRequest",
         {"dataset_id": "dataset-1", "program_spec": "package.module:program"},

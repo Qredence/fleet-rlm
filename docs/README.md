@@ -1,6 +1,6 @@
 # fleet-rlm Documentation
 
-`fleet-rlm` is a Daytona-backed recursive DSPy workbench. The maintained product is the live workbench, the durable volumes browser, the optimization surface, runtime settings and diagnostics, and the session history and replay view. This documentation mirrors that current product and keeps migration history separate.
+`fleet-rlm` is a Daytona-backed recursive DSPy workbench. The maintained product surfaces are the live workbench, the durable volumes browser, and runtime settings and diagnostics. This documentation mirrors that current product and keeps migration history separate.
 
 This documentation is for both:
 
@@ -23,7 +23,6 @@ Then open `http://localhost:8000`.
 - [Reference Index](reference/index.md)
 - [Explanation Index](explanation/index.md)
 - [Frontend Product Surface Guide](explanation/frontend-product-surface.md)
-- [Optimization Page Spec](specs/optimization-page.md)
 - [Wiring Analysis](explanation/wiring-analysis.md)
 - [Runtime Settings](how-to-guides/runtime-settings.md)
 - [Codex Local Environment](how-to-guides/codex-environment.md)

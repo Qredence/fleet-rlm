@@ -322,6 +322,10 @@ def export_session(
     loaded_document_paths = getattr(runtime, "loaded_document_paths", None)
     if isinstance(loaded_document_paths, list):
         payload["loaded_document_paths"] = [str(item) for item in loaded_document_paths]
+    conversation_summary = getattr(runtime, "conversation_summary", None)
+    if isinstance(conversation_summary, str):
+        payload["conversation_summary"] = conversation_summary
+        payload["turns_since_summary"] = int(getattr(runtime, "_turns_since_summary", 0) or 0)
     return payload
 
 
@@ -350,6 +354,16 @@ def import_session(
         runtime.loaded_document_paths = [str(item) for item in loaded_document_paths]
     elif hasattr(runtime, "loaded_document_paths"):
         runtime.loaded_document_paths = []
+    conversation_summary = data.get("conversation_summary")
+    if isinstance(conversation_summary, str) and hasattr(runtime, "conversation_summary"):
+        runtime.conversation_summary = conversation_summary
+    elif hasattr(runtime, "conversation_summary"):
+        runtime.conversation_summary = ""
+    turns_since_summary = data.get("turns_since_summary")
+    if isinstance(turns_since_summary, int) and hasattr(runtime, "_turns_since_summary"):
+        runtime._turns_since_summary = max(0, turns_since_summary)
+    elif hasattr(runtime, "_turns_since_summary"):
+        runtime._turns_since_summary = 0
 
     turns_count = len(list(getattr(restored, "messages", []) or []))
     return {

@@ -1,13 +1,11 @@
 import { type MouseEvent, useMemo } from "react";
 import {
-  Clock3,
   Database,
   LogIn,
   PanelLeftIcon,
   Plus,
   Search,
   Settings,
-  Sparkles,
   Terminal,
   Trash2,
   type LucideIcon,
@@ -89,8 +87,6 @@ export function AppSidebar() {
   const location = useLocation();
   const isWorkspace = location.pathname.startsWith("/app/workspace");
   const isVolumes = location.pathname.startsWith("/app/volumes");
-  const isOptimization = location.pathname.startsWith("/app/optimization");
-  const isHistory = location.pathname.startsWith("/app/history");
   const isSettings = location.pathname.startsWith("/app/settings");
   const sortedConversations = useMemo(() => sortConversations(conversations), [conversations]);
 
@@ -189,18 +185,6 @@ export function AppSidebar() {
                 icon={Database}
                 onClick={() => navigateTo("volumes")}
                 isActive={isVolumes}
-              />
-              <SidebarActionItem
-                label="Optimization"
-                icon={Sparkles}
-                onClick={() => navigateTo("optimization")}
-                isActive={isOptimization}
-              />
-              <SidebarActionItem
-                label="History"
-                icon={Clock3}
-                onClick={() => navigateTo("history")}
-                isActive={isHistory}
               />
             </SidebarMenu>
           </SidebarGroupContent>

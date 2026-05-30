@@ -59,6 +59,24 @@ uv run fleet-rlm daytona-smoke --repo https://github.com/qredence/fleet-rlm.git 
 uv run pytest -q -m "live_llm"
 ```
 
+**Running Live Daytona Restore and Concurrency Checks**
+
+Use these scripts after changing Daytona volume layout, memory bootstrap,
+session restore, or sandbox concurrency behavior:
+
+```bash
+# Recreate a sandbox with a persistent volume and verify session restore paths
+uv run python scripts/live_daytona_verify.py
+
+# Fill the sandbox slot limit, verify the busy error, then verify release
+FLEET_MAX_CONCURRENT_SANDBOXES=2 uv run python scripts/live_concurrency_verify.py
+```
+
+Both scripts require `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and optional
+`DAYTONA_TARGET`. Live web-search evidence additionally requires
+`BRAVE_SEARCH_API_KEY` or `BRAVE_API_KEY`; record that check as skipped when no
+provider key is configured.
+
 **Running Benchmarks**
 
 Benchmark tests measure performance and throughput:

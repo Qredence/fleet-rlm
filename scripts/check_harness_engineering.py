@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import json
 import subprocess
 import sys
 import tomllib
@@ -116,7 +115,11 @@ class HarnessChecker:
         required_toml.extend(sorted((codex_dir / "agents").glob("*.toml")))
         for path in required_toml:
             self._parse_toml(path)
-        self._parse_json(codex_dir / "hooks.json")
+        if (codex_dir / "hooks.json").exists():
+            self._error(
+                ".codex/hooks.json",
+                "deprecated hook source still present; use inline [hooks] in .codex/config.toml only",
+            )
         for rel_path in (
             ".codex/workspace-bootstrap.zsh",
             ".codex/hooks/block-env-edit.zsh",
@@ -204,16 +207,6 @@ class HarnessChecker:
             tomllib.loads(path.read_text(encoding="utf-8"))
         except tomllib.TOMLDecodeError as exc:
             self._error(rel_path, f"TOML parse failed: {exc}")
-
-    def _parse_json(self, path: Path) -> None:
-        rel_path = path.relative_to(self.repo_root).as_posix()
-        if not path.is_file():
-            self._error(rel_path, "required JSON file is missing")
-            return
-        try:
-            json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            self._error(rel_path, f"JSON parse failed: {exc}")
 
     def _extract_import_roots(self, path: Path) -> set[str]:
         content = path.read_text(encoding="utf-8", errors="ignore")

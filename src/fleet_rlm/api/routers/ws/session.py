@@ -9,10 +9,10 @@ from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from fleet_rlm.api.runtime_services.session_paths import legacy_session_manifest_path, session_conversation_path
 from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.utils.identity import owner_fingerprint, session_key
-from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
 from ...dependencies import SessionCacheDeps
 from ...runtime_services.chat_runtime import (
@@ -30,21 +30,24 @@ def _resolved_manifest_path(
     user_id: str | None,
     session_id: str | None,
 ) -> str | None:
-    if not workspace_id or not user_id or not session_id:
-        return None
-    safe_session_id = _sanitize_id(session_id, "default-session")
-    return f"meta/workspaces/{workspace_id}/users/{user_id}/react-session-{safe_session_id}.json"
+    _ = workspace_id, user_id
+    return session_conversation_path(session_id)
 
 
 def _switch_manifest_path(*, owner_id: str, workspace_id: str, session_id: str) -> str:
-    manifest_path = _resolved_manifest_path(
+    _ = owner_id, workspace_id
+    manifest_path = session_conversation_path(session_id)
+    if manifest_path is None:
+        raise ValueError("owner_id, workspace_id, and session_id are required")
+    return manifest_path
+
+
+def _legacy_switch_manifest_path(*, owner_id: str, workspace_id: str, session_id: str) -> str | None:
+    return legacy_session_manifest_path(
         workspace_id=owner_id,
         user_id=workspace_id,
         session_id=session_id,
     )
-    if manifest_path is None:
-        raise ValueError("owner_id, workspace_id, and session_id are required")
-    return manifest_path
 
 
 def _parse_uuid(value: object) -> uuid.UUID | None:
@@ -231,9 +234,29 @@ async def switch_session_if_needed(
 
     cached: dict[str, Any] | None = session_cache.sessions.get(key)
     if cached is None:
-        from ...runtime_services.chat_persistence import load_manifest_from_volume
+        from ...runtime_services.chat_persistence import (
+            _restore_manifest_from_local_store,
+            load_manifest_from_volume,
+        )
 
-        manifest = await load_manifest_from_volume(agent, manifest_path) if interpreter is not None else {}
+        legacy_manifest_path = _legacy_switch_manifest_path(
+            owner_id=owner_id,
+            workspace_id=workspace_id,
+            session_id=sess_id,
+        )
+        if interpreter is not None:
+            manifest = await load_manifest_from_volume(
+                agent,
+                manifest_path,
+                fallback_paths=[legacy_manifest_path] if legacy_manifest_path else [],
+            )
+        else:
+            # No Daytona volume — attempt to restore from local store so that
+            # session history survives process restarts between WS connections.
+            manifest = await _restore_manifest_from_local_store(
+                persistence=persistence,
+                sess_id=sess_id,
+            )
         cached = {
             "key": key,
             "workspace_id": workspace_id,
@@ -270,6 +293,22 @@ async def switch_session_if_needed(
         db_session_id = str(cached.get("db_session_id") or "").strip()
         if db_session_id:
             metadata["db_session_id"] = db_session_id
+        if interpreter is not None:
+            from ...runtime_services.chat_persistence import ensure_session_volume_layout
+
+            try:
+                layout_paths = await ensure_session_volume_layout(
+                    agent,
+                    sess_id,
+                    allow_session_create=False,
+                )
+            except (OSError, TimeoutError, asyncio.TimeoutError):
+                logger.warning("Best-effort Daytona session layout initialization failed", exc_info=True)
+            except Exception:
+                logger.warning("Best-effort Daytona session layout initialization failed", exc_info=True)
+                raise
+            else:
+                metadata.update(layout_paths)
     session_cache.sessions[key] = cached
 
     await _restore_agent_state(

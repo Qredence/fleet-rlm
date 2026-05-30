@@ -1,4 +1,4 @@
-export type NavItem = "workspace" | "volumes" | "optimization" | "history" | "settings";
+export type NavItem = "workspace" | "volumes" | "settings";
 
 /** The panel types available in the sidepanel canvas. */
 export type CanvasPanel = "workspace" | "volumes" | "graph";

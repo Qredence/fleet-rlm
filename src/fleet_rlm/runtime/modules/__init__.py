@@ -5,6 +5,7 @@ named DSPy execution modules as "models." All public symbols are re-exported her
 for convenience.
 
 Architecture:
+    - ``escalating`` — ChainOfThought→RLM auto-escalating unified agent module
     - ``evidence`` — EvidenceSink protocol
     - ``factory`` — low-level module construction helpers
     - ``grounded_answer`` — chunking + grounded-answer synthesis
@@ -14,6 +15,10 @@ Architecture:
     - ``workspace`` — multi-pass recursive workspace orchestrator
 """
 
+from fleet_rlm.runtime.modules.escalating import (
+    ESCALATION_SENTINEL,
+    EscalatingFleetModule,
+)
 from fleet_rlm.runtime.modules.evidence import EvidenceSink
 from fleet_rlm.runtime.modules.factory import (
     RuntimeModuleBuildConfig,
@@ -57,6 +62,9 @@ from fleet_rlm.runtime.modules.workspace import (
 )
 
 __all__ = [
+    # Escalating
+    "ESCALATION_SENTINEL",
+    "EscalatingFleetModule",
     # Evidence
     "EvidenceSink",
     # Factory

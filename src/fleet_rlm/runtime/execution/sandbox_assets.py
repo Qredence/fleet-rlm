@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import glob
-import json
 import os
 import re
 import subprocess
@@ -103,57 +102,6 @@ def chunk_by_headers(
             content = section[newline_pos + 1 :].strip()
         parts.append({"header": header, "content": content, "start_pos": match.start()})
     return parts
-
-
-def chunk_by_timestamps(
-    text: str,
-    pattern: str = r"^\d{4}-\d{2}-\d{2}[T ]",
-    flags: int = re.MULTILINE,
-) -> list[dict[str, Any]]:
-    if not text:
-        return []
-
-    compiled = re.compile(pattern, flags)
-    matches = list(compiled.finditer(text))
-    if not matches:
-        return [{"timestamp": "", "content": text, "start_pos": 0}]
-
-    chunks: list[dict[str, Any]] = []
-    if matches[0].start() > 0:
-        preamble = text[: matches[0].start()].strip()
-        if preamble:
-            chunks.append({"timestamp": "", "content": preamble, "start_pos": 0})
-
-    for idx, match in enumerate(matches):
-        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
-        content = text[match.start() : end].strip()
-        chunks.append(
-            {
-                "timestamp": match.group(0).strip(),
-                "content": content,
-                "start_pos": match.start(),
-            }
-        )
-    return chunks
-
-
-def chunk_by_json_keys(text: str) -> list[dict[str, Any]]:
-    if not text or not text.strip():
-        return []
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid JSON: {exc}") from exc
-    if not isinstance(data, dict):
-        raise ValueError(f"Expected JSON object, got {type(data).__name__}")
-    return [
-        {
-            "key": key,
-            "content": json.dumps(value, indent=2, default=str),
-            "value_type": type(value).__name__,
-        }
-        for key, value in data.items()
-    ]
 
 
 _buffers: dict[str, list[Any]] = {}

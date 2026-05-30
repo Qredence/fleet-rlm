@@ -11,9 +11,7 @@ from typing import Any
 
 from fleet_rlm.runtime.content.chunking import (
     chunk_by_headers,
-    chunk_by_json_keys,
     chunk_by_size,
-    chunk_by_timestamps,
 )
 from fleet_rlm.runtime.tools._marker import tool_fn
 
@@ -25,13 +23,9 @@ def _normalize_strategy(strategy: str) -> str:
         "size": "size",
         "headers": "headers",
         "header": "headers",
-        "timestamps": "timestamps",
-        "timestamp": "timestamps",
-        "json": "json_keys",
-        "json_keys": "json_keys",
     }
     if normalized not in mapping:
-        raise ValueError("Unsupported strategy. Choose one of: size, headers, timestamps, json_keys")
+        raise ValueError("Unsupported strategy. Choose one of: size, headers")
     return mapping[normalized]
 
 
@@ -49,9 +43,7 @@ def _chunk_text(
         return chunk_by_size(text, size=size, overlap=overlap)
     if strategy_norm == "headers":
         return chunk_by_headers(text, pattern=pattern or r"^#{1,3} ")
-    if strategy_norm == "timestamps":
-        return chunk_by_timestamps(text, pattern=pattern or r"^\d{4}-\d{2}-\d{2}[T ]")
-    return chunk_by_json_keys(text)
+    return chunk_by_size(text, size=size, overlap=overlap)
 
 
 def _looks_like_document_alias(text: str) -> bool:

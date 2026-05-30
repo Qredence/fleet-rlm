@@ -14,11 +14,9 @@ The live shell supports:
 
 - `/app/workspace`
 - `/app/volumes`
-- `/app/history`
-- `/app/optimization`
 - `/app/settings`
 
-Legacy `taxonomy`, `skills`, `memory`, and `analytics` routes are not supported
+Legacy `taxonomy`, `skills`, `memory`, `analytics`, `history`, and `optimization` routes are not supported
 entrypoints.
 
 ## REST Surfaces Used By The Frontend
@@ -181,9 +179,9 @@ Rules:
 - The workbench should not depend on transcript scraping for its canonical
   completion state.
 
-## Session And History Contract
+## Session Contract
 
-The history surface uses both backend sessions and local conversation state.
+The workbench session controls use both backend sessions and local conversation state.
 
 Backend session data supports:
 
@@ -207,6 +205,4 @@ The settings feature treats these operations as current:
 - test Daytona connectivity
 - refresh runtime status
 
-The runtime and LiteLLM forms use the backend runtime settings API. The
-optimization section reuses the optimization feature form rather than duplicating
-its own settings implementation.
+The runtime and LiteLLM forms use the backend runtime settings API.

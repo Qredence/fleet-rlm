@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import posixpath
+import shlex
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -30,6 +31,11 @@ from fleet_rlm.api.events import (
 from fleet_rlm.api.runtime_services.common import (
     parse_model_identity,
     resolve_sandbox_provider,
+)
+from fleet_rlm.api.runtime_services.session_paths import (
+    session_conversation_path,
+    session_scratchpad_path,
+    session_workspace_link_path,
 )
 from fleet_rlm.integrations.database import (
     FleetRepository,
@@ -156,7 +162,7 @@ EmitStartupEvent = Callable[[Any], Awaitable[None]]
 def build_startup_status_event() -> Any:
     """Return the canonical delayed startup status event."""
     return SimpleNamespace(
-        kind="status",
+        kind="turn_started",
         text="Preparing Daytona workspace...",
         payload={
             "phase": "startup",
@@ -256,7 +262,11 @@ async def handle_chat_disconnect(
     await cancel_task(pending_receive_task)
     await cancel_task(stream_task)
     try:
-        await local_persist(include_volume_save=True)
+        await local_persist(
+            include_volume_save=True,
+            allow_volume_session_create=False,
+            release_idle_session=True,
+        )
     except PersistenceRequiredError as exc:
         logger.warning(
             "Session persistence failed during disconnect: %s",
@@ -317,11 +327,23 @@ def _is_final_output(result: Any) -> bool:
 
 
 def _manifest_path(workspace_id: str, user_id: str, session_id: str) -> str:
+    _ = workspace_id, user_id
+    conversation_path = session_conversation_path(session_id)
+    if conversation_path is not None:
+        return conversation_path
     safe_session_id = _sanitize_id(session_id, "default-session")
     return f"meta/workspaces/{workspace_id}/users/{user_id}/react-session-{safe_session_id}.json"
 
 
-async def _aget_daytona_session(agent: Any) -> Any | None:
+def _get_existing_daytona_session(agent: Any) -> Any | None:
+    interpreter = getattr(agent, "interpreter", None)
+    workspace = getattr(interpreter, "_workspace", None)
+    if workspace is None:
+        return None
+    return getattr(workspace, "_session", None)
+
+
+async def _aget_daytona_session(agent: Any, *, allow_create: bool = True) -> Any | None:
     try:
         from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
     except ImportError:
@@ -330,10 +352,27 @@ async def _aget_daytona_session(agent: Any) -> Any | None:
     interpreter = getattr(agent, "interpreter", None)
     if not isinstance(interpreter, DaytonaInterpreter):
         return None
+    if not allow_create:
+        return _get_existing_daytona_session(agent)
     aget_session = getattr(interpreter, "aget_session", None)
     if aget_session is None or not callable(aget_session):
         return None
     return await aget_session()
+
+
+async def release_idle_daytona_session(agent: Any) -> None:
+    """Best-effort release of an already-created Daytona sandbox session."""
+    interpreter = getattr(agent, "interpreter", None)
+    if interpreter is None:
+        return
+    if _get_existing_daytona_session(agent) is None:
+        return
+    release_idle = getattr(interpreter, "arelease_idle_session", None)
+    if callable(release_idle):
+        try:
+            await release_idle()
+        except Exception:
+            logger.warning("Failed to release idle Daytona session", exc_info=True)
 
 
 def _persistent_storage_path(interpreter: Any, path: str) -> str:
@@ -349,40 +388,116 @@ def _persistent_storage_path(interpreter: Any, path: str) -> str:
     return resolved
 
 
-async def load_manifest_from_volume(agent: Any, path: str) -> dict[str, Any]:
-    """Best-effort manifest load from interpreter volume storage."""
+def _session_workspace_target(daytona_session: Any, interpreter: Any) -> str:
+    return str(
+        getattr(daytona_session, "workspace_path", None)
+        or getattr(interpreter, "workspace_path", None)
+        or getattr(interpreter, "repo_path", None)
+        or ""
+    ).strip()
+
+
+def _ensure_session_layout_command(*, scratchpad_path: str, workspace_link_path: str, workspace_target: str) -> str:
+    return " ".join(
+        [
+            "mkdir",
+            "-p",
+            shlex.quote(scratchpad_path),
+            "&&",
+            "rm",
+            "-rf",
+            shlex.quote(workspace_link_path),
+            "&&",
+            "ln",
+            "-s",
+            shlex.quote(workspace_target),
+            shlex.quote(workspace_link_path),
+        ]
+    )
+
+
+async def ensure_session_volume_layout(
+    agent: Any,
+    session_id: str,
+    *,
+    allow_session_create: bool = True,
+) -> dict[str, str]:
+    """Ensure Phase 1 per-session scratchpad and workspace mapping exist on the volume."""
     interpreter = agent.interpreter
     if interpreter is None:
         return {}
-    daytona_session = await _aget_daytona_session(agent)
+    scratchpad_path = session_scratchpad_path(session_id)
+    workspace_link_path = session_workspace_link_path(session_id)
+    if scratchpad_path is None or workspace_link_path is None:
+        return {}
+    storage_scratchpad_path = _persistent_storage_path(interpreter, scratchpad_path)
+    storage_workspace_link_path = _persistent_storage_path(interpreter, workspace_link_path)
+    daytona_session = await _aget_daytona_session(agent, allow_create=allow_session_create)
+    if daytona_session is None and not allow_session_create:
+        return {
+            "scratchpad_path": storage_scratchpad_path,
+            "workspace_link_path": storage_workspace_link_path,
+        }
+    workspace_target = _session_workspace_target(daytona_session, interpreter)
+    if not workspace_target:
+        return {
+            "scratchpad_path": storage_scratchpad_path,
+            "workspace_link_path": storage_workspace_link_path,
+        }
     if daytona_session is not None:
-        storage_path = _persistent_storage_path(interpreter, path)
-        try:
-            text = await daytona_session.aread_file(storage_path)
-        except Exception:
-            logger.debug(
-                "manifest_load_daytona_read_error",
-                extra={"path": storage_path},
-                exc_info=True,
-            )
-            return {}
-        if not text:
-            return {}
-        try:
-            parsed = json.loads(text)
-            return parsed if isinstance(parsed, dict) else {}
-        except json.JSONDecodeError:
-            return {}
-    result = await interpreter.aexecute(
-        "text = load_from_volume(path)\nSUBMIT(text=text)",
-        variables={"path": path},
+        process = getattr(getattr(daytona_session, "sandbox", None), "process", None)
+        exec_command = getattr(process, "exec", None)
+        if callable(exec_command):
+            try:
+                exec_command(
+                    _ensure_session_layout_command(
+                        scratchpad_path=storage_scratchpad_path,
+                        workspace_link_path=storage_workspace_link_path,
+                        workspace_target=workspace_target,
+                    )
+                )
+                return {
+                    "scratchpad_path": storage_scratchpad_path,
+                    "workspace_link_path": storage_workspace_link_path,
+                }
+            except Exception as exc:
+                logger.warning(
+                    "ensure_session_volume_layout: Daytona exec_command failed, falling back to interpreter aexecute: %s",
+                    exc,
+                )
+    await interpreter.aexecute(
+        "\n".join(
+            [
+                "import os",
+                "os.makedirs(scratchpad_path, exist_ok=True)",
+                "if os.path.isdir(workspace_target):",
+                "    if os.path.lexists(workspace_link_path):",
+                "        if os.path.isdir(workspace_link_path) and not os.path.islink(workspace_link_path):",
+                "            import shutil",
+                "            shutil.rmtree(workspace_link_path)",
+                "        else:",
+                "            os.unlink(workspace_link_path)",
+                "    os.symlink(workspace_target, workspace_link_path)",
+                "else:",
+                "    import warnings",
+                "    warnings.warn(f'Workspace target {workspace_target} does not exist, skipping symlink creation')",
+                "SUBMIT(scratchpad_path=scratchpad_path, workspace_link_path=workspace_link_path)",
+            ]
+        ),
+        variables={
+            "scratchpad_path": storage_scratchpad_path,
+            "workspace_link_path": storage_workspace_link_path,
+            "workspace_target": workspace_target,
+        },
         execution_profile=ExecutionProfile.MAINTENANCE,
     )
-    if not _is_final_output(result):
-        return {}
-    output = getattr(result, "output", None)
-    output = output if isinstance(output, dict) else {}
-    text = str(output.get("text", ""))
+    return {
+        "scratchpad_path": storage_scratchpad_path,
+        "workspace_link_path": storage_workspace_link_path,
+    }
+
+
+def _parse_manifest_text(text: str) -> dict[str, Any]:
     if not text or text.startswith("[file not found:") or text.startswith("[error:"):
         return {}
     try:
@@ -390,6 +505,52 @@ async def load_manifest_from_volume(agent: Any, path: str) -> dict[str, Any]:
         return parsed if isinstance(parsed, dict) else {}
     except json.JSONDecodeError:
         return {}
+
+
+async def load_manifest_from_volume(
+    agent: Any,
+    path: str,
+    fallback_paths: list[str] | None = None,
+    *,
+    allow_session_create: bool = True,
+) -> dict[str, Any]:
+    """Best-effort manifest load from interpreter volume storage."""
+    interpreter = agent.interpreter
+    if interpreter is None:
+        return {}
+    candidate_paths = [path, *(fallback_paths or [])]
+    daytona_session = await _aget_daytona_session(agent, allow_create=allow_session_create)
+    if daytona_session is not None:
+        for candidate_path in candidate_paths:
+            storage_path = _persistent_storage_path(interpreter, candidate_path)
+            try:
+                text = await daytona_session.aread_file(storage_path)
+            except Exception:
+                logger.debug(
+                    "manifest_load_daytona_read_error",
+                    extra={"path": storage_path},
+                    exc_info=True,
+                )
+                continue
+            parsed = _parse_manifest_text(text)
+            if parsed:
+                return parsed
+        return {}
+    if not allow_session_create:
+        return {}
+    for candidate_path in candidate_paths:
+        result = await interpreter.aexecute(
+            "text = load_from_volume(path)\nSUBMIT(text=text)",
+            variables={"path": candidate_path},
+            execution_profile=ExecutionProfile.MAINTENANCE,
+        )
+        if not _is_final_output(result):
+            continue
+        output = getattr(result, "output", None)
+        output = output if isinstance(output, dict) else {}
+        parsed = _parse_manifest_text(str(output.get("text", "")))
+        if parsed:
+            return parsed
     return {}
 
 
@@ -397,13 +558,15 @@ async def save_manifest_to_volume(
     agent: Any,
     path: str,
     manifest: dict[str, Any],
+    *,
+    allow_session_create: bool = True,
 ) -> str | None:
     """Best-effort manifest save to interpreter volume storage."""
     interpreter = agent.interpreter
     if interpreter is None:
         return None
     payload = json.dumps(manifest, ensure_ascii=False, default=str)
-    daytona_session = await _aget_daytona_session(agent)
+    daytona_session = await _aget_daytona_session(agent, allow_create=allow_session_create)
     if daytona_session is not None:
         storage_path = _persistent_storage_path(interpreter, path)
         try:
@@ -415,6 +578,8 @@ async def save_manifest_to_volume(
                 exc_info=True,
             )
             return None
+    if not allow_session_create:
+        return None
     result = await interpreter.aexecute(
         "saved_path = save_to_volume(path, payload)\nSUBMIT(saved_path=saved_path)",
         variables={"path": path, "payload": payload},
@@ -859,6 +1024,68 @@ async def persist_memory_item_if_needed(
         logger.warning("Failed to persist memory item: %s", _sanitize_for_log(exc))
 
 
+async def _persist_manifest_to_local_store(
+    *,
+    persistence: Any,
+    sess_id: str,
+    manifest: dict[str, Any],
+) -> None:
+    """Write the manifest into LocalStore/FleetRepository session metadata.
+
+    Used as a fallback when no Daytona volume is available (interpreter=None) so
+    that session state survives process restarts between WebSocket connections.
+    """
+    if persistence is None:
+        return
+    update_fn = getattr(persistence, "update_chat_session", None)
+    if not callable(update_fn):
+        return
+    try:
+        import inspect
+
+        sig = inspect.signature(update_fn)
+        # LocalStore.update_chat_session requires tenant_id + session_id UUIDs; the
+        # async FleetRepository variant has the same shape.  Both accept metadata_json.
+        # We store under the raw external_session_id key so the restore helper can
+        # locate it without a UUID round-trip.
+        params = set(sig.parameters)
+        if "external_session_id" in params:
+            await update_fn(external_session_id=sess_id, metadata_json={"_manifest_state": manifest})
+        else:
+            # Async path: skip – we cannot derive the UUID here without identity_rows.
+            pass
+    except Exception:
+        logger.debug("Best-effort manifest persist to local store failed", exc_info=True)
+
+
+async def _restore_manifest_from_local_store(
+    *,
+    persistence: Any,
+    sess_id: str,
+) -> dict[str, Any]:
+    """Read a previously persisted manifest from LocalStore session metadata.
+
+    Returns an empty dict when nothing is found or an error occurs.
+    """
+    if persistence is None:
+        return {}
+    get_fn = getattr(persistence, "get_chat_session_by_external_id", None)
+    if not callable(get_fn):
+        return {}
+    try:
+        row = await get_fn(external_session_id=sess_id)
+        if row is None:
+            return {}
+        metadata = getattr(row, "metadata_json", None)
+        if not isinstance(metadata, dict):
+            return {}
+        manifest = metadata.get("_manifest_state")
+        return manifest if isinstance(manifest, dict) else {}
+    except Exception:
+        logger.debug("Best-effort manifest restore from local store failed", exc_info=True)
+        return {}
+
+
 async def persist_session_state(
     *,
     session_cache: SessionCacheDeps,
@@ -872,6 +1099,47 @@ async def persist_session_state(
     persistence_required: bool,
     include_volume_save: bool = True,
     latest_user_message: str = "",
+    persistence: Any = None,
+    allow_volume_session_create: bool = True,
+    release_idle_session: bool = False,
+) -> None:
+    """Persist current session state and optionally release the live Daytona sandbox."""
+    try:
+        await _persist_session_state_impl(
+            session_cache=session_cache,
+            agent=agent,
+            session_record=session_record,
+            active_manifest_path=active_manifest_path,
+            active_run_db_id=active_run_db_id,
+            interpreter=interpreter,
+            repository=repository,
+            identity_rows=identity_rows,
+            persistence_required=persistence_required,
+            include_volume_save=include_volume_save,
+            latest_user_message=latest_user_message,
+            persistence=persistence,
+            allow_volume_session_create=allow_volume_session_create,
+        )
+    finally:
+        if release_idle_session:
+            await release_idle_daytona_session(agent)
+
+
+async def _persist_session_state_impl(
+    *,
+    session_cache: SessionCacheDeps,
+    agent: Any,
+    session_record: dict[str, Any] | None,
+    active_manifest_path: str | None,
+    active_run_db_id: uuid.UUID | None,
+    interpreter: Any | None,
+    repository: FleetRepository | None,
+    identity_rows: IdentityUpsertResult | None,
+    persistence_required: bool,
+    include_volume_save: bool = True,
+    latest_user_message: str = "",
+    persistence: Any = None,
+    allow_volume_session_create: bool = True,
 ) -> None:
     """Persist current session state to in-memory cache, volume, and DB."""
     if session_record is None:
@@ -895,26 +1163,56 @@ async def persist_session_state(
     )
 
     if include_volume_save and active_manifest_path and interpreter is not None:
-        remote_manifest = await load_manifest_from_volume(agent, active_manifest_path)
-        remote_rev_raw = remote_manifest.get("rev", 0)
-        remote_rev_candidate = remote_rev_raw if isinstance(remote_rev_raw, (int, float, str)) else 0
-        try:
-            remote_rev = int(remote_rev_candidate)
-        except (TypeError, ValueError):
-            remote_rev = 0
+        existing_session = None
+        if not allow_volume_session_create:
+            existing_session = await _aget_daytona_session(agent, allow_create=False)
+        if allow_volume_session_create or existing_session is not None:
+            remote_manifest = await load_manifest_from_volume(
+                agent,
+                active_manifest_path,
+                allow_session_create=allow_volume_session_create,
+            )
+            remote_rev_raw = remote_manifest.get("rev", 0)
+            remote_rev_candidate = remote_rev_raw if isinstance(remote_rev_raw, (int, float, str)) else 0
+            try:
+                remote_rev = int(remote_rev_candidate)
+            except (TypeError, ValueError):
+                remote_rev = 0
 
-        if remote_rev > previous_rev:
-            message = f"Session manifest revision conflict detected (remote_rev={remote_rev}, local_rev={previous_rev})"
-            if persistence_required:
-                raise PersistenceRequiredError("manifest_conflict", message)
-            logger.warning(message)
-        else:
-            saved_path = await save_manifest_to_volume(agent, active_manifest_path, manifest)
-            if saved_path is None:
-                message = f"Failed to save session manifest to volume (path={active_manifest_path})"
+            if remote_rev > previous_rev:
+                message = (
+                    f"Session manifest revision conflict detected (remote_rev={remote_rev}, local_rev={previous_rev})"
+                )
                 if persistence_required:
-                    raise PersistenceRequiredError("manifest_write_failed", message)
+                    raise PersistenceRequiredError("manifest_conflict", message)
                 logger.warning(message)
+            else:
+                saved_path = await save_manifest_to_volume(
+                    agent,
+                    active_manifest_path,
+                    manifest,
+                    allow_session_create=allow_volume_session_create,
+                )
+                if saved_path is None:
+                    message = f"Failed to save session manifest to volume (path={active_manifest_path})"
+                    if persistence_required:
+                        raise PersistenceRequiredError("manifest_write_failed", message)
+                    logger.warning(message)
+        else:
+            logger.debug(
+                "Skipping Daytona volume persistence because cleanup has no active session (path=%s)",
+                active_manifest_path,
+            )
+    elif include_volume_save and interpreter is None and persistence is not None:
+        # No Daytona volume available — fall back to local store so the manifest
+        # survives process restarts between WebSocket connections.
+        sess_id = str(session_record.get("session_id") or "")
+        if sess_id:
+            await _persist_manifest_to_local_store(
+                persistence=persistence,
+                sess_id=sess_id,
+                manifest=manifest,
+            )
 
     await persist_memory_item_if_needed(
         repository=repository,
@@ -937,20 +1235,29 @@ def build_local_persist_fn(
         *,
         include_volume_save: bool = True,
         latest_user_message: str = "",
+        allow_volume_session_create: bool = True,
+        release_idle_session: bool = False,
     ) -> None:
-        await persist_session_state(
-            session_cache=session_cache,
-            agent=agent,
-            session_record=session.session_record,
-            active_manifest_path=session.active_manifest_path,
-            active_run_db_id=session.active_run_db_id,
-            interpreter=interpreter,
-            repository=runtime.repository,
-            identity_rows=runtime.identity_rows,
-            persistence_required=runtime.persistence_required,
-            include_volume_save=include_volume_save,
-            latest_user_message=latest_user_message,
-        )
+        try:
+            await persist_session_state(
+                session_cache=session_cache,
+                agent=agent,
+                session_record=session.session_record,
+                active_manifest_path=session.active_manifest_path,
+                active_run_db_id=session.active_run_db_id,
+                interpreter=interpreter,
+                repository=runtime.repository,
+                identity_rows=runtime.identity_rows,
+                persistence_required=runtime.persistence_required,
+                include_volume_save=include_volume_save,
+                latest_user_message=latest_user_message,
+                persistence=runtime.persistence,
+                allow_volume_session_create=allow_volume_session_create,
+                release_idle_session=False,
+            )
+        finally:
+            if release_idle_session:
+                await release_idle_daytona_session(agent)
 
     return local_persist
 
@@ -973,6 +1280,9 @@ __all__ = [
     "build_workspace_task_request",
     "load_manifest_from_volume",
     "save_manifest_to_volume",
+    "release_idle_daytona_session",
+    "_persist_manifest_to_local_store",
+    "_restore_manifest_from_local_store",
     "_manifest_path",
     "_aget_daytona_session",
     "_persistent_storage_path",

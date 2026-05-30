@@ -7,6 +7,7 @@ The MLflow server evaluates a sampled subset of incoming traces.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from .config import MlflowConfig
@@ -22,6 +23,70 @@ except ImportError:
     pass
 
 _SCORER_REGISTRY: dict[tuple[str, str | None], Any] = {}
+
+
+def _scorer_display_name(scorer: Any) -> str:
+    if isinstance(scorer, Mapping):
+        for key in ("name", "scorer_name", "id", "scorer_id"):
+            value = scorer.get(key)
+            if value not in (None, ""):
+                return str(value)
+        return "<unnamed>"
+    return str(
+        getattr(scorer, "name", None)
+        or getattr(scorer, "scorer_name", None)
+        or getattr(scorer, "id", None)
+        or getattr(scorer, "scorer_id", None)
+        or "<unnamed>"
+    )
+
+
+def _active_experiment_id(mlflow: Any, config: MlflowConfig) -> str | None:
+    get_experiment_by_name = getattr(mlflow, "get_experiment_by_name", None)
+    if not callable(get_experiment_by_name) or not config.experiment:
+        return None
+    try:
+        experiment = get_experiment_by_name(config.experiment)
+    except Exception:
+        logger.debug("Failed to inspect MLflow experiment for scorer diagnostics.", exc_info=True)
+        return None
+    experiment_id = getattr(experiment, "experiment_id", None)
+    return str(experiment_id) if experiment_id is not None else None
+
+
+def warn_if_persisted_scorers_active(config: MlflowConfig, *, mlflow: Any | None = None) -> int:
+    """Warn when MLflow has persisted scorers but Fleet auto-assessment is disabled."""
+    if config.enable_auto_assessment:
+        return 0
+    if mlflow is None:
+        try:
+            import mlflow as mlflow_module
+
+            mlflow = mlflow_module
+        except ImportError:
+            return 0
+    genai = getattr(mlflow, "genai", None)
+    list_scorers = getattr(genai, "list_scorers", None)
+    if not callable(list_scorers):
+        return 0
+    experiment_id = _active_experiment_id(mlflow, config)
+    try:
+        scorers = list_scorers(experiment_id=experiment_id)
+    except Exception:
+        logger.debug("Failed to list MLflow scorers for diagnostics.", exc_info=True)
+        return 0
+    scorer_names = [_scorer_display_name(scorer) for scorer in scorers]
+    if not scorer_names:
+        return 0
+    logger.warning(
+        "MLflow has persisted scorer(s) for experiment %s while Fleet auto-assessment is disabled: %s. "
+        "These scorers can continue to assess traces independently of FLEET_RLM_ENABLE_AUTO_ASSESSMENT. "
+        "Use `uv run python scripts/mlflow_cli.py scorers list` and "
+        "`uv run python scripts/mlflow_cli.py scorers delete --name <name> --yes` to inspect or remove them.",
+        config.experiment,
+        ", ".join(scorer_names),
+    )
+    return len(scorer_names)
 
 
 def _instantiate_scorer(factory: Any, *, judge_model: str | None, **kwargs: Any) -> Any:

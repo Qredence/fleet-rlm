@@ -20,10 +20,9 @@ SAFE_COMMANDS = (
         [
             sys.executable,
             "-c",
-            "import json, pathlib, tomllib; "
+            "import pathlib, tomllib; "
             "root=pathlib.Path('.codex'); "
             "[tomllib.loads(p.read_text()) for p in root.rglob('*.toml')]; "
-            "json.loads((root/'hooks.json').read_text()); "
             "print('codex-config-ok')",
         ],
     ),

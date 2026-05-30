@@ -13,7 +13,6 @@
 
 - **[Reference Index](reference/index.md)** — CLI, HTTP/WebSocket API, Python API, auth modes, database, sandbox surfaces, source layout.
 - **[Frontend Product Surface Guide](explanation/frontend-product-surface.md)**
-- **[Optimization Page Spec](specs/optimization-page.md)**
 
 ## Architecture & Internals
 
@@ -29,9 +28,7 @@ Read these after you've seen the product:
 
 - [Workbench](explanation/product-spec.md)
 - [Volumes](explanation/product-spec.md)
-- [Optimization](explanation/product-spec.md)
 - [Settings](explanation/product-spec.md)
-- [History](reference/frontend-backend-integration.md)
 
 ## API Reference Surfaces
 

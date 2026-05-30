@@ -4,8 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import inspect
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
+from fleet_rlm.integrations.observability.config import MlflowConfig
 from fleet_rlm.quality.mlflow_evaluation import (
     evaluate_trace_rows,
     export_annotated_trace_rows,
@@ -15,6 +19,29 @@ from fleet_rlm.quality.mlflow_evaluation import (
 from fleet_rlm.quality.mlflow_optimization import (
     optimize_program_with_mipro,
 )
+
+
+def _configure_mlflow_tracking() -> tuple[Any, MlflowConfig, str | None]:
+    import mlflow
+
+    config = MlflowConfig.from_env()
+    mlflow.set_tracking_uri(config.tracking_uri)
+    experiment_id = None
+    if config.experiment:
+        experiment = mlflow.set_experiment(experiment_name=config.experiment)
+        experiment_id = str(getattr(experiment, "experiment_id", "") or "") or None
+    return mlflow, config, experiment_id
+
+
+def _scorer_attr(scorer: Any, *names: str) -> str:
+    for name in names:
+        if isinstance(scorer, Mapping):
+            value = scorer.get(name)
+        else:
+            value = getattr(scorer, name, None)
+        if value not in (None, ""):
+            return str(value)
+    return ""
 
 
 def do_export(args: argparse.Namespace) -> int:
@@ -65,6 +92,65 @@ def do_optimize(args: argparse.Namespace) -> int:
     return 0
 
 
+def do_scorers_list(args: argparse.Namespace) -> int:
+    mlflow, config, active_experiment_id = _configure_mlflow_tracking()
+    experiment_id = args.experiment_id or active_experiment_id
+    list_scorers = getattr(getattr(mlflow, "genai", None), "list_scorers", None)
+    if not callable(list_scorers):
+        raise RuntimeError("mlflow.genai.list_scorers is not available in this MLflow version.")
+
+    scorers = list_scorers(experiment_id=experiment_id)
+    print(f"tracking_uri={config.tracking_uri}")
+    print(f"experiment={config.experiment}")
+    print(f"experiment_id={experiment_id or ''}")
+    print(f"scorer_count={len(scorers)}")
+    for scorer in scorers:
+        name = _scorer_attr(scorer, "name", "scorer_name") or "<unnamed>"
+        scorer_id = _scorer_attr(scorer, "id", "scorer_id")
+        version = _scorer_attr(scorer, "version", "scorer_version")
+        model = _scorer_attr(scorer, "model", "model_uri")
+        print(f"scorer name={name} id={scorer_id} version={version} model={model}")
+    return 0
+
+
+def _delete_scorer(delete_scorer: Any, *, name: str, experiment_id: str | None, version: str | None) -> None:
+    parameters = inspect.signature(delete_scorer).parameters
+    if "name" in parameters:
+        kwargs: dict[str, Any] = {"name": name}
+        if "experiment_id" in parameters:
+            kwargs["experiment_id"] = experiment_id
+        if "version" in parameters and version:
+            kwargs["version"] = version
+        delete_scorer(**kwargs)
+        return
+    if "name_or_id" in parameters:
+        delete_scorer(name_or_id=name)
+        return
+    delete_scorer(name)
+
+
+def do_scorers_delete(args: argparse.Namespace) -> int:
+    if not args.yes:
+        print("Refusing to delete scorer without --yes.")
+        return 2
+    mlflow, config, active_experiment_id = _configure_mlflow_tracking()
+    experiment_id = args.experiment_id or active_experiment_id
+    delete_scorer = getattr(getattr(mlflow, "genai", None), "delete_scorer", None)
+    if not callable(delete_scorer):
+        raise RuntimeError("mlflow.genai.delete_scorer is not available in this MLflow version.")
+
+    _delete_scorer(
+        delete_scorer,
+        name=args.name,
+        experiment_id=experiment_id,
+        version=args.version,
+    )
+    print(f"deleted_scorer={args.name}")
+    print(f"experiment={config.experiment}")
+    print(f"experiment_id={experiment_id or ''}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fleet RLM MLflow Analytics CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -104,6 +190,21 @@ def main() -> int:
     po.add_argument("--auto", default="light")
     po.add_argument("--run-name", default=None)
     po.set_defaults(func=do_optimize)
+
+    # Scorers
+    ps = subparsers.add_parser("scorers", help="Inspect or remove persisted MLflow GenAI scorers")
+    scorer_subparsers = ps.add_subparsers(dest="scorer_command", required=True)
+
+    psl = scorer_subparsers.add_parser("list", help="List persisted scorers for the active MLflow experiment")
+    psl.add_argument("--experiment-id", default=None)
+    psl.set_defaults(func=do_scorers_list)
+
+    psd = scorer_subparsers.add_parser("delete", help="Delete a persisted scorer by name")
+    psd.add_argument("--name", required=True)
+    psd.add_argument("--experiment-id", default=None)
+    psd.add_argument("--version", default=None)
+    psd.add_argument("--yes", action="store_true", help="Confirm scorer deletion")
+    psd.set_defaults(func=do_scorers_delete)
 
     args = parser.parse_args()
     return args.func(args)

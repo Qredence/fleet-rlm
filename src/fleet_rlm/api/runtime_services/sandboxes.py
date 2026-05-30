@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import math
 from typing import Any
 
@@ -192,17 +193,17 @@ async def _list_sandboxes(
     limit: int,
     labels_filter: dict[str, str] | None,
 ) -> Any:
+    signature = inspect.signature(client.list)
+    params = signature.parameters
+    kwargs: dict[str, Any] = {}
     if labels_filter:
-        try:
-            return await _run_sync_in_thread(
-                client.list,
-                labels=labels_filter,
-                page=page,
-                limit=limit,
-            )
-        except TypeError:
-            pass
-    return await _run_sync_in_thread(client.list, page=page, limit=limit)
+        if "labels" in params:
+            kwargs["labels"] = labels_filter
+    if "page" in params:
+        kwargs["page"] = page
+    if "limit" in params:
+        kwargs["limit"] = limit
+    return await _run_sync_in_thread(client.list, **kwargs)
 
 
 def _sandbox_labels(sandbox: Any) -> dict[str, str]:

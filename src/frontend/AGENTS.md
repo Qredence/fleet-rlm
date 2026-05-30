@@ -13,28 +13,28 @@ Before editing:
 1. Read `package.json` for canonical scripts.
 2. Inspect the owning route, feature, component, or lib module.
 3. Do not hand-edit generated files (see list below).
-4. Preserve supported surfaces: **Workbench**, **Volumes**, **Optimization**, **Settings**, **History**.
+4. Preserve supported surfaces: **Workbench**, **Volumes**, **Settings**.
 5. Keep retired paths (`taxonomy`, `skills`, `memory`, `analytics`) falling through to `/404`.
 
 ---
 
 ## Source-of-Truth Files
 
-| Concern                 | File(s)                                                            |
-| ----------------------- | ------------------------------------------------------------------ |
-| Scripts & validation    | `package.json`                                                     |
-| Lint/build/import rules | `vite.config.ts`                                                   |
-| Routes & surfaces       | `src/routes/*`                                                     |
-| App chrome / layout     | `src/features/layout/*`                                            |
-| Product surfaces        | `src/features/{workspace,volumes,settings,optimization,history}/*` |
-| UI primitives           | `src/components/ui/*` (shadcn/Base UI)                             |
-| AI Elements             | `src/components/ai-elements/*`                                     |
-| Product compositions    | `src/components/product/*`                                         |
-| API clients & types     | `src/lib/rlm-api/*`                                                |
-| Workspace adapters      | `src/lib/workspace/*`                                              |
-| Theme / tokens          | `src/styles/globals.css`                                           |
-| shadcn config           | `components.json`                                                  |
-| API contract            | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts`             |
+| Concern                 | File(s)                                                |
+| ----------------------- | ------------------------------------------------------ |
+| Scripts & validation    | `package.json`                                         |
+| Lint/build/import rules | `vite.config.ts`                                       |
+| Routes & surfaces       | `src/routes/*`                                         |
+| App chrome / layout     | `src/features/layout/*`                                |
+| Product surfaces        | `src/features/{workspace,volumes,settings}/*`          |
+| UI primitives           | `src/components/ui/*` (shadcn/Base UI)                 |
+| AI Elements             | `src/components/ai-elements/*`                         |
+| Product compositions    | `src/components/product/*`                             |
+| API clients & types     | `src/lib/rlm-api/*`                                    |
+| Workspace adapters      | `src/lib/workspace/*`                                  |
+| Theme / tokens          | `src/styles/globals.css`                               |
+| shadcn config           | `components.json`                                      |
+| API contract            | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts` |
 
 ### Generated / Synced — Do Not Hand-Edit
 
@@ -53,7 +53,7 @@ Before editing:
 2. **`src/components/ai-elements/*`** — AI Elements registry. Composable, registry-aligned.
 3. **`src/components/product/*`** — Reusable product compositions (empty states, skeletons, panels).
 4. **`src/features/layout/*`** — App chrome. Consumes workspace/volumes through feature entrypoints only.
-5. **`src/features/{workspace,volumes,settings,optimization,history}/*`** — Canonical surface ownership.
+5. **`src/features/{workspace,volumes,settings}/*`** — Canonical surface ownership.
 6. **`src/lib/{rlm-api,workspace}/*`** — API clients, adapters, stores, frame shaping.
 7. **`src/stores/*`** — Cross-app shell/layout and navigation state.
 
@@ -346,7 +346,6 @@ The following prompt-kit / AI SDK Elements components were previously installed 
 - `components.json` defines the `@/*` alias and the shadcn/Base UI style baseline.
 - Keep runtime labels, route behavior, and endpoint expectations aligned with the backend contract.
 - `src/screens/*` no longer exists. All feature logic lives in `src/features/*`, `src/lib/*`, or `src/components/product/*`.
-- `History` is a supported surface at `/app/history`.
+- Optimization and History are not supported product surfaces in the current shell.
 - Do not recreate a screen-layer `workspace-adapter.ts`; adapter logic belongs in `src/lib/workspace/`.
 - The Volumes provider switcher is **page-scoped** and must not become a global runtime setting.
-- Settings should consume the shared optimization form from `features/optimization/optimization-form`.

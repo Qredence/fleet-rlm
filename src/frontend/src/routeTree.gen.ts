@@ -21,8 +21,6 @@ import { Route as AppIndexRouteImport } from './routes/app/index'
 import { Route as AppWorkspaceRouteImport } from './routes/app/workspace'
 import { Route as AppVolumesRouteImport } from './routes/app/volumes'
 import { Route as AppSettingsRouteImport } from './routes/app/settings'
-import { Route as AppOptimizationRouteImport } from './routes/app/optimization'
-import { Route as AppHistoryRouteImport } from './routes/app/history'
 import { Route as AppSplatRouteImport } from './routes/app/$'
 
 const SignupRoute = SignupRouteImport.update({
@@ -85,16 +83,6 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
-const AppOptimizationRoute = AppOptimizationRouteImport.update({
-  id: '/optimization',
-  path: '/optimization',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppHistoryRoute = AppHistoryRouteImport.update({
-  id: '/history',
-  path: '/history',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppSplatRoute = AppSplatRouteImport.update({
   id: '/$',
   path: '/$',
@@ -111,8 +99,6 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
   '/app/$': typeof AppSplatRoute
-  '/app/history': typeof AppHistoryRoute
-  '/app/optimization': typeof AppOptimizationRoute
   '/app/settings': typeof AppSettingsRoute
   '/app/volumes': typeof AppVolumesRoute
   '/app/workspace': typeof AppWorkspaceRoute
@@ -127,8 +113,6 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
   '/app/$': typeof AppSplatRoute
-  '/app/history': typeof AppHistoryRoute
-  '/app/optimization': typeof AppOptimizationRoute
   '/app/settings': typeof AppSettingsRoute
   '/app/volumes': typeof AppVolumesRoute
   '/app/workspace': typeof AppWorkspaceRoute
@@ -145,8 +129,6 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
   '/app/$': typeof AppSplatRoute
-  '/app/history': typeof AppHistoryRoute
-  '/app/optimization': typeof AppOptimizationRoute
   '/app/settings': typeof AppSettingsRoute
   '/app/volumes': typeof AppVolumesRoute
   '/app/workspace': typeof AppWorkspaceRoute
@@ -164,8 +146,6 @@ export interface FileRouteTypes {
     | '/settings'
     | '/signup'
     | '/app/$'
-    | '/app/history'
-    | '/app/optimization'
     | '/app/settings'
     | '/app/volumes'
     | '/app/workspace'
@@ -180,8 +160,6 @@ export interface FileRouteTypes {
     | '/settings'
     | '/signup'
     | '/app/$'
-    | '/app/history'
-    | '/app/optimization'
     | '/app/settings'
     | '/app/volumes'
     | '/app/workspace'
@@ -197,8 +175,6 @@ export interface FileRouteTypes {
     | '/settings'
     | '/signup'
     | '/app/$'
-    | '/app/history'
-    | '/app/optimization'
     | '/app/settings'
     | '/app/volumes'
     | '/app/workspace'
@@ -302,20 +278,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/optimization': {
-      id: '/app/optimization'
-      path: '/optimization'
-      fullPath: '/app/optimization'
-      preLoaderRoute: typeof AppOptimizationRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/history': {
-      id: '/app/history'
-      path: '/history'
-      fullPath: '/app/history'
-      preLoaderRoute: typeof AppHistoryRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/app/$': {
       id: '/app/$'
       path: '/$'
@@ -328,8 +290,6 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteChildren {
   AppSplatRoute: typeof AppSplatRoute
-  AppHistoryRoute: typeof AppHistoryRoute
-  AppOptimizationRoute: typeof AppOptimizationRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppVolumesRoute: typeof AppVolumesRoute
   AppWorkspaceRoute: typeof AppWorkspaceRoute
@@ -338,8 +298,6 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppSplatRoute: AppSplatRoute,
-  AppHistoryRoute: AppHistoryRoute,
-  AppOptimizationRoute: AppOptimizationRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppVolumesRoute: AppVolumesRoute,
   AppWorkspaceRoute: AppWorkspaceRoute,
