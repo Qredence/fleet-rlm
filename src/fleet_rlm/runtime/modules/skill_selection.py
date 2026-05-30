@@ -172,7 +172,7 @@ class SkillSelectionModule(dspy.Module):
             names = [str(s).strip() for s in raw]
         else:
             text = str(raw or "")
-            names = [s.strip().strip("\"'") for s in re.split(r"[,\n]", text) if s.strip()]
+            names = [s.strip().strip("[]()").strip("\"'") for s in re.split(r"[,\n]", text) if s.strip()]
         return [n for n in names if n in AVAILABLE_SKILLS]
 
     def forward(

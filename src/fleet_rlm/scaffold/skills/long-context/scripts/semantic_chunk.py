@@ -20,7 +20,7 @@ def detect_content_type(content: str):
     text = content.lstrip()
     probes = (
         ("json", text[:1] in "{["),
-        ("markdown", "\n#" in content),
+        ("markdown", text.startswith("#") or "\n#" in content),
         ("python", "def " in content),
         ("log", re.search(r"^\d{4}-\d{2}-\d{2}", content, re.MULTILINE) is not None),
     )

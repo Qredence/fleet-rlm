@@ -27,6 +27,16 @@ def test_rank_chunks_prefers_matching_query_terms() -> None:
     assert ranked[0][2] > 0
 
 
+def test_rank_chunks_ignores_common_stopwords() -> None:
+    content = ("and for are but not " * 20) + ("vector retrieval\n" * 3)
+
+    ranked = rank_chunks.rank_chunks_by_query(content, "and for not vector", chunk_size=100, top_k=1)
+
+    start, end, score = ranked[0]
+    assert "vector" in content[start:end]
+    assert score > 0
+
+
 def test_rank_chunks_honors_top_k_without_keywords() -> None:
     content = "one two\n" * 10
 

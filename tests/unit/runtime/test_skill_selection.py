@@ -48,3 +48,11 @@ def test_skill_selection_falls_back_when_llm_returns_no_valid_skills() -> None:
     module.select.assert_called_once()
     assert result.selected_skills == ["sandbox-execution", "dspy-programs"]
     assert result.reasoning == ""
+
+
+def test_skill_selection_parses_stringified_skill_list() -> None:
+    module = SkillSelectionModule()
+
+    selected = module._parse_skill_names("['sandbox-execution', 'delegation']")
+
+    assert selected == ["sandbox-execution", "delegation"]

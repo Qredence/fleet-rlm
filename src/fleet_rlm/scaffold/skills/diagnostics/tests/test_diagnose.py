@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import Mock
@@ -27,6 +28,21 @@ def test_check_env_accepts_dspy_lm_key(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("DSPY_LM_API_KEY", "secret")
 
     assert diagnose.check_env() is True
+
+
+def test_check_env_loads_missing_values_from_dotenv(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    Path(".env").write_text(
+        "DSPY_LM_MODEL=test-model\nDSPY_LM_API_KEY='secret'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("DSPY_LM_MODEL", raising=False)
+    monkeypatch.delenv("DSPY_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("DSPY_LM_API_KEY", raising=False)
+
+    assert diagnose.check_env() is True
+    assert os.environ["DSPY_LM_MODEL"] == "test-model"
+    assert os.environ["DSPY_LM_API_KEY"] == "secret"
 
 
 def test_check_daytona_reports_missing_required_env(monkeypatch) -> None:

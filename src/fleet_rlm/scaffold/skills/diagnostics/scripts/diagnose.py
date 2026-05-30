@@ -22,6 +22,19 @@ def env_presence_status(label: str, value: str) -> bool:
     return bool(value)
 
 
+def load_dotenv_missing(env_path: Path = Path(".env")) -> None:
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key and key not in os.environ:
+            os.environ[key] = value.strip().strip("\"'")
+
+
 def check_fleet_rlm() -> bool:
     print("\n--- fleet-rlm ---")
     if find_spec("fleet_rlm") is None:
@@ -55,6 +68,7 @@ def check_daytona() -> bool:
 def check_env() -> bool:
     print("\n--- Environment ---")
     env_path = Path(".env")
+    load_dotenv_missing(env_path)
     env_ok = env_path.exists()
     print_status(".env file", "OK" if env_ok else "FAIL")
     model_value = os.environ.get("DSPY_LM_MODEL", "")
