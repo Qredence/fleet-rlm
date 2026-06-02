@@ -99,6 +99,21 @@ Inspect active scorers before debugging unexpected assessment warnings:
 uv run python scripts/mlflow_cli.py scorers list
 ```
 
+Stop a stale scheduled scorer without deleting its registration:
+
+```bash
+# from repo root
+uv run python scripts/mlflow_cli.py scorers stop --name "Trace Judge"
+```
+
+Restart a stopped scorer only after confirming its judge model and trace inputs
+are correct:
+
+```bash
+# from repo root
+uv run python scripts/mlflow_cli.py scorers start --name "Trace Judge" --sample-rate 1.0
+```
+
 Remove a stale scorer only as an explicit maintenance action:
 
 ```bash
@@ -127,6 +142,17 @@ uv run fleet web
 ```
 
 As you use the app, MLflow traces are recorded in the configured experiment.
+For RLM document-analysis and variable-mode runs, Fleet also materializes
+trajectory code execution as MLflow `TOOL` spans named `repl_execute`. Those
+spans include bounded `mlflow.spanInputs` / `mlflow.spanOutputs` payloads so the
+MLflow trace tree, external scorers, and the chat transcript all describe the
+same REPL actions.
+
+Fleet also emits a compact `rlm_available_tools` `LLM` span with
+`mlflow.chat.tools` metadata for the RLM REPL. MLflow's built-in tool-call
+judges read available tool schemas from `LLM` / `CHAT_MODEL` spans and read
+actual calls from `TOOL` spans; keeping both in the trace prevents judges from
+falling back to model-based tool extraction.
 
 ## 4. Record Human Feedback and Ground Truth
 

@@ -13,7 +13,12 @@ def _load_cli_module():
     return importlib.import_module("scripts.mlflow_cli")
 
 
-def _fake_mlflow_module(*, scorers: list[object] | None = None, deleted: list[dict[str, object]] | None = None):
+def _fake_mlflow_module(
+    *,
+    scorers: list[object] | None = None,
+    deleted: list[dict[str, object]] | None = None,
+    scorer: object | None = None,
+):
     module = ModuleType("mlflow")
     module.tracking_uris = []  # type: ignore[attr-defined]
 
@@ -32,9 +37,25 @@ def _fake_mlflow_module(*, scorers: list[object] | None = None, deleted: list[di
         if deleted is not None:
             deleted.append({"name": name, "experiment_id": experiment_id, "version": version})
 
+    def get_scorer(*, name: str, experiment_id: str | None = None, version: int | str | None = None):
+        module.get_scorer_args = {"name": name, "experiment_id": experiment_id, "version": version}  # type: ignore[attr-defined]
+        return scorer
+
+    class ScorerSamplingConfig:
+        def __init__(self, *, sample_rate: float | None = None, filter_string: str | None = None) -> None:
+            self.sample_rate = sample_rate
+            self.filter_string = filter_string
+
     module.set_tracking_uri = set_tracking_uri  # type: ignore[attr-defined]
     module.set_experiment = set_experiment  # type: ignore[attr-defined]
-    module.genai = SimpleNamespace(list_scorers=list_scorers, delete_scorer=delete_scorer)  # type: ignore[attr-defined]
+    scorers_module = ModuleType("mlflow.genai.scorers")
+    scorers_module.ScorerSamplingConfig = ScorerSamplingConfig  # type: ignore[attr-defined]
+    genai_module = ModuleType("mlflow.genai")
+    genai_module.list_scorers = list_scorers  # type: ignore[attr-defined]
+    genai_module.get_scorer = get_scorer  # type: ignore[attr-defined]
+    genai_module.delete_scorer = delete_scorer  # type: ignore[attr-defined]
+    genai_module.scorers = scorers_module  # type: ignore[attr-defined]
+    module.genai = genai_module  # type: ignore[attr-defined]
     return module
 
 
@@ -97,3 +118,74 @@ def test_scorers_delete_calls_mlflow_delete_scorer(
     assert deleted == [{"name": "Trace Judge", "experiment_id": "exp-override", "version": "7"}]
     assert "deleted_scorer=Trace Judge" in output
     assert "experiment_id=exp-override" in output
+
+
+def test_scorers_stop_calls_registered_scorer_stop(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_runtime_env: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    apply_mlflow_env(clean_runtime_env)
+    stopped: list[dict[str, object]] = []
+
+    scorer = SimpleNamespace(
+        stop=lambda *, name, experiment_id: stopped.append({"name": name, "experiment_id": experiment_id})
+    )
+    fake_mlflow = _fake_mlflow_module(scorer=scorer)
+    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+
+    cli = _load_cli_module()
+    result = cli.do_scorers_stop(SimpleNamespace(name="Trace Judge", experiment_id=None))
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert stopped == [{"name": "Trace Judge", "experiment_id": "exp-active"}]
+    assert "stopped_scorer=Trace Judge" in output
+
+
+def test_scorers_start_calls_registered_scorer_start(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_runtime_env: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    apply_mlflow_env(clean_runtime_env)
+    started: list[dict[str, object]] = []
+
+    def start(*, name, experiment_id, sampling_config) -> None:
+        started.append(
+            {
+                "name": name,
+                "experiment_id": experiment_id,
+                "sample_rate": sampling_config.sample_rate,
+                "filter_string": sampling_config.filter_string,
+            }
+        )
+
+    scorer = SimpleNamespace(start=start)
+    fake_mlflow = _fake_mlflow_module(scorer=scorer)
+    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+    monkeypatch.setitem(sys.modules, "mlflow.genai", fake_mlflow.genai)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mlflow.genai.scorers", fake_mlflow.genai.scorers)  # type: ignore[attr-defined]
+
+    cli = _load_cli_module()
+    result = cli.do_scorers_start(
+        SimpleNamespace(
+            name="Trace Judge",
+            experiment_id="exp-override",
+            sample_rate=0.5,
+            filter_string="status = 'OK'",
+        )
+    )
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert started == [
+        {
+            "name": "Trace Judge",
+            "experiment_id": "exp-override",
+            "sample_rate": 0.5,
+            "filter_string": "status = 'OK'",
+        }
+    ]
+    assert "started_scorer=Trace Judge" in output
+    assert "sample_rate=0.5" in output

@@ -341,6 +341,58 @@ def test_chunk_document_and_load_document_helpers_use_text_and_directories(tmp_p
     }
 
 
+def test_fetch_document_text_bundles_root_document_auxiliary_indexes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.runtime.tools import document_tools
+
+    reads: list[str] = []
+
+    def fake_read_remote_document_text(url: str) -> tuple[str, dict[str, Any]]:
+        reads.append(url)
+        if url.endswith("/llms.txt"):
+            return "# LLM docs index\nAPI Reference", {"source_type": "text"}
+        if url.endswith("/sitemap.xml"):
+            return "<urlset><url><loc>https://docs.example/api</loc></url></urlset>", {"source_type": "xml"}
+        return "# Docs home\nWelcome", {"source_type": "html"}
+
+    monkeypatch.setattr(document_tools, "_read_remote_document_text", fake_read_remote_document_text)
+
+    fetched = document_tools.fetch_document_text("https://docs.example/")
+
+    assert fetched["status"] == "ok"
+    assert reads == [
+        "https://docs.example/",
+        "https://docs.example/llms.txt",
+        "https://docs.example/sitemap.xml",
+    ]
+    assert "# Source document: https://docs.example/" in fetched["text"]
+    assert "# Auxiliary document: https://docs.example/llms.txt" in fetched["text"]
+    assert "# Auxiliary document: https://docs.example/sitemap.xml" in fetched["text"]
+    assert fetched["metadata"]["bundled_source_count"] == 3
+
+
+def test_fetch_document_text_skips_auxiliary_indexes_for_file_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.runtime.tools import document_tools
+
+    reads: list[str] = []
+
+    def fake_read_remote_document_text(url: str) -> tuple[str, dict[str, Any]]:
+        reads.append(url)
+        return "plain text", {"source_type": "text"}
+
+    monkeypatch.setattr(document_tools, "_read_remote_document_text", fake_read_remote_document_text)
+
+    fetched = document_tools.fetch_document_text("https://docs.example/readme.txt")
+
+    assert fetched["status"] == "ok"
+    assert reads == ["https://docs.example/readme.txt"]
+    assert fetched["text"] == "plain text"
+    assert "bundled_source_count" not in fetched["metadata"]
+
+
 def test_download_url_removes_partial_temp_file_on_size_limit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -390,3 +442,95 @@ def test_download_url_removes_partial_temp_file_on_size_limit(
 
     assert created
     assert not created[0].exists()
+
+
+def test_browser_fetch_page_stub_raises_runtime_error() -> None:
+    from fleet_rlm.runtime.tools.browser_tools import browser_fetch_page
+
+    with pytest.raises(RuntimeError, match="browser-capable"):
+        browser_fetch_page("https://example.com")
+
+
+def test_browser_fetch_page_is_discoverable() -> None:
+    from fleet_rlm.runtime.tools.browser_tools import browser_fetch_page
+
+    assert getattr(browser_fetch_page, "__is_fleet_tool__", False) is True
+
+
+def test_browser_fetch_page_in_discover_tools() -> None:
+    from fleet_rlm.runtime.tools.registry import discover_tools
+
+    discover_tools.cache_clear()
+    tools = discover_tools()
+    tool_names = [getattr(t, "name", None) or getattr(t.func, "__name__", "") for t in tools]
+    assert "browser_fetch_page" in tool_names
+
+
+def test_bound_browser_fetch_page_validates_public_url_before_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.runtime.tools.binding as binding_mod
+    import fleet_rlm.runtime.tools.document_tools as document_tools
+    from fleet_rlm.runtime.tools.binding import bind_runtime_tools
+    from fleet_rlm.runtime.tools.browser_tools import browser_fetch_page
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_getaddrinfo(*args: Any, **kwargs: Any) -> list[Any]:
+        _ = (args, kwargs)
+        return [(document_tools.socket.AF_INET, 0, 0, "", ("93.184.216.34", 443))]
+
+    def fake_execute_sandbox_tool(interpreter: Any, code: str, variables: dict[str, Any]) -> dict[str, Any]:
+        _ = (interpreter, code)
+        calls.append(variables)
+        return {"status": "ok", "url": variables["target_url"]}
+
+    monkeypatch.setattr(document_tools.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(binding_mod, "execute_sandbox_tool", fake_execute_sandbox_tool)
+
+    bound = bind_runtime_tools(
+        [browser_fetch_page],
+        runtime=types.SimpleNamespace(core_memory={}),
+        interpreter=object(),
+    )
+
+    result = getattr(bound[0], "func", bound[0])("https://example.test/docs", extract_links=True)
+
+    assert result == {"status": "ok", "url": "https://example.test/docs"}
+    assert calls == [
+        {
+            "target_url": "https://example.test/docs",
+            "wait_until": "networkidle",
+            "extract_links": True,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:3000",
+        "http://127.0.0.1:8000",
+        "http://10.0.0.2/docs",
+        "http://169.254.169.254/latest/meta-data",
+    ],
+)
+def test_bound_browser_fetch_page_rejects_private_targets(
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+) -> None:
+    import fleet_rlm.runtime.tools.binding as binding_mod
+    from fleet_rlm.runtime.tools.binding import bind_runtime_tools
+    from fleet_rlm.runtime.tools.browser_tools import browser_fetch_page
+
+    def fake_execute_sandbox_tool(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        _ = (args, kwargs)
+        raise AssertionError("unsafe URL should be rejected before sandbox execution")
+
+    monkeypatch.setattr(binding_mod, "execute_sandbox_tool", fake_execute_sandbox_tool)
+    bound = bind_runtime_tools(
+        [browser_fetch_page],
+        runtime=types.SimpleNamespace(core_memory={}),
+        interpreter=object(),
+    )
+
+    with pytest.raises(ValueError, match="private network"):
+        getattr(bound[0], "func", bound[0])(url)

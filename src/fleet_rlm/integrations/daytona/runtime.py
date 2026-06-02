@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import re
 import threading
@@ -14,6 +15,7 @@ from .concurrency import (
     acquire_sandbox_slot,
     attach_slot_release_handler,
     get_current_sandbox_usage,
+    reconcile_sandbox_slots,
     release_sandbox_slot,
     release_sandbox_slot_for,
 )
@@ -86,6 +88,26 @@ logger = logging.getLogger(__name__)
 
 _GENERATED_SANDBOX_NAME_RE = re.compile(r"^fleet-rlm-\d{8}-\d{6}(?:-[0-9a-f]{8})?$")
 _SANDBOX_NAME_CONFLICT_RETRIES = 3
+_PROVIDER_ACTIVE_STATES = frozenset({"pending", "creating", "starting", "started", "running"})
+
+_BROWSER_SKILL_INDICATORS = frozenset({"browser-interaction", "browser_interaction", "browser", "playwright"})
+
+
+def resolve_snapshot_for_skills(selected_skills: list[str] | None = None) -> str:
+    """Return the appropriate snapshot name based on selected skills.
+
+    When any selected skill indicates browser interaction, returns the
+    browser-capable snapshot. Otherwise returns the default base snapshot.
+    """
+    from .snapshots import BROWSER_SNAPSHOT_NAME
+
+    if not selected_skills:
+        return DEFAULT_SNAPSHOT_NAME
+    for skill in selected_skills:
+        if any(indicator in skill.lower() for indicator in _BROWSER_SKILL_INDICATORS):
+            return BROWSER_SNAPSHOT_NAME
+    return DEFAULT_SNAPSHOT_NAME
+
 
 # ---------------------------------------------------------------------------
 # DaytonaSandboxRuntime
@@ -297,6 +319,55 @@ class DaytonaSandboxRuntime:
         """
         return await _run_sync_in_thread(self._create_sandbox_from_spec_impl, spec)
 
+    def _count_provider_fleet_sandboxes_sync(self) -> int:
+        """Return provider-visible Fleet-managed sandboxes for slot reconciliation."""
+        client = self._get_client()
+        signature = inspect.signature(client.list)
+        kwargs: dict[str, Any] = {}
+        if "labels" in signature.parameters:
+            kwargs["labels"] = self.DEFAULT_LABELS
+        result = client.list(**kwargs)
+        raw_items = getattr(result, "items", result) if result else []
+        count = 0
+        for sandbox in raw_items:
+            labels = getattr(sandbox, "labels", None) or {}
+            if not isinstance(labels, dict):
+                labels = {}
+            normalized = {str(key): str(value) for key, value in labels.items()}
+            if not all(normalized.get(key) == value for key, value in self.DEFAULT_LABELS.items()):
+                continue
+            raw_state = getattr(sandbox, "state", None)
+            state = str(getattr(raw_state, "value", raw_state) or "").lower()
+            if state and state not in _PROVIDER_ACTIVE_STATES:
+                continue
+            count += 1
+        return count
+
+    async def _count_provider_fleet_sandboxes(self) -> int:
+        return await _run_sync_in_thread(self._count_provider_fleet_sandboxes_sync)
+
+    async def _acquire_slot_with_reconciliation(self) -> None:
+        try:
+            await acquire_sandbox_slot(timeout=60.0)
+            return
+        except asyncio.TimeoutError:
+            before = get_current_sandbox_usage()
+
+        try:
+            provider_active = await self._count_provider_fleet_sandboxes()
+        except Exception:
+            logger.warning("Failed to reconcile sandbox slots from Daytona provider", exc_info=True)
+            raise asyncio.TimeoutError from None
+
+        if provider_active >= before.active_count:
+            raise asyncio.TimeoutError
+
+        reconcile_sandbox_slots(provider_active_count=provider_active)
+        try:
+            await acquire_sandbox_slot(timeout=1.0)
+        except asyncio.TimeoutError:
+            raise asyncio.TimeoutError from None
+
     def create_sandbox(
         self,
         volume_name: str | None = None,
@@ -327,7 +398,7 @@ class DaytonaSandboxRuntime:
         """
         slot_acquired = False
         try:
-            await acquire_sandbox_slot(timeout=60.0)
+            await self._acquire_slot_with_reconciliation()
             slot_acquired = True
         except asyncio.TimeoutError as exc:
             usage = get_current_sandbox_usage()
@@ -625,4 +696,5 @@ __all__ = [
     "aget_snapshot",
     "alist_snapshots",
     "aresolve_snapshot",
+    "resolve_snapshot_for_skills",
 ]

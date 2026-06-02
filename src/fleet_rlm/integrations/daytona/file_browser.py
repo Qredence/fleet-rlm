@@ -51,6 +51,13 @@ def _check_vfs_root_allowed(display_path: str) -> None:
         )
 
 
+def _is_allowed_root_child(parent_display_path: str, child_name: str) -> bool:
+    """Return whether a direct child should be visible from the VFS root."""
+    if PurePosixPath(parent_display_path) != PurePosixPath("/"):
+        return True
+    return str(PurePosixPath("/") / child_name) in VFS_CANONICAL_ROOTS
+
+
 @dataclass(frozen=True)
 class _ResolvedDaytonaPath:
     display_path: str
@@ -135,6 +142,8 @@ def list_daytona_volume_tree(
             name = entry_name(getattr(entry, "name", "") or getattr(entry, "path", ""))
             if not name:
                 continue
+            if not _is_allowed_root_child(location.display_path, name):
+                continue
 
             child = _child_daytona_path(location, name)
             is_dir = bool(getattr(entry, "is_dir", False))
@@ -186,7 +195,7 @@ def list_daytona_volume_tree(
     return {
         "volume_name": volume_name,
         "root_path": root.display_path,
-        "allowed_roots": ["/memory", "/artifacts", "/buffers", "/meta"],
+        "allowed_roots": sorted(VFS_CANONICAL_ROOTS),
         "nodes": [root_node],
         "total_files": counters["files"],
         "total_dirs": counters["dirs"],

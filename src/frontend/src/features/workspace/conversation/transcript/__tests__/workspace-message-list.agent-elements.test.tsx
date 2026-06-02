@@ -103,8 +103,8 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
       { onResolveHitl },
     );
 
-    const approveButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("Approve"),
+    const approveButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("Approve"),
     );
     expect(approveButton).toBeTruthy();
 
@@ -112,8 +112,8 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
       approveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    const sendButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("Send"),
+    const sendButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("Send"),
     );
     expect(sendButton).toBeTruthy();
 
@@ -141,7 +141,9 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
           },
           {
             kind: "reasoning",
-            parts: [{ type: "text", text: "I should inspect the repository files." }],
+            parts: [
+              { type: "text", text: "I should inspect the repository files." },
+            ],
             isStreaming: false,
           },
           {
@@ -170,7 +172,12 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
           },
         ],
       },
-      { id: "a1", type: "assistant", content: "Done inspecting.", streaming: false },
+      {
+        id: "a1",
+        type: "assistant",
+        content: "Done inspecting.",
+        streaming: false,
+      },
     ]);
 
     expect(container.textContent).toContain("Execution started");
@@ -179,6 +186,34 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
     expect(container.textContent).toContain("README.md");
     expect(container.textContent).toContain("app.tsx");
     expect(container.textContent).toContain("Done inspecting.");
+
+    act(() => root.unmount());
+  });
+
+  it("renders delegated agent work through the Agent Elements SubagentTool path", () => {
+    const { container, root } = mount([
+      { id: "u1", type: "user", content: "delegate this" },
+      {
+        id: "trace-agent",
+        type: "trace",
+        content: "",
+        renderParts: [
+          {
+            kind: "tool",
+            title: "Delegate",
+            toolType: "delegate_agent",
+            state: "output-available",
+            input: {
+              subagent_type: "Research agent",
+              description: "Inspect the RLM trajectory",
+            },
+            output: { status: "completed" },
+          },
+        ],
+      },
+    ]);
+
+    expect(container.textContent).toContain("Research agent completed");
 
     act(() => root.unmount());
   });
@@ -193,21 +228,24 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
       attachButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    const addDocumentButton = Array.from(document.body.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("Add document"),
-    );
-    const connectorsButton = Array.from(document.body.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("Connectors"),
-    );
+    const addDocumentButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((button) => button.textContent?.includes("Add document"));
+    const connectorsButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((button) => button.textContent?.includes("Connectors"));
     expect(addDocumentButton).toBeTruthy();
     expect(connectorsButton).toBeTruthy();
     expect(connectorsButton).toHaveProperty("disabled", true);
 
     act(() => {
-      addDocumentButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      addDocumentButton?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
     });
 
-    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    const fileInput =
+      container.querySelector<HTMLInputElement>('input[type="file"]');
     expect(fileInput).toBeTruthy();
     Object.defineProperty(fileInput, "files", {
       configurable: true,
@@ -223,10 +261,51 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
     act(() => root.unmount());
   });
 
-  it("renders the pending planning loader without a lazy component crash", async () => {
-    const { container, root } = mount([{ id: "u1", type: "user", content: "start working" }], {
-      isTyping: true,
+  it("renders the runtime model picker from active model status", () => {
+    const onOpenModelSettings = vi.fn();
+    const { container, root } = mount([], {
+      activeModels: {
+        planner: "openai/gemini-3-flash-preview",
+        delegate: "openai/gemini-3-pro-preview",
+        delegate_small: null,
+      },
+      onOpenModelSettings,
     });
+
+    expect(container.textContent).toContain("openai/gemini-3-flash-preview");
+
+    const modelButton = container.querySelector(
+      'button[aria-label^="Active model"]',
+    );
+    expect(modelButton).toBeTruthy();
+
+    act(() => {
+      modelButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(document.body.textContent).toContain("openai/gemini-3-pro-preview");
+
+    const settingsButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((button) => button.textContent?.includes("Model settings"));
+    expect(settingsButton).toBeTruthy();
+
+    act(() => {
+      settingsButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(onOpenModelSettings).toHaveBeenCalledOnce();
+
+    act(() => root.unmount());
+  });
+
+  it("renders the pending planning loader without a lazy component crash", async () => {
+    const { container, root } = mount(
+      [{ id: "u1", type: "user", content: "start working" }],
+      {
+        isTyping: true,
+      },
+    );
 
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));

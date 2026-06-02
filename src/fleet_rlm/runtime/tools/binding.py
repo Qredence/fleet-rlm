@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from fleet_rlm.runtime.tools.document_tools import _load_document_impl
+from fleet_rlm.runtime.tools.document_tools import _load_document_impl, _validate_download_url
 from fleet_rlm.runtime.tools.knowledge_tools import _search_knowledge_impl
 from fleet_rlm.runtime.tools.rlm_delegate import (
     delegate_to_rlm as _delegate_to_rlm,
@@ -36,6 +36,7 @@ from fleet_rlm.runtime.tools.volume_memory_tools import (
 
 INTERPRETER_TOOL_NAMES = frozenset(
     {
+        "browser_fetch_page",
         "clear_buffer",
         "delegate_to_rlm",
         "delegate_to_rlm_batched",
@@ -272,7 +273,59 @@ def _bound_runtime_tool_factories(
         }
 
     factories["recursive_workspace"] = recursive_workspace
+
+    def browser_fetch_page(
+        url: str,
+        wait_until: str = "networkidle",
+        extract_links: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch a JS-rendered page using Playwright inside the sandbox."""
+        _validate_download_url(url)
+        return execute_sandbox_tool(
+            interpreter,
+            _BROWSER_FETCH_PAGE_CODE,
+            {"target_url": url, "wait_until": wait_until, "extract_links": extract_links},
+        )
+
+    factories["browser_fetch_page"] = browser_fetch_page
     return factories
+
+
+_BROWSER_FETCH_PAGE_CODE = """\
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    SUBMIT(
+        status="error",
+        error="Playwright is not installed in this sandbox. "
+        "Use a browser-capable sandbox (fleet-rlm-browser snapshot) for rendered page fetching.",
+    )
+else:
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        page = browser.new_page()
+        try:
+            page.goto(target_url, wait_until=wait_until, timeout=30000)
+            text = page.inner_text("body")
+            title = page.title()
+            links = []
+            if extract_links:
+                links = page.eval_on_selector_all(
+                    "a[href]",
+                    "els => els.map(e => ({href: e.href, text: (e.textContent || '').trim()}))",
+                )
+            SUBMIT(
+                status="ok",
+                url=target_url,
+                title=title,
+                text=text[:200000],
+                char_count=len(text),
+                links=links[:100] if extract_links else [],
+            )
+        finally:
+            page.close()
+            browser.close()
+"""
 
 
 def bind_runtime_tools(

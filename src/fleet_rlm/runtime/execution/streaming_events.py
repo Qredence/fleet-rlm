@@ -225,6 +225,39 @@ def _build_flat_trajectory_step(raw: dict[str, Any], index: int) -> dict[str, An
     return step
 
 
+def _truncate_trajectory_output(step: dict[str, Any]) -> dict[str, Any]:
+    if step.get("output_truncated"):
+        return step
+    output = step.get("output")
+    if isinstance(output, str) and len(output) > _TRAJECTORY_OUTPUT_CONTENT_CHARS:
+        preview, full_len = head_tail_preview(output, max_chars=_TRAJECTORY_OUTPUT_CONTENT_CHARS)
+        step["output"] = preview
+        step["observation"] = preview
+        step["output_truncated"] = True
+        step["output_length"] = full_len
+    return step
+
+
+def _normalize_structured_trajectory_step(step: dict[str, Any], index: int) -> dict[str, Any]:
+    step_copy = dict(step)
+    if "index" not in step_copy:
+        step_copy["index"] = index
+
+    # DSPy RLM trajectories are shaped as {reasoning, code, output}. Convert
+    # them into Fleet's generic tool/repl shape so websocket and frontend
+    # adapters can render them as visible sandbox execution rows.
+    if "code" in step_copy and "tool_name" not in step_copy:
+        step_copy["tool_name"] = "repl_execute"
+        step_copy.setdefault("input", step_copy.get("code"))
+        step_copy.setdefault("tool_args", step_copy.get("code"))
+    if "reasoning" in step_copy and "thought" not in step_copy:
+        step_copy["thought"] = step_copy.get("reasoning")
+    if "output" in step_copy and "observation" not in step_copy:
+        step_copy["observation"] = step_copy.get("output")
+
+    return _truncate_trajectory_output(step_copy)
+
+
 def _normalize_trajectory(raw: Any | None) -> list[dict[str, Any]]:
     """Convert DSPy ReAct flat trajectory to structured step list."""
     if not raw:
@@ -241,10 +274,10 @@ def _normalize_trajectory(raw: Any | None) -> list[dict[str, Any]]:
         steps = [_build_flat_trajectory_step(raw, index) for index in _extract_step_indices(raw)]
 
     result: list[dict[str, Any]] = []
-    for step in steps:
+    for index, step in enumerate(steps):
         if not isinstance(step, dict):
             continue
-        step_copy = dict(step)
+        step_copy = _normalize_structured_trajectory_step(step, index)
         tool_name = step_copy.get("tool_name")
         is_terminal = (tool_name == "finish") or (not tool_name)
         if is_terminal and "thought" in step_copy:

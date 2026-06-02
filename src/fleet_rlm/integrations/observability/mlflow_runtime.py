@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import sys
 from threading import Lock
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -31,6 +32,7 @@ from .mlflow_context import (
 logger = logging.getLogger(__name__)
 
 _CLIENT_LOCK = Lock()
+_MLFLOW_IMPORT_LOCK = Lock()
 _INIT_IDENTITY: tuple[Any, ...] | None = None
 _LAST_INIT_WAS_AUTH_FAILURE = False
 _ACTIVE_CONFIG: MlflowConfig | None = None
@@ -70,12 +72,36 @@ def _mlflow_tracking_auth_identity() -> tuple[Any, ...]:
     )
 
 
+def _clear_partial_mlflow_import() -> None:
+    """Remove partially initialized MLflow modules after a failed import."""
+
+    for module_name in list(sys.modules):
+        if module_name == "mlflow" or module_name.startswith("mlflow."):
+            sys.modules.pop(module_name, None)
+
+
 def _import_mlflow() -> Any | None:
-    try:
-        import mlflow
-    except ImportError:
+    with _MLFLOW_IMPORT_LOCK:
+        for attempt in range(2):
+            try:
+                import mlflow
+
+                # MLflow circular-import failures can leave a top-level module
+                # object without expected attributes. Touch a stable attribute so
+                # the helper either returns a usable module or clears the partial
+                # import before the request continues.
+                _ = mlflow.version.VERSION
+            except ImportError:
+                return None
+            except Exception:
+                _clear_partial_mlflow_import()
+                if attempt == 0:
+                    continue
+                logger.warning("Failed to import MLflow after clearing a partial import.", exc_info=True)
+                return None
+            else:
+                return mlflow
         return None
-    return mlflow
 
 
 def _sanitize_log_field(value: object) -> str:
@@ -486,10 +512,15 @@ class FleetMlflowTraceCallback(BaseCallback):
 # closing </think> tag interrupts field parsing and forces an expensive JSONAdapter
 # retry (adds ~8 s per turn).
 _THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+# Some models emit <think> in one token batch and </think> in another, so the
+# paired regex above leaves orphaned closing tags after stripping complete pairs.
+_ORPHAN_THINK_CLOSE_RE = re.compile(r"</think>", re.IGNORECASE)
 
 
 def _strip_think_tags(text: str) -> str:
-    return _THINK_TAG_RE.sub("", text).lstrip("\n")
+    text = _THINK_TAG_RE.sub("", text)
+    text = _ORPHAN_THINK_CLOSE_RE.sub("", text)
+    return text.lstrip("\n")
 
 
 class ThinkTagStripCallback(BaseCallback):
@@ -580,10 +611,10 @@ def log_trace_feedback(
     )
 
 
-def trace_to_dataset_row(trace: Any) -> dict[str, Any]:
+def trace_to_dataset_row(trace: Any, *, config: MlflowConfig | None = None) -> dict[str, Any]:
     from .mlflow_traces import trace_to_dataset_row as _impl
 
-    return _impl(trace)
+    return _impl(trace, config=config)
 
 
 def search_annotated_trace_rows(

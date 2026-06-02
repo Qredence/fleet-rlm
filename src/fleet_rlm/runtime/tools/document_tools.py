@@ -37,7 +37,10 @@ _CONTENT_TYPE_SUFFIX_MAP = {
     "text/plain": ".txt",
     "application/json": ".json",
     "text/markdown": ".md",
+    "application/xml": ".xml",
+    "text/xml": ".xml",
 }
+_AUXILIARY_DOC_PATHS = ("/llms.txt", "/sitemap.xml")
 
 
 def _is_private_download_address(address: str) -> bool:
@@ -163,6 +166,45 @@ def _download_url(url: str) -> Path:
                 Path(tmp_path).unlink(missing_ok=True)
 
     return Path(tmp_path)
+
+
+def _origin_url(parsed: urllib.parse.ParseResult) -> str:
+    return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
+
+
+def _documentation_auxiliary_urls(url: str) -> list[str]:
+    """Return same-origin documentation index URLs worth bundling with a page.
+
+    RLM document analysis works best when the REPL receives the page content
+    plus a compact site map. Documentation sites increasingly expose
+    ``/llms.txt`` for LLM-readable summaries and ``/sitemap.xml`` for URL
+    inventory, so Fleet opportunistically fetches those small same-origin
+    companions for root documentation URLs.
+    """
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return []
+    path = parsed.path or "/"
+    if Path(path).suffix and path not in {"/"}:
+        return []
+    origin = _origin_url(parsed)
+    current = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path or "/", "", "", ""))
+    candidates = [origin + suffix for suffix in _AUXILIARY_DOC_PATHS]
+    return [candidate for candidate in candidates if candidate.rstrip("/") != current.rstrip("/")]
+
+
+def _read_remote_document_text(url: str) -> tuple[str, dict[str, Any]]:
+    from fleet_rlm.runtime.content.ingestion import (
+        read_document_content as _read_document_content,
+    )
+
+    tmp_path: Path | None = None
+    try:
+        tmp_path = _download_url(url)
+        return _read_document_content(tmp_path)
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
 
 
 @tool_fn
@@ -293,22 +335,37 @@ def fetch_document_text(url_or_path: str) -> dict[str, Any]:
         - ``metadata``: Extraction metadata dict (source_type, extraction_method, etc.).
         - ``error``: Error message (present when ``status == "error"``).
     """
-    from fleet_rlm.runtime.content.ingestion import (
-        read_document_content as _read_document_content,
-    )
-
     stripped = url_or_path.strip()
-    tmp_path: Path | None = None
     try:
         if not stripped.startswith(("http://", "https://")):
             return {
                 "status": "error",
                 "error": "fetch_document_text only accepts HTTP(S) URLs.",
             }
-        tmp_path = _download_url(stripped)
-        file_path = tmp_path
+        text, metadata = _read_remote_document_text(stripped)
+        bundled_sources = [{"url": stripped, "char_count": len(text)}]
+        combined_parts = [f"# Source document: {stripped}\n\n{text}"]
+        auxiliary_errors: list[str] = []
 
-        text, metadata = _read_document_content(file_path)
+        for auxiliary_url in _documentation_auxiliary_urls(stripped):
+            try:
+                auxiliary_text, _auxiliary_metadata = _read_remote_document_text(auxiliary_url)
+            except Exception as exc:
+                auxiliary_errors.append(f"{auxiliary_url}: {exc}")
+                continue
+            if not auxiliary_text.strip():
+                continue
+            bundled_sources.append({"url": auxiliary_url, "char_count": len(auxiliary_text)})
+            combined_parts.append(f"# Auxiliary document: {auxiliary_url}\n\n{auxiliary_text}")
+
+        if len(bundled_sources) > 1:
+            text = "\n\n".join(combined_parts)
+            metadata = dict(metadata or {})
+            metadata["bundled_sources"] = bundled_sources
+            metadata["bundled_source_count"] = len(bundled_sources)
+            if auxiliary_errors:
+                metadata["auxiliary_errors"] = auxiliary_errors
+
         return {
             "status": "ok",
             "text": text,
@@ -317,9 +374,6 @@ def fetch_document_text(url_or_path: str) -> dict[str, Any]:
         }
     except Exception as exc:
         return {"status": "error", "error": str(exc)}
-    finally:
-        if tmp_path is not None:
-            tmp_path.unlink(missing_ok=True)
 
 
 __all__ = [

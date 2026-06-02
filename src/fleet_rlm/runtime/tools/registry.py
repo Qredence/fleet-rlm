@@ -9,6 +9,7 @@ from typing import Any, Iterable
 from ._marker import tool_fn
 
 TOOL_MODULE_NAMES: tuple[str, ...] = (
+    "browser_tools",
     "chunking_tools",
     "document_tools",
     "filesystem",

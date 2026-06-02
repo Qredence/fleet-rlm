@@ -220,13 +220,22 @@ function sandboxFromPayload(
     payload?.step && typeof payload.step === "object" && !Array.isArray(payload.step)
       ? (payload.step as Record<string, unknown>)
       : undefined;
+  const stepInput = asRecord(step?.input);
+  const stepOutput = asRecord(step?.output);
   const code =
     (typeof step?.input === "string" && step.input) ||
+    asOptionalText(stepInput?.code) ||
+    asOptionalText(stepInput?.code_preview) ||
+    asOptionalText(stepInput?.command) ||
     (typeof payload?.tool_input === "string" && payload.tool_input) ||
     (typeof payload?.tool_args === "string" && payload.tool_args) ||
     "";
   const output =
     (typeof step?.output === "string" && step.output) ||
+    asOptionalText(stepOutput?.stdout) ||
+    asOptionalText(stepOutput?.stderr) ||
+    asOptionalText(stepOutput?.output) ||
+    asOptionalText(stepOutput?.result) ||
     (typeof payload?.tool_output === "string" && payload.tool_output) ||
     text;
   const state = inferToolState(kind, text, payload);

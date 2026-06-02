@@ -8,6 +8,36 @@ from typing import Any
 import dspy
 
 
+class _NoCallbackRLM(dspy.RLM):
+    """RLM variant for REPL-only tasks where host semantic callbacks are disabled."""
+
+    def _build_signatures(self) -> tuple[Any, Any]:
+        action_sig, extract_sig = super()._build_signatures()
+        instructions = str(action_sig.instructions)
+        instructions = instructions.replace(
+            "- `llm_query(prompt)` - query a sub-LLM (~500K char capacity) for semantic analysis\n",
+            "",
+        ).replace(
+            "- `llm_query_batched(prompts)` - query multiple prompts concurrently (much faster for multiple queries)\n",
+            "",
+        )
+        instructions = instructions.replace(
+            "4. USE llm_query FOR SEMANTICS - String matching finds WHERE things are; "
+            "llm_query understands WHAT things mean.",
+            "4. USE PYTHON INSPECTION - Extract headings, links, counts, samples, and sections with code; "
+            "semantic callbacks are disabled for this run.",
+        )
+        instructions = instructions.replace(
+            f"You have max {self.max_llm_calls} sub-LLM calls. When done, call SUBMIT() with your output.",
+            "Semantic callbacks are disabled. When done, call SUBMIT() with your output.",
+        )
+        return action_sig.with_instructions(instructions), extract_sig
+
+    def _make_llm_tools(self, max_workers: int = 8) -> dict[str, Any]:
+        _ = max_workers
+        return {}
+
+
 def create_runtime_rlm(
     *,
     signature: type[dspy.Signature],
@@ -18,6 +48,7 @@ def create_runtime_rlm(
     verbose: bool,
     tools: list[Any] | None = None,
     sub_lm: dspy.LM | None = None,
+    include_llm_tools: bool = True,
 ) -> dspy.Module:
     """Create a canonical RLM instance for a runtime signature."""
 
@@ -35,7 +66,8 @@ def create_runtime_rlm(
     if sub_lm is not None:
         kwargs["sub_lm"] = sub_lm
 
-    return dspy.RLM(
+    rlm_cls = dspy.RLM if include_llm_tools else _NoCallbackRLM
+    return rlm_cls(
         **kwargs,
     )
 

@@ -156,6 +156,100 @@ async def test_sandbox_create_releases_slot_after_retry_exhaustion(monkeypatch: 
 
 
 @pytest.mark.asyncio
+async def test_sandbox_create_reconciles_stale_slots_and_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.integrations.daytona import runtime as runtime_module
+    from fleet_rlm.integrations.daytona.models import SandboxSpec
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxRuntime
+
+    sandbox = SimpleNamespace(delete=MagicMock(), stop=MagicMock())
+    acquire_calls = 0
+    reconciled_counts: list[int] = []
+
+    async def fake_acquire(*, timeout: float | None = None) -> bool:
+        nonlocal acquire_calls
+        _ = timeout
+        acquire_calls += 1
+        if acquire_calls == 1:
+            raise asyncio.TimeoutError
+        return True
+
+    async def fake_provider_count(self: DaytonaSandboxRuntime) -> int:
+        _ = self
+        return 0
+
+    def fake_reconcile(provider_active_count: int):
+        reconciled_counts.append(provider_active_count)
+        return concurrency.SandboxUsageStats(limit=5, available_slots=5, active_count=0)
+
+    def fake_create(self: DaytonaSandboxRuntime, spec: SandboxSpec):
+        _ = (self, spec)
+        return sandbox
+
+    monkeypatch.setattr(runtime_module, "acquire_sandbox_slot", fake_acquire)
+    monkeypatch.setattr(
+        runtime_module,
+        "get_current_sandbox_usage",
+        lambda: concurrency.SandboxUsageStats(limit=5, available_slots=0, active_count=5),
+    )
+    monkeypatch.setattr(runtime_module, "reconcile_sandbox_slots", fake_reconcile)
+    monkeypatch.setattr(DaytonaSandboxRuntime, "_count_provider_fleet_sandboxes", fake_provider_count)
+    monkeypatch.setattr(runtime_module, "aresolve_sandbox_spec_snapshot", lambda spec, config: spec)
+    monkeypatch.setattr(DaytonaSandboxRuntime, "_create_sandbox_from_spec_impl", fake_create)
+
+    result = await _sandbox_runtime().acreate_sandbox(spec=SandboxSpec(name="custom-sandbox"))
+
+    assert result is sandbox
+    assert acquire_calls == 2
+    assert reconciled_counts == [0]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_create_keeps_busy_error_when_provider_reconcile_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.integrations.daytona import runtime as runtime_module
+    from fleet_rlm.integrations.daytona.errors import DaytonaDiagnosticError
+    from fleet_rlm.integrations.daytona.models import SandboxSpec
+    from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxRuntime
+
+    async def fake_acquire(*, timeout: float | None = None) -> bool:
+        _ = timeout
+        raise asyncio.TimeoutError
+
+    async def fake_provider_count(self: DaytonaSandboxRuntime) -> int:
+        _ = self
+        raise RuntimeError("provider unavailable")
+
+    reconcile = MagicMock()
+
+    monkeypatch.setattr(runtime_module, "acquire_sandbox_slot", fake_acquire)
+    monkeypatch.setattr(runtime_module, "reconcile_sandbox_slots", reconcile)
+    monkeypatch.setattr(DaytonaSandboxRuntime, "_count_provider_fleet_sandboxes", fake_provider_count)
+
+    with pytest.raises(DaytonaDiagnosticError, match="Sandbox concurrency limit reached") as exc_info:
+        await _sandbox_runtime().acreate_sandbox(spec=SandboxSpec(name="custom-sandbox"))
+
+    assert exc_info.value.category == "sandbox_concurrency_busy"
+    reconcile.assert_not_called()
+
+
+def test_provider_fleet_sandbox_count_filters_labels_and_inactive_states() -> None:
+    class FakeClient:
+        def list(self, *, labels: dict[str, str]):
+            assert labels == {"managed-by": "fleet-rlm"}
+            return [
+                SimpleNamespace(labels={"managed-by": "fleet-rlm"}, state="started"),
+                SimpleNamespace(labels={"managed-by": "fleet-rlm"}, state="archived"),
+                SimpleNamespace(labels={"managedBy": "fleet-pi"}, state="started"),
+            ]
+
+    runtime = _sandbox_runtime()
+    runtime._client = FakeClient()
+
+    assert runtime._count_provider_fleet_sandboxes_sync() == 1
+
+
+@pytest.mark.asyncio
 async def test_async_sandbox_create_does_not_block_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.integrations.daytona import runtime as runtime_module
     from fleet_rlm.integrations.daytona.models import SandboxSpec
@@ -344,6 +438,121 @@ def test_daytona_volume_browser_allows_durable_phase_roots() -> None:
         "/logs",
         "/uploads",
     } <= VFS_CANONICAL_ROOTS
+
+
+def test_daytona_volume_browser_reports_all_canonical_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.integrations.daytona import file_browser
+    from fleet_rlm.integrations.daytona.volumes import VFS_CANONICAL_ROOTS
+
+    class _Sandbox:
+        fs = SimpleNamespace(list_files=lambda path: [])
+
+    class _MountedVolume:
+        def __enter__(self) -> _Sandbox:
+            return _Sandbox()
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    monkeypatch.setattr(file_browser, "_mounted_daytona_volume", lambda volume_name: _MountedVolume())
+
+    tree = file_browser.list_daytona_volume_tree("volume", root_path="/", max_depth=1)
+
+    assert tree["allowed_roots"] == sorted(VFS_CANONICAL_ROOTS)
+
+
+def test_daytona_volume_browser_filters_root_to_canonical_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.integrations.daytona import file_browser
+
+    class _Sandbox:
+        def __init__(self) -> None:
+            self.fs = SimpleNamespace(list_files=self._list_files)
+
+        def _list_files(self, path: str) -> list[SimpleNamespace]:
+            if path == str(file_browser.DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH):
+                return [
+                    SimpleNamespace(name="artifacts", is_dir=True, size=None, mod_time=None),
+                    SimpleNamespace(name="workspace", is_dir=True, size=None, mod_time=None),
+                    SimpleNamespace(name="scratch.txt", is_dir=False, size=12, mod_time=None),
+                ]
+            return []
+
+    class _MountedVolume:
+        def __enter__(self) -> _Sandbox:
+            return _Sandbox()
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    monkeypatch.setattr(file_browser, "_mounted_daytona_volume", lambda volume_name: _MountedVolume())
+
+    tree = file_browser.list_daytona_volume_tree("volume", root_path="/", max_depth=1)
+    root_children = tree["nodes"][0]["children"]
+
+    assert [child["path"] for child in root_children] == ["/artifacts"]
+    assert tree["total_dirs"] == 1
+    assert tree["total_files"] == 0
+
+
+def test_build_browser_snapshot_image_includes_playwright_install() -> None:
+    from unittest.mock import MagicMock
+
+    from fleet_rlm.integrations.daytona import snapshots
+
+    mock_image = MagicMock()
+    mock_image.run_commands.return_value = mock_image
+
+    fake_daytona_image = MagicMock()
+    fake_daytona_image.base.return_value = mock_image
+
+    with patch.dict("sys.modules", {"daytona": SimpleNamespace(Image=fake_daytona_image)}):
+        result = snapshots.build_browser_snapshot_image(include_vnc=False)
+
+    assert result is mock_image
+    run_commands_calls = mock_image.run_commands.call_args_list
+    # Should have: system deps, pip install uv, uv pip install packages, playwright install
+    assert len(run_commands_calls) == 4
+    system_call = run_commands_calls[0][0][0]
+    assert "libx11-6" in system_call
+    assert "libnss3" in system_call
+    assert "xvfb" not in system_call  # VNC excluded
+    playwright_call = run_commands_calls[3][0][0]
+    assert "playwright install chromium" in playwright_call
+
+
+def test_build_browser_snapshot_image_includes_vnc_when_enabled() -> None:
+    from unittest.mock import MagicMock
+
+    from fleet_rlm.integrations.daytona import snapshots
+
+    mock_image = MagicMock()
+    mock_image.run_commands.return_value = mock_image
+
+    fake_daytona_image = MagicMock()
+    fake_daytona_image.base.return_value = mock_image
+
+    with patch.dict("sys.modules", {"daytona": SimpleNamespace(Image=fake_daytona_image)}):
+        snapshots.build_browser_snapshot_image(include_vnc=True)
+
+    system_call = mock_image.run_commands.call_args_list[0][0][0]
+    assert "xvfb" in system_call
+    assert "novnc" in system_call
+
+
+def test_resolve_snapshot_for_skills_returns_browser_snapshot() -> None:
+    from fleet_rlm.integrations.daytona.runtime import resolve_snapshot_for_skills
+    from fleet_rlm.integrations.daytona.snapshots import BROWSER_SNAPSHOT_NAME, DEFAULT_SNAPSHOT_NAME
+
+    assert resolve_snapshot_for_skills(None) == DEFAULT_SNAPSHOT_NAME
+    assert resolve_snapshot_for_skills([]) == DEFAULT_SNAPSHOT_NAME
+    assert resolve_snapshot_for_skills(["long-context"]) == DEFAULT_SNAPSHOT_NAME
+    assert resolve_snapshot_for_skills(["browser_interaction"]) == BROWSER_SNAPSHOT_NAME
+    assert resolve_snapshot_for_skills(["long-context", "browser_interaction"]) == BROWSER_SNAPSHOT_NAME
+    assert resolve_snapshot_for_skills(["Playwright automation"]) == BROWSER_SNAPSHOT_NAME
 
 
 def test_store_evidence_redacts_credentials_from_bridge_errors() -> None:

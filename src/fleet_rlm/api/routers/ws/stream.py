@@ -9,6 +9,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -20,7 +21,10 @@ from fleet_rlm.integrations.observability.mlflow_context import (
 from fleet_rlm.integrations.observability.trace_context import (
     runtime_telemetry_enabled_context,
 )
-from fleet_rlm.runtime.execution.streaming_events import is_terminal_stream_event_kind
+from fleet_rlm.runtime.execution.streaming_events import (
+    _normalize_trajectory,
+    is_terminal_stream_event_kind,
+)
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from ...dependencies import DiagnosticsDeps, SessionCacheDeps
@@ -78,6 +82,36 @@ from .turn_setup import PreparedStreamingTurn, prepare_chat_message_turn
 logger = logging.getLogger(__name__)
 
 
+def _routing_status_text(payload: dict[str, Any]) -> str:
+    selected = ", ".join(str(item) for item in payload.get("selected_skills", []) or [])
+    route = payload.get("routing_decision", "auto")
+    source = payload.get("source_url")
+    text = f"Route: {route}"
+    if selected:
+        text += f" | skills: {selected}"
+    if source:
+        text += f" | source: {source}"
+    return text
+
+
+def _build_routing_preview_event(agent: ChatAgentProtocol, msg: WSMessage) -> Any | None:
+    preview_routing = getattr(agent, "preview_routing", None)
+    if not callable(preview_routing):
+        return None
+    payload = preview_routing(
+        user_request=msg.content,
+        execution_mode=msg.execution_mode or "auto",
+    )
+    if not isinstance(payload, dict) or not payload.get("routing_decision"):
+        return None
+    return SimpleNamespace(
+        kind="status",
+        text=_routing_status_text(payload),
+        payload={**payload, "phase": "routing"},
+        timestamp=datetime.now(timezone.utc),
+    )
+
+
 @dataclass(slots=True)
 class WorkspaceEvent:
     """Normalized event shape for websocket streaming."""
@@ -129,6 +163,37 @@ def _runtime_trace_metadata(payload: dict[str, Any] | None) -> dict[str, Any]:
     runtime = runtime_payload if isinstance(runtime_payload, dict) else {}
 
     metadata: dict[str, Any] = {}
+    for key in (
+        "routing_decision",
+        "source_url",
+        "execution_mode",
+        "runtime_module",
+    ):
+        value = payload.get(key, runtime.get(key))
+        if value not in (None, "", False):
+            metadata[f"fleet_rlm.{key}"] = value
+
+    selected_skills = payload.get("selected_skills")
+    if isinstance(selected_skills, list):
+        metadata["fleet_rlm.selected_skills"] = ",".join(str(item) for item in selected_skills if str(item))
+
+    trajectory_steps = _normalize_trajectory(payload.get("trajectory"))
+    if trajectory_steps:
+        metadata["fleet_rlm.trajectory_steps"] = str(len(trajectory_steps))
+        if any(step.get("thought") for step in trajectory_steps):
+            metadata["fleet_rlm.trajectory_has_reasoning"] = "true"
+        if any(step.get("tool_name") for step in trajectory_steps):
+            metadata["fleet_rlm.trajectory_has_tools"] = "true"
+        if any(
+            "repl" in str(step.get("tool_name", "")).lower()
+            or "code" in step
+            or step.get("type") == "repl"
+            for step in trajectory_steps
+        ):
+            metadata["fleet_rlm.trajectory_has_repl"] = "true"
+        if any(step.get("output") is not None or step.get("observation") is not None for step in trajectory_steps):
+            metadata["fleet_rlm.trajectory_has_outputs"] = "true"
+
     for key in (
         "runtime_degraded",
         "runtime_failure_category",
@@ -1154,6 +1219,18 @@ class _ExecutionConnectionLoop:
                         ),
                     },
                 )
+                routing_preview_event = _build_routing_preview_event(self.agent, msg)
+                if routing_preview_event is not None:
+                    await _try_send_json(
+                        self.websocket,
+                        {
+                            "type": "event",
+                            "data": build_stream_event_dict(
+                                event=routing_preview_event,
+                                payload=routing_preview_event.payload,
+                            ),
+                        },
+                    )
                 self.stream_task = asyncio.create_task(
                     _background_execution_task(
                         msg=msg,
@@ -1173,6 +1250,8 @@ class _ExecutionConnectionLoop:
                 cancel_flag=self.session.cancel_flag,
                 local_persist=self.local_persist,
                 lifecycle=self.session.lifecycle,
+                cancel_active_run=False,
+                persist_on_disconnect=False,
             )
         except Exception as exc:
             await handle_chat_loop_exception(

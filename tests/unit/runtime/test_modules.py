@@ -27,7 +27,31 @@ def test_variable_mode_module_collects_sub_tools_and_uses_tight_output_cap(monke
     assert captured["max_llm_calls"] == 13
     assert captured["max_output_chars"] == variable_mode.VARIABLE_MODE_MAX_OUTPUT_CHARS
     assert captured["tools"] == [interpreter.sub_rlm, interpreter.sub_rlm_batched]
+    assert captured["include_llm_tools"] is True
     assert module is not None
+
+
+def test_variable_mode_module_can_disable_recursive_sub_tools(monkeypatch) -> None:
+    import dspy
+
+    from fleet_rlm.runtime.modules import variable_mode
+
+    interpreter = SimpleNamespace(sub_rlm=lambda prompt: prompt, sub_rlm_batched=lambda prompts: prompts)
+    captured: dict[str, Any] = {}
+
+    def fake_create_runtime_rlm(**kwargs: Any) -> MagicMock:
+        captured.update(kwargs)
+        return MagicMock(spec=dspy.Module)
+
+    monkeypatch.setattr(variable_mode, "create_runtime_rlm", fake_create_runtime_rlm)
+
+    variable_mode.RLMVariableExecutionModule(
+        interpreter=interpreter,
+        include_sub_tools=False,
+        extra_tools=[],
+    )
+
+    assert captured["tools"] is None
 
 
 def test_variable_mode_forward_preserves_signature_kwargs(monkeypatch) -> None:
@@ -47,6 +71,62 @@ def test_variable_mode_forward_preserves_signature_kwargs(monkeypatch) -> None:
     assert result.summary == "Summary"
     assert result.key_points == ["one"]
     assert result.coverage_pct == 90
+
+
+def test_variable_mode_forward_scopes_disabled_semantic_callbacks(monkeypatch) -> None:
+    import dspy
+
+    from fleet_rlm.runtime.modules import variable_mode
+
+    interpreter = SimpleNamespace(semantic_callbacks_enabled=True)
+    observed: dict[str, Any] = {}
+
+    def fake_create_runtime_rlm(**kwargs: Any) -> MagicMock:
+        observed["include_llm_tools"] = kwargs["include_llm_tools"]
+
+        def _run(**call_kwargs: Any) -> dspy.Prediction:
+            observed["semantic_callbacks_enabled_during_call"] = interpreter.semantic_callbacks_enabled
+            observed["adapter_during_call"] = dspy.settings.adapter
+            observed["call_kwargs"] = call_kwargs
+            return dspy.Prediction(answer="done")
+
+        return MagicMock(side_effect=_run)
+
+    monkeypatch.setattr(variable_mode, "create_runtime_rlm", fake_create_runtime_rlm)
+
+    module = variable_mode.RLMVariableExecutionModule(
+        interpreter=interpreter,
+        include_llm_tools=False,
+    )
+    result = module(task="inspect document")
+
+    assert result.answer == "done"
+    assert observed["include_llm_tools"] is False
+    assert observed["semantic_callbacks_enabled_during_call"] is False
+    assert isinstance(observed["adapter_during_call"], dspy.JSONAdapter)
+    assert interpreter.semantic_callbacks_enabled is True
+
+
+def test_create_runtime_rlm_without_llm_tools_removes_callback_instructions() -> None:
+    import dspy
+
+    from fleet_rlm.runtime.agent.signatures import RLMVariableSignature
+    from fleet_rlm.runtime.modules.factory import create_runtime_rlm
+
+    rlm = create_runtime_rlm(
+        signature=RLMVariableSignature,
+        interpreter=SimpleNamespace(),
+        max_iterations=2,
+        max_llm_calls=3,
+        verbose=False,
+        include_llm_tools=False,
+    )
+
+    instructions = rlm.generate_action.signature.instructions
+    assert "`llm_query(prompt)`" not in instructions
+    assert "`llm_query_batched(prompts)`" not in instructions
+    assert "semantic callbacks are disabled" in instructions
+    assert isinstance(rlm, dspy.Module)
 
 
 def test_build_variable_mode_rlm_returns_wrapper(monkeypatch) -> None:

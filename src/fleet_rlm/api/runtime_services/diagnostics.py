@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from collections.abc import Awaitable, Callable
@@ -13,7 +14,11 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from fleet_rlm.integrations.daytona import DaytonaConfigError
-from fleet_rlm.integrations.daytona.concurrency import get_current_sandbox_usage
+from fleet_rlm.integrations.daytona.concurrency import (
+    SandboxUsageStats,
+    get_current_sandbox_usage,
+    reconcile_sandbox_slots,
+)
 from fleet_rlm.integrations.observability.config import MlflowConfig
 
 from ..bootstrap_observability import resolve_mlflow_auto_start_enabled
@@ -40,6 +45,8 @@ from .common import (
     utc_now_iso,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def resolve_active_model(value: str | None, env_key: str) -> str:
     direct = (value or "").strip()
@@ -65,6 +72,38 @@ def connectivity_result_from_cache(
         return RuntimeConnectivityTestResponse(**cached)
     except ValidationError:
         return None
+
+
+def _status_sandbox_usage() -> SandboxUsageStats:
+    """Return sandbox slot diagnostics, reconciling obviously stale saturation.
+
+    Normal slot release remains lifecycle-driven. This diagnostic recovery path
+    only runs when the local semaphore reports at least one active slot; in
+    that case a provider count is cheap and prevents the Settings/Workbench UI
+    from showing stale local occupancy after Daytona sandboxes have already
+    disappeared.
+    """
+    usage = get_current_sandbox_usage()
+    if usage.active_count <= 0:
+        return usage
+
+    runtime = None
+    try:
+        from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxRuntime
+
+        runtime = DaytonaSandboxRuntime()
+        provider_active = runtime._count_provider_fleet_sandboxes_sync()
+    except Exception:
+        logger.debug("Skipping sandbox slot reconciliation during runtime status", exc_info=True)
+        return usage
+    finally:
+        if runtime is not None:
+            with suppress(Exception):
+                runtime.close()
+
+    if provider_active < usage.active_count:
+        return reconcile_sandbox_slots(provider_active_count=provider_active)
+    return usage
 
 
 def lm_preflight() -> tuple[dict[str, bool], list[str]]:
@@ -358,7 +397,7 @@ def build_runtime_status_response(
     daytona_checks, daytona_guidance = daytona_preflight(
         sandbox_provider=config_deps.config.sandbox_provider,
     )
-    sandbox_usage = get_current_sandbox_usage()
+    sandbox_usage = _status_sandbox_usage()
 
     lm_test = connectivity_result_from_cache(diagnostics=diagnostics_deps, kind="lm")
     daytona_test = connectivity_result_from_cache(diagnostics=diagnostics_deps, kind="daytona")
@@ -404,6 +443,22 @@ def build_runtime_status_response(
         mlflow_enabled=mlflow_cfg.enabled,
         tracking_uri=mlflow_cfg.tracking_uri,
     )
+    persisted_scorer_names: list[str] = []
+    if mlflow_cfg.enabled and not mlflow_cfg.enable_auto_assessment:
+        try:
+            from fleet_rlm.integrations.observability.auto_assessment import persisted_scorer_names as _scorer_names
+
+            persisted_scorer_names = _scorer_names(mlflow_cfg)
+        except Exception:
+            logger.debug("Failed to inspect MLflow persisted scorers for runtime status.", exc_info=True)
+            persisted_scorer_names = []
+    if persisted_scorer_names:
+        deduped_guidance.append(
+            "MLflow has persisted scorer(s) while Fleet auto-assessment is disabled: "
+            f"{', '.join(persisted_scorer_names)}. These can still assess traces; inspect with "
+            "`uv run python scripts/mlflow_cli.py scorers list` and stop with "
+            "`uv run python scripts/mlflow_cli.py scorers stop --name <name>` if unintended."
+        )
 
     return RuntimeStatusResponse(
         app_env=config_deps.config.app_env,
@@ -430,6 +485,9 @@ def build_runtime_status_response(
         mlflow={
             "enabled": mlflow_cfg.enabled,
             "auto_start_enabled": mlflow_auto_start_enabled,
+            "auto_assessment_enabled": mlflow_cfg.enable_auto_assessment,
+            "persisted_scorer_count": len(persisted_scorer_names),
+            "persisted_scorers": persisted_scorer_names,
             "startup_status": mlflow_startup_status,
             "startup_error": mlflow_startup_error,
         },

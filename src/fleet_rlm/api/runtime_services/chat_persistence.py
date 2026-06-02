@@ -256,11 +256,19 @@ async def handle_chat_disconnect(
     cancel_flag: dict[str, bool],
     local_persist: Callable[..., Awaitable[None]],
     lifecycle: ExecutionLifecycleManager | None,
+    cancel_active_run: bool = True,
+    persist_on_disconnect: bool = True,
 ) -> None:
     """Cleanly stop the active websocket loop after a client disconnect."""
-    cancel_flag["cancelled"] = True
+    if cancel_active_run:
+        cancel_flag["cancelled"] = True
     await cancel_task(pending_receive_task)
-    await cancel_task(stream_task)
+    if cancel_active_run:
+        await cancel_task(stream_task)
+    elif stream_task is not None:
+        stream_task.add_done_callback(_log_background_disconnect_task_result)
+    if not persist_on_disconnect:
+        return
     try:
         await local_persist(
             include_volume_save=True,
@@ -285,6 +293,16 @@ async def handle_chat_disconnect(
 
     if lifecycle is not None:
         await lifecycle.complete_run(RunStatus.CANCELLED)
+
+
+def _log_background_disconnect_task_result(task: asyncio.Task[Any]) -> None:
+    """Consume detached execution task failures after the command socket closes."""
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        logger.warning("Background execution failed after websocket disconnect", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1203,9 +1221,13 @@ async def _persist_session_state_impl(
                 "Skipping Daytona volume persistence because cleanup has no active session (path=%s)",
                 active_manifest_path,
             )
-    elif include_volume_save and interpreter is None and persistence is not None:
-        # No Daytona volume available — fall back to local store so the manifest
-        # survives process restarts between WebSocket connections.
+    # Always persist to local store when persistence is available — this is the
+    # durable fallback that survives sandbox churn. Pool-based dispatch means
+    # each turn may acquire a *different* Daytona sandbox, so the volume save
+    # above lands on the current sandbox while the *next* turn's new sandbox
+    # volume starts empty. The local store is sandbox-independent and bridges
+    # the gap. We write it regardless of whether a volume save also happened.
+    if include_volume_save and persistence is not None:
         sess_id = str(session_record.get("session_id") or "")
         if sess_id:
             await _persist_manifest_to_local_store(

@@ -125,6 +125,9 @@ async def _collect_chat_until_terminal(
         if payload.get("type") == "error":
             raise RuntimeError(f"Chat websocket error: {payload}")
 
+        if payload.get("type") == "execution_completed":
+            return events, payload
+
         if payload.get("type") != "event":
             continue
         kind = payload.get("data", {}).get("kind")
@@ -331,8 +334,8 @@ async def _run_validation(args: argparse.Namespace) -> ValidationResult:
         chat_ws_url = _make_ws_url(args.server_url, "/api/v1/ws/execution")
         execution_ws_url = _make_ws_url(
             args.server_url,
-            "/api/v1/ws/execution",
-            query=(f"workspace_id={args.workspace_id}&user_id={args.user_id}&session_id={session_id}"),
+            "/api/v1/ws/execution/events",
+            query=f"session_id={session_id}",
         )
 
         async with websockets.connect(
@@ -394,9 +397,12 @@ async def _run_validation(args: argparse.Namespace) -> ValidationResult:
                     if event.get("session_id") != session_id:
                         raise RuntimeError("Execution event session_id mismatch.")
 
-                terminal_kind = terminal_chat_payload.get("data", {}).get("kind")
-                if terminal_kind != "final":
-                    raise RuntimeError(f"Terminal chat event kind is {terminal_kind!r}; expected 'final'.")
+                terminal_kind = terminal_chat_payload.get("data", {}).get("kind") or terminal_chat_payload.get("type")
+                if terminal_kind not in {"final", "execution_completed"}:
+                    raise RuntimeError(
+                        f"Terminal chat event kind is {terminal_kind!r}; expected 'final' or "
+                        "'execution_completed'."
+                    )
 
                 await _persist_artifact_via_command(
                     chat_ws,

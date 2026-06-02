@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -227,6 +228,37 @@ async def test_disconnect_cleanup_disallows_volume_session_creation() -> None:
             "release_idle_session": True,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_disconnect_can_leave_background_execution_running_without_stale_persist() -> None:
+    from fleet_rlm.api.runtime_services.chat_persistence import handle_chat_disconnect
+
+    calls: list[dict[str, Any]] = []
+
+    async def local_persist(**kwargs: Any) -> None:
+        calls.append(dict(kwargs))
+
+    async def background() -> str:
+        await asyncio.sleep(0)
+        return "ok"
+
+    stream_task = asyncio.create_task(background())
+    cancel_flag: dict[str, bool] = {"cancelled": False}
+
+    await handle_chat_disconnect(
+        pending_receive_task=None,
+        stream_task=stream_task,
+        cancel_flag=cancel_flag,
+        local_persist=local_persist,
+        lifecycle=None,
+        cancel_active_run=False,
+        persist_on_disconnect=False,
+    )
+    await stream_task
+
+    assert cancel_flag["cancelled"] is False
+    assert calls == []
 
 
 @pytest.mark.asyncio

@@ -236,6 +236,15 @@ async def switch_session_if_needed(
                 agent,
                 manifest_path,
             )
+            # Each turn may acquire a different sandbox (pool-based dispatch),
+            # so the volume on the new sandbox won't have the prior turn's
+            # manifest. Fall back to the local store when the volume read
+            # returns nothing.
+            if not manifest:
+                manifest = await _restore_manifest_from_local_store(
+                    persistence=persistence,
+                    sess_id=sess_id,
+                )
         else:
             # No Daytona volume — attempt to restore from local store so that
             # session history survives process restarts between WS connections.

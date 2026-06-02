@@ -35,7 +35,11 @@ function parseTrajectoryStepIndex(
   payload?: Record<string, unknown>,
   stepData?: Record<string, unknown>,
 ): number {
-  return asOptionalNumber(payload?.step_index) ?? asOptionalNumber(stepData?.index) ?? 0;
+  return (
+    asOptionalNumber(payload?.step_index) ??
+    asOptionalNumber(stepData?.index) ??
+    0
+  );
 }
 
 function normalizeTrajectoryStep(
@@ -44,10 +48,16 @@ function normalizeTrajectoryStep(
   fallbackText?: string,
 ): NormalizedTrajectoryStep {
   const action = asOptionalText(raw.action);
-  const toolName = asOptionalText(raw.tool_name ?? raw.toolName);
-  const thought = asOptionalText(raw.thought) ?? asOptionalText(fallbackText);
+  const code = asOptionalText(raw.code);
+  const toolName =
+    asOptionalText(raw.tool_name ?? raw.toolName) ??
+    (code ? "repl_execute" : undefined);
+  const thought =
+    asOptionalText(raw.thought) ??
+    asOptionalText(raw.reasoning) ??
+    asOptionalText(fallbackText);
   const toolInput = normalizeOptionalUnknown(
-    raw.tool_args ?? raw.input ?? raw.tool_input ?? raw.toolInput,
+    raw.tool_args ?? raw.input ?? raw.tool_input ?? raw.toolInput ?? code,
   );
   const toolOutput = normalizeOptionalUnknown(
     raw.output ?? raw.observation ?? raw.tool_output ?? raw.toolOutput,
@@ -171,6 +181,17 @@ export function normalizeTrajectoryStepsFromFinalPayload(
 
   const trajectoryRecord = asRecord(rawTrajectory);
   if (trajectoryRecord) {
+    const nestedSteps = trajectoryRecord.steps ?? trajectoryRecord.trajectory;
+    if (Array.isArray(nestedSteps)) {
+      return nestedSteps
+        .map((entry, idx) => {
+          const record = asRecord(entry);
+          if (!record) return null;
+          const index = asOptionalNumber(record.index) ?? idx;
+          return normalizeTrajectoryStep(record, index);
+        })
+        .filter((step): step is NormalizedTrajectoryStep => step != null);
+    }
     return normalizeTrajectorySteps("", trajectoryRecord);
   }
 
@@ -225,16 +246,22 @@ function summarizeTrajectoryValue(value: unknown): string | undefined {
   }
 }
 
-export function trajectoryStepDetails(step: NormalizedTrajectoryStep): string[] {
+export function trajectoryStepDetails(
+  step: NormalizedTrajectoryStep,
+): string[] {
   const details: string[] = [];
   if (step.toolName) {
     details.push(`Tool · ${step.toolName}`);
   }
   if (step.toolInput !== undefined) {
-    details.push(`Input · ${summarizeTrajectoryValue(step.toolInput) ?? "Available"}`);
+    details.push(
+      `Input · ${summarizeTrajectoryValue(step.toolInput) ?? "Available"}`,
+    );
   }
   if (step.toolOutput !== undefined) {
-    details.push(`Observation · ${summarizeTrajectoryValue(step.toolOutput) ?? "Available"}`);
+    details.push(
+      `Observation · ${summarizeTrajectoryValue(step.toolOutput) ?? "Available"}`,
+    );
   }
   return details;
 }

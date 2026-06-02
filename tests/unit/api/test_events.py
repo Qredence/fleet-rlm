@@ -158,3 +158,33 @@ def test_backend_status_projects_to_canonical_execution_step_frame():
 
     assert frame["kind"] == "execution_step"
     assert frame["payload"]["source_type"] == "status"
+
+
+def test_runtime_trace_metadata_counts_structured_rlm_trajectory():
+    stream_module = importlib.import_module("fleet_rlm.api.routers.ws.stream")
+
+    metadata = stream_module._runtime_trace_metadata(
+        {
+            "routing_decision": "url_document_rlm",
+            "selected_skills": ["long-context"],
+            "source_url": "https://dspy.ai",
+            "trajectory": {
+                "steps": [
+                    {
+                        "reasoning": "Inspect docs",
+                        "code": "print(document_text[:80])",
+                        "output": "DSPy docs",
+                    }
+                ]
+            },
+        }
+    )
+
+    assert metadata["fleet_rlm.routing_decision"] == "url_document_rlm"
+    assert metadata["fleet_rlm.selected_skills"] == "long-context"
+    assert metadata["fleet_rlm.source_url"] == "https://dspy.ai"
+    assert metadata["fleet_rlm.trajectory_steps"] == "1"
+    assert metadata["fleet_rlm.trajectory_has_reasoning"] == "true"
+    assert metadata["fleet_rlm.trajectory_has_tools"] == "true"
+    assert metadata["fleet_rlm.trajectory_has_repl"] == "true"
+    assert metadata["fleet_rlm.trajectory_has_outputs"] == "true"

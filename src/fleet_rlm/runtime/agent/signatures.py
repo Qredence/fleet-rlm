@@ -60,6 +60,12 @@ class RLMReActChatSignature(dspy.Signature):
         desc="Persistent memory blocks (Persona, Human, Scratchpad) that define your identity and context"
     )
     history: dspy.History = dspy.InputField(desc="Prior chat turns using keys user_message and response")
+    recent_history: str = dspy.InputField(
+        desc=(
+            "Compact recent chat transcript, oldest to newest. The final listed turn is the most "
+            "recent prior exchange and should dominate recency-sensitive follow-up answers."
+        )
+    )
     assistant_response: str = dspy.OutputField(desc="Final assistant response to user")
 
 
@@ -439,16 +445,21 @@ class RLMVariableSignature(dspy.Signature):
 
 
 class RLMLargeDocSignature(dspy.Signature):
-    """Fetch and process an oversized URL document using the REPL.
+    """Process an oversized URL document using the REPL.
 
     All input fields are stored as REPL variables — the LLM sees only
-    metadata and writes Python to stream-fetch the URL, chunk it, and call
-    ``sub_rlm()`` per chunk.  The ``history`` variable provides session
-    context so the LLM can target extraction at what the user actually needs.
+    metadata and writes Python to inspect ``document_text`` and chunk it. The
+    dedicated URL path avoids automatic recursive child-sandbox delegation; use
+    built-in ``llm_query()`` for bounded semantic passes and ``SUBMIT(...)`` for
+    the final answer. The ``history`` variable provides session context so the
+    LLM can target extraction at what the user actually needs.
     """
 
     task: str = dspy.InputField(desc="Instruction for how to process the document")
-    prompt: str = dspy.InputField(desc="The URL to fetch (stored as REPL variable)")
+    prompt: str = dspy.InputField(desc="Brief task framing and any compressed conversation context")
+    source_url: str = dspy.InputField(desc="Canonical fetched source URL")
+    document_text: str = dspy.InputField(desc="Extracted document text stored as a REPL variable")
+    source_metadata: dict[str, str] = dspy.InputField(desc="Source metadata such as char count and fetch status")
     history: dspy.History = dspy.InputField(
         desc="Prior chat turns for user intent context (keys: user_request, assistant_response)"
     )

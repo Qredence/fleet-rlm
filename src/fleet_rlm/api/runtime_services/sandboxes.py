@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from fleet_rlm.integrations.daytona import config as _daytona_config
 from fleet_rlm.integrations.daytona import runtime as _daytona_runtime
 from fleet_rlm.integrations.daytona.async_compat import _run_sync_in_thread
+from fleet_rlm.integrations.daytona.concurrency import release_sandbox_slot
 from fleet_rlm.integrations.observability.sanitization import redact_sensitive
 from fleet_rlm.utils.sandbox_ownership import (
     SANDBOX_OWNER_LABEL,
@@ -110,7 +111,10 @@ async def delete_sandbox(
             sandbox,
             owner_labels=owner_labels,
         )
+        labels = _sandbox_labels(sandbox)
         await _management_session(sandbox).adelete()
+        if labels.get("managed-by") == "fleet-rlm":
+            release_sandbox_slot()
     finally:
         await _close_daytona_client(client)
 
@@ -133,7 +137,10 @@ async def archive_sandbox(
             sandbox,
             owner_labels=owner_labels,
         )
+        labels = _sandbox_labels(sandbox)
         await _management_session(sandbox).aarchive()
+        if labels.get("managed-by") == "fleet-rlm":
+            release_sandbox_slot()
     finally:
         await _close_daytona_client(client)
 

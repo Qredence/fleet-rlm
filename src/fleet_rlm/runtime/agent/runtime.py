@@ -95,6 +95,32 @@ def _runtime_degradation_payload(result: Any) -> dict[str, Any]:
     return payload
 
 
+def _runtime_routing_payload(result: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    selected_skills = _prediction_value(result, "selected_skills")
+    if isinstance(selected_skills, list):
+        payload["selected_skills"] = [str(item) for item in selected_skills]
+    routing_decision = _prediction_value(result, "routing_decision")
+    if routing_decision not in (None, ""):
+        payload["routing_decision"] = str(routing_decision)
+    source_url = _prediction_value(result, "source_url")
+    if source_url not in (None, ""):
+        payload["source_url"] = str(source_url)
+    return payload
+
+
+def _routing_status_text(payload: dict[str, Any]) -> str:
+    selected = ", ".join(payload.get("selected_skills", []))
+    route = payload.get("routing_decision", "auto")
+    source = payload.get("source_url")
+    text = f"Route: {route}"
+    if selected:
+        text += f" | skills: {selected}"
+    if source:
+        text += f" | source: {source}"
+    return text
+
+
 def _get_streamable_react_program(program: Any) -> Any | None:
     react_program = getattr(program, "react", program)
 
@@ -227,6 +253,9 @@ class AgentRuntime:
         *,
         interpreter: Any | None = None,
         max_iters: int = 10,
+        rlm_max_iterations: int | None = None,
+        rlm_max_llm_calls: int | None = None,
+        rlm_max_output_chars: int | None = None,
         history_max_turns: int | None = 6,
         extra_tools: list[Any] | None = None,
         repository: Any | None = None,
@@ -249,6 +278,9 @@ class AgentRuntime:
         self.execution_mode: str = "auto"
         self.loaded_document_paths: list[str] = []
         self.batch_concurrency: int | None = None
+        self.rlm_max_iterations = rlm_max_iterations if rlm_max_iterations is not None else max_iters
+        self.rlm_max_llm_calls = rlm_max_llm_calls if rlm_max_llm_calls is not None else 50
+        self.rlm_max_output_chars = rlm_max_output_chars
 
         # Conversation summary for context compression (Phase 2)
         self.conversation_summary: str = ""
@@ -273,7 +305,9 @@ class AgentRuntime:
             self.agent: Any = EscalatingFleetModule(
                 interpreter=interpreter,
                 tools=self.tools,
-                max_iterations=max_iters,
+                max_iterations=self.rlm_max_iterations,
+                max_llm_calls=self.rlm_max_llm_calls,
+                max_output_chars=self.rlm_max_output_chars,
                 summary_interval=summary_interval,
             )
         else:
@@ -314,6 +348,14 @@ class AgentRuntime:
             "conversation_summary": self.conversation_summary,
         }
 
+    def preview_routing(self, *, user_request: str, execution_mode: str = "auto") -> dict[str, Any]:
+        """Expose deterministic route metadata before expensive turn execution."""
+        preview_routing = getattr(self.agent, "preview_routing", None)
+        if not callable(preview_routing):
+            return {}
+        payload = preview_routing(user_request=user_request, execution_mode=execution_mode)
+        return payload if isinstance(payload, dict) else {}
+
     def _runtime_observability_payload(self) -> dict[str, Any]:
         """Return runtime metadata shared by streamed completion events."""
         return {
@@ -322,6 +364,11 @@ class AgentRuntime:
             "escalation_enabled": self._use_escalation,
             "conversation_summary_available": bool(self.conversation_summary),
             "loaded_document_count": len(self.loaded_document_paths),
+            "rlm_limits": {
+                "max_iterations": self.rlm_max_iterations,
+                "max_llm_calls": self.rlm_max_llm_calls,
+                "max_output_chars": self.rlm_max_output_chars,
+            },
         }
 
     def chat_turn(self, user_message: str) -> dspy.Prediction:
@@ -364,6 +411,18 @@ class AgentRuntime:
             return
 
         yield StreamEvent(kind="status", text="Starting turn...")
+        preview_routing = getattr(self.agent, "preview_routing", None)
+        if callable(preview_routing):
+            routing_preview = preview_routing(
+                user_request=message,
+                execution_mode=self.execution_mode,
+            )
+            if isinstance(routing_preview, dict) and routing_preview.get("routing_decision"):
+                yield StreamEvent(
+                    kind="status",
+                    text=_routing_status_text(routing_preview),
+                    payload=routing_preview,
+                )
 
         try:
             result = await asyncio.to_thread(
@@ -390,6 +449,14 @@ class AgentRuntime:
         trajectory_raw = getattr(result, "trajectory", None) or {}
         trajectory = _normalize_trajectory(trajectory_raw)
         degradation_payload = _runtime_degradation_payload(result)
+        routing_payload = _runtime_routing_payload(result)
+
+        if routing_payload.get("selected_skills") or routing_payload.get("routing_decision"):
+            yield StreamEvent(
+                kind="status",
+                text=_routing_status_text(routing_payload),
+                payload=routing_payload,
+            )
 
         for step in trajectory:
             thought = step.get("thought")
@@ -411,6 +478,9 @@ class AgentRuntime:
                     payload={
                         "tool_name": tool_name,
                         "tool_input": str(tool_args),
+                        "tool_args": tool_args,
+                        "step": step,
+                        "trajectory_index": step.get("index"),
                     },
                 )
 
@@ -422,6 +492,9 @@ class AgentRuntime:
                     payload={
                         "tool_name": tool_name,
                         "tool_output": str(observation),
+                        "output": observation,
+                        "step": step,
+                        "trajectory_index": step.get("index"),
                     },
                 )
                 if isinstance(observation, dict) and observation.get("status") == "clarification_needed":
@@ -463,6 +536,7 @@ class AgentRuntime:
         }
         done_payload.update(self._runtime_observability_payload())
         done_payload.update(degradation_payload)
+        done_payload.update(routing_payload)
         yield StreamEvent(kind="done", text=response, payload=done_payload)
 
     # -----------------------------------------------------------------
