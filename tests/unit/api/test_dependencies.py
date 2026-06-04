@@ -51,13 +51,13 @@ def test_compose_server_state_preserves_dependency_slices(clean_runtime_env):
         diagnostics_deps,
     )
 
-    assert state.config is cfg
-    assert state.sessions == {"owner:abc:__default__": {"history": []}}
-    assert state.auth_provider is auth_deps.auth_provider
-    assert state.local_store is persistence_deps.local_store
+    assert state.config_deps.config is cfg
+    assert state.session_cache_deps.sessions == {"owner:abc:__default__": {"history": []}}
+    assert state.auth_deps.auth_provider is auth_deps.auth_provider
+    assert state.persistence_deps.local_store is persistence_deps.local_store
     assert state.is_ready is False
 
-    state.planner_lm = object()
+    state.lm_deps.planner_lm = object()
     assert state.is_ready is True
 
 

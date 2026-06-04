@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextvars
 import logging
+import re
 import threading
 from concurrent.futures import (
     ThreadPoolExecutor,
@@ -33,6 +34,81 @@ _BROKER_ERROR_MARKER = "Broker server failed to start"
 # from within sub_rlm_batched threads, so they must not share the same pool.
 _LLM_BATCH_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="llm_batch")
 _SUB_RLM_BATCH_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="sub_rlm_batch")
+
+# Phase 7: child conversation snapshot configuration
+_CHILD_HISTORY_MAX_TURNS = 2
+_CHILD_HISTORY_MAX_CHARS = 2000
+
+# Simple redaction patterns for child history snapshots
+_SENSITIVE_PATTERNS = (
+    (re.compile(r"sk-[A-Za-z0-9_-]{8,}"), "sk-***REDACTED***"),
+    (re.compile(r"(Authorization\s*:\s*Bearer\s+)[^\s]+", re.IGNORECASE), r"\1***REDACTED***"),
+    (
+        re.compile(
+            r"((?:api[_-]?key|token|secret|password)\s*[=:]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,}\]]+)", re.IGNORECASE
+        ),
+        r"\1***REDACTED***",
+    ),
+)
+
+
+def _redact_sensitive(text: str) -> str:
+    """Replace API keys and other sensitive tokens with redaction markers."""
+    redacted = text
+    for pattern, replacement in _SENSITIVE_PATTERNS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted
+
+
+def _build_child_history_snapshot(interpreter: Any) -> str:
+    """Build a bounded, redacted conversation snapshot for recursive children.
+
+    Phase 7: Children receive a fresh REPL (per reference) but need explicit
+    conversation continuity. This function extracts the last N turns from the
+    parent runtime's history, redacts sensitive values, and bounds the size.
+
+    Args:
+        interpreter: The parent interpreter with a runtime reference.
+
+    Returns:
+        A bounded, redacted conversation snapshot string.
+    """
+    runtime = getattr(interpreter, "runtime", None)
+    if runtime is None:
+        return ""
+
+    history = getattr(runtime, "history", None)
+    if history is None:
+        return ""
+
+    messages = list(getattr(history, "messages", []) or [])
+    if not messages:
+        return ""
+
+    # Take the last N turns
+    recent_messages = messages[-_CHILD_HISTORY_MAX_TURNS:] if len(messages) > _CHILD_HISTORY_MAX_TURNS else messages
+
+    # Format each turn
+    turn_parts = []
+    for msg in recent_messages:
+        if isinstance(msg, dict):
+            user_msg = str(msg.get("user_message", ""))
+            response = str(msg.get("response", ""))
+            if user_msg or response:
+                turn_parts.append(f"User: {user_msg}\nAssistant: {response}")
+
+    snapshot = "\n\n".join(turn_parts)
+    if not snapshot:
+        return ""
+
+    # Redact sensitive values
+    snapshot = _redact_sensitive(snapshot)
+
+    # Truncate to max chars
+    if len(snapshot) > _CHILD_HISTORY_MAX_CHARS:
+        snapshot = snapshot[:_CHILD_HISTORY_MAX_CHARS] + "...[truncated]"
+
+    return snapshot
 
 
 class LLMQueryMixin:
@@ -245,22 +321,32 @@ class LLMQueryMixin:
         Each call spawns a child dspy.RLM with its own REPL, sharing the
         parent's LLM budget.
 
+        Phase 7: When max recursion depth is reached, this falls back to
+        a single LLM call (llm_query) instead of raising an error. This
+        ensures graceful degradation when the recursion ceiling is hit.
+
         Args:
             prompt: Task for the child RLM to solve.
             context: Optional supporting context string.
 
         Returns:
-            The child RLM's answer as a string.
+            The child RLM's answer as a string (or llm_query fallback at max depth).
 
         Raises:
-            RuntimeError: If recursion depth exceeded or LLM budget exhausted.
+            RuntimeError: If LLM budget exhausted.
         """
         if not prompt:
             raise ValueError("sub_rlm prompt cannot be empty")
         if self._sub_rlm_depth >= self._sub_rlm_max_depth:
-            raise RuntimeError(
-                f"sub_rlm max recursion depth ({self._sub_rlm_max_depth}) reached. Cannot recurse further."
+            # Phase 7: fallback to llm_query at max depth instead of raising
+            logger.info(
+                "sub_rlm max recursion depth (%s) reached; falling back to llm_query",
+                self._sub_rlm_max_depth,
             )
+            full_prompt = prompt
+            if context:
+                full_prompt = f"{context}\n\n{prompt}"
+            return self.llm_query(full_prompt)
         return self._execute_sub_rlm(prompt, context)
 
     def sub_rlm_batched(self, prompts: list[str], context: str = "") -> list[str]:
@@ -268,6 +354,9 @@ class LLMQueryMixin:
 
         Equivalent to ``[sub_rlm(p, context) for p in prompts]`` but runs
         concurrently using a thread pool.
+
+        Phase 7: When max recursion depth is reached, this falls back to
+        llm_query_batched instead of raising an error.
 
         Args:
             prompts: List of task prompts for child RLMs.
@@ -277,12 +366,18 @@ class LLMQueryMixin:
             List of answer strings, one per prompt (same order).
 
         Raises:
-            RuntimeError: On depth/budget violations or child failures.
+            RuntimeError: On budget violations or child failures.
         """
         if not prompts:
             return []
         if self._sub_rlm_depth >= self._sub_rlm_max_depth:
-            raise RuntimeError(f"sub_rlm max recursion depth ({self._sub_rlm_max_depth}) reached.")
+            # Phase 7: fallback to llm_query_batched at max depth
+            logger.info(
+                "sub_rlm_batched max recursion depth (%s) reached; falling back to llm_query_batched",
+                self._sub_rlm_max_depth,
+            )
+            full_prompts = [f"{context}\n\n{p}" if context else p for p in prompts]
+            return self.llm_query_batched(full_prompts)
 
         leases = self._sub_rlm_budget_leases(len(prompts))
         results: dict[int, str] = {}
@@ -333,6 +428,12 @@ class LLMQueryMixin:
             self._install_child_budget_lease(child, child_budget)
         max_iterations = max(1, min(getattr(self, "rlm_max_iterations", 30), child_budget))
 
+        # Phase 7: build bounded conversation snapshot for child context
+        history_snapshot = _build_child_history_snapshot(self)
+        full_context = context
+        if history_snapshot:
+            full_context = f"{history_snapshot}\n\n{context}" if context else history_snapshot
+
         child_module = build_recursive_subquery_rlm(
             interpreter=child,
             max_iterations=max_iterations,
@@ -348,7 +449,7 @@ class LLMQueryMixin:
             sandbox_id = getattr(session, "sandbox_id", None)
             if isinstance(metadata, dict) and sandbox_id:
                 metadata.setdefault("child_sandbox_id", sandbox_id)
-            prediction = child_module(prompt=prompt, context=context or "")
+            prediction = child_module(prompt=prompt, context=full_context or "")
             return _validated_child_answer(prediction)
         except Exception as exc:
             logger.warning("sub_rlm child failed: %s", exc, exc_info=True)

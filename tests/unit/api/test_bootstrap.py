@@ -19,13 +19,13 @@ def test_build_server_state_creates_ready_compatible_state(clean_runtime_env):
 
     state = bootstrap_module.build_server_state(cfg)
 
-    assert state.config is cfg
-    assert isinstance(state.auth_provider, auth_module.DevAuthProvider)
-    assert state.sessions == {}
-    assert state.optional_service_status["planner_lm"] == "pending"
+    assert state.config_deps.config is cfg
+    assert isinstance(state.auth_deps.auth_provider, auth_module.DevAuthProvider)
+    assert state.session_cache_deps.sessions == {}
+    assert state.diagnostics_deps.optional_service_status["planner_lm"] == "pending"
     assert state.is_ready is False
 
-    state.planner_lm = object()
+    state.lm_deps.planner_lm = object()
     assert state.is_ready is True
 
 

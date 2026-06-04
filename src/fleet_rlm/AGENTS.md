@@ -242,6 +242,43 @@ Common mistakes to avoid:
 - Hand-editing packaged UI build output or generated OpenAPI artifacts
 - Treating Volumes or `/ready` semantics differently from the implemented contract
 
+## Phase 7: RLM Recursion and History Management
+
+Phase 7 aligns the `dspy.RLM` path and recursion with the reference implementation, focusing on structured history management, explicit depth tracking, and token-budget-aware compaction.
+
+### P7.1: History as Native REPL Variable
+
+- `RLMVariableSignature` now includes `history: dspy.History` as an `InputField`
+- `EscalatingFleetModule._run_rlm` always passes the `history` object to the RLM module
+- The model can inspect full prior conversation turns with code (e.g., `history.messages[-1]`) rather than relying solely on flattened recency snippets
+
+### P7.2: Bounded Redacted Conversation Snapshot to Recursive Children
+
+- `LLMQueryMixin._execute_sub_rlm` builds a bounded, redacted conversation snapshot for child contexts
+- `_build_child_history_snapshot()` extracts the last N turns (default: 2) from the parent runtime's history
+- Sensitive values (API keys, tokens, passwords) are redacted using pattern-based replacement
+- Snapshot size is bounded (default: 2000 chars) and truncated with a marker if exceeded
+- Children receive a fresh REPL (per reference) but get explicit conversation continuity
+
+### P7.3: Token-Budget-Aware Compaction
+
+- `AgentRuntime._maybe_refresh_summary()` now compacts history based on estimated token usage
+- `_estimate_history_chars()` provides a character-count proxy for token estimation (4 chars/token approximation)
+- Compaction triggers when history exceeds the configured threshold (default: 70% of 64K token context window) or the turn interval is reached
+- `history_max_turns` remains a hard ceiling for turn-based truncation
+- New `compaction_threshold_pct` parameter controls the token-budget threshold
+
+### P7.4: Explicit Depth Tracking and Fallback
+
+- `AgentRuntime._recursion_depth_state()` returns `(depth, max_depth)` from interpreter state
+- `RuntimeEventContext` includes `depth` and `max_depth` fields surfaced on runtime events
+- `sub_rlm` and `sub_rlm_batched` fall back to `llm_query` and `llm_query_batched` when max recursion depth is reached
+- Fallback prevents infinite recursion while preserving answer quality
+
+### P7.5: Benchmark Fast-Paths Removed
+
+- Confirmed no benchmark fast-paths exist in `rlm_delegate.py` (already removed in earlier phases)
+
 ## Canonical Commands
 
 Backend setup and runtime:

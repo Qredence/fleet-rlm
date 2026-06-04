@@ -12,10 +12,6 @@ from fastapi import WebSocket
 from fleet_rlm.utils.sandbox_ownership import sandbox_owner_labels
 
 from ...events import ExecutionEventEmitter, ExecutionStepBuilder
-from ...runtime_services.chat_persistence import (
-    ExecutionLifecycleManager,
-    initialize_turn_lifecycle,
-)
 from ...runtime_services.chat_runtime import (
     ChatAgentProtocol,
     LocalPersistFn,
@@ -27,6 +23,7 @@ from ...runtime_services.chat_runtime import (
 from ...runtime_services.chat_runtime import (
     PreparedChatRuntime as _PreparedChatRuntime,
 )
+from ...runtime_services.run_lifecycle import ExecutionLifecycleManager, initialize_turn_lifecycle
 from ...schemas import WSMessage
 from .transport import _try_send_json
 

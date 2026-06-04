@@ -73,6 +73,7 @@ class SandboxUsageStats(BaseModel):
 # Module-level semaphore state
 # ---------------------------------------------------------------------------
 
+
 class _FleetSandboxSemaphore(asyncio.Semaphore):
     """Semaphore with a configurable release bound for reconciled state."""
 
@@ -192,8 +193,7 @@ def reconcile_sandbox_slots(*, provider_active_count: int) -> SandboxUsageStats:
         available = max(0, limit - clamped_active)
         _GLOBAL_SEMAPHORE = _FleetSandboxSemaphore(value=available, bound=limit)
         logger.warning(
-            "Reconciled Fleet sandbox slots from provider state "
-            "(provider_active=%d, limit=%d, available=%d)",
+            "Reconciled Fleet sandbox slots from provider state (provider_active=%d, limit=%d, available=%d)",
             clamped_active,
             limit,
             available,

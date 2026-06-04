@@ -19,6 +19,7 @@ import dspy
 from dspy.streaming import StreamListener, StreamResponse
 
 from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
+from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventContext, RuntimeEventKind
 from fleet_rlm.runtime.execution.streaming_events import (
     _normalize_trajectory,
 )
@@ -192,46 +193,33 @@ async def _call_react_tool(tool: Any, tool_args: dict[str, Any]) -> Any:
     return await asyncio.to_thread(tool, **tool_args)
 
 
-def _build_tool_call_event(*, tool_name: str, tool_args: dict[str, Any], step_index: int) -> StreamEvent:
-    return StreamEvent(
-        kind="tool_call",
-        text=f"Calling tool: {tool_name}({tool_args})",
-        payload={
-            "tool_name": tool_name,
-            "tool_input": str(tool_args),
-            "tool_args": tool_args,
-            "step_index": step_index,
-        },
+def _build_tool_call_event(*, tool_name: str, tool_args: dict[str, Any], step_index: int) -> RuntimeEvent:
+    return RuntimeEvent.tool_call(
+        tool_name=tool_name,
+        tool_args=tool_args,
+        step_index=step_index,
     )
 
 
-def _build_tool_result_event(*, tool_name: str, observation: Any, step_index: int) -> StreamEvent:
-    return StreamEvent(
-        kind="tool_result",
-        text=f"Tool result: {observation}",
-        payload={
-            "tool_name": tool_name,
-            "tool_output": str(observation),
-            "step_index": step_index,
-        },
+def _build_tool_result_event(*, tool_name: str, observation: Any, step_index: int) -> RuntimeEvent:
+    return RuntimeEvent.tool_result(
+        tool_name=tool_name,
+        observation=observation,
+        step_index=step_index,
     )
 
 
-def _build_clarification_event(observation: Any) -> StreamEvent | None:
+def _build_clarification_event(observation: Any) -> RuntimeEvent | None:
     if not isinstance(observation, dict) or observation.get("status") != "clarification_needed":
         return None
 
     import uuid as _uuid
 
-    return StreamEvent(
-        kind="clarification",
-        text=str(observation.get("question", "Please clarify your intent.")),
-        payload={
-            "message_id": str(observation.get("message_id") or f"clar-{_uuid.uuid4().hex[:8]}"),
-            "question": observation.get("question"),
-            "step_label": observation.get("step_label", "Clarification needed"),
-            "options": observation.get("options", []),
-        },
+    return RuntimeEvent.clarification(
+        message_id=str(observation.get("message_id") or f"clar-{_uuid.uuid4().hex[:8]}"),
+        question=observation.get("question"),
+        step_label=observation.get("step_label", "Clarification needed"),
+        options=observation.get("options", []),
     )
 
 
@@ -261,6 +249,7 @@ class AgentRuntime:
         repository: Any | None = None,
         use_escalation: bool = True,
         summary_interval: int = 10,
+        compaction_threshold_pct: float = 0.7,
     ) -> None:
         from .agent import FleetAgent
 
@@ -268,6 +257,11 @@ class AgentRuntime:
         self.history: dspy.History = dspy.History(messages=[])
         self.history_max_turns: int | None = history_max_turns
         self.core_memory: dict[str, str] = self.default_core_memory()
+
+        # Phase 7: attach runtime reference to interpreter so recursive children
+        # can access parent history for bounded conversation snapshots
+        if interpreter is not None:
+            setattr(interpreter, "runtime", self)
 
         # Session-management hooks used by the websocket layer
         self._db_session_id: str | object | None = None
@@ -287,6 +281,9 @@ class AgentRuntime:
         self._summary_interval: int = summary_interval
         self._turns_since_summary: int = 0
         self._use_escalation: bool = use_escalation
+
+        # Phase 7: token-budget-aware compaction threshold (keep history_max_turns as ceiling)
+        self._compaction_threshold_pct: float = max(0.0, min(1.0, compaction_threshold_pct))
 
         # Discover tools from the registry; append any extra tools
         base_tools = discover_tools()
@@ -320,18 +317,44 @@ class AgentRuntime:
     # Chat API
     # -----------------------------------------------------------------
 
+    def _estimate_history_chars(self) -> int:
+        """Estimate character count of history as a proxy for token usage."""
+        messages = list(getattr(self.history, "messages", []) or [])
+        return sum(len(str(msg.get("user_message", ""))) + len(str(msg.get("response", ""))) for msg in messages)
+
     def _maybe_refresh_summary(self) -> None:
-        """Regenerate conversation_summary every ``_summary_interval`` turns."""
+        """Regenerate conversation_summary based on token budget (Phase 7).
+
+        Phase 7: Compacts history when estimated token usage crosses the
+        compaction threshold, while keeping history_max_turns as a hard ceiling.
+        """
         if not self._use_escalation:
             return
+
         self._turns_since_summary += 1
-        if self._turns_since_summary >= self._summary_interval:
+
+        # Phase 7: token-budget-aware compaction
+        # Estimate history size and check against threshold
+        history_chars = self._estimate_history_chars()
+        # Use a reasonable default max context window if not available (64K tokens)
+        # Approximate 4 chars per token for estimation
+        max_context_chars = 64000 * 4
+        threshold_chars = int(max_context_chars * self._compaction_threshold_pct)
+
+        # Compact if threshold exceeded or interval reached
+        should_compact = history_chars > threshold_chars or self._turns_since_summary >= self._summary_interval
+
+        if should_compact:
             escalating = self.agent
             if hasattr(escalating, "compress_history"):
                 try:
                     self.conversation_summary = escalating.compress_history(self.history)
                     self._turns_since_summary = 0
-                    logger.debug("AgentRuntime: conversation summary refreshed")
+                    logger.debug(
+                        "AgentRuntime: conversation summary refreshed (chars=%d, threshold=%d)",
+                        history_chars,
+                        threshold_chars,
+                    )
                 except Exception as exc:
                     logger.warning("AgentRuntime: summary refresh failed: %s", exc)
 
@@ -356,14 +379,39 @@ class AgentRuntime:
         payload = preview_routing(user_request=user_request, execution_mode=execution_mode)
         return payload if isinstance(payload, dict) else {}
 
+    def _recursion_depth_state(self) -> tuple[int, int]:
+        """Return ``(depth, max_depth)`` for the current runtime/interpreter.
+
+        The root runtime is depth ``0``; ``max_depth`` is the configured
+        ``sub_rlm`` recursion ceiling carried on the interpreter (default 2).
+        """
+        depth = int(getattr(self.interpreter, "_sub_rlm_depth", 0) or 0)
+        max_depth = int(getattr(self.interpreter, "_sub_rlm_max_depth", 2) or 2)
+        return depth, max_depth
+
+    def _runtime_event_context(self) -> RuntimeEventContext:
+        """Build the canonical runtime context (incl. recursion depth) for events.
+
+        Phase 7: surfaces ``depth``/``max_depth`` so the frontend run-workbench
+        can render recursion depth from typed ``RuntimeEvent.context`` fields.
+        """
+        depth, max_depth = self._recursion_depth_state()
+        return RuntimeEventContext(
+            execution_mode=self.execution_mode,
+            depth=depth,
+            max_depth=max_depth,
+        )
+
     def _runtime_observability_payload(self) -> dict[str, Any]:
         """Return runtime metadata shared by streamed completion events."""
+        depth, max_depth = self._recursion_depth_state()
         return {
             "execution_mode": self.execution_mode,
             "runtime_module": type(self.agent).__name__,
             "escalation_enabled": self._use_escalation,
             "conversation_summary_available": bool(self.conversation_summary),
             "loaded_document_count": len(self.loaded_document_paths),
+            "recursion": {"depth": depth, "max_depth": max_depth},
             "rlm_limits": {
                 "max_iterations": self.rlm_max_iterations,
                 "max_llm_calls": self.rlm_max_llm_calls,
@@ -400,17 +448,17 @@ class AgentRuntime:
         *,
         message: str,
         cancel_check: Callable[[], bool] | None,
-    ) -> AsyncIterator[StreamEvent]:
+    ) -> AsyncIterator[RuntimeEvent]:
         """Fallback stream path that emits events after the turn finishes."""
         if cancel_check is not None and cancel_check():
-            yield StreamEvent(
-                kind="done",
+            yield RuntimeEvent(
+                kind=RuntimeEventKind.DONE,
                 text="[cancelled]",
                 payload={"cancelled": True, "history_turns": self.history_turns()},
             )
             return
 
-        yield StreamEvent(kind="status", text="Starting turn...")
+        yield RuntimeEvent.status("Starting turn...")
         preview_routing = getattr(self.agent, "preview_routing", None)
         if callable(preview_routing):
             routing_preview = preview_routing(
@@ -418,9 +466,8 @@ class AgentRuntime:
                 execution_mode=self.execution_mode,
             )
             if isinstance(routing_preview, dict) and routing_preview.get("routing_decision"):
-                yield StreamEvent(
-                    kind="status",
-                    text=_routing_status_text(routing_preview),
+                yield RuntimeEvent.status(
+                    _routing_status_text(routing_preview),
                     payload=routing_preview,
                 )
 
@@ -430,16 +477,16 @@ class AgentRuntime:
                 **self._escalation_call_args(message),
             )
         except Exception as exc:
-            yield StreamEvent(
-                kind="error",
+            yield RuntimeEvent(
+                kind=RuntimeEventKind.ERROR,
                 text=str(exc),
                 payload={"history_turns": self.history_turns()},
             )
             return
 
         if cancel_check is not None and cancel_check():
-            yield StreamEvent(
-                kind="done",
+            yield RuntimeEvent(
+                kind=RuntimeEventKind.DONE,
                 text="[cancelled]",
                 payload={"cancelled": True, "history_turns": self.history_turns()},
             )
@@ -452,9 +499,8 @@ class AgentRuntime:
         routing_payload = _runtime_routing_payload(result)
 
         if routing_payload.get("selected_skills") or routing_payload.get("routing_decision"):
-            yield StreamEvent(
-                kind="status",
-                text=_routing_status_text(routing_payload),
+            yield RuntimeEvent.status(
+                _routing_status_text(routing_payload),
                 payload=routing_payload,
             )
 
@@ -463,64 +509,45 @@ class AgentRuntime:
             tool_name = step.get("tool_name")
             is_terminal = (tool_name == "finish") or (not tool_name)
             if thought and not is_terminal:
-                yield StreamEvent(
-                    kind="reasoning",
-                    text=str(thought),
-                    payload={"phase": "reasoning"},
-                )
+                yield RuntimeEvent.reasoning(str(thought))
 
             tool_name = step.get("tool_name")
             if tool_name:
                 tool_args = step.get("tool_args") or step.get("input", "")
-                yield StreamEvent(
-                    kind="tool_call",
-                    text=f"Calling tool: {tool_name}({tool_args})",
-                    payload={
-                        "tool_name": tool_name,
-                        "tool_input": str(tool_args),
-                        "tool_args": tool_args,
-                        "step": step,
-                        "trajectory_index": step.get("index"),
-                    },
+                traj_idx = step.get("index")
+                tool_ev = RuntimeEvent.tool_call(
+                    tool_name=tool_name,
+                    tool_args=tool_args if isinstance(tool_args, dict) else {"input": tool_args},
+                    step_index=traj_idx,
                 )
+                tool_ev.payload["step"] = step
+                tool_ev.payload["trajectory_index"] = traj_idx
+                yield tool_ev
 
             observation = step.get("observation") or step.get("output", "")
             if observation and tool_name:
-                yield StreamEvent(
-                    kind="tool_result",
-                    text=f"Tool result: {observation}",
-                    payload={
-                        "tool_name": tool_name,
-                        "tool_output": str(observation),
-                        "output": observation,
-                        "step": step,
-                        "trajectory_index": step.get("index"),
-                    },
+                result_ev = RuntimeEvent.tool_result(
+                    tool_name=tool_name,
+                    observation=observation,
+                    step_index=step.get("index"),
                 )
-                if isinstance(observation, dict) and observation.get("status") == "clarification_needed":
-                    import uuid as _uuid
-
-                    clar_payload = observation
-                    yield StreamEvent(
-                        kind="clarification",
-                        text=str(clar_payload.get("question", "Please clarify your intent.")),
-                        payload={
-                            "message_id": str(clar_payload.get("message_id") or f"clar-{_uuid.uuid4().hex[:8]}"),
-                            "question": clar_payload.get("question"),
-                            "step_label": clar_payload.get("step_label", "Clarification needed"),
-                            "options": clar_payload.get("options", []),
-                        },
-                    )
+                result_ev.payload["output"] = observation
+                result_ev.payload["step"] = step
+                result_ev.payload["trajectory_index"] = step.get("index")
+                yield result_ev
+                clar_ev = _build_clarification_event(observation)
+                if clar_ev is not None:
+                    yield clar_ev
 
         if degradation_payload:
-            yield StreamEvent(
-                kind="warning",
+            yield RuntimeEvent(
+                kind=RuntimeEventKind.WARNING,
                 text=str(degradation_payload["runtime_warning"]),
                 payload=degradation_payload,
             )
 
         if response:
-            yield StreamEvent(kind="text", text=response)
+            yield RuntimeEvent(kind=RuntimeEventKind.TEXT, text=response)
 
         self.history = _append_turn_to_history(
             self.history,
@@ -537,7 +564,12 @@ class AgentRuntime:
         done_payload.update(self._runtime_observability_payload())
         done_payload.update(degradation_payload)
         done_payload.update(routing_payload)
-        yield StreamEvent(kind="done", text=response, payload=done_payload)
+        yield RuntimeEvent(
+            kind=RuntimeEventKind.DONE,
+            text=response,
+            payload=done_payload,
+            context=self._runtime_event_context(),
+        )
 
     # -----------------------------------------------------------------
     # Async context manager (required by ChatAgentProtocol)

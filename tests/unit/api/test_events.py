@@ -133,7 +133,7 @@ def test_summarize_code_for_event_returns_stable_preview(monkeypatch):
 
 def test_startup_status_projects_to_canonical_execution_started_frame():
     persistence_module = importlib.import_module("fleet_rlm.api.runtime_services.chat_persistence")
-    stream_module = importlib.import_module("fleet_rlm.api.routers.ws.stream")
+    stream_module = importlib.import_module("fleet_rlm.api.routers.ws.stream_events")
 
     event = persistence_module.build_startup_status_event()
     frame = stream_module.build_stream_event_dict(event=event, payload=event.payload)
@@ -161,7 +161,7 @@ def test_backend_status_projects_to_canonical_execution_step_frame():
 
 
 def test_runtime_trace_metadata_counts_structured_rlm_trajectory():
-    stream_module = importlib.import_module("fleet_rlm.api.routers.ws.stream")
+    stream_module = importlib.import_module("fleet_rlm.api.routers.ws.stream_summary")
 
     metadata = stream_module._runtime_trace_metadata(
         {

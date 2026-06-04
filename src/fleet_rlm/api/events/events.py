@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any, Literal
 from fastapi import WebSocket
 from pydantic import BaseModel, Field
 
+from fleet_rlm.runtime.events import RuntimeEventContext
+
 from .sanitizer import sanitize_event_payload, summarize_code_for_event
 
 logger = logging.getLogger(__name__)
@@ -44,28 +46,6 @@ ExecutionEventType = Literal[
     "execution_step",
     "execution_completed",
 ]
-
-
-class RuntimeEventContext(BaseModel):
-    """Stable runtime context attached to backend-emitted events."""
-
-    runtime_mode: str | None = None
-    execution_mode: str | None = None
-    execution_profile: str | None = None
-    sandbox_id: str | None = None
-    child_sandbox_id: str | None = None
-    volume_name: str | None = None
-    workspace_path: str | None = None
-    repo_url: str | None = None
-    repo_ref: str | None = None
-    document_path: str | None = None
-    depth: int | None = None
-    max_depth: int | None = None
-    actor_kind: ExecutionActorKind | None = None
-    actor_id: str | None = None
-    parent_id: str | None = None
-    lane_key: str | None = None
-    llm_call_budget: int | None = None
 
 
 class BackendEvent(BaseModel):

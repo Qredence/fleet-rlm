@@ -252,13 +252,9 @@ class TestEscalatingFleetModule:
             "source_type": "html",
         }
         assert "# DSPy docs\nRLM details" not in call_kwargs["prompt"]
-        assert call_kwargs["prompt"].startswith(
-            "Task:\nanalyze https://dspy.ai and provide documentation notes"
-        )
+        assert call_kwargs["prompt"].startswith("Task:\nanalyze https://dspy.ai and provide documentation notes")
         assert "URL document variables" in call_kwargs["prompt"]
-        assert call_kwargs["prompt"].endswith(
-            "Repeat task:\nanalyze https://dspy.ai and provide documentation notes"
-        )
+        assert call_kwargs["prompt"].endswith("Repeat task:\nanalyze https://dspy.ai and provide documentation notes")
 
     def test_tools_only_does_not_auto_route_url_to_rlm(self) -> None:
         module = _make_module()

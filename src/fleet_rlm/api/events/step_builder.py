@@ -32,6 +32,7 @@ class ExecutionStepBuilder:
     run_id: str
     root_id: str = field(init=False)
     _counter: int = 0
+    _sequence: int = 0
     _last_tool_step_id: str | None = None
     _depth_parents: dict[int, str] = field(default_factory=dict)
     _repl_parent_by_hash: dict[str, str] = field(default_factory=dict)
@@ -268,6 +269,30 @@ class ExecutionStepBuilder:
             )
 
         return None
+
+    def from_runtime_event(self, event: Any) -> ExecutionStep | None:
+        """Project a :class:`~fleet_rlm.runtime.events.RuntimeEvent` to a step.
+
+        Uses typed ``event.tool``, ``event.kind``, and ``event.context`` fields —
+        no text parsing.  Falls back to :meth:`from_stream_event` for events that
+        are not ``RuntimeEvent`` instances.
+        """
+        from fleet_rlm.runtime.events import RuntimeEvent
+
+        self._sequence += 1
+        if not isinstance(event, RuntimeEvent):
+            raw_ts = getattr(event, "timestamp", None)
+            ts = raw_ts.timestamp() if raw_ts is not None and hasattr(raw_ts, "timestamp") else time.time()
+            return self.from_stream_event(
+                kind=str(getattr(event, "kind", "status")),
+                text=str(getattr(event, "text", "") or ""),
+                payload=dict(getattr(event, "payload", {}) or {}),
+                timestamp=ts,
+            )
+
+        from .project_graph import project_graph
+
+        return project_graph(event, self)
 
     def from_interpreter_hook(self, payload: dict[str, Any]) -> ExecutionStep | None:
         if not isinstance(payload, dict):

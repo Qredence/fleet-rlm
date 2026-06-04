@@ -417,13 +417,18 @@ class EscalatingFleetModule(dspy.Module):
         call_kwargs: dict[str, Any] = {
             "task": user_request,
             "prompt": prompt,
+            # Phase 7: expose structured history as a native REPL variable on
+            # the heavy RLM path (both RLMVariableSignature and
+            # RLMLargeDocSignature declare a ``history`` input field), so the
+            # model can inspect full prior turns with code rather than relying
+            # solely on the flattened recency snippet embedded in ``prompt``.
+            "history": history,
         }
         if url_document_mode:
             fetched = self._fetch_url_document(source_url=source_url)
             call_kwargs["source_url"] = fetched.source_url
             call_kwargs["document_text"] = fetched.document_text
             call_kwargs["source_metadata"] = fetched.source_metadata
-            call_kwargs["history"] = history
         try:
             result = rlm(**call_kwargs)
             _prediction_set(result, "selected_skills", selected_skills or [])

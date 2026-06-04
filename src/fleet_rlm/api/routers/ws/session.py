@@ -226,10 +226,8 @@ async def switch_session_if_needed(
 
     cached: dict[str, Any] | None = session_cache.sessions.get(key)
     if cached is None:
-        from ...runtime_services.chat_persistence import (
-            _restore_manifest_from_local_store,
-            load_manifest_from_volume,
-        )
+        from ...runtime_services.session_manifest import load_manifest_from_volume
+        from ...runtime_services.session_persistence import _restore_manifest_from_local_store
 
         if interpreter is not None:
             manifest = await load_manifest_from_volume(
@@ -289,7 +287,7 @@ async def switch_session_if_needed(
         if db_session_id:
             metadata["db_session_id"] = db_session_id
         if interpreter is not None:
-            from ...runtime_services.chat_persistence import ensure_session_volume_layout
+            from ...runtime_services.session_manifest import ensure_session_volume_layout
 
             try:
                 layout_paths = await ensure_session_volume_layout(

@@ -437,10 +437,21 @@ class RLMVariableSignature(dspy.Signature):
     Per Algorithm 1 (arXiv 2512.24601v2): dspy.RLM stores input fields in
     the REPL automatically — the LLM sees only metadata (type, length,
     preview) and explores data through code execution.
+
+    ``history`` is exposed as a native REPL variable so the model can inspect
+    full prior conversation turns with code (e.g. ``history.messages[-1]``)
+    rather than relying solely on a flattened recency snippet in ``prompt``.
     """
 
     task: str = dspy.InputField(desc="The question or instruction to accomplish")
     prompt: str = dspy.InputField(desc="The full text to process (stored as REPL variable, not in LLM context)")
+    history: dspy.History = dspy.InputField(
+        desc=(
+            "Prior chat turns stored as a REPL variable (each message has keys "
+            "user_message and response). Inspect with Python for full conversation "
+            "continuity; the prompt only carries a short recency hint."
+        )
+    )
     answer: str = dspy.OutputField(desc="Final answer (call SUBMIT(answer=...) in REPL)")
 
 

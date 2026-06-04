@@ -12,6 +12,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.integrations.persistence_protocol import PersistenceProtocol
 from fleet_rlm.utils.identity import owner_fingerprint
 
 from .auth import AuthError, AuthProvider, NormalizedIdentity, resolve_admitted_identity
@@ -77,7 +78,7 @@ class PersistenceDeps:
 
     db_manager: DatabaseManager | None = None
     repository: FleetRepository | None = None
-    local_store: Any | None = None
+    local_store: PersistenceProtocol | None = None
 
 
 @dataclass
@@ -106,31 +107,11 @@ class InterpreterPoolDeps:
     pool: Any | None = None
 
 
-_SERVER_STATE_PROXY_ATTRS: dict[str, tuple[str, str]] = {
-    "config": ("config_deps", "config"),
-    "planner_lm": ("lm_deps", "planner_lm"),
-    "delegate_lm": ("lm_deps", "delegate_lm"),
-    "runtime_model_lock": ("lm_deps", "runtime_model_lock"),
-    "auth_provider": ("auth_deps", "auth_provider"),
-    "sessions": ("session_cache_deps", "sessions"),
-    "db_manager": ("persistence_deps", "db_manager"),
-    "repository": ("persistence_deps", "repository"),
-    "local_store": ("persistence_deps", "local_store"),
-    "events_event_emitter": ("diagnostics_deps", "events_event_emitter"),
-    "runtime_test_results": ("diagnostics_deps", "runtime_test_results"),
-    "optional_service_status": ("diagnostics_deps", "optional_service_status"),
-    "optional_service_errors": ("diagnostics_deps", "optional_service_errors"),
-    "mlflow_server_process": ("diagnostics_deps", "mlflow_server_process"),
-    "optional_startup_task": ("diagnostics_deps", "optional_startup_task"),
-    "interpreter_pool": ("interpreter_pool_deps", "pool"),
-}
-
-
 class ServerState:
     """Shared server state, set during lifespan.
 
-    New code should depend on focused dependency slices. The flat attributes
-    remain as mapped compatibility accessors for tests and older internals.
+    New code should depend on focused dependency slices directly.
+    Use ``state.config_deps``, ``state.lm_deps``, ``state.persistence_deps``, etc.
     """
 
     def __init__(
@@ -155,19 +136,6 @@ class ServerState:
             events_event_emitter=execution_event_emitter or ExecutionEventEmitter(),
         )
         self.interpreter_pool_deps = interpreter_pool_deps or InterpreterPoolDeps()
-
-    def __getattr__(self, name: str) -> Any:
-        if target := _SERVER_STATE_PROXY_ATTRS.get(name):
-            deps_name, attr_name = target
-            return getattr(getattr(self, deps_name), attr_name)
-        raise AttributeError(name)
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if target := _SERVER_STATE_PROXY_ATTRS.get(name):
-            deps_name, attr_name = target
-            setattr(getattr(self, deps_name), attr_name, value)
-            return
-        super().__setattr__(name, value)
 
     @property
     def is_ready(self) -> bool:
@@ -322,19 +290,19 @@ def get_repository(request: Request) -> FleetRepository | None:
 RepositoryDep = Annotated[FleetRepository | None, Depends(get_repository)]
 
 
-def get_persistence(request: Request) -> Any:
-    """Return the unified persistence backend (repository or local_store)."""
+def get_persistence(request: Request) -> PersistenceProtocol:
+    """Return the startup-resolved persistence backend (repository or local_store)."""
     persistence_deps = get_persistence_deps(request)
     if persistence_deps.repository is not None:
         return persistence_deps.repository
     if persistence_deps.local_store is not None:
         return persistence_deps.local_store
-    from fleet_rlm.integrations.local_store import LocalStore
+    raise RuntimeError(
+        "Persistence backend not initialized. Ensure FastAPI lifespan startup has completed before handling requests."
+    )
 
-    return LocalStore()
 
-
-PersistenceDep = Annotated[Any, Depends(get_persistence)]
+PersistenceDep = Annotated[PersistenceProtocol, Depends(get_persistence)]
 
 
 def build_unauthenticated_identity(

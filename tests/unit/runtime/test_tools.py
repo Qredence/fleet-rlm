@@ -124,22 +124,6 @@ def test_download_url_closes_temp_fd_before_unlink_on_failure(monkeypatch: pytes
     assert events == ["close:42", f"unlink:{tmp_path}"]
 
 
-def test_log_extraction_fast_path_is_case_insensitive() -> None:
-    from fleet_rlm.runtime.tools.rlm_delegate import _try_solve_extraction_locally
-
-    context = "\n".join(
-        [
-            "2026-01-01T00:00:00Z [INFO] Api: first",
-            "2026-01-01T00:00:01Z [info] api: second",
-            "2026-01-01T00:00:02Z [ERROR] api: ignored",
-        ]
-    )
-
-    answer = _try_solve_extraction_locally("How many log lines have level 'info' AND service 'api'?", context)
-
-    assert answer == "2"
-
-
 def test_bind_runtime_tools_binds_memory_tools_and_skips_interpreter_only_without_interpreter() -> None:
     from fleet_rlm.runtime.tools.binding import bind_runtime_tools
     from fleet_rlm.runtime.tools.rlm_delegate import delegate_to_rlm

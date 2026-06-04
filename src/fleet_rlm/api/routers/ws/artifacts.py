@@ -12,7 +12,7 @@ from fleet_rlm.integrations.database.repository_identity import IdentityUpsertRe
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 from fleet_rlm.utils.time import now_iso
 
-from ...runtime_services.chat_persistence import PersistenceRequiredError
+from ...runtime_services.stream_failures import PersistenceRequiredError
 
 logger = logging.getLogger(__name__)
 

@@ -10,7 +10,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_load_manifest_from_volume_reads_current_conversation_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.api.runtime_services.chat_persistence import load_manifest_from_volume
+    from fleet_rlm.api.runtime_services.session_manifest import load_manifest_from_volume
     from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
     reads: list[str] = []
@@ -40,7 +40,7 @@ async def test_load_manifest_from_volume_reads_current_conversation_path(monkeyp
 
 @pytest.mark.asyncio
 async def test_save_manifest_to_volume_writes_phase_one_conversation_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.api.runtime_services.chat_persistence import save_manifest_to_volume
+    from fleet_rlm.api.runtime_services.session_manifest import save_manifest_to_volume
     from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
     writes: list[tuple[str, str]] = []
@@ -70,7 +70,7 @@ async def test_save_manifest_to_volume_writes_phase_one_conversation_path(monkey
 async def test_manifest_volume_io_does_not_create_daytona_session_when_disallowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.api.runtime_services.chat_persistence import load_manifest_from_volume, save_manifest_to_volume
+    from fleet_rlm.api.runtime_services.session_manifest import load_manifest_from_volume, save_manifest_to_volume
     from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
     async def forbidden_get_session(self):
@@ -108,7 +108,7 @@ async def test_persist_session_state_skips_volume_without_creating_cleanup_sessi
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleet_rlm.api.dependencies import SessionCacheDeps
-    from fleet_rlm.api.runtime_services.chat_persistence import persist_session_state
+    from fleet_rlm.api.runtime_services.session_persistence import persist_session_state
     from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
     async def forbidden_get_session(self):
@@ -157,7 +157,7 @@ async def test_persist_session_state_skips_volume_without_creating_cleanup_sessi
 async def test_manifest_volume_io_uses_existing_daytona_session_without_creating(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.api.runtime_services.chat_persistence import load_manifest_from_volume, save_manifest_to_volume
+    from fleet_rlm.api.runtime_services.session_manifest import load_manifest_from_volume, save_manifest_to_volume
     from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
     class FakeDaytonaSession:
@@ -299,7 +299,7 @@ async def test_persist_session_state_releases_idle_daytona_session_after_save(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleet_rlm.api.dependencies import SessionCacheDeps
-    from fleet_rlm.api.runtime_services.chat_persistence import persist_session_state
+    from fleet_rlm.api.runtime_services.session_persistence import persist_session_state
 
     class FakeSession:
         async def aread_file(self, path: str) -> str:
@@ -339,7 +339,7 @@ async def test_persist_session_state_releases_idle_daytona_session_after_save(
         return session
 
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.chat_persistence._aget_daytona_session",
+        "fleet_rlm.api.runtime_services.session_manifest._aget_daytona_session",
         fake_get_daytona_session,
     )
 
@@ -366,7 +366,8 @@ async def test_persist_session_state_releases_idle_daytona_session_after_save_fa
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleet_rlm.api.dependencies import SessionCacheDeps
-    from fleet_rlm.api.runtime_services.chat_persistence import PersistenceRequiredError, persist_session_state
+    from fleet_rlm.api.runtime_services.session_persistence import persist_session_state
+    from fleet_rlm.api.runtime_services.stream_failures import PersistenceRequiredError
 
     class FakeSession:
         async def aread_file(self, path: str) -> str:
@@ -402,7 +403,7 @@ async def test_persist_session_state_releases_idle_daytona_session_after_save_fa
         return session
 
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.chat_persistence._aget_daytona_session",
+        "fleet_rlm.api.runtime_services.session_manifest._aget_daytona_session",
         fake_get_daytona_session,
     )
 
@@ -429,7 +430,7 @@ async def test_persist_session_state_releases_idle_daytona_session_after_save_fa
 async def test_ensure_session_volume_layout_creates_scratchpad_and_workspace_link(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.api.runtime_services.chat_persistence import ensure_session_volume_layout
+    from fleet_rlm.api.runtime_services.session_manifest import ensure_session_volume_layout
     from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 
     commands: list[str] = []
@@ -477,11 +478,11 @@ async def test_switch_session_layout_initialization_does_not_create_daytona_sess
         return {"rev": 0, "state": {}}
 
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.chat_persistence.ensure_session_volume_layout",
+        "fleet_rlm.api.runtime_services.session_manifest.ensure_session_volume_layout",
         fake_layout,
     )
     monkeypatch.setattr(
-        "fleet_rlm.api.runtime_services.chat_persistence.load_manifest_from_volume",
+        "fleet_rlm.api.runtime_services.session_manifest.load_manifest_from_volume",
         fake_load_manifest,
     )
 
