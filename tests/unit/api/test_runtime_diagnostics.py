@@ -35,7 +35,7 @@ def test_runtime_status_surfaces_persisted_mlflow_scorers(monkeypatch) -> None:
             (),
             {
                 "from_env": staticmethod(
-                    lambda: type(
+                    type(
                         "FakeMlflowConfig",
                         (),
                         {
@@ -43,7 +43,7 @@ def test_runtime_status_surfaces_persisted_mlflow_scorers(monkeypatch) -> None:
                             "enable_auto_assessment": False,
                             "tracking_uri": "http://127.0.0.1:5001",
                         },
-                    )()
+                    )
                 )
             },
         ),

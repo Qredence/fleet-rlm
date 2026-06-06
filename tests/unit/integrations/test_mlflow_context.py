@@ -259,7 +259,7 @@ def test_record_rlm_trajectory_spans_materializes_repl_steps(monkeypatch) -> Non
             self.record["status"] = status
 
     fake_mlflow = SimpleNamespace(
-        get_current_active_span=lambda: object(),
+        get_current_active_span=object,
         start_span=lambda name, span_type=None, attributes=None: FakeSpan(name, span_type, attributes),
     )
     monkeypatch.setattr(
@@ -320,7 +320,7 @@ def test_record_rlm_trajectory_spans_marks_error_outputs(monkeypatch) -> None:
             self.record["status"] = status
 
     fake_mlflow = SimpleNamespace(
-        get_current_active_span=lambda: object(),
+        get_current_active_span=object,
         start_span=lambda name, span_type=None, attributes=None: FakeSpan(name, span_type, attributes),
     )
     monkeypatch.setattr(
