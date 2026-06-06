@@ -126,11 +126,9 @@ def test_scorers_stop_calls_registered_scorer_stop(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     apply_mlflow_env(clean_runtime_env)
-    stopped: list[dict[str, object]] = []
+    stopped: list[str] = []
 
-    scorer = SimpleNamespace(
-        stop=lambda *, name, experiment_id: stopped.append({"name": name, "experiment_id": experiment_id})
-    )
+    scorer = SimpleNamespace(stop=lambda: stopped.append("called"))
     fake_mlflow = _fake_mlflow_module(scorer=scorer)
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
 
@@ -139,7 +137,7 @@ def test_scorers_stop_calls_registered_scorer_stop(
 
     output = capsys.readouterr().out
     assert result == 0
-    assert stopped == [{"name": "Trace Judge", "experiment_id": "exp-active"}]
+    assert stopped == ["called"]
     assert "stopped_scorer=Trace Judge" in output
 
 
@@ -151,11 +149,9 @@ def test_scorers_start_calls_registered_scorer_start(
     apply_mlflow_env(clean_runtime_env)
     started: list[dict[str, object]] = []
 
-    def start(*, name, experiment_id, sampling_config) -> None:
+    def start(*, sampling_config) -> None:
         started.append(
             {
-                "name": name,
-                "experiment_id": experiment_id,
                 "sample_rate": sampling_config.sample_rate,
                 "filter_string": sampling_config.filter_string,
             }
@@ -181,8 +177,6 @@ def test_scorers_start_calls_registered_scorer_start(
     assert result == 0
     assert started == [
         {
-            "name": "Trace Judge",
-            "experiment_id": "exp-override",
             "sample_rate": 0.5,
             "filter_string": "status = 'OK'",
         }
