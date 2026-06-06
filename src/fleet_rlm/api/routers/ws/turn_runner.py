@@ -306,7 +306,7 @@ async def _stream_agent_events(
             try:
                 await hosted_repl_bridge.stop()
             except Exception:
-                pass
+                logger.warning("Failed to stop hosted REPL bridge during stream cleanup.", exc_info=True)
 
     if not lifecycle.run_completed:
         lifecycle.raise_if_persistence_error()

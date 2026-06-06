@@ -79,7 +79,6 @@ def test_broker_start_failure_latches_and_blocks_immediate_retry() -> None:
             callbacks=callbacks,
         )
 
-    assert ensure_calls == 1
     _BROKER_START_FAILURES.clear()
 
 

@@ -150,7 +150,7 @@ def do_scorers_stop(args: argparse.Namespace) -> int:
     stop_scorer = getattr(scorer, "stop", None)
     if not callable(stop_scorer):
         raise RuntimeError("This MLflow scorer does not expose stop().")
-    stop_scorer(name=args.name, experiment_id=experiment_id)
+    stop_scorer()
     print(f"stopped_scorer={args.name}")
     print(f"experiment={config.experiment}")
     print(f"experiment_id={experiment_id or ''}")
@@ -167,11 +167,7 @@ def do_scorers_start(args: argparse.Namespace) -> int:
 
     from mlflow.genai.scorers import ScorerSamplingConfig
 
-    start_scorer(
-        name=args.name,
-        experiment_id=experiment_id,
-        sampling_config=ScorerSamplingConfig(sample_rate=args.sample_rate, filter_string=args.filter_string),
-    )
+    start_scorer(sampling_config=ScorerSamplingConfig(sample_rate=args.sample_rate, filter_string=args.filter_string))
     print(f"started_scorer={args.name}")
     print(f"sample_rate={args.sample_rate}")
     print(f"experiment={config.experiment}")

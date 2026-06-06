@@ -6,7 +6,8 @@ set -e
 
 echo "=== Phase 0: Capturing golden payloads and openapi.yaml baseline ==="
 
-# Create golden payloads directory
+# Clean up old golden payloads and recreate the directory
+rm -rf tests/contracts/golden_payloads
 mkdir -p tests/contracts/golden_payloads
 
 # Capture openapi.yaml baseline
@@ -19,8 +20,6 @@ cp src/frontend/src/lib/rlm-api/generated/openapi.ts tests/contracts/golden_payl
 
 # Run golden payload capture tests
 echo "Running golden payload capture tests..."
-# Temporarily remove golden payloads directory to trigger capture
-rm -rf tests/contracts/golden_payloads
 uv run pytest tests/contracts/test_golden_payloads.py::test_capture_chat_websocket_golden_payloads -v
 uv run pytest tests/contracts/test_golden_payloads.py::test_capture_passive_events_websocket_golden_payloads -v
 

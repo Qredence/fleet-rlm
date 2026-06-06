@@ -513,12 +513,14 @@ class FleetMlflowTraceCallback(BaseCallback):
 # retry (adds ~8 s per turn).
 _THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 # Some models emit <think> in one token batch and </think> in another, so the
-# paired regex above leaves orphaned closing tags after stripping complete pairs.
+# paired regex above leaves orphaned tags after stripping complete pairs.
+_ORPHAN_THINK_OPEN_RE = re.compile(r"<think>", re.IGNORECASE)
 _ORPHAN_THINK_CLOSE_RE = re.compile(r"</think>", re.IGNORECASE)
 
 
 def _strip_think_tags(text: str) -> str:
     text = _THINK_TAG_RE.sub("", text)
+    text = _ORPHAN_THINK_OPEN_RE.sub("", text)
     text = _ORPHAN_THINK_CLOSE_RE.sub("", text)
     return text.lstrip("\n")
 

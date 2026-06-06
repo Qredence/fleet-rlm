@@ -219,7 +219,7 @@ class ExecutionLifecycleManager:
         try:
             await self._persist_worker_task
         except asyncio.CancelledError:
-            pass
+            logger.debug("Persist worker task was cancelled during shutdown.")
         self._persist_worker_task = None
         self._persist_queue = None
 

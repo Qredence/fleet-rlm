@@ -14,7 +14,7 @@ def test_update_current_mlflow_trace_mirrors_fleet_metadata_to_tags(monkeypatch)
     captured: list[dict[str, Any]] = []
 
     fake_mlflow = SimpleNamespace(
-        get_current_active_span=lambda: object(),
+        get_current_active_span=object,
         get_active_trace_id=lambda: "tr-test",
         update_current_trace=lambda **kwargs: captured.append(kwargs),
     )
@@ -59,7 +59,7 @@ def test_update_current_mlflow_trace_does_not_resend_active_trace_tags(monkeypat
     captured: list[dict[str, Any]] = []
 
     fake_mlflow = SimpleNamespace(
-        get_current_active_span=lambda: object(),
+        get_current_active_span=object,
         get_active_trace_id=lambda: "tr-test",
         update_current_trace=lambda **kwargs: captured.append(kwargs),
     )

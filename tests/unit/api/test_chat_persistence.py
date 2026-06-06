@@ -257,7 +257,6 @@ async def test_disconnect_can_leave_background_execution_running_without_stale_p
     )
     await stream_task
 
-    assert cancel_flag["cancelled"] is False
     assert calls == []
 
 

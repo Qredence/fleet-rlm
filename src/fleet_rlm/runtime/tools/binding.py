@@ -301,10 +301,14 @@ except ImportError:
         "Use a browser-capable sandbox (fleet-rlm-browser snapshot) for rendered page fetching.",
     )
 else:
+    import logging
+    logger = logging.getLogger(__name__)
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
-        page = browser.new_page()
+        browser = None
+        page = None
         try:
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            page = browser.new_page()
             page.goto(target_url, wait_until=wait_until, timeout=30000)
             text = page.inner_text("body")
             title = page.title()
@@ -322,9 +326,17 @@ else:
                 char_count=len(text),
                 links=links[:100] if extract_links else [],
             )
+        except Exception:
+            logger.exception("Browser execution failed")
+            SUBMIT(
+                status="error",
+                error="Browser execution failed. Please check the logs for details.",
+            )
         finally:
-            page.close()
-            browser.close()
+            if page is not None:
+                page.close()
+            if browser is not None:
+                browser.close()
 """
 
 

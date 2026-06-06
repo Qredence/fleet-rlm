@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import uuid
 from typing import Any
@@ -158,8 +159,6 @@ async def _persist_manifest_to_local_store(
     if not callable(update_fn):
         return
     try:
-        import inspect
-
         sig = inspect.signature(update_fn)
         # LocalStore.update_chat_session requires tenant_id + session_id UUIDs; the
         # async FleetRepository variant has the same shape.  Both accept metadata_json.
@@ -167,7 +166,9 @@ async def _persist_manifest_to_local_store(
         # locate it without a UUID round-trip.
         params = set(sig.parameters)
         if "external_session_id" in params:
-            await update_fn(external_session_id=sess_id, metadata_json={"_manifest_state": manifest})
+            result = update_fn(external_session_id=sess_id, metadata_json={"_manifest_state": manifest})
+            if inspect.iscoroutine(result):
+                await result
         else:
             # Async path: skip – we cannot derive the UUID here without identity_rows.
             pass
@@ -190,7 +191,8 @@ async def _restore_manifest_from_local_store(
     if not callable(get_fn):
         return {}
     try:
-        row = await get_fn(external_session_id=sess_id)
+        result = get_fn(external_session_id=sess_id)
+        row = await result if inspect.iscoroutine(result) else result
         if row is None:
             return {}
         metadata = getattr(row, "metadata_json", None)

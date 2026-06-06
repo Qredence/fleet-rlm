@@ -452,8 +452,7 @@ def test_browser_fetch_page_in_discover_tools() -> None:
 
 def test_bound_browser_fetch_page_validates_public_url_before_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
     import fleet_rlm.runtime.tools.binding as binding_mod
-    import fleet_rlm.runtime.tools.document_tools as document_tools
-    from fleet_rlm.runtime.tools.binding import bind_runtime_tools
+    from fleet_rlm.runtime.tools import document_tools as document_tools
     from fleet_rlm.runtime.tools.browser_tools import browser_fetch_page
 
     calls: list[dict[str, Any]] = []
@@ -470,7 +469,7 @@ def test_bound_browser_fetch_page_validates_public_url_before_sandbox(monkeypatc
     monkeypatch.setattr(document_tools.socket, "getaddrinfo", fake_getaddrinfo)
     monkeypatch.setattr(binding_mod, "execute_sandbox_tool", fake_execute_sandbox_tool)
 
-    bound = bind_runtime_tools(
+    bound = binding_mod.bind_runtime_tools(
         [browser_fetch_page],
         runtime=types.SimpleNamespace(core_memory={}),
         interpreter=object(),
@@ -502,7 +501,6 @@ def test_bound_browser_fetch_page_rejects_private_targets(
     url: str,
 ) -> None:
     import fleet_rlm.runtime.tools.binding as binding_mod
-    from fleet_rlm.runtime.tools.binding import bind_runtime_tools
     from fleet_rlm.runtime.tools.browser_tools import browser_fetch_page
 
     def fake_execute_sandbox_tool(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -510,7 +508,7 @@ def test_bound_browser_fetch_page_rejects_private_targets(
         raise AssertionError("unsafe URL should be rejected before sandbox execution")
 
     monkeypatch.setattr(binding_mod, "execute_sandbox_tool", fake_execute_sandbox_tool)
-    bound = bind_runtime_tools(
+    bound = binding_mod.bind_runtime_tools(
         [browser_fetch_page],
         runtime=types.SimpleNamespace(core_memory={}),
         interpreter=object(),
