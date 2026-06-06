@@ -73,7 +73,7 @@ def _build_child_history_snapshot(interpreter: Any) -> str:
     Returns:
         A bounded, redacted conversation snapshot string.
     """
-    runtime = getattr(interpreter, "runtime", None)
+    runtime = getattr(interpreter, "agent_runtime", None)
     if runtime is None:
         return ""
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import logging
 
 import pytest
 
@@ -54,6 +55,26 @@ async def test_execution_event_emitter_delivers_events_to_matching_subscribers()
     assert len(websocket.sent_payloads) == 1
     assert websocket.sent_payloads[0]["run_id"] == "run-1"
     assert websocket.sent_payloads[0]["step"]["label"] == "Search code"  # ty: ignore[not-subscriptable]
+
+
+@pytest.mark.asyncio
+async def test_execution_event_emitter_does_not_warn_per_event(caplog):
+    events_module = importlib.import_module("fleet_rlm.api.events")
+
+    emitter = events_module.ExecutionEventEmitter()
+    event = events_module.ExecutionEvent(
+        type="execution_completed",
+        run_id="run-1",
+        workspace_id="workspace-a",
+        user_id="user-a",
+        session_id="session-a",
+        summary={"status": "ok"},
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await emitter.emit(event)
+
+    assert "EMITTING EVENT" not in caplog.text
 
 
 @pytest.mark.asyncio

@@ -218,6 +218,67 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
     act(() => root.unmount());
   });
 
+  it("renders forced and URL RLM event rows through Agent Elements", () => {
+    const { container, root } = mount([
+      { id: "u1", type: "user", content: "Analyze https://example.com" },
+      {
+        id: "trace-rlm",
+        type: "trace",
+        content: "",
+        renderParts: [
+          {
+            kind: "status_note",
+            text: "Route: url_document_rlm | source: https://example.com",
+            tone: "neutral",
+          },
+          {
+            kind: "status_note",
+            text: "Execution started",
+            tone: "neutral",
+          },
+          {
+            kind: "reasoning",
+            parts: [{ type: "text", text: "Summarize the fetched page" }],
+            isStreaming: false,
+          },
+          {
+            kind: "sandbox",
+            title: "summary",
+            state: "output-available",
+            code: "print('Example Domain')",
+            output: "Example Domain",
+            language: "python",
+          },
+          {
+            kind: "tool",
+            title: "mcp__docs__fetch",
+            toolType: "mcp__docs__fetch",
+            state: "output-available",
+            input: { url: "https://example.com" },
+            output: { text: "Example Domain" },
+          },
+        ],
+      },
+      {
+        id: "a1",
+        type: "assistant",
+        content: "- Example Domain is reserved for examples.",
+        streaming: false,
+      },
+    ]);
+
+    expect(container.textContent).toContain("Route: url_document_rlm");
+    expect(container.textContent).toContain("Execution started");
+    expect(container.textContent).toContain("Thought");
+    expect(container.textContent).toContain("Ran command");
+    expect(container.textContent).toContain("Example Domain");
+    expect(container.textContent).toContain("Fetched");
+    expect(container.textContent).toContain("example.com");
+    expect(container.textContent).toContain("Example Domain is reserved");
+
+    act(() => root.unmount());
+  });
+
   it("opens the attachment menu and stages a document chip", () => {
     const { container, root } = mount([]);
 

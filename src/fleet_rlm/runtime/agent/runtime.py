@@ -123,17 +123,19 @@ def _routing_status_text(payload: dict[str, Any]) -> str:
 
 
 def _get_streamable_react_program(program: Any) -> Any | None:
-    react_program = getattr(program, "react", program)
-
-    planner = getattr(react_program, "planner", None)
-    extract = getattr(react_program, "extract", None)
-    async_call = getattr(react_program, "async_planner_step", None)
-
-    if planner is None or extract is None:
-        return None
-    if not callable(async_call):
-        return None
-    return react_program
+    # The program itself may be drivable (``FleetAgent``), or it may wrap a
+    # streamable ReAct sub-program under ``.react`` (``EscalatingFleetModule``).
+    # Probe the program first so a ``FleetAgent`` (whose ``.react`` is the
+    # upstream planner ``Predict``, not a streamable program) is recognised.
+    for candidate in (program, getattr(program, "react", None)):
+        if candidate is None:
+            continue
+        planner = getattr(candidate, "planner", None)
+        extract = getattr(candidate, "extract", None)
+        async_call = getattr(candidate, "async_planner_step", None)
+        if planner is not None and extract is not None and callable(async_call):
+            return candidate
+    return None
 
 
 def _normalize_tool_args(tool_args: Any) -> dict[str, Any]:
@@ -251,8 +253,6 @@ class AgentRuntime:
         summary_interval: int = 10,
         compaction_threshold_pct: float = 0.7,
     ) -> None:
-        from .agent import FleetAgent
-
         self.interpreter: Any | None = interpreter
         self.history: dspy.History = dspy.History(messages=[])
         self.history_max_turns: int | None = history_max_turns
@@ -261,7 +261,7 @@ class AgentRuntime:
         # Phase 7: attach runtime reference to interpreter so recursive children
         # can access parent history for bounded conversation snapshots
         if interpreter is not None:
-            setattr(interpreter, "runtime", self)
+            setattr(interpreter, "agent_runtime", self)
 
         # Session-management hooks used by the websocket layer
         self._db_session_id: str | object | None = None
@@ -293,25 +293,82 @@ class AgentRuntime:
             interpreter=interpreter,
         )
 
-        self.tools: list[Any] = base_tools + list(extra_tools or [])
+        self._base_tools: list[Any] = base_tools + list(extra_tools or [])
+        self._mcp_tools: list[Any] = []
+        self.tools: list[Any] = list(self._base_tools)
         self.react_tools: list[Any] = self.tools
 
-        if use_escalation:
+        # Retained for rebuilding the agent when async tool sources (e.g. MCP)
+        # are attached after construction.
+        self._max_iters: int = max_iters
+        self._mcp_provider: Any | None = None
+
+        self.agent: Any = self._build_agent(self.tools)
+
+    def _build_agent(self, tools: list[Any]) -> Any:
+        """Construct the cognition module for the given tool set."""
+        from .agent import FleetAgent
+
+        if self._use_escalation:
             from fleet_rlm.runtime.modules.escalating import EscalatingFleetModule
 
-            self.agent: Any = EscalatingFleetModule(
-                interpreter=interpreter,
-                tools=self.tools,
+            return EscalatingFleetModule(
+                interpreter=self.interpreter,
+                tools=tools,
                 max_iterations=self.rlm_max_iterations,
                 max_llm_calls=self.rlm_max_llm_calls,
                 max_output_chars=self.rlm_max_output_chars,
-                summary_interval=summary_interval,
+                summary_interval=self._summary_interval,
             )
-        else:
-            self.agent: Any = FleetAgent(
-                tools=self.tools,
-                max_iters=max_iters,
-            )
+        return FleetAgent(
+            tools=tools,
+            max_iters=self._max_iters,
+        )
+
+    async def attach_mcp_tools(self, configs: Any | None = None) -> list[str]:
+        """Discover MCP tools and rebuild the agent with them registered.
+
+        Connects to the configured MCP servers (env-driven by default), appends
+        the discovered async ``dspy.Tool`` objects to the runtime tool list, and
+        rebuilds the cognition module so they appear in the ReAct tool set. Safe
+        to call when no MCP servers are configured (returns an empty list and
+        leaves the agent untouched). Call :meth:`aclose_mcp` to release sessions.
+
+        Returns the names of the MCP tools that were attached.
+        """
+        from fleet_rlm.runtime.tools.mcp_tools import MCPToolProvider, load_mcp_server_configs
+
+        resolved = configs if configs is not None else load_mcp_server_configs()
+        if not resolved:
+            return []
+
+        provider = MCPToolProvider(resolved)
+        mcp_tools = await provider.connect()
+        if not mcp_tools:
+            await provider.aclose()
+            return []
+
+        # Release any previously attached provider before swapping it in.
+        await self.aclose_mcp()
+        self._mcp_provider = provider
+        self._mcp_tools = list(mcp_tools)
+
+        self.tools = list(self._base_tools) + list(self._mcp_tools)
+        self.react_tools = self.tools
+        self.agent = self._build_agent(self.tools)
+        return [getattr(tool, "name", str(tool)) for tool in mcp_tools]
+
+    async def aclose_mcp(self) -> None:
+        """Close any live MCP sessions attached via :meth:`attach_mcp_tools`."""
+        provider = self._mcp_provider
+        if provider is None:
+            return
+        self._mcp_provider = None
+        self._mcp_tools = []
+        await provider.aclose()
+        self.tools = list(self._base_tools)
+        self.react_tools = self.tools
+        self.agent = self._build_agent(self.tools)
 
     # -----------------------------------------------------------------
     # Chat API
@@ -472,10 +529,20 @@ class AgentRuntime:
                 )
 
         try:
-            result = await asyncio.to_thread(
-                self.agent,
-                **self._escalation_call_args(message),
-            )
+            async_call = getattr(self.agent, "aforward", None)
+            if callable(async_call):
+                result = await async_call(**self._escalation_call_args(message))
+            else:
+                # Drive sync-only modules in a worker thread. The RLM heavy path
+                # runs sandbox code through the interpreter's blocking execute();
+                # dspy.RLM.aforward still calls that synchronously (only LM
+                # predictor calls are awaited), so to_thread is the correct
+                # non-blocking pattern for modules without an explicit async path.
+                # See docs/agent-harness/architecture-invariants.md.
+                result = await asyncio.to_thread(
+                    self.agent,
+                    **self._escalation_call_args(message),
+                )
         except Exception as exc:
             yield RuntimeEvent(
                 kind=RuntimeEventKind.ERROR,
@@ -602,6 +669,7 @@ class AgentRuntime:
         return False
 
     def shutdown(self) -> None:
+        _run_async_compat(self.aclose_mcp)
         if self.interpreter is not None:
             shutdown = getattr(self.interpreter, "shutdown", None)
             if callable(shutdown):
@@ -618,6 +686,7 @@ class AgentRuntime:
                         pass
 
     async def ashutdown(self) -> None:
+        await self.aclose_mcp()
         if self.interpreter is None:
             return
         ashutdown = getattr(self.interpreter, "ashutdown", None)

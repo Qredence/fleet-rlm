@@ -22,7 +22,7 @@ import uuid
 # Ensure repo root is on path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fleet_rlm.api.runtime_services.chat_persistence import (
+from fleet_rlm.api.runtime_services.session_manifest import (
     ensure_session_volume_layout,
     load_manifest_from_volume,
 )

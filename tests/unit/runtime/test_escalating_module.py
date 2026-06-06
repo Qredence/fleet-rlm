@@ -62,6 +62,19 @@ class _PreviewPosthocAgent(_PosthocAgent):
         }
 
 
+class _AsyncReactAgent:
+    def __init__(self, prediction: dspy.Prediction) -> None:
+        self.prediction = prediction
+        self.acall_kwargs: dict[str, Any] | None = None
+
+    def __call__(self, **_: Any) -> dspy.Prediction:
+        raise AssertionError("sync ReAct path should not be used by aforward")
+
+    async def acall(self, **kwargs: Any) -> dspy.Prediction:
+        self.acall_kwargs = kwargs
+        return self.prediction
+
+
 class TestEscalatingFleetModule:
     def test_url_document_rlm_is_bounded_and_disables_child_tools(
         self,
@@ -153,17 +166,39 @@ class TestEscalatingFleetModule:
         assert call_kwargs["recent_history"].rfind("NEW_MARKER") > call_kwargs["recent_history"].rfind("OLD_MARKER")
         assert "most recent prior turn" in call_kwargs["recent_history"]
 
-    def test_rlm_path_triggered_by_sentinel_in_reasoning(self) -> None:
+    def test_react_tool_branch_triggered_by_sentinel_in_reasoning(self) -> None:
         module = _make_module()
-        _stub_respond(module, reasoning=f"I need external data {ESCALATION_SENTINEL}", response="step1")
-        rlm_pred = _FakePrediction(answer="deep answer")
-        module._rlm = MagicMock(return_value=rlm_pred)
+        _stub_respond(module, reasoning=f"I need a tool {ESCALATION_SENTINEL}", response="step1")
+        react_pred = _FakePrediction(response="tool answer")
+        module._react = MagicMock(return_value=react_pred)
+        module._rlm = MagicMock()
         _stub_summarize(module)
 
-        result = module(user_request="Complex task", execution_mode="auto")
+        result = module(user_request="Use a tool", execution_mode="auto")
         module.respond.assert_called_once()
-        module._rlm.assert_called_once()
-        assert getattr(result, "answer", None) == "deep answer"
+        module._react.assert_called_once()
+        module._rlm.assert_not_called()
+        assert getattr(result, "response", None) == "tool answer"
+        assert result["routing_decision"] == "sentinel_react"
+
+    @pytest.mark.asyncio
+    async def test_async_react_tool_branch_uses_acall_for_sentinel(self) -> None:
+        module = _make_module()
+        _stub_respond(module, reasoning=f"I need a tool {ESCALATION_SENTINEL}", response="step1")
+        react_agent = _AsyncReactAgent(_FakePrediction(response="async tool answer"))
+        module._react = react_agent  # type: ignore[assignment]
+        module._rlm = MagicMock()
+        _stub_summarize(module)
+
+        result = await module.aforward(user_request="Use an async tool", execution_mode="auto")
+
+        module.respond.assert_called_once()
+        module._rlm.assert_not_called()
+        assert react_agent.acall_kwargs is not None
+        assert react_agent.acall_kwargs["user_message"] == "Use an async tool"
+        assert isinstance(react_agent.acall_kwargs["chat_history"], dspy.History)
+        assert getattr(result, "response", None) == "async tool answer"
+        assert result["routing_decision"] == "sentinel_react"
 
     def test_force_escalate_skips_cot(self) -> None:
         module = _make_module()
@@ -283,18 +318,18 @@ class TestEscalatingFleetModule:
             "source_url": "https://dspy.ai",
         }
 
-    def test_rlm_fallback_to_cot_on_error(self) -> None:
+    def test_react_fallback_to_cot_on_error(self) -> None:
         module = _make_module()
         cot_pred = _FakePrediction(reasoning=ESCALATION_SENTINEL, assistant_response="cot_resp")
         module.respond = MagicMock(side_effect=[cot_pred, _FakePrediction(assistant_response="fallback")])
-        module._rlm = MagicMock(side_effect=RuntimeError("RLM failed"))
+        module._react = MagicMock(side_effect=RuntimeError("ReAct failed"))
         _stub_summarize(module)
 
         result = module(user_request="query", execution_mode="auto")
         assert getattr(result, "assistant_response", None) == "fallback"
         assert result["runtime_degraded"] is True
-        assert result["runtime_failure_category"] == "rlm_fallback"
-        assert result["runtime_failure_phase"] == "escalating_rlm"
+        assert result["runtime_failure_category"] == "react_fallback"
+        assert result["runtime_failure_phase"] == "escalating_react"
         assert result["runtime_fallback_used"] is True
         assert result["runtime_warning"]
 

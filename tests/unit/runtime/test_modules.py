@@ -159,7 +159,7 @@ def test_runtime_module_registry_flags_and_signature_fields_are_stable() -> None
     assert RUNTIME_MODULE_REGISTRY["extract_from_logs"].variable_mode is True
     assert RUNTIME_MODULE_REGISTRY["grounded_answer"].variable_mode is False
 
-    assert set(RLMVariableSignature.input_fields) == {"task", "prompt"}
+    assert set(RLMVariableSignature.input_fields) == {"task", "prompt", "history"}
     assert set(RLMVariableSignature.output_fields) == {"answer"}
     assert {"query", "evidence_chunks", "response_style"} <= set(GroundedAnswerWithCitations.input_fields)
     assert {"answer", "citations", "confidence", "coverage_notes"} <= set(GroundedAnswerWithCitations.output_fields)

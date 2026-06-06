@@ -147,7 +147,9 @@ Runtime ownership:
 
 - Keep DSPy signatures in `runtime/agent/signatures.py`
 - Keep runtime module construction/registration in `runtime/modules/factory.py`, `runtime/modules/registry.py`, or the `fleet_rlm.runtime.modules` package exports
-- Keep the main cognition loop in `runtime/agent/agent.py` (FleetAgent / RLMReActAgent) and `runtime/agent/runtime.py` (AgentRuntime)
+- Keep the main cognition loop in `runtime/agent/agent.py` (`FleetAgent`, a thin
+  `dspy.ReAct` subclass), `runtime/modules/escalating.py` (`EscalatingFleetModule`, the
+  default CoT→ReAct→RLM router), and `runtime/agent/runtime.py` (AgentRuntime)
 - Keep the public Daytona interpreter facade in `integrations/daytona/interpreter.py`; durable workspace/session behavior lives in `workspace_manager.py`, code execution and bridge state live in `sandbox_executor.py`, and recursive child policy/delegation lives in `isolation.py`.
 - Keep Daytona collaborator boundaries typed with small internal Protocols. Use Pydantic v2 for validated configuration/state boundary models such as `WorkspaceConfig`, but keep hot execution-path payloads and bridge result carriers as dataclasses/functions.
 - Keep runtime orchestration and shared chat/runtime behavior under `runtime/agent/*` and `runtime/execution/*`
@@ -158,6 +160,10 @@ Runtime ownership:
 - The module registry (`module_registry.py`) is the single source of truth for optimizable modules, consumed by CLI, API, and frontend. **Note:** `longcot-reasoner` is currently registered via `fleet_rlm.quality.optimize_longcot`; add new `quality/optimize_*.py` entrypoints to `_MODULE_ENTRYPOINTS` as more modules become optimizable.
 - GEPA runs offline only — never in the live request path
 - Keep grouped tool helpers under root `runtime/tools/*`
+- Keep DSPy-native MCP tool discovery in `runtime/tools/mcp_tools.py`. It is opt-in:
+  servers are configured via the `FLEET_RLM_MCP_SERVERS` env var (JSON array) and
+  attached through `AgentRuntime.attach_mcp_tools(...)`; nothing connects unless set.
+  Do not add import-time MCP/`dspy` side effects (lazy-import inside `connect()`).
 
 API ownership:
 

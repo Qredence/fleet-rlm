@@ -3,7 +3,7 @@ for the RLM ReAct chat agent streaming pipeline.
 
 Event *construction* lives in :mod:`fleet_rlm.runtime.events`.
 This module retains only final-payload assembly (citations/attachments/sources)
-and the DSPy ``ReActStatusProvider`` status hook.
+and terminal-event/HITL helpers.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 import dspy
-from dspy.streaming.messages import StatusMessageProvider
 
 from fleet_rlm.runtime.events import EVENT_SCHEMA_VERSION
 from fleet_rlm.utils.preview import head_tail_preview
@@ -36,33 +35,6 @@ TERMINAL_STREAM_EVENT_KINDS: frozenset[str] = frozenset({"done", "error"})
 def is_terminal_stream_event_kind(kind: str) -> bool:
     """Return whether *kind* is terminal for both runtime and websocket flows."""
     return kind in TERMINAL_STREAM_EVENT_KINDS
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# DSPy status hook (structured data embedded in RuntimeEvent at build time)
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class ReActStatusProvider(StatusMessageProvider):
-    """Concise status hook for streamed ReAct sessions.
-
-    Returns human-readable status strings required by the DSPy
-    ``StatusMessageProvider`` interface.  Structured tool/actor data
-    is carried in :class:`~fleet_rlm.runtime.events.RuntimeEvent` objects
-    built by the event factories in :mod:`fleet_rlm.runtime.events`.
-    """
-
-    def tool_start_status_message(self, instance: Any, inputs: dict[str, Any]) -> str:
-        return f"Calling tool: {instance.name}"
-
-    def tool_end_status_message(self, outputs: Any) -> str | None:
-        return "Tool finished."
-
-    def module_start_status_message(self, instance: Any, inputs: dict[str, Any]) -> str | None:
-        return f"Running module: {instance.__class__.__name__}"
-
-    def module_end_status_message(self, outputs: Any) -> str | None:
-        return None
 
 
 # ═══════════════════════════════════════════════════════════════════════

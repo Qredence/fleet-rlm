@@ -111,12 +111,18 @@ def _to_workspace_event(event: Any) -> WorkspaceEvent:
     """Normalize a runtime-style stream event into a workspace event."""
     raw_ts = getattr(event, "timestamp", None)
     timestamp = raw_ts if isinstance(raw_ts, datetime) else datetime.now(timezone.utc)
+
+    kind = getattr(event, "kind", "status")
+    if hasattr(kind, "value"):
+        kind = getattr(kind, "value")
+    kind = str(kind)
+
     return WorkspaceEvent(
-        kind=str(getattr(event, "kind", "status")),
+        kind=kind,
         text=str(getattr(event, "text", "") or ""),
         payload=dict(getattr(event, "payload", {}) or {}),
         timestamp=timestamp,
-        terminal=is_terminal_stream_event_kind(str(getattr(event, "kind", ""))),
+        terminal=is_terminal_stream_event_kind(kind),
     )
 
 

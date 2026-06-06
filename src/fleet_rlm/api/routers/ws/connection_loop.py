@@ -291,68 +291,72 @@ async def _background_execution_task(
     """Run execution in the background with its own agent context."""
     from ...runtime_services.chat_runtime import build_chat_agent_context
 
-    agent_context = await build_chat_agent_context(runtime)
-    async with agent_context as agent:
-        interpreter = getattr(agent, "interpreter", None)
-        set_interpreter_default_profile(interpreter, runtime.cfg)
+    try:
+        agent_context = await build_chat_agent_context(runtime)
+        async with agent_context as agent:
+            interpreter = getattr(agent, "interpreter", None)
+            set_interpreter_default_profile(interpreter, runtime.cfg)
 
-        async def _noop_persist(
-            *,
-            include_volume_save: bool = True,
-            latest_user_message: str = "",
-        ) -> None:
-            _ = include_volume_save, latest_user_message
+            async def _noop_persist(
+                *,
+                include_volume_save: bool = True,
+                latest_user_message: str = "",
+            ) -> None:
+                _ = include_volume_save, latest_user_message
 
-        (
-            session.active_key,
-            session.active_manifest_path,
-            session.session_record,
-            session.last_loaded_docs_path,
-            session.orchestration_session,
-        ) = await switch_session_if_needed(
-            session_cache=session_cache,
-            agent=agent,
-            interpreter=interpreter,
-            workspace_id=workspace_id,
-            user_id=user_id,
-            sess_id=sess_id,
-            owner_tenant_claim=session.owner_tenant_claim,
-            owner_user_claim=session.owner_user_claim,
-            active_key=None,
-            session_record=session.session_record,
-            last_loaded_docs_path=session.last_loaded_docs_path,
-            local_persist=_noop_persist,
-            persistence=runtime.persistence,
-            identity_rows=runtime.identity_rows,
-        )
+            (
+                session.active_key,
+                session.active_manifest_path,
+                session.session_record,
+                session.last_loaded_docs_path,
+                session.orchestration_session,
+            ) = await switch_session_if_needed(
+                session_cache=session_cache,
+                agent=agent,
+                interpreter=interpreter,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                sess_id=sess_id,
+                owner_tenant_claim=session.owner_tenant_claim,
+                owner_user_claim=session.owner_user_claim,
+                active_key=None,
+                session_record=session.session_record,
+                last_loaded_docs_path=session.last_loaded_docs_path,
+                local_persist=_noop_persist,
+                persistence=runtime.persistence,
+                identity_rows=runtime.identity_rows,
+            )
 
-        agent._db_session_id = (session.session_record or {}).get("db_session_id")
-        agent._identity_rows = runtime.identity_rows
-        if agent.interpreter is not None:
-            agent.interpreter._host_repository = runtime.persistence
-            agent.interpreter._host_identity = runtime.identity_rows
-            agent.interpreter._host_run_id = None
-        local_persist = build_local_persist_fn(
-            session_cache=session_cache,
-            runtime=runtime,
-            agent=agent,
-            interpreter=interpreter,
-            session=session,
-        )
+            agent._db_session_id = (session.session_record or {}).get("db_session_id")
+            agent._identity_rows = runtime.identity_rows
+            if agent.interpreter is not None:
+                agent.interpreter._host_repository = runtime.persistence
+                agent.interpreter._host_identity = runtime.identity_rows
+                agent.interpreter._host_run_id = None
+            local_persist = build_local_persist_fn(
+                session_cache=session_cache,
+                runtime=runtime,
+                agent=agent,
+                interpreter=interpreter,
+                session=session,
+            )
 
-        return await _process_chat_message(
-            websocket=None,
-            msg=msg,
-            agent=agent,
-            interpreter=interpreter,
-            session=session,
-            local_persist=local_persist,
-            runtime=runtime,
-            workspace_id=workspace_id,
-            user_id=user_id,
-            sess_id=sess_id,
-            execution_emitter=execution_emitter,
-        )
+            return await _process_chat_message(
+                websocket=None,
+                msg=msg,
+                agent=agent,
+                interpreter=interpreter,
+                session=session,
+                local_persist=local_persist,
+                runtime=runtime,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                sess_id=sess_id,
+                execution_emitter=execution_emitter,
+            )
+    except Exception:
+        logger.exception("Background websocket execution task failed")
+        raise
 
 
 class _ExecutionConnectionLoop:

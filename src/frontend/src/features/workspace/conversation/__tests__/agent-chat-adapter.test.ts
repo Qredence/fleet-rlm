@@ -48,6 +48,72 @@ describe("toAgentChatMessages", () => {
     expect(messages[2]?.parts).toContainEqual({ type: "text", text: "All set" });
   });
 
+  it("maps RLM route, sandbox, delegation, and MCP rows to Agent Elements parts", () => {
+    const messages = adapter([
+      {
+        id: "trace-rlm",
+        type: "trace",
+        content: "",
+        renderParts: [
+          {
+            kind: "status_note",
+            text: "Route: url_document_rlm | source: https://example.com",
+            tone: "neutral",
+          },
+          {
+            kind: "sandbox",
+            title: "summary",
+            state: "output-available",
+            code: "print('Example Domain')",
+            output: "Example Domain",
+            language: "python",
+          },
+          {
+            kind: "tool",
+            title: "delegate_to_rlm",
+            toolType: "delegate_to_rlm",
+            state: "output-available",
+            input: { task: "summarize fetched document" },
+            output: { status: "completed" },
+          },
+          {
+            kind: "tool",
+            title: "mcp__docs__fetch",
+            toolType: "mcp__docs__fetch",
+            state: "output-available",
+            input: { url: "https://example.com" },
+            output: { text: "Example Domain" },
+          },
+        ],
+      },
+    ]);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "tool-Status",
+          output: expect.objectContaining({
+            message: expect.stringContaining("url_document_rlm"),
+          }),
+        }),
+        expect.objectContaining({
+          type: "tool-Bash",
+          input: expect.objectContaining({
+            command: "print('Example Domain')",
+            language: "python",
+          }),
+          output: { stdout: "Example Domain" },
+        }),
+        expect.objectContaining({ type: "tool-Agent" }),
+        expect.objectContaining({
+          type: "tool-mcp__docs__fetch",
+          output: { text: "Example Domain" },
+        }),
+      ]),
+    );
+  });
+
   it("maps HITL approval to tool-Question with resolved output", () => {
     const messages = adapter([
       {

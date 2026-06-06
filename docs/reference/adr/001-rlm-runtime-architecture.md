@@ -27,9 +27,20 @@ The architecture consists of these layers:
 The primary runtime (`src/fleet_rlm/runtime/agent/runtime.py`) owns session state, tool binding, streaming, and persistence. Its default agent module (`src/fleet_rlm/runtime/modules/escalating.py`) extends `dspy.Module` to provide:
 
 - **Stateful conversation**: `dspy.History` for persistent chat memory
-- **Lightweight-to-heavy escalation**: `dspy.ChainOfThought` for simple turns, escalating to the Daytona-backed RLM path when needed
-- **Tool orchestration**: Dynamic tool registration and dispatch
+- **Lightweight-to-heavy escalation**: `dspy.ChainOfThought` for simple turns; the
+  `[TOOLS NEEDED]` sentinel routes to a real `dspy.ReAct` tool loop (`FleetAgent`), while
+  forced `rlm`/`rlm_only` modes and auto-detected URL-document analysis route to the
+  Daytona-backed `dspy.RLM` heavy path
+- **Tool orchestration**: Dynamic tool registration and dispatch (including optional
+  DSPy-native MCP tools discovered from `FLEET_RLM_MCP_SERVERS`)
 - **Recursive delegation**: `runtime/tools/rlm_delegate.py` and `integrations/daytona/isolation.py` build bounded child RLM runs
+
+MCP tools are opt-in and session-backed. `AgentRuntime.attach_mcp_tools(...)` connects the
+configured MCP servers, converts discovered tools with `dspy.Tool.from_mcp_tool(...)`, and rebuilds
+the agent from the stable base tool set plus the current MCP attachment. Reattaching MCP servers
+replaces the previous MCP tools and closes their provider; runtime shutdown closes any remaining
+MCP sessions. Because these tools are async, the sentinel ReAct route is driven through an async
+ReAct call, while forced/url RLM routes remain sync-in-thread for Daytona sandbox execution.
 
 ### 2. Signature-Based Contracts
 

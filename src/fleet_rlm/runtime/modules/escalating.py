@@ -1,17 +1,22 @@
-"""Escalating fleet agent module — ChainOfThought for simple turns, RLM for complex ones.
+"""Escalating fleet agent module — ChainOfThought, ReAct tools, or RLM per turn.
 
-This module implements the Phase 2 unified agent design: a single DSPy Module
-that seamlessly escalates from a lightweight ChainOfThought response to a full
-dspy.RLM loop when the situation demands it.
+This module implements the unified agent design: a single DSPy Module that
+seamlessly escalates from a lightweight ChainOfThought response to a real,
+tool-using ``dspy.ReAct`` loop or a full ``dspy.RLM`` loop when the situation
+demands it.
 
-Escalation is triggered when:
-- The ChainOfThought reasoning output contains the sentinel ``[TOOLS NEEDED]``.
-- The caller sets ``execution_mode="rlm"`` or ``"rlm_only"`` explicitly.
-- The caller sets ``force_escalate=True``.
+Routing:
+- Simple turns are answered by the ChainOfThought fast path.
+- When the fast-path reasoning contains the sentinel ``[TOOLS NEEDED]`` the
+  module runs the shared ``dspy.ReAct`` tool loop (the same ``FleetAgent``
+  program used by the non-escalating runtime).
+- ``execution_mode="rlm"``/``"rlm_only"``, ``force_escalate=True``, or an
+  auto-detected URL-document analysis request route to the ``dspy.RLM`` sandbox.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -28,6 +33,8 @@ logger = logging.getLogger(__name__)
 
 ESCALATION_SENTINEL = "[TOOLS NEEDED]"
 _RLM_FALLBACK_WARNING = "RLM escalation failed; returned a lightweight fallback response."
+_REACT_FALLBACK_WARNING = "ReAct tool loop failed; returned a lightweight fallback response."
+_REACT_MAX_ITERS = 10
 _URL_DOCUMENT_MAX_ITERATIONS = 4
 _URL_DOCUMENT_MAX_LLM_CALLS = 8
 _URL_RE = re.compile(r"https?://[^\s)\],;]+", flags=re.IGNORECASE)
@@ -168,8 +175,10 @@ class EscalatingFleetModule(dspy.Module):
     """Unified DSPy Module that scales from lightweight chat to full RLM execution.
 
     Simple turns are handled by a ``dspy.ChainOfThought`` step.  When the
-    reasoning contains :data:`ESCALATION_SENTINEL` or the caller requests deep
-    work, the module re-runs via an ``RLMVariableExecutionModule`` or a
+    reasoning contains :data:`ESCALATION_SENTINEL` the module runs the shared
+    ``dspy.ReAct`` tool loop (:class:`~fleet_rlm.runtime.agent.agent.FleetAgent`)
+    for real tool use.  Explicit RLM modes, ``force_escalate``, or auto-detected
+    URL-document analysis instead route to an ``RLMVariableExecutionModule`` or a
     raw ``dspy.RLM`` with the same tool set.
 
     Parameters
@@ -220,6 +229,21 @@ class EscalatingFleetModule(dspy.Module):
 
         self.respond = dspy.ChainOfThought(RLMReActChatSignature)
         self.summarize = dspy.ChainOfThought(ConversationSummarySignature)
+
+        # Sentinel tool branch: the shared upstream dspy.ReAct loop (FleetAgent).
+        # When the ChainOfThought fast path emits ESCALATION_SENTINEL the module
+        # runs a real, tool-using ReAct loop here instead of the RLM sandbox,
+        # which stays reserved for forced/long-context and URL-document paths.
+        # Named with a leading underscore so the streaming router
+        # (``_get_streamable_react_program``) does not treat the escalating
+        # module itself as a directly drivable ReAct program; routing stays in
+        # ``forward`` and the posthoc stream surfaces this branch's trajectory.
+        from fleet_rlm.runtime.agent.agent import FleetAgent
+
+        self._react = FleetAgent(
+            tools=list(tools or []),
+            max_iters=max(1, min(max_iterations, _REACT_MAX_ITERS)),
+        )
 
         self._rlm: dspy.Module | None = None
         self._url_document_rlm: dspy.Module | None = None
@@ -370,20 +394,158 @@ class EscalatingFleetModule(dspy.Module):
         )
 
         if self._should_escalate(prediction, execution_mode=execution_mode, force_escalate=False):
-            logger.debug("EscalatingFleetModule: escalating to RLM (sentinel found in reasoning)")
-            return self._run_rlm(
+            logger.debug("EscalatingFleetModule: escalating to ReAct tool loop (sentinel found in reasoning)")
+            return self._run_react(
+                user_request=user_request,
+                core_memory=core_memory,
+                history=history,
+                recent_history=recent_history,
+                selected_skills=selected_skills,
+            )
+
+        _prediction_set(prediction, "selected_skills", selected_skills)
+        return prediction
+
+    async def aforward(
+        self,
+        *,
+        user_request: str,
+        core_memory: str = "",
+        history: dspy.History | None = None,
+        execution_mode: str = "auto",
+        force_escalate: bool = False,
+        conversation_summary: str = "",
+    ) -> dspy.Prediction:
+        """Run one turn without blocking async callers.
+
+        Heavy RLM work stays on the synchronous ``forward`` path inside a worker
+        thread because sandbox execution is blocking. The sentinel ReAct branch
+        uses ``acall`` so session-backed async tools, including MCP tools, are
+        awaited correctly.
+        """
+        if history is None:
+            history = dspy.History(messages=[])
+
+        self._turn_count += 1
+
+        core_memory, selected_skills = await asyncio.to_thread(self._enrich_with_skills, user_request, core_memory)
+        recent_history = _format_recent_history_context(history)
+        should_auto_route_url = execution_mode == "auto" and _is_url_document_analysis_request(user_request)
+
+        if _is_rlm_execution_mode(execution_mode) or force_escalate or should_auto_route_url:
+            return await asyncio.to_thread(
+                self._run_rlm,
                 user_request=user_request,
                 core_memory=core_memory,
                 history=history,
                 recent_history=recent_history,
                 conversation_summary=conversation_summary,
                 selected_skills=selected_skills,
-                routing_decision="sentinel_rlm",
-                source_url=None,
+                routing_decision="url_document_rlm" if should_auto_route_url else "forced_rlm",
+                source_url=_extract_first_url(user_request) if should_auto_route_url else None,
+            )
+
+        prediction = await asyncio.to_thread(
+            self.respond,
+            user_request=user_request,
+            core_memory=core_memory,
+            history=history,
+            recent_history=recent_history,
+        )
+
+        if self._should_escalate(prediction, execution_mode=execution_mode, force_escalate=False):
+            logger.debug("EscalatingFleetModule: async escalating to ReAct tool loop (sentinel found in reasoning)")
+            return await self._arun_react(
+                user_request=user_request,
+                core_memory=core_memory,
+                history=history,
+                recent_history=recent_history,
+                selected_skills=selected_skills,
             )
 
         _prediction_set(prediction, "selected_skills", selected_skills)
         return prediction
+
+    def _run_react(
+        self,
+        *,
+        user_request: str,
+        core_memory: str,
+        history: dspy.History,
+        recent_history: str,
+        selected_skills: list[str] | None = None,
+    ) -> dspy.Prediction:
+        """Run the shared dspy.ReAct tool loop for the sentinel tool branch.
+
+        The ReAct prediction carries its native ``trajectory`` (thought/tool/
+        observation per step) so the streaming layer surfaces tool calls and
+        results without extra adaptation. On failure the module degrades to the
+        lightweight ChainOfThought response, mirroring the RLM fallback contract.
+        """
+        try:
+            result = self._react(chat_history=history, user_message=user_request)
+            _prediction_set(result, "selected_skills", selected_skills or [])
+            _prediction_set(result, "routing_decision", "sentinel_react")
+            return result
+        except Exception as exc:
+            logger.warning(
+                "EscalatingFleetModule: ReAct tool loop failed (%s), falling back to ChainOfThought",
+                exc,
+            )
+            fallback = self.respond(
+                user_request=user_request,
+                core_memory=core_memory,
+                history=history,
+                recent_history=recent_history,
+            )
+            fallback["degraded"] = True
+            fallback["warning"] = _REACT_FALLBACK_WARNING
+            fallback["runtime_degraded"] = True
+            fallback["runtime_failure_category"] = "react_fallback"
+            fallback["runtime_failure_phase"] = "escalating_react"
+            fallback["runtime_fallback_used"] = True
+            fallback["runtime_warning"] = _REACT_FALLBACK_WARNING
+            fallback["selected_skills"] = selected_skills or []
+            fallback["routing_decision"] = "sentinel_react"
+            return fallback
+
+    async def _arun_react(
+        self,
+        *,
+        user_request: str,
+        core_memory: str,
+        history: dspy.History,
+        recent_history: str,
+        selected_skills: list[str] | None = None,
+    ) -> dspy.Prediction:
+        """Async ReAct branch for session-backed tools such as MCP."""
+        try:
+            result = await self._react.acall(chat_history=history, user_message=user_request)
+            _prediction_set(result, "selected_skills", selected_skills or [])
+            _prediction_set(result, "routing_decision", "sentinel_react")
+            return result
+        except Exception as exc:
+            logger.warning(
+                "EscalatingFleetModule: async ReAct tool loop failed (%s), falling back to ChainOfThought",
+                exc,
+            )
+            fallback = await asyncio.to_thread(
+                self.respond,
+                user_request=user_request,
+                core_memory=core_memory,
+                history=history,
+                recent_history=recent_history,
+            )
+            fallback["degraded"] = True
+            fallback["warning"] = _REACT_FALLBACK_WARNING
+            fallback["runtime_degraded"] = True
+            fallback["runtime_failure_category"] = "react_fallback"
+            fallback["runtime_failure_phase"] = "escalating_react"
+            fallback["runtime_fallback_used"] = True
+            fallback["runtime_warning"] = _REACT_FALLBACK_WARNING
+            fallback["selected_skills"] = selected_skills or []
+            fallback["routing_decision"] = "sentinel_react"
+            return fallback
 
     def _run_rlm(
         self,
