@@ -23,7 +23,7 @@ from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventContext, RuntimeE
 from fleet_rlm.runtime.execution.streaming_events import (
     _normalize_trajectory,
 )
-from fleet_rlm.runtime.schemas import StreamEvent
+from fleet_rlm.runtime.schemas import StreamEvent, StreamEventKind
 from fleet_rlm.runtime.tools import discover_tools
 from fleet_rlm.runtime.tools.binding import bind_runtime_tools, execute_sandbox_tool
 
@@ -193,6 +193,15 @@ async def _call_react_tool(tool: Any, tool_args: dict[str, Any]) -> Any:
     if callable(acall):
         return await acall(**tool_args)
     return await asyncio.to_thread(tool, **tool_args)
+
+
+def _stream_event_from_runtime_event(event: RuntimeEvent) -> StreamEvent:
+    return StreamEvent(
+        kind=cast(StreamEventKind, event.kind.value),
+        text=event.text,
+        payload=dict(event.payload),
+        timestamp=event.timestamp,
+    )
 
 
 def _build_tool_call_event(*, tool_name: str, tool_args: dict[str, Any], step_index: int) -> RuntimeEvent:
@@ -826,7 +835,7 @@ class AgentRuntime:
                 message=message,
                 cancel_check=cancel_check,
             ):
-                yield event
+                yield _stream_event_from_runtime_event(event)
             return
         logger.info("streaming_path=native (dspy.streamify per-token streaming)")
 
@@ -910,7 +919,9 @@ class AgentRuntime:
                     break
 
                 tool = react_program.tools[tool_name]
-                yield _build_tool_call_event(tool_name=tool_name, tool_args=tool_args, step_index=step_index)
+                yield _stream_event_from_runtime_event(
+                    _build_tool_call_event(tool_name=tool_name, tool_args=tool_args, step_index=step_index)
+                )
 
                 try:
                     observation = await _call_react_tool(tool, tool_args)
@@ -920,15 +931,17 @@ class AgentRuntime:
                 trajectory_raw[f"observation_{step_index}"] = observation
                 if recursive_child_review is None:
                     recursive_child_review = _recursive_child_review_payload(tool_name, observation)
-                yield _build_tool_result_event(
-                    tool_name=tool_name,
-                    observation=observation,
-                    step_index=step_index,
+                yield _stream_event_from_runtime_event(
+                    _build_tool_result_event(
+                        tool_name=tool_name,
+                        observation=observation,
+                        step_index=step_index,
+                    )
                 )
 
                 clarification_event = _build_clarification_event(observation)
                 if clarification_event is not None:
-                    yield clarification_event
+                    yield _stream_event_from_runtime_event(clarification_event)
 
             # Fast path: skip the extract LLM call when the agent finished
             # with a finish tool or no tool. The planner thought already

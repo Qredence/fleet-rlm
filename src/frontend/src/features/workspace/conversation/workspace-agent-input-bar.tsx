@@ -1,21 +1,12 @@
 import { useCallback, useRef, useState, type ChangeEvent } from "react";
-import {
-  Brain,
-  Settings2,
-  Sparkles,
-  TriangleAlert,
-  Wrench,
-} from "lucide-react";
+import { Brain, Settings2, Sparkles, TriangleAlert, Wrench } from "lucide-react";
 
 import {
   InputBar,
   type AttachedFile,
   type InputBarProps,
 } from "@/components/agent-elements/input-bar";
-import {
-  ModelPicker,
-  type ModelOption,
-} from "@/components/agent-elements/input/model-picker";
+import { ModelPicker, type ModelOption } from "@/components/agent-elements/input/model-picker";
 import { ModeSelector } from "@/components/agent-elements/input/mode-selector";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -30,10 +21,7 @@ const EXECUTION_MODE_OPTIONS = [
 ] as const;
 
 function createAttachmentId() {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -64,9 +52,7 @@ function activeModelOptions(
     {
       id: "planner",
       label: activeModels?.planner || "Planner model",
-      description: activeModels?.planner
-        ? "Planner runtime"
-        : "Planner model not configured",
+      description: activeModels?.planner ? "Planner runtime" : "Planner model not configured",
       disabled: !activeModels?.planner,
     },
     {
@@ -129,23 +115,20 @@ export function WorkspaceAgentInputBar({
     fileInputRef.current?.click();
   }, [onAttach]);
 
-  const handleDocumentInputChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(event.currentTarget.files ?? []);
-      if (files.length > 0) {
-        setStagedDocuments((current) => [
-          ...current,
-          ...files.map((file) => ({
-            id: `document-${createAttachmentId()}`,
-            filename: file.name,
-            size: file.size,
-          })),
-        ]);
-      }
-      event.currentTarget.value = "";
-    },
-    [],
-  );
+  const handleDocumentInputChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []);
+    if (files.length > 0) {
+      setStagedDocuments((current) => [
+        ...current,
+        ...files.map((file) => ({
+          id: `document-${createAttachmentId()}`,
+          filename: file.name,
+          size: file.size,
+        })),
+      ]);
+    }
+    event.currentTarget.value = "";
+  }, []);
 
   const handleRemoveFile = useCallback(
     (id: string) => {
@@ -164,9 +147,7 @@ export function WorkspaceAgentInputBar({
   );
 
   return (
-    <div
-      className={cn("mx-auto flex w-full max-w-175 flex-col gap-3", className)}
-    >
+    <div className={cn("mx-auto flex w-full max-w-175 flex-col gap-3", className)}>
       <input
         ref={fileInputRef}
         type="file"
@@ -178,9 +159,7 @@ export function WorkspaceAgentInputBar({
       {runtimeWarning ? (
         <Alert className="border-amber-500/25 bg-amber-500/5 text-foreground rounded-lg">
           <TriangleAlert className="text-amber-500 size-4" />
-          <AlertTitle className="text-sm font-medium">
-            {runtimeWarning.title}
-          </AlertTitle>
+          <AlertTitle className="text-sm font-medium">{runtimeWarning.title}</AlertTitle>
           <AlertDescription>
             <div className="mt-1 flex flex-col gap-3">
               <div className="flex items-start justify-between gap-4">
@@ -218,10 +197,7 @@ export function WorkspaceAgentInputBar({
         onSend={handleSend}
         rightActions={
           <>
-            <ExecutionModeToggle
-              value={executionMode}
-              onChange={onExecutionModeChange}
-            />
+            <ExecutionModeToggle value={executionMode} onChange={onExecutionModeChange} />
             <ModelPicker
               models={activeModelOptions(activeModels)}
               value="planner"

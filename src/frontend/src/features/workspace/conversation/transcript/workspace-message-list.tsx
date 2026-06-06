@@ -70,9 +70,7 @@ export function WorkspaceMessageList({
   showStatusBar = true,
   className,
 }: WorkspaceMessageListProps) {
-  const selectedAssistantTurnId = useWorkspaceUiStore(
-    (state) => state.selectedAssistantTurnId,
-  );
+  const selectedAssistantTurnId = useWorkspaceUiStore((state) => state.selectedAssistantTurnId);
   const agentMessages = useMemo(
     () =>
       toAgentChatMessages(messages, {
@@ -81,11 +79,8 @@ export function WorkspaceMessageList({
       }),
     [messages, onResolveClarification, onResolveHitl],
   );
-  const lastUserIndex = messages.findLastIndex(
-    (message) => message.type === "user",
-  );
-  const lastUserMessageId =
-    lastUserIndex >= 0 ? (messages[lastUserIndex]?.id ?? null) : null;
+  const lastUserIndex = messages.findLastIndex((message) => message.type === "user");
+  const lastUserMessageId = lastUserIndex >= 0 ? (messages[lastUserIndex]?.id ?? null) : null;
   const activeTurnAssistantMessageId =
     lastUserIndex >= 0
       ? (messages
@@ -97,19 +92,11 @@ export function WorkspaceMessageList({
   useEffect(() => {
     if (!selectedAssistantTurnId || !lastUserMessageId) return;
     const pendingTurnId = buildPendingAssistantTurnId(lastUserMessageId);
-    if (
-      selectedAssistantTurnId !== pendingTurnId ||
-      !activeTurnAssistantMessageId
-    )
-      return;
+    if (selectedAssistantTurnId !== pendingTurnId || !activeTurnAssistantMessageId) return;
     useWorkspaceUiStore.setState({
       selectedAssistantTurnId: activeTurnAssistantMessageId,
     });
-  }, [
-    activeTurnAssistantMessageId,
-    lastUserMessageId,
-    selectedAssistantTurnId,
-  ]);
+  }, [activeTurnAssistantMessageId, lastUserMessageId, selectedAssistantTurnId]);
 
   const status = chatStatus(isTyping);
   const inputSlot = useMemo(
@@ -155,9 +142,7 @@ export function WorkspaceMessageList({
     const selectedLabels = (answer.selectedIds ?? []).map(
       (id) => question.options?.find((option) => option.id === id)?.label ?? id,
     );
-    const text = [selectedLabels.join(", "), answer.text]
-      .filter(Boolean)
-      .join(" - ");
+    const text = [selectedLabels.join(", "), answer.text].filter(Boolean).join(" - ");
     if (!text) return;
     if (target?.type === "hitl") {
       onResolveHitl(toolCallId, text);
@@ -170,14 +155,9 @@ export function WorkspaceMessageList({
 
   if (messages.length === 0 && showEmptyState) {
     return (
-      <div
-        className={cn("flex h-full min-h-0 flex-col bg-background", className)}
-      >
+      <div className={cn("flex h-full min-h-0 flex-col bg-background", className)}>
         <div className="flex min-h-0 flex-1 items-center justify-center px-4 py-4">
-          <WorkspaceChatEmptyState
-            isMobile={isMobile}
-            onSuggestionClick={onSuggestionClick}
-          />
+          <WorkspaceChatEmptyState isMobile={isMobile} onSuggestionClick={onSuggestionClick} />
         </div>
         <AgentChat
           messages={agentMessages}

@@ -9,7 +9,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any
+from typing import Any, cast
 
 from fleet_rlm.integrations.config._env_utils import env_bool as _env_bool
 
@@ -152,9 +152,15 @@ def _flat_trajectory_indices(raw: dict[str, Any]) -> list[int]:
     return sorted(indices)
 
 
+def _coerce_step_dict(step: dict[Any, Any], index: int) -> dict[str, Any]:
+    step_dict = dict(cast(dict[str, Any], step))
+    step_dict.setdefault("index", index)
+    return step_dict
+
+
 def _coerce_trajectory_steps(raw: Any) -> list[dict[str, Any]]:
     if isinstance(raw, list):
-        return [dict(step, index=step.get("index", index)) for index, step in enumerate(raw) if isinstance(step, dict)]
+        return [_coerce_step_dict(step, index) for index, step in enumerate(raw) if isinstance(step, dict)]
 
     if not isinstance(raw, dict):
         return []
@@ -162,11 +168,7 @@ def _coerce_trajectory_steps(raw: Any) -> list[dict[str, Any]]:
     for key in ("trajectory", "steps"):
         nested = raw.get(key)
         if isinstance(nested, list):
-            return [
-                dict(step, index=step.get("index", index))
-                for index, step in enumerate(nested)
-                if isinstance(step, dict)
-            ]
+            return [_coerce_step_dict(step, index) for index, step in enumerate(nested) if isinstance(step, dict)]
 
     steps: list[dict[str, Any]] = []
     for index in _flat_trajectory_indices(raw):

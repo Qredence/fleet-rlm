@@ -123,10 +123,8 @@ export function WorkspaceScreen() {
         executionMode,
         runtimeMode,
         repoUrl: inferredRepoContext?.repoUrl,
-        repoRef:
-          inferredRepoContext?.repoRefCandidate ?? inferredRepoContext?.repoRef,
-        contextPaths:
-          inferredContextPaths.length > 0 ? inferredContextPaths : undefined,
+        repoRef: inferredRepoContext?.repoRefCandidate ?? inferredRepoContext?.repoRef,
+        contextPaths: inferredContextPaths.length > 0 ? inferredContextPaths : undefined,
       });
     },
     [
@@ -142,15 +140,11 @@ export function WorkspaceScreen() {
     ],
   );
 
-  const {
-    sessionRevision,
-    requestedConversationId,
-    clearRequestedConversation,
-  } = useWorkspaceUiStore();
+  const { sessionRevision, requestedConversationId, clearRequestedConversation } =
+    useWorkspaceUiStore();
 
   // Chat history
-  const { saveConversation, loadConversation: loadConv } =
-    useChatHistoryStore();
+  const { saveConversation, loadConversation: loadConv } = useChatHistoryStore();
 
   // ── Auto-save on session change ──────────────────────────────────
   // When sessionRevision increments (newSession() called), save the current
@@ -194,16 +188,8 @@ export function WorkspaceScreen() {
       return;
     }
 
-    if (
-      messagesRef.current.length > 0 &&
-      messagesRef.current !== conversation.messages
-    ) {
-      saveConversation(
-        messagesRef.current,
-        phaseRef.current,
-        undefined,
-        turnArtifactsRef.current,
-      );
+    if (messagesRef.current.length > 0 && messagesRef.current !== conversation.messages) {
+      saveConversation(messagesRef.current, phaseRef.current, undefined, turnArtifactsRef.current);
     }
 
     loadConversation(conversation);

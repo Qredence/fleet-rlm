@@ -17,7 +17,13 @@ from typing import TYPE_CHECKING, Any
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 
 from .sanitizer import sanitize_event_payload
-from .step_builder_extractors import ExecutionStepType, _derive_lane_key, _tool_step_type
+from .step_builder_extractors import (
+    ExecutionActorKind,
+    ExecutionStepType,
+    _derive_lane_key,
+    _map_actor_kind_text,
+    _tool_step_type,
+)
 
 if TYPE_CHECKING:
     from .step_builder import ExecutionStepBuilder
@@ -118,7 +124,8 @@ def project_graph(event: RuntimeEvent, builder: ExecutionStepBuilder) -> Any:
     actor_id = ctx.actor_id if ctx else None
     parent_id_hint = ctx.parent_id if ctx else None
 
-    actor_kind: str = actor_kind_raw or "unknown"
+    mapped_actor_kind = _map_actor_kind_text(actor_kind_raw) if actor_kind_raw else None
+    actor_kind: ExecutionActorKind = mapped_actor_kind or "unknown"
     if actor_kind == "unknown" and depth is None:
         actor_kind = "root_rlm"
         depth = 0

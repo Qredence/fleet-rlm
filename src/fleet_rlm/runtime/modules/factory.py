@@ -7,8 +7,10 @@ from typing import Any
 
 import dspy
 
+_DSPY_RLM_BASE: Any = dspy.RLM
 
-class _NoCallbackRLM(dspy.RLM):
+
+class _NoCallbackRLM(_DSPY_RLM_BASE):
     """RLM variant for REPL-only tasks where host semantic callbacks are disabled."""
 
     def _build_signatures(self) -> tuple[Any, Any]:

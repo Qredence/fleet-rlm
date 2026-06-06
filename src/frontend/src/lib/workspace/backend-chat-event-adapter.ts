@@ -1,7 +1,4 @@
-import type {
-  ChatMessage,
-  ChatRenderPart,
-} from "@/lib/workspace/workspace-types";
+import type { ChatMessage, ChatRenderPart } from "@/lib/workspace/workspace-types";
 import type { WsServerEvent, WsServerMessage } from "@/lib/rlm-api";
 import { createLocalId } from "@/lib/id";
 import { QueryClient } from "@tanstack/react-query";
@@ -66,10 +63,7 @@ function ensureStreamingAssistant(messages: ChatMessage[]): ChatMessage[] {
   ];
 }
 
-function appendAssistantToken(
-  messages: ChatMessage[],
-  token: string,
-): ChatMessage[] {
+function appendAssistantToken(messages: ChatMessage[], token: string): ChatMessage[] {
   if (!token) return messages;
   const withAssistant = ensureStreamingAssistant(messages);
   const idx = latestStreamingAssistantIndex(withAssistant);
@@ -122,10 +116,7 @@ function finishReasoning(messages: ChatMessage[]): ChatMessage[] {
   return updated ? next : messages;
 }
 
-function completeAssistant(
-  messages: ChatMessage[],
-  text: string,
-): ChatMessage[] {
+function completeAssistant(messages: ChatMessage[], text: string): ChatMessage[] {
   const idx = latestStreamingAssistantIndex(messages);
 
   if (idx >= 0) {
@@ -161,13 +152,7 @@ function preferredFinalArtifactText(value: unknown): string | undefined {
   const record = asRecord(value);
   if (!record) return undefined;
 
-  for (const key of [
-    "final_markdown",
-    "summary",
-    "text",
-    "content",
-    "message",
-  ]) {
+  for (const key of ["final_markdown", "summary", "text", "content", "message"]) {
     const candidate = asOptionalText(record[key]);
     if (candidate) return candidate;
   }
@@ -180,48 +165,30 @@ function preferredFinalArtifactText(value: unknown): string | undefined {
   return undefined;
 }
 
-function resolveFinalAssistantText(
-  text: string,
-  payload?: Record<string, unknown>,
-): string {
-  const preferred = preferredFinalArtifactText(
-    payload?.final_artifact ?? payload?.finalArtifact,
-  );
+function resolveFinalAssistantText(text: string, payload?: Record<string, unknown>): string {
+  const preferred = preferredFinalArtifactText(payload?.final_artifact ?? payload?.finalArtifact);
 
   return preferred ?? text;
 }
 
-function readGuardrailWarnings(
-  payload: Record<string, unknown> | undefined,
-): string[] {
+function readGuardrailWarnings(payload: Record<string, unknown> | undefined): string[] {
   const raw = payload?.guardrail_warnings;
   if (!Array.isArray(raw)) return [];
-  return raw
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean);
+  return raw.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
 }
 
 function canonicalSummaryPayload(
   payload: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
-  return asRecord(
-    payload?.run_summary ?? payload?.runSummary ?? payload?.summary,
-  );
+  return asRecord(payload?.run_summary ?? payload?.runSummary ?? payload?.summary);
 }
 
-function canonicalCompletionStatus(
-  payload: Record<string, unknown> | undefined,
-): string {
+function canonicalCompletionStatus(payload: Record<string, unknown> | undefined): string {
   const summary = canonicalSummaryPayload(payload);
-  return (
-    asOptionalText(summary?.status ?? payload?.status)?.toLowerCase() ?? ""
-  );
+  return asOptionalText(summary?.status ?? payload?.status)?.toLowerCase() ?? "";
 }
 
-function canonicalStepText(
-  step: Record<string, unknown>,
-  fallback: string,
-): string {
+function canonicalStepText(step: Record<string, unknown>, fallback: string): string {
   return (
     asOptionalText(step.label) ??
     asOptionalText(step.output) ??
@@ -230,22 +197,17 @@ function canonicalStepText(
   );
 }
 
-function routingStatusText(
-  text: string,
-  payload?: Record<string, unknown>,
-): string {
+function routingStatusText(text: string, payload?: Record<string, unknown>): string {
   const selectedSkills = Array.isArray(payload?.selected_skills)
     ? payload.selected_skills.map((item) => String(item)).filter(Boolean)
     : [];
   const routingDecision = asOptionalText(payload?.routing_decision);
   const sourceUrl = asOptionalText(payload?.source_url);
-  if (selectedSkills.length === 0 && !routingDecision && !sourceUrl)
-    return text;
+  if (selectedSkills.length === 0 && !routingDecision && !sourceUrl) return text;
 
   const parts = [text.trim()].filter(Boolean);
   if (routingDecision) parts.push(`route ${routingDecision}`);
-  if (selectedSkills.length > 0)
-    parts.push(`skills ${selectedSkills.join(", ")}`);
+  if (selectedSkills.length > 0) parts.push(`skills ${selectedSkills.join(", ")}`);
   if (sourceUrl) parts.push(`source ${sourceUrl}`);
   return parts.join(" | ");
 }
@@ -287,14 +249,9 @@ function applyCanonicalExecutionStep(
   }
   if (stepType === "llm") {
     const output = asRecord(step.output);
-    const token =
-      typeof output?.text === "string"
-        ? output.text
-        : asOptionalText(step.output);
+    const token = typeof output?.text === "string" ? output.text : asOptionalText(step.output);
     const reasoning =
-      typeof step.label === "string"
-        ? step.label
-        : asOptionalText(output?.reasoning ?? step.input);
+      typeof step.label === "string" ? step.label : asOptionalText(output?.reasoning ?? step.input);
     return {
       messages: token
         ? appendAssistantToken(messages, token)
@@ -345,44 +302,27 @@ function applyCanonicalExecutionCompleted(
   if (status === "failed" || status === "error") {
     let next = finishReasoning(messages);
     next = finalizeTraceParts(next);
-    next = appendSystem(
-      next,
-      `Backend error: ${text || "Unknown server error."}`,
-    );
+    next = appendSystem(next, `Backend error: ${text || "Unknown server error."}`);
     return { messages: next, terminal: true, errored: true };
   }
 
-  let next = completeAssistant(
-    messages,
-    resolveFinalAssistantText(text, payload),
-  );
+  let next = completeAssistant(messages, resolveFinalAssistantText(text, payload));
   next = finishReasoning(next);
   next = finalizeTraceParts(next);
   next = appendFinalTrajectoryThoughts(next, payload);
   next = appendFinalTrajectoryToolRows(next, payload);
 
   const finalReasoning =
-    typeof payload?.final_reasoning === "string"
-      ? payload.final_reasoning.trim()
-      : "";
+    typeof payload?.final_reasoning === "string" ? payload.final_reasoning.trim() : "";
   if (finalReasoning) {
-    next = appendReasoningEvent(
-      next,
-      finalReasoning,
-      "summary",
-      payload,
-      "final_reasoning",
-    );
+    next = appendReasoningEvent(next, finalReasoning, "summary", payload, "final_reasoning");
   }
 
   next = attachFinalReferences(next, payload);
 
   const warnings = readGuardrailWarnings(payload);
   if (warnings.length > 0) {
-    next = appendSystem(
-      next,
-      `Guardrail warnings:\n- ${warnings.join("\n- ")}`,
-    );
+    next = appendSystem(next, `Guardrail warnings:\n- ${warnings.join("\n- ")}`);
   }
 
   return { messages: next, terminal: true, errored: false };
@@ -473,33 +413,21 @@ function appendFinalTrajectoryThoughts(
 
   return steps.reduce<ChatMessage[]>((acc, step) => {
     if (!step.thought) return acc;
-    return appendReasoningEvent(
-      acc,
-      step.thought,
-      "summary",
-      payload,
-      `thought_${step.index}`,
-    );
+    return appendReasoningEvent(acc, step.thought, "summary", payload, `thought_${step.index}`);
   }, messages);
 }
 
 function currentTurnMessages(messages: ChatMessage[]): ChatMessage[] {
-  const lastUserIndex = messages.findLastIndex(
-    (message) => message.type === "user",
-  );
+  const lastUserIndex = messages.findLastIndex((message) => message.type === "user");
   return lastUserIndex >= 0 ? messages.slice(lastUserIndex + 1) : messages;
 }
 
-function hasLiveToolOrSandboxTraceForCurrentTurn(
-  messages: ChatMessage[],
-): boolean {
+function hasLiveToolOrSandboxTraceForCurrentTurn(messages: ChatMessage[]): boolean {
   return currentTurnMessages(messages).some(
     (message) =>
       message.type === "trace" &&
       message.traceSource === "live" &&
-      message.renderParts?.some(
-        (part) => part.kind === "tool" || part.kind === "sandbox",
-      ),
+      message.renderParts?.some((part) => part.kind === "tool" || part.kind === "sandbox"),
   );
 }
 
@@ -556,9 +484,7 @@ function finalizeTraceParts(messages: ChatMessage[]): ChatMessage[] {
             items: part.items.map((it) => ({ ...it, completed: true })),
           };
         case "task":
-          return part.status === "in_progress"
-            ? { ...part, status: "completed" as const }
-            : part;
+          return part.status === "in_progress" ? { ...part, status: "completed" as const } : part;
         case "tool":
         case "sandbox":
           return part.state === "running" || part.state === "input-streaming"
@@ -579,12 +505,7 @@ function resolveHitlByMessageId(
 ): ChatMessage[] {
   let changed = false;
   const next = messages.map((msg) => {
-    if (
-      changed ||
-      msg.id !== messageId ||
-      msg.type !== "hitl" ||
-      !msg.hitlData
-    ) {
+    if (changed || msg.id !== messageId || msg.type !== "hitl" || !msg.hitlData) {
       return msg;
     }
     changed = true;
@@ -600,18 +521,10 @@ function resolveHitlByMessageId(
   return changed ? next : messages;
 }
 
-function rollbackHitlByMessageId(
-  messages: ChatMessage[],
-  messageId: string,
-): ChatMessage[] {
+function rollbackHitlByMessageId(messages: ChatMessage[], messageId: string): ChatMessage[] {
   let changed = false;
   const next = messages.map((msg) => {
-    if (
-      changed ||
-      msg.id !== messageId ||
-      msg.type !== "hitl" ||
-      !msg.hitlData
-    ) {
+    if (changed || msg.id !== messageId || msg.type !== "hitl" || !msg.hitlData) {
       return msg;
     }
     changed = true;
@@ -627,10 +540,7 @@ function rollbackHitlByMessageId(
   return changed ? next : messages;
 }
 
-function applyEvent(
-  messages: ChatMessage[],
-  frame: WsServerEvent,
-): ApplyFrameResult {
+function applyEvent(messages: ChatMessage[], frame: WsServerEvent): ApplyFrameResult {
   const { kind, text, payload } = frame.data;
 
   switch (kind) {
@@ -665,11 +575,8 @@ function applyEvent(
       const command = asOptionalText(payload?.command);
       const result = asRecord(payload?.result);
       const messageId = asOptionalText(result?.message_id ?? result?.messageId);
-      const resolution =
-        asOptionalText(result?.resolution) ??
-        asOptionalText(result?.action_label);
-      const succeeded =
-        asOptionalText(result?.status)?.toLowerCase() !== "error";
+      const resolution = asOptionalText(result?.resolution) ?? asOptionalText(result?.action_label);
+      const succeeded = asOptionalText(result?.status)?.toLowerCase() !== "error";
       let next = messages;
       if (succeeded && command === "resolve_hitl" && messageId && resolution) {
         next = resolveHitlByMessageId(next, messageId, resolution);
@@ -683,8 +590,7 @@ function applyEvent(
           {
             kind: "status_note",
             tone: succeeded ? "success" : "error",
-            text:
-              text || (succeeded ? "Action acknowledged" : "Action rejected"),
+            text: text || (succeeded ? "Action acknowledged" : "Action rejected"),
           },
           text || (succeeded ? "Action acknowledged" : "Action rejected"),
         ),
@@ -707,9 +613,7 @@ export function applyWsFrameToMessages(
   _queryClient?: QueryClient,
 ): ApplyFrameResult {
   if (frame.type === "error") {
-    const next = finalizeTraceParts(
-      appendSystem(messages, `Backend error: ${frame.message}`),
-    );
+    const next = finalizeTraceParts(appendSystem(messages, `Backend error: ${frame.message}`));
     return { messages: finishReasoning(next), terminal: true, errored: true };
   }
 

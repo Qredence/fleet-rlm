@@ -4,11 +4,7 @@ import { memo, useMemo, useState } from "react";
 import { Check, ChevronDown, Cpu, Settings2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 import { cn } from "../utils/cn";
 
@@ -44,15 +40,9 @@ export const ModelPicker = memo(function ModelPicker({
   const [internalValue, setInternalValue] = useState(defaultValue);
   const [open, setOpen] = useState(false);
   const activeId = isControlled ? value : internalValue;
-  const enabledModels = useMemo(
-    () => models.filter((model) => !model.disabled),
-    [models],
-  );
+  const enabledModels = useMemo(() => models.filter((model) => !model.disabled), [models]);
   const activeModel =
-    models.find((model) => model.id === activeId) ??
-    enabledModels[0] ??
-    models[0] ??
-    null;
+    models.find((model) => model.id === activeId) ?? enabledModels[0] ?? models[0] ?? null;
 
   if (!activeModel) return null;
 
@@ -63,8 +53,7 @@ export const ModelPicker = memo(function ModelPicker({
       aria-label={`Active model: ${activeModel.label}`}
       className={cn(
         "inline-flex h-7 min-w-0 max-w-45 items-center gap-1.5 rounded-[6px] px-2 text-[12px] leading-4 text-foreground/60 transition-colors hover:bg-foreground/6 hover:text-foreground",
-        disabled &&
-          "cursor-not-allowed opacity-60 hover:bg-transparent hover:text-foreground/60",
+        disabled && "cursor-not-allowed opacity-60 hover:bg-transparent hover:text-foreground/60",
         className,
       )}
       disabled={disabled}
@@ -106,18 +95,12 @@ export const ModelPicker = memo(function ModelPicker({
               >
                 <Cpu className="mt-0.5 size-3.5 shrink-0 text-foreground/50" />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">
-                    {model.label}
-                  </span>
+                  <span className="block truncate font-medium">{model.label}</span>
                   {model.description ? (
-                    <span className="block truncate text-foreground/40">
-                      {model.description}
-                    </span>
+                    <span className="block truncate text-foreground/40">{model.description}</span>
                   ) : null}
                 </span>
-                {isActive && (
-                  <Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" />
-                )}
+                {isActive && <Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" />}
               </button>
             );
           })}

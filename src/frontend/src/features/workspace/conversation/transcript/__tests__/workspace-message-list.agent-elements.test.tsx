@@ -103,8 +103,8 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
       { onResolveHitl },
     );
 
-    const approveButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.includes("Approve"),
+    const approveButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Approve"),
     );
     expect(approveButton).toBeTruthy();
 
@@ -112,8 +112,8 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
       approveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    const sendButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.includes("Send"),
+    const sendButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Send"),
     );
     expect(sendButton).toBeTruthy();
 
@@ -141,9 +141,7 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
           },
           {
             kind: "reasoning",
-            parts: [
-              { type: "text", text: "I should inspect the repository files." },
-            ],
+            parts: [{ type: "text", text: "I should inspect the repository files." }],
             isStreaming: false,
           },
           {
@@ -289,24 +287,21 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
       attachButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    const addDocumentButton = Array.from(
-      document.body.querySelectorAll("button"),
-    ).find((button) => button.textContent?.includes("Add document"));
-    const connectorsButton = Array.from(
-      document.body.querySelectorAll("button"),
-    ).find((button) => button.textContent?.includes("Connectors"));
+    const addDocumentButton = Array.from(document.body.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Add document"),
+    );
+    const connectorsButton = Array.from(document.body.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Connectors"),
+    );
     expect(addDocumentButton).toBeTruthy();
     expect(connectorsButton).toBeTruthy();
     expect(connectorsButton).toHaveProperty("disabled", true);
 
     act(() => {
-      addDocumentButton?.dispatchEvent(
-        new MouseEvent("click", { bubbles: true }),
-      );
+      addDocumentButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    const fileInput =
-      container.querySelector<HTMLInputElement>('input[type="file"]');
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
     expect(fileInput).toBeTruthy();
     Object.defineProperty(fileInput, "files", {
       configurable: true,
@@ -335,9 +330,7 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
 
     expect(container.textContent).toContain("openai/gemini-3-flash-preview");
 
-    const modelButton = container.querySelector(
-      'button[aria-label^="Active model"]',
-    );
+    const modelButton = container.querySelector('button[aria-label^="Active model"]');
     expect(modelButton).toBeTruthy();
 
     act(() => {
@@ -346,9 +339,9 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
 
     expect(document.body.textContent).toContain("openai/gemini-3-pro-preview");
 
-    const settingsButton = Array.from(
-      document.body.querySelectorAll("button"),
-    ).find((button) => button.textContent?.includes("Model settings"));
+    const settingsButton = Array.from(document.body.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Model settings"),
+    );
     expect(settingsButton).toBeTruthy();
 
     act(() => {
@@ -361,12 +354,9 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
   });
 
   it("renders the pending planning loader without a lazy component crash", async () => {
-    const { container, root } = mount(
-      [{ id: "u1", type: "user", content: "start working" }],
-      {
-        isTyping: true,
-      },
-    );
+    const { container, root } = mount([{ id: "u1", type: "user", content: "start working" }], {
+      isTyping: true,
+    });
 
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
