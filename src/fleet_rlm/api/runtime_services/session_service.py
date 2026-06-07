@@ -147,7 +147,14 @@ class SessionService:
             user_id = string_or_default(payload_dict.get("user_id"), "anonymous")
             session = payload_dict.get("session", {})
             session_state = session.get("state", {}) if isinstance(session, Mapping) else {}
-            history = session_state.get("history", []) if isinstance(session_state, Mapping) else []
+            history = []
+            if isinstance(session_state, Mapping):
+                raw_history = session_state.get("history")
+                raw_turns = session_state.get("turns")
+                if isinstance(raw_turns, list):
+                    history = raw_turns
+                elif isinstance(raw_history, list):
+                    history = raw_history
             documents = session_state.get("documents", {}) if isinstance(session_state, Mapping) else {}
             summaries.append(
                 SessionStateSummary(

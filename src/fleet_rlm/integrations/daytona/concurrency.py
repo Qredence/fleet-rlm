@@ -73,19 +73,36 @@ class SandboxUsageStats(BaseModel):
 # Module-level semaphore state
 # ---------------------------------------------------------------------------
 
-_GLOBAL_SEMAPHORE: asyncio.BoundedSemaphore | None = None
+
+class _FleetSandboxSemaphore(asyncio.Semaphore):
+    """Semaphore with a configurable release bound for reconciled state."""
+
+    def __init__(self, *, value: int, bound: int) -> None:
+        super().__init__(value)
+        self._fleet_bound = bound
+
+    def release(self) -> None:
+        if self._value >= self._fleet_bound:
+            raise ValueError("BoundedSemaphore released too many times")
+        super().release()
+
+
+_GLOBAL_SEMAPHORE: asyncio.Semaphore | None = None
 _SEMAPHORE_LOCK = threading.Lock()
 _INITIALIZED_CONFIG: ConcurrencyConfig | None = None
 
 
-async def _get_global_semaphore() -> asyncio.BoundedSemaphore:
+async def _get_global_semaphore() -> asyncio.Semaphore:
     """Get or initialize the global sandbox semaphore lazily."""
     global _GLOBAL_SEMAPHORE, _INITIALIZED_CONFIG
     if _GLOBAL_SEMAPHORE is None:
         with _SEMAPHORE_LOCK:
             if _GLOBAL_SEMAPHORE is None:
                 config = ConcurrencyConfig.from_env()
-                _GLOBAL_SEMAPHORE = asyncio.BoundedSemaphore(config.max_sandboxes)
+                _GLOBAL_SEMAPHORE = _FleetSandboxSemaphore(
+                    value=config.max_sandboxes,
+                    bound=config.max_sandboxes,
+                )
                 _INITIALIZED_CONFIG = config
                 logger.info(
                     "Initialized global sandbox semaphore with limit=%d",
@@ -156,6 +173,36 @@ def release_sandbox_slot_for(sandbox: Any) -> None:
         return
     release_sandbox_slot()
     _set_sandbox_attr(sandbox, "_fleet_slot_released", True)
+
+
+def reconcile_sandbox_slots(*, provider_active_count: int) -> SandboxUsageStats:
+    """Reset local slot accounting from provider-visible Fleet sandbox count.
+
+    This is intentionally a recovery tool, not the normal release path. It is
+    used after slot acquisition times out and the Daytona provider reports fewer
+    Fleet-managed sandboxes than the in-process semaphore believes are active.
+    Waiting acquirers should retry after reconciliation because this replaces
+    the process-local semaphore instead of mutating its internal counters.
+    """
+    global _GLOBAL_SEMAPHORE, _INITIALIZED_CONFIG
+    with _SEMAPHORE_LOCK:
+        if _INITIALIZED_CONFIG is None:
+            _INITIALIZED_CONFIG = ConcurrencyConfig.from_env()
+        limit = _INITIALIZED_CONFIG.max_sandboxes
+        clamped_active = max(0, min(int(provider_active_count), limit))
+        available = max(0, limit - clamped_active)
+        _GLOBAL_SEMAPHORE = _FleetSandboxSemaphore(value=available, bound=limit)
+        logger.warning(
+            "Reconciled Fleet sandbox slots from provider state (provider_active=%d, limit=%d, available=%d)",
+            clamped_active,
+            limit,
+            available,
+        )
+        return SandboxUsageStats(
+            limit=limit,
+            available_slots=available,
+            active_count=clamped_active,
+        )
 
 
 def _set_sandbox_attr(sandbox: Any, name: str, value: Any) -> None:

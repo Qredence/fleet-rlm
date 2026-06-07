@@ -131,4 +131,29 @@ describe("parseWsServerFrame", () => {
     expect(frame.data.kind).toBe("execution_step");
     expect(frame.data.payload?.step).toMatchObject({ type: "output" });
   });
+
+  it("preserves raw RLM repl execution steps for chat rendering", () => {
+    const frame = parseWsServerFrame({
+      type: "execution_step",
+      timestamp: 1710849601,
+      step: {
+        id: "step-rlm-repl",
+        type: "repl",
+        label: "repl_result",
+        input: { code: "print(document_text[:20])" },
+        output: { stdout: "DSPy documentation" },
+        timestamp: 1710849602,
+      },
+    });
+
+    expect(frame).toBeTruthy();
+    if (!frame || frame.type !== "event") return;
+    expect(frame.data.kind).toBe("execution_step");
+    expect(frame.data.text).toBe("repl_result");
+    expect(frame.data.payload?.step).toMatchObject({
+      type: "repl",
+      input: { code: "print(document_text[:20])" },
+      output: { stdout: "DSPy documentation" },
+    });
+  });
 });

@@ -6,10 +6,10 @@ import { BashTool } from "./bash-tool";
 import { EditTool } from "./edit-tool";
 import { TodoTool } from "./todo-tool";
 import { PlanTool } from "./plan-tool";
-import { ToolGroup } from "./tool-group";
 import { McpTool, unwrapMcpOutput } from "./mcp-tool";
 import { ThinkingTool } from "./thinking-tool";
 import { SearchTool } from "./search-tool";
+import { SubagentTool } from "./subagent-tool";
 import { QuestionTool } from "../question/question-tool";
 import type { CustomToolRendererProps } from "../types";
 
@@ -54,20 +54,8 @@ export const ToolRenderer = memo(function ToolRenderer({
     case "tool-Question":
       return <QuestionTool part={part} chatStatus={chatStatus} />;
     case "tool-Task":
-    case "tool-Agent": {
-      const labelBase = part.type === "tool-Agent" ? "Agent" : "Task";
-      return (
-        <ToolGroup
-          part={part}
-          nestedTools={nestedTools}
-          chatStatus={chatStatus}
-          completeLabel={`${labelBase} completed`}
-          shimmerLabel={`Running ${labelBase.toLowerCase()}`}
-          interruptedLabel={`${labelBase} interrupted`}
-          defaultOpen={false}
-        />
-      );
-    }
+    case "tool-Agent":
+      return <SubagentTool part={part} nestedTools={nestedTools} chatStatus={chatStatus} />;
     case "tool-Thinking":
       return <ThinkingTool part={part} />;
   }

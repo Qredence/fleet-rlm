@@ -34,6 +34,12 @@ interface WorkspaceMessageListProps {
     guidance: string[];
     onOpenSettings: () => void;
   };
+  activeModels?: {
+    planner?: string | null;
+    delegate?: string | null;
+    delegate_small?: string | null;
+  };
+  onOpenModelSettings?: () => void;
   showStatusBar?: boolean;
   className?: string;
 }
@@ -59,6 +65,8 @@ export function WorkspaceMessageList({
   canSubmit = true,
   placeholder,
   runtimeWarning,
+  activeModels,
+  onOpenModelSettings,
   showStatusBar = true,
   className,
 }: WorkspaceMessageListProps) {
@@ -101,12 +109,23 @@ export function WorkspaceMessageList({
             placeholder={placeholder ?? props.placeholder}
             executionMode={executionMode}
             onExecutionModeChange={onExecutionModeChange}
+            activeModels={activeModels}
+            onOpenModelSettings={onOpenModelSettings}
             showStatusBar={showStatusBar}
             runtimeWarning={runtimeWarning}
           />
         );
       },
-    [canSubmit, executionMode, onExecutionModeChange, placeholder, runtimeWarning, showStatusBar],
+    [
+      activeModels,
+      canSubmit,
+      executionMode,
+      onExecutionModeChange,
+      onOpenModelSettings,
+      placeholder,
+      runtimeWarning,
+      showStatusBar,
+    ],
   );
 
   const handleQuestionAnswer = ({

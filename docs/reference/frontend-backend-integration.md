@@ -124,6 +124,26 @@ The frontend keeps the following runtime controls aligned with backend requests:
 - `context_paths`
 - `batch_concurrency`
 
+When `execution_mode` is `auto`, prompts that combine a public HTTP(S) URL
+with documentation-analysis intent (`analyze`, `summarize`, `read`, `docs`, or
+`documentation`) route directly to the Daytona-backed RLM document path. The
+backend fetches the document through the redirect-validating document helpers
+and passes `source_url`, `document_text`, and `source_metadata` as separate
+variable-mode `dspy.RLM` inputs. That keeps large documentation bodies in REPL
+variables instead of folding them into the prompt text.
+`execution_mode="rlm_only"` still forces RLM execution, while
+`execution_mode="tools_only"` bypasses the automatic URL-to-RLM route.
+
+Fleet's RLM prompt envelope follows the Fast-RLM usage pattern for large
+variable-mode tasks: repeat the task at the top and bottom, keep bulk data in
+REPL variables, make available tools ordinary Python callables, and keep
+intermediate printed output bounded. The server runtime settings feed the chat
+agent's RLM wrappers directly:
+
+- `rlm_max_iterations` -> `dspy.RLM(max_iterations=...)`
+- `rlm_max_llm_calls` -> `dspy.RLM(max_llm_calls=...)`
+- `agent_max_output_chars` -> `dspy.RLM(max_output_chars=...)`
+
 The backend enriches frames with runtime context. The frontend treats these keys
 as stable when present:
 
@@ -138,6 +158,11 @@ as stable when present:
 - `sandbox_id`
 - `workspace_path`
 - `sandbox_transition`
+- `selected_skills`
+- `routing_decision`
+- `source_url`
+- `trajectory_index`
+- `rlm_limits`
 
 ### Transcript Stream
 
@@ -148,8 +173,14 @@ The frontend reduces frames into:
 - user and assistant messages
 - reasoning and trajectory rows
 - tool and sandbox cards
+- selected-skill and routing status rows
 - HITL / clarification cards
 - summary rows and warnings
+
+RLM trajectories that include `{reasoning, code, output}` are normalized into
+`execution_step` frames with `step.type="repl"`. The transcript renders these
+as compact expandable sandbox rows; large code/output payloads stay summarized
+in chat while the workbench receives the structured step payload.
 
 The adapter stack is:
 

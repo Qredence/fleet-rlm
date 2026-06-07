@@ -129,6 +129,52 @@ def _delete_scorer(delete_scorer: Any, *, name: str, experiment_id: str | None, 
     delete_scorer(name)
 
 
+def _get_scorer(mlflow: Any, *, name: str, experiment_id: str | None, version: str | None = None) -> Any:
+    get_scorer = getattr(getattr(mlflow, "genai", None), "get_scorer", None)
+    if not callable(get_scorer):
+        raise RuntimeError("mlflow.genai.get_scorer is not available in this MLflow version.")
+
+    parameters = inspect.signature(get_scorer).parameters
+    kwargs: dict[str, Any] = {"name": name}
+    if "experiment_id" in parameters:
+        kwargs["experiment_id"] = experiment_id
+    if "version" in parameters and version:
+        kwargs["version"] = int(version) if str(version).isdigit() else version
+    return get_scorer(**kwargs)
+
+
+def do_scorers_stop(args: argparse.Namespace) -> int:
+    mlflow, config, active_experiment_id = _configure_mlflow_tracking()
+    experiment_id = args.experiment_id or active_experiment_id
+    scorer = _get_scorer(mlflow, name=args.name, experiment_id=experiment_id)
+    stop_scorer = getattr(scorer, "stop", None)
+    if not callable(stop_scorer):
+        raise RuntimeError("This MLflow scorer does not expose stop().")
+    stop_scorer()
+    print(f"stopped_scorer={args.name}")
+    print(f"experiment={config.experiment}")
+    print(f"experiment_id={experiment_id or ''}")
+    return 0
+
+
+def do_scorers_start(args: argparse.Namespace) -> int:
+    mlflow, config, active_experiment_id = _configure_mlflow_tracking()
+    experiment_id = args.experiment_id or active_experiment_id
+    scorer = _get_scorer(mlflow, name=args.name, experiment_id=experiment_id)
+    start_scorer = getattr(scorer, "start", None)
+    if not callable(start_scorer):
+        raise RuntimeError("This MLflow scorer does not expose start().")
+
+    from mlflow.genai.scorers import ScorerSamplingConfig
+
+    start_scorer(sampling_config=ScorerSamplingConfig(sample_rate=args.sample_rate, filter_string=args.filter_string))
+    print(f"started_scorer={args.name}")
+    print(f"sample_rate={args.sample_rate}")
+    print(f"experiment={config.experiment}")
+    print(f"experiment_id={experiment_id or ''}")
+    return 0
+
+
 def do_scorers_delete(args: argparse.Namespace) -> int:
     if not args.yes:
         print("Refusing to delete scorer without --yes.")
@@ -198,6 +244,18 @@ def main() -> int:
     psl = scorer_subparsers.add_parser("list", help="List persisted scorers for the active MLflow experiment")
     psl.add_argument("--experiment-id", default=None)
     psl.set_defaults(func=do_scorers_list)
+
+    pss = scorer_subparsers.add_parser("stop", help="Stop a persisted scorer schedule without deleting it")
+    pss.add_argument("--name", required=True)
+    pss.add_argument("--experiment-id", default=None)
+    pss.set_defaults(func=do_scorers_stop)
+
+    psr = scorer_subparsers.add_parser("start", help="Start or resume a persisted scorer schedule")
+    psr.add_argument("--name", required=True)
+    psr.add_argument("--experiment-id", default=None)
+    psr.add_argument("--sample-rate", type=float, default=1.0)
+    psr.add_argument("--filter-string", default=None)
+    psr.set_defaults(func=do_scorers_start)
 
     psd = scorer_subparsers.add_parser("delete", help="Delete a persisted scorer by name")
     psd.add_argument("--name", required=True)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import logging
 
 import pytest
 
@@ -54,6 +55,26 @@ async def test_execution_event_emitter_delivers_events_to_matching_subscribers()
     assert len(websocket.sent_payloads) == 1
     assert websocket.sent_payloads[0]["run_id"] == "run-1"
     assert websocket.sent_payloads[0]["step"]["label"] == "Search code"  # ty: ignore[not-subscriptable]
+
+
+@pytest.mark.asyncio
+async def test_execution_event_emitter_does_not_warn_per_event(caplog):
+    events_module = importlib.import_module("fleet_rlm.api.events")
+
+    emitter = events_module.ExecutionEventEmitter()
+    event = events_module.ExecutionEvent(
+        type="execution_completed",
+        run_id="run-1",
+        workspace_id="workspace-a",
+        user_id="user-a",
+        session_id="session-a",
+        summary={"status": "ok"},
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await emitter.emit(event)
+
+    assert "EMITTING EVENT" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -133,7 +154,7 @@ def test_summarize_code_for_event_returns_stable_preview(monkeypatch):
 
 def test_startup_status_projects_to_canonical_execution_started_frame():
     persistence_module = importlib.import_module("fleet_rlm.api.runtime_services.chat_persistence")
-    stream_module = importlib.import_module("fleet_rlm.api.routers.ws.stream")
+    stream_module = importlib.import_module("fleet_rlm.api.routers.ws.stream_events")
 
     event = persistence_module.build_startup_status_event()
     frame = stream_module.build_stream_event_dict(event=event, payload=event.payload)
@@ -158,3 +179,33 @@ def test_backend_status_projects_to_canonical_execution_step_frame():
 
     assert frame["kind"] == "execution_step"
     assert frame["payload"]["source_type"] == "status"
+
+
+def test_runtime_trace_metadata_counts_structured_rlm_trajectory():
+    stream_module = importlib.import_module("fleet_rlm.api.routers.ws.stream_summary")
+
+    metadata = stream_module._runtime_trace_metadata(
+        {
+            "routing_decision": "url_document_rlm",
+            "selected_skills": ["long-context"],
+            "source_url": "https://dspy.ai",
+            "trajectory": {
+                "steps": [
+                    {
+                        "reasoning": "Inspect docs",
+                        "code": "print(document_text[:80])",
+                        "output": "DSPy docs",
+                    }
+                ]
+            },
+        }
+    )
+
+    assert metadata["fleet_rlm.routing_decision"] == "url_document_rlm"
+    assert metadata["fleet_rlm.selected_skills"] == "long-context"
+    assert metadata["fleet_rlm.source_url"] == "https://dspy.ai"
+    assert metadata["fleet_rlm.trajectory_steps"] == "1"
+    assert metadata["fleet_rlm.trajectory_has_reasoning"] == "true"
+    assert metadata["fleet_rlm.trajectory_has_tools"] == "true"
+    assert metadata["fleet_rlm.trajectory_has_repl"] == "true"
+    assert metadata["fleet_rlm.trajectory_has_outputs"] == "true"

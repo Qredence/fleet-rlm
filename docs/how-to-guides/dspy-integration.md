@@ -468,6 +468,16 @@ When MLflow is enabled, RLM execution automatically captures:
 - Reasoning trajectories
 - Timing and token usage
 
+For variable-mode `dspy.RLM` runs, Fleet records each REPL/code trajectory step
+as a child MLflow `TOOL` span named `repl_execute`, with bounded inputs and
+outputs. This keeps the MLflow trace tree aligned with the compact trace rows
+rendered in the chat surface.
+
+Fleet also records an `rlm_available_tools` `LLM` span that advertises the
+`repl_execute` schema through `mlflow.chat.tools`. MLflow tool-call judges use
+that schema as the available-tool set and then evaluate the concrete
+`repl_execute` `TOOL` spans as the calls that actually ran.
+
 ### Optimize with MIPROv2
 
 Use collected traces for DSPy optimization:

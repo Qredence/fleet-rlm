@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import logging
 import sys
 import threading
@@ -115,7 +116,11 @@ def test_warn_if_persisted_scorers_active_logs_actionable_warning(
 
     def list_scorers(*, experiment_id: str | None = None) -> list[object]:
         list_calls.append(experiment_id)
-        return [SimpleNamespace(name="Trace Judge"), {"scorer_name": "retired-scorer"}]
+        return [
+            SimpleNamespace(name="Trace Judge", status="STARTED", sample_rate=1.0),
+            {"scorer_name": "retired-scorer", "status": "STARTED", "sample_rate": 0.25},
+            SimpleNamespace(name="stopped-scorer", status="STOPPED", sample_rate=0.0),
+        ]
 
     fake_mlflow = SimpleNamespace(
         genai=SimpleNamespace(list_scorers=list_scorers),
@@ -132,8 +137,90 @@ def test_warn_if_persisted_scorers_active_logs_actionable_warning(
     assert list_calls == ["exp-123"]
     assert "Trace Judge" in caplog.text
     assert "retired-scorer" in caplog.text
+    assert "stopped-scorer" not in caplog.text
     assert "scripts/mlflow_cli.py scorers list" in caplog.text
     assert "FLEET_RLM_ENABLE_AUTO_ASSESSMENT" in caplog.text
+
+
+def test_persisted_scorer_names_uses_short_cache() -> None:
+    from fleet_rlm.integrations.observability import auto_assessment
+    from fleet_rlm.integrations.observability.auto_assessment import persisted_scorer_names
+    from fleet_rlm.integrations.observability.config import MlflowConfig
+
+    auto_assessment._PERSISTED_SCORER_CACHE = None
+    calls: list[str | None] = []
+
+    def list_scorers(*, experiment_id: str | None = None) -> list[object]:
+        calls.append(experiment_id)
+        return [SimpleNamespace(name="Trace Judge", status="STARTED", sample_rate=1.0)]
+
+    fake_mlflow = SimpleNamespace(
+        genai=SimpleNamespace(list_scorers=list_scorers),
+        get_experiment_by_name=lambda name: SimpleNamespace(experiment_id="exp-123"),
+    )
+    config = MlflowConfig(enable_auto_assessment=False, experiment="fleet-rlm-test")
+
+    assert persisted_scorer_names(config, mlflow=fake_mlflow) == ["Trace Judge"]
+    assert persisted_scorer_names(config, mlflow=fake_mlflow) == ["Trace Judge"]
+    assert calls == ["exp-123"]
+    auto_assessment._PERSISTED_SCORER_CACHE = None
+
+
+def test_persisted_scorer_names_ignores_stopped_scorers() -> None:
+    from fleet_rlm.integrations.observability import auto_assessment
+    from fleet_rlm.integrations.observability.auto_assessment import persisted_scorer_names
+    from fleet_rlm.integrations.observability.config import MlflowConfig
+
+    auto_assessment._PERSISTED_SCORER_CACHE = None
+
+    def list_scorers(*, experiment_id: str | None = None) -> list[object]:
+        return [
+            SimpleNamespace(name="active", status="ScorerStatus.STARTED", sample_rate=1.0),
+            SimpleNamespace(name="stopped", status="ScorerStatus.STOPPED", sample_rate=0.0),
+        ]
+
+    fake_mlflow = SimpleNamespace(
+        genai=SimpleNamespace(list_scorers=list_scorers),
+        get_experiment_by_name=lambda name: SimpleNamespace(experiment_id="exp-123"),
+    )
+
+    names = persisted_scorer_names(
+        MlflowConfig(enable_auto_assessment=False, experiment="fleet-rlm-test"),
+        mlflow=fake_mlflow,
+        cache_seconds=0,
+    )
+
+    assert names == ["active"]
+
+
+def test_import_mlflow_clears_partial_import_and_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.integrations.observability import mlflow_runtime
+
+    calls = 0
+    real_import = builtins.__import__
+    partial_mlflow = types.ModuleType("mlflow")
+    partial_child = types.ModuleType("mlflow.genai")
+    good_mlflow = types.ModuleType("mlflow")
+    good_mlflow.version = SimpleNamespace(VERSION="3.12.0")
+
+    def fake_import(name: str, *args: object, **kwargs: object) -> object:
+        nonlocal calls
+        if name != "mlflow":
+            return real_import(name, *args, **kwargs)
+        calls += 1
+        if calls == 1:
+            sys.modules["mlflow"] = partial_mlflow
+            sys.modules["mlflow.genai"] = partial_child
+            return partial_mlflow
+        sys.modules["mlflow"] = good_mlflow
+        return good_mlflow
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    assert mlflow_runtime._import_mlflow() is good_mlflow
+    assert calls == 2
+    assert sys.modules["mlflow"] is good_mlflow
+    assert "mlflow.genai" not in sys.modules
 
 
 def test_warn_if_persisted_scorers_active_skips_when_auto_assessment_enabled() -> None:

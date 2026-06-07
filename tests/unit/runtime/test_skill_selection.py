@@ -7,6 +7,20 @@ import dspy
 from fleet_rlm.runtime.modules.skill_selection import SkillSelectionModule
 
 
+def test_browser_interaction_skill_is_cataloged_and_keyword_selected() -> None:
+    from fleet_rlm.runtime.modules.skill_selection import AVAILABLE_SKILLS
+
+    module = SkillSelectionModule()
+    module._load_skills = MagicMock(return_value="[Skill: browser-interaction]\nInstructions")
+
+    result = module(user_request="Use playwright to inspect this javascript page")
+
+    assert "browser-interaction" in AVAILABLE_SKILLS
+    assert result.selected_skills == ["browser-interaction"]
+    assert result.skill_context == "[Skill: browser-interaction]\nInstructions"
+    module._load_skills.assert_called_once_with(["browser-interaction"])
+
+
 def test_skill_selection_no_keyword_match_skips_llm_selector() -> None:
     module = SkillSelectionModule()
     module.select = MagicMock(side_effect=AssertionError("selector should not be called"))

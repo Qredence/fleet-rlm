@@ -93,6 +93,47 @@ async def test_list_sandboxes_supports_sdk_without_pagination_kwargs(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_delete_sandbox_releases_fleet_slot(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.api.runtime_services import sandboxes
+    from fleet_rlm.utils.sandbox_ownership import SANDBOX_OWNER_LABEL
+
+    released = 0
+
+    class FakeSandbox:
+        id = "sbx-1"
+        labels = {"managed-by": "fleet-rlm", SANDBOX_OWNER_LABEL: "tenant:user"}
+
+        def stop(self, **kwargs: Any) -> None:
+            _ = kwargs
+
+        def delete(self) -> None:
+            return None
+
+    class FakeClient:
+        def get(self, sandbox_id: str) -> FakeSandbox:
+            assert sandbox_id == "sbx-1"
+            return FakeSandbox()
+
+    async def fake_close(client: Any) -> None:
+        _ = client
+
+    def fake_release() -> None:
+        nonlocal released
+        released += 1
+
+    monkeypatch.setattr(sandboxes, "_build_daytona_client", lambda: FakeClient())
+    monkeypatch.setattr(sandboxes, "_close_daytona_client", fake_close)
+    monkeypatch.setattr(sandboxes, "release_sandbox_slot", fake_release)
+
+    await sandboxes.delete_sandbox(
+        "sbx-1",
+        owner_labels={SANDBOX_OWNER_LABEL: "tenant:user"},
+    )
+
+    assert released == 1
+
+
+@pytest.mark.asyncio
 async def test_sandbox_service_maps_generic_daytona_error_to_503(monkeypatch: pytest.MonkeyPatch) -> None:
     from daytona import DaytonaError
     from fastapi import HTTPException

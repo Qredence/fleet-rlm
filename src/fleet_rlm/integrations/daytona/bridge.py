@@ -4,10 +4,6 @@ Includes embedded broker assets (server code, tool wrapper templates) that
 were previously in bridge_assets.py.
 
 Uses the synchronous Daytona SDK directly — no async compatibility layer.
-
-FUTURE: If the Daytona SDK introduces a native callback or event system for
-sandbox-to-host communication, this Flask-based broker (~300 LOC) could be
-replaced. Monitor the SDK roadmap for webhook/callback infrastructure.
 """
 
 from __future__ import annotations
@@ -15,6 +11,7 @@ from __future__ import annotations
 import inspect
 import json
 import keyword
+import logging
 import time
 import urllib.error
 import urllib.request
@@ -28,6 +25,8 @@ from dspy.primitives import CodeInterpreterError
 
 from .async_compat import _run_sync_in_thread
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Embedded broker assets
 # ---------------------------------------------------------------------------
@@ -36,122 +35,157 @@ _BROKER_PORT = 3000
 _BROKER_SERVER_PATH = "/home/daytona/broker_server.py"
 _BROKER_SESSION_COMMAND = f"cd /home/daytona && python {_BROKER_SERVER_PATH.rsplit('/', 1)[-1]}"
 _BROKER_SERVER_CODE = """
-\"\"\"Broker server for mediating tool calls between sandbox code and the host.\"\"\"
+\"\"\"Broker server for mediating tool calls between sandbox code and the host.
+
+Uses only Python stdlib — no third-party dependencies required.
+\"\"\"
 
 import json
 import threading
 import time
 import uuid
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
+from urllib.parse import parse_qs, urlparse
 
-from flask import Flask, jsonify, request
-
-app = Flask(__name__)
 _lock = threading.Lock()
-_pending_requests: dict[str, dict[str, object]] = {}
-_results: dict[str, object] = {}
+_pending_requests: dict = {}
+_results: dict = {}
 
 
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok"})
+def _read_json(handler):
+    length = int(handler.headers.get("Content-Length", 0))
+    return json.loads(handler.rfile.read(length).decode("utf-8")) if length else {}
 
 
-@app.route("/tool_call", methods=["POST"])
-def tool_call():
-    data = request.json or {}
-    call_id = str(data.get("id") or uuid.uuid4())
-    tool_name = str(data.get("tool_name") or "")
-    args = data.get("args", [])
-    kwargs = data.get("kwargs", {})
-
-    with _lock:
-        _pending_requests[call_id] = {
-            "tool_name": tool_name,
-            "args": args if isinstance(args, list) else [],
-            "kwargs": kwargs if isinstance(kwargs, dict) else {},
-            "claimed": False,
-            "claimed_at": None,
-            "lease_token": None,
-        }
-
-    timeout = __DAYTONA_TOOL_CALL_TIMEOUT_S__
-    interval = 0.05
-    elapsed = 0.0
-    while elapsed < timeout:
-        with _lock:
-            if call_id in _results:
-                result = _results.pop(call_id)
-                _pending_requests.pop(call_id, None)
-                return jsonify({"result": result})
-        time.sleep(interval)
-        elapsed += interval
-
-    with _lock:
-        _pending_requests.pop(call_id, None)
-    return jsonify({"error": "Tool call timeout"}), 504
+def _send_json(handler, data, status=200):
+    body = json.dumps(data).encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
 
 
-@app.route("/pending", methods=["GET"])
-def get_pending():
-    try:
-        max_items = int(request.args.get("max", "1"))
-    except ValueError:
-        max_items = 1
-    max_items = max(1, max_items)
+class _BrokerHandler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        pass  # suppress default access log
 
-    try:
-        lease_seconds = float(request.args.get("lease_seconds", "60"))
-    except ValueError:
-        lease_seconds = 60.0
-    lease_seconds = max(1.0, lease_seconds)
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
 
-    requests_out = []
-    with _lock:
-        now = time.time()
-        for call_id, payload in _pending_requests.items():
-            if len(requests_out) >= max_items:
-                break
-            if call_id in _results:
-                continue
-            claimed_at = payload.get("claimed_at")
-            if payload.get("claimed") and isinstance(claimed_at, (int, float)):
-                if now - claimed_at < lease_seconds:
-                    continue
-            claim_token = str(uuid.uuid4())
-            payload["claimed"] = True
-            payload["claimed_at"] = now
-            payload["lease_token"] = claim_token
-            requests_out.append(
-                {
-                    "id": call_id,
-                    "tool_name": payload["tool_name"],
-                    "args": payload["args"],
-                    "kwargs": payload["kwargs"],
-                    "claim_token": claim_token,
+        if path == "/health":
+            _send_json(self, {"status": "ok"})
+
+        elif path == "/pending":
+            qs = parse_qs(parsed.query)
+            try:
+                max_items = int(qs.get("max", ["1"])[0])
+            except ValueError:
+                max_items = 1
+            max_items = max(1, max_items)
+            try:
+                lease_seconds = float(qs.get("lease_seconds", ["60"])[0])
+            except ValueError:
+                lease_seconds = 60.0
+            lease_seconds = max(1.0, lease_seconds)
+
+            requests_out = []
+            with _lock:
+                now = time.time()
+                for call_id, payload in _pending_requests.items():
+                    if len(requests_out) >= max_items:
+                        break
+                    if call_id in _results:
+                        continue
+                    claimed_at = payload.get("claimed_at")
+                    if payload.get("claimed") and isinstance(claimed_at, (int, float)):
+                        if now - claimed_at < lease_seconds:
+                            continue
+                    claim_token = str(uuid.uuid4())
+                    payload["claimed"] = True
+                    payload["claimed_at"] = now
+                    payload["lease_token"] = claim_token
+                    requests_out.append({
+                        "id": call_id,
+                        "tool_name": payload["tool_name"],
+                        "args": payload["args"],
+                        "kwargs": payload["kwargs"],
+                        "claim_token": claim_token,
+                    })
+            _send_json(self, {"requests": requests_out})
+
+        else:
+            _send_json(self, {"error": "not found"}, 404)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path == "/tool_call":
+            data = _read_json(self)
+            call_id = str(data.get("id") or uuid.uuid4())
+            tool_name = str(data.get("tool_name") or "")
+            args = data.get("args", [])
+            kwargs = data.get("kwargs", {})
+
+            with _lock:
+                _pending_requests[call_id] = {
+                    "tool_name": tool_name,
+                    "args": args if isinstance(args, list) else [],
+                    "kwargs": kwargs if isinstance(kwargs, dict) else {},
+                    "claimed": False,
+                    "claimed_at": None,
+                    "lease_token": None,
                 }
-            )
-    return jsonify({"requests": requests_out})
+
+            timeout = __DAYTONA_TOOL_CALL_TIMEOUT_S__
+            interval = 0.05
+            elapsed = 0.0
+            while elapsed < timeout:
+                with _lock:
+                    if call_id in _results:
+                        result = _results.pop(call_id)
+                        _pending_requests.pop(call_id, None)
+                        _send_json(self, {"result": result})
+                        return
+                time.sleep(interval)
+                elapsed += interval
+
+            with _lock:
+                _pending_requests.pop(call_id, None)
+            _send_json(self, {"error": "Tool call timeout"}, 504)
+
+        elif path.startswith("/result/"):
+            call_id = path[len("/result/"):]
+            data = _read_json(self)
+            result = data.get("result")
+            claim_token = str(data.get("claim_token") or "")
+            with _lock:
+                req = _pending_requests.get(call_id)
+                if req is None:
+                    _send_json(self, {"error": "Unknown or expired call_id"}, 404)
+                    return
+                expected_token = req.get("lease_token")
+                if not expected_token or claim_token != expected_token:
+                    _send_json(self, {"error": "Stale or invalid claim token"}, 409)
+                    return
+                _results[call_id] = result
+                req["lease_token"] = None
+            _send_json(self, {"status": "ok"})
+
+        else:
+            _send_json(self, {"error": "not found"}, 404)
 
 
-@app.route("/result/<call_id>", methods=["POST"])
-def post_result(call_id: str):
-    data = request.json or {}
-    result = data.get("result")
-    claim_token = data.get("claim_token")
-    with _lock:
-        req = _pending_requests.get(call_id)
-        if req is None:
-            return jsonify({"error": "Unknown or expired call_id"}), 404
-        expected_token = req.get("lease_token")
-        if not expected_token or claim_token != expected_token:
-            return jsonify({"error": "Stale or invalid claim token"}), 409
-        _results[call_id] = result
-        req["lease_token"] = None
-    return jsonify({"status": "ok"})
+class _ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3000, threaded=True)
+    server = _ThreadedHTTPServer(("0.0.0.0", 3000), _BrokerHandler)
+    server.serve_forever()
 """.strip()
 
 # Default broker tool-call polling timeout (used as fallback when no instance
@@ -350,6 +384,12 @@ class DaytonaToolBridge:
                 return
             except Exception as exc:
                 last_error = exc
+                logger.warning(
+                    "Broker start attempt %d/%d failed: %s",
+                    attempt + 1,
+                    self.broker_start_retries + 1,
+                    exc,
+                )
                 # Clean up the failed session attempt and reset state so
                 # the next attempt (or the next ensure_started call) starts
                 # from scratch instead of caching a broken broker.

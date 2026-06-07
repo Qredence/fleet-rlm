@@ -21,6 +21,27 @@ Transport code may call runtime services and schemas. Runtime code should not im
 FastAPI route modules, or test-only helpers. Configuration/package-root modules must not pull in
 heavy runtime providers such as DSPy, MLflow, PostHog, or Daytona at import time.
 
+## Async Execution Boundary
+
+The sandbox interpreters (Daytona, Modal) expose a synchronous, blocking `execute(...)` that
+performs a network round-trip per code iteration. `dspy.RLM.aforward` only awaits the LM predictor
+calls — it still runs sandbox code through the **synchronous** `repl.execute(...)` (verified in
+dspy 3.2.1). Therefore the heavy RLM turn is driven sync-in-a-thread via
+`asyncio.to_thread(self.agent, ...)` in `runtime/agent/runtime.py`, which offloads both the LM
+calls and the blocking sandbox I/O to a worker thread and keeps the event loop free.
+
+Do not replace this `asyncio.to_thread` wrapping with a direct `await agent.acall(...)`/`aforward`
+on the RLM heavy path while the interpreter's `execute` stays synchronous — doing so would block the
+event loop on every code-execution iteration and regress server concurrency. The native chat
+streaming path is the exception: it interleaves per-token streaming through `async_planner_step`
+(which uses `acall` on the planner predictor only, not sandbox execution).
+
+MCP-backed ReAct tools are the other async exception. Tools converted with
+`dspy.Tool.from_mcp_tool(session, tool)` are bound to a live MCP `ClientSession` and must be invoked
+through an async ReAct path (`acall`) while that session remains open. Keep MCP tools out of sync
+ReAct calls, close the provider when the runtime shuts down, and rebuild the agent from base tools
+plus the current MCP attachment when servers are reattached.
+
 ## Frontend Boundaries
 
 Keep shared UI primitives reusable:

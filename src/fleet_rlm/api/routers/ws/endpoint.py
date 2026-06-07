@@ -35,12 +35,6 @@ from ...dependencies import (
     get_session_cache_deps_from_websocket,
 )
 from ...events import ExecutionSubscription
-from ...runtime_services.chat_persistence import (
-    build_local_persist_fn as _build_local_persist_fn,
-)
-from ...runtime_services.chat_persistence import (
-    get_execution_emitter,
-)
 from ...runtime_services.chat_runtime import (
     PreparedChatRuntime as _PreparedChatRuntime,
 )
@@ -56,7 +50,8 @@ from ...runtime_services.chat_runtime import (
 from ...runtime_services.chat_runtime import (
     set_interpreter_default_profile as _set_interpreter_default_profile,
 )
-from .stream import _chat_message_loop
+from ...runtime_services.session_persistence import build_local_persist_fn as _build_local_persist_fn
+from .stream_loop import _chat_message_loop
 from .transport import (
     _authenticate_websocket,
     _close_websocket_safely,
@@ -267,7 +262,7 @@ class _ExecutionWebSocketConnection:
                     )
 
                     # Connect to Event Bus for decoupled execution events
-                    emitter = get_execution_emitter(self.diagnostics_deps)
+                    emitter = self.diagnostics_deps.events_event_emitter
                     subscription = ExecutionSubscription(
                         workspace_id=session.canonical_workspace_id,
                         user_id=session.canonical_user_id,
@@ -321,7 +316,7 @@ async def _run_execution_subscription_stream(
             await _close_websocket_safely(websocket, code=1008)
         return
 
-    emitter = get_execution_emitter(diagnostics_deps)
+    emitter = diagnostics_deps.events_event_emitter
     await emitter.connect(websocket, subscription)
 
     try:

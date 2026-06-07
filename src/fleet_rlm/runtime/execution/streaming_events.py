@@ -1,25 +1,21 @@
-"""Event construction, status parsing, citation handling, and payload building
+"""Citation handling, trajectory normalisation, and terminal-event helpers
 for the RLM ReAct chat agent streaming pipeline.
 
-Event construction logic kept separate from stream orchestration in
-:mod:`fleet_rlm.api.routers.ws.stream`.
+Event *construction* lives in :mod:`fleet_rlm.runtime.events`.
+This module retains only final-payload assembly (citations/attachments/sources)
+and terminal-event/HITL helpers.
 """
 
 from __future__ import annotations
 
 import json
-import re
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import urlparse
 
 import dspy
-from dspy.streaming.messages import StatusMessageProvider
 
-from fleet_rlm.runtime.schemas import StreamEvent
+from fleet_rlm.runtime.events import EVENT_SCHEMA_VERSION
 from fleet_rlm.utils.preview import head_tail_preview
-
-# Pre-compiled regexes for hot-path status parsing
-_CALLING_TOOL_RE = re.compile(r"^Calling tool:\s*(.+)$")
 
 # Soft content cap for trajectory step outputs crossing the websocket boundary.
 # Individual steps can carry multi-KB observations (grep hits, long file reads)
@@ -42,83 +38,14 @@ def is_terminal_stream_event_kind(kind: str) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Status parsing and tool/HITL event helpers  (was streaming_status.py)
+# HITL event helper
 # ═══════════════════════════════════════════════════════════════════════
-
-ToolEventKind = Literal["tool_call"]
-
-
-def parse_tool_call_status(message: str) -> str | None:
-    match = _CALLING_TOOL_RE.match(message.strip())
-    if not match:
-        return None
-    return f"tool call: {match.group(1).strip()}"
-
-
-def parse_tool_call_payload(message: str) -> dict[str, Any] | None:
-    match = _CALLING_TOOL_RE.match(message.strip())
-    if not match:
-        return None
-
-    raw_call = match.group(1).strip()
-    tool_name = raw_call.split("(", 1)[0].strip() if raw_call else ""
-    args_snippet = ""
-    if "(" in raw_call:
-        args_snippet = raw_call.split("(", 1)[1].rsplit(")", 1)[0].strip()
-
-    payload: dict[str, Any] = {"raw_status": message, "raw_call": raw_call}
-    if tool_name:
-        payload["tool_name"] = tool_name
-    if args_snippet:
-        payload["tool_args"] = args_snippet
-        payload["tool_input"] = args_snippet
-    return payload
-
-
-def parse_tool_result_status(message: str) -> str | None:
-    stripped = message.strip()
-    if stripped == "Tool finished.":
-        return "tool result: finished"
-    if stripped.startswith("Tool result:"):
-        return "tool result: completed"
-    return None
-
-
-def parse_tool_result_payload(message: str, *, tool_name: str | None) -> dict[str, Any] | None:
-    stripped = message.strip()
-    if stripped != "Tool finished." and not stripped.startswith("Tool result:"):
-        return None
-
-    payload: dict[str, Any] = {"raw_status": message}
-    if tool_name:
-        payload["tool_name"] = tool_name
-    if stripped.startswith("Tool result:"):
-        result_text = stripped.removeprefix("Tool result:").strip()
-        if result_text:
-            payload["tool_output"] = result_text
-    return payload
-
-
-class ReActStatusProvider(StatusMessageProvider):
-    """Concise status messaging for streamed ReAct sessions."""
-
-    def tool_start_status_message(self, instance: Any, inputs: dict[str, Any]):
-        return f"Calling tool: {instance.name}"
-
-    def tool_end_status_message(self, outputs: Any):
-        return "Tool finished."
-
-    def module_start_status_message(self, instance: Any, inputs: dict[str, Any]):
-        return f"Running module: {instance.__class__.__name__}"
-
-    def module_end_status_message(self, outputs: Any):
-        return None
 
 
 def try_parse_hitl_request(
     tool_name: str | None,
     payload: dict[str, Any],
-) -> StreamEvent | None:
+) -> dict[str, Any] | None:
     if not tool_name:
         return None
 
@@ -138,40 +65,34 @@ def try_parse_hitl_request(
         if data and isinstance(data, dict):
             questions = data.get("questions", [])
         if questions:
-            return StreamEvent(
-                kind="status",
-                text="The agent has some questions for you.",
-                payload={
+            return {
+                "kind": "status",
+                "text": "The agent has some questions for you.",
+                "payload": {
                     "options": questions,
                     "source": "clarification_questions",
                     "requires_response": True,
                 },
-            )
+            }
 
     if tool_name == "memory_action_intent":
         if data and isinstance(data, dict) and data.get("requires_confirmation"):
-            return StreamEvent(
-                kind="status",
-                text="This memory action requires confirmation.",
-                payload={
+            return {
+                "kind": "status",
+                "text": "This memory action requires confirmation.",
+                "payload": {
                     "action": data.get("intent"),
                     "source": "memory_action_intent",
                     "requires_response": True,
                 },
-            )
+            }
 
     return None
-
-
-def classify_tool_event_kind(tool_name: str | None) -> ToolEventKind:
-    return "tool_call"
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Citation and final-payload helpers  (was streaming_citations.py)
 # ═══════════════════════════════════════════════════════════════════════
-
-STREAM_EVENT_SCHEMA_VERSION = 2
 _ALLOWED_EXTERNAL_URL_SCHEMES = frozenset({"http", "https"})
 
 
@@ -225,6 +146,39 @@ def _build_flat_trajectory_step(raw: dict[str, Any], index: int) -> dict[str, An
     return step
 
 
+def _truncate_trajectory_output(step: dict[str, Any]) -> dict[str, Any]:
+    if step.get("output_truncated"):
+        return step
+    output = step.get("output")
+    if isinstance(output, str) and len(output) > _TRAJECTORY_OUTPUT_CONTENT_CHARS:
+        preview, full_len = head_tail_preview(output, max_chars=_TRAJECTORY_OUTPUT_CONTENT_CHARS)
+        step["output"] = preview
+        step["observation"] = preview
+        step["output_truncated"] = True
+        step["output_length"] = full_len
+    return step
+
+
+def _normalize_structured_trajectory_step(step: dict[str, Any], index: int) -> dict[str, Any]:
+    step_copy = dict(step)
+    if "index" not in step_copy:
+        step_copy["index"] = index
+
+    # DSPy RLM trajectories are shaped as {reasoning, code, output}. Convert
+    # them into Fleet's generic tool/repl shape so websocket and frontend
+    # adapters can render them as visible sandbox execution rows.
+    if "code" in step_copy and "tool_name" not in step_copy:
+        step_copy["tool_name"] = "repl_execute"
+        step_copy.setdefault("input", step_copy.get("code"))
+        step_copy.setdefault("tool_args", step_copy.get("code"))
+    if "reasoning" in step_copy and "thought" not in step_copy:
+        step_copy["thought"] = step_copy.get("reasoning")
+    if "output" in step_copy and "observation" not in step_copy:
+        step_copy["observation"] = step_copy.get("output")
+
+    return _truncate_trajectory_output(step_copy)
+
+
 def _normalize_trajectory(raw: Any | None) -> list[dict[str, Any]]:
     """Convert DSPy ReAct flat trajectory to structured step list."""
     if not raw:
@@ -241,10 +195,10 @@ def _normalize_trajectory(raw: Any | None) -> list[dict[str, Any]]:
         steps = [_build_flat_trajectory_step(raw, index) for index in _extract_step_indices(raw)]
 
     result: list[dict[str, Any]] = []
-    for step in steps:
+    for index, step in enumerate(steps):
         if not isinstance(step, dict):
             continue
-        step_copy = dict(step)
+        step_copy = _normalize_structured_trajectory_step(step, index)
         tool_name = step_copy.get("tool_name")
         is_terminal = (tool_name == "finish") or (not tool_name)
         if is_terminal and "thought" in step_copy:
@@ -592,7 +546,7 @@ def _build_final_payload(
     ]
 
     payload: dict[str, Any] = {
-        "schema_version": STREAM_EVENT_SCHEMA_VERSION,
+        "schema_version": EVENT_SCHEMA_VERSION,
         "trajectory": trajectory,
         "history_turns": history_turns,
         "guardrail_warnings": guardrail_warnings,

@@ -6,6 +6,7 @@ import {
   type AttachedFile,
   type InputBarProps,
 } from "@/components/agent-elements/input-bar";
+import { ModelPicker, type ModelOption } from "@/components/agent-elements/input/model-picker";
 import { ModeSelector } from "@/components/agent-elements/input/mode-selector";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -29,6 +30,12 @@ function createAttachmentId() {
 interface WorkspaceAgentInputBarProps extends InputBarProps {
   executionMode: WsExecutionMode;
   onExecutionModeChange: (mode: WsExecutionMode) => void;
+  activeModels?: {
+    planner?: string | null;
+    delegate?: string | null;
+    delegate_small?: string | null;
+  };
+  onOpenModelSettings?: () => void;
   showStatusBar?: boolean;
   runtimeWarning?: {
     title: string;
@@ -36,6 +43,36 @@ interface WorkspaceAgentInputBarProps extends InputBarProps {
     guidance: string[];
     onOpenSettings: () => void;
   };
+}
+
+function activeModelOptions(
+  activeModels: WorkspaceAgentInputBarProps["activeModels"],
+): ModelOption[] {
+  const options = [
+    {
+      id: "planner",
+      label: activeModels?.planner || "Planner model",
+      description: activeModels?.planner ? "Planner runtime" : "Planner model not configured",
+      disabled: !activeModels?.planner,
+    },
+    {
+      id: "delegate",
+      label: activeModels?.delegate || "Delegate model",
+      description: activeModels?.delegate
+        ? "Recursive delegate runtime"
+        : "Delegate model not configured",
+      disabled: !activeModels?.delegate,
+    },
+    {
+      id: "delegate_small",
+      label: activeModels?.delegate_small || "Small delegate model",
+      description: activeModels?.delegate_small
+        ? "Lightweight delegate runtime"
+        : "Small delegate model not configured",
+      disabled: !activeModels?.delegate_small,
+    },
+  ];
+  return options;
 }
 
 function ExecutionModeToggle({
@@ -58,6 +95,8 @@ function ExecutionModeToggle({
 export function WorkspaceAgentInputBar({
   executionMode,
   onExecutionModeChange,
+  activeModels,
+  onOpenModelSettings,
   showStatusBar = true,
   runtimeWarning,
   className,
@@ -159,6 +198,12 @@ export function WorkspaceAgentInputBar({
         rightActions={
           <>
             <ExecutionModeToggle value={executionMode} onChange={onExecutionModeChange} />
+            <ModelPicker
+              models={activeModelOptions(activeModels)}
+              value="planner"
+              onConfigure={onOpenModelSettings}
+              className="text-an-foreground-muted hover:text-an-foreground"
+            />
             {rightActions}
           </>
         }

@@ -7,6 +7,7 @@ having them in the prompt context directly.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any
 
 import dspy
@@ -61,14 +62,20 @@ class RLMVariableExecutionModule(dspy.Module):
         max_output_chars: int | None = None,
         sub_lm: dspy.LM | None = None,
         extra_tools: list[Any] | None = None,
+        include_sub_tools: bool = True,
+        include_llm_tools: bool = True,
     ) -> None:
         super().__init__()
+        self._interpreter = interpreter
+        self._include_llm_tools = include_llm_tools
+        self._adapter = None if include_llm_tools else dspy.JSONAdapter()
         # Gather sub_rlm tools from the interpreter (if it exposes them)
         tools: list[Any] = list(extra_tools or [])
-        for attr_name in ("sub_rlm", "sub_rlm_batched"):
-            fn = getattr(interpreter, attr_name, None)
-            if callable(fn):
-                tools.append(fn)
+        if include_sub_tools:
+            for attr_name in ("sub_rlm", "sub_rlm_batched"):
+                fn = getattr(interpreter, attr_name, None)
+                if callable(fn):
+                    tools.append(fn)
 
         self._rlm = create_runtime_rlm(
             signature=signature,
@@ -81,6 +88,7 @@ class RLMVariableExecutionModule(dspy.Module):
             verbose=verbose,
             tools=tools or None,
             sub_lm=sub_lm,
+            include_llm_tools=include_llm_tools,
         )
 
     def forward(self, **kwargs: Any) -> dspy.Prediction:
@@ -90,7 +98,29 @@ class RLMVariableExecutionModule(dspy.Module):
         model writes code to explore those variables before calling
         ``SUBMIT(...)`` with the signature's declared outputs.
         """
-        return self._rlm(**kwargs)
+        if self._include_llm_tools:
+            result = self._rlm(**kwargs)
+            self._record_trajectory_spans(result)
+            return result
+
+        previous = getattr(self._interpreter, "semantic_callbacks_enabled", True)
+        adapter_context = dspy.settings.context(adapter=self._adapter) if self._adapter else nullcontext()
+        try:
+            setattr(self._interpreter, "semantic_callbacks_enabled", False)
+            with adapter_context:
+                result = self._rlm(**kwargs)
+                self._record_trajectory_spans(result)
+                return result
+        finally:
+            setattr(self._interpreter, "semantic_callbacks_enabled", previous)
+
+    def _record_trajectory_spans(self, result: dspy.Prediction) -> None:
+        try:
+            from fleet_rlm.integrations.observability.mlflow_context import record_rlm_trajectory_spans
+
+            record_rlm_trajectory_spans(getattr(result, "trajectory", None))
+        except Exception:
+            return
 
 
 def build_variable_mode_rlm(
@@ -103,6 +133,8 @@ def build_variable_mode_rlm(
     max_output_chars: int | None = None,
     sub_lm: dspy.LM | None = None,
     extra_tools: list[Any] | None = None,
+    include_sub_tools: bool = True,
+    include_llm_tools: bool = True,
 ) -> RLMVariableExecutionModule:
     """Factory for the true-RLM variable-mode execution module.
 
@@ -119,6 +151,8 @@ def build_variable_mode_rlm(
         max_output_chars=max_output_chars,
         sub_lm=sub_lm,
         extra_tools=extra_tools,
+        include_sub_tools=include_sub_tools,
+        include_llm_tools=include_llm_tools,
     )
 
 

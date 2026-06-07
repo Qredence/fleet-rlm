@@ -20,10 +20,8 @@ from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from ...auth import AuthError
 from ...dependencies import AuthDeps, ConfigDeps, build_unauthenticated_identity
-from ...runtime_services.chat_persistence import (
-    ExecutionLifecycleManager,
-    classify_stream_failure,
-)
+from ...runtime_services.run_lifecycle import ExecutionLifecycleManager
+from ...runtime_services.stream_failures import classify_stream_failure
 from ...schemas import WSMessage
 
 logger = logging.getLogger(__name__)
@@ -228,10 +226,8 @@ async def handle_chat_loop_exception(
     lifecycle: ExecutionLifecycleManager | None,
 ) -> None:
     """Handle an unexpected outer-loop failure without losing client notification."""
-    from fleet_rlm.api.runtime_services.chat_persistence import (
-        PersistenceRequiredError,
-        cancel_task,
-    )
+    from fleet_rlm.api.runtime_services.chat_persistence import cancel_task
+    from fleet_rlm.api.runtime_services.stream_failures import PersistenceRequiredError
 
     await cancel_task(pending_receive_task)
     await cancel_task(stream_task)

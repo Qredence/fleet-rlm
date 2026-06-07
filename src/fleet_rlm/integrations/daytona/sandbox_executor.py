@@ -37,6 +37,9 @@ from .bridge_callbacks import (
 )
 from .session_runtime import DaytonaSandboxSession
 
+_BROKER_START_FAILURE_COOLDOWN_SECONDS = 300.0
+_BROKER_START_FAILURES: dict[str, tuple[float, str]] = {}
+
 
 def _generic_submit_code() -> str:
     return """
@@ -375,6 +378,7 @@ class DaytonaExecutionOwner(SupportsExecutionEventCallback, Protocol):
     _bridge: DaytonaToolBridge | None
     _bridge_sandbox_id: str | None
     _bridge_context_id: str | None
+    _bridge_start_error: str | None
     _bridge_tools: Callable[..., Any]
     _invoke_tool: Callable[..., Any]
     _reject_unsupported_recursive_callbacks: Callable[..., None]
@@ -763,6 +767,73 @@ def structured_execution_error(*, reason: str, error: str) -> DaytonaExecutionRe
     return DaytonaExecutionResponse(error=payload)
 
 
+def _broker_failure_key(session: DaytonaSandboxSession) -> str:
+    return str(getattr(session, "sandbox_id", "") or getattr(session, "id", "") or id(session))
+
+
+def _cached_broker_start_error(session: DaytonaSandboxSession, *, now: float | None = None) -> str | None:
+    key = _broker_failure_key(session)
+    cached = _BROKER_START_FAILURES.get(key)
+    if cached is None:
+        return None
+    timestamp, error = cached
+    current = time.time() if now is None else now
+    if current - timestamp > _BROKER_START_FAILURE_COOLDOWN_SECONDS:
+        _BROKER_START_FAILURES.pop(key, None)
+        return None
+    return error
+
+
+def _remember_broker_start_error(session: DaytonaSandboxSession, error: str) -> None:
+    _BROKER_START_FAILURES[_broker_failure_key(session)] = (time.time(), error)
+
+
+def _clear_broker_start_error(session: DaytonaSandboxSession) -> None:
+    _BROKER_START_FAILURES.pop(_broker_failure_key(session), None)
+
+
+def _owner_broker_start_error(
+    owner: DaytonaExecutionOwner,
+    session: DaytonaSandboxSession,
+) -> str | None:
+    """Return an active broker-start failure and clear stale owner state."""
+    cached = _cached_broker_start_error(session)
+    if cached:
+        return cached
+    if getattr(owner, "_bridge_start_error", None):
+        owner._bridge_start_error = None
+    return None
+
+
+def _inject_broker_failure_stubs(
+    session: DaytonaSandboxSession,
+    context: Any,
+    tools: dict[str, Any],
+    *,
+    error: str,
+) -> None:
+    """Inject stub functions for each bridged tool so the REPL agent gets an
+    informative RuntimeError instead of a bare NameError when the broker failed.
+    Best-effort: any injection error is silently suppressed.
+    """
+    if not tools:
+        return
+    short_error = error[:200].replace("'", "\\'")
+    lines = [
+        f"def {name}(*_a, **_kw):"
+        f" raise RuntimeError('Tool {name!r} unavailable: broker failed to start. {short_error}')"
+        for name in tools
+        if name.isidentifier()
+    ]
+    if not lines:
+        return
+    stub_code = "\n".join(lines)
+    try:
+        session.sandbox.code_interpreter.run_code(stub_code, context=context)
+    except Exception:
+        pass  # best-effort
+
+
 def run_prepared_execution(
     owner: DaytonaExecutionOwner,
     *,
@@ -774,11 +845,26 @@ def run_prepared_execution(
 ) -> DaytonaBridgeExecution:
     tools = callbacks.bridge_tools()
     if callbacks.requires_bridge(code, tools):
-        bridge = callbacks.ensure_bridge(
-            session=session,
-            context=context,
-            tools=tools,
-        )
+        bridge_start_error = _owner_broker_start_error(owner, session)
+        if bridge_start_error:
+            raise CodeInterpreterError(
+                "Broker callbacks are unavailable after a previous startup failure in this session; "
+                f"llm_query should not be retried. Previous failure: {bridge_start_error}"
+            )
+        try:
+            bridge = callbacks.ensure_bridge(
+                session=session,
+                context=context,
+                tools=tools,
+            )
+        except Exception as exc:
+            if "Broker server failed to start" in str(exc):
+                owner._bridge_start_error = str(exc)
+                _remember_broker_start_error(session, str(exc))
+                _inject_broker_failure_stubs(session, context, tools, error=str(exc))
+            raise
+        owner._bridge_start_error = None
+        _clear_broker_start_error(session)
         return bridge.execute_tool_call(
             code=code,
             timeout=int(owner.execute_timeout or owner.timeout),
@@ -1103,6 +1189,7 @@ class SandboxExecutor:
         self._bridge: DaytonaToolBridge | None = None
         self._bridge_sandbox_id: str | None = None
         self._bridge_context_id: str | None = None
+        self._bridge_start_error: str | None = None
         self._setup_context_id: str | None = None
         self._setup_workspace_path: str | None = None
         self._submit_signature_key: tuple[tuple[str, str], ...] | None = None
@@ -1126,6 +1213,7 @@ class SandboxExecutor:
         self._setup_context_id = None
         self._setup_workspace_path = None
         self._submit_signature_key = None
+        self._bridge_start_error = None
         if self._bridge is not None:
             self._bridge._injected_tools.clear()
             self._bridge_context_id = None
@@ -1148,6 +1236,7 @@ class SandboxExecutor:
         self._bridge = None
         self._bridge_sandbox_id = None
         self._bridge_context_id = None
+        self._bridge_start_error = None
         if bridge is not None:
             bridge.close()
 

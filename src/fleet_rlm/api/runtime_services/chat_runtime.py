@@ -293,6 +293,9 @@ async def prepare_chat_runtime(
 def _chat_agent_builder_kwargs(runtime: PreparedChatRuntime) -> dict[str, Any]:
     return {
         "react_max_iters": runtime.cfg.react_max_iters,
+        "rlm_max_iterations": runtime.cfg.rlm_max_iterations,
+        "rlm_max_llm_calls": runtime.cfg.rlm_max_llm_calls,
+        "rlm_max_output_chars": runtime.cfg.agent_max_output_chars,
         "planner_lm": runtime.planner_lm,
         "delegate_lm": runtime.delegate_lm,
         "repository": runtime.repository,

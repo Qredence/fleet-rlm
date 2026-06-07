@@ -27,6 +27,7 @@ AVAILABLE_SKILLS: dict[str, str] = {
     "optimization": "GEPA/MIPROv2 optimization, evaluation metrics, MLflow",
     "diagnostics": "Diagnose runtime failures, contract drift, test triage",
     "volume-bootstrap": "Volume filesystem structure, CRUD helpers, persistence guarantees",
+    "browser-interaction": "Rendered page fetching, JavaScript-heavy docs, Playwright browser inspection",
 }
 
 _KEYWORD_MAP: dict[str, list[str]] = {
@@ -72,6 +73,29 @@ _KEYWORD_MAP: dict[str, list[str]] = {
         "semantic chunk",
         "variable-mode",
         "codebase analysis",
+        "analyze the documentation",
+        "analyze documentation",
+        "read the docs",
+        "summarize the page",
+        "http://",
+        "https://",
+        "fetch",
+        "browse",
+        "scrape",
+        "analyze https",
+        "analyze http",
+    ],
+    "browser-interaction": [
+        "render the page",
+        "rendered page",
+        "javascript page",
+        "spa content",
+        "headless browser",
+        "playwright",
+        "dynamic page",
+        "browser fetch",
+        "screenshot the page",
+        "interact with the page",
     ],
     "optimization": [
         "optimi",

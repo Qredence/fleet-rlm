@@ -39,9 +39,10 @@ def bridge_tools(
 ) -> dict[str, Callable[..., Any]]:
     """Return host callbacks exposed to sandbox bridge wrappers."""
     tools = {name: tool for name, tool in interpreter._tools.items() if name not in native_tool_names}
-    if "llm_query" not in tools:
+    semantic_callbacks_enabled = bool(getattr(interpreter, "semantic_callbacks_enabled", True))
+    if semantic_callbacks_enabled and "llm_query" not in tools:
         tools["llm_query"] = interpreter.llm_query
-    if "llm_query_batched" not in tools:
+    if semantic_callbacks_enabled and "llm_query_batched" not in tools:
         tools["llm_query_batched"] = interpreter.llm_query_batched
     if "sub_rlm" not in tools and hasattr(interpreter, "sub_rlm"):
         tools["sub_rlm"] = interpreter.sub_rlm

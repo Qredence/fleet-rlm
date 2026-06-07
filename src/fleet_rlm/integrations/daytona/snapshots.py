@@ -42,6 +42,20 @@ DEFAULT_SNAPSHOT_NAME = "fleet-rlm-base"
 DEFAULT_SNAPSHOT_BASE_IMAGE = "python:3.12-slim"
 _VALID_PACKAGE_SPEC_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-\[\],<>=!~]*$")
 
+BROWSER_SNAPSHOT_NAME = "fleet-rlm-browser"
+BROWSER_SNAPSHOT_PACKAGES: list[str] = [
+    *DEFAULT_SNAPSHOT_PACKAGES,
+    "playwright",
+]
+
+_CHROMIUM_SYSTEM_DEPS = (
+    "libx11-6 libxrandr2 libxext6 libxrender1 libxfixes3 libxss1 "
+    "libxtst6 libxi6 libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 "
+    "libcups2 libdrm2 libgbm1 libpango-1.0-0 libcairo2 libasound2 "
+    "libatspi2.0-0 libdbus-1-3 fonts-liberation"
+)
+_VNC_DESKTOP_DEPS = "xvfb xfce4 xfce4-terminal x11vnc novnc dbus-x11"
+
 
 def _experimental_call(
     sandbox: DaytonaSandbox,
@@ -94,6 +108,151 @@ def build_base_snapshot_image(
         install_command = shlex.join(["uv", "pip", "install", "--system", *packages_to_install])
         image = image.run_commands(install_command)
     return image
+
+
+def build_browser_snapshot_image(
+    *,
+    base_image: str = DEFAULT_SNAPSHOT_BASE_IMAGE,
+    packages: list[str] | None = None,
+    include_vnc: bool = True,
+) -> Any:
+    """Build a Daytona image with Playwright, Chromium, and optional VNC/desktop."""
+    try:
+        from daytona import Image as DaytonaImage
+    except ImportError as exc:  # pragma: no cover - environment specific
+        raise _daytona_import_error(exc) from exc
+
+    packages_to_install = packages if packages is not None else BROWSER_SNAPSHOT_PACKAGES
+    for package in packages_to_install:
+        if not package or not _VALID_PACKAGE_SPEC_PATTERN.fullmatch(package):
+            msg = f"Invalid package spec for browser snapshot image install: {package!r}"
+            raise ValueError(msg)
+
+    system_deps = _CHROMIUM_SYSTEM_DEPS
+    if include_vnc:
+        system_deps += f" {_VNC_DESKTOP_DEPS}"
+
+    image = DaytonaImage.base(base_image).run_commands(
+        f"apt-get update && apt-get install -y --no-install-recommends {system_deps} && rm -rf /var/lib/apt/lists/*"
+    )
+    image = image.run_commands("pip install uv")
+    if packages_to_install:
+        install_command = shlex.join(["uv", "pip", "install", "--system", *packages_to_install])
+        image = image.run_commands(install_command)
+    image = image.run_commands("playwright install chromium")
+    return image
+
+
+def create_browser_snapshot(
+    name: str = BROWSER_SNAPSHOT_NAME,
+    *,
+    base_image: str = DEFAULT_SNAPSHOT_BASE_IMAGE,
+    packages: list[str] | None = None,
+    include_vnc: bool = True,
+    config: ResolvedDaytonaConfig | None = None,
+    on_logs: Any | None = None,
+) -> dict[str, Any]:
+    """Create a browser-capable Daytona snapshot with Playwright and Chromium."""
+    try:
+        from daytona.common.snapshot import CreateSnapshotParams
+    except ImportError as exc:  # pragma: no cover - environment specific
+        raise _daytona_import_error(exc) from exc
+
+    image = build_browser_snapshot_image(base_image=base_image, packages=packages, include_vnc=include_vnc)
+    params = CreateSnapshotParams(name=name, image=image)
+    cfg = config or resolve_daytona_config()
+    client = _build_daytona_client(cfg)
+    try:
+        snapshot = client.snapshot.create(params, on_logs=on_logs, timeout=0)
+        logger.info("Browser snapshot '%s' created (id=%s)", snapshot.name, snapshot.id)
+        return _snapshot_summary(snapshot)
+    finally:
+        with suppress(Exception):
+            client.close()
+
+
+async def acreate_browser_snapshot(
+    name: str = BROWSER_SNAPSHOT_NAME,
+    *,
+    base_image: str = DEFAULT_SNAPSHOT_BASE_IMAGE,
+    packages: list[str] | None = None,
+    include_vnc: bool = True,
+    config: ResolvedDaytonaConfig | None = None,
+    on_logs: Any | None = None,
+) -> dict[str, Any]:
+    """Async wrapper — runs blocking SDK call in a thread."""
+    return await _run_sync_in_thread(
+        create_browser_snapshot,
+        name,
+        base_image=base_image,
+        packages=packages,
+        include_vnc=include_vnc,
+        config=config,
+        on_logs=on_logs,
+    )
+
+
+def bootstrap_browser_snapshot(
+    name: str = BROWSER_SNAPSHOT_NAME,
+    *,
+    base_image: str = DEFAULT_SNAPSHOT_BASE_IMAGE,
+    refresh: bool = False,
+    include_vnc: bool = True,
+    config: ResolvedDaytonaConfig | None = None,
+    on_logs: Any | None = None,
+) -> dict[str, Any]:
+    """Ensure the reusable Fleet browser Daytona snapshot exists."""
+    cfg = config or resolve_daytona_config()
+    existing = get_snapshot(name, config=cfg)
+    if existing is not None and not refresh:
+        return {**existing, "created": False, "refreshed": False}
+    if existing is not None:
+        previous_snapshot_id = str(existing.get("id") or "") or None
+        delete_snapshot(previous_snapshot_id or str(existing.get("name") or name), config=cfg)
+        replacement = _wait_for_snapshot_refresh_target(
+            name,
+            previous_snapshot_id=previous_snapshot_id,
+            config=cfg,
+        )
+        if replacement is not None:
+            return {**replacement, "created": False, "refreshed": True}
+
+    try:
+        created = create_browser_snapshot(
+            name=name,
+            base_image=base_image,
+            include_vnc=include_vnc,
+            config=cfg,
+            on_logs=on_logs,
+        )
+    except Exception as exc:
+        if _snapshot_create_conflict(exc):
+            replacement = get_snapshot(name, config=cfg)
+            if replacement is not None:
+                return {**replacement, "created": False, "refreshed": existing is not None}
+        raise
+    return {**created, "created": True, "refreshed": existing is not None}
+
+
+async def abootstrap_browser_snapshot(
+    name: str = BROWSER_SNAPSHOT_NAME,
+    *,
+    base_image: str = DEFAULT_SNAPSHOT_BASE_IMAGE,
+    refresh: bool = False,
+    include_vnc: bool = True,
+    config: ResolvedDaytonaConfig | None = None,
+    on_logs: Any | None = None,
+) -> dict[str, Any]:
+    """Async wrapper — runs blocking SDK call in a thread."""
+    return await _run_sync_in_thread(
+        bootstrap_browser_snapshot,
+        name,
+        base_image=base_image,
+        refresh=refresh,
+        include_vnc=include_vnc,
+        config=config,
+        on_logs=on_logs,
+    )
 
 
 def list_snapshots(
@@ -412,10 +571,14 @@ async def acreate_sandbox_snapshot(
 
 
 __all__ = [
+    "BROWSER_SNAPSHOT_NAME",
+    "BROWSER_SNAPSHOT_PACKAGES",
     "DEFAULT_SNAPSHOT_BASE_IMAGE",
     "DEFAULT_SNAPSHOT_NAME",
     "DEFAULT_SNAPSHOT_PACKAGES",
+    "abootstrap_browser_snapshot",
     "abootstrap_snapshot",
+    "acreate_browser_snapshot",
     "acreate_sandbox_snapshot",
     "acreate_snapshot",
     "adelete_snapshot",
@@ -423,7 +586,10 @@ __all__ = [
     "alist_snapshots",
     "aresolve_sandbox_spec_snapshot",
     "aresolve_snapshot",
+    "bootstrap_browser_snapshot",
     "build_base_snapshot_image",
+    "build_browser_snapshot_image",
+    "create_browser_snapshot",
     "fallback_to_declarative_image",
     "resolve_default_snapshot",
 ]

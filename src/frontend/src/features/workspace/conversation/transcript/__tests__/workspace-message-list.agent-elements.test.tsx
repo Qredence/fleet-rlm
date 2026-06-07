@@ -170,7 +170,12 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
           },
         ],
       },
-      { id: "a1", type: "assistant", content: "Done inspecting.", streaming: false },
+      {
+        id: "a1",
+        type: "assistant",
+        content: "Done inspecting.",
+        streaming: false,
+      },
     ]);
 
     expect(container.textContent).toContain("Execution started");
@@ -179,6 +184,95 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
     expect(container.textContent).toContain("README.md");
     expect(container.textContent).toContain("app.tsx");
     expect(container.textContent).toContain("Done inspecting.");
+
+    act(() => root.unmount());
+  });
+
+  it("renders delegated agent work through the Agent Elements SubagentTool path", () => {
+    const { container, root } = mount([
+      { id: "u1", type: "user", content: "delegate this" },
+      {
+        id: "trace-agent",
+        type: "trace",
+        content: "",
+        renderParts: [
+          {
+            kind: "tool",
+            title: "Delegate",
+            toolType: "delegate_agent",
+            state: "output-available",
+            input: {
+              subagent_type: "Research agent",
+              description: "Inspect the RLM trajectory",
+            },
+            output: { status: "completed" },
+          },
+        ],
+      },
+    ]);
+
+    expect(container.textContent).toContain("Research agent completed");
+
+    act(() => root.unmount());
+  });
+
+  it("renders forced and URL RLM event rows through Agent Elements", () => {
+    const { container, root } = mount([
+      { id: "u1", type: "user", content: "Analyze https://example.com" },
+      {
+        id: "trace-rlm",
+        type: "trace",
+        content: "",
+        renderParts: [
+          {
+            kind: "status_note",
+            text: "Route: url_document_rlm | source: https://example.com",
+            tone: "neutral",
+          },
+          {
+            kind: "status_note",
+            text: "Execution started",
+            tone: "neutral",
+          },
+          {
+            kind: "reasoning",
+            parts: [{ type: "text", text: "Summarize the fetched page" }],
+            isStreaming: false,
+          },
+          {
+            kind: "sandbox",
+            title: "summary",
+            state: "output-available",
+            code: "print('Example Domain')",
+            output: "Example Domain",
+            language: "python",
+          },
+          {
+            kind: "tool",
+            title: "mcp__docs__fetch",
+            toolType: "mcp__docs__fetch",
+            state: "output-available",
+            input: { url: "https://example.com" },
+            output: { text: "Example Domain" },
+          },
+        ],
+      },
+      {
+        id: "a1",
+        type: "assistant",
+        content: "- Example Domain is reserved for examples.",
+        streaming: false,
+      },
+    ]);
+
+    expect(container.textContent).toContain("Route: url_document_rlm");
+    expect(container.textContent).toContain("Execution started");
+    expect(container.textContent).toContain("Thought");
+    expect(container.textContent).toContain("Ran command");
+    expect(container.textContent).toContain("Example Domain");
+    expect(container.textContent).toContain("Fetched");
+    expect(container.textContent).toContain("example.com");
+    expect(container.textContent).toContain("Example Domain is reserved");
 
     act(() => root.unmount());
   });
@@ -219,6 +313,42 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
     });
 
     expect(container.textContent).toContain("notes.md");
+
+    act(() => root.unmount());
+  });
+
+  it("renders the runtime model picker from active model status", () => {
+    const onOpenModelSettings = vi.fn();
+    const { container, root } = mount([], {
+      activeModels: {
+        planner: "openai/gemini-3-flash-preview",
+        delegate: "openai/gemini-3-pro-preview",
+        delegate_small: null,
+      },
+      onOpenModelSettings,
+    });
+
+    expect(container.textContent).toContain("openai/gemini-3-flash-preview");
+
+    const modelButton = container.querySelector('button[aria-label^="Active model"]');
+    expect(modelButton).toBeTruthy();
+
+    act(() => {
+      modelButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(document.body.textContent).toContain("openai/gemini-3-pro-preview");
+
+    const settingsButton = Array.from(document.body.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Model settings"),
+    );
+    expect(settingsButton).toBeTruthy();
+
+    act(() => {
+      settingsButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(onOpenModelSettings).toHaveBeenCalledOnce();
 
     act(() => root.unmount());
   });

@@ -9,7 +9,11 @@ import dspy
 import pytest
 
 from fleet_rlm.runtime.factory import ESCALATING_RUNTIME_ENV_VAR, build_chat_agent
-from fleet_rlm.runtime.modules.escalating import ESCALATION_SENTINEL, EscalatingFleetModule
+from fleet_rlm.runtime.modules.escalating import (
+    ESCALATION_SENTINEL,
+    EscalatingFleetModule,
+    _build_rlm_prompt_context,
+)
 
 
 class _FakePrediction(dspy.Prediction):
@@ -49,7 +53,93 @@ class _PosthocAgent:
         return self.prediction
 
 
+class _PreviewPosthocAgent(_PosthocAgent):
+    def preview_routing(self, *, user_request: str, execution_mode: str = "auto") -> dict[str, Any]:
+        _ = user_request, execution_mode
+        return {
+            "routing_decision": "url_document_rlm",
+            "source_url": "https://dspy.ai",
+        }
+
+
+class _AsyncReactAgent:
+    def __init__(self, prediction: dspy.Prediction) -> None:
+        self.prediction = prediction
+        self.acall_kwargs: dict[str, Any] | None = None
+
+    def __call__(self, **_: Any) -> dspy.Prediction:
+        raise AssertionError("sync ReAct path should not be used by aforward")
+
+    async def acall(self, **kwargs: Any) -> dspy.Prediction:
+        self.acall_kwargs = kwargs
+        return self.prediction
+
+
 class TestEscalatingFleetModule:
+    def test_url_document_rlm_is_bounded_and_disables_child_tools(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from fleet_rlm.runtime.modules import variable_mode
+
+        calls: list[dict[str, Any]] = []
+
+        def fake_build_variable_mode_rlm(**kwargs: Any) -> MagicMock:
+            calls.append(kwargs)
+            return MagicMock()
+
+        monkeypatch.setattr(variable_mode, "build_variable_mode_rlm", fake_build_variable_mode_rlm)
+
+        EscalatingFleetModule(
+            interpreter=object(),
+            tools=[lambda: None],
+            max_iterations=20,
+            max_llm_calls=50,
+        )
+
+        url_call = calls[1]
+        assert url_call["max_iterations"] == 4
+        assert url_call["max_llm_calls"] == 8
+        assert url_call["extra_tools"] == []
+        assert url_call["include_sub_tools"] is False
+        assert url_call["include_llm_tools"] is False
+
+    def test_url_document_prompt_tells_rlm_semantic_callbacks_are_disabled(self) -> None:
+        prompt = _build_rlm_prompt_context(
+            user_request="analyze https://dspy.ai docs",
+            recent_history="",
+            compressed_history="",
+            core_memory="",
+            url_document_mode=True,
+        )
+
+        assert "llm_query and llm_query_batched are disabled" in prompt
+        assert "synthesize from Python inspection" in prompt
+        assert "llm_query" in prompt
+
+    def test_escalating_module_passes_max_output_chars_to_rlm_wrappers(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from fleet_rlm.runtime.modules import variable_mode
+
+        calls: list[dict[str, Any]] = []
+
+        def fake_build_variable_mode_rlm(**kwargs: Any) -> MagicMock:
+            calls.append(kwargs)
+            return MagicMock()
+
+        monkeypatch.setattr(variable_mode, "build_variable_mode_rlm", fake_build_variable_mode_rlm)
+
+        EscalatingFleetModule(
+            interpreter=object(),
+            tools=[],
+            max_output_chars=12_345,
+        )
+
+        assert calls[0]["max_output_chars"] == 12_345
+        assert calls[1]["max_output_chars"] == 12_345
+
     def test_cot_path_taken_when_no_signal(self) -> None:
         module = _make_module()
         _stub_respond(module, reasoning="Just thinking carefully.", response="Here is the answer.")
@@ -57,17 +147,58 @@ class TestEscalatingFleetModule:
         module.respond.assert_called_once()
         assert getattr(result, "assistant_response", None) == "Here is the answer."
 
-    def test_rlm_path_triggered_by_sentinel_in_reasoning(self) -> None:
+    def test_cot_path_passes_recency_ordered_history_context(self) -> None:
         module = _make_module()
-        _stub_respond(module, reasoning=f"I need external data {ESCALATION_SENTINEL}", response="step1")
-        rlm_pred = _FakePrediction(answer="deep answer")
-        module._rlm = MagicMock(return_value=rlm_pred)
+        _stub_respond(module, reasoning="Just thinking carefully.", response="Here is the answer.")
+        history = dspy.History(
+            messages=[
+                {"user_message": "remember OLD_MARKER", "response": "OLD_MARKER"},
+                {"user_message": "remember NEW_MARKER", "response": "NEW_MARKER"},
+            ]
+        )
+
+        module(user_request="What marker did I just ask you to remember?", execution_mode="auto", history=history)
+
+        call_kwargs = module.respond.call_args.kwargs
+        assert call_kwargs["history"] is history
+        assert "OLD_MARKER" in call_kwargs["recent_history"]
+        assert "NEW_MARKER" in call_kwargs["recent_history"]
+        assert call_kwargs["recent_history"].rfind("NEW_MARKER") > call_kwargs["recent_history"].rfind("OLD_MARKER")
+        assert "most recent prior turn" in call_kwargs["recent_history"]
+
+    def test_react_tool_branch_triggered_by_sentinel_in_reasoning(self) -> None:
+        module = _make_module()
+        _stub_respond(module, reasoning=f"I need a tool {ESCALATION_SENTINEL}", response="step1")
+        react_pred = _FakePrediction(response="tool answer")
+        module._react = MagicMock(return_value=react_pred)
+        module._rlm = MagicMock()
         _stub_summarize(module)
 
-        result = module(user_request="Complex task", execution_mode="auto")
+        result = module(user_request="Use a tool", execution_mode="auto")
         module.respond.assert_called_once()
-        module._rlm.assert_called_once()
-        assert getattr(result, "answer", None) == "deep answer"
+        module._react.assert_called_once()
+        module._rlm.assert_not_called()
+        assert getattr(result, "response", None) == "tool answer"
+        assert result["routing_decision"] == "sentinel_react"
+
+    @pytest.mark.asyncio
+    async def test_async_react_tool_branch_uses_acall_for_sentinel(self) -> None:
+        module = _make_module()
+        _stub_respond(module, reasoning=f"I need a tool {ESCALATION_SENTINEL}", response="step1")
+        react_agent = _AsyncReactAgent(_FakePrediction(response="async tool answer"))
+        module._react = react_agent  # type: ignore[assignment]
+        module._rlm = MagicMock()
+        _stub_summarize(module)
+
+        result = await module.aforward(user_request="Use an async tool", execution_mode="auto")
+
+        module.respond.assert_called_once()
+        module._rlm.assert_not_called()
+        assert react_agent.acall_kwargs is not None
+        assert react_agent.acall_kwargs["user_message"] == "Use an async tool"
+        assert isinstance(react_agent.acall_kwargs["chat_history"], dspy.History)
+        assert getattr(result, "response", None) == "async tool answer"
+        assert result["routing_decision"] == "sentinel_react"
 
     def test_force_escalate_skips_cot(self) -> None:
         module = _make_module()
@@ -103,18 +234,102 @@ class TestEscalatingFleetModule:
         module.respond.assert_not_called()
         assert getattr(result, "answer", None) == "rlm_only_mode"
 
-    def test_rlm_fallback_to_cot_on_error(self) -> None:
+    def test_url_document_analysis_auto_routes_to_rlm(self) -> None:
+        module = _make_module()
+        _stub_respond(module)
+        rlm_pred = _FakePrediction(answer="doc analysis")
+        module._rlm = MagicMock(return_value=rlm_pred)
+        _stub_summarize(module)
+
+        result = module(
+            user_request="analyze https://dspy.ai and provide an in depth analysis of the documentation",
+            execution_mode="auto",
+        )
+
+        module.respond.assert_not_called()
+        module._rlm.assert_called_once()
+        assert getattr(result, "answer", None) == "doc analysis"
+        assert result["routing_decision"] == "url_document_rlm"
+        assert result["source_url"] == "https://dspy.ai"
+
+    def test_url_document_analysis_passes_fetched_doc_as_rlm_variables(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        module = _make_module(interpreter=object())
+        _stub_respond(module)
+        rlm_pred = _FakePrediction(answer="doc analysis")
+        module._url_document_rlm = MagicMock(return_value=rlm_pred)
+        _stub_summarize(module)
+
+        monkeypatch.setattr(
+            "fleet_rlm.runtime.tools.document_tools.fetch_document_text",
+            lambda url: {
+                "status": "ok",
+                "text": "# DSPy docs\nRLM details",
+                "char_count": 23,
+                "metadata": {"source_type": "html"},
+            },
+        )
+
+        module(
+            user_request="analyze https://dspy.ai and provide documentation notes",
+            execution_mode="auto",
+        )
+
+        module._url_document_rlm.assert_called_once()
+        call_kwargs = module._url_document_rlm.call_args.kwargs
+        assert call_kwargs["source_url"] == "https://dspy.ai"
+        assert call_kwargs["document_text"] == "# DSPy docs\nRLM details"
+        assert call_kwargs["source_metadata"] == {
+            "status": "ok",
+            "char_count": "23",
+            "source_type": "html",
+        }
+        assert "# DSPy docs\nRLM details" not in call_kwargs["prompt"]
+        assert call_kwargs["prompt"].startswith("Task:\nanalyze https://dspy.ai and provide documentation notes")
+        assert "URL document variables" in call_kwargs["prompt"]
+        assert call_kwargs["prompt"].endswith("Repeat task:\nanalyze https://dspy.ai and provide documentation notes")
+
+    def test_tools_only_does_not_auto_route_url_to_rlm(self) -> None:
+        module = _make_module()
+        _stub_respond(module, response="tool path")
+        module._rlm = MagicMock(return_value=_FakePrediction(answer="should not run"))
+
+        result = module(
+            user_request="analyze https://dspy.ai and provide documentation notes",
+            execution_mode="tools_only",
+        )
+
+        module.respond.assert_called_once()
+        module._rlm.assert_not_called()
+        assert getattr(result, "assistant_response", None) == "tool path"
+
+    def test_preview_routing_surfaces_url_document_route_before_execution(self) -> None:
+        module = _make_module()
+
+        preview = module.preview_routing(
+            user_request="analyze https://dspy.ai and summarize the docs",
+            execution_mode="auto",
+        )
+
+        assert preview == {
+            "routing_decision": "url_document_rlm",
+            "source_url": "https://dspy.ai",
+        }
+
+    def test_react_fallback_to_cot_on_error(self) -> None:
         module = _make_module()
         cot_pred = _FakePrediction(reasoning=ESCALATION_SENTINEL, assistant_response="cot_resp")
         module.respond = MagicMock(side_effect=[cot_pred, _FakePrediction(assistant_response="fallback")])
-        module._rlm = MagicMock(side_effect=RuntimeError("RLM failed"))
+        module._react = MagicMock(side_effect=RuntimeError("ReAct failed"))
         _stub_summarize(module)
 
         result = module(user_request="query", execution_mode="auto")
         assert getattr(result, "assistant_response", None) == "fallback"
         assert result["runtime_degraded"] is True
-        assert result["runtime_failure_category"] == "rlm_fallback"
-        assert result["runtime_failure_phase"] == "escalating_rlm"
+        assert result["runtime_failure_category"] == "react_fallback"
+        assert result["runtime_failure_phase"] == "escalating_react"
         assert result["runtime_fallback_used"] is True
         assert result["runtime_warning"]
 
@@ -204,6 +419,64 @@ class TestAgentRuntimeEscalationFlag:
         assert done.payload["execution_mode"] == "auto"
         assert done.text == "fallback answer"
 
+    @pytest.mark.asyncio
+    async def test_posthoc_stream_surfaces_rlm_code_trajectory(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _disable_runtime_tool_discovery(monkeypatch)
+        from fleet_rlm.runtime.agent.runtime import AgentRuntime
+
+        rt = AgentRuntime(use_escalation=True)
+        rt.agent = _PosthocAgent(
+            _FakePrediction(
+                answer="analysis complete",
+                selected_skills=["long-context"],
+                routing_decision="url_document_rlm",
+                source_url="https://dspy.ai",
+                trajectory=[
+                    {
+                        "reasoning": "Fetch and inspect the docs page.",
+                        "code": "import urllib.request\nprint('docs')",
+                        "output": "docs",
+                    }
+                ],
+            )
+        )
+
+        events = [event async for event in rt.aiter_chat_turn_stream("analyze https://dspy.ai")]
+
+        status = next(event for event in events if event.payload.get("selected_skills") == ["long-context"])
+        reasoning = next(event for event in events if event.kind == "reasoning")
+        repl_call = next(event for event in events if event.kind == "tool_call")
+        repl_result = next(event for event in events if event.kind == "tool_result")
+        done = events[-1]
+
+        assert "long-context" in status.text
+        assert reasoning.text == "Fetch and inspect the docs page."
+        assert repl_call.payload["tool_name"] == "repl_execute"
+        assert "urllib.request" in repl_call.payload["tool_input"]
+        assert repl_result.payload["tool_output"] == "docs"
+        assert done.payload["routing_decision"] == "url_document_rlm"
+        assert done.payload["source_url"] == "https://dspy.ai"
+
+    @pytest.mark.asyncio
+    async def test_posthoc_stream_emits_routing_preview_before_result(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _disable_runtime_tool_discovery(monkeypatch)
+        from fleet_rlm.runtime.agent.runtime import AgentRuntime
+
+        rt = AgentRuntime(use_escalation=True)
+        rt.agent = _PreviewPosthocAgent(_FakePrediction(answer="analysis complete"))
+
+        events = [event async for event in rt.aiter_chat_turn_stream("analyze https://dspy.ai")]
+
+        assert events[0].text == "Starting turn..."
+        assert events[1].payload == {
+            "routing_decision": "url_document_rlm",
+            "source_url": "https://dspy.ai",
+        }
+        assert "url_document_rlm" in events[1].text
+
 
 class TestBuildChatAgentRuntimeDefault:
     def test_build_chat_agent_defaults_to_escalating_module(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -230,3 +503,17 @@ class TestBuildChatAgentRuntimeDefault:
         rt = build_chat_agent(planner_lm=object(), use_escalation=True)
 
         assert isinstance(rt.agent, EscalatingFleetModule)
+
+    def test_build_chat_agent_forwards_rlm_limits_to_runtime(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _disable_runtime_tool_discovery(monkeypatch)
+
+        rt = build_chat_agent(
+            planner_lm=object(),
+            rlm_max_iterations=9,
+            rlm_max_llm_calls=11,
+            rlm_max_output_chars=12_345,
+        )
+
+        assert rt.rlm_max_iterations == 9
+        assert rt.rlm_max_llm_calls == 11
+        assert rt.rlm_max_output_chars == 12_345

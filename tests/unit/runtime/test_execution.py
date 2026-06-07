@@ -27,36 +27,13 @@ def test_storage_paths_normalize_mount_layouts() -> None:
     assert interpreter_roots.memory_root == "/srv/runtime/memory"
 
 
-def test_streaming_event_helpers_parse_tool_status_and_results() -> None:
-    from fleet_rlm.runtime.execution.streaming_events import (
-        classify_tool_event_kind,
-        is_terminal_stream_event_kind,
-        parse_tool_call_payload,
-        parse_tool_call_status,
-        parse_tool_result_payload,
-        parse_tool_result_status,
-    )
+def test_is_terminal_stream_event_kind_classifies_terminal_kinds() -> None:
+    from fleet_rlm.runtime.execution.streaming_events import is_terminal_stream_event_kind
 
     assert is_terminal_stream_event_kind("done") is True
+    assert is_terminal_stream_event_kind("error") is True
     assert is_terminal_stream_event_kind("status") is False
-    assert classify_tool_event_kind("list_files") == "tool_call"
-
-    assert parse_tool_call_status("Calling tool: list_files(path='src')") == "tool call: list_files(path='src')"
-    assert parse_tool_call_payload("Calling tool: list_files(path='src')") == {
-        "raw_status": "Calling tool: list_files(path='src')",
-        "raw_call": "list_files(path='src')",
-        "tool_name": "list_files",
-        "tool_args": "path='src'",
-        "tool_input": "path='src'",
-    }
-
-    assert parse_tool_result_status("Tool finished.") == "tool result: finished"
-    assert parse_tool_result_status("Tool result: wrote file") == "tool result: completed"
-    assert parse_tool_result_payload("Tool result: wrote file", tool_name="write_file") == {
-        "raw_status": "Tool result: wrote file",
-        "tool_name": "write_file",
-        "tool_output": "wrote file",
-    }
+    assert is_terminal_stream_event_kind("text") is False
 
 
 def test_try_parse_hitl_request_builds_status_event() -> None:
@@ -72,13 +49,13 @@ def test_try_parse_hitl_request_builds_status_event() -> None:
     )
 
     assert clarification is not None
-    assert clarification.kind == "status"
-    assert clarification.payload["options"] == ["Which repo?", "Which branch?"]
-    assert clarification.payload["requires_response"] is True
+    assert clarification["kind"] == "status"
+    assert clarification["payload"]["options"] == ["Which repo?", "Which branch?"]
+    assert clarification["payload"]["requires_response"] is True
 
     assert memory_review is not None
-    assert memory_review.text == "This memory action requires confirmation."
-    assert memory_review.payload["action"] == "delete"
+    assert memory_review["text"] == "This memory action requires confirmation."
+    assert memory_review["payload"]["action"] == "delete"
 
 
 def test_normalize_trajectory_truncates_long_output_and_drops_terminal_thought() -> None:
@@ -166,7 +143,7 @@ def test_build_final_payload_collects_sources_citations_and_human_review() -> No
         effective_max_iters=8,
     )
 
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["history_turns"] == 4
     assert payload["guardrail_warnings"] == ["watch output size"]
     assert payload["token_count"] == 7

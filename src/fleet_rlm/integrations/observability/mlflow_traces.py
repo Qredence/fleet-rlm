@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +25,30 @@ def _trace_experiment_ids(config: MlflowConfig) -> list[str]:
     return [experiment.experiment_id]
 
 
+def _search_traces(
+    mlflow: Any,
+    *,
+    experiment_ids: list[str],
+    max_results: int,
+    return_type: str,
+    include_spans: bool,
+    filter_string: str | None = None,
+) -> Any:
+    search_traces = getattr(mlflow, "search_traces")
+    parameters = inspect.signature(search_traces).parameters
+    kwargs: dict[str, Any] = {
+        "filter_string": filter_string,
+        "max_results": max_results,
+        "return_type": return_type,
+        "include_spans": include_spans,
+    }
+    if "locations" in parameters:
+        kwargs["locations"] = experiment_ids
+    else:
+        kwargs["experiment_ids"] = experiment_ids
+    return search_traces(**kwargs)
+
+
 def resolve_trace_by_client_request_id(
     client_request_id: str,
     *,
@@ -41,7 +66,8 @@ def resolve_trace_by_client_request_id(
         return None
 
     try:
-        traces = mlflow.search_traces(
+        traces = _search_traces(
+            mlflow,
             experiment_ids=experiment_ids,
             filter_string=(f"trace.client_request_id = '{runtime._mlflow_string_literal(client_request_id)}'"),
             max_results=max_results,
@@ -196,7 +222,45 @@ def _trace_span_types(trace: Trace) -> list[str]:
     return span_types
 
 
-def trace_to_dataset_row(trace: Trace) -> dict[str, Any]:
+def _assessment_source_field(assessment: dict[str, Any], key: str) -> str:
+    source = assessment.get("source")
+    if not isinstance(source, dict):
+        return ""
+    value = source.get(key)
+    return str(value or "").strip()
+
+
+def _skip_external_persisted_scorer_feedback(
+    assessment: dict[str, Any],
+    *,
+    disabled_persisted_scorers: set[str],
+) -> bool:
+    if not disabled_persisted_scorers:
+        return False
+    name = str(assessment.get("assessment_name") or "").strip()
+    if name not in disabled_persisted_scorers:
+        return False
+    return _assessment_source_field(assessment, "source_type") == "LLM_JUDGE"
+
+
+def _disabled_persisted_scorer_names(config: MlflowConfig | None) -> set[str]:
+    resolved = config or runtime.get_mlflow_config()
+    if resolved.enable_auto_assessment:
+        return set()
+    try:
+        from .auto_assessment import persisted_scorer_names
+
+        return set(persisted_scorer_names(resolved))
+    except Exception:
+        runtime.logger.debug("Failed to inspect persisted MLflow scorers for trace export.", exc_info=True)
+        return set()
+
+
+def trace_to_dataset_row(
+    trace: Trace,
+    *,
+    config: MlflowConfig | None = None,
+) -> dict[str, Any]:
     """Convert an MLflow trace into an evaluation/export dataset row."""
     payload = trace.to_dict()
     info = payload.get("info", {}) if isinstance(payload, dict) else {}
@@ -211,7 +275,22 @@ def trace_to_dataset_row(trace: Trace) -> dict[str, Any]:
 
     expectations: dict[str, Any] = {}
     feedback: dict[str, Any] = {}
+    skipped_feedback: list[dict[str, str]] = []
+    disabled_persisted_scorers = _disabled_persisted_scorer_names(config)
     for assessment in _trace_assessment_dicts(trace):
+        if _skip_external_persisted_scorer_feedback(
+            assessment,
+            disabled_persisted_scorers=disabled_persisted_scorers,
+        ):
+            skipped_feedback.append(
+                {
+                    "assessment_name": str(assessment.get("assessment_name") or ""),
+                    "source_type": _assessment_source_field(assessment, "source_type"),
+                    "source_id": _assessment_source_field(assessment, "source_id"),
+                    "reason": "persisted_scorer_while_fleet_auto_assessment_disabled",
+                }
+            )
+            continue
         name = str(assessment.get("assessment_name") or "assessment")
         source = assessment.get("source") or {}
         source_id = source.get("source_id") if isinstance(source, dict) else None
@@ -240,6 +319,8 @@ def trace_to_dataset_row(trace: Trace) -> dict[str, Any]:
         row["span_types"] = span_types
     if feedback:
         row["feedback"] = feedback
+    if skipped_feedback:
+        row["skipped_feedback"] = skipped_feedback
     return row
 
 
@@ -259,7 +340,8 @@ def search_annotated_trace_rows(
         return []
 
     try:
-        traces = mlflow.search_traces(
+        traces = _search_traces(
+            mlflow,
             experiment_ids=experiment_ids,
             max_results=max_results,
             return_type="list",
@@ -274,7 +356,7 @@ def search_annotated_trace_rows(
         return []
     rows: list[dict[str, Any]] = []
     for trace in traces:
-        row = trace_to_dataset_row(trace)
+        row = trace_to_dataset_row(trace, config=resolved)
         if row.get("expectations") or row.get("feedback"):
             rows.append(row)
     rows.sort(

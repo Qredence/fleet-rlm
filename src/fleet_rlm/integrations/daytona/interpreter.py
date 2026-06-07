@@ -137,6 +137,7 @@ class DaytonaInterpreter(
         self.broker_health_timeout = max(1.0, float(broker_health_timeout))
         self.broker_tool_call_timeout = max(1.0, float(broker_tool_call_timeout))
         self.broker_start_retries = max(0, int(broker_start_retries))
+        self.semantic_callbacks_enabled = True
         self.delegate_adapter = delegate_adapter
         self.child_isolation_metadata: dict[str, Any] | None = None
 

@@ -694,6 +694,164 @@ describe("applyWsFrameToMessages", () => {
     }
   });
 
+  it("renders canonical repl execution steps with compact code and output", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("execution_step", "repl_result", {
+        step: {
+          type: "repl",
+          label: "repl_result",
+          input: {
+            code: "import urllib.request\nprint('docs')",
+          },
+          output: {
+            stdout: "docs",
+          },
+        },
+      }),
+    );
+
+    const sandbox = findFirstPart(messages, (p) => p.kind === "sandbox");
+    expect(sandbox).toBeDefined();
+    if (sandbox?.kind === "sandbox") {
+      expect(sandbox.state).toBe("output-available");
+      expect(sandbox.code).toContain("urllib.request");
+      expect(sandbox.output).toContain("docs");
+    }
+  });
+
+  it("renders final RLM code/output trajectory as compact sandbox summary rows", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("done", "Done", {
+        trajectory: {
+          steps: [
+            {
+              reasoning: "Inspect the fetched documentation.",
+              code: "print(document_text[:80])",
+              output: "DSPy docs",
+            },
+          ],
+        },
+      }),
+    );
+
+    const summaryReasoning = traceRows(
+      messages,
+      (part, message) => part.kind === "reasoning" && message.traceSource === "summary",
+    );
+    expect(summaryReasoning).toHaveLength(1);
+
+    const sandbox = traceRows(
+      messages,
+      (part, message) => part.kind === "sandbox" && message.traceSource === "summary",
+    )[0]?.part;
+    expect(sandbox).toBeDefined();
+    if (sandbox?.kind === "sandbox") {
+      expect(sandbox.state).toBe("output-available");
+      expect(sandbox.code).toContain("document_text");
+      expect(sandbox.output).toContain("DSPy docs");
+    }
+  });
+
+  it("does not duplicate final trajectory tool rows after live tool rows streamed", () => {
+    let messages = applyWsFrameToMessages(
+      [],
+      makeEvent("execution_step", "repl_result", {
+        step: {
+          type: "repl",
+          label: "repl_result",
+          input: { code: "print('docs')" },
+          output: { stdout: "docs" },
+        },
+      }),
+    ).messages;
+
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("done", "Done", {
+        trajectory: {
+          steps: [
+            {
+              reasoning: "Inspect the fetched documentation.",
+              code: "print('docs')",
+              output: "docs",
+            },
+          ],
+        },
+      }),
+    ).messages;
+
+    const sandboxRows = traceRows(messages, (part) => part.kind === "sandbox");
+    expect(sandboxRows).toHaveLength(1);
+    expect(sandboxRows[0]?.message.traceSource).toBe("live");
+  });
+
+  it("renders final trajectory rows when only a previous turn streamed live tool rows", () => {
+    let messages = applyWsFrameToMessages(
+      [],
+      makeEvent("execution_step", "repl_result", {
+        step: {
+          type: "repl",
+          label: "previous repl",
+          input: { code: "print('previous')" },
+          output: { stdout: "previous" },
+        },
+      }),
+    ).messages;
+    messages = [
+      ...messages,
+      {
+        id: "user-next",
+        type: "user",
+        content: "Analyze the next page",
+        phase: 1,
+      },
+    ];
+
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("done", "Done", {
+        trajectory: {
+          steps: [
+            {
+              reasoning: "Inspect the current documentation.",
+              code: "print('current')",
+              output: "current",
+            },
+          ],
+        },
+      }),
+    ).messages;
+
+    const summarySandboxRows = traceRows(
+      messages,
+      (part, message) => part.kind === "sandbox" && message.traceSource === "summary",
+    );
+    expect(summarySandboxRows).toHaveLength(1);
+    const sandbox = summarySandboxRows[0]?.part;
+    expect(sandbox?.kind === "sandbox" ? sandbox.output : "").toContain("current");
+  });
+
+  it("renders selected skills and routing decisions as compact status rows", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("execution_step", "RLM document analysis selected", {
+        selected_skills: ["long-context", "dspy-programs"],
+        routing_decision: "url_document_rlm",
+        source_url: "https://dspy.ai",
+      }),
+    );
+
+    const status = findFirstPart(messages, (p) => p.kind === "status_note");
+    expect(status).toBeDefined();
+    if (status?.kind === "status_note") {
+      expect(status.text).toContain("long-context");
+      expect(status.text).toContain("url_document_rlm");
+      expect(status.text).toContain("https://dspy.ai");
+    }
+  });
+
   it("classifies environment variable payloads as environment_variables on tool_result", () => {
     const { messages } = applyWsFrameToMessages(
       [],

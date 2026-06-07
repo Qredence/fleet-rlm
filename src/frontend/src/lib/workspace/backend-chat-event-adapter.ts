@@ -197,6 +197,21 @@ function canonicalStepText(step: Record<string, unknown>, fallback: string): str
   );
 }
 
+function routingStatusText(text: string, payload?: Record<string, unknown>): string {
+  const selectedSkills = Array.isArray(payload?.selected_skills)
+    ? payload.selected_skills.map((item) => String(item)).filter(Boolean)
+    : [];
+  const routingDecision = asOptionalText(payload?.routing_decision);
+  const sourceUrl = asOptionalText(payload?.source_url);
+  if (selectedSkills.length === 0 && !routingDecision && !sourceUrl) return text;
+
+  const parts = [text.trim()].filter(Boolean);
+  if (routingDecision) parts.push(`route ${routingDecision}`);
+  if (selectedSkills.length > 0) parts.push(`skills ${selectedSkills.join(", ")}`);
+  if (sourceUrl) parts.push(`source ${sourceUrl}`);
+  return parts.join(" | ");
+}
+
 function applyCanonicalExecutionStep(
   messages: ChatMessage[],
   text: string,
@@ -205,7 +220,12 @@ function applyCanonicalExecutionStep(
   const step = asRecord(payload?.step);
   if (!step) {
     return {
-      messages: appendStatusTrace(messages, text || "Execution step received", "neutral", payload),
+      messages: appendStatusTrace(
+        messages,
+        routingStatusText(text || "Execution step received", payload),
+        "neutral",
+        payload,
+      ),
       terminal: false,
       errored: false,
     };
@@ -235,7 +255,10 @@ function applyCanonicalExecutionStep(
     return {
       messages: token
         ? appendAssistantToken(messages, token)
-        : appendReasoningEvent(messages, reasoning ?? stepText, "live", { ...payload, ...step }),
+        : appendReasoningEvent(messages, reasoning ?? stepText, "live", {
+            ...payload,
+            ...step,
+          }),
       terminal: false,
       errored: false,
     };
@@ -255,7 +278,7 @@ function applyCanonicalExecutionStep(
   return {
     messages: appendStatusTrace(
       messages,
-      stepText || "Execution step received",
+      routingStatusText(stepText || "Execution step received", payload),
       "neutral",
       payload,
     ),
@@ -287,6 +310,7 @@ function applyCanonicalExecutionCompleted(
   next = finishReasoning(next);
   next = finalizeTraceParts(next);
   next = appendFinalTrajectoryThoughts(next, payload);
+  next = appendFinalTrajectoryToolRows(next, payload);
 
   const finalReasoning =
     typeof payload?.final_reasoning === "string" ? payload.final_reasoning.trim() : "";
@@ -393,6 +417,55 @@ function appendFinalTrajectoryThoughts(
   }, messages);
 }
 
+function currentTurnMessages(messages: ChatMessage[]): ChatMessage[] {
+  const lastUserIndex = messages.findLastIndex((message) => message.type === "user");
+  return lastUserIndex >= 0 ? messages.slice(lastUserIndex + 1) : messages;
+}
+
+function hasLiveToolOrSandboxTraceForCurrentTurn(messages: ChatMessage[]): boolean {
+  return currentTurnMessages(messages).some(
+    (message) =>
+      message.type === "trace" &&
+      message.traceSource === "live" &&
+      message.renderParts?.some((part) => part.kind === "tool" || part.kind === "sandbox"),
+  );
+}
+
+function appendFinalTrajectoryToolRows(
+  messages: ChatMessage[],
+  payload?: Record<string, unknown>,
+): ChatMessage[] {
+  if (hasLiveToolOrSandboxTraceForCurrentTurn(messages)) return messages;
+
+  const steps = normalizeTrajectoryStepsFromFinalPayload(payload);
+  return steps.reduce<ChatMessage[]>((acc, step) => {
+    if (!step.toolName) return acc;
+    const stepPayload = {
+      ...payload,
+      tool_name: step.toolName,
+      tool_input: step.toolInput,
+      tool_args: step.toolInput,
+      tool_output: step.toolOutput,
+      output: step.toolOutput,
+      step_index: step.index,
+      step: {
+        type: step.toolName.toLowerCase().includes("repl") ? "repl" : "tool",
+        label: step.label,
+        input: step.toolInput,
+        output: step.toolOutput,
+      },
+    };
+    return appendToolLikePart(
+      acc,
+      step.toolOutput === undefined ? "tool_call" : "tool_result",
+      step.label,
+      stepPayload,
+      appendTracePart,
+      { traceSource: "summary" },
+    );
+  }, messages);
+}
+
 function finalizeTraceParts(messages: ChatMessage[]): ChatMessage[] {
   return messages.map((msg) => {
     if (msg.type !== "trace" || !msg.renderParts) return msg;
@@ -472,7 +545,10 @@ function applyEvent(messages: ChatMessage[], frame: WsServerEvent): ApplyFrameRe
 
   switch (kind) {
     case "execution_started": {
-      const normalizedPayload = { ...payload, phase: payload?.phase ?? "startup" };
+      const normalizedPayload = {
+        ...payload,
+        phase: payload?.phase ?? "startup",
+      };
       const sandboxPart = sandboxProgressPartFromStatus(normalizedPayload);
       if (sandboxPart) {
         return {

@@ -248,6 +248,8 @@ export function WorkspaceScreen() {
                     }
                   : undefined
               }
+              activeModels={runtimeStatus.data?.active_models}
+              onOpenModelSettings={handleOpenRuntimeSettings}
             />
           </div>
         </div>

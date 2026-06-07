@@ -149,6 +149,13 @@ def _resolve_max_tokens(value: int | str | None, *, default: int = 64000) -> int
         return default
 
 
+# Normalized LM API guard (dspy.ai/community/normalized-lm-api-migration):
+# fleet-rlm uses the stock ``dspy.LM`` with no custom BaseLM/Adapter subclass, so it
+# sits in the migration's "nothing required" bucket. Keep it that way: always invoke
+# the LM as ``lm(...)`` (never ``lm.forward(...)``). When bumping to dspy 3.3+, the
+# typed LM API stays opt-in via ``dspy.context(experimental=True)`` — no behaviour
+# change. Any future custom LM/adapter must declare ``forward_contract`` and build
+# ``LMRequest`` / parse ``LMResponse`` rather than reaching into ``forward``.
 def _build_lm(
     *,
     model: str,

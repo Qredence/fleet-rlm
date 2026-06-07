@@ -14,6 +14,7 @@ SandboxUsageStats = concurrency.SandboxUsageStats
 acquire_sandbox_slot = concurrency.acquire_sandbox_slot
 attach_slot_release_handler = concurrency.attach_slot_release_handler
 get_current_sandbox_usage = concurrency.get_current_sandbox_usage
+reconcile_sandbox_slots = concurrency.reconcile_sandbox_slots
 release_sandbox_slot = concurrency.release_sandbox_slot
 release_sandbox_slot_for = concurrency.release_sandbox_slot_for
 
@@ -147,6 +148,50 @@ async def test_get_usage_after_acquire() -> None:
     assert usage.active_count == 1
 
     release_sandbox_slot()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_sandbox_slots_resets_stale_active_count() -> None:
+    with patch.dict("os.environ", {"FLEET_MAX_CONCURRENT_SANDBOXES": "5"}):
+        for _ in range(5):
+            await acquire_sandbox_slot(timeout=1.0)
+        stale_semaphore = concurrency._GLOBAL_SEMAPHORE
+
+        reconciled = reconcile_sandbox_slots(provider_active_count=0)
+
+        assert reconciled.limit == 5
+        assert reconciled.active_count == 0
+        assert reconciled.available_slots == 5
+        assert concurrency._GLOBAL_SEMAPHORE is not stale_semaphore
+        result = await acquire_sandbox_slot(timeout=1.0)
+        assert result is True
+        release_sandbox_slot()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_sandbox_slots_clamps_provider_count_to_limit() -> None:
+    with patch.dict("os.environ", {"FLEET_MAX_CONCURRENT_SANDBOXES": "2"}):
+        await acquire_sandbox_slot(timeout=1.0)
+
+        reconciled = reconcile_sandbox_slots(provider_active_count=20)
+
+        assert reconciled.limit == 2
+        assert reconciled.active_count == 2
+        assert reconciled.available_slots == 0
+
+
+@pytest.mark.asyncio
+async def test_reconciled_slots_can_release_back_to_original_limit() -> None:
+    with patch.dict("os.environ", {"FLEET_MAX_CONCURRENT_SANDBOXES": "3"}):
+        reconciled = reconcile_sandbox_slots(provider_active_count=2)
+
+        assert reconciled.available_slots == 1
+
+        release_sandbox_slot()
+        release_sandbox_slot()
+        usage = get_current_sandbox_usage()
+        assert usage.available_slots == 3
+        assert usage.active_count == 0
 
 
 # ---------------------------------------------------------------------------

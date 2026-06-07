@@ -19,10 +19,11 @@ import dspy
 from dspy.streaming import StreamListener, StreamResponse
 
 from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
+from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventContext, RuntimeEventKind
 from fleet_rlm.runtime.execution.streaming_events import (
     _normalize_trajectory,
 )
-from fleet_rlm.runtime.schemas import StreamEvent
+from fleet_rlm.runtime.schemas import StreamEvent, StreamEventKind
 from fleet_rlm.runtime.tools import discover_tools
 from fleet_rlm.runtime.tools.binding import bind_runtime_tools, execute_sandbox_tool
 
@@ -95,18 +96,46 @@ def _runtime_degradation_payload(result: Any) -> dict[str, Any]:
     return payload
 
 
+def _runtime_routing_payload(result: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    selected_skills = _prediction_value(result, "selected_skills")
+    if isinstance(selected_skills, list):
+        payload["selected_skills"] = [str(item) for item in selected_skills]
+    routing_decision = _prediction_value(result, "routing_decision")
+    if routing_decision not in (None, ""):
+        payload["routing_decision"] = str(routing_decision)
+    source_url = _prediction_value(result, "source_url")
+    if source_url not in (None, ""):
+        payload["source_url"] = str(source_url)
+    return payload
+
+
+def _routing_status_text(payload: dict[str, Any]) -> str:
+    selected = ", ".join(payload.get("selected_skills", []))
+    route = payload.get("routing_decision", "auto")
+    source = payload.get("source_url")
+    text = f"Route: {route}"
+    if selected:
+        text += f" | skills: {selected}"
+    if source:
+        text += f" | source: {source}"
+    return text
+
+
 def _get_streamable_react_program(program: Any) -> Any | None:
-    react_program = getattr(program, "react", program)
-
-    planner = getattr(react_program, "planner", None)
-    extract = getattr(react_program, "extract", None)
-    async_call = getattr(react_program, "async_planner_step", None)
-
-    if planner is None or extract is None:
-        return None
-    if not callable(async_call):
-        return None
-    return react_program
+    # The program itself may be drivable (``FleetAgent``), or it may wrap a
+    # streamable ReAct sub-program under ``.react`` (``EscalatingFleetModule``).
+    # Probe the program first so a ``FleetAgent`` (whose ``.react`` is the
+    # upstream planner ``Predict``, not a streamable program) is recognised.
+    for candidate in (program, getattr(program, "react", None)):
+        if candidate is None:
+            continue
+        planner = getattr(candidate, "planner", None)
+        extract = getattr(candidate, "extract", None)
+        async_call = getattr(candidate, "async_planner_step", None)
+        if planner is not None and extract is not None and callable(async_call):
+            return candidate
+    return None
 
 
 def _normalize_tool_args(tool_args: Any) -> dict[str, Any]:
@@ -166,46 +195,42 @@ async def _call_react_tool(tool: Any, tool_args: dict[str, Any]) -> Any:
     return await asyncio.to_thread(tool, **tool_args)
 
 
-def _build_tool_call_event(*, tool_name: str, tool_args: dict[str, Any], step_index: int) -> StreamEvent:
+def _stream_event_from_runtime_event(event: RuntimeEvent) -> StreamEvent:
     return StreamEvent(
-        kind="tool_call",
-        text=f"Calling tool: {tool_name}({tool_args})",
-        payload={
-            "tool_name": tool_name,
-            "tool_input": str(tool_args),
-            "tool_args": tool_args,
-            "step_index": step_index,
-        },
+        kind=cast(StreamEventKind, event.kind.value),
+        text=event.text,
+        payload=dict(event.payload),
+        timestamp=event.timestamp,
     )
 
 
-def _build_tool_result_event(*, tool_name: str, observation: Any, step_index: int) -> StreamEvent:
-    return StreamEvent(
-        kind="tool_result",
-        text=f"Tool result: {observation}",
-        payload={
-            "tool_name": tool_name,
-            "tool_output": str(observation),
-            "step_index": step_index,
-        },
+def _build_tool_call_event(*, tool_name: str, tool_args: dict[str, Any], step_index: int) -> RuntimeEvent:
+    return RuntimeEvent.tool_call(
+        tool_name=tool_name,
+        tool_args=tool_args,
+        step_index=step_index,
     )
 
 
-def _build_clarification_event(observation: Any) -> StreamEvent | None:
+def _build_tool_result_event(*, tool_name: str, observation: Any, step_index: int) -> RuntimeEvent:
+    return RuntimeEvent.tool_result(
+        tool_name=tool_name,
+        observation=observation,
+        step_index=step_index,
+    )
+
+
+def _build_clarification_event(observation: Any) -> RuntimeEvent | None:
     if not isinstance(observation, dict) or observation.get("status") != "clarification_needed":
         return None
 
     import uuid as _uuid
 
-    return StreamEvent(
-        kind="clarification",
-        text=str(observation.get("question", "Please clarify your intent.")),
-        payload={
-            "message_id": str(observation.get("message_id") or f"clar-{_uuid.uuid4().hex[:8]}"),
-            "question": observation.get("question"),
-            "step_label": observation.get("step_label", "Clarification needed"),
-            "options": observation.get("options", []),
-        },
+    return RuntimeEvent.clarification(
+        message_id=str(observation.get("message_id") or f"clar-{_uuid.uuid4().hex[:8]}"),
+        question=observation.get("question"),
+        step_label=observation.get("step_label", "Clarification needed"),
+        options=observation.get("options", []),
     )
 
 
@@ -227,18 +252,25 @@ class AgentRuntime:
         *,
         interpreter: Any | None = None,
         max_iters: int = 10,
+        rlm_max_iterations: int | None = None,
+        rlm_max_llm_calls: int | None = None,
+        rlm_max_output_chars: int | None = None,
         history_max_turns: int | None = 6,
         extra_tools: list[Any] | None = None,
         repository: Any | None = None,
         use_escalation: bool = True,
         summary_interval: int = 10,
+        compaction_threshold_pct: float = 0.7,
     ) -> None:
-        from .agent import FleetAgent
-
         self.interpreter: Any | None = interpreter
         self.history: dspy.History = dspy.History(messages=[])
         self.history_max_turns: int | None = history_max_turns
         self.core_memory: dict[str, str] = self.default_core_memory()
+
+        # Phase 7: attach runtime reference to interpreter so recursive children
+        # can access parent history for bounded conversation snapshots
+        if interpreter is not None:
+            setattr(interpreter, "agent_runtime", self)
 
         # Session-management hooks used by the websocket layer
         self._db_session_id: str | object | None = None
@@ -249,12 +281,18 @@ class AgentRuntime:
         self.execution_mode: str = "auto"
         self.loaded_document_paths: list[str] = []
         self.batch_concurrency: int | None = None
+        self.rlm_max_iterations = rlm_max_iterations if rlm_max_iterations is not None else max_iters
+        self.rlm_max_llm_calls = rlm_max_llm_calls if rlm_max_llm_calls is not None else 50
+        self.rlm_max_output_chars = rlm_max_output_chars
 
         # Conversation summary for context compression (Phase 2)
         self.conversation_summary: str = ""
         self._summary_interval: int = summary_interval
         self._turns_since_summary: int = 0
         self._use_escalation: bool = use_escalation
+
+        # Phase 7: token-budget-aware compaction threshold (keep history_max_turns as ceiling)
+        self._compaction_threshold_pct: float = max(0.0, min(1.0, compaction_threshold_pct))
 
         # Discover tools from the registry; append any extra tools
         base_tools = discover_tools()
@@ -264,40 +302,125 @@ class AgentRuntime:
             interpreter=interpreter,
         )
 
-        self.tools: list[Any] = base_tools + list(extra_tools or [])
+        self._base_tools: list[Any] = base_tools + list(extra_tools or [])
+        self._mcp_tools: list[Any] = []
+        self.tools: list[Any] = list(self._base_tools)
         self.react_tools: list[Any] = self.tools
 
-        if use_escalation:
+        # Retained for rebuilding the agent when async tool sources (e.g. MCP)
+        # are attached after construction.
+        self._max_iters: int = max_iters
+        self._mcp_provider: Any | None = None
+
+        self.agent: Any = self._build_agent(self.tools)
+
+    def _build_agent(self, tools: list[Any]) -> Any:
+        """Construct the cognition module for the given tool set."""
+        from .agent import FleetAgent
+
+        if self._use_escalation:
             from fleet_rlm.runtime.modules.escalating import EscalatingFleetModule
 
-            self.agent: Any = EscalatingFleetModule(
-                interpreter=interpreter,
-                tools=self.tools,
-                max_iterations=max_iters,
-                summary_interval=summary_interval,
+            return EscalatingFleetModule(
+                interpreter=self.interpreter,
+                tools=tools,
+                max_iterations=self.rlm_max_iterations,
+                max_llm_calls=self.rlm_max_llm_calls,
+                max_output_chars=self.rlm_max_output_chars,
+                summary_interval=self._summary_interval,
             )
-        else:
-            self.agent: Any = FleetAgent(
-                tools=self.tools,
-                max_iters=max_iters,
-            )
+        return FleetAgent(
+            tools=tools,
+            max_iters=self._max_iters,
+        )
+
+    async def attach_mcp_tools(self, configs: Any | None = None) -> list[str]:
+        """Discover MCP tools and rebuild the agent with them registered.
+
+        Connects to the configured MCP servers (env-driven by default), appends
+        the discovered async ``dspy.Tool`` objects to the runtime tool list, and
+        rebuilds the cognition module so they appear in the ReAct tool set. Safe
+        to call when no MCP servers are configured (returns an empty list and
+        leaves the agent untouched). Call :meth:`aclose_mcp` to release sessions.
+
+        Returns the names of the MCP tools that were attached.
+        """
+        from fleet_rlm.runtime.tools.mcp_tools import MCPToolProvider, load_mcp_server_configs
+
+        resolved = configs if configs is not None else load_mcp_server_configs()
+        if not resolved:
+            return []
+
+        provider = MCPToolProvider(resolved)
+        mcp_tools = await provider.connect()
+        if not mcp_tools:
+            await provider.aclose()
+            return []
+
+        # Release any previously attached provider before swapping it in.
+        await self.aclose_mcp()
+        self._mcp_provider = provider
+        self._mcp_tools = list(mcp_tools)
+
+        self.tools = list(self._base_tools) + list(self._mcp_tools)
+        self.react_tools = self.tools
+        self.agent = self._build_agent(self.tools)
+        return [getattr(tool, "name", str(tool)) for tool in mcp_tools]
+
+    async def aclose_mcp(self) -> None:
+        """Close any live MCP sessions attached via :meth:`attach_mcp_tools`."""
+        provider = self._mcp_provider
+        if provider is None:
+            return
+        self._mcp_provider = None
+        self._mcp_tools = []
+        await provider.aclose()
+        self.tools = list(self._base_tools)
+        self.react_tools = self.tools
+        self.agent = self._build_agent(self.tools)
 
     # -----------------------------------------------------------------
     # Chat API
     # -----------------------------------------------------------------
 
+    def _estimate_history_chars(self) -> int:
+        """Estimate character count of history as a proxy for token usage."""
+        messages = list(getattr(self.history, "messages", []) or [])
+        return sum(len(str(msg.get("user_message", ""))) + len(str(msg.get("response", ""))) for msg in messages)
+
     def _maybe_refresh_summary(self) -> None:
-        """Regenerate conversation_summary every ``_summary_interval`` turns."""
+        """Regenerate conversation_summary based on token budget (Phase 7).
+
+        Phase 7: Compacts history when estimated token usage crosses the
+        compaction threshold, while keeping history_max_turns as a hard ceiling.
+        """
         if not self._use_escalation:
             return
+
         self._turns_since_summary += 1
-        if self._turns_since_summary >= self._summary_interval:
+
+        # Phase 7: token-budget-aware compaction
+        # Estimate history size and check against threshold
+        history_chars = self._estimate_history_chars()
+        # Use a reasonable default max context window if not available (64K tokens)
+        # Approximate 4 chars per token for estimation
+        max_context_chars = 64000 * 4
+        threshold_chars = int(max_context_chars * self._compaction_threshold_pct)
+
+        # Compact if threshold exceeded or interval reached
+        should_compact = history_chars > threshold_chars or self._turns_since_summary >= self._summary_interval
+
+        if should_compact:
             escalating = self.agent
             if hasattr(escalating, "compress_history"):
                 try:
                     self.conversation_summary = escalating.compress_history(self.history)
                     self._turns_since_summary = 0
-                    logger.debug("AgentRuntime: conversation summary refreshed")
+                    logger.debug(
+                        "AgentRuntime: conversation summary refreshed (chars=%d, threshold=%d)",
+                        history_chars,
+                        threshold_chars,
+                    )
                 except Exception as exc:
                     logger.warning("AgentRuntime: summary refresh failed: %s", exc)
 
@@ -314,14 +437,52 @@ class AgentRuntime:
             "conversation_summary": self.conversation_summary,
         }
 
+    def preview_routing(self, *, user_request: str, execution_mode: str = "auto") -> dict[str, Any]:
+        """Expose deterministic route metadata before expensive turn execution."""
+        preview_routing = getattr(self.agent, "preview_routing", None)
+        if not callable(preview_routing):
+            return {}
+        payload = preview_routing(user_request=user_request, execution_mode=execution_mode)
+        return payload if isinstance(payload, dict) else {}
+
+    def _recursion_depth_state(self) -> tuple[int, int]:
+        """Return ``(depth, max_depth)`` for the current runtime/interpreter.
+
+        The root runtime is depth ``0``; ``max_depth`` is the configured
+        ``sub_rlm`` recursion ceiling carried on the interpreter (default 2).
+        """
+        depth = int(getattr(self.interpreter, "_sub_rlm_depth", 0) or 0)
+        max_depth = int(getattr(self.interpreter, "_sub_rlm_max_depth", 2) or 2)
+        return depth, max_depth
+
+    def _runtime_event_context(self) -> RuntimeEventContext:
+        """Build the canonical runtime context (incl. recursion depth) for events.
+
+        Phase 7: surfaces ``depth``/``max_depth`` so the frontend run-workbench
+        can render recursion depth from typed ``RuntimeEvent.context`` fields.
+        """
+        depth, max_depth = self._recursion_depth_state()
+        return RuntimeEventContext(
+            execution_mode=self.execution_mode,
+            depth=depth,
+            max_depth=max_depth,
+        )
+
     def _runtime_observability_payload(self) -> dict[str, Any]:
         """Return runtime metadata shared by streamed completion events."""
+        depth, max_depth = self._recursion_depth_state()
         return {
             "execution_mode": self.execution_mode,
             "runtime_module": type(self.agent).__name__,
             "escalation_enabled": self._use_escalation,
             "conversation_summary_available": bool(self.conversation_summary),
             "loaded_document_count": len(self.loaded_document_paths),
+            "recursion": {"depth": depth, "max_depth": max_depth},
+            "rlm_limits": {
+                "max_iterations": self.rlm_max_iterations,
+                "max_llm_calls": self.rlm_max_llm_calls,
+                "max_output_chars": self.rlm_max_output_chars,
+            },
         }
 
     def chat_turn(self, user_message: str) -> dspy.Prediction:
@@ -353,34 +514,55 @@ class AgentRuntime:
         *,
         message: str,
         cancel_check: Callable[[], bool] | None,
-    ) -> AsyncIterator[StreamEvent]:
+    ) -> AsyncIterator[RuntimeEvent]:
         """Fallback stream path that emits events after the turn finishes."""
         if cancel_check is not None and cancel_check():
-            yield StreamEvent(
-                kind="done",
+            yield RuntimeEvent(
+                kind=RuntimeEventKind.DONE,
                 text="[cancelled]",
                 payload={"cancelled": True, "history_turns": self.history_turns()},
             )
             return
 
-        yield StreamEvent(kind="status", text="Starting turn...")
+        yield RuntimeEvent.status("Starting turn...")
+        preview_routing = getattr(self.agent, "preview_routing", None)
+        if callable(preview_routing):
+            routing_preview = preview_routing(
+                user_request=message,
+                execution_mode=self.execution_mode,
+            )
+            if isinstance(routing_preview, dict) and routing_preview.get("routing_decision"):
+                yield RuntimeEvent.status(
+                    _routing_status_text(routing_preview),
+                    payload=routing_preview,
+                )
 
         try:
-            result = await asyncio.to_thread(
-                self.agent,
-                **self._escalation_call_args(message),
-            )
+            async_call = getattr(self.agent, "aforward", None)
+            if callable(async_call):
+                result = await async_call(**self._escalation_call_args(message))
+            else:
+                # Drive sync-only modules in a worker thread. The RLM heavy path
+                # runs sandbox code through the interpreter's blocking execute();
+                # dspy.RLM.aforward still calls that synchronously (only LM
+                # predictor calls are awaited), so to_thread is the correct
+                # non-blocking pattern for modules without an explicit async path.
+                # See docs/agent-harness/architecture-invariants.md.
+                result = await asyncio.to_thread(
+                    self.agent,
+                    **self._escalation_call_args(message),
+                )
         except Exception as exc:
-            yield StreamEvent(
-                kind="error",
+            yield RuntimeEvent(
+                kind=RuntimeEventKind.ERROR,
                 text=str(exc),
                 payload={"history_turns": self.history_turns()},
             )
             return
 
         if cancel_check is not None and cancel_check():
-            yield StreamEvent(
-                kind="done",
+            yield RuntimeEvent(
+                kind=RuntimeEventKind.DONE,
                 text="[cancelled]",
                 payload={"cancelled": True, "history_turns": self.history_turns()},
             )
@@ -390,64 +572,58 @@ class AgentRuntime:
         trajectory_raw = getattr(result, "trajectory", None) or {}
         trajectory = _normalize_trajectory(trajectory_raw)
         degradation_payload = _runtime_degradation_payload(result)
+        routing_payload = _runtime_routing_payload(result)
+
+        if routing_payload.get("selected_skills") or routing_payload.get("routing_decision"):
+            yield RuntimeEvent.status(
+                _routing_status_text(routing_payload),
+                payload=routing_payload,
+            )
 
         for step in trajectory:
             thought = step.get("thought")
             tool_name = step.get("tool_name")
             is_terminal = (tool_name == "finish") or (not tool_name)
             if thought and not is_terminal:
-                yield StreamEvent(
-                    kind="reasoning",
-                    text=str(thought),
-                    payload={"phase": "reasoning"},
-                )
+                yield RuntimeEvent.reasoning(str(thought))
 
             tool_name = step.get("tool_name")
             if tool_name:
                 tool_args = step.get("tool_args") or step.get("input", "")
-                yield StreamEvent(
-                    kind="tool_call",
-                    text=f"Calling tool: {tool_name}({tool_args})",
-                    payload={
-                        "tool_name": tool_name,
-                        "tool_input": str(tool_args),
-                    },
+                traj_idx = step.get("index")
+                tool_ev = RuntimeEvent.tool_call(
+                    tool_name=tool_name,
+                    tool_args=tool_args if isinstance(tool_args, dict) else {"input": tool_args},
+                    step_index=traj_idx,
                 )
+                tool_ev.payload["step"] = step
+                tool_ev.payload["trajectory_index"] = traj_idx
+                yield tool_ev
 
             observation = step.get("observation") or step.get("output", "")
             if observation and tool_name:
-                yield StreamEvent(
-                    kind="tool_result",
-                    text=f"Tool result: {observation}",
-                    payload={
-                        "tool_name": tool_name,
-                        "tool_output": str(observation),
-                    },
+                result_ev = RuntimeEvent.tool_result(
+                    tool_name=tool_name,
+                    observation=observation,
+                    step_index=step.get("index"),
                 )
-                if isinstance(observation, dict) and observation.get("status") == "clarification_needed":
-                    import uuid as _uuid
-
-                    clar_payload = observation
-                    yield StreamEvent(
-                        kind="clarification",
-                        text=str(clar_payload.get("question", "Please clarify your intent.")),
-                        payload={
-                            "message_id": str(clar_payload.get("message_id") or f"clar-{_uuid.uuid4().hex[:8]}"),
-                            "question": clar_payload.get("question"),
-                            "step_label": clar_payload.get("step_label", "Clarification needed"),
-                            "options": clar_payload.get("options", []),
-                        },
-                    )
+                result_ev.payload["output"] = observation
+                result_ev.payload["step"] = step
+                result_ev.payload["trajectory_index"] = step.get("index")
+                yield result_ev
+                clar_ev = _build_clarification_event(observation)
+                if clar_ev is not None:
+                    yield clar_ev
 
         if degradation_payload:
-            yield StreamEvent(
-                kind="warning",
+            yield RuntimeEvent(
+                kind=RuntimeEventKind.WARNING,
                 text=str(degradation_payload["runtime_warning"]),
                 payload=degradation_payload,
             )
 
         if response:
-            yield StreamEvent(kind="text", text=response)
+            yield RuntimeEvent(kind=RuntimeEventKind.TEXT, text=response)
 
         self.history = _append_turn_to_history(
             self.history,
@@ -463,7 +639,13 @@ class AgentRuntime:
         }
         done_payload.update(self._runtime_observability_payload())
         done_payload.update(degradation_payload)
-        yield StreamEvent(kind="done", text=response, payload=done_payload)
+        done_payload.update(routing_payload)
+        yield RuntimeEvent(
+            kind=RuntimeEventKind.DONE,
+            text=response,
+            payload=done_payload,
+            context=self._runtime_event_context(),
+        )
 
     # -----------------------------------------------------------------
     # Async context manager (required by ChatAgentProtocol)
@@ -496,6 +678,7 @@ class AgentRuntime:
         return False
 
     def shutdown(self) -> None:
+        _run_async_compat(self.aclose_mcp)
         if self.interpreter is not None:
             shutdown = getattr(self.interpreter, "shutdown", None)
             if callable(shutdown):
@@ -512,6 +695,7 @@ class AgentRuntime:
                         pass
 
     async def ashutdown(self) -> None:
+        await self.aclose_mcp()
         if self.interpreter is None:
             return
         ashutdown = getattr(self.interpreter, "ashutdown", None)
@@ -651,7 +835,7 @@ class AgentRuntime:
                 message=message,
                 cancel_check=cancel_check,
             ):
-                yield event
+                yield _stream_event_from_runtime_event(event)
             return
         logger.info("streaming_path=native (dspy.streamify per-token streaming)")
 
@@ -735,7 +919,9 @@ class AgentRuntime:
                     break
 
                 tool = react_program.tools[tool_name]
-                yield _build_tool_call_event(tool_name=tool_name, tool_args=tool_args, step_index=step_index)
+                yield _stream_event_from_runtime_event(
+                    _build_tool_call_event(tool_name=tool_name, tool_args=tool_args, step_index=step_index)
+                )
 
                 try:
                     observation = await _call_react_tool(tool, tool_args)
@@ -745,15 +931,17 @@ class AgentRuntime:
                 trajectory_raw[f"observation_{step_index}"] = observation
                 if recursive_child_review is None:
                     recursive_child_review = _recursive_child_review_payload(tool_name, observation)
-                yield _build_tool_result_event(
-                    tool_name=tool_name,
-                    observation=observation,
-                    step_index=step_index,
+                yield _stream_event_from_runtime_event(
+                    _build_tool_result_event(
+                        tool_name=tool_name,
+                        observation=observation,
+                        step_index=step_index,
+                    )
                 )
 
                 clarification_event = _build_clarification_event(observation)
                 if clarification_event is not None:
-                    yield clarification_event
+                    yield _stream_event_from_runtime_event(clarification_event)
 
             # Fast path: skip the extract LLM call when the agent finished
             # with a finish tool or no tool. The planner thought already

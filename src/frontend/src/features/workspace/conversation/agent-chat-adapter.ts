@@ -115,6 +115,9 @@ function stableToolCallId(messageId: string, kind: string, index: number, stepIn
 
 function toolPartType(toolType: string): string {
   const normalized = toolType.toLowerCase();
+  if (normalized.startsWith("mcp__")) {
+    return `tool-${toolType}`;
+  }
   if (/(bash|exec|command|terminal|run|shell|python|repl|interpreter|sandbox)/.test(normalized)) {
     return "tool-Bash";
   }
@@ -142,9 +145,6 @@ function toolPartType(toolType: string): string {
   if (/(plan|planning)/.test(normalized)) return "tool-PlanWrite";
   if (/(delegate|sub_rlm|agent|recursive)/.test(normalized)) return "tool-Agent";
   if (/(think|reason)/.test(normalized)) return "tool-Thinking";
-  if (normalized.startsWith("mcp__")) {
-    return `tool-${toolType}`;
-  }
   return `tool-${sanitizeToolName(toolType)}`;
 }
 

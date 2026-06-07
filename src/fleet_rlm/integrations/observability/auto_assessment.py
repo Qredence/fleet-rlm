@@ -7,6 +7,7 @@ The MLflow server evaluates a sampled subset of incoming traces.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Mapping
 from typing import Any
 
@@ -23,6 +24,8 @@ except ImportError:
     pass
 
 _SCORER_REGISTRY: dict[tuple[str, str | None], Any] = {}
+_PERSISTED_SCORER_CACHE: tuple[float, tuple[str, bool], list[str]] | None = None
+_PERSISTED_SCORER_CACHE_SECONDS = 30.0
 
 
 def _scorer_display_name(scorer: Any) -> str:
@@ -41,6 +44,31 @@ def _scorer_display_name(scorer: Any) -> str:
     )
 
 
+def _scorer_is_active(scorer: Any) -> bool:
+    """Return whether a persisted scorer is actively scheduled to evaluate traces."""
+    if isinstance(scorer, Mapping):
+        sample_rate = scorer.get("sample_rate")
+        status = scorer.get("status")
+    else:
+        sample_rate = getattr(scorer, "sample_rate", None)
+        status = getattr(scorer, "status", None)
+
+    if sample_rate is not None:
+        try:
+            return float(sample_rate) > 0
+        except (TypeError, ValueError):
+            pass
+
+    normalized_status = str(status or "").lower()
+    if normalized_status:
+        if "stopped" in normalized_status:
+            return False
+        if "started" in normalized_status or "active" in normalized_status:
+            return True
+
+    return True
+
+
 def _active_experiment_id(mlflow: Any, config: MlflowConfig) -> str | None:
     get_experiment_by_name = getattr(mlflow, "get_experiment_by_name", None)
     if not callable(get_experiment_by_name) or not config.experiment:
@@ -54,35 +82,55 @@ def _active_experiment_id(mlflow: Any, config: MlflowConfig) -> str | None:
     return str(experiment_id) if experiment_id is not None else None
 
 
-def warn_if_persisted_scorers_active(config: MlflowConfig, *, mlflow: Any | None = None) -> int:
-    """Warn when MLflow has persisted scorers but Fleet auto-assessment is disabled."""
-    if config.enable_auto_assessment:
-        return 0
+def persisted_scorer_names(
+    config: MlflowConfig,
+    *,
+    mlflow: Any | None = None,
+    cache_seconds: float = _PERSISTED_SCORER_CACHE_SECONDS,
+) -> list[str]:
+    """Return active persisted MLflow GenAI scorer names for diagnostics."""
+    global _PERSISTED_SCORER_CACHE
+    cache_key = (config.experiment, config.enable_auto_assessment)
+    now = time.monotonic()
+    if cache_seconds > 0 and _PERSISTED_SCORER_CACHE is not None:
+        cached_at, cached_key, cached_names = _PERSISTED_SCORER_CACHE
+        if cached_key == cache_key and now - cached_at <= cache_seconds:
+            return list(cached_names)
     if mlflow is None:
         try:
             import mlflow as mlflow_module
 
             mlflow = mlflow_module
         except ImportError:
-            return 0
+            return []
     genai = getattr(mlflow, "genai", None)
     list_scorers = getattr(genai, "list_scorers", None)
     if not callable(list_scorers):
-        return 0
+        return []
     experiment_id = _active_experiment_id(mlflow, config)
     try:
         scorers = list_scorers(experiment_id=experiment_id)
     except Exception:
         logger.debug("Failed to list MLflow scorers for diagnostics.", exc_info=True)
+        return []
+    scorer_names = [_scorer_display_name(scorer) for scorer in scorers if _scorer_is_active(scorer)]
+    if cache_seconds > 0:
+        _PERSISTED_SCORER_CACHE = (now, cache_key, list(scorer_names))
+    return scorer_names
+
+
+def warn_if_persisted_scorers_active(config: MlflowConfig, *, mlflow: Any | None = None) -> int:
+    """Warn when MLflow has persisted scorers but Fleet auto-assessment is disabled."""
+    if config.enable_auto_assessment:
         return 0
-    scorer_names = [_scorer_display_name(scorer) for scorer in scorers]
+    scorer_names = persisted_scorer_names(config, mlflow=mlflow, cache_seconds=0)
     if not scorer_names:
         return 0
     logger.warning(
         "MLflow has persisted scorer(s) for experiment %s while Fleet auto-assessment is disabled: %s. "
         "These scorers can continue to assess traces independently of FLEET_RLM_ENABLE_AUTO_ASSESSMENT. "
         "Use `uv run python scripts/mlflow_cli.py scorers list` and "
-        "`uv run python scripts/mlflow_cli.py scorers delete --name <name> --yes` to inspect or remove them.",
+        "`uv run python scripts/mlflow_cli.py scorers stop --name <name>` to inspect or stop them.",
         config.experiment,
         ", ".join(scorer_names),
     )

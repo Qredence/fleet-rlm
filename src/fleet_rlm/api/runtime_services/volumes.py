@@ -17,6 +17,7 @@ from fleet_rlm.integrations.daytona.sdk_ops import (
     alist_daytona_volumes,
     aread_daytona_volume_file_text,
 )
+from fleet_rlm.integrations.daytona.volumes import VFS_CANONICAL_ROOTS
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
 from ..auth import NormalizedIdentity
@@ -33,7 +34,7 @@ from .common import VOLUME_OPERATION_TIMEOUT_SECONDS, run_blocking
 VolumeOperation = Callable[[str, str, int], dict[str, Any] | Awaitable[dict[str, Any]]]
 VolumeTreeOperation = Callable[[str, str, int, int], dict[str, Any] | Awaitable[dict[str, Any]]]
 
-CANONICAL_VOLUME_ROOTS: tuple[str, ...] = ("/memory", "/artifacts", "/buffers", "/meta")
+CANONICAL_VOLUME_ROOTS: tuple[str, ...] = tuple(sorted(VFS_CANONICAL_ROOTS))
 
 
 @dataclass(frozen=True)

@@ -226,16 +226,23 @@ async def switch_session_if_needed(
 
     cached: dict[str, Any] | None = session_cache.sessions.get(key)
     if cached is None:
-        from ...runtime_services.chat_persistence import (
-            _restore_manifest_from_local_store,
-            load_manifest_from_volume,
-        )
+        from ...runtime_services.session_manifest import load_manifest_from_volume
+        from ...runtime_services.session_persistence import _restore_manifest_from_local_store
 
         if interpreter is not None:
             manifest = await load_manifest_from_volume(
                 agent,
                 manifest_path,
             )
+            # Each turn may acquire a different sandbox (pool-based dispatch),
+            # so the volume on the new sandbox won't have the prior turn's
+            # manifest. Fall back to the local store when the volume read
+            # returns nothing.
+            if not manifest:
+                manifest = await _restore_manifest_from_local_store(
+                    persistence=persistence,
+                    sess_id=sess_id,
+                )
         else:
             # No Daytona volume — attempt to restore from local store so that
             # session history survives process restarts between WS connections.
@@ -280,7 +287,7 @@ async def switch_session_if_needed(
         if db_session_id:
             metadata["db_session_id"] = db_session_id
         if interpreter is not None:
-            from ...runtime_services.chat_persistence import ensure_session_volume_layout
+            from ...runtime_services.session_manifest import ensure_session_volume_layout
 
             try:
                 layout_paths = await ensure_session_volume_layout(
