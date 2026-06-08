@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import dspy
+if TYPE_CHECKING:
+    pass
 
 from fleet_rlm.runtime.execution.interpreter_protocol import (
     ExecutionProfile,
@@ -92,7 +93,7 @@ class DaytonaInterpreter(
         sandbox_labels: dict[str, str] | None = None,
         delete_session_on_shutdown: bool = True,
         delete_context_on_shutdown: bool = False,
-        sub_lm: dspy.LM | None = None,
+        sub_lm: Any | None = None,
         max_llm_calls: int = 50,
         max_recursion_depth: int = 2,
         rlm_max_iterations: int = 30,
