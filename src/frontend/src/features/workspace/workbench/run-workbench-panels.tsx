@@ -1,6 +1,8 @@
 import { SearchSlash } from "lucide-react";
 
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
+import { Streamdown } from "@/components/ui/streamdown";
+import { ThinkingTool } from "@/components/agent-elements/tools/thinking-tool";
+import { buildThinkingStep } from "@/components/agent-elements/utils/static-tool-parts";
 import { EmptyPanel } from "@/components/product/empty-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +51,17 @@ export function IterationRow({
   );
 }
 
+function artifactRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function artifactString(value: unknown, key: string): string | undefined {
+  const record = artifactRecord(value);
+  const candidate = record?.[key];
+  return typeof candidate === "string" && candidate.trim() ? candidate : undefined;
+}
+
 export function ArtifactPanel({ artifact }: { artifact?: ArtifactSummary | null }) {
   if (!artifact) {
     return (
@@ -60,7 +73,15 @@ export function ArtifactPanel({ artifact }: { artifact?: ArtifactSummary | null 
     );
   }
 
-  const renderedArtifactText = preferredArtifactText(artifact.value);
+  const value = artifact.value;
+  const markdownText =
+    artifactString(value, "final_markdown") ??
+    (artifact.kind === "markdown" ? preferredArtifactText(value) : undefined);
+  const codeContent = artifactString(value, "content");
+  const codeLanguage = artifactString(value, "language") ?? "text";
+  const codeFilename = artifactString(value, "filename");
+  const summaryText = artifactString(value, "summary") ?? artifact.textPreview ?? undefined;
+  const renderedArtifactText = preferredArtifactText(value);
 
   return (
     <div className="flex flex-col gap-3">
@@ -72,18 +93,42 @@ export function ArtifactPanel({ artifact }: { artifact?: ArtifactSummary | null 
         {artifact.variableName ? (
           <Badge variant="secondary">var {artifact.variableName}</Badge>
         ) : null}
+        {codeFilename ? <Badge variant="secondary">{codeFilename}</Badge> : null}
       </div>
-      {artifact.textPreview ? (
+      {summaryText && artifact.kind !== "assistant_response" ? (
         <Card className="border-border-subtle/80 bg-muted/15">
-          <CardContent className="pt-4 text-sm text-foreground">{artifact.textPreview}</CardContent>
+          <CardContent className="pt-4 text-sm text-foreground">{summaryText}</CardContent>
         </Card>
       ) : null}
-      <CodeBlock className="border-border-subtle/80 bg-muted/15">
-        <CodeBlockCode
-          code={renderedArtifactText ?? stringifyValue(artifact.value)}
-          language="json"
-        />
-      </CodeBlock>
+      {artifact.kind === "markdown" && markdownText ? (
+        <Card className="border-border-subtle/80 bg-muted/15">
+          <CardContent className="pt-4">
+            <Streamdown content={markdownText} className="text-sm leading-relaxed" />
+          </CardContent>
+        </Card>
+      ) : null}
+      {artifact.kind === "code_file" && codeContent ? (
+        <CodeBlock className="border-border-subtle/80 bg-muted/15">
+          <CodeBlockCode code={codeContent} language={codeLanguage} />
+        </CodeBlock>
+      ) : null}
+      {artifact.kind !== "markdown" && artifact.kind !== "code_file" ? (
+        <>
+          {artifact.textPreview ? (
+            <Card className="border-border-subtle/80 bg-muted/15">
+              <CardContent className="pt-4 text-sm text-foreground">
+                {artifact.textPreview}
+              </CardContent>
+            </Card>
+          ) : null}
+          <CodeBlock className="border-border-subtle/80 bg-muted/15">
+            <CodeBlockCode
+              code={renderedArtifactText ?? stringifyValue(artifact.value)}
+              language="json"
+            />
+          </CodeBlock>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -111,16 +156,16 @@ export function IterationDetail({ iteration }: { iteration?: IterationSummary | 
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {iteration.reasoningSummary ? (
-          <Reasoning className="mb-0" defaultOpen>
-            <ReasoningTrigger
-              getThinkingMessage={() => (
-                <span className="text-sm font-medium">Planner reasoning</span>
-              )}
-            />
-            <ReasoningContent className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">
-              {iteration.reasoningSummary}
-            </ReasoningContent>
-          </Reasoning>
+          <ThinkingTool
+            defaultOpen
+            step={buildThinkingStep(
+              `iteration-${iteration.iteration}-reasoning`,
+              iteration.reasoningSummary,
+              { toolName: "Planner reasoning" },
+            )}
+            state="complete"
+            onComplete={() => {}}
+          />
         ) : null}
         {iteration.code ? (
           <section className="flex flex-col gap-2">

@@ -12,8 +12,9 @@ from fleet_rlm.runtime.factory import ESCALATING_RUNTIME_ENV_VAR, build_chat_age
 from fleet_rlm.runtime.modules.escalating import (
     ESCALATION_SENTINEL,
     EscalatingFleetModule,
-    _build_rlm_prompt_context,
 )
+from fleet_rlm.runtime.modules.rlm_prompts import build_rlm_prompt_context
+from fleet_rlm.runtime.task_intent import implies_quote_retrieval, quote_retrieval_repl_guidance
 
 
 class _FakePrediction(dspy.Prediction):
@@ -37,6 +38,18 @@ def _stub_summarize(module: EscalatingFleetModule, *, summary: str = "summary") 
     module.summarize = MagicMock(return_value=pred)
 
 
+def test_enrich_with_skills_uses_scaffold_when_volume_unmounted() -> None:
+    module = _make_module(interpreter=None)
+
+    enriched, selected = module._enrich_with_skills(
+        "Analyze the whole documentation of https://dspy.ai",
+        "",
+    )
+
+    assert "long-context" in selected
+    assert "[Active Skills]" in enriched or "[Skill:" in enriched
+
+
 def _disable_runtime_tool_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.runtime.agent import runtime as runtime_mod
 
@@ -54,8 +67,14 @@ class _PosthocAgent:
 
 
 class _PreviewPosthocAgent(_PosthocAgent):
-    def preview_routing(self, *, user_request: str, execution_mode: str = "auto") -> dict[str, Any]:
-        _ = user_request, execution_mode
+    def preview_routing(
+        self,
+        *,
+        user_request: str,
+        execution_mode: str = "auto",
+        turn_context: Any | None = None,
+    ) -> dict[str, Any]:
+        _ = user_request, execution_mode, turn_context
         return {
             "routing_decision": "url_document_rlm",
             "source_url": "https://dspy.ai",
@@ -102,10 +121,52 @@ class TestEscalatingFleetModule:
         assert url_call["max_llm_calls"] == 8
         assert url_call["extra_tools"] == []
         assert url_call["include_sub_tools"] is False
-        assert url_call["include_llm_tools"] is False
+        assert url_call["include_llm_tools"] is True
 
-    def test_url_document_prompt_tells_rlm_semantic_callbacks_are_disabled(self) -> None:
-        prompt = _build_rlm_prompt_context(
+    def test_url_document_prompt_enables_llm_query_by_default(self) -> None:
+        prompt = build_rlm_prompt_context(
+            user_request="analyze https://dspy.ai docs",
+            recent_history="",
+            compressed_history="",
+            core_memory="",
+            url_document_mode=True,
+        )
+
+        assert "llm_query/llm_query_batched on focused snippets" in prompt
+        assert "llm_query" in prompt
+
+    def test_needle_guidance_requires_single_verbatim_quote(self) -> None:
+        guidance = quote_retrieval_repl_guidance()
+        assert guidance
+        assert "exactly ONE quote block" in guidance
+        assert "no paraphrase" in guidance
+        assert implies_quote_retrieval("Return the quote verbatim from Akiyuki Ui, Operating Officer, Mizuho Bank.")
+
+    def test_needle_guidance_skipped_for_non_quote_tasks(self) -> None:
+        assert not implies_quote_retrieval("Summarize the foreword themes")
+
+    def test_large_context_prompt_adds_needle_guidance_for_exact_quotes(self) -> None:
+        prompt = build_rlm_prompt_context(
+            user_request="What is the exact quote from Chad Gates, Managing Director?",
+            recent_history="",
+            compressed_history="",
+            core_memory="",
+            url_document_mode=False,
+            large_context_mode=True,
+        )
+
+        assert "Exact quote retrieval (mandatory):" in prompt
+        assert "exactly ONE quote block" in prompt
+        assert "document_text.find" in prompt
+        assert "character-for-character" in prompt
+        assert "Do not open host context_paths" in prompt
+
+    def test_url_document_prompt_disables_llm_query_when_repl_only_env(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("FLEET_RLM_URL_REPL_ONLY", "true")
+        prompt = build_rlm_prompt_context(
             user_request="analyze https://dspy.ai docs",
             recent_history="",
             compressed_history="",
@@ -115,7 +176,6 @@ class TestEscalatingFleetModule:
 
         assert "llm_query and llm_query_batched are disabled" in prompt
         assert "synthesize from Python inspection" in prompt
-        assert "llm_query" in prompt
 
     def test_escalating_module_passes_max_output_chars_to_rlm_wrappers(
         self,
@@ -458,6 +518,29 @@ class TestAgentRuntimeEscalationFlag:
         assert done.payload["source_url"] == "https://dspy.ai"
 
     @pytest.mark.asyncio
+    async def test_posthoc_stream_emits_chain_of_thought_reasoning(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _disable_runtime_tool_discovery(monkeypatch)
+        from fleet_rlm.runtime.agent.runtime import AgentRuntime
+
+        rt = AgentRuntime(use_escalation=True)
+        rt.agent = _PosthocAgent(
+            _FakePrediction(
+                reasoning="The user wants a concise definition of RLM.",
+                assistant_response="RLM is a recursive long-chain-of-thought framework.",
+            )
+        )
+
+        events = [event async for event in rt.aiter_chat_turn_stream("Explain what is RLM")]
+
+        reasoning = next(event for event in events if event.kind == "reasoning")
+        text = next(event for event in events if event.kind == "text")
+        done = events[-1]
+
+        assert reasoning.text == "The user wants a concise definition of RLM."
+        assert text.text == "RLM is a recursive long-chain-of-thought framework."
+        assert done.payload["final_reasoning"] == "The user wants a concise definition of RLM."
+
+    @pytest.mark.asyncio
     async def test_posthoc_stream_emits_routing_preview_before_result(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -476,6 +559,27 @@ class TestAgentRuntimeEscalationFlag:
             "source_url": "https://dspy.ai",
         }
         assert "url_document_rlm" in events[1].text
+
+
+class TestLargeContextRouting:
+    def test_preview_routing_large_context_when_turn_context_exceeds_threshold(self, tmp_path) -> None:
+        from fleet_rlm.runtime.agent.turn_context import TurnContext
+        from fleet_rlm.runtime.modules.variable_mode import VARIABLE_MODE_THRESHOLD
+
+        module = _make_module()
+        turn_context = TurnContext(
+            docs_path=str(tmp_path / "large.txt"),
+            estimated_chars=VARIABLE_MODE_THRESHOLD + 500,
+            threshold_chars=VARIABLE_MODE_THRESHOLD,
+            context_sources=[f"docs_path:{tmp_path}:large"],
+        )
+        preview = module.preview_routing(
+            user_request="Summarize the attached documentation",
+            execution_mode="auto",
+            turn_context=turn_context,
+        )
+        assert preview["routing_decision"] == "large_context_rlm"
+        assert preview["estimated_chars"] >= VARIABLE_MODE_THRESHOLD
 
 
 class TestBuildChatAgentRuntimeDefault:

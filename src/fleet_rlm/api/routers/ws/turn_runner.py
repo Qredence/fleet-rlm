@@ -47,6 +47,7 @@ from .stream_events import (
 from .stream_summary import (
     _runtime_trace_metadata,
     build_execution_completion_summary,
+    enrich_terminal_stream_payload,
     final_event_failed,
     merge_trace_result_metadata,
 )
@@ -196,12 +197,18 @@ async def _emit_stream_event(
     execution_emitter: ExecutionEventEmitter,
 ) -> None:
     lifecycle.raise_if_persistence_error()
-    payload = event.payload
+    payload = event.payload if isinstance(event.payload, dict) else {}
     if event.kind in {"done", "error"}:
         payload = merge_trace_result_metadata(
-            payload if isinstance(payload, dict) else None,
+            payload,
             response_preview=event.text,
-            trace_metadata=_runtime_trace_metadata(payload if isinstance(payload, dict) else None),
+            trace_metadata=_runtime_trace_metadata(payload),
+        )
+        payload = enrich_terminal_stream_payload(
+            event=event,
+            payload=payload,
+            request_message=request_message,
+            run_id=lifecycle.run_id,
         )
     event_dict = build_stream_event_dict(
         event=event,
@@ -333,12 +340,30 @@ async def run_streaming_turn(
         setattr(interpreter, "_host_run_id", lifecycle.active_run_db_id)
     await lifecycle.emit_started()
     ws_loop = asyncio.get_running_loop()
+    from fleet_rlm.runtime.agent import runtime_helpers as rh
+    from fleet_rlm.runtime.agent.turn_progress_relay import TurnProgressRelay
+
+    progress_relay = TurnProgressRelay(loop=ws_loop)
+    previous_progress_relay = getattr(agent, "_turn_progress_relay", None)
+    if hasattr(agent, "_turn_progress_relay"):
+        setattr(agent, "_turn_progress_relay", progress_relay)
+
+    def _turn_step_callback(payload: dict[str, Any]) -> None:
+        phase = str(payload.get("phase", "")).strip().lower()
+        source = "interpreter" if phase in {"start", "complete", "progress"} else "rlm"
+        rh.emit_turn_progress_from_payload(progress_relay, payload, source=source)
+
+    previous_turn_callback = getattr(interpreter, "_turn_step_callback", None) if interpreter is not None else None
+    if interpreter is not None:
+        setattr(interpreter, "_turn_step_callback", _turn_step_callback)
+
     repl_hook_bridge = ReplHookBridge(
         ws_loop=ws_loop,
         lifecycle=lifecycle,
         step_builder=step_builder,
         interpreter=interpreter,
         enqueue_nonblocking=enqueue_latest_nonblocking,
+        progress_relay=progress_relay,
     )
 
     last_loaded_docs_path = prepared_turn.last_loaded_docs_path
@@ -385,6 +410,11 @@ async def run_streaming_turn(
             exc=exc,
             request_message=prepared_turn.message,
         )
+    finally:
+        if interpreter is not None:
+            setattr(interpreter, "_turn_step_callback", previous_turn_callback)
+        if hasattr(agent, "_turn_progress_relay"):
+            setattr(agent, "_turn_progress_relay", previous_progress_relay)
 
     return last_loaded_docs_path
 

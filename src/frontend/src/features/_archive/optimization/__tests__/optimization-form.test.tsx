@@ -2,7 +2,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { OptimizationForm } from "@/features/optimization/optimization-form";
+import { OptimizationForm } from "@/features/_archive/optimization/optimization-form";
 import { optimizationEndpoints } from "@/lib/rlm-api/optimization";
 
 (

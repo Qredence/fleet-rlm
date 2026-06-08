@@ -66,7 +66,12 @@ class RLMReActChatSignature(dspy.Signature):
             "recent prior exchange and should dominate recency-sensitive follow-up answers."
         )
     )
-    assistant_response: str = dspy.OutputField(desc="Final assistant response to user")
+    assistant_response: str = dspy.OutputField(
+        desc=(
+            "Final assistant response to user. Use structured Markdown for detailed or long "
+            "answers; wrap deliverable code in fenced blocks when the user expects a file."
+        )
+    )
 
 
 class SummarizeLongDocument(dspy.Signature):
@@ -452,7 +457,29 @@ class RLMVariableSignature(dspy.Signature):
             "continuity; the prompt only carries a short recency hint."
         )
     )
-    answer: str = dspy.OutputField(desc="Final answer (call SUBMIT(answer=...) in REPL)")
+    document_text: str = dspy.InputField(
+        default="",
+        desc="Optional large document body stored as a REPL variable (not in LLM context)",
+    )
+    context_paths: list[str] = dspy.InputField(
+        default_factory=list,
+        desc="Optional staged sandbox file paths to inspect with Python",
+    )
+    context_manifest: dict[str, str] = dspy.InputField(
+        default_factory=dict,
+        desc="Optional path-to-size metadata for staged context files",
+    )
+    source_metadata: dict[str, str] = dspy.InputField(
+        default_factory=dict,
+        desc="Optional metadata for large local or fetched document inputs",
+    )
+    answer: str = dspy.OutputField(
+        desc=(
+            "Final answer (call SUBMIT(answer=...) in REPL). Use Markdown headings and lists "
+            "for detailed or long responses; wrap deliverable code in fenced blocks with a "
+            "language tag when the user expects a code file."
+        )
+    )
 
 
 class RLMLargeDocSignature(dspy.Signature):
@@ -474,7 +501,12 @@ class RLMLargeDocSignature(dspy.Signature):
     history: dspy.History = dspy.InputField(
         desc="Prior chat turns for user intent context (keys: user_request, assistant_response)"
     )
-    answer: str = dspy.OutputField(desc="Final answer (call SUBMIT(answer=...) in REPL)")
+    answer: str = dspy.OutputField(
+        desc=(
+            "Final answer (call SUBMIT(answer=...) in REPL). Prefer structured Markdown for "
+            "reports and analyses; use fenced code blocks when returning an implementation."
+        )
+    )
 
 
 __all__ = [

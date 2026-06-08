@@ -11,32 +11,60 @@ import os
 import re
 from typing import Any
 
-from mlflow.entities import AssessmentSource, Feedback
 
-try:
-    from mlflow.genai.scorers import (
+def _load_mlflow_scorers() -> tuple[Any, Any, Any, Any, Any, Any, Any]:
+    """Import MLflow scorer types lazily to avoid import-time side effects."""
+    from mlflow.entities import AssessmentSource, Feedback
+
+    RelevanceToQuery: Any
+    RetrievalGroundedness: Any
+    ToolCallCorrectness: Any
+    ToolCallEfficiency: Any
+    try:
+        from mlflow.genai.scorers import (
+            RelevanceToQuery as _RelevanceToQuery,
+        )
+        from mlflow.genai.scorers import (
+            RetrievalGroundedness as _RetrievalGroundedness,
+        )
+        from mlflow.genai.scorers import (
+            ToolCallCorrectness as _ToolCallCorrectness,
+        )
+        from mlflow.genai.scorers import (
+            ToolCallEfficiency as _ToolCallEfficiency,
+        )
+        from mlflow.genai.scorers import (
+            scorer,
+        )
+
+        RelevanceToQuery = _RelevanceToQuery
+        RetrievalGroundedness = _RetrievalGroundedness
+        ToolCallCorrectness = _ToolCallCorrectness
+        ToolCallEfficiency = _ToolCallEfficiency
+    except ImportError:
+        from mlflow.genai.scorers import scorer
+
+        class PlaceholderScorer:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            def __call__(self, *args: Any, **kwargs: Any) -> Any:
+                return Feedback(value=1, rationale="Scorer not available in this environment")
+
+        RelevanceToQuery = PlaceholderScorer
+        RetrievalGroundedness = PlaceholderScorer
+        ToolCallCorrectness = PlaceholderScorer
+        ToolCallEfficiency = PlaceholderScorer
+
+    return (
+        AssessmentSource,
+        Feedback,
         RelevanceToQuery,
         RetrievalGroundedness,
         ToolCallCorrectness,
         ToolCallEfficiency,
         scorer,
     )
-except ImportError:
-    # Use generic scorers or provide placeholders for missing ones if needed
-    from mlflow.genai.scorers import scorer
-
-    # Provide placeholders for missing scorers if they are not in the current mlflow version
-    class PlaceholderScorer:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def __call__(self, *args, **kwargs):
-            return Feedback(value=1, rationale="Scorer not available in this environment")
-
-    RelevanceToQuery: Any = PlaceholderScorer
-    RetrievalGroundedness: Any = PlaceholderScorer
-    ToolCallCorrectness: Any = PlaceholderScorer
-    ToolCallEfficiency: Any = PlaceholderScorer
 
 
 def get_default_judge_model() -> str:
@@ -60,6 +88,17 @@ def build_rlm_scorers(
     Returns:
         List of MLflow GenAI scorers.
     """
+    (
+        _AssessmentSource,
+        _Feedback,
+        RelevanceToQuery,
+        RetrievalGroundedness,
+        ToolCallCorrectness,
+        ToolCallEfficiency,
+        scorer,
+    ) = _load_mlflow_scorers()
+    _ = _AssessmentSource, _Feedback, scorer
+
     judge_model = model or get_default_judge_model()
 
     scorers = [
@@ -97,6 +136,7 @@ def reasoning_quality_scorer(model: str) -> Any:
     A custom MLflow GenAI scorer using the @scorer decorator to evaluate
     the internal Chain of Thought (Thoughts/Actions).
     """
+    AssessmentSource, Feedback, _, _, _, _, scorer = _load_mlflow_scorers()
 
     # Simple redaction and truncation utilities to reduce the risk of leaking
     # secrets or large payloads from span.inputs into the judge prompt.

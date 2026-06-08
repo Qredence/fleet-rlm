@@ -31,3 +31,72 @@ def test_build_trace_context_includes_attempt_metadata(monkeypatch: pytest.Monke
     assert context.metadata["fleet_rlm.turn_attempt_id"] == "chat-fixed"
     assert context.metadata["fleet_rlm.client_request_id"] == "chat-fixed"
     assert context.metadata["fleet_rlm.run_id"] == "workspace-1:user-1:session-1:1"
+
+
+@pytest.mark.asyncio
+async def test_prepare_daytona_workspace_warm_starts_interpreter() -> None:
+    from fleet_rlm.api.routers.ws.turn_setup import (
+        DaytonaChatRequestOptions,
+        prepare_daytona_workspace_for_turn,
+    )
+
+    class _Interpreter:
+        timeout = 30
+        started = False
+
+        async def aconfigure_workspace(self, **kwargs: object) -> None:
+            self.configured = kwargs
+
+        async def astart(self) -> None:
+            self.started = True
+
+    interpreter = _Interpreter()
+    agent = SimpleNamespace(interpreter=interpreter, loaded_document_paths=())
+    request = DaytonaChatRequestOptions(
+        repo_url=None,
+        repo_ref=None,
+        context_paths=[],
+        batch_concurrency=None,
+        workspace_id="default",
+        sandbox_labels={},
+    )
+
+    await prepare_daytona_workspace_for_turn(agent=agent, request=request, docs_path=None)
+
+    assert interpreter.started is True
+
+
+@pytest.mark.asyncio
+async def test_prepare_daytona_workspace_timeout_raises_diagnostic_error() -> None:
+    from fleet_rlm.api.routers.ws.turn_setup import (
+        DaytonaChatRequestOptions,
+        prepare_daytona_workspace_for_turn,
+    )
+    from fleet_rlm.integrations.daytona.errors import DaytonaDiagnosticError
+
+    class _Interpreter:
+        timeout = 0.01
+
+        async def aconfigure_workspace(self, **kwargs: object) -> None:
+            return None
+
+        async def astart(self) -> None:
+            import asyncio
+
+            await asyncio.sleep(1)
+
+    interpreter = _Interpreter()
+    agent = SimpleNamespace(interpreter=interpreter, loaded_document_paths=())
+    request = DaytonaChatRequestOptions(
+        repo_url=None,
+        repo_ref=None,
+        context_paths=[],
+        batch_concurrency=None,
+        workspace_id="default",
+        sandbox_labels={},
+    )
+
+    with pytest.raises(DaytonaDiagnosticError) as exc_info:
+        await prepare_daytona_workspace_for_turn(agent=agent, request=request, docs_path=None)
+
+    assert exc_info.value.category == "workspace_prep_timeout"

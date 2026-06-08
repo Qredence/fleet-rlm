@@ -23,6 +23,20 @@ function makeEvent(kind: string, text: string, payload?: Record<string, unknown>
   }
   if (kind === "text" || kind === "reasoning" || kind === "tool_call" || kind === "tool_result") {
     const stepType = kind === "tool_call" || kind === "tool_result" ? "tool" : "llm";
+    const stepInput =
+      kind === "tool_call"
+        ? text
+        : kind === "reasoning"
+          ? { phase: "reasoning" }
+          : kind === "text"
+            ? { event_kind: "text" }
+            : undefined;
+    const stepOutput =
+      kind === "text" || kind === "reasoning"
+        ? { text }
+        : kind === "tool_result"
+          ? text
+          : undefined;
     return {
       type: "event",
       data: {
@@ -30,12 +44,12 @@ function makeEvent(kind: string, text: string, payload?: Record<string, unknown>
         text,
         payload: {
           ...payload,
-          source_type: "execution_step",
+          source_type: kind,
           step: {
             type: stepType,
             label: text,
-            input: kind === "tool_call" ? text : undefined,
-            output: kind === "text" ? { text } : kind === "tool_result" ? text : undefined,
+            input: stepInput,
+            output: stepOutput,
             ...payload,
           },
         },
@@ -96,10 +110,10 @@ function traceRows(
   const rows: Array<{ message: ChatMessage; part: ChatRenderPart }> = [];
   for (const message of messages) {
     if (message.type !== "trace") continue;
-    const part = message.renderParts?.[0];
-    if (!part) continue;
-    if (predicate && !predicate(part, message)) continue;
-    rows.push({ message, part });
+    for (const part of message.renderParts ?? []) {
+      if (predicate && !predicate(part, message)) continue;
+      rows.push({ message, part });
+    }
   }
   return rows;
 }
@@ -141,7 +155,7 @@ describe("applyWsFrameToMessages", () => {
     expect(assistant?.streaming).toBe(true);
   });
 
-  it("creates append-only reasoning rows for reasoning events", () => {
+  it("extends streaming reasoning into one coalesced trace part", () => {
     let messages: ChatMessage[] = [];
     messages = applyWsFrameToMessages(
       messages,
@@ -157,10 +171,54 @@ describe("applyWsFrameToMessages", () => {
       (part, message) => part.kind === "reasoning" && message.traceSource === "live",
     );
 
-    expect(reasoningRows).toHaveLength(2);
+    expect(reasoningRows).toHaveLength(1);
+    expect(reasoningRows[0]?.part).toMatchObject({
+      kind: "reasoning",
+      isStreaming: true,
+      parts: [{ type: "text", text: "Analyzing input \nand checking constraints" }],
+    });
+  });
+
+  it("starts a new live trace coalescing scope after each user turn", () => {
+    let messages = applyWsFrameToMessages(
+      [],
+      makeEvent("reasoning", "Turn one reasoning"),
+    ).messages;
+    messages = applyWsFrameToMessages(messages, makeEvent("done", "Turn one answer")).messages;
+
+    messages = [
+      ...messages,
+      {
+        id: "user-turn-2",
+        type: "user",
+        content: "Second question",
+        phase: 1,
+      },
+    ];
+
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("reasoning", "Turn two reasoning"),
+    ).messages;
+
+    const liveTraces = messages.filter(
+      (message) => message.type === "trace" && message.traceSource === "live",
+    );
+    expect(liveTraces).toHaveLength(2);
     expect(
-      reasoningRows.map((row) => (row.part.kind === "reasoning" ? row.part.parts[0]?.text : "")),
-    ).toEqual(["Analyzing input ", "and checking constraints"]);
+      liveTraces[0]?.renderParts?.some(
+        (part) =>
+          part.kind === "reasoning" &&
+          part.parts.map((item) => item.text).join("") === "Turn one reasoning",
+      ),
+    ).toBe(true);
+    expect(
+      liveTraces[1]?.renderParts?.some(
+        (part) =>
+          part.kind === "reasoning" &&
+          part.parts.map((item) => item.text).join("") === "Turn two reasoning",
+      ),
+    ).toBe(true);
   });
 
   it("attaches runtime context to live reasoning rows", () => {
@@ -464,6 +522,56 @@ describe("applyWsFrameToMessages", () => {
     expect(queue).toBeDefined();
     if (queue?.kind === "queue") {
       expect(queue.items[queue.items.length - 1]?.label).toBe("Moving to step 2");
+    }
+  });
+
+  it("merges tool_call and tool_result into one tool row when step_index matches", () => {
+    let messages: ChatMessage[] = [];
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("tool_call", "Running grep", {
+        tool_name: "grep",
+        step_index: 3,
+        tool_args: { pattern: "foo" },
+      }),
+    ).messages;
+
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("tool_result", "Done", {
+        tool_name: "grep",
+        step_index: 3,
+        tool_output: "match line",
+      }),
+    ).messages;
+
+    const toolRows = traceRows(messages, (p) => p.kind === "tool");
+    expect(toolRows).toHaveLength(1);
+
+    const tool = toolRows[0]?.part;
+    if (tool?.kind === "tool") {
+      expect(tool.state).toBe("output-available");
+      expect(tool.stepIndex).toBe(3);
+      expect(String(tool.output)).toContain("match line");
+    }
+  });
+
+  it("accepts stdout_preview on sandbox_output status events", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("status", "Sandbox stdout preview", {
+        phase: "sandbox_output",
+        iteration: 1,
+        stream: "stdout",
+        stdout_preview: "partial output chunk",
+      }),
+    );
+
+    const sandbox = findFirstPart(messages, (part) => part.kind === "sandbox");
+    expect(sandbox).toBeDefined();
+    if (sandbox?.kind === "sandbox") {
+      expect(sandbox.output).toBe("partial output chunk");
+      expect(sandbox.stepIndex).toBe(1);
     }
   });
 

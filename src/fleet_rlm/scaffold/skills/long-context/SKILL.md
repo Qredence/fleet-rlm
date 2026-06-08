@@ -1,34 +1,50 @@
 ---
 name: long-context
-description: "Process documents and codebases exceeding a single context window. Use when handling large files, designing chunking strategies, or orchestrating multi-chunk synthesis via variable-mode execution or hierarchical map-reduce."
+description: "Process documents and codebases exceeding a single context window using canonical dspy.RLM variable mode in the Daytona REPL."
 ---
 
-# Long-Context Processing
+# Long-Context Processing (dspy.RLM)
 
-## Decision Tree
+Official references:
 
-1. **Input fits normal context**: answer directly; do not chunk.
-2. **Input is large and a Daytona interpreter is available**: prefer variable-mode so the model can inspect content through code.
-3. **Input is large and needs focused extraction**: create semantic chunks, rank them against the query, then delegate only the relevant chunks.
-4. **Input is codebase-scale**: preserve file paths in every chunk and delegate by file or subsystem, not by anonymous text windows.
+- https://dspy.ai/api/modules/RLM/
+- https://dspy.ai/diving-deeper/rlm/
 
-## Included Helpers
+## Core pattern (variable space vs token space)
 
-- `scripts/semantic_chunk.py`: split markdown, logs, JSON, Python, or generic text into bounded chunks.
-- `scripts/rank_chunks.py`: score chunk ranges against query keywords and emit the highest-value chunk paths.
-- `references/chunking-strategies.md`: compact command reference for the two helper scripts.
+`dspy.RLM` stores large inputs as **REPL variables** (`document_text`, `context_paths`, `history`, …). The model sees only metadata (name, type, length, preview) and explores with Python:
 
-## Workflow
+1. `print(document_text[:2000])` or `print(len(document_text))` to peek.
+2. Use slices, `re`, or `open(path)` on `context_paths` to locate relevant sections.
+3. Call `llm_query(snippet)` or `llm_query_batched([...])` on focused excerpts — never the full document.
+4. Finish with `SUBMIT(answer=...)`.
 
-1. Store the large input in the local RLM state file (`.codex/rlm_state/state.pkl` or an explicit `--state` path).
-2. Run semantic chunking with the content type closest to the input.
-3. Rank chunks against the user query before delegating.
-4. Pass each selected chunk to `delegation` with file path, chunk id, and query context.
-5. Merge child results in the parent; quote findings, not full chunks.
+## fleet-rlm auto-routing
+
+- `execution_mode=auto` routes to `large_context_rlm` when estimated context ≥ `FLEET_RLM_LARGE_CONTEXT_THRESHOLD` (default 32_000 chars).
+- Staged sandbox paths arrive as `context_paths` REPL variables with `context_manifest` metadata.
+- Optional `sub_rlm(text)` delegates to an isolated child sandbox for heavy map-reduce (see `delegation` skill).
+
+## Optional pre-chunking
+
+When semantic boundaries matter before delegation:
+
+- `scripts/semantic_chunk.py` — split by structure (markdown, logs, Python, JSON).
+- `scripts/rank_chunks.py` — rank chunks against the query.
+
+Chunking complements `dspy.RLM`; it does not replace REPL inspection.
 
 ## Guardrails
 
-- Do not paste whole chunks into the main chat context.
-- Do not spawn child RLMs from child RLMs.
-- Do not split structured content with blind fixed-size windows when semantic boundaries are available.
-- Do not process every chunk when the query has clear keywords or identifiers.
+- Do not paste whole documents into the action prompt or assistant reply.
+- Do not call `llm_query` on an entire large variable; slice first.
+- Respect `max_llm_calls` and `max_output_chars`; print summaries, not raw dumps.
+- Load this skill from the volume with `load_skill("long-context")` when mounted at `/home/daytona/memory/`.
+
+## Exact quote retrieval
+
+When the user asks for a verbatim quote or speaker attribution:
+
+- Return exactly one quote block in `SUBMIT` — not a numbered list of quotes.
+- Locate the speaker in `document_text` with Python search, then slice the typographic quote span verbatim.
+- Do not paraphrase, substitute heading text, or open host `context_paths` in the sandbox.

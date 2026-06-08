@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time as _time
 from dataclasses import dataclass
@@ -102,6 +103,8 @@ async def prepare_daytona_workspace_for_turn(
     agent: ChatAgentProtocol,
     request: DaytonaChatRequestOptions,
     docs_path: str | None,
+    user_request: str | None = None,
+    execution_mode: str = "auto",
 ) -> None:
     """Apply Daytona workspace settings via the interpreter's native session API."""
 
@@ -112,6 +115,40 @@ async def prepare_daytona_workspace_for_turn(
     configure_workspace = getattr(interpreter, "aconfigure_workspace", None)
     if not callable(configure_workspace):
         return
+
+    snapshot: str | None = None
+    if user_request:
+        from fleet_rlm.integrations.daytona.runtime import resolve_snapshot_for_skills
+        from fleet_rlm.runtime.modules.context_routing import build_turn_context_for_agent
+        from fleet_rlm.runtime.modules.skill_selection import preview_skills_for_turn
+
+        turn_context = build_turn_context_for_agent(
+            agent,
+            user_request=user_request,
+            docs_path=docs_path,
+            context_paths=list(request.context_paths),
+        )
+        routing_decision: str | None = None
+        preview_routing = getattr(agent, "preview_routing", None)
+        if callable(preview_routing):
+            routing_payload = preview_routing(
+                user_request=user_request,
+                execution_mode=execution_mode,
+                turn_context=turn_context,
+            )
+            if isinstance(routing_payload, dict):
+                routing_decision = str(routing_payload.get("routing_decision") or "") or None
+        turn_count = getattr(agent, "turn_count", None)
+        if not isinstance(turn_count, int):
+            agent_module = getattr(agent, "agent", None)
+            turn_count = getattr(agent_module, "_turn_count", 0)
+        preview_skills = preview_skills_for_turn(
+            user_request,
+            execution_mode=execution_mode,
+            routing_decision=routing_decision,
+            is_first_turn=int(turn_count or 0) == 0,
+        )
+        snapshot = resolve_snapshot_for_skills(preview_skills)
 
     raw_loaded_paths = getattr(agent, "loaded_document_paths", ())
     loaded_document_paths = (
@@ -137,7 +174,40 @@ async def prepare_daytona_workspace_for_turn(
         context_paths=context_paths,
         volume_name=request.workspace_id,
         sandbox_labels=request.sandbox_labels,
+        snapshot=snapshot,
     )
+
+    if context_paths and hasattr(agent, "loaded_document_paths"):
+        loaded = getattr(agent, "loaded_document_paths", None)
+        if isinstance(loaded, list):
+            for path in context_paths:
+                if path not in loaded:
+                    loaded.append(path)
+
+    astart = getattr(interpreter, "astart", None)
+    if not callable(astart):
+        return
+
+    prep_timeout = 120.0
+    raw_timeout = getattr(interpreter, "timeout", None)
+    if raw_timeout is not None:
+        try:
+            prep_timeout = float(raw_timeout)
+        except (TypeError, ValueError):
+            prep_timeout = 120.0
+    if prep_timeout <= 0:
+        prep_timeout = 120.0
+    try:
+        await asyncio.wait_for(astart(), timeout=prep_timeout)
+    except asyncio.TimeoutError as exc:
+        from fleet_rlm.integrations.daytona.errors import DaytonaDiagnosticError
+
+        raise DaytonaDiagnosticError(
+            f"Daytona workspace did not become ready within {prep_timeout:.0f}s. "
+            "Verify DAYTONA_API_KEY, DAYTONA_API_URL, and sandbox capacity, then retry.",
+            category="workspace_prep_timeout",
+            phase="workspace_prepare",
+        ) from exc
 
 
 async def _reject_empty_message(
@@ -191,6 +261,8 @@ def _build_prepare_stream(
             agent=agent,
             request=daytona_request,
             docs_path=msg.docs_path,
+            user_request=msg.content,
+            execution_mode=msg.execution_mode or "auto",
         )
         t_ws_prep_ms = (_time.monotonic() - t_ws_prep) * 1000
         logger.debug("turn_setup: prepare_daytona_workspace completed in %.0fms", t_ws_prep_ms)

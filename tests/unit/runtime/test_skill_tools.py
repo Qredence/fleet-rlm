@@ -48,9 +48,16 @@ def test_load_skill_path_traversal_blocked(vol: Path) -> None:
     assert result.status == "error"
 
 
-def test_load_skill_no_volume() -> None:
-    result = _load_skill_impl("some-skill", volume_mount_path=None)
-    assert result.status == "error"
+def test_load_skill_no_volume_falls_back_to_scaffold() -> None:
+    result = _load_skill_impl("dspy-programs", volume_mount_path=None)
+    assert result.status == "ok"
+    assert result.scope == "scaffold"
+    assert "dspy" in (result.instructions or "").lower()
+
+
+def test_load_skill_no_volume_scaffold_not_found() -> None:
+    result = _load_skill_impl("nonexistent-skill", volume_mount_path=None)
+    assert result.status == "not_found"
 
 
 def test_load_skill_empty_name(vol: Path) -> None:

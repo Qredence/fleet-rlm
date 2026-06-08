@@ -10,6 +10,103 @@ import dspy
 _DSPY_RLM_BASE: Any = dspy.RLM
 
 
+class _StreamingRLM(_DSPY_RLM_BASE):
+    """RLM variant that emits per-iteration progress via interpreter callback."""
+
+    def _emit_step(self, payload: dict[str, Any]) -> None:
+        interpreter = getattr(self, "_interpreter", None)
+        if interpreter is None:
+            return
+        callback = getattr(interpreter, "_turn_step_callback", None)
+        if not callable(callback):
+            return
+        try:
+            callback(payload)
+        except Exception:
+            return
+
+    def _execute_iteration(
+        self,
+        repl: Any,
+        variables: list[Any],
+        history: Any,
+        iteration: int,
+        input_args: dict[str, Any],
+        output_field_names: list[str],
+    ) -> Any:
+        variables_info = [variable.format() for variable in variables]
+        action = self.generate_action(
+            variables_info=variables_info,
+            repl_history=history,
+            iteration=f"{iteration + 1}/{self.max_iterations}",
+        )
+        reasoning = str(getattr(action, "reasoning", "") or "")
+        code_raw = str(getattr(action, "code", "") or "")
+        self._emit_step(
+            {
+                "phase": "rlm_reasoning",
+                "iteration": iteration,
+                "reasoning": reasoning,
+                "code_preview": code_raw[:500],
+            }
+        )
+
+        from dspy.predict.rlm import _strip_code_fences
+
+        try:
+            code = _strip_code_fences(code_raw)
+        except SyntaxError as exc:
+            code = code_raw
+            result = f"[Error] {exc}"
+            self._emit_step(
+                {
+                    "phase": "rlm_tool_call",
+                    "iteration": iteration,
+                    "code": code,
+                    "tool_name": "repl_execute",
+                }
+            )
+            processed = self._process_execution_result(action, code, result, history, output_field_names)
+            if not isinstance(processed, dspy.Prediction):
+                output = str(result)
+                self._emit_step(
+                    {
+                        "phase": "rlm_tool_result",
+                        "iteration": iteration,
+                        "output": output,
+                        "observation": output,
+                        "tool_name": "repl_execute",
+                    }
+                )
+            return processed
+
+        self._emit_step(
+            {
+                "phase": "rlm_tool_call",
+                "iteration": iteration,
+                "code": code,
+                "tool_name": "repl_execute",
+            }
+        )
+        result = self._execute_code(repl, code, input_args)
+        processed = self._process_execution_result(action, code, result, history, output_field_names)
+        if not isinstance(processed, dspy.Prediction):
+            if isinstance(result, list):
+                output = "\n".join(map(str, result))
+            else:
+                output = str(result) if result else ""
+            self._emit_step(
+                {
+                    "phase": "rlm_tool_result",
+                    "iteration": iteration,
+                    "output": output,
+                    "observation": output,
+                    "tool_name": "repl_execute",
+                }
+            )
+        return processed
+
+
 class _NoCallbackRLM(_DSPY_RLM_BASE):
     """RLM variant for REPL-only tasks where host semantic callbacks are disabled."""
 
@@ -68,10 +165,13 @@ def create_runtime_rlm(
     if sub_lm is not None:
         kwargs["sub_lm"] = sub_lm
 
-    rlm_cls = dspy.RLM if include_llm_tools else _NoCallbackRLM
-    return rlm_cls(
-        **kwargs,
-    )
+    rlm_cls: type[Any]
+    if not include_llm_tools:
+        rlm_cls = _NoCallbackRLM
+    else:
+        rlm_cls = _StreamingRLM
+
+    return rlm_cls(**kwargs)
 
 
 def build_recursive_subquery_rlm(

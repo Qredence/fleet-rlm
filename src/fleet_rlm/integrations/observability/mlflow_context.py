@@ -82,16 +82,63 @@ def current_request_context() -> MlflowTraceRequestContext | None:
 
 
 @contextmanager
+def _application_turn_span(context: MlflowTraceRequestContext):
+    """Open a parent MLflow span for the full chat turn when tracing is enabled."""
+    runtime = _runtime_module()
+    mlflow = runtime._import_mlflow()
+    if mlflow is None:
+        yield None
+        return
+
+    start_span = getattr(mlflow, "start_span", None)
+    if not callable(start_span):
+        yield None
+        return
+
+    attributes = {
+        "fleet_rlm.trace_kind": "application",
+        "mlflow.traceName": "fleet_rlm.chat_turn",
+    }
+    entered = False
+    try:
+        with start_span(name="fleet_rlm.chat_turn", span_type="CHAIN", attributes=attributes) as span:
+            entered = True
+            if context.request_preview:
+                set_inputs = getattr(span, "set_inputs", None)
+                if callable(set_inputs):
+                    set_inputs({"message": context.request_preview})
+            update_current_mlflow_trace()
+            capture_last_active_trace_id()
+            try:
+                yield span
+            finally:
+                outputs: dict[str, Any] = {}
+                if context.final_response_preview:
+                    outputs["response"] = context.final_response_preview
+                if outputs:
+                    set_outputs = getattr(span, "set_outputs", None)
+                    if callable(set_outputs):
+                        set_outputs(outputs)
+    except Exception:
+        runtime.logger.debug("MLflow application turn span skipped.", exc_info=True)
+        if not entered:
+            yield None
+        raise
+
+
+@contextmanager
 def mlflow_request_context(context: MlflowTraceRequestContext):
     """Scope MLflow request metadata to the current execution context."""
     context_token = _CURRENT_REQUEST_CONTEXT.set(context)
     trace_token = _CURRENT_TRACE_ID.set(None)
     trace_state = "OK"
     try:
-        yield context
-    except BaseException:
-        trace_state = "ERROR"
-        raise
+        with _application_turn_span(context):
+            try:
+                yield context
+            except BaseException:
+                trace_state = "ERROR"
+                raise
     finally:
         finalize_current_mlflow_trace(state=trace_state)
         capture_last_active_trace_id()

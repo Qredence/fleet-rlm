@@ -18,8 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import dspy
@@ -27,6 +26,13 @@ import dspy
 from fleet_rlm.runtime.agent.signatures import (
     ConversationSummarySignature,
     RLMReActChatSignature,
+)
+from fleet_rlm.runtime.agent.turn_context import TurnContext
+from fleet_rlm.runtime.modules.rlm_prompts import build_rlm_prompt_context, url_repl_only_enabled
+from fleet_rlm.runtime.modules.rlm_routing import (
+    fetch_url_document,
+    is_rlm_execution_mode,
+    resolve_rlm_routing,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,54 +43,6 @@ _REACT_FALLBACK_WARNING = "ReAct tool loop failed; returned a lightweight fallba
 _REACT_MAX_ITERS = 10
 _URL_DOCUMENT_MAX_ITERATIONS = 4
 _URL_DOCUMENT_MAX_LLM_CALLS = 8
-_URL_RE = re.compile(r"https?://[^\s)\],;]+", flags=re.IGNORECASE)
-_URL_DOCUMENT_ANALYSIS_TERMS = (
-    "analyze",
-    "analyse",
-    "analysis",
-    "summarize",
-    "summarise",
-    "summary",
-    "read",
-    "documentation",
-    "docs",
-    "document",
-    "page",
-)
-_RLM_REPL_GUIDANCE = """RLM REPL guidance:
-- Keep the task visible: solve the task stated at the top and repeated at the bottom of this prompt.
-- Use Python variables instead of printing large inputs. Inspect slices, lengths, keywords, and structure with code.
-- Treat available tools as ordinary Python callables. Their type hints and docstrings are the contract.
-- For documentation URLs, first inspect headings, links, llms.txt, sitemap entries, and section samples with Python. Do not send an entire document to one semantic callback.
-- If semantic callbacks such as llm_query are unavailable, finish from Python document inspection.
-- Keep intermediate output bounded; print summaries or small samples, then call SUBMIT(...) for the final answer.
-- Do not print or return credentials, environment variables, or hidden configuration values.
-"""
-
-
-@dataclass(slots=True)
-class _FetchedUrlDocument:
-    """Fetched URL document payload passed into DSPy RLM as REPL variables."""
-
-    source_url: str
-    document_text: str = ""
-    source_metadata: dict[str, str] = field(default_factory=dict)
-
-
-def _is_rlm_execution_mode(execution_mode: str) -> bool:
-    return execution_mode in {"rlm", "rlm_only"}
-
-
-def _extract_first_url(text: str) -> str | None:
-    match = _URL_RE.search(text)
-    return match.group(0).rstrip(".,;]") if match else None
-
-
-def _is_url_document_analysis_request(text: str) -> bool:
-    if _extract_first_url(text) is None:
-        return False
-    lowered = text.lower()
-    return any(term in lowered for term in _URL_DOCUMENT_ANALYSIS_TERMS)
 
 
 def _prediction_set(prediction: dspy.Prediction, key: str, value: Any) -> None:
@@ -139,36 +97,28 @@ def _format_recent_history_context(history: dspy.History, *, max_turns: int = 4)
     return "\n".join(lines)
 
 
-def _build_rlm_prompt_context(
-    *,
-    user_request: str,
-    recent_history: str,
-    compressed_history: str,
-    core_memory: str,
-    url_document_mode: bool,
-) -> str:
-    """Build a Fast-RLM-style prompt envelope for variable-mode DSPy RLM."""
-    sections = [
-        "Task:\n" + user_request,
-        _RLM_REPL_GUIDANCE,
-    ]
-    if url_document_mode:
-        sections.append(
-            "URL document variables:\n"
-            "- source_url: canonical fetched URL string.\n"
-            "- document_text: extracted source text; inspect it with Python rather than printing it wholesale.\n"
-            "- source_metadata: fetch status, source metadata, and any bundled llms.txt/sitemap companions.\n"
-            "- llm_query and llm_query_batched are disabled in this URL-document path; synthesize from Python inspection.\n"
-            "- history: structured dspy.History for prior turns."
-        )
-    if recent_history:
-        sections.append(recent_history)
-    if compressed_history:
-        sections.append("Compressed conversation context:\n" + compressed_history)
-    if core_memory:
-        sections.append("Core memory and active skill guidance:\n" + core_memory)
-    sections.append("Repeat task:\n" + user_request)
-    return "\n\n".join(section for section in sections if section.strip())
+def _emit_turn_milestone(interpreter: Any | None, *, phase: str, text: str, **extra: Any) -> None:
+    if interpreter is None:
+        return
+    callback = getattr(interpreter, "_turn_step_callback", None)
+    if not callable(callback):
+        return
+    payload = {"phase": phase, "text": text, **extra}
+    try:
+        callback(payload)
+    except Exception:
+        return
+
+
+@dataclass(slots=True)
+class _TurnPrep:
+    history: dspy.History
+    recent_history: str
+    should_route_rlm: bool
+    routing_decision: str
+    source_url: str | None
+    core_memory: str
+    selected_skills: list[str]
 
 
 class EscalatingFleetModule(dspy.Module):
@@ -271,7 +221,7 @@ class EscalatingFleetModule(dspy.Module):
                 sub_lm=sub_lm,
                 extra_tools=[],
                 include_sub_tools=False,
-                include_llm_tools=False,
+                include_llm_tools=not url_repl_only_enabled(),
             )
         else:
             self._rlm = dspy.ChainOfThought(RLMReActChatSignature)
@@ -285,21 +235,34 @@ class EscalatingFleetModule(dspy.Module):
     ) -> bool:
         if force_escalate:
             return True
-        if _is_rlm_execution_mode(execution_mode):
+        if is_rlm_execution_mode(execution_mode):
             return True
         reasoning = str(getattr(prediction, "reasoning", "") or "")
         return ESCALATION_SENTINEL in reasoning
 
-    def preview_routing(self, *, user_request: str, execution_mode: str = "auto") -> dict[str, Any]:
+    def preview_routing(
+        self,
+        *,
+        user_request: str,
+        execution_mode: str = "auto",
+        turn_context: TurnContext | None = None,
+    ) -> dict[str, Any]:
         """Return deterministic routing metadata available before the full turn."""
-        if execution_mode == "auto" and _is_url_document_analysis_request(user_request):
-            source_url = _extract_first_url(user_request)
-            payload: dict[str, Any] = {"routing_decision": "url_document_rlm"}
+        should_route, routing_decision, source_url = resolve_rlm_routing(
+            execution_mode=execution_mode,
+            user_request=user_request,
+            force_escalate=False,
+            turn_context=turn_context,
+        )
+        if should_route:
+            payload: dict[str, Any] = {"routing_decision": routing_decision}
             if source_url:
                 payload["source_url"] = source_url
+            if routing_decision == "large_context_rlm" and turn_context is not None:
+                payload["estimated_chars"] = getattr(turn_context, "estimated_chars", 0)
+                payload["threshold_chars"] = getattr(turn_context, "threshold_chars", 0)
+                payload["context_sources"] = list(getattr(turn_context, "context_sources", []) or [])
             return payload
-        if _is_rlm_execution_mode(execution_mode):
-            return {"routing_decision": "forced_rlm"}
         return {}
 
     def compress_history(self, history: dspy.History) -> str:
@@ -319,10 +282,37 @@ class EscalatingFleetModule(dspy.Module):
             logger.warning("Conversation summary failed, returning truncated history: %s", exc)
             return history_text[-4000:]
 
-    def _enrich_with_skills(self, user_request: str, core_memory: str) -> tuple[str, list[str]]:
+    def _resolve_skill_volume_mount_path(self) -> str | None:
+        from fleet_rlm.runtime.tools._volume_paths import volume_root
+
+        if self._interpreter is not None:
+            mounted = getattr(self._interpreter, "volume_mount_path", None)
+            if mounted:
+                return str(mounted)
+        resolved = volume_root()
+        return str(resolved) if resolved is not None else None
+
+    def _enrich_with_skills(
+        self,
+        user_request: str,
+        core_memory: str,
+        *,
+        execution_mode: str = "auto",
+        routing_decision: str | None = None,
+        is_first_turn: bool = False,
+    ) -> tuple[str, list[str]]:
         """Select relevant skills and append their instructions to core_memory."""
+        volume_mount_path = self._resolve_skill_volume_mount_path()
+        if volume_mount_path != self._skill_selector._volume_mount_path:
+            self._skill_selector._volume_mount_path = volume_mount_path
         try:
-            selection = self._skill_selector(user_request=user_request, core_memory=core_memory)
+            selection = self._skill_selector(
+                user_request=user_request,
+                core_memory=core_memory,
+                execution_mode=execution_mode,
+                routing_decision=routing_decision,
+                is_first_turn=is_first_turn,
+            )
             skill_context = str(getattr(selection, "skill_context", "") or "")
             selected = [str(item) for item in list(getattr(selection, "selected_skills", []) or [])]
             if skill_context:
@@ -334,6 +324,44 @@ class EscalatingFleetModule(dspy.Module):
             logger.debug("SkillSelection: skipped (%s)", exc)
         return core_memory, []
 
+    def _prepare_turn(
+        self,
+        *,
+        user_request: str,
+        core_memory: str,
+        history: dspy.History | None,
+        execution_mode: str,
+        force_escalate: bool,
+        turn_context: TurnContext | None,
+    ) -> _TurnPrep:
+        if history is None:
+            history = dspy.History(messages=[])
+
+        self._turn_count += 1
+        recent_history = _format_recent_history_context(history)
+        should_route_rlm, routing_decision, source_url = resolve_rlm_routing(
+            execution_mode=execution_mode,
+            user_request=user_request,
+            force_escalate=force_escalate,
+            turn_context=turn_context,
+        )
+        core_memory, selected_skills = self._enrich_with_skills(
+            user_request,
+            core_memory,
+            execution_mode=execution_mode,
+            routing_decision=routing_decision if should_route_rlm else None,
+            is_first_turn=self._turn_count == 1,
+        )
+        return _TurnPrep(
+            history=history,
+            recent_history=recent_history,
+            should_route_rlm=should_route_rlm,
+            routing_decision=routing_decision,
+            source_url=source_url,
+            core_memory=core_memory,
+            selected_skills=selected_skills,
+        )
+
     def forward(
         self,
         *,
@@ -343,6 +371,7 @@ class EscalatingFleetModule(dspy.Module):
         execution_mode: str = "auto",
         force_escalate: bool = False,
         conversation_summary: str = "",
+        turn_context: TurnContext | None = None,
     ) -> dspy.Prediction:
         """Run one turn through the escalating module.
 
@@ -363,47 +392,51 @@ class EscalatingFleetModule(dspy.Module):
             Pre-computed session summary; used when ``execution_mode`` is
             ``"rlm"`` and we skip the ChainOfThought step.
         """
-        if history is None:
-            history = dspy.History(messages=[])
+        prep = self._prepare_turn(
+            user_request=user_request,
+            core_memory=core_memory,
+            history=history,
+            execution_mode=execution_mode,
+            force_escalate=force_escalate,
+            turn_context=turn_context,
+        )
 
-        self._turn_count += 1
-
-        core_memory, selected_skills = self._enrich_with_skills(user_request, core_memory)
-        recent_history = _format_recent_history_context(history)
-        should_auto_route_url = execution_mode == "auto" and _is_url_document_analysis_request(user_request)
-        source_url = _extract_first_url(user_request) if should_auto_route_url else None
-
-        if _is_rlm_execution_mode(execution_mode) or force_escalate or should_auto_route_url:
-            logger.debug("EscalatingFleetModule: forced RLM path (mode=%s)", execution_mode)
+        if prep.should_route_rlm:
+            logger.debug(
+                "EscalatingFleetModule: RLM path (mode=%s route=%s)",
+                execution_mode,
+                prep.routing_decision,
+            )
             return self._run_rlm(
                 user_request=user_request,
-                core_memory=core_memory,
-                history=history,
-                recent_history=recent_history,
+                core_memory=prep.core_memory,
+                history=prep.history,
+                recent_history=prep.recent_history,
                 conversation_summary=conversation_summary,
-                selected_skills=selected_skills,
-                routing_decision="url_document_rlm" if should_auto_route_url else "forced_rlm",
-                source_url=source_url,
+                selected_skills=prep.selected_skills,
+                routing_decision=prep.routing_decision,
+                source_url=prep.source_url,
+                turn_context=turn_context,
             )
 
         prediction = self.respond(
             user_request=user_request,
-            core_memory=core_memory,
-            history=history,
-            recent_history=recent_history,
+            core_memory=prep.core_memory,
+            history=prep.history,
+            recent_history=prep.recent_history,
         )
 
         if self._should_escalate(prediction, execution_mode=execution_mode, force_escalate=False):
             logger.debug("EscalatingFleetModule: escalating to ReAct tool loop (sentinel found in reasoning)")
             return self._run_react(
                 user_request=user_request,
-                core_memory=core_memory,
-                history=history,
-                recent_history=recent_history,
-                selected_skills=selected_skills,
+                core_memory=prep.core_memory,
+                history=prep.history,
+                recent_history=prep.recent_history,
+                selected_skills=prep.selected_skills,
             )
 
-        _prediction_set(prediction, "selected_skills", selected_skills)
+        _prediction_set(prediction, "selected_skills", prep.selected_skills)
         return prediction
 
     async def aforward(
@@ -415,6 +448,7 @@ class EscalatingFleetModule(dspy.Module):
         execution_mode: str = "auto",
         force_escalate: bool = False,
         conversation_summary: str = "",
+        turn_context: TurnContext | None = None,
     ) -> dspy.Prediction:
         """Run one turn without blocking async callers.
 
@@ -423,47 +457,49 @@ class EscalatingFleetModule(dspy.Module):
         uses ``acall`` so session-backed async tools, including MCP tools, are
         awaited correctly.
         """
-        if history is None:
-            history = dspy.History(messages=[])
+        prep = await asyncio.to_thread(
+            self._prepare_turn,
+            user_request=user_request,
+            core_memory=core_memory,
+            history=history,
+            execution_mode=execution_mode,
+            force_escalate=force_escalate,
+            turn_context=turn_context,
+        )
 
-        self._turn_count += 1
-
-        core_memory, selected_skills = await asyncio.to_thread(self._enrich_with_skills, user_request, core_memory)
-        recent_history = _format_recent_history_context(history)
-        should_auto_route_url = execution_mode == "auto" and _is_url_document_analysis_request(user_request)
-
-        if _is_rlm_execution_mode(execution_mode) or force_escalate or should_auto_route_url:
+        if prep.should_route_rlm:
             return await asyncio.to_thread(
                 self._run_rlm,
                 user_request=user_request,
-                core_memory=core_memory,
-                history=history,
-                recent_history=recent_history,
+                core_memory=prep.core_memory,
+                history=prep.history,
+                recent_history=prep.recent_history,
                 conversation_summary=conversation_summary,
-                selected_skills=selected_skills,
-                routing_decision="url_document_rlm" if should_auto_route_url else "forced_rlm",
-                source_url=_extract_first_url(user_request) if should_auto_route_url else None,
+                selected_skills=prep.selected_skills,
+                routing_decision=prep.routing_decision,
+                source_url=prep.source_url,
+                turn_context=turn_context,
             )
 
         prediction = await asyncio.to_thread(
             self.respond,
             user_request=user_request,
-            core_memory=core_memory,
-            history=history,
-            recent_history=recent_history,
+            core_memory=prep.core_memory,
+            history=prep.history,
+            recent_history=prep.recent_history,
         )
 
         if self._should_escalate(prediction, execution_mode=execution_mode, force_escalate=False):
             logger.debug("EscalatingFleetModule: async escalating to ReAct tool loop (sentinel found in reasoning)")
             return await self._arun_react(
                 user_request=user_request,
-                core_memory=core_memory,
-                history=history,
-                recent_history=recent_history,
-                selected_skills=selected_skills,
+                core_memory=prep.core_memory,
+                history=prep.history,
+                recent_history=prep.recent_history,
+                selected_skills=prep.selected_skills,
             )
 
-        _prediction_set(prediction, "selected_skills", selected_skills)
+        _prediction_set(prediction, "selected_skills", prep.selected_skills)
         return prediction
 
     def _run_react(
@@ -558,6 +594,7 @@ class EscalatingFleetModule(dspy.Module):
         selected_skills: list[str] | None = None,
         routing_decision: str = "rlm",
         source_url: str | None = None,
+        turn_context: TurnContext | None = None,
     ) -> dspy.Prediction:
         if self._rlm is None:
             return self.respond(
@@ -566,31 +603,62 @@ class EscalatingFleetModule(dspy.Module):
                 history=history,
                 recent_history=recent_history,
             )
+        _emit_turn_milestone(
+            self._interpreter,
+            phase="rlm_start",
+            text="Running RLM analysis...",
+            routing_decision=routing_decision,
+        )
+        if turn_context is not None:
+            estimated = getattr(turn_context, "estimated_chars", 0)
+            _emit_turn_milestone(
+                self._interpreter,
+                phase="context_estimate",
+                text=f"Large context detected ({estimated} chars) — using dspy.RLM",
+                estimated_chars=estimated,
+                routing_decision=routing_decision,
+            )
         context = conversation_summary or self.compress_history(history)
         rlm = self._url_document_rlm if source_url and self._url_document_rlm is not None else self._rlm
         url_document_mode = bool(source_url and rlm is self._url_document_rlm)
-        prompt = _build_rlm_prompt_context(
+        large_context_mode = routing_decision == "large_context_rlm"
+        prompt = build_rlm_prompt_context(
             user_request=user_request,
             recent_history=recent_history,
             compressed_history=context,
             core_memory=core_memory,
             url_document_mode=url_document_mode,
+            large_context_mode=large_context_mode,
         )
         call_kwargs: dict[str, Any] = {
             "task": user_request,
             "prompt": prompt,
-            # Phase 7: expose structured history as a native REPL variable on
-            # the heavy RLM path (both RLMVariableSignature and
-            # RLMLargeDocSignature declare a ``history`` input field), so the
-            # model can inspect full prior turns with code rather than relying
-            # solely on the flattened recency snippet embedded in ``prompt``.
             "history": history,
         }
         if url_document_mode:
-            fetched = self._fetch_url_document(source_url=source_url)
+            _emit_turn_milestone(
+                self._interpreter,
+                phase="document_fetch",
+                text=f"Fetching document from {source_url}...",
+                source_url=source_url,
+            )
+            fetched = fetch_url_document(interpreter=self._interpreter, source_url=source_url)
             call_kwargs["source_url"] = fetched.source_url
             call_kwargs["document_text"] = fetched.document_text
             call_kwargs["source_metadata"] = fetched.source_metadata
+        elif large_context_mode and turn_context is not None:
+            from fleet_rlm.runtime.modules.context_routing import load_large_context_rlm_kwargs
+
+            large_kwargs = load_large_context_rlm_kwargs(turn_context, interpreter=self._interpreter)
+            if large_kwargs:
+                estimated = getattr(turn_context, "estimated_chars", 0)
+                _emit_turn_milestone(
+                    self._interpreter,
+                    phase="large_context_prepare",
+                    text=f"Large context in REPL variables ({estimated} chars)...",
+                    estimated_chars=estimated,
+                )
+                call_kwargs.update(large_kwargs)
         try:
             result = rlm(**call_kwargs)
             _prediction_set(result, "selected_skills", selected_skills or [])
@@ -618,46 +686,6 @@ class EscalatingFleetModule(dspy.Module):
             if source_url:
                 fallback["source_url"] = source_url
             return fallback
-
-    def _fetch_url_document(self, *, source_url: str) -> _FetchedUrlDocument:
-        if self._interpreter is None:
-            return _FetchedUrlDocument(
-                source_url=source_url,
-                source_metadata={"status": "not_fetched", "reason": "interpreter_unavailable"},
-            )
-        try:
-            from fleet_rlm.runtime.tools.document_tools import fetch_document_text
-
-            fetched = fetch_document_text(source_url)
-        except Exception as exc:
-            return _FetchedUrlDocument(
-                source_url=source_url,
-                source_metadata={"status": "error", "error": str(exc)},
-            )
-
-        if fetched.get("status") != "ok":
-            return _FetchedUrlDocument(
-                source_url=source_url,
-                source_metadata={
-                    "status": "error",
-                    "error": str(fetched.get("error", "unknown error")),
-                },
-            )
-
-        text = str(fetched.get("text") or "")
-        char_count = fetched.get("char_count", len(text))
-        raw_metadata = fetched.get("metadata")
-        metadata: dict[str, str] = {
-            "status": "ok",
-            "char_count": str(char_count),
-        }
-        if isinstance(raw_metadata, dict):
-            metadata.update({str(key): str(value) for key, value in raw_metadata.items()})
-        return _FetchedUrlDocument(
-            source_url=source_url,
-            document_text=text,
-            source_metadata=metadata,
-        )
 
 
 __all__ = [

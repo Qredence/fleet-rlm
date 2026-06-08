@@ -104,6 +104,26 @@ describe("runWorkbenchAdapter", () => {
     expect(next.attachments[0]?.name).toBe("result.md");
   });
 
+  it("hydrates final artifact from completion text when summary payload is sparse", () => {
+    const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
+      task: "Analyze https://dspy.ai",
+    });
+
+    const next = applyFrameToRunWorkbenchState(
+      started,
+      makeEvent("execution_completed", "DSPy documentation analysis complete.", {
+        source_type: "turn_completed",
+        status: "completed",
+      }),
+    );
+
+    expect(next.status).toBe("completed");
+    expect(next.finalArtifact?.value).toMatchObject({
+      summary: "DSPy documentation analysis complete.",
+      final_markdown: "DSPy documentation analysis complete.",
+    });
+  });
+
   it("maps needs_human_review execution summaries into a stable workbench state", () => {
     const started = startRunWorkbenchRun(createInitialRunWorkbenchState(), {
       task: "Repair the risky workspace",

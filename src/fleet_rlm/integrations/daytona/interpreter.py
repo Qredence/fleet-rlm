@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import dspy
+if TYPE_CHECKING:
+    pass
 
 from fleet_rlm.runtime.execution.interpreter_protocol import (
     ExecutionProfile,
@@ -59,7 +60,7 @@ from .runtime import (
 )
 from .sandbox_executor import SandboxExecutor
 from .session_runtime import DaytonaSandboxSession
-from .workspace_manager import WorkspaceManager
+from .workspace_manager import _UNSET, WorkspaceManager
 
 
 class DaytonaInterpreter(
@@ -92,7 +93,7 @@ class DaytonaInterpreter(
         sandbox_labels: dict[str, str] | None = None,
         delete_session_on_shutdown: bool = True,
         delete_context_on_shutdown: bool = False,
-        sub_lm: dspy.LM | None = None,
+        sub_lm: Any | None = None,
         max_llm_calls: int = 50,
         max_recursion_depth: int = 2,
         rlm_max_iterations: int = 30,
@@ -391,6 +392,7 @@ class DaytonaInterpreter(
         volume_name: str | None,
         sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
+        snapshot: str | None | object = _UNSET,
     ) -> ReconfigureOutcome:
         return self._workspace.configure_workspace(
             repo_url=repo_url,
@@ -399,6 +401,7 @@ class DaytonaInterpreter(
             volume_name=volume_name,
             sandbox_labels=sandbox_labels,
             force_new_session=force_new_session,
+            snapshot=snapshot,
         )
 
     async def aconfigure_workspace(
@@ -410,6 +413,7 @@ class DaytonaInterpreter(
         volume_name: str | None,
         sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
+        snapshot: str | None | object = _UNSET,
     ) -> ReconfigureOutcome:
         return await self._workspace.aconfigure_workspace(
             repo_url=repo_url,
@@ -418,6 +422,7 @@ class DaytonaInterpreter(
             volume_name=volume_name,
             sandbox_labels=sandbox_labels,
             force_new_session=force_new_session,
+            snapshot=snapshot,
         )
 
     def export_session_state(self) -> dict[str, Any]:

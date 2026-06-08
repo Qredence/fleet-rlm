@@ -6,7 +6,8 @@ import type { InputBarProps } from "@/components/agent-elements/input-bar";
 import { WorkspaceAgentInputBar } from "@/features/workspace/conversation/workspace-agent-input-bar";
 import { toAgentChatMessages } from "@/features/workspace/conversation/agent-chat-adapter";
 import { buildPendingAssistantTurnId } from "@/lib/workspace/chat-display-items";
-import { WorkspaceChatEmptyState } from "@/features/workspace/conversation/transcript/workspace-chat-empty-state";
+import { WorkspaceChatEmptyStateHero } from "@/features/workspace/conversation/transcript/workspace-chat-empty-state";
+import { workspaceChatSuggestionItems } from "@/features/workspace/conversation/transcript/workspace-chat-suggestions";
 import type { ChatMessage } from "@/features/workspace/use-workspace";
 import { useWorkspaceUiStore } from "@/features/workspace/use-workspace";
 import type { WsExecutionMode } from "@/lib/rlm-api/ws-types";
@@ -153,57 +154,60 @@ export function WorkspaceMessageList({
     }
   };
 
+  const emptyChatSuggestions = useMemo(
+    () => ({
+      items: workspaceChatSuggestionItems(),
+      onSelect: (item: { value?: string; label: string }) =>
+        onSuggestionClick(item.value ?? item.label),
+      className: "w-full justify-center",
+      itemClassName:
+        "h-auto rounded-xl border border-border bg-card/50 px-4 py-3 text-left whitespace-normal hover:bg-card",
+    }),
+    [onSuggestionClick],
+  );
+
+  const sharedAgentChatProps = {
+    messages: agentMessages,
+    status,
+    onSend: (message: { content: string }) => onSend(message.content),
+    onStop: onStop ?? (() => {}),
+    value,
+    onChange,
+    slots: { InputBar: inputSlot },
+    showCopyToolbar: false as const,
+    enableImagePreview: false as const,
+    questionTool: {
+      submitLabel: "Send",
+      skipLabel: "Skip",
+      allowSkip: false,
+      onAnswer: handleQuestionAnswer,
+    },
+  };
+
   if (messages.length === 0 && showEmptyState) {
     return (
-      <div className={cn("flex h-full min-h-0 flex-col bg-background", className)}>
-        <div className="flex min-h-0 flex-1 items-center justify-center px-4 py-4">
-          <WorkspaceChatEmptyState isMobile={isMobile} onSuggestionClick={onSuggestionClick} />
-        </div>
-        <AgentChat
-          messages={agentMessages}
-          status={status}
-          onSend={(message) => onSend(message.content)}
-          onStop={onStop ?? (() => {})}
-          value={value}
-          onChange={onChange}
-          slots={{ InputBar: inputSlot }}
-          className="h-auto shrink-0"
-          classNames={{ inputBar: "px-4 pb-6 md:px-6" }}
-          showCopyToolbar={false}
-          enableImagePreview={false}
-          questionTool={{
-            submitLabel: "Send",
-            skipLabel: "Skip",
-            allowSkip: false,
-            onAnswer: handleQuestionAnswer,
-          }}
-        />
-      </div>
+      <AgentChat
+        {...sharedAgentChatProps}
+        emptyStatePosition="center"
+        emptySuggestionsPlacement="empty"
+        emptySuggestionsPosition="top"
+        emptyState={<WorkspaceChatEmptyStateHero isMobile={isMobile} />}
+        suggestions={emptyChatSuggestions}
+        className={cn("h-full min-h-0 bg-background", className)}
+        classNames={{ inputBar: "px-4 pb-6 md:px-6" }}
+      />
     );
   }
 
   return (
     <AgentChat
-      messages={agentMessages}
-      status={status}
-      onSend={(message) => onSend(message.content)}
-      onStop={onStop ?? (() => {})}
-      value={value}
-      onChange={onChange}
-      slots={{ InputBar: inputSlot }}
+      {...sharedAgentChatProps}
+      showCopyToolbar
       className={cn("bg-background", className)}
       classNames={{
         root: "bg-background",
         inputBar: "px-4 pb-6 pt-4 md:px-6",
         userMessage: "mx-auto max-w-175",
-      }}
-      showCopyToolbar
-      enableImagePreview={false}
-      questionTool={{
-        submitLabel: "Send",
-        skipLabel: "Skip",
-        allowSkip: false,
-        onAnswer: handleQuestionAnswer,
       }}
     />
   );

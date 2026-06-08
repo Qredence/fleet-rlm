@@ -2,7 +2,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { DatasetsTab } from "@/features/optimization/datasets-tab";
+import { DatasetsTab } from "@/features/_archive/optimization/datasets-tab";
 import { optimizationEndpoints } from "@/lib/rlm-api/optimization";
 import { sessionEndpoints } from "@/lib/rlm-api/sessions";
 

@@ -43,7 +43,9 @@ export type WsEventKind =
   | "execution_started"
   | "execution_step"
   | "execution_completed"
-  | "command_result";
+  | "command_result"
+  | "tool_call"
+  | "tool_result";
 
 export interface WsEventPayload {
   kind: WsEventKind;

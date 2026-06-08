@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from fleet_rlm.runtime.agent import runtime_helpers as rh
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 logger = logging.getLogger(__name__)
@@ -25,12 +26,14 @@ class ReplHookBridge:
         step_builder: Any,
         interpreter: Any,
         enqueue_nonblocking: Callable[[asyncio.Queue[Any | None], Any], bool],
+        progress_relay: Any | None = None,
     ) -> None:
         self._ws_loop = ws_loop
         self._lifecycle = lifecycle
         self._step_builder = step_builder
         self._interpreter = interpreter
         self._enqueue_nonblocking = enqueue_nonblocking
+        self._progress_relay = progress_relay
         self._previous_execution_hook: Any = None
         self._queue: asyncio.Queue[Any | None] = asyncio.Queue(maxsize=_REPL_HOOK_STEP_QUEUE_MAX)
         self._worker_task: asyncio.Task[None] | None = None
@@ -92,4 +95,6 @@ class ReplHookBridge:
         repl_step = self._step_builder.from_interpreter_hook(payload)
         if repl_step is None:
             return
+        if self._progress_relay is not None:
+            rh.emit_turn_progress_from_payload(self._progress_relay, payload, source="interpreter")
         self._ws_loop.call_soon_threadsafe(lambda step_data=repl_step: self._queue_repl_step(step_data))

@@ -59,6 +59,20 @@ function getCanonicalRunSummary(
   return asRecord(payload?.run_summary ?? payload?.runSummary);
 }
 
+function artifactFromCompletionText(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  return normalizeArtifact({
+    kind: "assistant_response",
+    value: {
+      text: trimmed,
+      final_markdown: trimmed,
+      summary: trimmed.slice(0, 320),
+    },
+    finalization_mode: "RETURN",
+  });
+}
+
 function mergeMlflowTraceMetadata(
   summary: RunSummary | undefined,
   payload?: Record<string, unknown>,
@@ -404,13 +418,16 @@ export function applyFrameToRunWorkbenchState(
   const canonicalSummary = isCanonicalCompletion
     ? normalizeSummary(payload?.summary ?? runSummary?.summary)
     : undefined;
+  const explicitFinalArtifact = normalizeArtifact(
+    payload?.final_artifact ??
+      payload?.finalArtifact ??
+      runSummary?.final_artifact ??
+      runSummary?.finalArtifact,
+  );
+  const hasRunResultBackfill = asRecord(payload?.run_result ?? payload?.runResult) != null;
   const canonicalFinalArtifact = isCanonicalCompletion
-    ? normalizeArtifact(
-        payload?.final_artifact ??
-          payload?.finalArtifact ??
-          runSummary?.final_artifact ??
-          runSummary?.finalArtifact,
-      )
+    ? (explicitFinalArtifact ??
+      (!hasRunResultBackfill ? artifactFromCompletionText(frame.data.text) : null))
     : undefined;
   const mergedSummary = mergeMlflowTraceMetadata(canonicalSummary ?? next.summary, payload);
 

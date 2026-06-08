@@ -125,6 +125,8 @@ describe("RunWorkbench", () => {
     expect(html).not.toContain(">Callbacks<");
     expect(html).not.toContain(">Prompts<");
     expect(html).toContain("Iteration 1");
+    expect(html).toContain("Thought");
+    expect(html).toContain("Planner selected a grounded architecture pass.");
     expect(html).toContain("iter 1");
     expect(html).toContain("1 callbacks");
     expect(html).toContain("Staged corpus");

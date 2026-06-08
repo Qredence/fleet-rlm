@@ -16,6 +16,7 @@ import {
   inferStatusTone,
   sandboxProgressPartFromStatus,
 } from "@/lib/workspace/backend-chat-event-tool-parts";
+import { applyCanonicalExecutionStepWithRouter } from "@/lib/workspace/backend-chat-event-step-router";
 
 const DEFAULT_PHASE = 1 as const;
 interface ApplyFrameResult {
@@ -97,21 +98,36 @@ function upsertReasoningRenderPart(
 function finishReasoning(messages: ChatMessage[]): ChatMessage[] {
   let updated = false;
   const next = messages.map((msg) => {
-    if (msg.type !== "reasoning" || !msg.reasoningData?.isThinking) return msg;
-    updated = true;
-    const nextMsg = {
-      ...msg,
-      reasoningData: {
-        ...msg.reasoningData,
-        isThinking: false,
-      },
-    };
-    return upsertReasoningRenderPart(
-      nextMsg,
-      nextMsg.reasoningData.parts,
-      false,
-      nextMsg.reasoningData.duration,
-    );
+    if (msg.type === "reasoning" && msg.reasoningData?.isThinking) {
+      updated = true;
+      const nextMsg = {
+        ...msg,
+        reasoningData: {
+          ...msg.reasoningData,
+          isThinking: false,
+        },
+      };
+      return upsertReasoningRenderPart(
+        nextMsg,
+        nextMsg.reasoningData.parts,
+        false,
+        nextMsg.reasoningData.duration,
+      );
+    }
+    if (msg.type !== "trace" || !msg.renderParts?.length) return msg;
+    let traceUpdated = false;
+    const renderParts = msg.renderParts.map((part) => {
+      if (part.kind === "reasoning" && part.isStreaming) {
+        traceUpdated = true;
+        return { ...part, isStreaming: false };
+      }
+      return part;
+    });
+    if (traceUpdated) {
+      updated = true;
+      return { ...msg, renderParts };
+    }
+    return msg;
   });
   return updated ? next : messages;
 }
@@ -166,7 +182,15 @@ function preferredFinalArtifactText(value: unknown): string | undefined {
 }
 
 function resolveFinalAssistantText(text: string, payload?: Record<string, unknown>): string {
-  const preferred = preferredFinalArtifactText(payload?.final_artifact ?? payload?.finalArtifact);
+  const artifact = asRecord(payload?.final_artifact ?? payload?.finalArtifact);
+  if (artifact?.kind === "code_file") {
+    const value = asRecord(artifact.value);
+    const summary = asOptionalText(value?.summary ?? value?.text);
+    if (summary) return summary;
+  }
+  const preferred = preferredFinalArtifactText(
+    artifact ?? payload?.final_artifact ?? payload?.finalArtifact,
+  );
 
   return preferred ?? text;
 }
@@ -186,105 +210,6 @@ function canonicalSummaryPayload(
 function canonicalCompletionStatus(payload: Record<string, unknown> | undefined): string {
   const summary = canonicalSummaryPayload(payload);
   return asOptionalText(summary?.status ?? payload?.status)?.toLowerCase() ?? "";
-}
-
-function canonicalStepText(step: Record<string, unknown>, fallback: string): string {
-  return (
-    asOptionalText(step.label) ??
-    asOptionalText(step.output) ??
-    asOptionalText(step.input) ??
-    fallback
-  );
-}
-
-function routingStatusText(text: string, payload?: Record<string, unknown>): string {
-  const selectedSkills = Array.isArray(payload?.selected_skills)
-    ? payload.selected_skills.map((item) => String(item)).filter(Boolean)
-    : [];
-  const routingDecision = asOptionalText(payload?.routing_decision);
-  const sourceUrl = asOptionalText(payload?.source_url);
-  if (selectedSkills.length === 0 && !routingDecision && !sourceUrl) return text;
-
-  const parts = [text.trim()].filter(Boolean);
-  if (routingDecision) parts.push(`route ${routingDecision}`);
-  if (selectedSkills.length > 0) parts.push(`skills ${selectedSkills.join(", ")}`);
-  if (sourceUrl) parts.push(`source ${sourceUrl}`);
-  return parts.join(" | ");
-}
-
-function applyCanonicalExecutionStep(
-  messages: ChatMessage[],
-  text: string,
-  payload?: Record<string, unknown>,
-): ApplyFrameResult {
-  const step = asRecord(payload?.step);
-  if (!step) {
-    return {
-      messages: appendStatusTrace(
-        messages,
-        routingStatusText(text || "Execution step received", payload),
-        "neutral",
-        payload,
-      ),
-      terminal: false,
-      errored: false,
-    };
-  }
-
-  const stepType = asOptionalText(step.type)?.toLowerCase();
-  const stepText = canonicalStepText(step, text);
-  if (stepType === "tool" || stepType === "repl") {
-    const kind = step.output == null ? "tool_call" : "tool_result";
-    return {
-      messages: appendToolLikePart(
-        messages,
-        kind,
-        stepText,
-        { ...payload, ...step },
-        appendTracePart,
-      ),
-      terminal: false,
-      errored: false,
-    };
-  }
-  if (stepType === "llm") {
-    const output = asRecord(step.output);
-    const token = typeof output?.text === "string" ? output.text : asOptionalText(step.output);
-    const reasoning =
-      typeof step.label === "string" ? step.label : asOptionalText(output?.reasoning ?? step.input);
-    return {
-      messages: token
-        ? appendAssistantToken(messages, token)
-        : appendReasoningEvent(messages, reasoning ?? stepText, "live", {
-            ...payload,
-            ...step,
-          }),
-      terminal: false,
-      errored: false,
-    };
-  }
-  if (stepType === "output") {
-    return {
-      messages: appendStatusTrace(
-        messages,
-        stepText || "Output step completed",
-        "success",
-        payload,
-      ),
-      terminal: false,
-      errored: false,
-    };
-  }
-  return {
-    messages: appendStatusTrace(
-      messages,
-      routingStatusText(stepText || "Execution step received", payload),
-      "neutral",
-      payload,
-    ),
-    terminal: false,
-    errored: false,
-  };
 }
 
 function applyCanonicalExecutionCompleted(
@@ -328,12 +253,38 @@ function applyCanonicalExecutionCompleted(
   return { messages: next, terminal: true, errored: false };
 }
 
+function latestLiveTraceIndex(messages: ChatMessage[]): number {
+  const lastUserIndex = messages.findLastIndex((message) => message.type === "user");
+  const startIndex = lastUserIndex >= 0 ? lastUserIndex + 1 : 0;
+  for (let i = messages.length - 1; i >= startIndex; i -= 1) {
+    const msg = messages[i];
+    if (msg?.type === "trace" && msg.traceSource === "live") return i;
+  }
+  return -1;
+}
+
 function appendTracePart(
   messages: ChatMessage[],
   part: ChatRenderPart,
   content = "",
   traceSource: ChatMessage["traceSource"] = "live",
 ): ChatMessage[] {
+  if (traceSource === "live") {
+    const idx = latestLiveTraceIndex(messages);
+    if (idx >= 0) {
+      const copy = [...messages];
+      const current = copy[idx];
+      if (current?.type === "trace") {
+        copy[idx] = {
+          ...current,
+          content: content || current.content,
+          renderParts: [...(current.renderParts ?? []), part],
+        };
+        return copy;
+      }
+    }
+  }
+
   return [
     ...messages,
     {
@@ -347,14 +298,13 @@ function appendTracePart(
   ];
 }
 
-function appendReasoningEvent(
-  messages: ChatMessage[],
+function buildReasoningRenderPart(
   text: string,
   traceSource: ChatMessage["traceSource"],
   payload?: Record<string, unknown>,
   label = "reasoning",
-): ChatMessage[] {
-  if (text.length === 0) return messages;
+  isStreaming = false,
+): ChatRenderPart {
   const runtimePayload = asRecord(payload?.runtime);
   const runtimeContext = parseRuntimeContext(runtimePayload ?? payload);
   const resolvedLabel = asOptionalText(
@@ -363,18 +313,150 @@ function appendReasoningEvent(
       payload?.label ??
       runtimePayload?.actor_kind,
   );
+  return {
+    kind: "reasoning",
+    parts: [{ type: "text", text }],
+    isStreaming: traceSource === "live" ? isStreaming : false,
+    label: resolvedLabel ?? label,
+    ...(runtimeContext ? { runtimeContext } : {}),
+  };
+}
+
+function appendReasoningEvent(
+  messages: ChatMessage[],
+  text: string,
+  traceSource: ChatMessage["traceSource"],
+  payload?: Record<string, unknown>,
+  label = "reasoning",
+): ChatMessage[] {
+  if (text.length === 0) return messages;
   return appendTracePart(
     messages,
-    {
-      kind: "reasoning",
-      parts: [{ type: "text", text }],
-      isStreaming: false,
-      label: resolvedLabel ?? label,
-      ...(runtimeContext ? { runtimeContext } : {}),
-    },
+    buildReasoningRenderPart(text, traceSource, payload, label, false),
     text,
     traceSource,
   );
+}
+
+function appendOrExtendReasoningEvent(
+  messages: ChatMessage[],
+  text: string,
+  traceSource: ChatMessage["traceSource"],
+  payload?: Record<string, unknown>,
+  label = "reasoning",
+): ChatMessage[] {
+  if (text.length === 0) return messages;
+
+  if (traceSource === "live") {
+    const idx = latestLiveTraceIndex(messages);
+    if (idx >= 0) {
+      const current = messages[idx];
+      if (current?.type === "trace" && current.renderParts?.length) {
+        const parts = [...current.renderParts];
+        const lastPart = parts[parts.length - 1];
+        if (lastPart?.kind === "reasoning" && lastPart.isStreaming) {
+          const mergedText = [lastPart.parts.map((p) => p.text).join("\n"), text]
+            .filter(Boolean)
+            .join("\n");
+          parts[parts.length - 1] = buildReasoningRenderPart(
+            mergedText,
+            traceSource,
+            payload,
+            label,
+            true,
+          );
+          const copy = [...messages];
+          copy[idx] = { ...current, renderParts: parts, content: mergedText };
+          return copy;
+        }
+      }
+    }
+  }
+
+  return appendTracePart(
+    messages,
+    buildReasoningRenderPart(text, traceSource, payload, label, traceSource === "live"),
+    text,
+    traceSource,
+  );
+}
+
+function appendClarificationMessage(
+  messages: ChatMessage[],
+  text: string,
+  payload?: Record<string, unknown>,
+): ChatMessage[] {
+  const question = asOptionalText(payload?.question) ?? text;
+  if (!question.trim()) return messages;
+
+  const rawActions = Array.isArray(payload?.actions) ? payload.actions : [];
+  const actions = rawActions
+    .map((item) => {
+      const record = asRecord(item);
+      if (!record) return null;
+      const actionLabel = asOptionalText(record.label);
+      if (!actionLabel) return null;
+      const variant = asOptionalText(record.variant);
+      return {
+        label: actionLabel,
+        variant: variant === "primary" ? ("primary" as const) : ("secondary" as const),
+      };
+    })
+    .filter((item): item is { label: string; variant: "primary" | "secondary" } => item != null);
+
+  const rawOptions = Array.isArray(payload?.options) ? payload.options : [];
+  const options = rawOptions
+    .map((item, index) => {
+      const record = asRecord(item);
+      if (!record) return null;
+      const optionLabel = asOptionalText(record.label) ?? asOptionalText(record.text);
+      if (!optionLabel) return null;
+      const description = asOptionalText(record.description);
+      return {
+        id: asOptionalText(record.id) ?? `option-${index}`,
+        label: optionLabel,
+        ...(description ? { description } : {}),
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item != null);
+
+  if (options.length > 0) {
+    return [
+      ...messages,
+      {
+        id: nextId("clarification"),
+        type: "clarification",
+        content: question,
+        phase: DEFAULT_PHASE,
+        clarificationData: {
+          question,
+          stepLabel: asOptionalText(payload?.step_label ?? payload?.stepLabel) ?? "Clarification",
+          options,
+          customOptionId: asOptionalText(payload?.custom_option_id) ?? "custom",
+        },
+      },
+    ];
+  }
+
+  return [
+    ...messages,
+    {
+      id: nextId("hitl"),
+      type: "hitl",
+      content: question,
+      phase: DEFAULT_PHASE,
+      hitlData: {
+        question,
+        actions:
+          actions.length > 0
+            ? actions
+            : [
+                { label: "Approve", variant: "primary" },
+                { label: "Reject", variant: "secondary" },
+              ],
+      },
+    },
+  ];
 }
 
 function appendStatusTrace(
@@ -490,6 +572,8 @@ function finalizeTraceParts(messages: ChatMessage[]): ChatMessage[] {
           return part.state === "running" || part.state === "input-streaming"
             ? { ...part, state: "output-available" as const }
             : part;
+        case "reasoning":
+          return part.isStreaming ? { ...part, isStreaming: false } : part;
         default:
           return part;
       }
@@ -540,6 +624,31 @@ function rollbackHitlByMessageId(messages: ChatMessage[], messageId: string): Ch
   return changed ? next : messages;
 }
 
+const executionStepRouterDeps = {
+  appendTracePart,
+  appendOrExtendReasoningEvent,
+  appendAssistantToken,
+  appendStatusTrace,
+  appendClarificationMessage,
+};
+
+function applyCanonicalExecutionStep(
+  messages: ChatMessage[],
+  text: string,
+  payload?: Record<string, unknown>,
+): ApplyFrameResult {
+  return {
+    messages: applyCanonicalExecutionStepWithRouter(
+      messages,
+      text,
+      payload,
+      executionStepRouterDeps,
+    ),
+    terminal: false,
+    errored: false,
+  };
+}
+
 function applyEvent(messages: ChatMessage[], frame: WsServerEvent): ApplyFrameResult {
   const { kind, text, payload } = frame.data;
 
@@ -570,6 +679,14 @@ function applyEvent(messages: ChatMessage[], frame: WsServerEvent): ApplyFrameRe
     }
     case "execution_step": {
       return applyCanonicalExecutionStep(messages, text, payload);
+    }
+    case "tool_call":
+    case "tool_result": {
+      return {
+        messages: appendToolLikePart(messages, kind, text, payload, appendTracePart),
+        terminal: false,
+        errored: false,
+      };
     }
     case "command_result": {
       const command = asOptionalText(payload?.command);

@@ -14,6 +14,8 @@ from .models import ReconfigureOutcome, SandboxSpec, WorkspaceConfig, normalized
 from .runtime import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH, DaytonaSandboxRuntime
 from .session_runtime import DaytonaSandboxSession
 
+_UNSET = object()
+
 
 class WorkspaceManager:
     """Own Daytona workspace/session state for a ``DaytonaInterpreter`` facade."""
@@ -72,6 +74,7 @@ class WorkspaceManager:
         self._runtime_failure_category: str | None = None
         self._runtime_failure_phase: str | None = None
         self._runtime_fallback_used = False
+        self._session_snapshot: str | None | object = _UNSET
 
     @property
     def execution_event_callback(self) -> Callable[[dict[str, Any]], None] | None:
@@ -320,16 +323,27 @@ class WorkspaceManager:
             self._clear_persisted_session()
             return None, True
 
+    def _resolve_session_snapshot(self) -> str | None:
+        if self._session_snapshot is _UNSET:
+            if isinstance(self.sandbox_spec, SandboxSpec):
+                return self.sandbox_spec.snapshot
+            return getattr(self.sandbox_spec, "snapshot", None)
+        if self._session_snapshot is None:
+            return None
+        return str(self._session_snapshot)
+
     def _effective_sandbox_spec(self) -> SandboxSpec:
         """Return the sandbox spec with current volume and owner labels applied."""
         labels = dict(getattr(self.sandbox_spec, "labels", None) or {})
         labels.update(self.sandbox_labels)
+        snapshot = self._resolve_session_snapshot()
         if isinstance(self.sandbox_spec, SandboxSpec):
             return replace(
                 self.sandbox_spec,
                 volume_name=self.volume_name or self.sandbox_spec.volume_name,
                 volume_subpath=(self.volume_subpath or self.sandbox_spec.volume_subpath),
                 labels=labels or None,
+                snapshot=snapshot,
             )
         build_sandbox_spec = getattr(self.runtime, "build_sandbox_spec", None)
         if callable(build_sandbox_spec):
@@ -337,12 +351,14 @@ class WorkspaceManager:
                 volume_name=self.volume_name,
                 volume_subpath=self.volume_subpath,
                 labels=labels or None,
+                snapshot=snapshot,
             )
         return SandboxSpec(
             volume_name=self.volume_name,
             volume_mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
             volume_subpath=self.volume_subpath,
             labels=labels or None,
+            snapshot=snapshot,
         )
 
     async def _acreate_session_from_runtime(
@@ -473,6 +489,7 @@ class WorkspaceManager:
         volume_name: str | None,
         sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
+        snapshot: str | None | object = _UNSET,
     ) -> ReconfigureOutcome:
         (
             normalized_repo_url,
@@ -488,7 +505,16 @@ class WorkspaceManager:
             volume_name=volume_name,
             sandbox_labels=sandbox_labels,
         )
-        should_recreate = force_new_session or self._session_needs_recreation(desired_volume=normalized_volume)
+        snapshot_changed = False
+        if snapshot is not _UNSET:
+            normalized_snapshot = str(snapshot or "").strip() or None
+            current_snapshot = None if self._session_snapshot is _UNSET else self._session_snapshot
+            snapshot_changed = normalized_snapshot != current_snapshot
+            if snapshot_changed:
+                self._session_snapshot = normalized_snapshot
+        should_recreate = (
+            force_new_session or snapshot_changed or self._session_needs_recreation(desired_volume=normalized_volume)
+        )
         if should_recreate:
             self._detach_session(delete=True)
         self._apply_workspace_config(
@@ -512,6 +538,7 @@ class WorkspaceManager:
         volume_name: str | None,
         sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
+        snapshot: str | None | object = _UNSET,
     ) -> ReconfigureOutcome:
         (
             normalized_repo_url,
@@ -527,7 +554,16 @@ class WorkspaceManager:
             volume_name=volume_name,
             sandbox_labels=sandbox_labels,
         )
-        should_recreate = force_new_session or self._session_needs_recreation(desired_volume=normalized_volume)
+        snapshot_changed = False
+        if snapshot is not _UNSET:
+            normalized_snapshot = str(snapshot or "").strip() or None
+            current_snapshot = None if self._session_snapshot is _UNSET else self._session_snapshot
+            snapshot_changed = normalized_snapshot != current_snapshot
+            if snapshot_changed:
+                self._session_snapshot = normalized_snapshot
+        should_recreate = (
+            force_new_session or snapshot_changed or self._session_needs_recreation(desired_volume=normalized_volume)
+        )
         if should_recreate:
             await self._adetach_session(delete=True)
         self._apply_workspace_config(

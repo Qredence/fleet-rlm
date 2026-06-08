@@ -20,21 +20,22 @@ Before editing:
 
 ## Source-of-Truth Files
 
-| Concern                 | File(s)                                                |
-| ----------------------- | ------------------------------------------------------ |
-| Scripts & validation    | `package.json`                                         |
-| Lint/build/import rules | `vite.config.ts`                                       |
-| Routes & surfaces       | `src/routes/*`                                         |
-| App chrome / layout     | `src/features/layout/*`                                |
-| Product surfaces        | `src/features/{workspace,volumes,settings}/*`          |
-| UI primitives           | `src/components/ui/*` (shadcn/Base UI)                 |
-| AI Elements             | `src/components/ai-elements/*`                         |
-| Product compositions    | `src/components/product/*`                             |
-| API clients & types     | `src/lib/rlm-api/*`                                    |
-| Workspace adapters      | `src/lib/workspace/*`                                  |
-| Theme / tokens          | `src/styles/globals.css`                               |
-| shadcn config           | `components.json`                                      |
-| API contract            | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts` |
+| Concern                 | File(s)                                                   |
+| ----------------------- | --------------------------------------------------------- |
+| Scripts & validation    | `package.json`                                            |
+| Lint/build/import rules | `vite.config.ts`                                          |
+| Routes & surfaces       | `src/routes/*`                                            |
+| App chrome / layout     | `src/features/layout/*`                                   |
+| Product surfaces        | `src/features/{workspace,volumes,settings}/*`             |
+| UI primitives           | `src/components/ui/*` (shadcn/Base UI)                    |
+| Agent Elements (chat)   | `src/components/agent-elements/*`                         |
+| Legacy inspection UI    | `src/components/ai-elements/*` (composer/inspection only) |
+| Product compositions    | `src/components/product/*`                                |
+| API clients & types     | `src/lib/rlm-api/*`                                       |
+| Workspace adapters      | `src/lib/workspace/*`                                     |
+| Theme / tokens          | `src/styles/globals.css`                                  |
+| shadcn config           | `components.json`                                         |
+| API contract            | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts`    |
 
 ### Generated / Synced — Do Not Hand-Edit
 
@@ -50,16 +51,29 @@ Before editing:
 ### Component Layers (outer → inner)
 
 1. **`src/components/ui/*`** — shadcn/Base UI primitives. Thin, semantic, no feature/runtime imports.
-2. **`src/components/ai-elements/*`** — AI Elements registry. Composable, registry-aligned.
-3. **`src/components/product/*`** — Reusable product compositions (empty states, skeletons, panels).
-4. **`src/features/layout/*`** — App chrome. Consumes workspace/volumes through feature entrypoints only.
-5. **`src/features/{workspace,volumes,settings}/*`** — Canonical surface ownership.
-6. **`src/lib/{rlm-api,workspace}/*`** — API clients, adapters, stores, frame shaping.
-7. **`src/stores/*`** — Cross-app shell/layout and navigation state.
+2. **`src/components/agent-elements/*`** — **Canonical agent/chat UI** ([Agent Elements](https://agent-elements.21st.dev/docs) shadcn registry). `AgentChat`, `InputBar`, tool cards, `UIMessage`-shaped transcripts.
+3. **`src/components/product/*`** — Reusable product compositions (empty states, skeletons, panels). Do not add chat, reasoning, or tool transcript UI here; use Agent Elements.
+4. **`src/components/ai-elements/*`** — **Legacy inspection/composer primitives only** (`prompt-input`, `chain-of-thought`). Do not add new chat/message/tool components here.
+5. **`src/features/layout/*`** — App chrome. Consumes workspace/volumes through feature entrypoints only.
+6. **`src/features/{workspace,volumes,settings}/*`** — Canonical surface ownership.
+7. **`src/lib/{rlm-api,workspace}/*`** — API clients, adapters, stores, frame shaping.
+8. **`src/stores/*`** — Cross-app shell/layout and navigation state.
+
+### Chat data flow (not Vercel `useChat`)
+
+The backend streams custom websocket frames. The frontend does **not** call `useChat()` directly:
+
+```
+backend WS frames
+  → lib/workspace/backend-chat-event-adapter.ts
+  → lib/workspace/backend-artifact-event-adapter.ts
+  → features/workspace/conversation/agent-chat-adapter.ts (UIMessage + toolRenderers)
+  → AgentChat (agent-elements)
+```
 
 ### Import Boundaries (enforced in `vite.config.ts`)
 
-- `src/components/{ui,ai-elements,product}/*` **must not** import from `src/screens/*`.
+- `src/components/{ui,ai-elements,agent-elements,product}/*` **must not** import from `src/screens/*`.
 - `src/lib/workspace/*` **must not** depend on workspace UI modules.
 - `src/features/layout/*` **must** consume workspace/volumes through their feature entrypoints or explicit public contracts.
 - `@/lib/utils` is the canonical `cn()` import path.
@@ -267,79 +281,81 @@ Keep sync artifacts in the same change; never hand-edit generated output.
 
 ---
 
-## AI Component Registries
+## Agent Elements and shadcn Registries
 
-The project uses **prompt-kit** as the primary AI component registry and **AI SDK Elements** as the secondary registry for AI-SDK-native features (e.g., `attachments`). Both are configured in `components.json`.
+[Agent Elements](https://agent-elements.21st.dev/docs) is the **canonical chat/agent UI kit**. Official guidance: **do not mix** Agent Elements with `ai-elements`, CopilotKit, or other chat kits for message/tool surfaces.
 
-### Registry Installation
+Registries are configured in [components.json](components.json):
+
+| Namespace         | URL                                                    | Use                                |
+| ----------------- | ------------------------------------------------------ | ---------------------------------- |
+| `@agent-elements` | `https://agent-elements.21st.dev/r/{name}.json`        | Chat shell, tool cards, input bar  |
+| `@ai-elements`    | `https://ai-sdk.dev/elements/api/registry/{name}.json` | Do not install new chat components |
+| `@prompt-kit`     | `https://www.prompt-kit.com/c/{name}.json`             | Avoid unless net-new capability    |
+
+### Install Agent Elements
 
 ```bash
-# prompt-kit (installs into src/components/ai-elements/ by default)
-npx shadcn@latest add "https://prompt-kit.com/c/{component}.json" -p src/components/ai-elements
+# Preferred: namespaced registry alias from components.json
+npx shadcn@latest add @agent-elements/agent-chat
 
-# AI SDK Elements
-npx shadcn@latest add "https://ai-sdk.dev/elements/api/registry/{component}.json" -p src/components/ai-elements
+# Or direct URL (agent-chat pulls transitive deps)
+npx shadcn@latest add https://agent-elements.21st.dev/r/agent-chat.json
 ```
 
-**Important**: Always use `-p src/components/ai-elements` to avoid overwriting UI primitives in `src/components/ui/`. If the CLI installs bundled UI primitives (button, hover-card, etc.) into `ai-elements/`, delete them — the project canonical versions live in `src/components/ui/`.
+Import from the **exact file** (no barrel):
 
-### Component Catalog & Reuse Policy
+```tsx
+import { AgentChat } from "@/components/agent-elements/agent-chat";
+import { BashTool } from "@/components/agent-elements/tools/bash-tool";
+```
 
-**Before installing any new component, check this catalog.** The project already has multiple components solving the same problem. Prefer reuse over proliferation.
+### Canonical Agent Elements (actively used)
 
-#### Canonical AI Components (actively used — reuse these)
+| Component           | Location                                    | Consumers                                               | Purpose                                              |
+| ------------------- | ------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------- |
+| `AgentChat`         | `agent-elements/agent-chat.tsx`             | `workspace-message-list.tsx`                            | Full chat shell (messages + input)                   |
+| `InputBar`          | `agent-elements/input-bar.tsx`              | `workspace-agent-input-bar.tsx`                         | Composer with mode/model pickers                     |
+| `Suggestions`       | `agent-elements/input/suggestions.tsx`      | `AgentChat` via `workspace-message-list.tsx`            | Quick-prompt chips (empty state + input)             |
+| Tool mapping        | `lib/workspace/agent-tool-parts.ts`         | `agent-chat-adapter.ts`, `execution-inspector-rows.tsx` | Shared tool part normalization                       |
+| Static tool helpers | `agent-elements/utils/static-tool-parts.ts` | workbench, inspector                                    | `ThinkingTool` steps outside chat transcripts        |
+| Tool cards          | `agent-elements/tools/*`                    | `agent-chat-adapter.ts` via `toolRenderers`             | Bash, Edit, Search, MCP, Subagent, Thinking, Generic |
+| `TextShimmer`       | `agent-elements/text-shimmer.tsx`           | tool rows, loading states                               | Streaming label shimmer                              |
+| `Streamdown`        | `ui/streamdown.tsx`                         | agent-elements markdown                                 | Canonical markdown renderer                          |
 
-| Component        | Location                           | Consumers                                | Purpose                                                               |
-| ---------------- | ---------------------------------- | ---------------------------------------- | --------------------------------------------------------------------- |
-| `Message`        | `ai-elements/message.tsx`          | workspace chat (5 files)                 | Chat message shell with Streamdown rendering, branch support, actions |
-| `Conversation`   | `ai-elements/conversation.tsx`     | workspace-message-list, chat-empty-state | StickToBottom scroll container with empty state & download            |
-| `Reasoning`      | `ai-elements/reasoning.tsx`        | 4 workspace files                        | Collapsible thinking block with duration tracking                     |
-| `ChainOfThought` | `ai-elements/chain-of-thought.tsx` | execution-inspector-tab                  | Step-by-step reasoning timeline                                       |
-| `Tool`           | `ai-elements/tool.tsx`             | render-primitives, trace-part-renderers  | Tool call/result display with status badges                           |
-| `Sources`        | `ai-elements/sources.tsx`          | trace-part-renderers                     | Collapsible source list (Book icon + count)                           |
-| `Suggestion`     | `ai-elements/suggestion.tsx`       | workspace-chat-empty-state               | Scrollable suggestion pills with onClick handler                      |
-| `PromptInput`    | `ai-elements/prompt-input/`        | workspace-composer                       | Full composer input (textarea + attachments + send)                   |
-| `InlineCitation` | `ai-elements/inline-citation.tsx`  | trace-part-renderers                     | Inline numbered citation badges                                       |
-| `Task`           | `ai-elements/task.tsx`             | trace-part-renderers                     | Task status display component                                         |
-| `Shimmer`        | `product/text-shimmer.tsx`         | reasoning, answer-block, trace-renderers | Animated text shimmer (loading state)                                 |
-| `Streamdown`     | `ui/streamdown.tsx`                | 5 workspace files                        | Canonical markdown renderer (streaming-safe)                          |
+Wire backend tools through `agent-chat-adapter.ts` → `ToolRenderer`. Shared normalization lives in `lib/workspace/agent-tool-parts.ts`. Unknown kinds should fall back to `GenericTool`.
 
-#### Removed Registry Components
+### Legacy `ai-elements/` (composer only)
 
-The following prompt-kit / AI SDK Elements components were previously installed but had zero consumers and were removed during consolidation. Do not reinstall them:
+| Component        | Location                           | Consumers                | Notes                                                |
+| ---------------- | ---------------------------------- | ------------------------ | ---------------------------------------------------- |
+| `PromptInput`    | `ai-elements/prompt-input/`        | `workspace-composer.tsx` | Legacy composer; prefer `InputBar` for new work      |
+| `ChainOfThought` | `ai-elements/chain-of-thought.tsx` | —                        | Removed from execution inspector; do not reintroduce |
+| `Reasoning`      | `ai-elements/reasoning.tsx`        | tests only               | Prefer `ThinkingTool` via `static-tool-parts.ts`     |
 
-| Component              | Was At                              | Replacement                           |
-| ---------------------- | ----------------------------------- | ------------------------------------- |
-| `Markdown`             | `ai-elements/markdown.tsx`          | `Streamdown` is canonical             |
-| `Message` (prompt-kit) | `ui/message.tsx`                    | Hand-rolled `ai-elements/message.tsx` |
-| `ChatContainer`        | `ai-elements/chat-container.tsx`    | `Conversation`                        |
-| `ScrollButton`         | `ai-elements/scroll-button.tsx`     | `ConversationScrollButton`            |
-| `PromptSuggestion`     | `ai-elements/prompt-suggestion.tsx` | `Suggestion`                          |
-| `Source` (prompt-kit)  | `ai-elements/source.tsx`            | `Sources`                             |
-| `ResponseStream`       | `ai-elements/response-stream.tsx`   | N/A — no use case                     |
-| `Attachments`          | `ai-elements/attachments.tsx`       | N/A — no use case                     |
+Do **not** install `Message`, `Conversation`, `Tool`, or other chat primitives from `@ai-elements` or `@prompt-kit`.
 
-#### Markdown Renderers — One Canonical Choice
+### Markdown
 
-- **Streamdown** (`ui/streamdown.tsx`) is the **only** markdown renderer used in feature code. It wraps the `streamdown` package with streaming-safe parsing, CJK/code/math/mermaid plugins, and Tailwind typography.
-- `ui/markdown.tsx` (react-markdown wrapper) exists in the primitives layer but has **no feature consumers**. Do not introduce new markdown renderers.
+- **Streamdown** (`ui/streamdown.tsx`) is the only markdown renderer in feature code.
+- Do not add alternate markdown renderers.
 
-### Reuse Guidelines
+### Reuse guidelines
 
-1. **Check existing components first.** The hand-rolled AI components are mature, styled for the product, and have active consumers. Do not install a registry component that duplicates `Message`, `Conversation`, `Reasoning`, `Tool`, `Sources`, `Suggestion`, or `PromptInput` without a clear capability gap.
-2. **Registry components are for net-new capabilities.** Only install from prompt-kit or AI SDK Elements when the project genuinely lacks a component for the use case (e.g., a new `thread-list` or `command` component).
-3. **If you install a registry component, migrate to it.** Do not leave registry components as dead code. Update consumers or remove the installed file if adoption doesn't happen within the same PR.
-4. **Do not hand-roll new message/reasoning/tool/suggestion/citation components.** Extend the existing ones or install from registries.
-5. **Extend, don't duplicate.** If a component is close to what you need, add props or variants rather than creating a second component. Example: `Suggestion` already supports `wrap` and `onClick(suggestion)` — extend it before installing `PromptSuggestion`.
+1. **Chat/message/tool UI** → extend or install from `@agent-elements` only (adapter pipeline + `ToolRenderer`).
+2. **Shared non-chat patterns** → `components/product/*` (never reasoning/tool transcript cards).
+3. **Primitives** → `components/ui/*` via `npx shadcn@latest add …`.
+4. **Extend before install** — add props/variants before pulling a new registry component.
+5. **Canonical `cn()`** → `@/lib/utils` only (not `agent-elements/utils/cn.ts`).
 
-### External Documentation References
+### External documentation
 
-- **shadcn/ui**: https://ui.shadcn.com/docs — Open-code component distribution platform. Not a library; components are copied into `src/components/ui/` and owned by the project.
-- **Base UI**: https://base-ui.com/react/overview — Headless, accessible primitives (Accordion, Dialog, Select, etc.). Used as the underlying layer for many shadcn/ui components.
-- **TanStack Router**: https://tanstack.com/router/latest/docs/framework/react/overview — File-based routing with 100% inferred TypeScript, search-param state management, and built-in caching.
-- **TanStack Query**: https://tanstack.com/query/latest/docs/framework/react/overview — Server-state management (fetching, caching, synchronization). Used via `src/hooks/use-*` and feature data layers.
-- **prompt-kit**: https://www.prompt-kit.com/docs — AI interface components built on shadcn/ui. Registry URL: `https://www.prompt-kit.com/c/{name}.json`.
-- **AI SDK Elements**: https://elements.ai-sdk.dev/docs — AI-native components (messages, attachments, etc.) built for the Vercel AI SDK. Registry URL: `https://ai-sdk.dev/elements/api/registry/{name}.json`.
+- **Agent Elements**: https://agent-elements.21st.dev/docs — full catalog: https://agent-elements.21st.dev/llms-full.txt
+- **shadcn/ui**: https://ui.shadcn.com/docs — copy-paste components; namespaced registries in CLI 3.x
+- **Base UI**: https://base-ui.com/react/overview
+- **TanStack Router**: https://tanstack.com/router/latest/docs/framework/react/overview
+- **TanStack Query**: https://tanstack.com/query/latest/docs/framework/react/overview
+- **Vercel AI SDK** (`UIMessage` types): https://ai-sdk.dev/docs — types only; transport is fleet websocket adapters
 
 ## Agent Notes
 

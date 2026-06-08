@@ -7,6 +7,7 @@ from typing import Any
 from fleet_rlm.integrations.observability.mlflow_context import (
     merge_trace_result_metadata as _merge_trace_result_metadata,
 )
+from fleet_rlm.runtime.execution.final_artifact import build_final_artifact_from_answer
 from fleet_rlm.runtime.execution.streaming_events import _normalize_trajectory
 
 from ...runtime_services.chat_runtime import StreamEventLike
@@ -149,15 +150,34 @@ def _canonical_run_status(
     return "error"
 
 
-def _build_fallback_final_artifact(event: StreamEventLike) -> dict[str, Any] | None:
+def _build_fallback_final_artifact(
+    event: StreamEventLike,
+    *,
+    request_message: str = "",
+) -> dict[str, Any] | None:
     if event.kind != "done":
         return None
+    text = _as_text(event.text)
+    if not text:
+        return None
+
+    payload = event.payload if isinstance(event.payload, dict) else {}
+    routing_decision = _as_text(payload.get("routing_decision"))
+    artifact = build_final_artifact_from_answer(
+        text,
+        task=request_message or None,
+        routing_decision=routing_decision,
+        finalization_mode="RETURN",
+    )
+    if artifact is not None:
+        return artifact
+
     return {
         "kind": "assistant_response",
         "value": {
-            "text": event.text,
-            "final_markdown": event.text,
-            "summary": event.text,
+            "text": text,
+            "final_markdown": text,
+            "summary": text,
         },
         "finalization_mode": "RETURN",
     }
@@ -269,11 +289,14 @@ def build_execution_completion_summary(
         normalized["summary"] = nested_summary
         normalized.setdefault(
             "final_artifact",
-            payload_final_artifact or _build_fallback_final_artifact(event),
+            payload_final_artifact or _build_fallback_final_artifact(event, request_message=request_message),
         )
         return normalized
 
-    final_artifact = payload_final_artifact or _build_fallback_final_artifact(event)
+    final_artifact = payload_final_artifact or _build_fallback_final_artifact(
+        event,
+        request_message=request_message,
+    )
 
     return {
         "run_id": _as_text(runtime.get("run_id")) or run_id,
@@ -295,9 +318,43 @@ def build_execution_completion_summary(
     }
 
 
+def enrich_terminal_stream_payload(
+    *,
+    event: StreamEventLike,
+    payload: dict[str, Any] | None,
+    request_message: str,
+    run_id: str,
+) -> dict[str, Any]:
+    """Attach canonical run summary + final artifact to terminal websocket payloads.
+
+    The execution lifecycle emitter already builds this summary for the
+    secondary execution stream, but the primary chat websocket previously only
+    forwarded the raw runtime payload. Hydrating here keeps chat transcripts and
+    the run workbench aligned when a turn completes.
+    """
+    merged = dict(payload or {})
+    summary = build_execution_completion_summary(
+        event=event,
+        request_message=request_message,
+        run_id=run_id,
+    )
+    merged.setdefault("run_summary", summary)
+    merged.setdefault("final_artifact", summary.get("final_artifact"))
+    merged.setdefault("status", summary.get("status"))
+    nested_summary = summary.get("summary")
+    if isinstance(nested_summary, dict):
+        merged.setdefault("summary", nested_summary)
+    if summary.get("run_id"):
+        merged.setdefault("run_id", summary.get("run_id"))
+    if summary.get("runtime_mode"):
+        merged.setdefault("runtime_mode", summary.get("runtime_mode"))
+    return merged
+
+
 __all__ = [
     "merge_trace_result_metadata",
     "_runtime_trace_metadata",
+    "enrich_terminal_stream_payload",
     "final_event_failed",
     "build_execution_completion_summary",
 ]

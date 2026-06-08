@@ -34,7 +34,7 @@ import {
   type GEPAModuleInfo,
 } from "@/lib/rlm-api/optimization";
 import { sessionEndpoints, sessionKeys, type SessionListItem } from "@/lib/rlm-api/sessions";
-import type { OptimizationRunDraft } from "@/features/optimization/optimization-form";
+import type { OptimizationRunDraft } from "@/features/_archive/optimization/optimization-form";
 
 function formatDate(iso: string): string {
   return parseIsoTimestamp(iso).toLocaleDateString(undefined, {

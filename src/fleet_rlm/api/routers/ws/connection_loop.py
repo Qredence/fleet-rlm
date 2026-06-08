@@ -50,31 +50,50 @@ from .turn_setup import prepare_chat_message_turn
 logger = logging.getLogger(__name__)
 
 
-def _routing_status_text(payload: dict[str, Any]) -> str:
-    selected = ", ".join(str(item) for item in payload.get("selected_skills", []) or [])
-    route = payload.get("routing_decision", "auto")
-    source = payload.get("source_url")
-    text = f"Route: {route}"
-    if selected:
-        text += f" | skills: {selected}"
-    if source:
-        text += f" | source: {source}"
-    return text
+def _agent_turn_count(agent: ChatAgentProtocol) -> int:
+    turn_count = getattr(agent, "turn_count", None)
+    if isinstance(turn_count, int):
+        return turn_count
+    agent_module = getattr(agent, "agent", None)
+    module_turn_count = getattr(agent_module, "_turn_count", None)
+    if isinstance(module_turn_count, int):
+        return module_turn_count
+    return 0
 
 
 def _build_routing_preview_event(agent: ChatAgentProtocol, msg: WSMessage) -> Any | None:
     preview_routing = getattr(agent, "preview_routing", None)
     if not callable(preview_routing):
         return None
+    from fleet_rlm.runtime.agent.runtime_helpers import routing_status_text
+    from fleet_rlm.runtime.modules.context_routing import build_turn_context_for_agent
+    from fleet_rlm.runtime.modules.skill_selection import preview_skills_for_turn
+
+    turn_context = build_turn_context_for_agent(
+        agent,
+        user_request=msg.content,
+        docs_path=msg.docs_path,
+        context_paths=list(msg.context_paths or []) if msg.context_paths is not None else None,
+    )
+    execution_mode = msg.execution_mode or "auto"
     payload = preview_routing(
         user_request=msg.content,
-        execution_mode=msg.execution_mode or "auto",
+        execution_mode=execution_mode,
+        turn_context=turn_context,
     )
     if not isinstance(payload, dict) or not payload.get("routing_decision"):
         return None
+    preview_skills = preview_skills_for_turn(
+        msg.content,
+        execution_mode=execution_mode,
+        routing_decision=str(payload.get("routing_decision") or "") or None,
+        is_first_turn=_agent_turn_count(agent) == 0,
+    )
+    if preview_skills:
+        payload = {**payload, "selected_skills": preview_skills}
     return SimpleNamespace(
         kind="status",
-        text=_routing_status_text(payload),
+        text=routing_status_text(payload),
         payload={**payload, "phase": "routing"},
         timestamp=datetime.now(timezone.utc),
     )
