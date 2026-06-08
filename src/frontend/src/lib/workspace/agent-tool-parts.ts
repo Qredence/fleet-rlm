@@ -1,13 +1,6 @@
-import type {
-  ChatRenderPart,
-  ChatRenderToolState,
-} from "@/lib/workspace/workspace-types";
+import type { ChatRenderPart, ChatRenderToolState } from "@/lib/workspace/workspace-types";
 
-export type AgentToolState =
-  | "input-streaming"
-  | "call"
-  | "output-available"
-  | "output-error";
+export type AgentToolState = "input-streaming" | "call" | "output-available" | "output-error";
 
 export type AgentToolPart = {
   type: string;
@@ -37,10 +30,7 @@ export function mapToolState(state: ChatRenderToolState): AgentToolState {
   }
 }
 
-export function normalizeToolInput(
-  toolType: string,
-  input: unknown,
-): Record<string, unknown> {
+export function normalizeToolInput(toolType: string, input: unknown): Record<string, unknown> {
   const base = isRecord(input) ? { ...input } : {};
   const normalized = toolType.toLowerCase();
 
@@ -81,8 +71,7 @@ export function normalizeToolInput(
 function stringifyValue(value: unknown): string {
   if (value == null) return "";
   if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean")
-    return String(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
   try {
     return JSON.stringify(value, null, 2);
   } catch {
@@ -104,11 +93,7 @@ export function toolPartType(toolType: string): string {
   if (normalized.startsWith("mcp__")) {
     return `tool-${toolType}`;
   }
-  if (
-    /(bash|exec|command|terminal|run|shell|python|repl|interpreter|sandbox)/.test(
-      normalized,
-    )
-  ) {
+  if (/(bash|exec|command|terminal|run|shell|python|repl|interpreter|sandbox)/.test(normalized)) {
     return "tool-Bash";
   }
   if (
@@ -133,17 +118,14 @@ export function toolPartType(toolType: string): string {
   if (/(webfetch|fetch|url|browser)/.test(normalized)) return "tool-WebFetch";
   if (/(todo|task_list)/.test(normalized)) return "tool-TodoWrite";
   if (/(plan|planning)/.test(normalized)) return "tool-PlanWrite";
-  if (/(delegate|sub_rlm|agent|recursive)/.test(normalized))
-    return "tool-Agent";
+  if (/(delegate|sub_rlm|agent|recursive)/.test(normalized)) return "tool-Agent";
   if (/(think|reason)/.test(normalized)) return "tool-Thinking";
   return `tool-${sanitizeToolName(toolType)}`;
 }
 
 function isSearchToolType(toolType: string): boolean {
   const normalized = toolType.toLowerCase();
-  return /(grep|find|search|glob|list[_-]?files?|list[_-]?dir|websearch)/.test(
-    normalized,
-  );
+  return /(grep|find|search|glob|list[_-]?files?|list[_-]?dir|websearch)/.test(normalized);
 }
 
 function searchSourceForToolType(toolType: string): string {
@@ -158,10 +140,7 @@ function toSearchResultRow(title: string, toolType: string): SearchResultRow {
   };
 }
 
-function parseSearchResultRows(
-  value: unknown,
-  toolType: string,
-): SearchResultRow[] {
+function parseSearchResultRows(value: unknown, toolType: string): SearchResultRow[] {
   if (value == null) return [];
 
   if (Array.isArray(value)) {
@@ -196,13 +175,7 @@ function parseSearchResultRows(
   }
 
   if (isRecord(value)) {
-    for (const key of [
-      "results",
-      "matches",
-      "files",
-      "paths",
-      "items",
-    ] as const) {
+    for (const key of ["results", "matches", "files", "paths", "items"] as const) {
       const nested = value[key];
       if (nested != null) {
         const parsed = parseSearchResultRows(nested, toolType);
@@ -270,9 +243,7 @@ export function enrichDelegateToolInput(
   };
 }
 
-function commandInput(
-  part: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>,
-) {
+function commandInput(part: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>) {
   if (part.kind === "sandbox") {
     return {
       command: part.code || part.title,
@@ -294,12 +265,9 @@ function commandInput(
   });
 }
 
-function outputRecord(
-  part: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>,
-) {
+function outputRecord(part: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>) {
   if (part.errorText) return { error: part.errorText };
-  if (part.kind === "sandbox")
-    return part.output ? { stdout: part.output } : undefined;
+  if (part.kind === "sandbox") return part.output ? { stdout: part.output } : undefined;
   return normalizeSearchOutput(part.output, part.toolType);
 }
 
@@ -326,13 +294,7 @@ export function chatRenderPartToAgentToolPart(
     if (!text.trim()) return null;
     return {
       type: "tool-Thinking",
-      toolCallId: stableToolCallId(
-        messageId,
-        "reasoning",
-        index,
-        undefined,
-        options?.parentId,
-      ),
+      toolCallId: stableToolCallId(messageId, "reasoning", index, undefined, options?.parentId),
       state: part.isStreaming ? "input-streaming" : "output-available",
       input: { thought: text, label: part.label ?? "Reasoning" },
       output: part.isStreaming ? undefined : { reasoning: text },
@@ -344,18 +306,11 @@ export function chatRenderPartToAgentToolPart(
     const state = mapToolState(part.state);
     return {
       type: toolPartType(toolType),
-      toolCallId: stableToolCallId(
-        messageId,
-        toolType,
-        index,
-        part.stepIndex,
-        options?.parentId,
-      ),
+      toolCallId: stableToolCallId(messageId, toolType, index, part.stepIndex, options?.parentId),
       state,
       input: commandInput(part),
       output: outputRecord(part),
-      ...((state === "call" || state === "input-streaming") &&
-      options?.startedAt != null
+      ...((state === "call" || state === "input-streaming") && options?.startedAt != null
         ? { startedAt: options.startedAt }
         : {}),
     };
@@ -364,13 +319,7 @@ export function chatRenderPartToAgentToolPart(
   if (part.kind === "task") {
     return {
       type: "tool-TodoWrite",
-      toolCallId: stableToolCallId(
-        messageId,
-        "task",
-        index,
-        undefined,
-        options?.parentId,
-      ),
+      toolCallId: stableToolCallId(messageId, "task", index, undefined, options?.parentId),
       state:
         part.status === "in_progress"
           ? "call"
@@ -386,24 +335,15 @@ export function chatRenderPartToAgentToolPart(
           file: item.file?.name,
         })),
       },
-      output:
-        part.status === "in_progress" ? undefined : { status: part.status },
+      output: part.status === "in_progress" ? undefined : { status: part.status },
     };
   }
 
   if (part.kind === "queue") {
     return {
       type: "tool-PlanWrite",
-      toolCallId: stableToolCallId(
-        messageId,
-        "plan",
-        index,
-        undefined,
-        options?.parentId,
-      ),
-      state: part.items.every((item) => item.completed)
-        ? "output-available"
-        : "call",
+      toolCallId: stableToolCallId(messageId, "plan", index, undefined, options?.parentId),
+      state: part.items.every((item) => item.completed) ? "output-available" : "call",
       input: {
         action: "update",
         plan: {
@@ -415,22 +355,14 @@ export function chatRenderPartToAgentToolPart(
           })),
         },
       },
-      output: part.items.every((item) => item.completed)
-        ? { status: "completed" }
-        : undefined,
+      output: part.items.every((item) => item.completed) ? { status: "completed" } : undefined,
     };
   }
 
   if (part.kind === "status_note") {
     return {
       type: "tool-Status",
-      toolCallId: stableToolCallId(
-        messageId,
-        "status",
-        index,
-        part.stepIndex,
-        options?.parentId,
-      ),
+      toolCallId: stableToolCallId(messageId, "status", index, part.stepIndex, options?.parentId),
       state: part.tone === "error" ? "output-error" : "output-available",
       input: { message: part.text, tone: part.tone },
       output: { message: part.text, tone: part.tone },
@@ -440,13 +372,7 @@ export function chatRenderPartToAgentToolPart(
   if (part.kind === "environment_variables") {
     return {
       type: "tool-EnvironmentVariables",
-      toolCallId: stableToolCallId(
-        messageId,
-        "env",
-        index,
-        undefined,
-        options?.parentId,
-      ),
+      toolCallId: stableToolCallId(messageId, "env", index, undefined, options?.parentId),
       state: "output-available",
       input: { title: part.title ?? "Environment variables" },
       output: {
