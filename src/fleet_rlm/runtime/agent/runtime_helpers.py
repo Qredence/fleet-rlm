@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import json
+import uuid
 from typing import Any, cast
 
 import dspy
@@ -103,7 +104,10 @@ def routing_status_text(payload: dict[str, Any]) -> str:
     selected = ", ".join(payload.get("selected_skills", []))
     route = payload.get("routing_decision", "auto")
     source = payload.get("source_url")
+    estimated = payload.get("estimated_chars")
     text = f"Route: {route}"
+    if route == "large_context_rlm" and estimated is not None:
+        text = f"Route: large_context_rlm ({estimated} chars) — using dspy.RLM"
     if selected:
         text += f" | skills: {selected}"
     if source:
@@ -223,3 +227,113 @@ def build_clarification_event(observation: Any) -> RuntimeEvent | None:
         step_label=observation.get("step_label", "Clarification needed"),
         options=observation.get("options", []),
     )
+
+
+def relay_event_from_rlm_step(payload: dict[str, Any]) -> RuntimeEvent | None:
+    """Convert an RLM iteration callback payload into a canonical RuntimeEvent."""
+    if not isinstance(payload, dict):
+        return None
+    phase = str(payload.get("phase", "")).strip().lower()
+    iteration = payload.get("iteration")
+    step_index = int(iteration) if isinstance(iteration, int) else None
+
+    if phase == "rlm_reasoning":
+        reasoning = str(payload.get("reasoning") or "").strip()
+        if not reasoning:
+            return None
+        event = RuntimeEvent.reasoning(reasoning)
+        if step_index is not None:
+            event.payload["step_index"] = step_index
+        return event
+
+    if phase == "rlm_tool_call":
+        code = str(payload.get("code") or payload.get("code_preview") or "")
+        tool_name = str(payload.get("tool_name") or "repl_execute")
+        tool_args = {"code": code} if code else {}
+        event = RuntimeEvent.tool_call(
+            tool_name=tool_name,
+            tool_args=tool_args,
+            step_index=step_index,
+        )
+        event.payload["trajectory_index"] = step_index
+        return event
+
+    if phase == "rlm_tool_result":
+        observation = payload.get("output") or payload.get("observation") or ""
+        tool_name = str(payload.get("tool_name") or "repl_execute")
+        event = RuntimeEvent.tool_result(
+            tool_name=tool_name,
+            observation=observation,
+            step_index=step_index,
+        )
+        event.payload["output"] = observation
+        event.payload["trajectory_index"] = step_index
+        return event
+
+    if phase in {"document_fetch", "rlm_start", "large_context_prepare", "context_estimate", "rlm_progress"}:
+        text = str(payload.get("text") or "").strip()
+        if not text and phase == "rlm_progress":
+            elapsed = payload.get("elapsed_s")
+            text = (
+                f"RLM execution in progress ({elapsed}s)..." if elapsed is not None else "RLM execution in progress..."
+            )
+        if not text:
+            return None
+        return RuntimeEvent.status(text, payload=dict(payload))
+
+    return None
+
+
+def relay_event_from_interpreter_hook(payload: dict[str, Any]) -> RuntimeEvent | None:
+    """Map interpreter execution_event_callback payloads to chat RuntimeEvents."""
+    if not isinstance(payload, dict):
+        return None
+    phase = str(payload.get("phase", "")).strip().lower()
+    code_preview = str(payload.get("code_preview") or "")
+
+    if phase == "start":
+        tool_args = {"code": code_preview} if code_preview else {}
+        event = RuntimeEvent.tool_call(tool_name="repl_execute", tool_args=tool_args)
+        event.payload["phase"] = "sandbox_exec"
+        event.payload["code_hash"] = payload.get("code_hash")
+        return event
+
+    if phase == "complete":
+        stdout = payload.get("stdout_preview") or ""
+        stderr = payload.get("stderr_preview") or ""
+        observation = stdout or stderr or ("ok" if payload.get("success") else "error")
+        event = RuntimeEvent.tool_result(tool_name="repl_execute", observation=observation)
+        event.payload["phase"] = "sandbox_exec"
+        event.payload["success"] = payload.get("success")
+        if stderr:
+            event.payload["stderr_preview"] = stderr
+        return event
+
+    if phase == "progress":
+        path = str(payload.get("path") or "").strip()
+        label = str(payload.get("event_kind") or "progress")
+        text = f"{label}: {path}" if path else label
+        return RuntimeEvent.status(
+            text,
+            payload={
+                "phase": "sandbox_output",
+                "path": path or None,
+                "bytes_written": payload.get("bytes_written"),
+                "bytes_total": payload.get("bytes_total"),
+            },
+        )
+
+    return None
+
+
+def emit_turn_progress_from_payload(relay: Any, payload: dict[str, Any], *, source: str) -> None:
+    """Emit a RuntimeEvent to a TurnProgressRelay from RLM or interpreter payloads."""
+    if relay is None:
+        return
+    converter = relay_event_from_rlm_step if source == "rlm" else relay_event_from_interpreter_hook
+    event = converter(payload)
+    if event is None:
+        return
+    emit = getattr(relay, "emit_threadsafe", None)
+    if callable(emit):
+        emit(event)

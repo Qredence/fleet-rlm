@@ -1,6 +1,6 @@
 import type { ChatMessage } from "@/lib/workspace/workspace-types";
 import { asOptionalText, asRecord } from "@/lib/workspace/backend-chat-event-payload";
-import { appendToolLikePart, inferStatusTone } from "@/lib/workspace/backend-chat-event-tool-parts";
+import { appendToolLikePart, inferStatusTone, sandboxProgressPartFromStatus } from "@/lib/workspace/backend-chat-event-tool-parts";
 
 export type TracePartAppender = (
   messages: ChatMessage[],
@@ -106,13 +106,18 @@ export function routeExecutionStepBySourceType(
     case "warning":
       return deps.appendStatusTrace(messages, trimmed || "Warning", "warning", mergedPayload);
     case "status":
-    case "turn_started":
+    case "turn_started": {
+      const sandboxPart = sandboxProgressPartFromStatus(mergedPayload);
+      if (sandboxPart) {
+        return deps.appendTracePart(messages, sandboxPart, trimmed);
+      }
       return deps.appendStatusTrace(
         messages,
         trimmed || "Status update",
         inferStatusTone(trimmed, mergedPayload) ?? "neutral",
         mergedPayload,
       );
+    }
     case "sandbox_exec":
       return appendToolLikePart(
         messages,
@@ -197,6 +202,14 @@ export function applyCanonicalExecutionStepWithRouter(
     }
 
     if (isStatus) {
+      const sandboxPart = sandboxProgressPartFromStatus({
+        ...payload,
+        ...step,
+        phase: asOptionalText(payload?.phase) ?? asOptionalText(asRecord(step.input)?.phase),
+      });
+      if (sandboxPart) {
+        return deps.appendTracePart(messages, sandboxPart, stepText);
+      }
       return deps.appendStatusTrace(
         messages,
         stepText,

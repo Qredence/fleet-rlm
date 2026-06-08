@@ -146,6 +146,7 @@ def _build_rlm_prompt_context(
     compressed_history: str,
     core_memory: str,
     url_document_mode: bool,
+    large_context_mode: bool = False,
 ) -> str:
     """Build a Fast-RLM-style prompt envelope for variable-mode DSPy RLM."""
     sections = [
@@ -161,6 +162,15 @@ def _build_rlm_prompt_context(
             "- llm_query and llm_query_batched are disabled in this URL-document path; synthesize from Python inspection.\n"
             "- history: structured dspy.History for prior turns."
         )
+    if large_context_mode:
+        sections.append(
+            "Large context variables:\n"
+            "- document_text: optional local document body stored as a REPL variable.\n"
+            "- context_paths: staged sandbox paths; inspect with Python open/grep rather than printing wholesale.\n"
+            "- context_manifest: path-to-size metadata for staged files.\n"
+            "- source_metadata: load status and char counts for local inputs.\n"
+            "- history: structured dspy.History for prior turns."
+        )
     if recent_history:
         sections.append(recent_history)
     if compressed_history:
@@ -169,6 +179,42 @@ def _build_rlm_prompt_context(
         sections.append("Core memory and active skill guidance:\n" + core_memory)
     sections.append("Repeat task:\n" + user_request)
     return "\n\n".join(section for section in sections if section.strip())
+
+
+def _emit_turn_milestone(interpreter: Any | None, *, phase: str, text: str, **extra: Any) -> None:
+    if interpreter is None:
+        return
+    callback = getattr(interpreter, "_turn_step_callback", None)
+    if not callable(callback):
+        return
+    payload = {"phase": phase, "text": text, **extra}
+    try:
+        callback(payload)
+    except Exception:
+        return
+
+
+def _resolve_rlm_routing(
+    *,
+    execution_mode: str,
+    user_request: str,
+    force_escalate: bool,
+    turn_context: Any | None,
+) -> tuple[bool, str, str | None]:
+    from fleet_rlm.runtime.modules.context_routing import should_auto_route_large_context
+
+    should_auto_route_url = execution_mode == "auto" and _is_url_document_analysis_request(user_request)
+    should_auto_route_large = should_auto_route_large_context(
+        execution_mode=execution_mode,
+        turn_context=turn_context,
+    )
+    if _is_rlm_execution_mode(execution_mode) or force_escalate or should_auto_route_url or should_auto_route_large:
+        if should_auto_route_url:
+            return True, "url_document_rlm", _extract_first_url(user_request)
+        if should_auto_route_large:
+            return True, "large_context_rlm", None
+        return True, "forced_rlm", None
+    return False, "auto", None
 
 
 class EscalatingFleetModule(dspy.Module):
@@ -290,16 +336,29 @@ class EscalatingFleetModule(dspy.Module):
         reasoning = str(getattr(prediction, "reasoning", "") or "")
         return ESCALATION_SENTINEL in reasoning
 
-    def preview_routing(self, *, user_request: str, execution_mode: str = "auto") -> dict[str, Any]:
+    def preview_routing(
+        self,
+        *,
+        user_request: str,
+        execution_mode: str = "auto",
+        turn_context: Any | None = None,
+    ) -> dict[str, Any]:
         """Return deterministic routing metadata available before the full turn."""
-        if execution_mode == "auto" and _is_url_document_analysis_request(user_request):
-            source_url = _extract_first_url(user_request)
-            payload: dict[str, Any] = {"routing_decision": "url_document_rlm"}
+        should_route, routing_decision, source_url = _resolve_rlm_routing(
+            execution_mode=execution_mode,
+            user_request=user_request,
+            force_escalate=False,
+            turn_context=turn_context,
+        )
+        if should_route:
+            payload: dict[str, Any] = {"routing_decision": routing_decision}
             if source_url:
                 payload["source_url"] = source_url
+            if routing_decision == "large_context_rlm" and turn_context is not None:
+                payload["estimated_chars"] = getattr(turn_context, "estimated_chars", 0)
+                payload["threshold_chars"] = getattr(turn_context, "threshold_chars", 0)
+                payload["context_sources"] = list(getattr(turn_context, "context_sources", []) or [])
             return payload
-        if _is_rlm_execution_mode(execution_mode):
-            return {"routing_decision": "forced_rlm"}
         return {}
 
     def compress_history(self, history: dspy.History) -> str:
@@ -356,6 +415,7 @@ class EscalatingFleetModule(dspy.Module):
         execution_mode: str = "auto",
         force_escalate: bool = False,
         conversation_summary: str = "",
+        turn_context: Any | None = None,
     ) -> dspy.Prediction:
         """Run one turn through the escalating module.
 
@@ -383,11 +443,15 @@ class EscalatingFleetModule(dspy.Module):
 
         core_memory, selected_skills = self._enrich_with_skills(user_request, core_memory)
         recent_history = _format_recent_history_context(history)
-        should_auto_route_url = execution_mode == "auto" and _is_url_document_analysis_request(user_request)
-        source_url = _extract_first_url(user_request) if should_auto_route_url else None
+        should_route_rlm, routing_decision, source_url = _resolve_rlm_routing(
+            execution_mode=execution_mode,
+            user_request=user_request,
+            force_escalate=force_escalate,
+            turn_context=turn_context,
+        )
 
-        if _is_rlm_execution_mode(execution_mode) or force_escalate or should_auto_route_url:
-            logger.debug("EscalatingFleetModule: forced RLM path (mode=%s)", execution_mode)
+        if should_route_rlm:
+            logger.debug("EscalatingFleetModule: RLM path (mode=%s route=%s)", execution_mode, routing_decision)
             return self._run_rlm(
                 user_request=user_request,
                 core_memory=core_memory,
@@ -395,8 +459,9 @@ class EscalatingFleetModule(dspy.Module):
                 recent_history=recent_history,
                 conversation_summary=conversation_summary,
                 selected_skills=selected_skills,
-                routing_decision="url_document_rlm" if should_auto_route_url else "forced_rlm",
+                routing_decision=routing_decision,
                 source_url=source_url,
+                turn_context=turn_context,
             )
 
         prediction = self.respond(
@@ -428,6 +493,7 @@ class EscalatingFleetModule(dspy.Module):
         execution_mode: str = "auto",
         force_escalate: bool = False,
         conversation_summary: str = "",
+        turn_context: Any | None = None,
     ) -> dspy.Prediction:
         """Run one turn without blocking async callers.
 
@@ -443,9 +509,14 @@ class EscalatingFleetModule(dspy.Module):
 
         core_memory, selected_skills = await asyncio.to_thread(self._enrich_with_skills, user_request, core_memory)
         recent_history = _format_recent_history_context(history)
-        should_auto_route_url = execution_mode == "auto" and _is_url_document_analysis_request(user_request)
+        should_route_rlm, routing_decision, source_url = _resolve_rlm_routing(
+            execution_mode=execution_mode,
+            user_request=user_request,
+            force_escalate=force_escalate,
+            turn_context=turn_context,
+        )
 
-        if _is_rlm_execution_mode(execution_mode) or force_escalate or should_auto_route_url:
+        if should_route_rlm:
             return await asyncio.to_thread(
                 self._run_rlm,
                 user_request=user_request,
@@ -454,8 +525,9 @@ class EscalatingFleetModule(dspy.Module):
                 recent_history=recent_history,
                 conversation_summary=conversation_summary,
                 selected_skills=selected_skills,
-                routing_decision="url_document_rlm" if should_auto_route_url else "forced_rlm",
-                source_url=_extract_first_url(user_request) if should_auto_route_url else None,
+                routing_decision=routing_decision,
+                source_url=source_url,
+                turn_context=turn_context,
             )
 
         prediction = await asyncio.to_thread(
@@ -571,6 +643,7 @@ class EscalatingFleetModule(dspy.Module):
         selected_skills: list[str] | None = None,
         routing_decision: str = "rlm",
         source_url: str | None = None,
+        turn_context: Any | None = None,
     ) -> dspy.Prediction:
         if self._rlm is None:
             return self.respond(
@@ -579,31 +652,62 @@ class EscalatingFleetModule(dspy.Module):
                 history=history,
                 recent_history=recent_history,
             )
+        _emit_turn_milestone(
+            self._interpreter,
+            phase="rlm_start",
+            text="Running RLM analysis...",
+            routing_decision=routing_decision,
+        )
+        if turn_context is not None:
+            estimated = getattr(turn_context, "estimated_chars", 0)
+            _emit_turn_milestone(
+                self._interpreter,
+                phase="context_estimate",
+                text=f"Large context detected ({estimated} chars) — using dspy.RLM",
+                estimated_chars=estimated,
+                routing_decision=routing_decision,
+            )
         context = conversation_summary or self.compress_history(history)
         rlm = self._url_document_rlm if source_url and self._url_document_rlm is not None else self._rlm
         url_document_mode = bool(source_url and rlm is self._url_document_rlm)
+        large_context_mode = routing_decision == "large_context_rlm"
         prompt = _build_rlm_prompt_context(
             user_request=user_request,
             recent_history=recent_history,
             compressed_history=context,
             core_memory=core_memory,
             url_document_mode=url_document_mode,
+            large_context_mode=large_context_mode,
         )
         call_kwargs: dict[str, Any] = {
             "task": user_request,
             "prompt": prompt,
-            # Phase 7: expose structured history as a native REPL variable on
-            # the heavy RLM path (both RLMVariableSignature and
-            # RLMLargeDocSignature declare a ``history`` input field), so the
-            # model can inspect full prior turns with code rather than relying
-            # solely on the flattened recency snippet embedded in ``prompt``.
             "history": history,
         }
         if url_document_mode:
+            _emit_turn_milestone(
+                self._interpreter,
+                phase="document_fetch",
+                text=f"Fetching document from {source_url}...",
+                source_url=source_url,
+            )
             fetched = self._fetch_url_document(source_url=source_url)
             call_kwargs["source_url"] = fetched.source_url
             call_kwargs["document_text"] = fetched.document_text
             call_kwargs["source_metadata"] = fetched.source_metadata
+        elif large_context_mode and turn_context is not None:
+            from fleet_rlm.runtime.modules.context_routing import load_large_context_rlm_kwargs
+
+            large_kwargs = load_large_context_rlm_kwargs(turn_context, interpreter=self._interpreter)
+            if large_kwargs:
+                estimated = getattr(turn_context, "estimated_chars", 0)
+                _emit_turn_milestone(
+                    self._interpreter,
+                    phase="large_context_prepare",
+                    text=f"Large context in REPL variables ({estimated} chars)...",
+                    estimated_chars=estimated,
+                )
+                call_kwargs.update(large_kwargs)
         try:
             result = rlm(**call_kwargs)
             _prediction_set(result, "selected_skills", selected_skills or [])

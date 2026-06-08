@@ -258,7 +258,9 @@ export function sandboxProgressPartFromStatus(
   payload?: Record<string, unknown>,
 ): ChatRenderPart | null {
   if (!payload) return null;
-  const streamText = asOptionalText(payload.stream_text ?? payload.streamText);
+  const streamText = asOptionalText(
+    payload.stream_text ?? payload.streamText ?? payload.stdout_preview,
+  );
   if (!streamText) return null;
   const phase = asOptionalText(payload.phase);
   if (phase !== "sandbox_output") return null;
@@ -305,6 +307,51 @@ function toolFromPayload(
   };
 }
 
+function toolIdentity(part: ChatRenderPart): string {
+  if (part.kind === "tool") return part.toolType ?? part.title ?? "tool";
+  if (part.kind === "sandbox") return part.title ?? "sandbox";
+  return part.title ?? "tool";
+}
+
+function upsertMatchingToolPart(
+  messages: ChatMessage[],
+  part: ChatRenderPart,
+  text: string,
+  traceSource: ChatMessage["traceSource"],
+): ChatMessage[] | null {
+  if (part.stepIndex == null) return null;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.type !== "trace" || message.traceSource !== traceSource) continue;
+    const renderParts = message.renderParts ?? [];
+    for (let j = renderParts.length - 1; j >= 0; j -= 1) {
+      const existing = renderParts[j];
+      if (existing.kind !== part.kind) continue;
+      if (existing.stepIndex !== part.stepIndex) continue;
+      if (toolIdentity(existing) !== toolIdentity(part)) continue;
+      const merged: ChatRenderPart = {
+        ...existing,
+        ...part,
+        input: existing.kind === "tool" && part.kind === "tool" ? (existing.input ?? part.input) : part.input,
+        state: part.state ?? existing.state,
+        output: part.output ?? existing.output,
+        errorText: part.errorText ?? existing.errorText,
+      };
+      const copy = [...messages];
+      const nextParts = [...renderParts];
+      nextParts[j] = merged;
+      copy[i] = {
+        ...message,
+        content: text || message.content,
+        renderParts: nextParts,
+      };
+      return copy;
+    }
+    break;
+  }
+  return null;
+}
+
 export function appendToolLikePart(
   messages: ChatMessage[],
   kind: "tool_call" | "tool_result",
@@ -336,5 +383,9 @@ export function appendToolLikePart(
     ? sandboxFromPayload(kind, text, payload)
     : toolFromPayload(kind, text, payload);
 
-  return appendTracePart(messages, part, text, options?.traceSource ?? "live");
+  const traceSource = options?.traceSource ?? "live";
+  const upserted = upsertMatchingToolPart(messages, part, text, traceSource);
+  if (upserted) return upserted;
+
+  return appendTracePart(messages, part, text, traceSource);
 }

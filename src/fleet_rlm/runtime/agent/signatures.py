@@ -452,6 +452,22 @@ class RLMVariableSignature(dspy.Signature):
             "continuity; the prompt only carries a short recency hint."
         )
     )
+    document_text: str = dspy.InputField(
+        default="",
+        desc="Optional large document body stored as a REPL variable (not in LLM context)",
+    )
+    context_paths: list[str] = dspy.InputField(
+        default_factory=list,
+        desc="Optional staged sandbox file paths to inspect with Python",
+    )
+    context_manifest: dict[str, str] = dspy.InputField(
+        default_factory=dict,
+        desc="Optional path-to-size metadata for staged context files",
+    )
+    source_metadata: dict[str, str] = dspy.InputField(
+        default_factory=dict,
+        desc="Optional metadata for large local or fetched document inputs",
+    )
     answer: str = dspy.OutputField(desc="Final answer (call SUBMIT(answer=...) in REPL)")
 
 

@@ -143,20 +143,29 @@ class AgentRuntime:
         if not self._use_escalation:
             return {"chat_history": self.history, "user_message": user_message}
         core_memory_str = "\n".join(f"[{k.upper()}]\n{v}" for k, v in self.core_memory.items() if v)
-        return {
+        args: dict[str, Any] = {
             "user_request": user_message,
             "core_memory": core_memory_str,
             "history": self.history,
             "execution_mode": self.execution_mode,
             "conversation_summary": self.conversation_summary,
         }
+        turn_context = getattr(self, "_turn_context", None)
+        if turn_context is not None:
+            args["turn_context"] = turn_context
+        return args
 
-    def preview_routing(self, *, user_request: str, execution_mode: str = "auto") -> dict[str, Any]:
+    def preview_routing(
+        self, *, user_request: str, execution_mode: str = "auto", turn_context: Any | None = None
+    ) -> dict[str, Any]:
         """Expose deterministic route metadata before expensive turn execution."""
         preview_routing = getattr(self.agent, "preview_routing", None)
         if not callable(preview_routing):
             return {}
-        payload = preview_routing(user_request=user_request, execution_mode=execution_mode)
+        kwargs: dict[str, Any] = {"user_request": user_request, "execution_mode": execution_mode}
+        if turn_context is not None:
+            kwargs["turn_context"] = turn_context
+        payload = preview_routing(**kwargs)
         return payload if isinstance(payload, dict) else {}
 
     def _recursion_depth_state(self) -> tuple[int, int]:
@@ -410,32 +419,44 @@ class AgentRuntime:
         ``done`` event.
         """
         _ = trace
-        _ = docs_path
         _ = repo_url
         _ = repo_ref
-        _ = context_paths
         _ = volume_name
         if batch_concurrency is not None:
             self.batch_concurrency = batch_concurrency
 
-        react_program = rh.get_streamable_react_program(self.agent)
-        if react_program is None:
-            logger.info("streaming_path=posthoc (react_program not streamable)")
-            async for event in self._aiter_chat_turn_stream_posthoc(
+        from fleet_rlm.runtime.modules.context_routing import build_turn_context
+
+        self._turn_context = build_turn_context(
+            user_request=message,
+            history=self.history,
+            docs_path=docs_path,
+            context_paths=context_paths,
+            repo_url=repo_url,
+            repo_ref=repo_ref,
+            loaded_document_paths=list(self.loaded_document_paths),
+        )
+        try:
+            react_program = rh.get_streamable_react_program(self.agent)
+            if react_program is None:
+                logger.info("streaming_path=posthoc (react_program not streamable)")
+                async for event in self._aiter_chat_turn_stream_posthoc(
+                    message=message,
+                    cancel_check=cancel_check,
+                ):
+                    yield rh.stream_event_from_runtime_event(event)
+                return
+
+            logger.info("streaming_path=native (dspy.streamify per-token streaming)")
+            async for event in runtime_streaming.aiter_chat_turn_stream_native(
+                self,
                 message=message,
                 cancel_check=cancel_check,
+                react_program=react_program,
             ):
-                yield rh.stream_event_from_runtime_event(event)
-            return
-
-        logger.info("streaming_path=native (dspy.streamify per-token streaming)")
-        async for event in runtime_streaming.aiter_chat_turn_stream_native(
-            self,
-            message=message,
-            cancel_check=cancel_check,
-            react_program=react_program,
-        ):
-            yield event
+                yield event
+        finally:
+            self._turn_context = None
 
     # -----------------------------------------------------------------
     # Core memory API (accessible by tools)

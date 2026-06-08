@@ -514,6 +514,27 @@ class TestAgentRuntimeEscalationFlag:
         assert "url_document_rlm" in events[1].text
 
 
+class TestLargeContextRouting:
+    def test_preview_routing_large_context_when_turn_context_exceeds_threshold(self, tmp_path) -> None:
+        from fleet_rlm.runtime.agent.turn_context import TurnContext
+        from fleet_rlm.runtime.modules.variable_mode import VARIABLE_MODE_THRESHOLD
+
+        module = _make_module()
+        turn_context = TurnContext(
+            docs_path=str(tmp_path / "large.txt"),
+            estimated_chars=VARIABLE_MODE_THRESHOLD + 500,
+            threshold_chars=VARIABLE_MODE_THRESHOLD,
+            context_sources=[f"docs_path:{tmp_path}:large"],
+        )
+        preview = module.preview_routing(
+            user_request="Summarize the attached documentation",
+            execution_mode="auto",
+            turn_context=turn_context,
+        )
+        assert preview["routing_decision"] == "large_context_rlm"
+        assert preview["estimated_chars"] >= VARIABLE_MODE_THRESHOLD
+
+
 class TestBuildChatAgentRuntimeDefault:
     def test_build_chat_agent_defaults_to_escalating_module(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(ESCALATING_RUNTIME_ENV_VAR, raising=False)

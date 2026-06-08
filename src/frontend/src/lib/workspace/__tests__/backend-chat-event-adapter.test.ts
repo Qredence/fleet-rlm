@@ -525,6 +525,56 @@ describe("applyWsFrameToMessages", () => {
     }
   });
 
+  it("merges tool_call and tool_result into one tool row when step_index matches", () => {
+    let messages: ChatMessage[] = [];
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("tool_call", "Running grep", {
+        tool_name: "grep",
+        step_index: 3,
+        tool_args: { pattern: "foo" },
+      }),
+    ).messages;
+
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("tool_result", "Done", {
+        tool_name: "grep",
+        step_index: 3,
+        tool_output: "match line",
+      }),
+    ).messages;
+
+    const toolRows = traceRows(messages, (p) => p.kind === "tool");
+    expect(toolRows).toHaveLength(1);
+
+    const tool = toolRows[0]?.part;
+    if (tool?.kind === "tool") {
+      expect(tool.state).toBe("output-available");
+      expect(tool.stepIndex).toBe(3);
+      expect(String(tool.output)).toContain("match line");
+    }
+  });
+
+  it("accepts stdout_preview on sandbox_output status events", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("status", "Sandbox stdout preview", {
+        phase: "sandbox_output",
+        iteration: 1,
+        stream: "stdout",
+        stdout_preview: "partial output chunk",
+      }),
+    );
+
+    const sandbox = findFirstPart(messages, (part) => part.kind === "sandbox");
+    expect(sandbox).toBeDefined();
+    if (sandbox?.kind === "sandbox") {
+      expect(sandbox.output).toBe("partial output chunk");
+      expect(sandbox.stepIndex).toBe(1);
+    }
+  });
+
   it("maps tool_call/tool_result to distinct chronological tool rows", () => {
     let messages: ChatMessage[] = [];
     messages = applyWsFrameToMessages(

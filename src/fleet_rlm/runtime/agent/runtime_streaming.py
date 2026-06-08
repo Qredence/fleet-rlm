@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time as _time
 from collections.abc import AsyncIterator, Callable
 from typing import Any, cast
@@ -18,6 +19,116 @@ from fleet_rlm.runtime.execution.streaming_events import _normalize_trajectory
 from fleet_rlm.runtime.schemas import StreamEvent
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_HEARTBEAT_S = 20.0
+
+
+class _TurnComplete:
+    """Internal sentinel carrying the finished turn prediction."""
+
+    __slots__ = ("result",)
+
+    def __init__(self, result: Any) -> None:
+        self.result = result
+
+
+def _turn_heartbeat_seconds() -> float:
+    raw = os.environ.get("FLEET_RLM_TURN_HEARTBEAT_S", "")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_HEARTBEAT_S
+    return max(5.0, value)
+
+
+def _event_fingerprint(event: RuntimeEvent) -> str:
+    relay = getattr(event, "_relay_fingerprint", None)
+    if isinstance(relay, str):
+        return relay
+    payload = event.payload if isinstance(event.payload, dict) else {}
+    kind = event.kind.value
+    traj_idx = payload.get("trajectory_index", payload.get("step_index"))
+    tool_name = payload.get("tool_name") or ""
+    text_key = hash(event.text[:256]) if event.text else 0
+    return f"{kind}:{traj_idx}:{tool_name}:{text_key}"
+
+
+def _should_skip_replay(event: RuntimeEvent, seen: set[str], relay: Any | None = None) -> bool:
+    if relay is not None and hasattr(relay, "fingerprint"):
+        return relay.fingerprint(event) in seen
+    return _event_fingerprint(event) in seen
+
+
+async def _await_turn_with_live_progress(
+    runtime: Any,
+    *,
+    message: str,
+    cancel_check: Callable[[], bool] | None,
+) -> AsyncIterator[RuntimeEvent | _TurnComplete]:
+    """Run aforward in a task while draining live progress from the turn relay."""
+    relay = getattr(runtime, "_turn_progress_relay", None)
+    heartbeat_s = _turn_heartbeat_seconds()
+    t0 = _time.monotonic()
+
+    async def _run_turn() -> Any:
+        async_call = getattr(runtime.agent, "aforward", None)
+        args = runtime._escalation_call_args(message)
+        if callable(async_call):
+            return await async_call(**args)
+        return await asyncio.to_thread(runtime.agent, **args)
+
+    task = asyncio.create_task(_run_turn())
+    try:
+        while not task.done():
+            if cancel_check is not None and cancel_check():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                yield RuntimeEvent(
+                    kind=RuntimeEventKind.DONE,
+                    text="[cancelled]",
+                    payload={"cancelled": True, "history_turns": runtime.history_turns()},
+                )
+                return
+
+            if relay is not None:
+                for live_event in relay.drain_nonblocking():
+                    yield live_event
+                live = await relay.wait_for_event(timeout=heartbeat_s)
+                if live is not None:
+                    yield live
+                    continue
+
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=heartbeat_s)
+                break
+            except asyncio.TimeoutError:
+                pass
+
+            elapsed = int(_time.monotonic() - t0)
+            yield RuntimeEvent.status(
+                f"RLM execution in progress ({elapsed}s)...",
+                payload={"phase": "rlm_progress", "elapsed_s": elapsed},
+            )
+
+        result = await task
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        yield RuntimeEvent(
+            kind=RuntimeEventKind.ERROR,
+            text=str(exc),
+            payload={"history_turns": runtime.history_turns()},
+        )
+        return
+    finally:
+        if relay is not None:
+            for live_event in relay.drain_nonblocking():
+                yield live_event
+
+    yield _TurnComplete(result)
 
 
 async def aiter_chat_turn_stream_posthoc(
@@ -41,6 +152,7 @@ async def aiter_chat_turn_stream_posthoc(
         routing_preview = preview_routing(
             user_request=message,
             execution_mode=runtime.execution_mode,
+            turn_context=getattr(runtime, "_turn_context", None),
         )
         if isinstance(routing_preview, dict) and routing_preview.get("routing_decision"):
             yield RuntimeEvent.status(
@@ -48,21 +160,14 @@ async def aiter_chat_turn_stream_posthoc(
                 payload=routing_preview,
             )
 
-    try:
-        async_call = getattr(runtime.agent, "aforward", None)
-        if callable(async_call):
-            result = await async_call(**runtime._escalation_call_args(message))
-        else:
-            result = await asyncio.to_thread(
-                runtime.agent,
-                **runtime._escalation_call_args(message),
-            )
-    except Exception as exc:
-        yield RuntimeEvent(
-            kind=RuntimeEventKind.ERROR,
-            text=str(exc),
-            payload={"history_turns": runtime.history_turns()},
-        )
+    result: Any = None
+    async for item in _await_turn_with_live_progress(runtime, message=message, cancel_check=cancel_check):
+        if isinstance(item, _TurnComplete):
+            result = item.result
+            break
+        yield item
+
+    if result is None:
         return
 
     if cancel_check is not None and cancel_check():
@@ -73,6 +178,9 @@ async def aiter_chat_turn_stream_posthoc(
         )
         return
 
+    relay = getattr(runtime, "_turn_progress_relay", None)
+    seen_keys = relay.seen_keys if relay is not None else set()
+
     response = rh.prediction_response_text(result)
     trajectory_raw = getattr(result, "trajectory", None) or {}
     trajectory = _normalize_trajectory(trajectory_raw)
@@ -81,20 +189,27 @@ async def aiter_chat_turn_stream_posthoc(
     routing_payload = rh.runtime_routing_payload(result)
 
     if routing_payload.get("selected_skills") or routing_payload.get("routing_decision"):
-        yield RuntimeEvent.status(
+        status_event = RuntimeEvent.status(
             rh.routing_status_text(routing_payload),
             payload=routing_payload,
         )
+        if not _should_skip_replay(status_event, seen_keys, relay):
+            yield status_event
 
     if cot_reasoning and not trajectory:
-        yield RuntimeEvent.reasoning(cot_reasoning)
+        reasoning_event = RuntimeEvent.reasoning(cot_reasoning)
+        if not _should_skip_replay(reasoning_event, seen_keys, relay):
+            yield reasoning_event
 
     for step in trajectory:
         thought = step.get("thought")
         tool_name = step.get("tool_name")
         is_terminal = (tool_name == "finish") or (not tool_name)
         if thought and not is_terminal:
-            yield RuntimeEvent.reasoning(str(thought))
+            reasoning_event = RuntimeEvent.reasoning(str(thought))
+            reasoning_event.payload["trajectory_index"] = step.get("index")
+            if not _should_skip_replay(reasoning_event, seen_keys, relay):
+                yield reasoning_event
 
         tool_name = step.get("tool_name")
         if tool_name:
@@ -107,7 +222,8 @@ async def aiter_chat_turn_stream_posthoc(
             )
             tool_ev.payload["step"] = step
             tool_ev.payload["trajectory_index"] = traj_idx
-            yield tool_ev
+            if not _should_skip_replay(tool_ev, seen_keys, relay):
+                yield tool_ev
 
         observation = step.get("observation") or step.get("output", "")
         if observation and tool_name:
@@ -119,9 +235,10 @@ async def aiter_chat_turn_stream_posthoc(
             result_ev.payload["output"] = observation
             result_ev.payload["step"] = step
             result_ev.payload["trajectory_index"] = step.get("index")
-            yield result_ev
+            if not _should_skip_replay(result_ev, seen_keys, relay):
+                yield result_ev
             clar_ev = rh.build_clarification_event(observation)
-            if clar_ev is not None:
+            if clar_ev is not None and not _should_skip_replay(clar_ev, seen_keys, relay):
                 yield clar_ev
 
     if degradation_payload:
