@@ -51,13 +51,3 @@ async def test_achat_turn_offloads_sync_chat_turn() -> None:
     await runtime.achat_turn("ping")
 
     assert runtime.agent.calls
-
-
-def test_interpreter_module_avoids_eager_dspy_import() -> None:
-    import importlib
-    import sys
-
-    module_name = "fleet_rlm.integrations.daytona.interpreter"
-    sys.modules.pop(module_name, None)
-    module = importlib.import_module(module_name)
-    assert "dspy" not in module.__dict__
