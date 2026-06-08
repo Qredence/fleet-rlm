@@ -192,7 +192,10 @@ export function applyCanonicalExecutionStepWithRouter(
     if (isReasoning) {
       const reasoningText = token || stepText;
       return reasoningText
-        ? deps.appendOrExtendReasoningEvent(messages, reasoningText, "live", { ...payload, ...step })
+        ? deps.appendOrExtendReasoningEvent(messages, reasoningText, "live", {
+            ...payload,
+            ...step,
+          })
         : messages;
     }
 
@@ -223,7 +226,12 @@ export function applyCanonicalExecutionStepWithRouter(
     if (label === "assistant_output") {
       return messages;
     }
-    return deps.appendStatusTrace(messages, stepText || "Output step completed", "success", payload);
+    return deps.appendStatusTrace(
+      messages,
+      stepText || "Output step completed",
+      "success",
+      payload,
+    );
   }
 
   return deps.appendStatusTrace(
