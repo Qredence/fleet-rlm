@@ -200,7 +200,7 @@ export function applyCanonicalExecutionStepWithRouter(
       return deps.appendStatusTrace(
         messages,
         stepText,
-        inferStatusTone(stepText, { ...payload, ...step }),
+        inferStatusTone(stepText, { ...payload, ...step }) ?? "neutral",
         { ...payload, ...step },
       );
     }
