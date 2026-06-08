@@ -1,6 +1,6 @@
 import { SearchSlash } from "lucide-react";
 
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
+import { ReasoningBlock } from "@/components/product/reasoning-block";
 import { EmptyPanel } from "@/components/product/empty-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -111,16 +111,13 @@ export function IterationDetail({ iteration }: { iteration?: IterationSummary | 
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {iteration.reasoningSummary ? (
-          <Reasoning className="mb-0" defaultOpen>
-            <ReasoningTrigger
-              getThinkingMessage={() => (
-                <span className="text-sm font-medium">Planner reasoning</span>
-              )}
-            />
-            <ReasoningContent className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">
-              {iteration.reasoningSummary}
-            </ReasoningContent>
-          </Reasoning>
+          <ReasoningBlock
+            defaultOpen
+            label={<span>Planner reasoning</span>}
+            contentClassName="whitespace-pre-wrap"
+          >
+            {iteration.reasoningSummary}
+          </ReasoningBlock>
         ) : null}
         {iteration.code ? (
           <section className="flex flex-col gap-2">
