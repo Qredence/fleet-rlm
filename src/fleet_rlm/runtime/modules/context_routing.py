@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,8 @@ import dspy
 from fleet_rlm.runtime.agent.turn_context import TurnContext
 from fleet_rlm.runtime.content.ingestion import read_document_content
 from fleet_rlm.runtime.modules.variable_mode import VARIABLE_MODE_THRESHOLD
+
+logger = logging.getLogger(__name__)
 
 _EXTRACTABLE_CONTEXT_SUFFIXES = frozenset(
     {
@@ -37,7 +40,11 @@ def large_context_threshold_chars() -> int:
         if raw.strip():
             return max(1, int(raw))
     except ValueError:
-        pass
+        logger.warning(
+            "Invalid FLEET_RLM_LARGE_CONTEXT_THRESHOLD value %r; using default threshold %d",
+            raw,
+            VARIABLE_MODE_THRESHOLD,
+        )
     return VARIABLE_MODE_THRESHOLD
 
 
