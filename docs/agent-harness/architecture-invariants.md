@@ -36,6 +36,9 @@ event loop on every code-execution iteration and regress server concurrency. The
 streaming path is the exception: it interleaves per-token streaming through `async_planner_step`
 (which uses `acall` on the planner predictor only, not sandbox execution).
 
+See also [docs/reference/dspy-daytona-interpreter-boundary.md](../reference/dspy-daytona-interpreter-boundary.md)
+for Daytona snapshot/volume lifecycle notes and RLM budget knobs.
+
 MCP-backed ReAct tools are the other async exception. Tools converted with
 `dspy.Tool.from_mcp_tool(session, tool)` are bound to a live MCP `ClientSession` and must be invoked
 through an async ReAct path (`acall`) while that session remains open. Keep MCP tools out of sync
