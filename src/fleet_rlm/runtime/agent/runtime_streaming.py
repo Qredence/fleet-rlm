@@ -106,6 +106,7 @@ async def _await_turn_with_live_progress(
                 await asyncio.wait_for(asyncio.shield(task), timeout=heartbeat_s)
                 break
             except asyncio.TimeoutError:
+                # Expected while polling: allow loop to emit periodic progress heartbeat.
                 pass
 
             elapsed = int(_time.monotonic() - t0)
