@@ -289,7 +289,7 @@ async def aiter_chat_turn_stream_native(
             )
             async for chunk in stream_extract(
                 **input_args,
-                trajectory=react_program._format_trajectory(trajectory_raw),
+                trajectory=rh.format_react_trajectory(react_program, trajectory_raw),
             ):
                 if isinstance(chunk, StreamResponse):
                     if chunk.signature_field_name == "response" and chunk.chunk:

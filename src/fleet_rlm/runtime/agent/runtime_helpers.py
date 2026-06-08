@@ -123,6 +123,14 @@ def get_streamable_react_program(program: Any) -> Any | None:
     return None
 
 
+def format_react_trajectory(program: Any, trajectory_raw: Any) -> str:
+    """Format a ReAct trajectory for extract, with a safe fallback for custom programs."""
+    formatter = getattr(program, "_format_trajectory", None)
+    if callable(formatter):
+        return formatter(trajectory_raw)
+    return str(trajectory_raw)
+
+
 def normalize_tool_args(tool_args: Any) -> dict[str, Any]:
     return dict(tool_args) if isinstance(tool_args, dict) else {}
 
