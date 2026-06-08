@@ -217,10 +217,8 @@ def build_clarification_event(observation: Any) -> RuntimeEvent | None:
     if not isinstance(observation, dict) or observation.get("status") != "clarification_needed":
         return None
 
-    import uuid as _uuid
-
     return RuntimeEvent.clarification(
-        message_id=str(observation.get("message_id") or f"clar-{_uuid.uuid4().hex[:8]}"),
+        message_id=str(observation.get("message_id") or f"clar-{uuid.uuid4().hex[:8]}"),
         question=observation.get("question"),
         step_label=observation.get("step_label", "Clarification needed"),
         options=observation.get("options", []),

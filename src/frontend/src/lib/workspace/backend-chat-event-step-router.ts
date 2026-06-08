@@ -91,7 +91,7 @@ export function routeExecutionStepBySourceType(
       return appendToolLikePart(
         messages,
         "tool_call",
-        trimmed || asOptionalText(mergedPayload.tool_name) || "tool_call",
+        trimmed || asOptionalText(mergedPayload["tool_name"]) || "tool_call",
         mergedPayload,
         deps.appendTracePart,
       );
@@ -99,7 +99,7 @@ export function routeExecutionStepBySourceType(
       return appendToolLikePart(
         messages,
         "tool_result",
-        trimmed || asOptionalText(mergedPayload.tool_name) || "tool_result",
+        trimmed || asOptionalText(mergedPayload["tool_name"]) || "tool_result",
         mergedPayload,
         deps.appendTracePart,
       );
@@ -116,16 +116,16 @@ export function routeExecutionStepBySourceType(
     case "sandbox_exec":
       return appendToolLikePart(
         messages,
-        mergedPayload.tool_output == null ? "tool_call" : "tool_result",
-        trimmed || asOptionalText(mergedPayload.tool_name) || "repl",
+        mergedPayload["tool_output"] == null ? "tool_call" : "tool_result",
+        trimmed || asOptionalText(mergedPayload["tool_name"]) || "repl",
         {
           ...mergedPayload,
-          tool_name: asOptionalText(mergedPayload.tool_name) ?? "repl",
+          tool_name: asOptionalText(mergedPayload["tool_name"]) ?? "repl",
           step: {
             type: "repl",
             label: trimmed || "sandbox_exec",
-            input: mergedPayload.tool_input ?? mergedPayload.tool_args,
-            output: mergedPayload.tool_output ?? mergedPayload.output,
+            input: mergedPayload["tool_input"] ?? mergedPayload["tool_args"],
+            output: mergedPayload["tool_output"] ?? mergedPayload["output"],
           },
         },
         deps.appendTracePart,
@@ -133,11 +133,11 @@ export function routeExecutionStepBySourceType(
     case "rlm_delegate":
       return appendToolLikePart(
         messages,
-        mergedPayload.tool_output == null ? "tool_call" : "tool_result",
+        mergedPayload["tool_output"] == null ? "tool_call" : "tool_result",
         trimmed || "delegate_to_rlm",
         {
           ...mergedPayload,
-          tool_name: asOptionalText(mergedPayload.tool_name) ?? "delegate_to_rlm",
+          tool_name: asOptionalText(mergedPayload["tool_name"]) ?? "delegate_to_rlm",
         },
         deps.appendTracePart,
       );
@@ -183,11 +183,8 @@ export function applyCanonicalExecutionStepWithRouter(
     const inputKind = stepInputKind(step);
     const output = asRecord(step.output);
     const token = typeof output?.text === "string" ? output.text : asOptionalText(step.output);
-    const label = asOptionalText(step.label)?.toLowerCase() ?? "";
     const isReasoning = sourceType === "reasoning" || inputKind === "reasoning";
     const isStatus = sourceType === "status" || inputKind === "status";
-    const isAssistantText =
-      sourceType === "text" || inputKind === "text" || label === "assistant_token";
 
     if (isReasoning) {
       const reasoningText = token || stepText;
@@ -208,10 +205,7 @@ export function applyCanonicalExecutionStepWithRouter(
       );
     }
 
-    if (isAssistantText && token) {
-      return deps.appendAssistantToken(messages, token);
-    }
-
+    // Assistant-labeled tokens and unlabeled token fallbacks both stream as reply text.
     if (token) {
       return deps.appendAssistantToken(messages, token);
     }

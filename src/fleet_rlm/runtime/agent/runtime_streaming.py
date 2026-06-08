@@ -209,7 +209,12 @@ async def aiter_chat_turn_stream_native(
                 )
                 t_planner_ms = (_time.monotonic() - t_planner_start) * 1000
                 logger.info("streaming: planner step %d completed in %.0fms", step_index, t_planner_ms)
-            except ValueError:
+            except ValueError as exc:
+                logger.debug(
+                    "streaming: planner step %d raised ValueError, ending iteration: %s",
+                    step_index,
+                    exc,
+                )
                 break
 
             thought = str(getattr(prediction, "next_thought", "") or "")
