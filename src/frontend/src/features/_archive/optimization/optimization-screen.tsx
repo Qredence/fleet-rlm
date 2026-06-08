@@ -4,14 +4,14 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { PageHeader } from "@/components/product/page-header";
-import { ModulesTab } from "@/features/optimization/modules-tab";
-import { DatasetsTab } from "@/features/optimization/datasets-tab";
-import { RunsTab } from "@/features/optimization/runs-tab";
-import { CompareTab } from "@/features/optimization/compare-tab";
+import { ModulesTab } from "@/features/_archive/optimization/modules-tab";
+import { DatasetsTab } from "@/features/_archive/optimization/datasets-tab";
+import { RunsTab } from "@/features/_archive/optimization/runs-tab";
+import { CompareTab } from "@/features/_archive/optimization/compare-tab";
 import {
   OptimizationForm,
   type OptimizationRunDraft,
-} from "@/features/optimization/optimization-form";
+} from "@/features/_archive/optimization/optimization-form";
 import { cn } from "@/lib/utils";
 
 export function OptimizationScreen() {

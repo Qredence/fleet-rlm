@@ -23,7 +23,7 @@ import {
   type DatasetResponse,
   type GEPAModuleInfo,
 } from "@/lib/rlm-api/optimization";
-import type { OptimizationRunDraft } from "@/features/optimization/optimization-form";
+import type { OptimizationRunDraft } from "@/features/_archive/optimization/optimization-form";
 
 /** Turn a kebab-case slug into a title-cased label (e.g. "reflect-and-revise" → "Reflect and Revise"). */
 function humanizeSlug(slug: string): string {
