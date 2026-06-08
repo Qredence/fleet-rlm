@@ -144,7 +144,7 @@ def build_gold_items(pdf_path: Path) -> tuple[list[dict[str, Any]], str]:
             "category": "needle_fact",
             "query": "What year does the report title refer to for 'The enterprise in ...'?",
             "speaker": "",
-            "expected_substrings": ["2030", "enterprise"],
+            "expected_substrings": [fact, "enterprise"],
             "expected_exact_quote": "",
             "forbidden_substrings": [],
             "negative_control": False,
