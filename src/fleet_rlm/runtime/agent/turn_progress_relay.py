@@ -53,6 +53,8 @@ class TurnProgressRelay:
             try:
                 _ = self._queue.get_nowait()
             except asyncio.QueueEmpty:
+                # Queue was drained by another consumer between QueueFull and get_nowait().
+                # Safe to continue and retry put_nowait below.
                 pass
             try:
                 self._queue.put_nowait(event)
