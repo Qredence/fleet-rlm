@@ -85,6 +85,7 @@ async def _await_turn_with_live_progress(
                 try:
                     await task
                 except asyncio.CancelledError:
+                    # Expected after task.cancel(); cancellation is surfaced below via a DONE event.
                     pass
                 yield RuntimeEvent(
                     kind=RuntimeEventKind.DONE,
