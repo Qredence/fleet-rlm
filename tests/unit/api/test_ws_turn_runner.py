@@ -85,4 +85,6 @@ async def test_emit_stream_event_sends_terminal_frame_before_completion() -> Non
     assert websocket.messages[0]["kind"] == "execution_completed"
     assert websocket.messages[0]["text"] == "done"
     assert websocket.messages[0]["payload"]["source_type"] == "turn_completed"
+    assert websocket.messages[0]["payload"]["final_artifact"] is not None
+    assert websocket.messages[0]["payload"]["run_summary"]["status"] == "completed"
     assert lifecycle.run_completed is True

@@ -233,6 +233,67 @@ def test_mlflow_request_context_reapplies_final_metadata_after_flush(monkeypatch
     assert ("tr-after-flush", "fleet_rlm.routing_decision", "url_document_rlm") in captured_tags
 
 
+def test_mlflow_request_context_opens_application_turn_span(monkeypatch) -> None:
+    from fleet_rlm.integrations.observability import mlflow_context
+    from fleet_rlm.integrations.observability.mlflow_context import (
+        MlflowTraceRequestContext,
+        mlflow_request_context,
+    )
+
+    captured: list[dict[str, object]] = []
+
+    class FakeSpan:
+        def __init__(self, name: str, span_type: str | None, attributes: dict[str, object] | None) -> None:
+            self.record: dict[str, object] = {
+                "name": name,
+                "span_type": span_type,
+                "attributes": attributes or {},
+            }
+
+        def __enter__(self) -> "FakeSpan":
+            captured.append(self.record)
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def set_inputs(self, inputs: object) -> None:
+            self.record["inputs"] = inputs
+
+        def set_outputs(self, outputs: object) -> None:
+            self.record["outputs"] = outputs
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=object,
+        get_active_trace_id=lambda: "tr-parent",
+        update_current_trace=lambda **kwargs: None,
+        start_span=lambda name, span_type=None, attributes=None: FakeSpan(name, span_type, attributes),
+    )
+    monkeypatch.setattr(
+        mlflow_context,
+        "_runtime_module",
+        lambda: SimpleNamespace(
+            _import_mlflow=lambda: fake_mlflow,
+            get_mlflow_config=lambda: SimpleNamespace(active_model_id=None),
+            flush_mlflow_traces=lambda: None,
+            logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        ),
+    )
+
+    with mlflow_request_context(
+        MlflowTraceRequestContext(
+            client_request_id="chat-parent",
+            request_preview="analyze docs",
+            final_response_preview="done",
+        )
+    ):
+        pass
+
+    assert captured[0]["name"] == "fleet_rlm.chat_turn"
+    assert captured[0]["inputs"] == {"message": "analyze docs"}
+    assert captured[0]["outputs"] == {"response": "done"}
+
+
 def test_record_rlm_trajectory_spans_materializes_repl_steps(monkeypatch) -> None:
     from fleet_rlm.integrations.observability import mlflow_context
 

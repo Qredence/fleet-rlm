@@ -105,7 +105,13 @@ describe("toAgentChatMessages", () => {
           }),
           output: { stdout: "Example Domain" },
         }),
-        expect.objectContaining({ type: "tool-Agent" }),
+        expect.objectContaining({
+          type: "tool-Agent",
+          input: expect.objectContaining({
+            description: "summarize fetched document",
+            subagent_type: "delegate_to_rlm",
+          }),
+        }),
         expect.objectContaining({
           type: "tool-mcp__docs__fetch",
           output: { text: "Example Domain" },
@@ -215,6 +221,48 @@ describe("toAgentChatMessages", () => {
           },
         ],
       },
+    });
+  });
+
+  it("normalizes grep and list_files outputs into SearchTool result rows", () => {
+    const messages = adapter([
+      {
+        id: "trace-search",
+        type: "trace",
+        content: "",
+        renderParts: [
+          {
+            kind: "tool",
+            title: "grep",
+            toolType: "grep",
+            state: "output-available",
+            input: { pattern: "ThinkingTool", path: "src" },
+            output: ["src/a.ts", "src/b.ts"],
+          },
+          {
+            kind: "tool",
+            title: "list_files",
+            toolType: "list_files",
+            state: "output-available",
+            input: { path: "src/frontend" },
+            output: { matches: [{ path: "src/frontend/app.tsx" }] },
+          },
+        ],
+      },
+    ]);
+
+    const parts = messages[0]?.parts as Array<{ type?: string; output?: unknown }> | undefined;
+    const grepPart = parts?.find((part) => part.type === "tool-Grep");
+    const globPart = parts?.find((part) => part.type === "tool-Glob");
+
+    expect(grepPart?.output).toEqual({
+      results: [
+        { source: "github", title: "src/a.ts", date: "" },
+        { source: "github", title: "src/b.ts", date: "" },
+      ],
+    });
+    expect(globPart?.output).toEqual({
+      results: [{ source: "github", title: "src/frontend/app.tsx", date: "" }],
     });
   });
 });

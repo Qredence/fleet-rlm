@@ -1,10 +1,37 @@
 from __future__ import annotations
 
-from typing import Any
+import importlib.resources
+from typing import Any, Iterator
 
 from fleet_rlm.runtime.tools._marker import tool_fn
 from fleet_rlm.runtime.tools._volume_paths import skills_root
 from fleet_rlm.runtime.tools.schemas import LoadSkillInput, LoadSkillOutput
+
+
+def _iter_scaffold_skill_markdown() -> Iterator[tuple[str, str]]:
+    skills_pkg = importlib.resources.files("fleet_rlm.scaffold") / "skills"
+    for skill_entry in skills_pkg.iterdir():
+        skill_md = skill_entry / "SKILL.md"
+        if not skill_md.is_file():
+            continue
+        yield skill_entry.name, skill_md.read_text(encoding="utf-8")
+
+
+def _load_scaffold_skill(name: str) -> LoadSkillOutput:
+    try:
+        safe_name = _safe_skill_name(name)
+    except ValueError as exc:
+        return LoadSkillOutput(status="error", name=name, error=str(exc))
+    for skill_name, instructions in _iter_scaffold_skill_markdown():
+        if skill_name == safe_name:
+            return LoadSkillOutput(
+                status="ok",
+                name=safe_name,
+                scope="scaffold",
+                path=f"fleet_rlm.scaffold.skills.{safe_name}.SKILL.md",
+                instructions=instructions,
+            )
+    return LoadSkillOutput(status="not_found", name=safe_name, error=f"Skill not found: {safe_name}")
 
 
 def _safe_skill_name(name: str) -> str:
@@ -17,7 +44,7 @@ def _safe_skill_name(name: str) -> str:
 def _load_skill_impl(name: str, *, volume_mount_path: str | None = None) -> LoadSkillOutput:
     root = skills_root(volume_mount_path)
     if root is None:
-        return LoadSkillOutput(status="error", name=name, error="No volume mount path configured for skills.")
+        return _load_scaffold_skill(name)
     try:
         safe_name = _safe_skill_name(name)
     except ValueError as exc:

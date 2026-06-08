@@ -47,6 +47,7 @@ from .stream_events import (
 from .stream_summary import (
     _runtime_trace_metadata,
     build_execution_completion_summary,
+    enrich_terminal_stream_payload,
     final_event_failed,
     merge_trace_result_metadata,
 )
@@ -196,12 +197,18 @@ async def _emit_stream_event(
     execution_emitter: ExecutionEventEmitter,
 ) -> None:
     lifecycle.raise_if_persistence_error()
-    payload = event.payload
+    payload = event.payload if isinstance(event.payload, dict) else {}
     if event.kind in {"done", "error"}:
         payload = merge_trace_result_metadata(
-            payload if isinstance(payload, dict) else None,
+            payload,
             response_preview=event.text,
-            trace_metadata=_runtime_trace_metadata(payload if isinstance(payload, dict) else None),
+            trace_metadata=_runtime_trace_metadata(payload),
+        )
+        payload = enrich_terminal_stream_payload(
+            event=event,
+            payload=payload,
+            request_message=request_message,
+            run_id=lifecycle.run_id,
         )
     event_dict = build_stream_event_dict(
         event=event,

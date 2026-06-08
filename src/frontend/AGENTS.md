@@ -52,7 +52,7 @@ Before editing:
 
 1. **`src/components/ui/*`** — shadcn/Base UI primitives. Thin, semantic, no feature/runtime imports.
 2. **`src/components/agent-elements/*`** — **Canonical agent/chat UI** ([Agent Elements](https://agent-elements.21st.dev/docs) shadcn registry). `AgentChat`, `InputBar`, tool cards, `UIMessage`-shaped transcripts.
-3. **`src/components/product/*`** — Reusable product compositions (empty states, skeletons, panels, shared reasoning blocks).
+3. **`src/components/product/*`** — Reusable product compositions (empty states, skeletons, panels). Do not add chat, reasoning, or tool transcript UI here; use Agent Elements.
 4. **`src/components/ai-elements/*`** — **Legacy inspection/composer primitives only** (`prompt-input`, `chain-of-thought`). Do not add new chat/message/tool components here.
 5. **`src/features/layout/*`** — App chrome. Consumes workspace/volumes through feature entrypoints only.
 6. **`src/features/{workspace,volumes,settings}/*`** — Canonical surface ownership.
@@ -316,20 +316,22 @@ import { BashTool } from "@/components/agent-elements/tools/bash-tool";
 | --- | --- | --- | --- |
 | `AgentChat` | `agent-elements/agent-chat.tsx` | `workspace-message-list.tsx` | Full chat shell (messages + input) |
 | `InputBar` | `agent-elements/input-bar.tsx` | `workspace-agent-input-bar.tsx` | Composer with mode/model pickers |
-| `Suggestions` | `agent-elements/input/suggestions.tsx` | `workspace-chat-empty-state.tsx` | Quick-prompt chips |
+| `Suggestions` | `agent-elements/input/suggestions.tsx` | `AgentChat` via `workspace-message-list.tsx` | Quick-prompt chips (empty state + input) |
+| Tool mapping | `lib/workspace/agent-tool-parts.ts` | `agent-chat-adapter.ts`, `execution-inspector-rows.tsx` | Shared tool part normalization |
+| Static tool helpers | `agent-elements/utils/static-tool-parts.ts` | workbench, inspector | `ThinkingTool` steps outside chat transcripts |
 | Tool cards | `agent-elements/tools/*` | `agent-chat-adapter.ts` via `toolRenderers` | Bash, Edit, Search, MCP, Subagent, Thinking, Generic |
 | `TextShimmer` | `agent-elements/text-shimmer.tsx` | tool rows, loading states | Streaming label shimmer |
 | `Streamdown` | `ui/streamdown.tsx` | agent-elements markdown | Canonical markdown renderer |
 
-Wire backend tools through `toolRenderers` in [agent-chat-adapter.ts](src/features/workspace/conversation/agent-chat-adapter.ts). Unknown kinds should fall back to `GenericTool`.
+Wire backend tools through `agent-chat-adapter.ts` → `ToolRenderer`. Shared normalization lives in `lib/workspace/agent-tool-parts.ts`. Unknown kinds should fall back to `GenericTool`.
 
-### Legacy `ai-elements/` (inspection/composer only)
+### Legacy `ai-elements/` (composer only)
 
 | Component | Location | Consumers | Notes |
 | --- | --- | --- | --- |
 | `PromptInput` | `ai-elements/prompt-input/` | `workspace-composer.tsx` | Legacy composer; prefer `InputBar` for new work |
-| `ChainOfThought` | `ai-elements/chain-of-thought.tsx` | `execution-inspector-tab.tsx` | Inspection timeline only |
-| `Reasoning` | `ai-elements/reasoning.tsx` | tests only | Prefer `product/reasoning-block.tsx` or `ThinkingTool` |
+| `ChainOfThought` | `ai-elements/chain-of-thought.tsx` | — | Removed from execution inspector; do not reintroduce |
+| `Reasoning` | `ai-elements/reasoning.tsx` | tests only | Prefer `ThinkingTool` via `static-tool-parts.ts` |
 
 Do **not** install `Message`, `Conversation`, `Tool`, or other chat primitives from `@ai-elements` or `@prompt-kit`.
 
@@ -340,8 +342,8 @@ Do **not** install `Message`, `Conversation`, `Tool`, or other chat primitives f
 
 ### Reuse guidelines
 
-1. **Chat/message/tool UI** → extend or install from `@agent-elements` only.
-2. **Shared non-chat patterns** → `components/product/*`.
+1. **Chat/message/tool UI** → extend or install from `@agent-elements` only (adapter pipeline + `ToolRenderer`).
+2. **Shared non-chat patterns** → `components/product/*` (never reasoning/tool transcript cards).
 3. **Primitives** → `components/ui/*` via `npx shadcn@latest add …`.
 4. **Extend before install** — add props/variants before pulling a new registry component.
 5. **Canonical `cn()`** → `@/lib/utils` only (not `agent-elements/utils/cn.ts`).

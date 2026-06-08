@@ -295,9 +295,43 @@ def build_execution_completion_summary(
     }
 
 
+def enrich_terminal_stream_payload(
+    *,
+    event: StreamEventLike,
+    payload: dict[str, Any] | None,
+    request_message: str,
+    run_id: str,
+) -> dict[str, Any]:
+    """Attach canonical run summary + final artifact to terminal websocket payloads.
+
+    The execution lifecycle emitter already builds this summary for the
+    secondary execution stream, but the primary chat websocket previously only
+    forwarded the raw runtime payload. Hydrating here keeps chat transcripts and
+    the run workbench aligned when a turn completes.
+    """
+    merged = dict(payload or {})
+    summary = build_execution_completion_summary(
+        event=event,
+        request_message=request_message,
+        run_id=run_id,
+    )
+    merged.setdefault("run_summary", summary)
+    merged.setdefault("final_artifact", summary.get("final_artifact"))
+    merged.setdefault("status", summary.get("status"))
+    nested_summary = summary.get("summary")
+    if isinstance(nested_summary, dict):
+        merged.setdefault("summary", nested_summary)
+    if summary.get("run_id"):
+        merged.setdefault("run_id", summary.get("run_id"))
+    if summary.get("runtime_mode"):
+        merged.setdefault("runtime_mode", summary.get("runtime_mode"))
+    return merged
+
+
 __all__ = [
     "merge_trace_result_metadata",
     "_runtime_trace_metadata",
+    "enrich_terminal_stream_payload",
     "final_event_failed",
     "build_execution_completion_summary",
 ]

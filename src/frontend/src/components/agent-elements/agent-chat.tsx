@@ -26,6 +26,7 @@ export function AgentChat({
   emptyStatePosition = "default",
   emptySuggestionsPlacement = "input",
   emptySuggestionsPosition = "top",
+  emptyState,
   questionTool,
   className,
   style,
@@ -49,6 +50,10 @@ export function AgentChat({
     suggestionConfig.items.length > 0;
 
   const handleEmptySuggestionSelect = (item: SuggestionItem) => {
+    if (suggestionConfig.onSelect) {
+      suggestionConfig.onSelect(item);
+      return;
+    }
     setDraft(item.value ?? item.label);
   };
 
@@ -120,6 +125,7 @@ export function AgentChat({
       {isCenteredEmptyState ? (
         <div className="flex-1 min-h-0 flex items-center justify-center px-4 py-4">
           <div className="w-full max-w-an">
+            {emptyState ? <div className="mb-4">{emptyState}</div> : null}
             {emptySuggestionsPosition === "top" ? emptySuggestionsNode : null}
             {inputBarNode}
             {emptySuggestionsPosition === "bottom" ? emptySuggestionsNode : null}
@@ -166,12 +172,14 @@ function resolveSuggestions(suggestions: AgentChatProps["suggestions"]) {
       items: suggestions,
       className: undefined,
       itemClassName: undefined,
+      onSelect: undefined,
     };
   }
   return {
     items: suggestions?.items ?? [],
     className: suggestions?.className,
     itemClassName: suggestions?.itemClassName,
+    onSelect: suggestions?.onSelect,
   };
 }
 

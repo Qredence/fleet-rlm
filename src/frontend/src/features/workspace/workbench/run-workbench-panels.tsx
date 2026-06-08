@@ -1,6 +1,7 @@
 import { SearchSlash } from "lucide-react";
 
-import { ReasoningBlock } from "@/components/product/reasoning-block";
+import { ThinkingTool } from "@/components/agent-elements/tools/thinking-tool";
+import { buildThinkingStep } from "@/components/agent-elements/utils/static-tool-parts";
 import { EmptyPanel } from "@/components/product/empty-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -111,13 +112,16 @@ export function IterationDetail({ iteration }: { iteration?: IterationSummary | 
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {iteration.reasoningSummary ? (
-          <ReasoningBlock
+          <ThinkingTool
             defaultOpen
-            label={<span>Planner reasoning</span>}
-            contentClassName="whitespace-pre-wrap"
-          >
-            {iteration.reasoningSummary}
-          </ReasoningBlock>
+            step={buildThinkingStep(
+              `iteration-${iteration.iteration}-reasoning`,
+              iteration.reasoningSummary,
+              { toolName: "Planner reasoning" },
+            )}
+            state="complete"
+            onComplete={() => {}}
+          />
         ) : null}
         {iteration.code ? (
           <section className="flex flex-col gap-2">

@@ -37,6 +37,19 @@ def _stub_summarize(module: EscalatingFleetModule, *, summary: str = "summary") 
     module.summarize = MagicMock(return_value=pred)
 
 
+def test_enrich_with_skills_uses_scaffold_when_volume_unmounted() -> None:
+    module = _make_module(interpreter=None)
+
+    enriched, selected = module._enrich_with_skills(
+        "Analyze the whole documentation of https://dspy.ai",
+        "",
+    )
+
+    assert "dspy-programs" in selected
+    assert "long-context" in selected
+    assert "[Active Skills]" in enriched or "[Skill:" in enriched
+
+
 def _disable_runtime_tool_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.runtime.agent import runtime as runtime_mod
 

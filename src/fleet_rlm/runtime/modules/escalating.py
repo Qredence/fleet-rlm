@@ -319,8 +319,21 @@ class EscalatingFleetModule(dspy.Module):
             logger.warning("Conversation summary failed, returning truncated history: %s", exc)
             return history_text[-4000:]
 
+    def _resolve_skill_volume_mount_path(self) -> str | None:
+        from fleet_rlm.runtime.tools._volume_paths import volume_root
+
+        if self._interpreter is not None:
+            mounted = getattr(self._interpreter, "volume_mount_path", None)
+            if mounted:
+                return str(mounted)
+        resolved = volume_root()
+        return str(resolved) if resolved is not None else None
+
     def _enrich_with_skills(self, user_request: str, core_memory: str) -> tuple[str, list[str]]:
         """Select relevant skills and append their instructions to core_memory."""
+        volume_mount_path = self._resolve_skill_volume_mount_path()
+        if volume_mount_path != self._skill_selector._volume_mount_path:
+            self._skill_selector._volume_mount_path = volume_mount_path
         try:
             selection = self._skill_selector(user_request=user_request, core_memory=core_memory)
             skill_context = str(getattr(selection, "skill_context", "") or "")

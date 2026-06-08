@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time as _time
 from dataclasses import dataclass
@@ -138,6 +139,23 @@ async def prepare_daytona_workspace_for_turn(
         volume_name=request.workspace_id,
         sandbox_labels=request.sandbox_labels,
     )
+
+    astart = getattr(interpreter, "astart", None)
+    if not callable(astart):
+        return
+
+    prep_timeout = float(getattr(interpreter, "timeout", None) or 120)
+    try:
+        await asyncio.wait_for(astart(), timeout=prep_timeout)
+    except asyncio.TimeoutError as exc:
+        from fleet_rlm.integrations.daytona.errors import DaytonaDiagnosticError
+
+        raise DaytonaDiagnosticError(
+            f"Daytona workspace did not become ready within {prep_timeout:.0f}s. "
+            "Verify DAYTONA_API_KEY, DAYTONA_API_URL, and sandbox capacity, then retry.",
+            category="workspace_prep_timeout",
+            phase="workspace_prepare",
+        ) from exc
 
 
 async def _reject_empty_message(

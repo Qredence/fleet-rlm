@@ -1,24 +1,12 @@
-import type { UIMessage } from "ai";
-
+import type { AgentToolPart } from "@/lib/workspace/agent-tool-parts";
+import { chatRenderPartToAgentToolPart, stableToolCallId } from "@/lib/workspace/agent-tool-parts";
 import type {
   QuestionAnswer,
   QuestionConfig,
 } from "@/components/agent-elements/question/question-prompt";
-import type {
-  ChatMessage,
-  ChatRenderPart,
-  ChatRenderToolState,
-} from "@/lib/workspace/workspace-types";
+import type { ChatMessage, ChatRenderPart } from "@/lib/workspace/workspace-types";
 
-type AgentToolState = "input-streaming" | "call" | "output-available" | "output-error";
-
-type AgentToolPart = {
-  type: string;
-  toolCallId: string;
-  state: AgentToolState;
-  input?: unknown;
-  output?: unknown;
-};
+export type { AgentToolPart };
 
 interface AgentChatMessageAdapterOptions {
   onResolveHitl: (msgId: string, label: string) => void;
@@ -29,162 +17,22 @@ function toUiMessage(message: {
   id: string;
   role: "user" | "assistant";
   parts: unknown[];
-}): UIMessage {
-  return message as UIMessage;
-}
-
-function mapToolState(state: ChatRenderToolState): AgentToolState {
-  switch (state) {
-    case "input-streaming":
-      return "input-streaming";
-    case "running":
-      return "call";
-    case "output-available":
-      return "output-available";
-    case "output-error":
-      return "output-error";
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function normalizeToolInput(toolType: string, input: unknown): Record<string, unknown> {
-  const base = isRecord(input) ? { ...input } : {};
-  const normalized = toolType.toLowerCase();
-
-  if (
-    /(load[_-]?document|read[_-]?(?:file|document)(?:[_-]?slice)?|open[_-]?document|document[_-]?read|file[_-]?read)/.test(
-      normalized,
-    )
-  ) {
-    const filePath =
-      (typeof base.file_path === "string" && base.file_path.trim()) ||
-      (typeof base.path === "string" && base.path.trim()) ||
-      (typeof base.document === "string" && base.document.trim()) ||
-      "";
-    if (filePath && !base.file_path) base.file_path = filePath;
-  }
-
-  if (normalized.includes("glob") || normalized.includes("list")) {
-    const pattern =
-      (typeof base.pattern === "string" && base.pattern.trim()) ||
-      (typeof base.path === "string" && base.path.trim()) ||
-      (typeof base.query === "string" && base.query.trim()) ||
-      "";
-    if (pattern && !base.pattern) base.pattern = pattern;
-  }
-
-  if (/(grep|search|find)/.test(normalized)) {
-    const query =
-      (typeof base.query === "string" && base.query.trim()) ||
-      (typeof base.pattern === "string" && base.pattern.trim()) ||
-      (typeof base.path === "string" && base.path.trim()) ||
-      "";
-    if (query && !base.query) base.query = query;
-  }
-
-  return base;
-}
-
-function stringifyValue(value: unknown): string {
-  if (value == null) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function sanitizeToolName(value: string): string {
-  const compact = value
-    .split(/[^a-zA-Z0-9]+/)
-    .filter(Boolean)
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join("");
-  return compact || "Tool";
-}
-
-function stableToolCallId(messageId: string, kind: string, index: number, stepIndex?: number) {
-  const suffix = stepIndex == null ? index : stepIndex;
-  return `${messageId}:${kind}:${suffix}`;
-}
-
-function toolPartType(toolType: string): string {
-  const normalized = toolType.toLowerCase();
-  if (normalized.startsWith("mcp__")) {
-    return `tool-${toolType}`;
-  }
-  if (/(bash|exec|command|terminal|run|shell|python|repl|interpreter|sandbox)/.test(normalized)) {
-    return "tool-Bash";
-  }
-  if (
-    /(load[_-]?document|read[_-]?(?:file|document)(?:[_-]?slice)?|open[_-]?document|document[_-]?read|file[_-]?read)/.test(
-      normalized,
-    )
-  ) {
-    return "tool-Read";
-  }
-  if (
-    /(list[_-]?files?|list[_-]?dir|glob|tree|ls|directory[_-]?listing|browse[_-]?files?)/.test(
-      normalized,
-    )
-  ) {
-    return "tool-Glob";
-  }
-  if (/(write|create_file)/.test(normalized)) return "tool-Write";
-  if (/(edit|patch|notebook)/.test(normalized)) return "tool-Edit";
-  if (/(grep|find|search)/.test(normalized)) {
-    return normalized.includes("web") ? "tool-WebSearch" : "tool-Grep";
-  }
-  if (/(webfetch|fetch|url|browser)/.test(normalized)) return "tool-WebFetch";
-  if (/(todo|task_list)/.test(normalized)) return "tool-TodoWrite";
-  if (/(plan|planning)/.test(normalized)) return "tool-PlanWrite";
-  if (/(delegate|sub_rlm|agent|recursive)/.test(normalized)) return "tool-Agent";
-  if (/(think|reason)/.test(normalized)) return "tool-Thinking";
-  return `tool-${sanitizeToolName(toolType)}`;
-}
-
-function commandInput(part: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>) {
-  if (part.kind === "sandbox") {
-    return {
-      command: part.code || part.title,
-      description: part.title,
-      language: part.language,
-    };
-  }
-  if (isRecord(part.input)) return normalizeToolInput(part.toolType, part.input);
-  const input = stringifyValue(part.input);
-  return {
-    command: input || part.title || part.toolType,
-    description: part.title,
-  };
-}
-
-function outputRecord(part: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>) {
-  if (part.errorText) return { error: part.errorText };
-  if (part.kind === "sandbox") return part.output ? { stdout: part.output } : undefined;
-  if (isRecord(part.output)) return part.output;
-  const output = stringifyValue(part.output);
-  return output ? { result: output } : undefined;
+}) {
+  return message as import("ai").UIMessage;
 }
 
 function tracePartToAgentParts(part: ChatRenderPart, messageId: string, index: number): unknown[] {
-  if (part.kind === "reasoning") {
-    const text = part.parts.map((item) => item.text).join("\n");
-    if (!text.trim()) return [];
-    return [
-      {
-        type: "tool-Thinking",
-        toolCallId: stableToolCallId(messageId, "reasoning", index),
-        state: part.isStreaming ? "input-streaming" : "output-available",
-        input: { thought: text, label: part.label ?? "Reasoning" },
-        output: part.isStreaming ? undefined : { reasoning: text },
-      } satisfies AgentToolPart,
-    ];
+  if (
+    part.kind === "reasoning" ||
+    part.kind === "tool" ||
+    part.kind === "sandbox" ||
+    part.kind === "task" ||
+    part.kind === "queue" ||
+    part.kind === "status_note" ||
+    part.kind === "environment_variables"
+  ) {
+    const agentPart = chatRenderPartToAgentToolPart(part, messageId, index);
+    return agentPart ? [agentPart] : [];
   }
 
   if (part.kind === "chain_of_thought") {
@@ -205,96 +53,6 @@ function tracePartToAgentParts(part: ChatRenderPart, messageId: string, index: n
               : { reasoning: [step.body, ...(step.details ?? [])].filter(Boolean).join("\n") },
         }) satisfies AgentToolPart,
     );
-  }
-
-  if (part.kind === "tool" || part.kind === "sandbox") {
-    const toolType = part.kind === "sandbox" ? "sandbox" : part.toolType;
-    return [
-      {
-        type: toolPartType(toolType),
-        toolCallId: stableToolCallId(messageId, toolType, index, part.stepIndex),
-        state: mapToolState(part.state),
-        input: commandInput(part),
-        output: outputRecord(part),
-      } satisfies AgentToolPart,
-    ];
-  }
-
-  if (part.kind === "task") {
-    return [
-      {
-        type: "tool-TodoWrite",
-        toolCallId: stableToolCallId(messageId, "task", index),
-        state:
-          part.status === "in_progress"
-            ? "call"
-            : part.status === "error"
-              ? "output-error"
-              : "output-available",
-        input: {
-          action: "update",
-          title: part.title,
-          todos: part.items?.map((item) => ({
-            content: item.text,
-            status: part.status,
-            file: item.file?.name,
-          })),
-        },
-        output: part.status === "in_progress" ? undefined : { status: part.status },
-      } satisfies AgentToolPart,
-    ];
-  }
-
-  if (part.kind === "queue") {
-    return [
-      {
-        type: "tool-PlanWrite",
-        toolCallId: stableToolCallId(messageId, "plan", index),
-        state: part.items.every((item) => item.completed) ? "output-available" : "call",
-        input: {
-          action: "update",
-          plan: {
-            title: part.title,
-            steps: part.items.map((item) => ({
-              content: item.label,
-              description: item.description,
-              status: item.completed ? "completed" : "pending",
-            })),
-          },
-        },
-        output: part.items.every((item) => item.completed) ? { status: "completed" } : undefined,
-      } satisfies AgentToolPart,
-    ];
-  }
-
-  if (part.kind === "status_note") {
-    return [
-      {
-        type: "tool-Status",
-        toolCallId: stableToolCallId(messageId, "status", index, part.stepIndex),
-        state: part.tone === "error" ? "output-error" : "output-available",
-        input: { message: part.text, tone: part.tone },
-        output: { message: part.text, tone: part.tone },
-      } satisfies AgentToolPart,
-    ];
-  }
-
-  if (part.kind === "environment_variables") {
-    return [
-      {
-        type: "tool-EnvironmentVariables",
-        toolCallId: stableToolCallId(messageId, "env", index),
-        state: "output-available",
-        input: { title: part.title ?? "Environment variables" },
-        output: {
-          variables: part.variables.map((variable) => ({
-            name: variable.name,
-            value: variable.value,
-            required: variable.required,
-          })),
-        },
-      } satisfies AgentToolPart,
-    ];
   }
 
   if (part.kind === "confirmation") {
@@ -493,7 +251,7 @@ function messageToParts(message: ChatMessage, options: AgentChatMessageAdapterOp
 export function toAgentChatMessages(
   messages: ChatMessage[],
   options: AgentChatMessageAdapterOptions,
-): UIMessage[] {
+) {
   return messages.flatMap((message) => {
     if (message.type === "user") {
       return [
