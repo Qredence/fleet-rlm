@@ -182,7 +182,13 @@ function preferredFinalArtifactText(value: unknown): string | undefined {
 }
 
 function resolveFinalAssistantText(text: string, payload?: Record<string, unknown>): string {
-  const preferred = preferredFinalArtifactText(payload?.final_artifact ?? payload?.finalArtifact);
+  const artifact = asRecord(payload?.final_artifact ?? payload?.finalArtifact);
+  if (artifact?.kind === "code_file") {
+    const value = asRecord(artifact.value);
+    const summary = asOptionalText(value?.summary ?? value?.text);
+    if (summary) return summary;
+  }
+  const preferred = preferredFinalArtifactText(artifact ?? payload?.final_artifact ?? payload?.finalArtifact);
 
   return preferred ?? text;
 }

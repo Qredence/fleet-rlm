@@ -11,6 +11,7 @@ from typing import Any, cast
 import dspy
 
 from fleet_rlm.runtime.events import RuntimeEvent
+from fleet_rlm.runtime.execution.final_artifact import build_final_artifact_from_answer
 from fleet_rlm.runtime.schemas import StreamEvent, StreamEventKind
 
 
@@ -97,6 +98,29 @@ def runtime_routing_payload(result: Any) -> dict[str, Any]:
     source_url = prediction_value(result, "source_url")
     if source_url not in (None, ""):
         payload["source_url"] = str(source_url)
+    return payload
+
+
+def attach_final_artifact(
+    payload: dict[str, Any],
+    *,
+    answer: str,
+    task: str | None = None,
+) -> dict[str, Any]:
+    """Add a structured ``final_artifact`` when the answer warrants markdown or code output."""
+    if payload.get("final_artifact"):
+        return payload
+    routing_decision = payload.get("routing_decision")
+    if not isinstance(routing_decision, str):
+        routing_decision = None
+    artifact = build_final_artifact_from_answer(
+        answer,
+        task=task,
+        routing_decision=routing_decision,
+    )
+    if artifact is not None:
+        payload["final_artifact"] = artifact
+        payload["output_format"] = artifact.get("kind")
     return payload
 
 

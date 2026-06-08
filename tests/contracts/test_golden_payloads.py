@@ -124,8 +124,8 @@ def test_capture_passive_events_websocket_golden_payloads(no_db_client, auth_hea
 
 
 @pytest.mark.skipif(
-    GOLDEN_PAYLOADS_DIR.exists(),
-    reason="Golden payloads already captured - use for regression testing",
+    not GOLDEN_PAYLOADS_DIR.exists(),
+    reason="Golden payloads not captured yet — run capture tests first",
 )
 def test_regression_chat_websocket_events(no_db_client, auth_headers: dict[str, str]) -> None:
     """Regression test: compare current events against golden payload."""
@@ -156,8 +156,8 @@ def test_regression_chat_websocket_events(no_db_client, auth_headers: dict[str, 
 
 
 @pytest.mark.skipif(
-    GOLDEN_PAYLOADS_DIR.exists(),
-    reason="Golden payloads already captured - use for regression testing",
+    not GOLDEN_PAYLOADS_DIR.exists(),
+    reason="Golden payloads not captured yet — run capture tests first",
 )
 def test_regression_passive_events_websocket_events(no_db_client, auth_headers: dict[str, str]) -> None:
     """Regression test: compare passive events against golden payload."""

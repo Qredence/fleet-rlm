@@ -24,14 +24,9 @@ from .memory_db import init_memory_db, memory_db_bootstrap_script
 
 
 def _iter_scaffold_skill_markdown() -> Iterator[tuple[str, str]]:
-    import importlib.resources as _importlib_resources
+    from fleet_rlm.runtime.tools.skill_tools import iter_scaffold_skill_markdown
 
-    skills_pkg = _importlib_resources.files("fleet_rlm.scaffold") / "skills"
-    for skill_entry in skills_pkg.iterdir():
-        skill_md = skill_entry / "SKILL.md"
-        if not skill_md.is_file():
-            continue
-        yield skill_entry.name, skill_md.read_text(encoding="utf-8")
+    yield from iter_scaffold_skill_markdown()
 
 
 def seed_system_skills(mounted_root: str) -> None:

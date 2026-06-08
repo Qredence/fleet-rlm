@@ -1,35 +1,40 @@
 ---
 name: rlm
-description: "Use when starting fleet-rlm agent work or routing a task to the right workflow skill for sandbox execution, recursive delegation, signature design, optimization, long-context work, or debugging."
+description: "Hub skill for fleet-rlm: when to use dspy.RLM vs ReAct/CodeAct and which workflow skill to load next."
 ---
 
-## Core Model
+# fleet-rlm RLM Hub
 
-AgentRuntime receives a user turn and resolves available tools.
-EscalatingFleetModule decides execution path: ChainOfThought (lightweight) OR dspy.RLM (heavy).
-The chosen path produces tool calls including delegate_to_rlm for recursive work.
-Tools execute via DaytonaInterpreter which manages sandbox lifecycle.
-DaytonaInterpreter wraps a DaytonaSandboxRuntime (SDK, snapshots, volumes).
-Code runs inside an isolated Daytona workspace with durable volume at /home/daytona/memory/.
-Results return via SUBMIT() protocol back through the interpreter.
-The module aggregates tool results and streams the final response.
-Budget tracking (max_llm_calls, timeouts) is enforced at interpreter and module level.
-WebSocket streaming delivers incremental output to the Web UI or API consumers.
+Canonical DSPy module: https://dspy.ai/api/modules/RLM/
 
-## Canonical Commands
+Module variants overview: https://dspy.ai/diving-deeper/built-in-module-variants/
 
-- `uv run fleet web` — Web UI on 0.0.0.0:8000
-- `uv run fleet-rlm serve-api --port 8000` — API server
-- `uv run fleet-rlm chat` — Terminal interactive chat
-- `uv run fleet-rlm daytona-smoke --repo <url>` — Validate Daytona
-- `uv run fleet-rlm optimize` — Run GEPA/MIPROv2 optimization
+## When to use `dspy.RLM`
 
-## Decision Tree
+Use RLM when context is too large, unevenly relevant, or benefits from programmatic exploration — not a single full-context LM call.
 
-1. EXECUTE code in sandbox / persist results / manage workspace → `sandbox-execution`
-2. DELEGATE recursive work (parent→child, batch, budget) → `delegation`
-3. DESIGN signatures / choose modules / wire execution modes → `dspy-programs`
-4. PROCESS large documents or codebases (chunking, map-reduce) → `long-context`
-5. OPTIMIZE programs (GEPA, evaluation, datasets, MLflow) → `optimization`
-6. DIAGNOSE failures (sandbox errors, contract drift, test failures) → `diagnostics`
-7. UNDERSTAND volume filesystem / what's pre-initialized / CRUD contract → `volume-bootstrap`
+fleet-rlm routes to `dspy.RLM` when:
+
+- `execution_mode` is `rlm` / `rlm_only`
+- Auto mode detects URL document analysis (`url_document_rlm`)
+- Auto mode detects large context (`large_context_rlm`, threshold via `FLEET_RLM_LARGE_CONTEXT_THRESHOLD`)
+
+Lightweight chat stays on ChainOfThought; tool-heavy turns use ReAct via `[TOOLS NEEDED]` sentinel.
+
+## REPL contract (Daytona interpreter)
+
+- Large fields are REPL variables; explore with `print()` and Python.
+- Built-ins: `llm_query`, `llm_query_batched`, `SUBMIT(...)`.
+- Fleet extensions: `sub_rlm`, `sub_rlm_batched`, volume `load_skill(name)`.
+- Durable storage: `/home/daytona/memory/` (`skills/system/*.md` seeded from scaffold).
+
+## Route to a workflow skill
+
+1. Sandbox / REPL / SUBMIT / volume lifecycle → `sandbox-execution`
+2. Recursive child sandboxes / budgets → `delegation`
+3. Signatures / modules / execution modes → `dspy-programs`
+4. Large documents / variable mode → `long-context`
+5. GEPA / offline optimization → `optimization`
+6. Failures / contract drift → `diagnostics`
+7. Volume layout / CRUD → `volume-bootstrap`
+8. Playwright / rendered pages → `browser-interaction`

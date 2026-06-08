@@ -425,8 +425,12 @@ class AgentRuntime:
         if batch_concurrency is not None:
             self.batch_concurrency = batch_concurrency
 
-        from fleet_rlm.runtime.modules.context_routing import build_turn_context
+        from fleet_rlm.runtime.modules.context_routing import (
+            build_turn_context,
+            interpreter_session_context_paths,
+        )
 
+        interpreter = getattr(self, "interpreter", None)
         self._turn_context = build_turn_context(
             user_request=message,
             history=self.history,
@@ -435,6 +439,7 @@ class AgentRuntime:
             repo_url=repo_url,
             repo_ref=repo_ref,
             loaded_document_paths=list(self.loaded_document_paths),
+            session_context_paths=interpreter_session_context_paths(interpreter),
         )
         try:
             react_program = rh.get_streamable_react_program(self.agent)

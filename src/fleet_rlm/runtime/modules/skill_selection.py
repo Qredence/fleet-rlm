@@ -1,10 +1,4 @@
-"""Skill selection module — proactively selects and injects relevant skills into context.
-
-This module classifies the user request against the predefined skill set and
-loads matching skill instructions into the agent's context before the main
-reasoning path runs. It uses a fast keyword heuristic for obvious cases and
-falls back to a ChainOfThought LLM call for ambiguous requests.
-"""
+"""Skill selection module — proactively selects and injects relevant skills into context."""
 
 from __future__ import annotations
 
@@ -15,22 +9,20 @@ from typing import Any
 import dspy
 
 from fleet_rlm.runtime.agent.signatures import SkillSelectionSignature
-from fleet_rlm.runtime.tools.skill_tools import _load_skill_impl
+from fleet_rlm.runtime.task_intent import has_url, has_url_document_intent
+from fleet_rlm.runtime.tools.skill_tools import _load_skill_impl, discover_scaffold_skills
 
 logger = logging.getLogger(__name__)
 
-AVAILABLE_SKILLS: dict[str, str] = {
-    "sandbox-execution": "Execute Python in Daytona sandboxes, persist results, volume lifecycle",
-    "delegation": "Recursive child RLMs, batch fan-out, budget management",
-    "dspy-programs": "DSPy signature design, module registry, execution modes",
-    "long-context": "Chunk large documents, variable-mode, hierarchical map-reduce",
-    "optimization": "GEPA/MIPROv2 optimization, evaluation metrics, MLflow",
-    "diagnostics": "Diagnose runtime failures, contract drift, test triage",
-    "volume-bootstrap": "Volume filesystem structure, CRUD helpers, persistence guarantees",
-    "browser-interaction": "Rendered page fetching, JavaScript-heavy docs, Playwright browser inspection",
-}
-
-_KEYWORD_MAP: dict[str, list[str]] = {
+# Keyword overrides for skills not fully captured by frontmatter alone.
+_KEYWORD_OVERRIDES: dict[str, list[str]] = {
+    "rlm": [
+        "recursive language",
+        "dspy.rlm",
+        "variable mode",
+        "variable-mode",
+        "repl loop",
+    ],
     "sandbox-execution": [
         "execute",
         "sandbox",
@@ -40,7 +32,6 @@ _KEYWORD_MAP: dict[str, list[str]] = {
         "SUBMIT",
         "volume",
         "persist",
-        "shutdown",
         "workspace",
     ],
     "delegation": [
@@ -49,15 +40,14 @@ _KEYWORD_MAP: dict[str, list[str]] = {
         "sub_rlm",
         "rlm_query",
         "batch",
-        "concurrent",
         "fan-out",
         "fanout",
         "budget",
         "recursion",
     ],
     "dspy-programs": [
-        "signature",
         "dspy",
+        "signature",
         "module",
         "InputField",
         "OutputField",
@@ -73,17 +63,6 @@ _KEYWORD_MAP: dict[str, list[str]] = {
         "semantic chunk",
         "variable-mode",
         "codebase analysis",
-        "analyze the documentation",
-        "analyze documentation",
-        "read the docs",
-        "summarize the page",
-        "http://",
-        "https://",
-        "fetch",
-        "browse",
-        "scrape",
-        "analyze https",
-        "analyze http",
     ],
     "browser-interaction": [
         "render the page",
@@ -101,22 +80,17 @@ _KEYWORD_MAP: dict[str, list[str]] = {
         "optimi",
         "GEPA",
         "MIPROv2",
-        "evaluate",
         "scorer",
         "dataset",
         "mlflow",
-        "training",
         "compile",
     ],
     "diagnostics": [
-        "debug",
         "diagnos",
-        "broken",
-        "fail",
-        "error",
-        "test",
-        "contract drift",
         "troubleshoot",
+        "contract drift",
+        "broken sandbox",
+        "runtime failure",
     ],
     "volume-bootstrap": [
         "volume init",
@@ -131,12 +105,35 @@ _KEYWORD_MAP: dict[str, list[str]] = {
 }
 
 
+def _build_keyword_map() -> dict[str, list[str]]:
+    catalog = discover_scaffold_skills()
+    keyword_map: dict[str, list[str]] = {}
+    for skill_name in catalog:
+        keywords = list(_KEYWORD_OVERRIDES.get(skill_name, []))
+        normalized = skill_name.replace("-", " ")
+        keywords.append(normalized)
+        keyword_map[skill_name] = keywords
+    for skill_name, keywords in _KEYWORD_OVERRIDES.items():
+        if skill_name not in keyword_map:
+            keyword_map[skill_name] = list(keywords)
+    return keyword_map
+
+
+AVAILABLE_SKILLS: dict[str, str] = discover_scaffold_skills()
+_KEYWORD_MAP: dict[str, list[str]] = _build_keyword_map()
+
+
 def _keyword_match(user_request: str) -> list[str]:
     """Fast keyword-based skill matching (zero LLM cost)."""
     request_lower = user_request.lower()
     scores: dict[str, int] = {}
     for skill_name, keywords in _KEYWORD_MAP.items():
-        score = sum(1 for kw in keywords if kw.lower() in request_lower)
+        score = 0
+        for kw in keywords:
+            if kw.lower() in request_lower:
+                score += 1
+        if skill_name == "long-context" and has_url_document_intent(user_request):
+            score += 2
         if score > 0:
             scores[skill_name] = score
 
@@ -148,22 +145,83 @@ def _keyword_match(user_request: str) -> list[str]:
     return [name for name, score in scores.items() if score >= threshold]
 
 
+def _routing_skill_hints(
+    *,
+    execution_mode: str,
+    routing_decision: str | None,
+    is_first_turn: bool,
+    user_request: str = "",
+) -> list[str]:
+    hints: list[str] = []
+    if routing_decision == "url_document_rlm":
+        hints.append("long-context")
+    if routing_decision == "large_context_rlm" or execution_mode in {"rlm", "rlm_only"}:
+        hints.append("long-context")
+    if is_first_turn:
+        hints.append("rlm")
+    if has_url(user_request) and "playwright" in user_request.lower():
+        hints.append("browser-interaction")
+    return hints
+
+
+def _merge_skill_candidates(
+    *,
+    keyword_candidates: list[str],
+    routing_hints: list[str],
+) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for name in [*routing_hints, *keyword_candidates]:
+        if name not in AVAILABLE_SKILLS or name in seen:
+            continue
+        seen.add(name)
+        merged.append(name)
+    return merged
+
+
+def select_skill_candidates(
+    user_request: str,
+    *,
+    execution_mode: str = "auto",
+    routing_decision: str | None = None,
+    is_first_turn: bool = False,
+) -> list[str]:
+    """Return merged keyword and routing-hint skill candidates for a turn."""
+    routing_hints = _routing_skill_hints(
+        execution_mode=execution_mode,
+        routing_decision=routing_decision,
+        is_first_turn=is_first_turn,
+        user_request=user_request,
+    )
+    return _merge_skill_candidates(
+        keyword_candidates=_keyword_match(user_request),
+        routing_hints=routing_hints,
+    )
+
+
+def preview_skills_for_turn(
+    user_request: str,
+    *,
+    execution_mode: str = "auto",
+    routing_decision: str | None = None,
+    is_first_turn: bool = False,
+) -> list[str]:
+    """Canonical skill preview for routing, snapshots, and runtime selection."""
+    return select_skill_candidates(
+        user_request,
+        execution_mode=execution_mode,
+        routing_decision=routing_decision,
+        is_first_turn=is_first_turn,
+    )
+
+
 def _format_available_skills() -> str:
-    """Format the skill catalog as a compact string for the LLM."""
     lines = [f"- {name}: {desc}" for name, desc in AVAILABLE_SKILLS.items()]
     return "\n".join(lines)
 
 
 class SkillSelectionModule(dspy.Module):
-    """Selects relevant skills from the predefined set and loads their instructions.
-
-    Uses a two-phase approach:
-    1. Fast keyword heuristic — if exactly one skill matches clearly, use it (no LLM cost)
-    2. ChainOfThought fallback — for ambiguous requests, ask the LLM to select
-
-    The loaded skill instructions are returned as a string suitable for injection
-    into core_memory or the RLM prompt context.
-    """
+    """Selects relevant skills and loads their instructions for injection."""
 
     def __init__(self, *, volume_mount_path: str | None = None, max_skills: int = 2) -> None:
         super().__init__()
@@ -172,7 +230,6 @@ class SkillSelectionModule(dspy.Module):
         self._max_skills = max_skills
 
     def _load_skills(self, names: list[str]) -> str:
-        """Load skill instructions from the volume and return as formatted context."""
         loaded: list[str] = []
         for name in names[: self._max_skills]:
             result = _load_skill_impl(name, volume_mount_path=self._volume_mount_path)
@@ -181,7 +238,6 @@ class SkillSelectionModule(dspy.Module):
         return "\n\n".join(loaded)
 
     def _prediction(self, *, selected: list[str], reasoning: str = "") -> dspy.Prediction:
-        """Build a selection prediction whose metadata matches loaded context."""
         selected = selected[: self._max_skills]
         skill_context = self._load_skills(selected) if selected else ""
         return dspy.Prediction(
@@ -191,7 +247,6 @@ class SkillSelectionModule(dspy.Module):
         )
 
     def _parse_skill_names(self, raw: Any) -> list[str]:
-        """Parse skill names from LLM output (handles list or comma-separated string)."""
         if isinstance(raw, list):
             names = [str(s).strip() for s in raw]
         else:
@@ -204,15 +259,16 @@ class SkillSelectionModule(dspy.Module):
         *,
         user_request: str,
         core_memory: str = "",
+        execution_mode: str = "auto",
+        routing_decision: str | None = None,
+        is_first_turn: bool = False,
     ) -> dspy.Prediction:
-        """Select and load relevant skills for the given request.
-
-        Returns a Prediction with:
-        - selected_skills: list[str] — names of selected skills
-        - skill_context: str — loaded skill instructions (for injection into context)
-        - reasoning: str — why these skills were selected (empty for keyword path)
-        """
-        candidates = _keyword_match(user_request)
+        candidates = select_skill_candidates(
+            user_request,
+            execution_mode=execution_mode,
+            routing_decision=routing_decision,
+            is_first_turn=is_first_turn,
+        )
 
         if len(candidates) == 1:
             return self._prediction(selected=candidates)
@@ -246,4 +302,6 @@ __all__ = [
     "AVAILABLE_SKILLS",
     "SkillSelectionModule",
     "_keyword_match",
+    "preview_skills_for_turn",
+    "select_skill_candidates",
 ]

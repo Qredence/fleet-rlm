@@ -268,6 +268,7 @@ async def aiter_chat_turn_stream_posthoc(
     done_payload.update(runtime._runtime_observability_payload())
     done_payload.update(degradation_payload)
     done_payload.update(routing_payload)
+    rh.attach_final_artifact(done_payload, answer=response, task=message)
     yield RuntimeEvent(
         kind=RuntimeEventKind.DONE,
         text=response,
@@ -480,6 +481,8 @@ async def aiter_chat_turn_stream_native(
         )
     if final_reasoning:
         done_payload["final_reasoning"] = final_reasoning
+
+    rh.attach_final_artifact(done_payload, answer=response, task=message)
 
     t_total_ms = (_time.monotonic() - t_turn_start) * 1000
     logger.info("streaming: turn completed in %.0fms", t_total_ms)

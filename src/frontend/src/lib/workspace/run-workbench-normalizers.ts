@@ -67,7 +67,7 @@ export function preferredArtifactText(value: unknown): string | undefined {
   const record = asRecord(value);
   if (!record) return undefined;
 
-  for (const key of ["final_markdown", "summary", "text", "content", "message"]) {
+  for (const key of ["final_markdown", "content", "summary", "text", "message"]) {
     const candidate = asText(record[key]);
     if (candidate) return candidate;
   }

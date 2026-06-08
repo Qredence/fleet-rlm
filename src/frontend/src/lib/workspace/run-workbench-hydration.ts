@@ -67,7 +67,7 @@ function artifactFromCompletionText(text: string) {
     value: {
       text: trimmed,
       final_markdown: trimmed,
-      summary: trimmed,
+      summary: trimmed.slice(0, 320),
     },
     finalization_mode: "RETURN",
   });

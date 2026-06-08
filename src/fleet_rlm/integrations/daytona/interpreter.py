@@ -392,6 +392,7 @@ class DaytonaInterpreter(
         volume_name: str | None,
         sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
+        snapshot: str | None = None,
     ) -> ReconfigureOutcome:
         return self._workspace.configure_workspace(
             repo_url=repo_url,
@@ -400,6 +401,7 @@ class DaytonaInterpreter(
             volume_name=volume_name,
             sandbox_labels=sandbox_labels,
             force_new_session=force_new_session,
+            snapshot=snapshot,
         )
 
     async def aconfigure_workspace(
@@ -411,6 +413,7 @@ class DaytonaInterpreter(
         volume_name: str | None,
         sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
+        snapshot: str | None = None,
     ) -> ReconfigureOutcome:
         return await self._workspace.aconfigure_workspace(
             repo_url=repo_url,
@@ -419,6 +422,7 @@ class DaytonaInterpreter(
             volume_name=volume_name,
             sandbox_labels=sandbox_labels,
             force_new_session=force_new_session,
+            snapshot=snapshot,
         )
 
     def export_session_state(self) -> dict[str, Any]:

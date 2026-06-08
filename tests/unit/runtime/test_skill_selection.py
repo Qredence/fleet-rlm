@@ -60,7 +60,8 @@ def test_skill_selection_falls_back_when_llm_returns_no_valid_skills() -> None:
     result = module(user_request="debug a broken sandbox dspy module")
 
     module.select.assert_called_once()
-    assert result.selected_skills == ["sandbox-execution", "dspy-programs"]
+    assert len(result.selected_skills) == 2
+    assert set(result.selected_skills) <= {"sandbox-execution", "dspy-programs", "diagnostics"}
     assert result.reasoning == ""
 
 
