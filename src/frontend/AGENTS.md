@@ -20,22 +20,22 @@ Before editing:
 
 ## Source-of-Truth Files
 
-| Concern                 | File(s)                                                |
-| ----------------------- | ------------------------------------------------------ |
-| Scripts & validation    | `package.json`                                         |
-| Lint/build/import rules | `vite.config.ts`                                       |
-| Routes & surfaces       | `src/routes/*`                                         |
-| App chrome / layout     | `src/features/layout/*`                                |
-| Product surfaces        | `src/features/{workspace,volumes,settings}/*`          |
-| UI primitives           | `src/components/ui/*` (shadcn/Base UI)                 |
-| Agent Elements (chat)   | `src/components/agent-elements/*`                      |
+| Concern                 | File(s)                                                   |
+| ----------------------- | --------------------------------------------------------- |
+| Scripts & validation    | `package.json`                                            |
+| Lint/build/import rules | `vite.config.ts`                                          |
+| Routes & surfaces       | `src/routes/*`                                            |
+| App chrome / layout     | `src/features/layout/*`                                   |
+| Product surfaces        | `src/features/{workspace,volumes,settings}/*`             |
+| UI primitives           | `src/components/ui/*` (shadcn/Base UI)                    |
+| Agent Elements (chat)   | `src/components/agent-elements/*`                         |
 | Legacy inspection UI    | `src/components/ai-elements/*` (composer/inspection only) |
-| Product compositions    | `src/components/product/*`                             |
-| API clients & types     | `src/lib/rlm-api/*`                                    |
-| Workspace adapters      | `src/lib/workspace/*`                                  |
-| Theme / tokens          | `src/styles/globals.css`                               |
-| shadcn config           | `components.json`                                      |
-| API contract            | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts` |
+| Product compositions    | `src/components/product/*`                                |
+| API clients & types     | `src/lib/rlm-api/*`                                       |
+| Workspace adapters      | `src/lib/workspace/*`                                     |
+| Theme / tokens          | `src/styles/globals.css`                                  |
+| shadcn config           | `components.json`                                         |
+| API contract            | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts`    |
 
 ### Generated / Synced — Do Not Hand-Edit
 
@@ -287,11 +287,11 @@ Keep sync artifacts in the same change; never hand-edit generated output.
 
 Registries are configured in [components.json](components.json):
 
-| Namespace | URL | Use |
-| --- | --- | --- |
-| `@agent-elements` | `https://agent-elements.21st.dev/r/{name}.json` | Chat shell, tool cards, input bar |
-| `@ai-elements` | `https://ai-sdk.dev/elements/api/registry/{name}.json` | Do not install new chat components |
-| `@prompt-kit` | `https://www.prompt-kit.com/c/{name}.json` | Avoid unless net-new capability |
+| Namespace         | URL                                                    | Use                                |
+| ----------------- | ------------------------------------------------------ | ---------------------------------- |
+| `@agent-elements` | `https://agent-elements.21st.dev/r/{name}.json`        | Chat shell, tool cards, input bar  |
+| `@ai-elements`    | `https://ai-sdk.dev/elements/api/registry/{name}.json` | Do not install new chat components |
+| `@prompt-kit`     | `https://www.prompt-kit.com/c/{name}.json`             | Avoid unless net-new capability    |
 
 ### Install Agent Elements
 
@@ -312,26 +312,26 @@ import { BashTool } from "@/components/agent-elements/tools/bash-tool";
 
 ### Canonical Agent Elements (actively used)
 
-| Component | Location | Consumers | Purpose |
-| --- | --- | --- | --- |
-| `AgentChat` | `agent-elements/agent-chat.tsx` | `workspace-message-list.tsx` | Full chat shell (messages + input) |
-| `InputBar` | `agent-elements/input-bar.tsx` | `workspace-agent-input-bar.tsx` | Composer with mode/model pickers |
-| `Suggestions` | `agent-elements/input/suggestions.tsx` | `AgentChat` via `workspace-message-list.tsx` | Quick-prompt chips (empty state + input) |
-| Tool mapping | `lib/workspace/agent-tool-parts.ts` | `agent-chat-adapter.ts`, `execution-inspector-rows.tsx` | Shared tool part normalization |
-| Static tool helpers | `agent-elements/utils/static-tool-parts.ts` | workbench, inspector | `ThinkingTool` steps outside chat transcripts |
-| Tool cards | `agent-elements/tools/*` | `agent-chat-adapter.ts` via `toolRenderers` | Bash, Edit, Search, MCP, Subagent, Thinking, Generic |
-| `TextShimmer` | `agent-elements/text-shimmer.tsx` | tool rows, loading states | Streaming label shimmer |
-| `Streamdown` | `ui/streamdown.tsx` | agent-elements markdown | Canonical markdown renderer |
+| Component           | Location                                    | Consumers                                               | Purpose                                              |
+| ------------------- | ------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------- |
+| `AgentChat`         | `agent-elements/agent-chat.tsx`             | `workspace-message-list.tsx`                            | Full chat shell (messages + input)                   |
+| `InputBar`          | `agent-elements/input-bar.tsx`              | `workspace-agent-input-bar.tsx`                         | Composer with mode/model pickers                     |
+| `Suggestions`       | `agent-elements/input/suggestions.tsx`      | `AgentChat` via `workspace-message-list.tsx`            | Quick-prompt chips (empty state + input)             |
+| Tool mapping        | `lib/workspace/agent-tool-parts.ts`         | `agent-chat-adapter.ts`, `execution-inspector-rows.tsx` | Shared tool part normalization                       |
+| Static tool helpers | `agent-elements/utils/static-tool-parts.ts` | workbench, inspector                                    | `ThinkingTool` steps outside chat transcripts        |
+| Tool cards          | `agent-elements/tools/*`                    | `agent-chat-adapter.ts` via `toolRenderers`             | Bash, Edit, Search, MCP, Subagent, Thinking, Generic |
+| `TextShimmer`       | `agent-elements/text-shimmer.tsx`           | tool rows, loading states                               | Streaming label shimmer                              |
+| `Streamdown`        | `ui/streamdown.tsx`                         | agent-elements markdown                                 | Canonical markdown renderer                          |
 
 Wire backend tools through `agent-chat-adapter.ts` → `ToolRenderer`. Shared normalization lives in `lib/workspace/agent-tool-parts.ts`. Unknown kinds should fall back to `GenericTool`.
 
 ### Legacy `ai-elements/` (composer only)
 
-| Component | Location | Consumers | Notes |
-| --- | --- | --- | --- |
-| `PromptInput` | `ai-elements/prompt-input/` | `workspace-composer.tsx` | Legacy composer; prefer `InputBar` for new work |
-| `ChainOfThought` | `ai-elements/chain-of-thought.tsx` | — | Removed from execution inspector; do not reintroduce |
-| `Reasoning` | `ai-elements/reasoning.tsx` | tests only | Prefer `ThinkingTool` via `static-tool-parts.ts` |
+| Component        | Location                           | Consumers                | Notes                                                |
+| ---------------- | ---------------------------------- | ------------------------ | ---------------------------------------------------- |
+| `PromptInput`    | `ai-elements/prompt-input/`        | `workspace-composer.tsx` | Legacy composer; prefer `InputBar` for new work      |
+| `ChainOfThought` | `ai-elements/chain-of-thought.tsx` | —                        | Removed from execution inspector; do not reintroduce |
+| `Reasoning`      | `ai-elements/reasoning.tsx`        | tests only               | Prefer `ThinkingTool` via `static-tool-parts.ts`     |
 
 Do **not** install `Message`, `Conversation`, `Tool`, or other chat primitives from `@ai-elements` or `@prompt-kit`.
 

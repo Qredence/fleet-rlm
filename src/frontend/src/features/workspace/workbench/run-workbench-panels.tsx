@@ -116,7 +116,9 @@ export function ArtifactPanel({ artifact }: { artifact?: ArtifactSummary | null 
         <>
           {artifact.textPreview ? (
             <Card className="border-border-subtle/80 bg-muted/15">
-              <CardContent className="pt-4 text-sm text-foreground">{artifact.textPreview}</CardContent>
+              <CardContent className="pt-4 text-sm text-foreground">
+                {artifact.textPreview}
+              </CardContent>
             </Card>
           ) : null}
           <CodeBlock className="border-border-subtle/80 bg-muted/15">

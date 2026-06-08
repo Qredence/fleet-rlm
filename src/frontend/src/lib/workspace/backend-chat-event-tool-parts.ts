@@ -332,7 +332,10 @@ function upsertMatchingToolPart(
       const merged: ChatRenderPart = {
         ...existing,
         ...part,
-        input: existing.kind === "tool" && part.kind === "tool" ? (existing.input ?? part.input) : part.input,
+        input:
+          existing.kind === "tool" && part.kind === "tool"
+            ? (existing.input ?? part.input)
+            : part.input,
         state: part.state ?? existing.state,
         output: part.output ?? existing.output,
         errorText: part.errorText ?? existing.errorText,

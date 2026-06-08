@@ -1,6 +1,10 @@
 import type { ChatMessage } from "@/lib/workspace/workspace-types";
 import { asOptionalText, asRecord } from "@/lib/workspace/backend-chat-event-payload";
-import { appendToolLikePart, inferStatusTone, sandboxProgressPartFromStatus } from "@/lib/workspace/backend-chat-event-tool-parts";
+import {
+  appendToolLikePart,
+  inferStatusTone,
+  sandboxProgressPartFromStatus,
+} from "@/lib/workspace/backend-chat-event-tool-parts";
 
 export type TracePartAppender = (
   messages: ChatMessage[],

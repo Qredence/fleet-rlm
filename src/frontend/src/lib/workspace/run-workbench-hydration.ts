@@ -427,7 +427,7 @@ export function applyFrameToRunWorkbenchState(
   const hasRunResultBackfill = asRecord(payload?.run_result ?? payload?.runResult) != null;
   const canonicalFinalArtifact = isCanonicalCompletion
     ? (explicitFinalArtifact ??
-        (!hasRunResultBackfill ? artifactFromCompletionText(frame.data.text) : null))
+      (!hasRunResultBackfill ? artifactFromCompletionText(frame.data.text) : null))
     : undefined;
   const mergedSummary = mergeMlflowTraceMetadata(canonicalSummary ?? next.summary, payload);
 

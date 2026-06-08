@@ -188,7 +188,9 @@ function resolveFinalAssistantText(text: string, payload?: Record<string, unknow
     const summary = asOptionalText(value?.summary ?? value?.text);
     if (summary) return summary;
   }
-  const preferred = preferredFinalArtifactText(artifact ?? payload?.final_artifact ?? payload?.finalArtifact);
+  const preferred = preferredFinalArtifactText(
+    artifact ?? payload?.final_artifact ?? payload?.finalArtifact,
+  );
 
   return preferred ?? text;
 }

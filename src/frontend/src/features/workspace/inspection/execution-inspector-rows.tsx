@@ -2,10 +2,7 @@ import { memo } from "react";
 
 import { ToolRenderer } from "@/components/agent-elements/tools/tool-renderer";
 import type { AgentToolPart } from "@/lib/workspace/agent-tool-parts";
-import {
-  chatRenderPartToAgentToolPart,
-  mapToolState,
-} from "@/lib/workspace/agent-tool-parts";
+import { chatRenderPartToAgentToolPart, mapToolState } from "@/lib/workspace/agent-tool-parts";
 import type { ExecutionSection } from "@/features/workspace/conversation/assistant-content/model/types";
 import {
   executionSectionState,
@@ -52,7 +49,8 @@ function executionSectionToToolParts(
   }
 
   const agentPart = chatRenderPartToAgentToolPart(section.part, messageId, 0, {
-    startedAt: section.part.kind === "tool" && section.part.state === "running" ? Date.now() : undefined,
+    startedAt:
+      section.part.kind === "tool" && section.part.state === "running" ? Date.now() : undefined,
   });
   if (!agentPart) return null;
 

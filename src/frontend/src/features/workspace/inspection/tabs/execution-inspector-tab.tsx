@@ -2,11 +2,7 @@ import { memo } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import type { AssistantContentModel } from "@/features/workspace/conversation/assistant-content/model";
 import { ExecutionInspectorRow } from "@/features/workspace/inspection/execution-inspector-rows";
 import { inspectorStyles } from "@/features/workspace/inspection/inspector-styles";

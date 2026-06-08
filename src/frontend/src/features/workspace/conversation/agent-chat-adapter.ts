@@ -13,11 +13,7 @@ interface AgentChatMessageAdapterOptions {
   onResolveClarification: (msgId: string, answer: string) => void;
 }
 
-function toUiMessage(message: {
-  id: string;
-  role: "user" | "assistant";
-  parts: unknown[];
-}) {
+function toUiMessage(message: { id: string; role: "user" | "assistant"; parts: unknown[] }) {
   return message as import("ai").UIMessage;
 }
 
