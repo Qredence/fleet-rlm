@@ -344,6 +344,7 @@ async def run_streaming_turn(
     from fleet_rlm.runtime.agent.turn_progress_relay import TurnProgressRelay
 
     progress_relay = TurnProgressRelay(loop=ws_loop)
+    previous_progress_relay = getattr(agent, "_turn_progress_relay", None)
     if hasattr(agent, "_turn_progress_relay"):
         setattr(agent, "_turn_progress_relay", progress_relay)
 
@@ -413,7 +414,7 @@ async def run_streaming_turn(
         if interpreter is not None:
             setattr(interpreter, "_turn_step_callback", previous_turn_callback)
         if hasattr(agent, "_turn_progress_relay"):
-            setattr(agent, "_turn_progress_relay", None)
+            setattr(agent, "_turn_progress_relay", previous_progress_relay)
 
     return last_loaded_docs_path
 

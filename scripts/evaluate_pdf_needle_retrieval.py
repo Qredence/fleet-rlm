@@ -308,6 +308,7 @@ def evaluate_item(
                 trajectory="",
             )
             row = {
+                "item": {"negative_control": bool(item.get("negative_control"))},
                 "item_id": item["id"],
                 "category": item.get("category"),
                 "backend": routing_row["backend"],
@@ -318,7 +319,7 @@ def evaluate_item(
                 "scores": scores.to_dict(),
                 "answer_excerpt": "",
                 "trajectory_notes": "routing-only",
-                "verdict": "PASS" if scores.routing >= 1.0 or item.get("negative_control") else "FAIL",
+                "verdict": _overall_verdict(scores.to_dict(), item),
             }
             rows.append(row)
 

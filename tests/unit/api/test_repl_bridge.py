@@ -47,7 +47,7 @@ async def test_repl_bridge_forwards_interpreter_progress_to_relay() -> None:
             "event_kind": "write",
         }
     )
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(0)
 
     drained = relay.drain_nonblocking()
     assert any(event.text and "write" in event.text for event in drained)

@@ -188,7 +188,15 @@ async def prepare_daytona_workspace_for_turn(
     if not callable(astart):
         return
 
-    prep_timeout = float(getattr(interpreter, "timeout", None) or 120)
+    prep_timeout = 120.0
+    raw_timeout = getattr(interpreter, "timeout", None)
+    if raw_timeout is not None:
+        try:
+            prep_timeout = float(raw_timeout)
+        except (TypeError, ValueError):
+            prep_timeout = 120.0
+    if prep_timeout <= 0:
+        prep_timeout = 120.0
     try:
         await asyncio.wait_for(astart(), timeout=prep_timeout)
     except asyncio.TimeoutError as exc:

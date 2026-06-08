@@ -310,9 +310,9 @@ export function chatRenderPartToAgentToolPart(
       state,
       input: commandInput(part),
       output: outputRecord(part),
-      ...(state === "call" || state === "input-streaming"
-        ? { startedAt: options?.startedAt ?? Date.now() }
-        : {}),
+      ...(state === "call" || state === "input-streaming") && options?.startedAt != null
+        ? { startedAt: options.startedAt }
+        : {},
     };
   }
 

@@ -1,6 +1,6 @@
 import { SearchSlash } from "lucide-react";
 
-import { Markdown } from "@/components/agent-elements/markdown";
+import { Streamdown } from "@/components/ui/streamdown";
 import { ThinkingTool } from "@/components/agent-elements/tools/thinking-tool";
 import { buildThinkingStep } from "@/components/agent-elements/utils/static-tool-parts";
 import { EmptyPanel } from "@/components/product/empty-panel";
@@ -103,7 +103,7 @@ export function ArtifactPanel({ artifact }: { artifact?: ArtifactSummary | null 
       {artifact.kind === "markdown" && markdownText ? (
         <Card className="border-border-subtle/80 bg-muted/15">
           <CardContent className="pt-4">
-            <Markdown content={markdownText} className="text-sm leading-relaxed" />
+            <Streamdown content={markdownText} className="text-sm leading-relaxed" />
           </CardContent>
         </Card>
       ) : null}

@@ -203,12 +203,14 @@ def build_turn_context(
         session_context_paths=session_context_paths,
     )
     threshold = large_context_threshold_chars()
+    effective_path_set = set(effective_paths or [])
+    extra_loaded_paths = [path for path in (loaded_document_paths or []) if path not in effective_path_set]
     estimated, sources = estimate_turn_context_chars(
         user_request=user_request,
         history=history,
         docs_path=docs_path,
         context_paths=effective_paths,
-        loaded_document_paths=loaded_document_paths,
+        loaded_document_paths=extra_loaded_paths or None,
     )
     return TurnContext(
         docs_path=(docs_path or "").strip() or None,
@@ -274,7 +276,8 @@ def load_large_context_rlm_kwargs(
         path = Path(docs_path)
         if path.is_file():
             text, meta = _load_host_document_text(path)
-            kwargs["document_text"] = text
+            if text.strip():
+                kwargs["document_text"] = text
             manifest["docs_path"] = docs_path
             source_metadata.update(meta)
 

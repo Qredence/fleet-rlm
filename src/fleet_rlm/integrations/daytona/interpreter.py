@@ -60,7 +60,7 @@ from .runtime import (
 )
 from .sandbox_executor import SandboxExecutor
 from .session_runtime import DaytonaSandboxSession
-from .workspace_manager import WorkspaceManager
+from .workspace_manager import _UNSET, WorkspaceManager
 
 
 class DaytonaInterpreter(
@@ -392,7 +392,7 @@ class DaytonaInterpreter(
         volume_name: str | None,
         sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
-        snapshot: str | None = None,
+        snapshot: str | None | object = _UNSET,
     ) -> ReconfigureOutcome:
         return self._workspace.configure_workspace(
             repo_url=repo_url,
@@ -413,7 +413,7 @@ class DaytonaInterpreter(
         volume_name: str | None,
         sandbox_labels: dict[str, str] | None = None,
         force_new_session: bool = False,
-        snapshot: str | None = None,
+        snapshot: str | None | object = _UNSET,
     ) -> ReconfigureOutcome:
         return await self._workspace.aconfigure_workspace(
             repo_url=repo_url,

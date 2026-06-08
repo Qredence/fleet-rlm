@@ -99,8 +99,10 @@ def _application_turn_span(context: MlflowTraceRequestContext):
         "fleet_rlm.trace_kind": "application",
         "mlflow.traceName": "fleet_rlm.chat_turn",
     }
+    entered = False
     try:
         with start_span(name="fleet_rlm.chat_turn", span_type="CHAIN", attributes=attributes) as span:
+            entered = True
             if context.request_preview:
                 set_inputs = getattr(span, "set_inputs", None)
                 if callable(set_inputs):
@@ -119,7 +121,9 @@ def _application_turn_span(context: MlflowTraceRequestContext):
                         set_outputs(outputs)
     except Exception:
         runtime.logger.debug("MLflow application turn span skipped.", exc_info=True)
-        yield None
+        if not entered:
+            yield None
+        raise
 
 
 @contextmanager

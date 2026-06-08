@@ -86,6 +86,8 @@ def run_matrix(
             )
             route = str(preview.get("routing_decision") or "auto")
             scores = score_needle_result(item, answer="", route=route, trajectory="")
+            is_negative = bool(item.get("negative_control"))
+            passed = (scores.routing < 1.0) if is_negative else (scores.routing >= 1.0)
             row = {
                 "timestamp": datetime.now(UTC).isoformat(),
                 "item_id": item["id"],
@@ -99,7 +101,7 @@ def run_matrix(
                 "scores": scores.to_dict(),
                 "answer_excerpt": "",
                 "trajectory_notes": "routing-preview-only",
-                "verdict": "PASS" if scores.routing >= 1.0 or item.get("negative_control") else "FAIL",
+                "verdict": "PASS" if passed else "FAIL",
             }
             rows.append(row)
     return rows

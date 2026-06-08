@@ -59,7 +59,9 @@ _CODE_TASK_TERMS = (
     "generate code",
     "code file",
     "python script",
-    "typescript",
+    "write typescript",
+    "typescript file",
+    "implement in typescript",
     "full file",
     "complete file",
 )
@@ -71,9 +73,6 @@ _QUOTE_RETRIEVAL_TRIGGERS = (
     "return the quote",
     "include the quote",
     "verbatim",
-    "what did ",
-    "what does ",
-    " said ",
 )
 
 _QUOTE_RETRIEVAL_REPL_GUIDANCE = """Exact quote retrieval (mandatory):
