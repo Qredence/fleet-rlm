@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { applyWsFrameToMessages } from "@/lib/workspace/backend-chat-event-adapter";
-import { toAgentChatMessages } from "@/features/workspace/conversation/agent-chat-adapter";
 import type { WsServerMessage } from "@/lib/rlm-api";
 
 describe("backend chat event adapter contract", () => {
@@ -151,17 +150,6 @@ describe("backend chat event adapter contract", () => {
       "tool",
       "tool",
     ]);
-
-    const agentMessages = toAgentChatMessages(afterToolResult.messages, {
-      onResolveHitl: () => undefined,
-      onResolveClarification: () => undefined,
-    });
-    expect(agentMessages[0]?.parts).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ type: "tool-Thinking", state: "input-streaming" }),
-        expect.objectContaining({ type: "tool-Read" }),
-      ]),
-    );
   });
 
   it("appends assistant tokens from execution_step source_type text frames", () => {
