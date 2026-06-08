@@ -1,9 +1,14 @@
 import type { WsEventKind, WsServerEvent, WsServerMessage } from "@/lib/rlm-api/ws-types";
 
 function isWsEventKind(value: string): value is WsEventKind {
-  return ["execution_started", "execution_step", "execution_completed", "command_result"].includes(
-    value,
-  );
+  return [
+    "execution_started",
+    "execution_step",
+    "execution_completed",
+    "command_result",
+    "tool_call",
+    "tool_result",
+  ].includes(value);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -71,12 +76,22 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
     const summary = asRecord(parsed.summary) ?? asRecord(parsed.payload);
     const artifact = asRecord(summary?.final_artifact ?? summary?.finalArtifact);
     const artifactValue = asRecord(artifact?.value);
+    const step = asRecord(parsed.step);
+    const stepOutput = asRecord(step?.output);
+    const stepPayload = asRecord(stepOutput?.payload);
+    const finalReasoning =
+      typeof stepPayload?.final_reasoning === "string"
+        ? stepPayload.final_reasoning
+        : typeof summary?.final_reasoning === "string"
+          ? summary.final_reasoning
+          : undefined;
     return {
       type: "event",
       data: {
         kind: "execution_completed",
         text: asText(
           parsed.output ??
+            stepOutput?.text ??
             artifactValue?.final_markdown ??
             artifactValue?.summary ??
             artifactValue?.text ??
@@ -89,6 +104,8 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
         payload: {
           source_type: frameType,
           ...(summary ? { run_summary: summary, ...summary } : {}),
+          ...(step ? { step } : {}),
+          ...(finalReasoning ? { final_reasoning: finalReasoning } : {}),
           raw: parsed,
         },
         timestamp: asTimestamp(parsed.timestamp),
@@ -117,8 +134,20 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
     };
   }
 
+  const stepInput = asRecord(step.input);
+  const routedSourceType =
+    asText(stepInput?.phase) ||
+    asText(stepInput?.event_kind) ||
+    (String(step.type ?? "").toLowerCase() === "repl" ? "sandbox_exec" : frameType);
+  const stepOutput = asRecord(step.output);
   const text = asText(
-    step.label ?? step.output ?? step.input ?? step.content ?? step.message ?? "execution_step",
+    stepOutput?.text ??
+      step.label ??
+      step.output ??
+      step.input ??
+      step.content ??
+      step.message ??
+      "execution_step",
   );
 
   return {
@@ -127,11 +156,28 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
       kind: "execution_step",
       text,
       payload: {
-        source_type: frameType,
+        source_type: routedSourceType,
         step,
         raw: parsed,
       },
       timestamp: asTimestamp(step.timestamp) ?? asTimestamp(parsed.timestamp),
+    },
+  };
+}
+
+function parseProjectChatEnvelope(parsed: Record<string, unknown>): WsServerEvent | null {
+  const kind = String(parsed.kind ?? "").trim();
+  if (!isWsEventKind(kind)) return null;
+
+  return {
+    type: "event",
+    data: {
+      kind,
+      text: asText(parsed.text),
+      payload: asRecord(parsed.payload) ?? undefined,
+      timestamp: asTimestamp(parsed.timestamp),
+      version: asNumber(parsed.version),
+      event_id: typeof parsed.event_id === "string" ? parsed.event_id : undefined,
     },
   };
 }
@@ -189,6 +235,9 @@ export function parseWsServerFrame(parsed: Record<string, unknown>): WsServerMes
 
   const executionEnvelope = parseExecutionEnvelope(parsed);
   if (executionEnvelope) return executionEnvelope;
+
+  const projectChatEnvelope = parseProjectChatEnvelope(parsed);
+  if (projectChatEnvelope) return projectChatEnvelope;
 
   if (frameType === "error") {
     return {

@@ -180,7 +180,7 @@ function tracePartToAgentParts(part: ChatRenderPart, messageId: string, index: n
       {
         type: "tool-Thinking",
         toolCallId: stableToolCallId(messageId, "reasoning", index),
-        state: part.isStreaming ? "call" : "output-available",
+        state: part.isStreaming ? "input-streaming" : "output-available",
         input: { thought: text, label: part.label ?? "Reasoning" },
         output: part.isStreaming ? undefined : { reasoning: text },
       } satisfies AgentToolPart,

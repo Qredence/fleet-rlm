@@ -159,6 +159,31 @@ describe("toAgentChatMessages", () => {
     });
   });
 
+  it("maps streaming reasoning to tool-Thinking with input-streaming state", () => {
+    const messages = adapter([
+      {
+        id: "trace-stream",
+        type: "trace",
+        content: "",
+        renderParts: [
+          {
+            kind: "reasoning",
+            label: "Planner",
+            parts: [{ type: "text", text: "Still thinking..." }],
+            isStreaming: true,
+          },
+        ],
+      },
+    ]);
+
+    expect(messages[0]?.parts[0]).toMatchObject({
+      type: "tool-Thinking",
+      state: "input-streaming",
+      input: { thought: "Still thinking...", label: "Planner" },
+      output: undefined,
+    });
+  });
+
   it("maps clarification options to tool-Question", () => {
     const messages = adapter([
       {

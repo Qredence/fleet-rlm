@@ -458,6 +458,29 @@ class TestAgentRuntimeEscalationFlag:
         assert done.payload["source_url"] == "https://dspy.ai"
 
     @pytest.mark.asyncio
+    async def test_posthoc_stream_emits_chain_of_thought_reasoning(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _disable_runtime_tool_discovery(monkeypatch)
+        from fleet_rlm.runtime.agent.runtime import AgentRuntime
+
+        rt = AgentRuntime(use_escalation=True)
+        rt.agent = _PosthocAgent(
+            _FakePrediction(
+                reasoning="The user wants a concise definition of RLM.",
+                assistant_response="RLM is a recursive long-chain-of-thought framework.",
+            )
+        )
+
+        events = [event async for event in rt.aiter_chat_turn_stream("Explain what is RLM")]
+
+        reasoning = next(event for event in events if event.kind == "reasoning")
+        text = next(event for event in events if event.kind == "text")
+        done = events[-1]
+
+        assert reasoning.text == "The user wants a concise definition of RLM."
+        assert text.text == "RLM is a recursive long-chain-of-thought framework."
+        assert done.payload["final_reasoning"] == "The user wants a concise definition of RLM."
+
+    @pytest.mark.asyncio
     async def test_posthoc_stream_emits_routing_preview_before_result(
         self,
         monkeypatch: pytest.MonkeyPatch,

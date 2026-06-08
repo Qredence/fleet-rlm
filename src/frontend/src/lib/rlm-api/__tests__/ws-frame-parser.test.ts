@@ -132,6 +132,59 @@ describe("parseWsServerFrame", () => {
     expect(frame.data.payload?.step).toMatchObject({ type: "output" });
   });
 
+  it("parses project_chat envelopes with top-level kind", () => {
+    const frame = parseWsServerFrame({
+      kind: "execution_step",
+      text: "Planning response.",
+      payload: { source_type: "reasoning" },
+      timestamp: "2026-06-08T09:00:00.000Z",
+      version: 3,
+      event_id: "run:4",
+      sequence: 4,
+    });
+
+    expect(frame).toBeTruthy();
+    if (!frame || frame.type !== "event") return;
+    expect(frame.data.kind).toBe("execution_step");
+    expect(frame.data.payload?.source_type).toBe("reasoning");
+    expect(frame.data.text).toBe("Planning response.");
+  });
+
+  it("maps execution_step reasoning phase to reasoning source_type", () => {
+    const frame = parseWsServerFrame({
+      type: "execution_step",
+      step: {
+        type: "llm",
+        label: "Short reasoning summary",
+        input: { phase: "reasoning" },
+        output: { text: "Short reasoning summary" },
+      },
+    });
+
+    expect(frame).toBeTruthy();
+    if (!frame || frame.type !== "event") return;
+    expect(frame.data.payload?.source_type).toBe("reasoning");
+    expect(frame.data.text).toBe("Short reasoning summary");
+  });
+
+  it("hoists final_reasoning from execution_completed step payload", () => {
+    const frame = parseWsServerFrame({
+      type: "execution_completed",
+      step: {
+        output: {
+          text: "The sum is 4.",
+          payload: { final_reasoning: "I added 2 and 2." },
+        },
+      },
+      summary: { status: "completed" },
+    });
+
+    expect(frame).toBeTruthy();
+    if (!frame || frame.type !== "event") return;
+    expect(frame.data.payload?.final_reasoning).toBe("I added 2 and 2.");
+    expect(frame.data.text).toBe("The sum is 4.");
+  });
+
   it("preserves raw RLM repl execution steps for chat rendering", () => {
     const frame = parseWsServerFrame({
       type: "execution_step",
