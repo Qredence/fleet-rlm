@@ -179,6 +179,48 @@ describe("applyWsFrameToMessages", () => {
     });
   });
 
+  it("starts a new live trace coalescing scope after each user turn", () => {
+    let messages = applyWsFrameToMessages(
+      [],
+      makeEvent("reasoning", "Turn one reasoning"),
+    ).messages;
+    messages = applyWsFrameToMessages(messages, makeEvent("done", "Turn one answer")).messages;
+
+    messages = [
+      ...messages,
+      {
+        id: "user-turn-2",
+        type: "user",
+        content: "Second question",
+        phase: 1,
+      },
+    ];
+
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("reasoning", "Turn two reasoning"),
+    ).messages;
+
+    const liveTraces = messages.filter(
+      (message) => message.type === "trace" && message.traceSource === "live",
+    );
+    expect(liveTraces).toHaveLength(2);
+    expect(
+      liveTraces[0]?.renderParts?.some(
+        (part) =>
+          part.kind === "reasoning" &&
+          part.parts.map((item) => item.text).join("") === "Turn one reasoning",
+      ),
+    ).toBe(true);
+    expect(
+      liveTraces[1]?.renderParts?.some(
+        (part) =>
+          part.kind === "reasoning" &&
+          part.parts.map((item) => item.text).join("") === "Turn two reasoning",
+      ),
+    ).toBe(true);
+  });
+
   it("attaches runtime context to live reasoning rows", () => {
     const { messages } = applyWsFrameToMessages(
       [],

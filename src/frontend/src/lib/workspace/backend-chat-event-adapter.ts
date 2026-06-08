@@ -246,7 +246,9 @@ function applyCanonicalExecutionCompleted(
 }
 
 function latestLiveTraceIndex(messages: ChatMessage[]): number {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
+  const lastUserIndex = messages.findLastIndex((message) => message.type === "user");
+  const startIndex = lastUserIndex >= 0 ? lastUserIndex + 1 : 0;
+  for (let i = messages.length - 1; i >= startIndex; i -= 1) {
     const msg = messages[i];
     if (msg?.type === "trace" && msg.traceSource === "live") return i;
   }
