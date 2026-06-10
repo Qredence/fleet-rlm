@@ -123,3 +123,40 @@ When changing workflow, contracts, or architecture, update the durable docs befo
 - `docs/README.md`, `docs/index.md`, and `docs/SUMMARY.md`.
 - `scripts/README.md`, `Makefile`, `pyproject.toml`, and `src/frontend/package.json` when commands move.
 - `openapi.yaml` and frontend API artifacts when backend request or response shapes move.
+
+## Cursor Cloud specific instructions
+
+### Toolchain notes
+
+- Cloud VMs may not have `zsh`; use `bash` for shell commands. Ensure `uv` is on `PATH` via
+  `export PATH="$HOME/.local/bin:$PATH"` (install with `curl -LsSf https://astral.sh/uv/install.sh | sh`
+  when missing).
+- `uv sync` creates `.venv` with Python 3.13 (see `.python-version`). Node 22+ and pnpm 10 are
+  sufficient for `src/frontend`.
+
+### Secrets and local config
+
+- Copy `.env.example` to `.env` or populate from injected secrets: `DSPY_LM_MODEL`, `DSPY_LLM_API_KEY`
+  (or `DSPY_LM_API_KEY`), `DAYTONA_API_KEY`, and `DAYTONA_API_URL` are required for real chat /
+  sandbox turns. Local dev defaults: `AUTH_MODE=dev`, `APP_ENV=local`, `AUTH_REQUIRED=false`.
+- Set `MLFLOW_ENABLED=false` and `POSTHOG_ENABLED=false` in `.env` for faster API startup when
+  tracing/analytics are not needed.
+
+### Running services
+
+| Service | Command | Port |
+| --- | --- | --- |
+| Web UI + API (bundled) | `uv run fleet web --host 127.0.0.1 --port 8000` | 8000 |
+| Frontend dev (hot reload) | `cd src/frontend && pnpm run dev` | Vite (proxies API to 8000) |
+
+Use tmux for long-running servers. Verify with `curl http://127.0.0.1:8000/health` and
+`curl http://127.0.0.1:8000/ready`. The bundled UI is served from `src/fleet_rlm/ui/dist`; rebuild
+with `make build-ui` after frontend contract changes.
+
+### Validation caveats
+
+- `make lint`, `make typecheck`, and `make format-check` are reliable smoke checks on Cloud VMs.
+- `make test-fast` uses `pytest-xdist` (`-n auto`); on memory-constrained VMs some workers may crash.
+  Re-run failing modules sequentially: `uv run pytest -q <path> -m "not live_llm and not live_daytona"`.
+- Frontend `pnpm run type-check` may fail on the current branch independently of environment setup;
+  use `pnpm run test:unit` and `pnpm run build` when validating UI changes.
