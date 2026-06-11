@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
-## [0.5.5] - 2026-06-11
+## [0.5.50] - 2026-06-11
 
 ### Added
 
@@ -1111,7 +1111,7 @@ All notable changes to this project are documented in this file.
 - Removed checked-in `__pycache__` directories under `src/fleet_rlm/`.
 - Moved non-runtime memory-topology notes out of package source and into docs.
 
-[0.5.5]: https://github.com/Qredence/fleet-rlm/compare/v0.5.40...v0.5.5
+[0.5.50]: https://github.com/Qredence/fleet-rlm/compare/v0.5.40...v0.5.50
 [0.5.40]: https://github.com/Qredence/fleet-rlm/compare/v0.5.31...v0.5.40
 [0.5.31]: https://github.com/Qredence/fleet-rlm/compare/v0.5.3...v0.5.31
 [0.5.3]: https://github.com/Qredence/fleet-rlm/compare/v0.5.2...v0.5.3
