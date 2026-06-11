@@ -4,6 +4,48 @@ from types import SimpleNamespace
 from typing import Any
 
 
+def test_mlflow_request_context_initializes_mlflow_at_turn_entry(monkeypatch) -> None:
+    from fleet_rlm.integrations.observability.mlflow_context import (
+        MlflowTraceRequestContext,
+        mlflow_request_context,
+    )
+
+    init_calls: list[bool] = []
+
+    fake_mlflow = SimpleNamespace(
+        start_span=lambda **kwargs: _FakeSpanContext(),
+        get_current_active_span=object,
+        get_active_trace_id=lambda: None,
+        update_current_trace=lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.mlflow_runtime._import_mlflow",
+        lambda: fake_mlflow,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.mlflow_runtime.get_mlflow_config",
+        lambda: SimpleNamespace(enabled=True),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.mlflow_runtime.initialize_mlflow",
+        lambda _config: init_calls.append(True) or True,
+    )
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+
+    with mlflow_request_context(MlflowTraceRequestContext(client_request_id="chat-init")):
+        pass
+
+    assert init_calls == [True]
+
+
+class _FakeSpanContext:
+    def __enter__(self):
+        return SimpleNamespace(set_inputs=lambda *args, **kwargs: None, set_outputs=lambda *args, **kwargs: None)
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
 def test_update_current_mlflow_trace_mirrors_fleet_metadata_to_tags(monkeypatch) -> None:
     from fleet_rlm.integrations.observability import mlflow_context
     from fleet_rlm.integrations.observability.mlflow_context import (

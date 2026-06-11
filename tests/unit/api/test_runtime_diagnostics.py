@@ -42,6 +42,7 @@ def test_runtime_status_surfaces_persisted_mlflow_scorers(monkeypatch) -> None:
                             "enabled": True,
                             "enable_auto_assessment": False,
                             "tracking_uri": "http://127.0.0.1:5001",
+                            "experiment": "fleet-rlm",
                         },
                     )
                 )
@@ -59,9 +60,9 @@ def test_runtime_status_surfaces_persisted_mlflow_scorers(monkeypatch) -> None:
         diagnostics_deps=DiagnosticsDeps(),
     )
 
-    assert response.mlflow["auto_assessment_enabled"] is False
-    assert response.mlflow["persisted_scorer_count"] == 1
-    assert response.mlflow["persisted_scorers"] == ["Trace Judge"]
+    assert response.mlflow.auto_assessment_enabled is False
+    assert response.mlflow.persisted_scorer_count == 1
+    assert response.mlflow.persisted_scorers == ["Trace Judge"]
     assert any("Trace Judge" in item for item in response.guidance)
 
 

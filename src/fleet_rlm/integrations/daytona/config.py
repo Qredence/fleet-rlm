@@ -86,7 +86,9 @@ def resolve_daytona_lm_runtime_config(
         )
 
     api_base = values.get("DSPY_LM_API_BASE", "").strip() or None
-    small_model = values.get("DSPY_LM_SMALL_MODEL", "").strip()
+    small_model = (
+        values.get("DSPY_DELEGATE_LM_SMALL_MODEL", "").strip() or values.get("DSPY_LM_SMALL_MODEL", "").strip()
+    )
     delegate_model = small_model or None
     delegate_api_key = api_key if delegate_model else None
     delegate_api_base = api_base if delegate_model else None

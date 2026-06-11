@@ -313,6 +313,18 @@ class PersistenceProtocol(Protocol):
         """Persist an RLM child trajectory trace."""
         pass
 
+    async def list_external_traces_for_session(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[Sequence[Any], int]:
+        """List external traces associated with a durable chat session."""
+        pass
+
     # ------------------------------------------------------------------
     # Datasets
     # ------------------------------------------------------------------

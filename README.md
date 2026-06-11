@@ -150,6 +150,10 @@ pnpm run dev
 
 The frontend dev server runs on `http://localhost:5173` and proxies API requests to the backend on `http://localhost:8000`.
 
+`make dev` and `uv run fleet web` serve a **built** bundle from `src/frontend/dist` on `http://127.0.0.1:8000`.
+In a source checkout, the server never falls back to packaged `fleet_rlm/ui/dist` assets.
+Build first with `cd src/frontend && pnpm run build`, or use `pnpm run dev` when you want HMR.
+
 Common source checks:
 
 ```bash

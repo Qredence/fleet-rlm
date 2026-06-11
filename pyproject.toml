@@ -58,7 +58,7 @@ dependencies = [
     "uvicorn>=0.47.0,<1",
     # Observability and external services.
     "boto3>=1.43.4",
-    "mlflow[mcp]>=3.12.0",
+    "mlflow[mcp]>=3.13.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.39.0",
     "posthog>=7.14.0",
 ]

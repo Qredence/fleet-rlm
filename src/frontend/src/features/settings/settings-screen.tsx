@@ -30,6 +30,13 @@ export function SettingsScreen() {
             router.history.back();
           }
         }}
+        onSectionChange={(nextSection) => {
+          router.navigate({
+            to: "/app/settings",
+            search: { section: nextSection ?? "appearance" },
+            replace: true,
+          });
+        }}
       />
     </div>
   );

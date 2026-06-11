@@ -173,6 +173,11 @@ POSTHOG_ENABLED=false
 > localhost MLflow target by default. If you change the port in `.env`, keep your
 > manual MLflow server command aligned, or set `MLFLOW_AUTO_START=false` if you
 > want to manage MLflow yourself.
+>
+> After upgrading MLflow with `uv sync`, restart any existing server on port 5001.
+> If the UI reports a GraphQL field error such as
+> `effectiveTraceArchivalRetention`, run `make mlflow-upgrade` and
+> `make mlflow-server`. See [MLflow workflows](mlflow-workflows.md#troubleshooting-experiment-load--graphql-version-mismatch).
 
 ## 5. Configure Daytona Credentials
 
@@ -265,9 +270,21 @@ uv run python scripts/validate_env.py daytona --repo https://github.com/qredence
 # Terminal chat
 uv run fleet
 
-# Web UI
+# Web UI (serves built assets from src/frontend/dist on :8000)
 uv run fleet web
 ```
+
+For frontend HMR, run the Vite dev server in a second terminal:
+
+```bash
+cd src/frontend
+pnpm run dev
+```
+
+Open `http://localhost:5173` (API proxied to `http://localhost:8000`). In source checkouts,
+`fleet web` only serves `src/frontend/dist` and does not fall back to packaged
+`fleet_rlm/ui/dist` assets. Build with `pnpm run build` when you want the integrated
+`:8000` experience.
 
 ## 8. IDE/Editor Setup (Recommended)
 

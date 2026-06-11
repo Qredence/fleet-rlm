@@ -30,7 +30,7 @@ import { ServiceInfoPanel } from "./service-info-panel";
 export const settingsSections = [
   { key: "appearance", label: "Appearance", icon: Paintbrush },
   { key: "telemetry", label: "Telemetry", icon: Bell },
-  { key: "litellm", label: "LiteLLM Integration", icon: Bot },
+  { key: "litellm", label: "LLM Providers", icon: Bot },
   { key: "runtime", label: "Runtime", icon: Cpu },
   { key: "about", label: "About", icon: Info },
 ] as const;
@@ -40,7 +40,7 @@ export type SettingsSection = (typeof settingsSections)[number]["key"];
 export const sectionDescriptions: Record<SettingsSection, string> = {
   appearance: "Theme and interface defaults.",
   telemetry: "Privacy and communication preferences.",
-  litellm: "Set planner models, provider endpoint, and API key.",
+  litellm: "Manage provider profiles, role model assignments, and API credentials.",
   runtime: "Manage runtime credentials and connectivity checks.",
   about: "Build metadata and active feature flags for this instance.",
 };

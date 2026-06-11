@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import inspect
 from collections.abc import Mapping
 from typing import AbstractSet, Any, Callable
 
@@ -12,6 +13,28 @@ from ._sandbox_constants import (
     _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
     _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
 )
+
+
+def _bind_interpreter_tool(interpreter: Any, tool_func: Callable[..., Any]) -> Callable[..., Any]:
+    """Expose a host callback to the sandbox without the interpreter parameter."""
+
+    signature = inspect.signature(tool_func)
+    params = list(signature.parameters.values())
+    if not params or params[0].name != "interpreter":
+        raise ValueError(f"Expected interpreter-first callback, got: {tool_func!r}")
+
+    public_params = params[1:]
+
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return tool_func(interpreter, *args, **kwargs)
+
+    wrapper.__name__ = getattr(tool_func, "__name__", "bridge_tool")
+    wrapper.__qualname__ = wrapper.__name__
+    wrapper.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+        parameters=public_params,
+        return_annotation=signature.return_annotation,
+    )
+    return wrapper
 
 
 def reject_unsupported_recursive_callbacks(
@@ -65,7 +88,7 @@ def bridge_tools(
         ("list_evidence", list_evidence),
     ):
         if name not in tools:
-            tools[name] = lambda *a, _fn=fn, _i=interpreter, **kw: _fn(_i, *a, **kw)
+            tools[name] = _bind_interpreter_tool(interpreter, fn)
     return tools
 
 

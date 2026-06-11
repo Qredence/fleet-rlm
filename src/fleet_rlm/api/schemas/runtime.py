@@ -108,6 +108,45 @@ class RuntimeTestCache(BaseModel):
     )
 
 
+class RuntimeMlflowStatus(BaseModel):
+    """MLflow enablement and startup diagnostics for the runtime settings UI."""
+
+    enabled: bool = Field(description="Whether MLflow tracing is enabled for this runtime.")
+    tracking_uri: str = Field(default="", description="Configured MLflow tracking server URI.")
+    experiment_name: str | None = Field(
+        default=None,
+        description="Configured MLflow experiment name.",
+    )
+    experiment_id: str | None = Field(
+        default=None,
+        description="Resolved MLflow experiment id when startup succeeded.",
+    )
+    auto_start_enabled: bool = Field(
+        default=False,
+        description="Whether the runtime may auto-start a local MLflow tracking server.",
+    )
+    auto_assessment_enabled: bool = Field(
+        default=False,
+        description="Whether Fleet-managed MLflow auto-assessment is enabled.",
+    )
+    persisted_scorer_count: int = Field(
+        default=0,
+        description="Count of persisted MLflow scorers active on the tracking server.",
+    )
+    persisted_scorers: list[str] = Field(
+        default_factory=list,
+        description="Names of persisted MLflow scorers active on the tracking server.",
+    )
+    startup_status: str = Field(
+        default="pending",
+        description="MLflow startup lifecycle status for this runtime.",
+    )
+    startup_error: str | None = Field(
+        default=None,
+        description="Startup error summary when MLflow initialization failed.",
+    )
+
+
 class RuntimeActiveModels(BaseModel):
     """Resolved active model identifiers currently loaded by the runtime."""
 
@@ -116,6 +155,30 @@ class RuntimeActiveModels(BaseModel):
     delegate_small: str = Field(
         default="",
         description="Small delegate model identifier currently in use, when configured.",
+    )
+    planner_profile_id: str | None = Field(
+        default=None,
+        description="Provider profile id bound to the planner role, when configured.",
+    )
+    planner_profile_name: str | None = Field(
+        default=None,
+        description="Human-readable provider profile name for the planner role.",
+    )
+    delegate_profile_id: str | None = Field(
+        default=None,
+        description="Provider profile id bound to the delegate role, when configured.",
+    )
+    delegate_profile_name: str | None = Field(
+        default=None,
+        description="Human-readable provider profile name for the delegate role.",
+    )
+    delegate_small_profile_id: str | None = Field(
+        default=None,
+        description="Provider profile id bound to the delegate_small role, when configured.",
+    )
+    delegate_small_profile_name: str | None = Field(
+        default=None,
+        description="Human-readable provider profile name for the delegate_small role.",
     )
 
 
@@ -134,8 +197,8 @@ class RuntimeStatusResponse(BaseModel):
         default_factory=dict,
         description="Language-model configuration and readiness diagnostics.",
     )
-    mlflow: dict[str, Any] = Field(
-        default_factory=dict,
+    mlflow: RuntimeMlflowStatus = Field(
+        default_factory=RuntimeMlflowStatus,
         description="MLflow enablement and startup diagnostics.",
     )
     daytona: dict[str, Any] = Field(

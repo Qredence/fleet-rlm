@@ -113,6 +113,19 @@ vi.mock("@/features/workspace/use-workspace", () => ({
   useRunWorkbenchStore: () => mockedWorkbenchStore,
 }));
 
+vi.mock("@/hooks/use-runtime-status", () => ({
+  useRuntimeStatus: () => ({
+    data: {
+      mlflow: {
+        enabled: true,
+        tracking_uri: "http://127.0.0.1:5001",
+        experiment_id: "1",
+        startup_status: "ready",
+      },
+    },
+  }),
+}));
+
 describe("RunWorkbench", () => {
   it("renders the analyst-oriented tabs and hides retired tree framing", () => {
     const html = renderToStaticMarkup(<RunWorkbench />);

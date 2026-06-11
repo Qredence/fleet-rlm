@@ -399,6 +399,39 @@ def resolve_lm(
     raise ValueError(f"Unknown LM role: {role!r}")
 
 
+def _delegate_small_lm_kwargs(
+    *,
+    model_name: str | None = None,
+    default_api_key: str | None = None,
+    default_api_base: str | None = None,
+    default_max_tokens: int | str | None = None,
+) -> dict[str, Any] | None:
+    model = model_name or os.environ.get("DSPY_DELEGATE_LM_SMALL_MODEL")
+    if not model:
+        return None
+
+    api_key = (
+        os.environ.get("DSPY_DELEGATE_LM_API_KEY")
+        or default_api_key
+        or os.environ.get("DSPY_LLM_API_KEY")
+        or os.environ.get("DSPY_LM_API_KEY")
+    )
+    if not api_key:
+        logger.warning("Small delegate LM model is configured but no API key is available; using delegate fallback.")
+        return None
+
+    return {
+        "model": model,
+        "api_key": api_key,
+        "api_base": (
+            os.environ.get("DSPY_DELEGATE_LM_API_BASE") or default_api_base or os.environ.get("DSPY_LM_API_BASE")
+        ),
+        "max_tokens": _resolve_max_tokens(
+            default_max_tokens if default_max_tokens is not None else os.environ.get("DSPY_DELEGATE_LM_MAX_TOKENS")
+        ),
+    }
+
+
 def get_delegate_lm_from_env(
     *,
     env_file: Path | None = None,
@@ -433,6 +466,36 @@ def get_delegate_lm_from_env(
     except Exception as exc:
         logger.warning(
             "Failed to initialize delegate LM (%s); using planner fallback.",
+            type(exc).__name__,
+        )
+        return None
+
+
+def get_delegate_small_lm_from_env(
+    *,
+    env_file: Path | None = None,
+    model_name: str | None = None,
+    default_api_key: str | None = None,
+    default_api_base: str | None = None,
+    default_max_tokens: int | None = None,
+) -> dspy.LM | None:
+    """Create and return an optional small delegate DSPy LM from environment."""
+    _prepare_env(env_file=env_file)
+    delegate_small_lm_kwargs = _delegate_small_lm_kwargs(
+        model_name=model_name,
+        default_api_key=default_api_key,
+        default_api_base=default_api_base,
+        default_max_tokens=default_max_tokens
+        if default_max_tokens is not None
+        else os.environ.get("DSPY_DELEGATE_LM_MAX_TOKENS"),
+    )
+    if delegate_small_lm_kwargs is None:
+        return None
+    try:
+        return _build_lm(**delegate_small_lm_kwargs)
+    except Exception as exc:
+        logger.warning(
+            "Failed to initialize small delegate LM (%s); using delegate fallback.",
             type(exc).__name__,
         )
         return None

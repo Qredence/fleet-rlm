@@ -43,6 +43,39 @@ def test_prime_runtime_env_loads_env_file_in_local_mode(clean_runtime_env, tmp_p
     assert os.getenv("FEATURE_FLAG") == "from-file"
 
 
+def test_get_planner_lm_from_env_shim_unpacks_four_helpers(monkeypatch):
+    bootstrap_module = importlib.import_module("fleet_rlm.api.bootstrap")
+    sentinel = object()
+
+    monkeypatch.setattr(
+        bootstrap_module,
+        "_runtime_config_helpers",
+        lambda: (lambda: None, lambda **_kwargs: sentinel, lambda **_kwargs: None, lambda **_kwargs: None),
+    )
+
+    assert bootstrap_module.get_planner_lm_from_env() is sentinel
+
+
+def test_sync_llm_model_config_from_env_overrides_stale_hydra_defaults(clean_runtime_env, monkeypatch):
+    bootstrap_module = importlib.import_module("fleet_rlm.api.bootstrap")
+    config_module = importlib.import_module("fleet_rlm.api.config")
+
+    cfg = config_module.ServerRuntimeConfig(
+        agent_model="openai/gemini/gemini-flash-lite-latest",
+        agent_delegate_model=None,
+        agent_delegate_small_model=None,
+    )
+    monkeypatch.setenv("DSPY_LM_MODEL", "openai/gemini-3.1-pro-preview")
+    monkeypatch.setenv("DSPY_DELEGATE_LM_MODEL", "openai/gemini-3.5-flash")
+    monkeypatch.setenv("DSPY_DELEGATE_LM_SMALL_MODEL", "openai/gemini-3.1-flash-lite")
+
+    bootstrap_module._sync_llm_model_config_from_env(cfg)
+
+    assert cfg.agent_model == "openai/gemini-3.1-pro-preview"
+    assert cfg.agent_delegate_model == "openai/gemini-3.5-flash"
+    assert cfg.agent_delegate_small_model == "openai/gemini-3.1-flash-lite"
+
+
 def test_prime_runtime_env_preserves_existing_values_outside_local(clean_runtime_env, tmp_path, monkeypatch):
     bootstrap_module = importlib.import_module("fleet_rlm.api.bootstrap")
     config_module = importlib.import_module("fleet_rlm.api.config")

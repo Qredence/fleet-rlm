@@ -20,6 +20,7 @@ load_dotenv(ROOT / ".env", override=True)
 
 from fleet_rlm.integrations.database import (  # noqa: E402
     Base,
+    models_llm_profiles,  # noqa: E402, F401
     select_database_url,
     to_sync_database_url,
 )

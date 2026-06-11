@@ -38,6 +38,22 @@ Notes:
 - Startup still succeeds if MLflow cannot be reached; the app reports MLflow as
   degraded instead of failing boot.
 
+### Runtime status: `ready` vs `degraded`
+
+`GET /api/v1/runtime/status` exposes an `mlflow.startup_status` field separate from the
+top-level `ready` flag (which also requires LM and Daytona connection tests).
+
+| `startup_status` | Meaning |
+|---|---|
+| `ready` | MLflow client initialized and tracking URI is reachable. |
+| `degraded` | MLflow is enabled but startup failed (version mismatch, unreachable URI, init error). |
+| `disabled` | `MLFLOW_ENABLED=false`. |
+| `pending` | Background MLflow warmup has not finished yet. |
+
+Chat turns call `initialize_mlflow()` at turn entry, so tracing can recover on the first
+turn even when background startup is still racing. Check `mlflow.startup_error` in
+Settings → Runtime for actionable remediation (for example stale server on port 5001).
+
 If the local startup logs report `Detected out-of-date database schema`, upgrade the configured backend store before retrying:
 
 ```bash
@@ -45,6 +61,40 @@ uv run mlflow db upgrade sqlite:///.data/mlruns.db
 ```
 
 If the local tracking history does not matter, you can also delete the SQLite database file backing `MLFLOW_LOCAL_BACKEND_STORE_URI` and let MLflow recreate it on the next startup.
+
+### Troubleshooting: experiment load / GraphQL version mismatch
+
+If the MLflow UI shows an error like:
+
+```text
+Experiment load error: Cannot query field 'effectiveTraceArchivalRetention' on type 'MlflowExperiment'.
+```
+
+the browser UI is newer than the tracking server still listening on your local port
+(commonly after `uv sync` upgraded MLflow but an older `mlflow server` process was left
+running). MLflow 3.13+ exposes `effectiveTraceArchivalRetention`; a 3.12 server cannot
+answer that GraphQL field.
+
+Check the versions:
+
+```bash
+uv run mlflow --version
+curl -s http://127.0.0.1:5001/version
+```
+
+When they differ, stop the stale server, upgrade the backend store, and restart with the
+project environment:
+
+```bash
+# from repo root
+lsof -ti :5001 | xargs kill
+make mlflow-upgrade
+make mlflow-server
+```
+
+`make mlflow-upgrade` runs `uv run mlflow db upgrade` against `MLFLOW_LOCAL_BACKEND_STORE_URI`
+(default `sqlite:///.data/mlruns.db`). Fleet's local auto-start skips launching MLflow when
+port 5001 is already open, so restarting the server after dependency upgrades is required.
 
 ## 2. Enable MLflow in fleet-rlm
 
@@ -311,6 +361,26 @@ When you need an end-to-end proof that websocket execution, persisted run state,
 ```bash
 uv run python scripts/validate_rlm_e2e_trace.py \
   --server-url http://127.0.0.1:8000
+```
+
+When MLflow is enabled, assert that the terminal websocket payload includes a trace id and
+optionally verify it exists in the tracking server:
+
+```bash
+uv run python scripts/validate_rlm_e2e_trace.py \
+  --server-url http://127.0.0.1:8000 \
+  --require-mlflow-trace-id \
+  --verify-mlflow
+```
+
+CLI verification without the harness:
+
+```bash
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5001
+uv run mlflow traces search \
+  --experiment-id "$(uv run mlflow experiments search --filter-string \"name='fleet-rlm'\" --output json | jq -r '.[0].experiment_id')" \
+  --max-results 5 \
+  --output json
 ```
 
 This requires a running API server plus working database, auth, and runtime configuration. The harness writes captured payloads and validation artifacts under `output/phase-04/qre-301/` by default.
