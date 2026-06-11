@@ -30,6 +30,9 @@ Support boundary:
 | `consolidate_rlm_results.py` | Build a single `RESULTS.md` from benchmark summaries | Generated benchmark summaries under `output/` | `uv run python scripts/consolidate_rlm_results.py --input-dir output/rlm-eval-full` |
 | `benchmarks/sniah.py` | Generate and score S-NIAH benchmark data | None | `uv run python scripts/benchmarks/sniah.py --generate` |
 | `benchmarks/oolong.py` | Generate and score synthetic OOLONG benchmark data | None | `uv run python scripts/benchmarks/oolong.py --generate` |
+| `build_enterprise_2030_gold_set.py` | Build the Enterprise 2030 PDF needle-in-haystack gold set from MarkItDown ingestion | Source PDF under `output/` | `uv run python scripts/build_enterprise_2030_gold_set.py` |
+| `evaluate_pdf_needle_retrieval.py` | Evaluate PDF needle retrieval over the Enterprise 2030 gold set (routing-only or live RLM) | None for `--routing-only`; DSPy/Daytona env for live runs | `uv run python scripts/evaluate_pdf_needle_retrieval.py --routing-only` |
+| `run_frontend_needle_matrix.py` | Simulate the workspace frontend needle matrix and write `frontend-runs.jsonl` | Generated gold set under `.data/datasets/` | `uv run python scripts/run_frontend_needle_matrix.py` |
 
 ## Operator Scripts
 

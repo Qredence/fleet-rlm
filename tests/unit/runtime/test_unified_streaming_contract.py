@@ -1,12 +1,14 @@
-"""Characterization tests locking the native streaming StreamEvent contract.
+"""Characterization tests locking the unified streaming StreamEvent contract.
 
 These tests pin the exact ``StreamEvent`` sequence the websocket layer emits
-today through :meth:`AgentRuntime.aiter_chat_turn_stream` when the agent exposes
-a streamable ReAct program (``FleetAgent``). They form the Phase 0 guardrail for
-the dspy.ReAct migration: the migration must keep these sequences intact.
+through :meth:`AgentRuntime.aiter_chat_turn_stream`. The unified path runs the
+turn (via ``dspy.streamify`` for real DSPy modules, plain ``aforward`` for
+everything else), then replays the final prediction's trajectory as reasoning
+and tool events before the terminal ``done`` event.
 
-The planner step is scripted so the assertions are deterministic and require no
-live LM. The goal is to capture observable behaviour, not to test internals.
+The agent forward pass is scripted so the assertions are deterministic and
+require no live LM. The goal is to capture observable behaviour, not to test
+internals.
 """
 
 from __future__ import annotations
@@ -23,23 +25,16 @@ def _disable_runtime_tool_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runtime_mod, "discover_tools", lambda: [])
 
 
-def _script_planner(react_program: Any, steps: list[dspy.Prediction]) -> None:
-    """Replace ``async_planner_step`` with a scripted, deterministic sequence."""
+class _ScriptedAgent:
+    """Fake cognition module returning a fixed prediction with a trajectory."""
 
-    iterator = iter(steps)
+    def __init__(self, prediction: dspy.Prediction) -> None:
+        self._prediction = prediction
+        self.calls: list[dict[str, Any]] = []
 
-    async def _scripted(trajectory: dict[str, Any], **_input: Any) -> dspy.Prediction:
-        _ = trajectory
-        return next(iterator)
-
-    react_program.async_planner_step = _scripted  # type: ignore[assignment]
-
-
-def _pred(**kwargs: Any) -> dspy.Prediction:
-    pred = dspy.Prediction(**kwargs)
-    for key, value in kwargs.items():
-        object.__setattr__(pred, key, value)
-    return pred
+    async def aforward(self, **kwargs: Any) -> dspy.Prediction:
+        self.calls.append(kwargs)
+        return self._prediction
 
 
 @pytest.mark.asyncio
@@ -50,27 +45,20 @@ async def test_tool_using_turn_emits_canonical_event_sequence(
     from fleet_rlm.runtime.agent.runtime import AgentRuntime
 
     rt = AgentRuntime(use_escalation=False)
-    react_program = rt.agent
-
-    def echo(value: str) -> str:
-        return f"echoed: {value}"
-
-    react_program.tools["echo_tool"] = echo  # type: ignore[index]
-
-    _script_planner(
-        react_program,
-        [
-            _pred(
-                next_thought="I should echo the value first.",
-                next_tool_name="echo_tool",
-                next_tool_args={"value": "hi"},
-            ),
-            _pred(
-                next_thought="Here is your answer.",
-                next_tool_name="finish",
-                next_tool_args={},
-            ),
-        ],
+    rt.agent = _ScriptedAgent(
+        dspy.Prediction(
+            response="Here is your answer.",
+            trajectory={
+                "thought_0": "I should echo the value first.",
+                "tool_name_0": "echo_tool",
+                "tool_args_0": {"value": "hi"},
+                "observation_0": "echoed: hi",
+                "thought_1": "Here is your answer.",
+                "tool_name_1": "finish",
+                "tool_args_1": {},
+                "observation_1": "Completed.",
+            },
+        )
     )
 
     events = [event async for event in rt.aiter_chat_turn_stream("hello")]
@@ -99,25 +87,14 @@ async def test_tool_using_turn_emits_canonical_event_sequence(
 
 
 @pytest.mark.asyncio
-async def test_finish_first_turn_skips_tool_and_extract(
+async def test_direct_turn_emits_text_and_done_without_tools(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _disable_runtime_tool_discovery(monkeypatch)
     from fleet_rlm.runtime.agent.runtime import AgentRuntime
 
     rt = AgentRuntime(use_escalation=False)
-    react_program = rt.agent
-
-    _script_planner(
-        react_program,
-        [
-            _pred(
-                next_thought="Direct answer, no tools needed.",
-                next_tool_name="finish",
-                next_tool_args={},
-            ),
-        ],
-    )
+    rt.agent = _ScriptedAgent(dspy.Prediction(response="Direct answer, no tools needed."))
 
     events = [event async for event in rt.aiter_chat_turn_stream("hi")]
     kinds = [event.kind for event in events]

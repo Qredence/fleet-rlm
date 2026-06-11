@@ -66,7 +66,7 @@ Their maintained controls are `message`, `docs_path`, `react_max_iters`, `includ
 
 Common output shape includes:
 
-- `assistant_response`
+- `response`
 - optional trajectory metadata (when enabled)
 - turn/session metadata and warnings
 

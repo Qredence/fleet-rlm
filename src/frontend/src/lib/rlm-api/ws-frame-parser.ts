@@ -165,23 +165,6 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
   };
 }
 
-function parseProjectChatEnvelope(parsed: Record<string, unknown>): WsServerEvent | null {
-  const kind = String(parsed.kind ?? "").trim();
-  if (!isWsEventKind(kind)) return null;
-
-  return {
-    type: "event",
-    data: {
-      kind,
-      text: asText(parsed.text),
-      payload: asRecord(parsed.payload) ?? undefined,
-      timestamp: asTimestamp(parsed.timestamp),
-      version: asNumber(parsed.version),
-      event_id: typeof parsed.event_id === "string" ? parsed.event_id : undefined,
-    },
-  };
-}
-
 export function parseWsServerFrame(parsed: Record<string, unknown>): WsServerMessage | null {
   const frameType = String(parsed.type ?? "");
 
@@ -235,9 +218,6 @@ export function parseWsServerFrame(parsed: Record<string, unknown>): WsServerMes
 
   const executionEnvelope = parseExecutionEnvelope(parsed);
   if (executionEnvelope) return executionEnvelope;
-
-  const projectChatEnvelope = parseProjectChatEnvelope(parsed);
-  if (projectChatEnvelope) return projectChatEnvelope;
 
   if (frameType === "error") {
     return {

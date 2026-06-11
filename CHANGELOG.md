@@ -4,6 +4,49 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [0.5.5] - 2026-06-11
+
+### Added
+
+- **Change:** Added native `dspy.RLM` large-input support through
+  `SandboxSerializable` document and workspace context models.
+  **Outcome:** RLM document and workspace analysis can rely on upstream DSPy
+  variable injection instead of Fleet-maintained variable-mode patches.
+- **Change:** Added a centralized DSPy callback registry for MLflow and
+  PostHog observability callbacks.
+  **Outcome:** Optional observability startup remains lazy, deduplicated, and
+  visible to current worker-thread DSPy contexts when global `dspy.configure`
+  rejects non-owner threads or async tasks.
+- **Change:** Added MIPROv2 as an optional backend in the unified offline
+  optimization pipeline.
+  **Outcome:** CLI, API, MLflow metadata, and review bundles can use the same
+  optimization runner for GEPA and MIPROv2 jobs.
+
+### Changed
+
+- **Change:** Reworked the chat runtime around typed routing, unified
+  `dspy.streamify` streaming, and `response`-first DSPy signatures.
+  **Outcome:** Direct, tool-using, and RLM turns share one websocket event
+  replay path with clearer routing metadata and less custom ReAct driving code.
+- **Change:** Replaced local DSPy monkeypatch modules with an exact upstream
+  DSPy `3.3.0b1` pin.
+  **Outcome:** Fleet now depends on the upstream RLM/SandboxSerializable
+  contract directly while keeping the private RLM hooks isolated in runtime
+  module factories.
+- **Change:** Refreshed backend, frontend, scaffold-skill, and harness docs for
+  the current DSPy RLM, optimization, streaming, and observability contracts.
+  **Outcome:** Durable agent guides and how-to docs match the implementation
+  surfaces validated by the repo checks.
+
+### Removed
+
+- **Change:** Removed retired variable-mode wrappers, local DSPy patch modules,
+  archived optimization/history frontend clients, and legacy bare websocket
+  frame parsing.
+  **Outcome:** The supported runtime and Web UI surface is smaller and aligned
+  with the Daytona-backed Workbench, generated OpenAPI client, and canonical
+  websocket event envelope.
+
 ## [0.5.40] - 2026-05-23
 
 ### Added
@@ -1068,6 +1111,7 @@ All notable changes to this project are documented in this file.
 - Removed checked-in `__pycache__` directories under `src/fleet_rlm/`.
 - Moved non-runtime memory-topology notes out of package source and into docs.
 
+[0.5.5]: https://github.com/Qredence/fleet-rlm/compare/v0.5.40...v0.5.5
 [0.5.40]: https://github.com/Qredence/fleet-rlm/compare/v0.5.31...v0.5.40
 [0.5.31]: https://github.com/Qredence/fleet-rlm/compare/v0.5.3...v0.5.31
 [0.5.3]: https://github.com/Qredence/fleet-rlm/compare/v0.5.2...v0.5.3

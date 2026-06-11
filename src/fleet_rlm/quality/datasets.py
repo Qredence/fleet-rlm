@@ -1,4 +1,4 @@
-"""Shared dataset loading, validation, and split helpers for offline GEPA optimization."""
+"""Shared dataset loading, conversion, validation, and split helpers for offline optimization."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence, cast
+
+import dspy
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,40 @@ def load_dataset_rows(dataset_path: str | Path) -> list[DatasetRow]:
         return payload
 
     raise ValueError(f"Expected a JSON array or JSONL file of trace examples, got {type(payload).__name__}: {path}")
+
+
+def rows_to_examples(
+    rows: list[DatasetRow],
+    *,
+    input_keys: list[str] | None = None,
+    output_key: str = "response",
+) -> list[dspy.Example]:
+    """Convert exported MLflow trace rows into DSPy examples.
+
+    Rows must carry an ``inputs`` dict and an ``expectations`` dict with a
+    non-empty ``expected_response``; other rows are skipped.
+    """
+    examples: list[dspy.Example] = []
+    for row in rows:
+        inputs = row.get("inputs")
+        expectations = row.get("expectations")
+        if not isinstance(inputs, dict) or not isinstance(expectations, dict):
+            continue
+
+        expected_response = expectations.get("expected_response")
+        if expected_response in (None, ""):
+            continue
+
+        resolved_input_keys = input_keys or list(inputs.keys())
+        if not resolved_input_keys:
+            continue
+
+        example = dspy.Example(
+            **inputs,
+            **{output_key: expected_response},
+        ).with_inputs(*resolved_input_keys)
+        examples.append(example)
+    return examples
 
 
 def validate_required_keys(
@@ -112,9 +148,7 @@ def split_examples(
 ) -> tuple[list[Any], list[Any]]:
     """Split examples into train/validation partitions.
 
-    This is the canonical split helper for offline GEPA optimization.
-    Re-exported here from ``mlflow_optimization.split_examples`` for
-    consistency; both locations remain importable for backward compatibility.
+    This is the canonical split helper for offline optimization.
     """
     if not examples:
         raise ValueError("No optimization examples were produced from the dataset.")

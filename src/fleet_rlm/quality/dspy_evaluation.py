@@ -14,20 +14,36 @@ from typing import Any, Callable
 
 import dspy
 
-from .mlflow_evaluation import load_trace_rows
-from .mlflow_optimization import (
-    build_exact_match_metric,
-    rows_to_examples,
-    split_examples,
-)
+from .datasets import load_dataset_rows, rows_to_examples, split_examples
 from .workspace_metrics import workspace_score_metric
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "build_exact_match_metric",
     "evaluate_program",
     "evaluate_program_from_dataset",
 ]
+
+
+def _prediction_field(prediction: Any, output_key: str) -> str:
+    if isinstance(prediction, dict):
+        value = prediction.get(output_key)
+    else:
+        value = getattr(prediction, output_key, None)
+    return str(value or "").strip()
+
+
+def build_exact_match_metric(output_key: str) -> Callable[..., bool]:
+    """Build a simple exact-match metric for DSPy optimization/evaluation."""
+
+    def metric(example: Any, prediction: Any, trace: Any = None) -> bool:
+        _ = trace
+        expected = str(getattr(example, output_key, "") or "").strip()
+        actual = _prediction_field(prediction, output_key)
+        return bool(expected) and expected == actual
+
+    return metric
 
 
 def _metric_supports_trace(metric: Callable[..., Any]) -> bool:
@@ -139,7 +155,7 @@ def evaluate_program_from_dataset(
     program: dspy.Module,
     dataset_path: Path,
     input_keys: list[str] | None = None,
-    output_key: str = "assistant_response",
+    output_key: str = "response",
     train_ratio: float = 0.0,
     metric: Callable[..., Any] | None = None,
     num_threads: int = 4,
@@ -149,7 +165,7 @@ def evaluate_program_from_dataset(
     When *train_ratio* is 0.0 (default), the entire dataset is used for
     evaluation.  Otherwise the validation split is used.
     """
-    rows = load_trace_rows(dataset_path)
+    rows = load_dataset_rows(dataset_path)
     examples = rows_to_examples(
         rows,
         input_keys=input_keys,

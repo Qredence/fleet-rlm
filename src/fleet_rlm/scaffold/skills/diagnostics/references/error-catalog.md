@@ -52,15 +52,15 @@ Known error messages, their root causes, and fixes.
 
 ---
 
-## "[TOOLS NEEDED] not detected"
+## "Turn never escalates to tools or RLM"
 
-**Cause:** The LLM is not producing the `[TOOLS NEEDED]` sentinel that triggers escalation from direct mode to RLM mode. This prevents the escalating runtime from engaging tools.
+**Cause:** The typed `RouteTurnSignature` router keeps classifying turns as `direct`, so the escalating runtime never engages the ReAct tool loop or the RLM sandbox.
 
 **Fix:**
-- Check the system prompt includes escalation instructions
+- Inspect the `routing_decision` payload on the turn (`tools_react`, `router_rlm`, deterministic `*_rlm` routes)
 - Force RLM mode explicitly: set `execution_mode="rlm"` in the request
-- Verify the model supports the prompt format (some models ignore structured sentinels)
-- Review recent prompt changes that may have removed the escalation trigger
+- Confirm tools are registered — with an empty tool list the router downgrades `tools` to `direct`
+- If the router LM is failing, the module logs "Turn routing failed" and degrades to `direct`; check planner LM configuration
 
 ---
 

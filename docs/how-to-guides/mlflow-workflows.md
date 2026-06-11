@@ -126,6 +126,12 @@ task. If startup cannot reach the tracking server, check `/api/v1/runtime/status
 for the `mlflow.startup_status` and `mlflow.startup_error` fields while you verify
 connectivity, permissions, or auth settings.
 
+MLflow tracing callbacks are registered through Fleet's centralized DSPy callback
+registry during that optional startup. The registry keeps callback registration lazy,
+deduplicated, and safe when startup runs in a worker thread or inside an active
+`dspy.context(...)` override, so initialization success means the current DSPy work can
+see the tracing callbacks.
+
 When MLflow is enabled:
 
 - WebSocket chat turns generate one `mlflow_client_request_id` per turn.
@@ -142,7 +148,7 @@ uv run fleet web
 ```
 
 As you use the app, MLflow traces are recorded in the configured experiment.
-For RLM document-analysis and variable-mode runs, Fleet also materializes
+For `dspy.RLM` document-analysis and workspace-context runs, Fleet also materializes
 trajectory code execution as MLflow `TOOL` spans named `repl_execute`. Those
 spans include bounded `mlflow.spanInputs` / `mlflow.spanOutputs` payloads so the
 MLflow trace tree, external scorers, and the chat transcript all describe the

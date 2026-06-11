@@ -11,6 +11,8 @@ from typing import Literal, TypedDict
 
 import dspy
 
+from fleet_rlm.runtime.sandbox_types import LargeDocument, WorkspaceContext
+
 
 class GroundedCitation(TypedDict):
     """Canonical machine-readable citation record for grounded answers."""
@@ -52,21 +54,37 @@ class LongCoTQASignature(dspy.Signature):
     answer: str = dspy.OutputField(desc="Concise final answer")
 
 
+class RouteTurnSignature(dspy.Signature):
+    """Choose the execution route for the current chat turn.
+
+    - direct: the request can be answered well from knowledge, core memory, and
+      conversation history alone.
+    - tools: the request needs live tool calls (sandbox file operations,
+      document fetches, MCP tools, runtime actions) to answer correctly.
+    - rlm: the request needs sandboxed Python over large data, long documents,
+      or repositories (code execution, recursive analysis).
+    """
+
+    user_request: str = dspy.InputField(desc="Current user request in the chat session")
+    core_memory: str = dspy.InputField(desc="Persistent memory blocks that define identity and context")
+    history: dspy.History = dspy.InputField(desc="Prior chat turns using keys user_message and response")
+    available_tools: str = dspy.InputField(desc="Callable tool names with short descriptions, one per line")
+    route: Literal["direct", "tools", "rlm"] = dspy.OutputField(desc="Execution route for this turn")
+
+
 class RLMReActChatSignature(dspy.Signature):
-    """Interactive ReAct chat signature with explicit conversation history."""
+    """Interactive chat signature with explicit conversation history.
+
+    ``history`` carries the prior turns; the most recent message should
+    dominate recency-sensitive follow-up answers.
+    """
 
     user_request: str = dspy.InputField(desc="Current user request in the chat session")
     core_memory: str = dspy.InputField(
         desc="Persistent memory blocks (Persona, Human, Scratchpad) that define your identity and context"
     )
     history: dspy.History = dspy.InputField(desc="Prior chat turns using keys user_message and response")
-    recent_history: str = dspy.InputField(
-        desc=(
-            "Compact recent chat transcript, oldest to newest. The final listed turn is the most "
-            "recent prior exchange and should dominate recency-sensitive follow-up answers."
-        )
-    )
-    assistant_response: str = dspy.OutputField(
+    response: str = dspy.OutputField(
         desc=(
             "Final assistant response to user. Use structured Markdown for detailed or long "
             "answers; wrap deliverable code in fenced blocks when the user expects a file."
@@ -431,80 +449,93 @@ class ConversationSummarySignature(dspy.Signature):
     )
 
 
-class RLMVariableSignature(dspy.Signature):
-    """Explore and answer questions about an arbitrarily long prompt.
+class RLMTurnSignature(dspy.Signature):
+    """Solve the user's request by writing Python in the sandboxed REPL.
 
-    The ``prompt`` field is stored as a REPL variable — use code to slice,
-    search, and aggregate it.  Call ``sub_rlm(text)`` for recursive semantic
-    processing of chunks, ``llm_query(text)`` for single LLM calls, and
-    ``SUBMIT(answer=...)`` to return the result.
-
-    Per Algorithm 1 (arXiv 2512.24601v2): dspy.RLM stores input fields in
-    the REPL automatically — the LLM sees only metadata (type, length,
-    preview) and explores data through code execution.
-
-    ``history`` is exposed as a native REPL variable so the model can inspect
-    full prior conversation turns with code (e.g. ``history.messages[-1]``)
-    rather than relying solely on a flattened recency snippet in ``prompt``.
+    All input fields are stored as REPL variables — only metadata and previews
+    appear in the LM context. Inspect slices, lengths, keywords, and structure
+    with code instead of printing large values. Treat available tools (including
+    ``sub_rlm``/``sub_rlm_batched`` recursive delegation) as ordinary Python
+    callables, use ``llm_query``/``llm_query_batched`` on focused snippets for
+    semantics, and call ``SUBMIT(response=...)`` with the final answer. Never
+    print or return credentials, environment variables, or hidden configuration.
     """
 
-    task: str = dspy.InputField(desc="The question or instruction to accomplish")
-    prompt: str = dspy.InputField(desc="The full text to process (stored as REPL variable, not in LLM context)")
+    user_request: str = dspy.InputField(desc="The current user request to solve")
+    core_memory: str = dspy.InputField(
+        desc="Core memory, active skill guidance, turn guidance, and compressed conversation context"
+    )
     history: dspy.History = dspy.InputField(
         desc=(
             "Prior chat turns stored as a REPL variable (each message has keys "
-            "user_message and response). Inspect with Python for full conversation "
-            "continuity; the prompt only carries a short recency hint."
+            "user_message and response); inspect with Python for full continuity"
         )
     )
-    document_text: str = dspy.InputField(
-        default="",
-        desc="Optional large document body stored as a REPL variable (not in LLM context)",
-    )
-    context_paths: list[str] = dspy.InputField(
-        default_factory=list,
-        desc="Optional staged sandbox file paths to inspect with Python",
-    )
-    context_manifest: dict[str, str] = dspy.InputField(
-        default_factory=dict,
-        desc="Optional path-to-size metadata for staged context files",
-    )
-    source_metadata: dict[str, str] = dspy.InputField(
-        default_factory=dict,
-        desc="Optional metadata for large local or fetched document inputs",
-    )
-    answer: str = dspy.OutputField(
+    response: str = dspy.OutputField(
         desc=(
-            "Final answer (call SUBMIT(answer=...) in REPL). Use Markdown headings and lists "
+            "Final answer (call SUBMIT(response=...) in REPL). Use Markdown headings and lists "
             "for detailed or long responses; wrap deliverable code in fenced blocks with a "
             "language tag when the user expects a code file."
         )
     )
 
 
-class RLMLargeDocSignature(dspy.Signature):
-    """Process an oversized URL document using the REPL.
+class RLMDocumentTurnSignature(dspy.Signature):
+    """Answer a request about an oversized fetched document using the REPL.
 
-    All input fields are stored as REPL variables — the LLM sees only
-    metadata and writes Python to inspect ``document_text`` and chunk it. The
-    dedicated URL path avoids automatic recursive child-sandbox delegation; use
-    built-in ``llm_query()`` for bounded semantic passes and ``SUBMIT(...)`` for
-    the final answer. The ``history`` variable provides session context so the
-    LLM can target extraction at what the user actually needs.
+    ``document`` is reconstructed in the sandbox as a dict with keys ``text``,
+    ``source_url``, and ``metadata`` — write Python to inspect headings, links,
+    and sections of ``document["text"]`` before any semantic pass; never print
+    it wholesale. Use ``llm_query()`` on focused snippets when semantic
+    callbacks are enabled, and call ``SUBMIT(response=...)`` for the final answer.
     """
 
-    task: str = dspy.InputField(desc="Instruction for how to process the document")
-    prompt: str = dspy.InputField(desc="Brief task framing and any compressed conversation context")
-    source_url: str = dspy.InputField(desc="Canonical fetched source URL")
-    document_text: str = dspy.InputField(desc="Extracted document text stored as a REPL variable")
-    source_metadata: dict[str, str] = dspy.InputField(desc="Source metadata such as char count and fetch status")
-    history: dspy.History = dspy.InputField(
-        desc="Prior chat turns for user intent context (keys: user_request, assistant_response)"
+    user_request: str = dspy.InputField(desc="Instruction for how to process the document")
+    core_memory: str = dspy.InputField(
+        desc="Core memory, active skill guidance, turn guidance, and compressed conversation context"
     )
-    answer: str = dspy.OutputField(
+    history: dspy.History = dspy.InputField(
+        desc="Prior chat turns for user intent context (keys: user_message, response)"
+    )
+    document: LargeDocument = dspy.InputField(
+        desc="Fetched document in the sandbox as a dict with keys text, source_url, metadata"
+    )
+    response: str = dspy.OutputField(
         desc=(
-            "Final answer (call SUBMIT(answer=...) in REPL). Prefer structured Markdown for "
+            "Final answer (call SUBMIT(response=...) in REPL). Prefer structured Markdown for "
             "reports and analyses; use fenced code blocks when returning an implementation."
+        )
+    )
+
+
+class RLMWorkspaceTurnSignature(dspy.Signature):
+    """Answer a request over large local context staged for the sandbox.
+
+    ``context`` is reconstructed in the sandbox as a dict with keys
+    ``document_text``, ``context_paths``, ``manifest``, and ``metadata``. When
+    ``document_text`` is empty, read ``.fleet-rlm/context/manifest.json`` in the
+    workspace and open each staged ``.extracted.txt`` file; ``context_paths``
+    are host paths recorded for reference only. Inspect with Python slices and
+    regex, use ``llm_query`` on focused excerpts, and call
+    ``SUBMIT(response=...)`` for the final answer.
+    """
+
+    user_request: str = dspy.InputField(desc="The current user request to solve")
+    core_memory: str = dspy.InputField(
+        desc="Core memory, active skill guidance, turn guidance, and compressed conversation context"
+    )
+    history: dspy.History = dspy.InputField(
+        desc="Prior chat turns stored as a REPL variable (keys: user_message, response)"
+    )
+    context: WorkspaceContext = dspy.InputField(
+        desc=(
+            "Staged local context in the sandbox as a dict with keys document_text, context_paths, manifest, metadata"
+        )
+    )
+    response: str = dspy.OutputField(
+        desc=(
+            "Final answer (call SUBMIT(response=...) in REPL). Use Markdown headings and lists "
+            "for detailed or long responses; quote evidence verbatim when the user asks for quotes."
         )
     )
 
@@ -526,10 +557,12 @@ __all__ = [
     "MemoryStructureMigrationPlanSignature",
     "PlanRecursiveRepair",
     "PlanRecursiveSubqueries",
-    "RLMLargeDocSignature",
+    "RLMDocumentTurnSignature",
     "RLMReActChatSignature",
-    "RLMVariableSignature",
+    "RLMTurnSignature",
+    "RLMWorkspaceTurnSignature",
     "RecursiveSubQuerySignature",
+    "RouteTurnSignature",
     "SkillSelectionSignature",
     "ReflectAndReviseWorkspaceStep",
     "SummarizeLongDocument",

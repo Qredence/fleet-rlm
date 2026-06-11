@@ -36,11 +36,15 @@ class GEPAOptimizationRequest(BaseModel):
     )
     auto: Literal["light", "medium", "heavy"] = Field(
         default="light",
-        description="GEPA optimization intensity level.",
+        description="Optimization intensity level.",
     )
     train_ratio: float = Field(
         default=0.8,
         description="Fraction of examples to use for training (remainder used for validation).",
+    )
+    optimizer: Literal["gepa", "miprov2"] = Field(
+        default="gepa",
+        description="Optimizer backend to use (GEPA default, MIPROv2 optional).",
     )
 
     @model_validator(mode="after")

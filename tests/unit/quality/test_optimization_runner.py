@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import types
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -73,13 +74,38 @@ class _FakeGEPA:
         return _FakeOptimizedProgram()
 
 
+class _FakeMIPROv2:
+    last_init: dict[str, object] | None = None
+    last_compile: dict[str, object] | None = None
+
+    def __init__(self, *, metric, auto) -> None:
+        _FakeMIPROv2.last_init = {"metric": metric, "auto": auto}
+
+    def compile(self, program, *, trainset, valset):
+        _FakeMIPROv2.last_compile = {"program": program, "trainset": trainset, "valset": valset}
+        return _FakeOptimizedProgram()
+
+
 class _FakeEvaluate:
-    def __init__(self, *, devset, metric) -> None:
+    """Mirror of dspy.Evaluate: failure isolation + (example, prediction, score) results."""
+
+    def __init__(self, *, devset, metric, num_threads=None, display_progress=False, failure_score=0.0) -> None:
         self.devset = devset
         self.metric = metric
+        self.failure_score = failure_score
 
-    def __call__(self, program) -> float:
-        return 0.5
+    def __call__(self, program) -> SimpleNamespace:
+        results = []
+        for example in self.devset:
+            try:
+                prediction = program(**example.inputs())
+                score = self.metric(example, prediction)
+            except Exception:
+                prediction, score = None, self.failure_score
+            results.append((example, prediction, score))
+        total = sum(float(getattr(score, "score", score) or 0.0) for *_rest, score in results)
+        mean = total / len(results) if results else 0.0
+        return SimpleNamespace(score=round(100 * mean, 2), results=results)
 
 
 def _install_fake_dspy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -91,6 +117,7 @@ def _install_fake_dspy(monkeypatch: pytest.MonkeyPatch) -> None:
     dspy_module.settings = SimpleNamespace(lm=None)  # ty: ignore[unresolved-attribute]
     dspy_module.Evaluate = _FakeEvaluate  # ty: ignore[unresolved-attribute]
     teleprompt_module.GEPA = _FakeGEPA  # ty: ignore[unresolved-attribute]
+    teleprompt_module.MIPROv2 = _FakeMIPROv2  # ty: ignore[unresolved-attribute]
     gepa_utils_module.ScoreWithFeedback = _FakeScoreWithFeedback  # ty: ignore[unresolved-attribute]
 
     monkeypatch.setitem(sys.modules, "dspy", dspy_module)
@@ -152,18 +179,20 @@ def _write_dataset(tmp_path: Path) -> Path:
 def _stub_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeGEPA.last_init = None
     _FakeGEPA.last_compile = None
+    _FakeMIPROv2.last_init = None
+    _FakeMIPROv2.last_compile = None
     _install_fake_dspy(monkeypatch)
-    monkeypatch.setattr(optimization_runner, "_ensure_dspy_configured", lambda: None)
+    monkeypatch.setattr(optimization_runner, "_optimization_dspy_context", nullcontext)
 
 
-def test_evaluate_per_example_records_successes_and_failures() -> None:
+def test_evaluate_validation_set_records_successes_and_failures() -> None:
     examples = [
         _FakeExample(question="question-1", answer="answer-1"),
         _FakeExample(question="question-2", answer="answer-2"),
     ]
     program = _FakeProgram(instructions="Before", fail_on={"question-2"})
 
-    results = optimization_runner._evaluate_per_example(
+    results = optimization_runner._evaluate_validation_set(
         program,
         examples,
         lambda gold, pred: _FakeScoreWithFeedback(score=1.0, feedback="ok"),
@@ -171,8 +200,9 @@ def test_evaluate_per_example_records_successes_and_failures() -> None:
 
     assert results[0]["score"] == 1.0
     assert results[0]["expected_output"] == "answer-1"
+    assert results[0]["predicted_output"]
     assert results[1]["score"] == 0.0
-    assert results[1]["predicted_output"] == "ValueError: synthetic failure"
+    assert results[1]["predicted_output"] == ""
 
 
 def test_run_module_optimization_writes_artifacts_and_manifest(tmp_path, monkeypatch) -> None:
@@ -221,10 +251,61 @@ def test_run_module_optimization_writes_artifacts_and_manifest(tmp_path, monkeyp
     assert len(_FakeGEPA.last_compile["valset"]) == 2  # ty: ignore[invalid-argument-type]
 
 
+def test_run_module_optimization_supports_miprov2(tmp_path, monkeypatch) -> None:
+    dataset_path = _write_dataset(tmp_path)
+    output_root = tmp_path / "quality-artifacts"
+
+    with monkeypatch.context() as patch_context:
+        patch_context.setattr(optimization_runner, "_persist_run_artifacts", lambda *args: None)
+        result = optimization_runner.run_module_optimization(
+            _make_spec(),
+            dataset_path=dataset_path,
+            default_output_root=output_root,
+            train_ratio=0.5,
+            auto="light",
+            optimizer="miprov2",
+        )
+
+    assert result["optimizer"] == "MIPROv2"
+    assert _FakeMIPROv2.last_init is not None
+    assert _FakeMIPROv2.last_compile is not None
+    assert _FakeGEPA.last_init is None  # reflection LM never resolved for MIPROv2
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    assert manifest["optimizer"] == "MIPROv2"
+
+
+def test_run_module_optimization_rejects_unknown_optimizer(tmp_path) -> None:
+    dataset_path = _write_dataset(tmp_path)
+    with pytest.raises(ValueError, match="Unknown optimizer"):
+        optimization_runner.run_module_optimization(
+            _make_spec(),
+            dataset_path=dataset_path,
+            default_output_root=tmp_path,
+            optimizer="bogus",  # ty: ignore[invalid-argument-type]
+        )
+
+
+def test_spec_for_program_builds_adhoc_spec() -> None:
+    spec = optimization_runner.spec_for_program("my_module:build_program", output_key="answer")
+
+    assert spec.module_slug == "program-my-module-build-program"
+    assert spec.program_spec == "my_module:build_program"
+    assert spec.required_dataset_keys == []
+    rows = [
+        {
+            "inputs": {"question": "q1"},
+            "expectations": {"expected_response": "a1"},
+        },
+        {"inputs": {"question": "q2"}, "expectations": {}},
+    ]
+    examples = spec.row_converter(rows)
+    assert len(examples) == 1
+    assert examples[0].answer == "a1"
+
+
 def test_resolve_reflection_lm_raises_when_no_models_are_configured(clean_runtime_env, monkeypatch) -> None:
     fake_runtime_config = types.ModuleType("fleet_rlm.runtime.config")
-    fake_runtime_config.get_delegate_lm_from_env = lambda: None  # ty: ignore[unresolved-attribute]
-    fake_runtime_config.get_planner_lm_from_env = lambda: None  # ty: ignore[unresolved-attribute]
+    fake_runtime_config.resolve_lm = lambda role, **kwargs: None  # ty: ignore[unresolved-attribute]
     monkeypatch.setitem(sys.modules, "fleet_rlm.runtime.config", fake_runtime_config)
 
     with pytest.raises(RuntimeError, match="No DSPy LM configured"):

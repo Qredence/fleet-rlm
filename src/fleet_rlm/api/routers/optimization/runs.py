@@ -1,4 +1,4 @@
-"""Run endpoints for GEPA optimization."""
+"""Run endpoints for prompt optimization (GEPA default, MIPROv2 optional)."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from fleet_rlm.integrations.database import OptimizationRunStatus
 from fleet_rlm.integrations.database.repository_optimization import (
     OptimizationRunCreateRequest,
 )
-from fleet_rlm.quality import gepa_optimization, module_registry, optimization_runner
+from fleet_rlm.quality import module_registry, optimization_runner
 
 from ...dependencies import ConfigDepsDep, HTTPIdentityDep, PersistenceDep
 from ...runtime_services.common import run_blocking
@@ -46,7 +46,6 @@ from ._deps import (
     OpenAPIResponses,
     _check_gepa_available,
     _db_run_to_response,
-    _get_mlflow_status,
     _parse_uuid_id,
     _require_workspace_id,
     _resolve_dataset_request,
@@ -64,38 +63,25 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
-def _run_gepa_optimization(
+def _run_optimization(
     *,
-    dataset_path: Path,
+    module_slug: str | None,
     program_spec: str,
-    output_path: Path | None,
-    auto: Literal["light", "medium", "heavy"],
-    train_ratio: float,
-) -> dict:
-    """Blocking wrapper around optimize_program_with_gepa."""
-    return gepa_optimization.optimize_program_with_gepa(
-        dataset_path=dataset_path,
-        program_spec=program_spec,
-        output_path=output_path,
-        auto=auto,
-        train_ratio=train_ratio,
-    )
-
-
-def _run_module_optimization(
-    *,
-    module_slug: str,
     dataset_path: Path,
     output_path: Path | None,
     default_output_root: Path | None,
     auto: Literal["light", "medium", "heavy"],
     train_ratio: float,
+    optimizer: optimization_runner.OptimizerName,
     run_id: int | None = None,
 ) -> dict:
-    """Blocking wrapper for registry-based module optimization."""
-    spec = module_registry.get_module_spec(module_slug)
-    if spec is None:
-        raise ValueError(f"Unknown module slug: {module_slug!r}")
+    """Blocking wrapper around the unified optimization pipeline."""
+    if module_slug:
+        spec = module_registry.get_module_spec(module_slug)
+        if spec is None:
+            raise ValueError(f"Unknown module slug: {module_slug!r}")
+    else:
+        spec = optimization_runner.spec_for_program(program_spec)
     return dict(
         optimization_runner.run_module_optimization(
             spec,
@@ -104,29 +90,17 @@ def _run_module_optimization(
             default_output_root=default_output_root,
             train_ratio=train_ratio,
             auto=auto,
+            optimizer=optimizer,
             run_id=run_id,
         )
     )
 
 
-def _ensure_gepa_runtime_available(*, requires_mlflow: bool) -> None:
+def _ensure_optimizer_runtime_available() -> None:
     if not _check_gepa_available():
         raise HTTPException(
             status_code=503,
             detail="GEPA teleprompt module is not available.",
-        )
-    if not requires_mlflow:
-        return
-    mlflow_configured, mlflow_enabled = _get_mlflow_status()
-    if not mlflow_enabled:
-        detail = (
-            "MLflow is not enabled. Custom GEPA optimization requires MLflow."
-            if not mlflow_configured
-            else "MLflow is unavailable. Custom GEPA optimization requires a reachable MLflow tracking server."
-        )
-        raise HTTPException(
-            status_code=503,
-            detail=detail,
         )
 
 
@@ -197,7 +171,7 @@ async def _create_blocking_run_record(
                 tenant_id=persisted_identity.tenant_id,
                 workspace_id=workspace_id,
                 created_by_user_id=persisted_identity.user_id,
-                optimizer="GEPA",
+                optimizer=optimization_runner.OPTIMIZER_LABELS[request.optimizer],
                 program_spec=program_spec,
                 module_slug=request.module_slug,
                 dataset_id=dataset_uuid,
@@ -220,28 +194,19 @@ async def _execute_blocking_optimization(
     program_spec: str,
     db_run_id: str | None,
 ) -> dict:
-    if request.module_slug:
-        return await run_blocking(
-            partial(
-                _run_module_optimization,
-                module_slug=request.module_slug,
-                dataset_path=dataset,
-                output_path=output_path,
-                default_output_root=OPTIMIZATION_DATA_ROOT,
-                auto=request.auto,
-                train_ratio=request.train_ratio,
-                run_id=None,
-            ),
-            timeout=OPTIMIZATION_TIMEOUT_SECONDS,
-        )
+    _ = db_run_id
     return await run_blocking(
         partial(
-            _run_gepa_optimization,
-            dataset_path=dataset,
+            _run_optimization,
+            module_slug=request.module_slug,
             program_spec=program_spec,
+            dataset_path=dataset,
             output_path=output_path,
+            default_output_root=OPTIMIZATION_DATA_ROOT,
             auto=request.auto,
             train_ratio=request.train_ratio,
+            optimizer=request.optimizer,
+            run_id=None,
         ),
         timeout=OPTIMIZATION_TIMEOUT_SECONDS,
     )
@@ -368,13 +333,13 @@ async def run_optimization(
     identity: HTTPIdentityDep,
     persistence: PersistenceDep,
 ) -> GEPAOptimizationResponse:
-    """Trigger a GEPA prompt optimization run."""
+    """Trigger a blocking prompt optimization run (GEPA default, MIPROv2 optional)."""
     persisted_identity = await _resolve_persisted_identity(
         config_deps=config_deps,
         persistence=persistence,
         identity=identity,
     )
-    _ensure_gepa_runtime_available(requires_mlflow=request.module_slug is None)
+    _ensure_optimizer_runtime_available()
     effective_program_spec = _resolve_effective_program_spec(request)
 
     dataset, dataset_ref = await _resolve_dataset_request(
@@ -448,7 +413,7 @@ async def create_optimization_run(
     identity: HTTPIdentityDep,
     persistence: PersistenceDep,
 ) -> OptimizationRunCreatedResponse:
-    """Create a non-blocking GEPA optimization run.
+    """Create a non-blocking prompt optimization run.
 
     Returns immediately with the run_id.  The optimization executes as a
     background task.  Poll ``GET /runs/{run_id}`` for progress and results.
@@ -458,7 +423,7 @@ async def create_optimization_run(
         persistence=persistence,
         identity=identity,
     )
-    _ensure_gepa_runtime_available(requires_mlflow=request.module_slug is None)
+    _ensure_optimizer_runtime_available()
 
     effective_program_spec = _resolve_effective_program_spec(request)
     dataset, dataset_ref = await _resolve_dataset_request(
@@ -473,7 +438,7 @@ async def create_optimization_run(
             tenant_id=persisted_identity.tenant_id,
             workspace_id=_require_workspace_id(persisted_identity),
             created_by_user_id=persisted_identity.user_id,
-            optimizer="GEPA",
+            optimizer=optimization_runner.OPTIMIZER_LABELS[request.optimizer],
             program_spec=effective_program_spec,
             module_slug=request.module_slug,
             dataset_id=(
@@ -502,6 +467,7 @@ async def create_optimization_run(
         default_output_root=OPTIMIZATION_DATA_ROOT,
         auto=request.auto,
         train_ratio=request.train_ratio,
+        optimizer=request.optimizer,
     )
     return OptimizationRunCreatedResponse(run_id=run_id, status="running")
 

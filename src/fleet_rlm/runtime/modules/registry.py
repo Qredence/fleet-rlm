@@ -23,9 +23,12 @@ from fleet_rlm.runtime.agent.signatures import (
     VolumeFileTreeSignature,
 )
 from fleet_rlm.runtime.modules.factory import (
+    VARIABLE_MODE_MAX_OUTPUT_CHARS,
     RuntimeModuleBuildConfig,
     _create_configured_runtime_rlm,
     build_runtime_module_config,
+    create_runtime_rlm,
+    interpreter_delegation_tools,
 )
 from fleet_rlm.runtime.modules.grounded_answer import GroundedAnswerSynthesisModule
 from fleet_rlm.runtime.modules.memory import (
@@ -34,7 +37,6 @@ from fleet_rlm.runtime.modules.memory import (
     MemoryMigrationPlanningModule,
     MemoryStructureAuditPlanningModule,
 )
-from fleet_rlm.runtime.modules.variable_mode import RLMVariableExecutionModule
 from fleet_rlm.runtime.modules.workspace import RecursiveWorkspaceModule
 
 
@@ -89,9 +91,9 @@ class RuntimeModuleDefinition:
     doc: str
     module_class: type[dspy.Module] | None = None
     variable_mode: bool = False
-    # When True, ``build_runtime_module`` routes the original signature through
-    # ``RLMVariableExecutionModule`` so the module keeps its input/output field
-    # names while dspy.RLM stores the inputs as REPL variables.
+    # When True, ``build_runtime_module`` builds the RLM with the interpreter's
+    # recursive delegation tools and a tighter output budget so the LM works
+    # through REPL variables instead of printing large inputs.
 
 
 RUNTIME_MODULE_REGISTRY: dict[str, RuntimeModuleDefinition] = {
@@ -212,9 +214,10 @@ def build_runtime_module(
 ) -> dspy.Module:
     """Build a runtime module from the canonical registry.
 
-    When the definition has ``variable_mode=True``, returns an
-    ``RLMVariableExecutionModule`` that leverages ``dspy.RLM``'s native
-    REPL variable injection (Algorithm 1, arXiv 2512.24601v2).
+    When the definition has ``variable_mode=True``, the RLM is built with the
+    interpreter's recursive delegation tools (``sub_rlm``/``sub_rlm_batched``)
+    and a tighter output budget; ``dspy.RLM`` natively stores all input fields
+    as REPL variables (Algorithm 1, arXiv 2512.24601v2).
     """
 
     definition = RUNTIME_MODULE_REGISTRY.get(name)
@@ -222,12 +225,14 @@ def build_runtime_module(
         raise ValueError(f"Unknown runtime module: {name}")
 
     if definition.variable_mode:
-        return RLMVariableExecutionModule(
+        return create_runtime_rlm(
             signature=definition.signature,
             interpreter=interpreter,
             max_iterations=max_iterations,
             max_llm_calls=max_llm_calls,
+            max_output_chars=VARIABLE_MODE_MAX_OUTPUT_CHARS,
             verbose=verbose,
+            tools=interpreter_delegation_tools(interpreter) or None,
         )
 
     wrapper_class = cast(

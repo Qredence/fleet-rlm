@@ -21,8 +21,8 @@ from fleet_rlm.quality.workspace_metrics import (
 )
 def test_exact_match_feedback_metric_returns_useful_feedback(expected, actual, score, snippet) -> None:
     result_score, feedback = exact_match_feedback_metric(
-        {"assistant_response": expected},
-        {"assistant_response": actual},
+        {"response": expected},
+        {"response": actual},
     )
 
     assert result_score == score
@@ -31,8 +31,8 @@ def test_exact_match_feedback_metric_returns_useful_feedback(expected, actual, s
 
 def test_completeness_feedback_metric_reports_missing_terms() -> None:
     score, feedback = completeness_feedback_metric(
-        {"assistant_response": "machine learning optimization pipeline"},
-        {"assistant_response": "machine learning"},
+        {"response": "machine learning optimization pipeline"},
+        {"response": "machine learning"},
     )
 
     assert 0.0 < score < 0.6
@@ -42,12 +42,12 @@ def test_completeness_feedback_metric_reports_missing_terms() -> None:
 
 def test_workspace_metrics_share_the_same_weighted_score() -> None:
     feedback_score, feedback = workspace_feedback_metric(
-        {"assistant_response": "hello world"},
-        {"assistant_response": "hello"},
+        {"response": "hello world"},
+        {"response": "hello"},
     )
     numeric_score = workspace_score_metric(
-        {"assistant_response": "hello world"},
-        {"assistant_response": "hello"},
+        {"response": "hello world"},
+        {"response": "hello"},
     )
 
     assert feedback_score == pytest.approx(0.2)

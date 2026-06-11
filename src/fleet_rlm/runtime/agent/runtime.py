@@ -19,7 +19,7 @@ from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
 from fleet_rlm.runtime.agent import runtime_helpers as rh
 from fleet_rlm.runtime.agent import runtime_mcp, runtime_streaming
 from fleet_rlm.runtime.agent.runtime_history import maybe_refresh_summary
-from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventContext
+from fleet_rlm.runtime.events import RuntimeEventContext
 from fleet_rlm.runtime.schemas import StreamEvent
 from fleet_rlm.runtime.tools import discover_tools
 from fleet_rlm.runtime.tools.binding import bind_runtime_tools, execute_sandbox_tool
@@ -232,20 +232,6 @@ class AgentRuntime:
         """Run one chat turn from async callers without blocking the event loop."""
         return await asyncio.to_thread(self.chat_turn, user_message)
 
-    async def _aiter_chat_turn_stream_posthoc(
-        self,
-        *,
-        message: str,
-        cancel_check: Callable[[], bool] | None,
-    ) -> AsyncIterator[RuntimeEvent]:
-        """Fallback stream path that emits events after the turn finishes."""
-        async for event in runtime_streaming.aiter_chat_turn_stream_posthoc(
-            self,
-            message=message,
-            cancel_check=cancel_check,
-        ):
-            yield event
-
     # -----------------------------------------------------------------
     # Async context manager (required by ChatAgentProtocol)
     # -----------------------------------------------------------------
@@ -414,9 +400,11 @@ class AgentRuntime:
         """Stream one chat turn through the agent, yielding events.
 
         This is the canonical entrypoint used by the websocket streaming
-        layer.  It runs a single forward pass, extracts the trajectory,
-        and yields ``StreamEvent`` objects for each step plus a terminal
-        ``done`` event.
+        layer.  The unified path in
+        :mod:`~fleet_rlm.runtime.agent.runtime_streaming` runs the turn under
+        ``dspy.streamify`` (live ``response`` tokens and tool status messages),
+        relays live RLM/sandbox progress, then replays the final trajectory
+        once with fingerprint dedup before the terminal ``done`` event.
         """
         _ = trace
         _ = repo_url
@@ -442,24 +430,12 @@ class AgentRuntime:
             session_context_paths=interpreter_session_context_paths(interpreter),
         )
         try:
-            react_program = rh.get_streamable_react_program(self.agent)
-            if react_program is None:
-                logger.info("streaming_path=posthoc (react_program not streamable)")
-                async for event in self._aiter_chat_turn_stream_posthoc(
-                    message=message,
-                    cancel_check=cancel_check,
-                ):
-                    yield rh.stream_event_from_runtime_event(event)
-                return
-
-            logger.info("streaming_path=native (dspy.streamify per-token streaming)")
-            async for event in runtime_streaming.aiter_chat_turn_stream_native(
+            async for event in runtime_streaming.aiter_chat_turn_stream(
                 self,
                 message=message,
                 cancel_check=cancel_check,
-                react_program=react_program,
             ):
-                yield event
+                yield rh.stream_event_from_runtime_event(event)
         finally:
             self._turn_context = None
 

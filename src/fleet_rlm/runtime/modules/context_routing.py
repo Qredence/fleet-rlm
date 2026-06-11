@@ -11,7 +11,7 @@ import dspy
 
 from fleet_rlm.runtime.agent.turn_context import TurnContext
 from fleet_rlm.runtime.content.ingestion import read_document_content
-from fleet_rlm.runtime.modules.variable_mode import VARIABLE_MODE_THRESHOLD
+from fleet_rlm.runtime.modules.factory import VARIABLE_MODE_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
@@ -79,16 +79,10 @@ def _history_char_estimate(history: dspy.History | None) -> int:
     messages = list(getattr(history, "messages", []) or []) if history is not None else []
     total = 0
     for message in messages:
-        if isinstance(message, dict):
-            for key in ("user_message", "user_request", "response", "assistant_response", "answer"):
-                value = message.get(key)
-                if value not in (None, ""):
-                    total += len(str(value))
-        else:
-            for key in ("user_message", "user_request", "response", "assistant_response", "answer"):
-                value = getattr(message, key, None)
-                if value not in (None, ""):
-                    total += len(str(value))
+        for key in ("user_message", "response"):
+            value = message.get(key) if isinstance(message, dict) else getattr(message, key, None)
+            if value not in (None, ""):
+                total += len(str(value))
     return total
 
 

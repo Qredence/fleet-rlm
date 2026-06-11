@@ -215,7 +215,7 @@ function sandboxFromPayload(
   kind: "tool_call" | "tool_result",
   text: string,
   payload?: Record<string, unknown>,
-): ChatRenderPart {
+): ToolLikeRenderPart {
   const step =
     payload?.step && typeof payload.step === "object" && !Array.isArray(payload.step)
       ? (payload.step as Record<string, unknown>)
@@ -286,7 +286,7 @@ function toolFromPayload(
   kind: "tool_call" | "tool_result",
   text: string,
   payload?: Record<string, unknown>,
-): ChatRenderPart {
+): ToolLikeRenderPart {
   const state = inferToolState(kind, text, payload);
   const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
   const runtimeContext = parseRuntimeContext(payload);
@@ -307,39 +307,53 @@ function toolFromPayload(
   };
 }
 
-function toolIdentity(part: ChatRenderPart): string {
-  if (part.kind === "tool") return part.toolType ?? part.title ?? "tool";
-  if (part.kind === "sandbox") return part.title ?? "sandbox";
-  return part.title ?? "tool";
+type ToolLikeRenderPart = Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>;
+
+function isToolLikePart(part: ChatRenderPart): part is ToolLikeRenderPart {
+  return part.kind === "tool" || part.kind === "sandbox";
+}
+
+function toolIdentity(part: ToolLikeRenderPart): string {
+  if (part.kind === "tool") return part.toolType || part.title || "tool";
+  return part.title || "sandbox";
 }
 
 function upsertMatchingToolPart(
   messages: ChatMessage[],
-  part: ChatRenderPart,
+  part: ToolLikeRenderPart,
   text: string,
   traceSource: ChatMessage["traceSource"],
 ): ChatMessage[] | null {
   if (part.stepIndex == null) return null;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
-    if (message.type !== "trace" || message.traceSource !== traceSource) continue;
+    if (!message || message.type !== "trace" || message.traceSource !== traceSource) continue;
     const renderParts = message.renderParts ?? [];
     for (let j = renderParts.length - 1; j >= 0; j -= 1) {
       const existing = renderParts[j];
+      if (!existing || !isToolLikePart(existing)) continue;
       if (existing.kind !== part.kind) continue;
       if (existing.stepIndex !== part.stepIndex) continue;
       if (toolIdentity(existing) !== toolIdentity(part)) continue;
-      const merged: ChatRenderPart = {
-        ...existing,
-        ...part,
-        input:
-          existing.kind === "tool" && part.kind === "tool"
-            ? (existing.input ?? part.input)
-            : part.input,
-        state: part.state ?? existing.state,
-        output: part.output ?? existing.output,
-        errorText: part.errorText ?? existing.errorText,
-      };
+      const merged: ChatRenderPart =
+        existing.kind === "tool" && part.kind === "tool"
+          ? {
+              ...existing,
+              ...part,
+              input: existing.input ?? part.input,
+              state: part.state ?? existing.state,
+              output: part.output ?? existing.output,
+              errorText: part.errorText ?? existing.errorText,
+            }
+          : existing.kind === "sandbox" && part.kind === "sandbox"
+            ? {
+                ...existing,
+                ...part,
+                state: part.state ?? existing.state,
+                output: part.output ?? existing.output,
+                errorText: part.errorText ?? existing.errorText,
+              }
+            : part;
       const copy = [...messages];
       const nextParts = [...renderParts];
       nextParts[j] = merged;

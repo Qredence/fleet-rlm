@@ -38,6 +38,7 @@ def configure_analytics(
     """Configure and register a PostHog DSPy callback lazily."""
     import dspy
 
+    from .callback_registry import ensure_dspy_callbacks
     from .config import PostHogConfig
     from .posthog_callback import PostHogLLMCallback
 
@@ -64,55 +65,5 @@ def configure_analytics(
             return callback
 
     callback = PostHogLLMCallback(config, distinct_id=distinct_id)
-    desired_callbacks = [*callbacks, callback]
-    try:
-        dspy.configure(callbacks=desired_callbacks)
-    except RuntimeError as exc:
-        if "dspy.settings can only be changed by the thread" not in str(exc):
-            raise
-
-        settings_lock = getattr(dspy.settings, "lock", None)
-        if settings_lock is None:
-            msg = (
-                "Unable to configure DSPy callbacks after thread-owner RuntimeError; dspy.settings.lock is unavailable."
-            )
-            raise RuntimeError(msg) from exc
-
-        try:
-            settings_module = import_module("dspy.dsp.utils.settings")
-        except ImportError as imp_exc:
-            msg = (
-                "Unable to configure DSPy callbacks after thread-owner RuntimeError; "
-                "dspy.dsp.utils.settings is unavailable."
-            )
-            raise RuntimeError(msg) from imp_exc
-
-        main_thread_config = getattr(settings_module, "main_thread_config", None)
-        if not isinstance(main_thread_config, dict):
-            msg = (
-                "Unable to configure DSPy callbacks after thread-owner RuntimeError; "
-                "dspy.dsp.utils.settings.main_thread_config is unavailable."
-            )
-            raise RuntimeError(msg) from exc
-
-        with settings_lock:
-            thread_local_overrides = getattr(settings_module, "thread_local_overrides", None)
-            main_thread_callbacks = list(main_thread_config.get("callbacks", []) or [])
-            registered_callback = callback
-            for existing_callback in main_thread_callbacks:
-                if isinstance(existing_callback, PostHogLLMCallback):
-                    registered_callback = existing_callback
-                    break
-            else:
-                main_thread_config["callbacks"] = [*main_thread_callbacks, callback]
-
-            if thread_local_overrides is not None:
-                active_overrides = thread_local_overrides.get()
-                if "callbacks" in active_overrides:
-                    active_callbacks = list(active_overrides.get("callbacks", []) or [])
-                    if not any(
-                        isinstance(existing_callback, PostHogLLMCallback) for existing_callback in active_callbacks
-                    ):
-                        active_overrides["callbacks"] = [*active_callbacks, registered_callback]
-            return registered_callback
+    ensure_dspy_callbacks([callback])
     return callback

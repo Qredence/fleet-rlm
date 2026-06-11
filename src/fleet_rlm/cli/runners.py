@@ -119,7 +119,7 @@ def run_react_chat_once(
             result.pop("trajectory", None)
         return merge_trace_result_metadata(
             result,
-            response_preview=result.get("assistant_response"),
+            response_preview=result.get("response"),
         )
 
 
@@ -157,7 +157,7 @@ async def arun_react_chat_once(
                 result.pop("trajectory", None)
             return merge_trace_result_metadata(
                 result,
-                response_preview=result.get("assistant_response"),
+                response_preview=result.get("response"),
             )
     except Exception:
         agent.shutdown()

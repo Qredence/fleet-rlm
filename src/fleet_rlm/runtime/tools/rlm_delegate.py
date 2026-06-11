@@ -49,13 +49,29 @@ def _resolve_delegate_adapter(interpreter: Any) -> Any | None:
     return dspy.JSONAdapter()
 
 
-def _run_with_delegate_adapter(rlm: Any, interpreter: Any, *, prompt: str, context: str) -> Any:
-    """Execute the child RLM with the configured delegate adapter."""
+def _run_with_delegate_adapter(
+    rlm: Any,
+    interpreter: Any,
+    *,
+    prompt: str,
+    context: str,
+    lm: Any | None = None,
+) -> Any:
+    """Execute the child RLM with the delegate adapter and LM scoped via dspy.context.
+
+    The LM is applied as a request-scoped override rather than a global
+    ``dspy.configure`` so concurrent sessions cannot clobber each other.
+    """
     import dspy
 
+    ctx_kwargs: dict[str, Any] = {}
     adapter = _resolve_delegate_adapter(interpreter)
     if adapter is not None:
-        with dspy.context(adapter=adapter):
+        ctx_kwargs["adapter"] = adapter
+    if lm is not None and dspy.settings.lm is None:
+        ctx_kwargs["lm"] = lm
+    if ctx_kwargs:
+        with dspy.context(**ctx_kwargs):
             return rlm(prompt=prompt, context=context)
     return rlm(prompt=prompt, context=context)
 
@@ -248,7 +264,6 @@ def _run_delegate_child(
             ),
         )
         effective_sub_lm = _resolve_delegate_sub_lm(child, interpreter)
-        _ensure_dspy_lm_configured(effective_sub_lm)
         rlm = build_recursive_subquery_rlm(
             interpreter=child,
             max_iterations=max_iterations,
@@ -261,7 +276,13 @@ def _run_delegate_child(
             "delegate_to_rlm: running child RLM with isolation=%s",
             getattr(child, "child_isolation_metadata", {}),
         )
-        prediction = _run_with_delegate_adapter(rlm, interpreter, prompt=query, context=resolved_context)
+        prediction = _run_with_delegate_adapter(
+            rlm,
+            interpreter,
+            prompt=query,
+            context=resolved_context,
+            lm=effective_sub_lm,
+        )
         raw_answer = getattr(prediction, "answer", None)
         answer = "" if raw_answer is None else str(raw_answer)
 
@@ -418,8 +439,8 @@ def _resolve_delegate_sub_lm(child: Any, parent: Any) -> Any | None:
     Resolution order:
     1. child.sub_lm (set by build_delegate_child)
     2. parent interpreter's sub_lm
-    3. dspy.settings.lm (global default)
-    4. Auto-resolve from environment via get_delegate_lm_from_env()
+    3. dspy.settings.lm (current context/global default)
+    4. Auto-resolve from environment via ``resolve_lm("delegate")``
 
     This ensures the child RLM always has an LM available even when the
     benchmark or caller does not explicitly configure one.
@@ -436,40 +457,22 @@ def _resolve_delegate_sub_lm(child: Any, parent: Any) -> Any | None:
     if parent_lm is not None:
         return parent_lm
 
-    # 3. Global DSPy LM
+    # 3. Current DSPy LM (context override or global default)
     if dspy.settings.lm is not None:
         return dspy.settings.lm
 
-    # 4. Auto-resolve from environment
+    # 4. Auto-resolve from environment (delegate model first, planner fallback)
     try:
-        from fleet_rlm.runtime.config import get_delegate_lm_from_env, get_planner_lm_from_env
+        from fleet_rlm.runtime.config import resolve_lm
 
-        lm = get_delegate_lm_from_env()
+        lm = resolve_lm("delegate")
         if lm is not None:
             logger.info("delegate_to_rlm: auto-resolved delegate LM from environment")
-            return lm
-        lm = get_planner_lm_from_env()
-        if lm is not None:
-            logger.info("delegate_to_rlm: auto-resolved planner LM from environment as delegate fallback")
             return lm
     except Exception as exc:
         logger.warning("delegate_to_rlm: failed to auto-resolve LM from environment: %s", exc)
 
     return None
-
-
-def _ensure_dspy_lm_configured(sub_lm: Any) -> None:
-    """Ensure dspy.settings.lm is set so dspy.RLM can function.
-
-    dspy.RLM uses dspy.settings.lm internally for the planning LM.
-    If it's not configured globally but we have a resolved sub_lm,
-    configure it as a context default.
-    """
-    import dspy
-
-    if dspy.settings.lm is None and sub_lm is not None:
-        dspy.configure(lm=sub_lm)
-        logger.info("delegate_to_rlm: configured dspy.settings.lm from resolved sub_lm")
 
 
 def _resolve_delegate_context(

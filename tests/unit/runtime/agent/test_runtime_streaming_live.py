@@ -1,4 +1,4 @@
-"""Integration-style tests for live post-hoc streaming."""
+"""Integration-style tests for live unified streaming."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import pytest
 from fleet_rlm.runtime.agent.runtime_streaming import (
     _await_turn_with_live_progress,
     _TurnComplete,
-    aiter_chat_turn_stream_posthoc,
+    aiter_chat_turn_stream,
 )
 from fleet_rlm.runtime.agent.turn_progress_relay import TurnProgressRelay
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
@@ -20,7 +20,7 @@ from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 class _SlowAgent:
     async def aforward(self, **kwargs: Any) -> dspy.Prediction:
         await asyncio.sleep(0.2)
-        return dspy.Prediction(answer="done", assistant_response="done")
+        return dspy.Prediction(response="done")
 
 
 class _RuntimeStub:
@@ -63,7 +63,7 @@ async def test_await_turn_with_live_progress_emits_heartbeat_while_waiting(
 
 
 @pytest.mark.asyncio
-async def test_posthoc_stream_drains_relay_events_before_replay(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_unified_stream_drains_relay_events_before_replay(monkeypatch: pytest.MonkeyPatch) -> None:
     runtime = _RuntimeStub()
     loop = asyncio.get_running_loop()
     relay = TurnProgressRelay(loop=loop)
@@ -72,14 +72,13 @@ async def test_posthoc_stream_drains_relay_events_before_replay(monkeypatch: pyt
     async def _fast_turn(**kwargs: Any) -> dspy.Prediction:
         await relay.emit(RuntimeEvent.reasoning("live step during turn"))
         return dspy.Prediction(
-            answer="done",
-            assistant_response="done",
+            response="done",
             trajectory={"steps": [{"index": 0, "thought": "live step during turn"}]},
         )
 
     runtime.agent.aforward = _fast_turn  # type: ignore[method-assign]
 
-    events = [event async for event in aiter_chat_turn_stream_posthoc(runtime, message="hello", cancel_check=None)]
+    events = [event async for event in aiter_chat_turn_stream(runtime, message="hello", cancel_check=None)]
     reasoning_texts = [event.text for event in events if event.kind == RuntimeEventKind.REASONING]
     assert "live step during turn" in reasoning_texts
     assert reasoning_texts.count("live step during turn") == 1

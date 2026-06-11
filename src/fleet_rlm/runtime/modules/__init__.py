@@ -12,20 +12,23 @@ Architecture:
     - ``memory`` — memory-tree priming and audit/action/migration/clarification
     - ``registry`` — name→definition mapping and cached build helpers
     - ``skill_selection`` — proactive skill selection and context injection
-    - ``variable_mode`` — variable-mode RLM execution wrapper
     - ``workspace`` — multi-pass recursive workspace orchestrator
+
+Large inputs are passed to ``dspy.RLM`` as ``SandboxSerializable`` models from
+:mod:`fleet_rlm.runtime.sandbox_types`; dspy injects them into the sandbox
+natively, so no variable-mode wrapper is needed.
 """
 
-from fleet_rlm.runtime.modules.escalating import (
-    ESCALATION_SENTINEL,
-    EscalatingFleetModule,
-)
+from fleet_rlm.runtime.modules.escalating import EscalatingFleetModule
 from fleet_rlm.runtime.modules.evidence import EvidenceSink
 from fleet_rlm.runtime.modules.factory import (
+    VARIABLE_MODE_MAX_OUTPUT_CHARS,
+    VARIABLE_MODE_THRESHOLD,
     RuntimeModuleBuildConfig,
     build_recursive_subquery_rlm,
     build_runtime_module_config,
     create_runtime_rlm,
+    interpreter_delegation_tools,
 )
 from fleet_rlm.runtime.modules.grounded_answer import (
     GroundedAnswerSynthesisModule,
@@ -52,12 +55,6 @@ from fleet_rlm.runtime.modules.skill_selection import (
     AVAILABLE_SKILLS,
     SkillSelectionModule,
 )
-from fleet_rlm.runtime.modules.variable_mode import (
-    VARIABLE_MODE_MAX_OUTPUT_CHARS,
-    VARIABLE_MODE_THRESHOLD,
-    RLMVariableExecutionModule,
-    build_variable_mode_rlm,
-)
 from fleet_rlm.runtime.modules.workspace import (
     _MISSING_SOURCE_FAILURE_MARKERS,
     _NON_SUFFICIENT_FAILURE_STATUSES,
@@ -68,15 +65,17 @@ from fleet_rlm.runtime.modules.workspace import (
 
 __all__ = [
     # Escalating
-    "ESCALATION_SENTINEL",
     "EscalatingFleetModule",
     # Evidence
     "EvidenceSink",
     # Factory
     "RuntimeModuleBuildConfig",
+    "VARIABLE_MODE_MAX_OUTPUT_CHARS",
+    "VARIABLE_MODE_THRESHOLD",
     "build_recursive_subquery_rlm",
     "build_runtime_module_config",
     "create_runtime_rlm",
+    "interpreter_delegation_tools",
     # Grounded Answer
     "GroundedAnswerSynthesisModule",
     "_chunk_document",
@@ -98,11 +97,6 @@ __all__ = [
     # Skill Selection
     "AVAILABLE_SKILLS",
     "SkillSelectionModule",
-    # Variable Mode
-    "RLMVariableExecutionModule",
-    "VARIABLE_MODE_MAX_OUTPUT_CHARS",
-    "VARIABLE_MODE_THRESHOLD",
-    "build_variable_mode_rlm",
     # Workspace
     "RecursiveWorkspaceModule",
     "_MISSING_SOURCE_FAILURE_MARKERS",

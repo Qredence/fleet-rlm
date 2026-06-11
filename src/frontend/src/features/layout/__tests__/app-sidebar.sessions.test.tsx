@@ -48,13 +48,6 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
 
-vi.mock("@/lib/rlm-api/sessions", () => ({
-  sessionKeys: { list: (params: Record<string, unknown>) => ["sessions", "list", params] },
-  sessionEndpoints: {
-    listSessions: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, limit: 20 }),
-  },
-}));
-
 vi.mock("@/components/ui/button", () => ({
   Button: ({ children, className, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button type="button" className={className} {...props}>

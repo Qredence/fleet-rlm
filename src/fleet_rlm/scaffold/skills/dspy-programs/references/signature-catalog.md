@@ -74,8 +74,11 @@
 From `src/fleet_rlm/runtime/agent/signatures.py`:
 
 ```python
-# Interactive ReAct chat with conversation history
-"user_request, core_memory, history -> assistant_response"
+# Typed per-turn routing (direct, tools, or rlm)
+"user_request, core_memory, history, available_tools -> route"
+
+# Interactive chat with conversation history
+"user_request, core_memory, history -> response"
 
 # Long document summarization with focus control
 "document, focus -> summary, key_points, coverage_pct"

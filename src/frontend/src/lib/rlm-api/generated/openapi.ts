@@ -198,7 +198,7 @@ export interface paths {
   "/api/v1/optimization/run": {
     /**
      * Run Optimization
-     * @description Trigger a GEPA prompt optimization run.
+     * @description Trigger a blocking prompt optimization run (GEPA default, MIPROv2 optional).
      */
     post: operations["run_optimization_api_v1_optimization_run_post"];
   };
@@ -210,7 +210,7 @@ export interface paths {
     get: operations["list_runs_api_v1_optimization_runs_get"];
     /**
      * Create Optimization Run
-     * @description Create a non-blocking GEPA optimization run.
+     * @description Create a non-blocking prompt optimization run.
      *
      * Returns immediately with the run_id.  The optimization executes as a
      * background task.  Poll ``GET /runs/{run_id}`` for progress and results.
@@ -579,7 +579,7 @@ export interface components {
       output_path?: string | null;
       /**
        * Auto
-       * @description GEPA optimization intensity level.
+       * @description Optimization intensity level.
        * @default light
        * @enum {string}
        */
@@ -590,6 +590,13 @@ export interface components {
        * @default 0.8
        */
       train_ratio?: number;
+      /**
+       * Optimizer
+       * @description Optimizer backend to use (GEPA default, MIPROv2 optional).
+       * @default gepa
+       * @enum {string}
+       */
+      optimizer?: "gepa" | "miprov2";
     };
     /**
      * GEPAOptimizationResponse
@@ -3286,7 +3293,7 @@ export interface operations {
   };
   /**
    * Run Optimization
-   * @description Trigger a GEPA prompt optimization run.
+   * @description Trigger a blocking prompt optimization run (GEPA default, MIPROv2 optional).
    */
   run_optimization_api_v1_optimization_run_post: {
     requestBody: {
@@ -3361,7 +3368,7 @@ export interface operations {
   };
   /**
    * Create Optimization Run
-   * @description Create a non-blocking GEPA optimization run.
+   * @description Create a non-blocking prompt optimization run.
    *
    * Returns immediately with the run_id.  The optimization executes as a
    * background task.  Poll ``GET /runs/{run_id}`` for progress and results.

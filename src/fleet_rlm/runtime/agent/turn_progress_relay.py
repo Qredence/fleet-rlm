@@ -14,7 +14,7 @@ _DEFAULT_QUEUE_MAX = 128
 
 
 class TurnProgressRelay:
-    """Queue runtime events from worker threads into the post-hoc stream loop."""
+    """Queue runtime events from worker threads into the unified stream loop."""
 
     def __init__(
         self,
@@ -27,7 +27,7 @@ class TurnProgressRelay:
         self.seen_keys: set[str] = set()
 
     def fingerprint(self, event: RuntimeEvent) -> str:
-        """Stable dedupe key for live vs post-hoc replay."""
+        """Stable dedupe key for live events vs the final trajectory replay."""
         payload = event.payload if isinstance(event.payload, dict) else {}
         kind = event.kind.value
         step_index = payload.get("step_index", payload.get("trajectory_index"))

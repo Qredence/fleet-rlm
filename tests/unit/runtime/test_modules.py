@@ -5,116 +5,44 @@ from typing import Any
 from unittest.mock import MagicMock
 
 
-def test_variable_mode_module_collects_sub_tools_and_uses_tight_output_cap(monkeypatch) -> None:
-    import dspy
-
-    from fleet_rlm.runtime.agent.signatures import RLMVariableSignature
-    from fleet_rlm.runtime.modules import variable_mode
+def test_interpreter_delegation_tools_collects_sub_rlm_callables() -> None:
+    from fleet_rlm.runtime.modules.factory import interpreter_delegation_tools
 
     interpreter = SimpleNamespace(sub_rlm=lambda prompt: prompt, sub_rlm_batched=lambda prompts: prompts)
-    captured: dict[str, Any] = {}
 
-    def fake_create_runtime_rlm(**kwargs: Any) -> MagicMock:
-        captured.update(kwargs)
-        return MagicMock(spec=dspy.Module)
+    tools = interpreter_delegation_tools(interpreter)
 
-    monkeypatch.setattr(variable_mode, "create_runtime_rlm", fake_create_runtime_rlm)
-    module = variable_mode.RLMVariableExecutionModule(interpreter=interpreter, max_iterations=7, max_llm_calls=13)
-
-    assert captured["signature"] is RLMVariableSignature
-    assert captured["interpreter"] is interpreter
-    assert captured["max_iterations"] == 7
-    assert captured["max_llm_calls"] == 13
-    assert captured["max_output_chars"] == variable_mode.VARIABLE_MODE_MAX_OUTPUT_CHARS
-    assert captured["tools"] == [interpreter.sub_rlm, interpreter.sub_rlm_batched]
-    assert captured["include_llm_tools"] is True
-    assert module is not None
+    assert tools == [interpreter.sub_rlm, interpreter.sub_rlm_batched]
+    assert interpreter_delegation_tools(None) == []
+    assert interpreter_delegation_tools(SimpleNamespace()) == []
 
 
-def test_variable_mode_module_can_disable_recursive_sub_tools(monkeypatch) -> None:
-    import dspy
+def test_sandbox_types_serialize_to_json_dicts() -> None:
+    import json
 
-    from fleet_rlm.runtime.modules import variable_mode
+    from fleet_rlm.runtime.sandbox_types import LargeDocument, WorkspaceContext
 
-    interpreter = SimpleNamespace(sub_rlm=lambda prompt: prompt, sub_rlm_batched=lambda prompts: prompts)
-    captured: dict[str, Any] = {}
+    doc = LargeDocument(text="body text", source_url="https://example.com", metadata={"status": "ok"})
+    payload = json.loads(doc.to_sandbox().decode("utf-8"))
+    assert payload == {"text": "body text", "source_url": "https://example.com", "metadata": {"status": "ok"}}
+    assert doc.sandbox_assignment("document", "_raw_document") == "document = json.loads(_raw_document)"
+    assert "source_url" in doc.rlm_preview()
 
-    def fake_create_runtime_rlm(**kwargs: Any) -> MagicMock:
-        captured.update(kwargs)
-        return MagicMock(spec=dspy.Module)
-
-    monkeypatch.setattr(variable_mode, "create_runtime_rlm", fake_create_runtime_rlm)
-
-    variable_mode.RLMVariableExecutionModule(
-        interpreter=interpreter,
-        include_sub_tools=False,
-        extra_tools=[],
-    )
-
-    assert captured["tools"] is None
-
-
-def test_variable_mode_forward_preserves_signature_kwargs(monkeypatch) -> None:
-    import dspy
-
-    from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
-    from fleet_rlm.runtime.modules import variable_mode
-
-    interpreter = SimpleNamespace()
-    fake_rlm = MagicMock(return_value=dspy.Prediction(summary="Summary", key_points=["one"], coverage_pct=90))
-    monkeypatch.setattr(variable_mode, "create_runtime_rlm", lambda **kwargs: fake_rlm)
-
-    module = variable_mode.RLMVariableExecutionModule(signature=SummarizeLongDocument, interpreter=interpreter)
-    result = module(document="doc body", focus="latency")
-
-    fake_rlm.assert_called_once_with(document="doc body", focus="latency")
-    assert result.summary == "Summary"
-    assert result.key_points == ["one"]
-    assert result.coverage_pct == 90
-
-
-def test_variable_mode_forward_scopes_disabled_semantic_callbacks(monkeypatch) -> None:
-    import dspy
-
-    from fleet_rlm.runtime.modules import variable_mode
-
-    interpreter = SimpleNamespace(semantic_callbacks_enabled=True)
-    observed: dict[str, Any] = {}
-
-    def fake_create_runtime_rlm(**kwargs: Any) -> MagicMock:
-        observed["include_llm_tools"] = kwargs["include_llm_tools"]
-
-        def _run(**call_kwargs: Any) -> dspy.Prediction:
-            observed["semantic_callbacks_enabled_during_call"] = interpreter.semantic_callbacks_enabled
-            observed["adapter_during_call"] = dspy.settings.adapter
-            observed["call_kwargs"] = call_kwargs
-            return dspy.Prediction(answer="done")
-
-        return MagicMock(side_effect=_run)
-
-    monkeypatch.setattr(variable_mode, "create_runtime_rlm", fake_create_runtime_rlm)
-
-    module = variable_mode.RLMVariableExecutionModule(
-        interpreter=interpreter,
-        include_llm_tools=False,
-    )
-    result = module(task="inspect document")
-
-    assert result.answer == "done"
-    assert observed["include_llm_tools"] is False
-    assert observed["semantic_callbacks_enabled_during_call"] is False
-    assert isinstance(observed["adapter_during_call"], dspy.JSONAdapter)
-    assert interpreter.semantic_callbacks_enabled is True
+    ctx = WorkspaceContext(context_paths=["/tmp/a.pdf"], manifest={"/tmp/a.pdf": "1024"})
+    payload = json.loads(ctx.to_sandbox().decode("utf-8"))
+    assert payload["context_paths"] == ["/tmp/a.pdf"]
+    assert payload["manifest"] == {"/tmp/a.pdf": "1024"}
+    assert "manifest.json" in ctx.rlm_preview()
 
 
 def test_create_runtime_rlm_without_llm_tools_removes_callback_instructions() -> None:
     import dspy
 
-    from fleet_rlm.runtime.agent.signatures import RLMVariableSignature
+    from fleet_rlm.runtime.agent.signatures import RLMTurnSignature
     from fleet_rlm.runtime.modules.factory import create_runtime_rlm
 
     rlm = create_runtime_rlm(
-        signature=RLMVariableSignature,
+        signature=RLMTurnSignature,
         interpreter=SimpleNamespace(),
         max_iterations=2,
         max_llm_calls=3,
@@ -129,23 +57,90 @@ def test_create_runtime_rlm_without_llm_tools_removes_callback_instructions() ->
     assert isinstance(rlm, dspy.Module)
 
 
-def test_build_variable_mode_rlm_returns_wrapper(monkeypatch) -> None:
+def test_streaming_rlm_emits_action_and_result_steps() -> None:
     import dspy
 
-    from fleet_rlm.runtime.modules import variable_mode
+    from fleet_rlm.runtime.agent.signatures import RLMTurnSignature
+    from fleet_rlm.runtime.modules.factory import create_runtime_rlm
 
-    monkeypatch.setattr(variable_mode, "create_runtime_rlm", lambda **kwargs: MagicMock(spec=dspy.Module))
+    events: list[dict[str, Any]] = []
+    interpreter = SimpleNamespace(_turn_step_callback=events.append)
 
-    module = variable_mode.build_variable_mode_rlm(interpreter=SimpleNamespace())
+    rlm = create_runtime_rlm(
+        signature=RLMTurnSignature,
+        interpreter=interpreter,
+        max_iterations=2,
+        max_llm_calls=3,
+        verbose=False,
+    )
 
-    assert isinstance(module, variable_mode.RLMVariableExecutionModule)
+    action = dspy.Prediction(reasoning="check lengths", code="print(len(user_request))")
+    rlm.generate_action._inner = MagicMock(return_value=action)
+    prediction = rlm.generate_action(variables_info=[], repl_history=None, iteration="2/2")
+
+    assert prediction is action
+    assert [event["phase"] for event in events] == ["rlm_reasoning", "rlm_tool_call"]
+    assert events[0]["iteration"] == 1
+    assert events[1]["code"] == "print(len(user_request))"
+
+    from dspy.primitives.repl_types import REPLHistory
+
+    history = rlm._process_execution_result(
+        action,
+        "print(len(user_request))",
+        "12",
+        REPLHistory(),
+        ["response"],
+    )
+    assert not isinstance(history, dspy.Prediction)
+    assert events[-1]["phase"] == "rlm_tool_result"
+    assert events[-1]["output"] == "12"
+
+
+def test_no_callback_rlm_scopes_disabled_semantic_callbacks(monkeypatch) -> None:
+    import dspy
+
+    from fleet_rlm.runtime.agent.signatures import RLMTurnSignature
+    from fleet_rlm.runtime.modules.factory import _NoCallbackRLM, create_runtime_rlm
+
+    interpreter = SimpleNamespace(semantic_callbacks_enabled=True)
+    observed: dict[str, Any] = {}
+
+    rlm = create_runtime_rlm(
+        signature=RLMTurnSignature,
+        interpreter=interpreter,
+        max_iterations=2,
+        max_llm_calls=3,
+        verbose=False,
+        include_llm_tools=False,
+    )
+    assert isinstance(rlm, _NoCallbackRLM)
+
+    def fake_forward(self: Any, **kwargs: Any) -> dspy.Prediction:
+        observed["semantic_callbacks_enabled_during_call"] = interpreter.semantic_callbacks_enabled
+        observed["adapter_during_call"] = dspy.settings.adapter
+        return dspy.Prediction(response="done")
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.modules.factory._StreamingRLM.forward",
+        fake_forward,
+    )
+
+    result = rlm.forward(user_request="inspect", core_memory="", history=dspy.History(messages=[]))
+
+    assert result.response == "done"
+    assert observed["semantic_callbacks_enabled_during_call"] is False
+    assert isinstance(observed["adapter_during_call"], dspy.JSONAdapter)
+    assert interpreter.semantic_callbacks_enabled is True
 
 
 def test_runtime_module_registry_flags_and_signature_fields_are_stable() -> None:
     from fleet_rlm.runtime.agent.signatures import (
         GroundedAnswerWithCitations,
         ReflectAndReviseWorkspaceStep,
-        RLMVariableSignature,
+        RLMDocumentTurnSignature,
+        RLMTurnSignature,
+        RLMWorkspaceTurnSignature,
     )
     from fleet_rlm.runtime.modules.registry import RUNTIME_MODULE_NAMES, RUNTIME_MODULE_REGISTRY
 
@@ -159,16 +154,12 @@ def test_runtime_module_registry_flags_and_signature_fields_are_stable() -> None
     assert RUNTIME_MODULE_REGISTRY["extract_from_logs"].variable_mode is True
     assert RUNTIME_MODULE_REGISTRY["grounded_answer"].variable_mode is False
 
-    assert set(RLMVariableSignature.input_fields) == {
-        "task",
-        "prompt",
-        "history",
-        "document_text",
-        "context_paths",
-        "context_manifest",
-        "source_metadata",
-    }
-    assert set(RLMVariableSignature.output_fields) == {"answer"}
+    assert set(RLMTurnSignature.input_fields) == {"user_request", "core_memory", "history"}
+    assert set(RLMTurnSignature.output_fields) == {"response"}
+    assert set(RLMDocumentTurnSignature.input_fields) == {"user_request", "core_memory", "history", "document"}
+    assert set(RLMDocumentTurnSignature.output_fields) == {"response"}
+    assert set(RLMWorkspaceTurnSignature.input_fields) == {"user_request", "core_memory", "history", "context"}
+    assert set(RLMWorkspaceTurnSignature.output_fields) == {"response"}
     assert {"query", "evidence_chunks", "response_style"} <= set(GroundedAnswerWithCitations.input_fields)
     assert {"answer", "citations", "confidence", "coverage_notes"} <= set(GroundedAnswerWithCitations.output_fields)
     assert {"next_action", "revised_plan", "rationale", "confidence"} <= set(
@@ -197,8 +188,9 @@ def test_runtime_module_class_caches_generated_wrappers() -> None:
 def test_build_runtime_module_routes_variable_mode_and_caches_instances(monkeypatch) -> None:
     import dspy
 
+    from fleet_rlm.runtime.agent.signatures import SummarizeLongDocument
     from fleet_rlm.runtime.modules import registry as module_registry
-    from fleet_rlm.runtime.modules.factory import RuntimeModuleBuildConfig
+    from fleet_rlm.runtime.modules.factory import VARIABLE_MODE_MAX_OUTPUT_CHARS, RuntimeModuleBuildConfig
 
     interpreter = SimpleNamespace(sub_rlm=lambda prompt: prompt, sub_rlm_batched=lambda prompts: prompts)
     captured: list[dict[str, Any]] = []
@@ -207,7 +199,7 @@ def test_build_runtime_module_routes_variable_mode_and_caches_instances(monkeypa
         captured.append(kwargs)
         return MagicMock(spec=dspy.Module)
 
-    monkeypatch.setattr("fleet_rlm.runtime.modules.variable_mode.create_runtime_rlm", fake_create_runtime_rlm)
+    monkeypatch.setattr(module_registry, "create_runtime_rlm", fake_create_runtime_rlm)
 
     built = module_registry.build_runtime_module(
         "summarize_long_document",
@@ -221,9 +213,12 @@ def test_build_runtime_module_routes_variable_mode_and_caches_instances(monkeypa
     cached_first = module_registry.get_or_build_runtime_module(cache, "summarize_long_document", config=config)
     cached_second = module_registry.get_or_build_runtime_module(cache, "summarize_long_document", config=config)
 
-    assert isinstance(built, module_registry.RLMVariableExecutionModule)
+    assert built is not None
     assert cached_first is cached_second
     assert len(captured) == 2
+    assert captured[0]["signature"] is SummarizeLongDocument
+    assert captured[0]["max_output_chars"] == VARIABLE_MODE_MAX_OUTPUT_CHARS
+    assert captured[0]["tools"] == [interpreter.sub_rlm, interpreter.sub_rlm_batched]
 
 
 def test_build_runtime_module_rejects_unknown_names() -> None:
