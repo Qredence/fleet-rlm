@@ -451,6 +451,12 @@ Volume manifests persist the runtime state used for local restart restore. The s
 
 Fleet-rlm integrates with MLflow for trace capture, feedback collection, and optimization. See [mlflow-workflows.md](mlflow-workflows.md) for complete documentation.
 
+MLflow and PostHog attach to DSPy through observability callbacks. Fleet registers those callbacks
+through a centralized, thread-aware registry because `dspy.configure(...)` can only mutate global
+settings from the owner thread or async task. Use `dspy.context(...)` for request-scoped LM,
+adapter, or streaming overrides; do not use it as a replacement for global observability callback
+registration.
+
 ### Enable MLflow Tracing
 
 ```bash
@@ -468,7 +474,7 @@ When MLflow is enabled, RLM execution automatically captures:
 - Reasoning trajectories
 - Timing and token usage
 
-For variable-mode `dspy.RLM` runs, Fleet records each REPL/code trajectory step
+For `dspy.RLM` runs, Fleet records each REPL/code trajectory step
 as a child MLflow `TOOL` span named `repl_execute`, with bounded inputs and
 outputs. This keeps the MLflow trace tree aligned with the compact trace rows
 rendered in the chat surface.

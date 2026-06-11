@@ -9,11 +9,8 @@ import dspy
 import pytest
 
 from fleet_rlm.runtime.factory import ESCALATING_RUNTIME_ENV_VAR, build_chat_agent
-from fleet_rlm.runtime.modules.escalating import (
-    ESCALATION_SENTINEL,
-    EscalatingFleetModule,
-)
-from fleet_rlm.runtime.modules.rlm_prompts import build_rlm_prompt_context
+from fleet_rlm.runtime.modules.escalating import EscalatingFleetModule
+from fleet_rlm.runtime.modules.rlm_prompts import build_rlm_core_context
 from fleet_rlm.runtime.task_intent import implies_quote_retrieval, quote_retrieval_repl_guidance
 
 
@@ -29,8 +26,12 @@ def _make_module(*, interpreter: Any | None = None) -> EscalatingFleetModule:
 
 
 def _stub_respond(module: EscalatingFleetModule, *, reasoning: str = "", response: str = "ok") -> None:
-    pred = _FakePrediction(reasoning=reasoning, assistant_response=response)
+    pred = _FakePrediction(reasoning=reasoning, response=response)
     module.respond = MagicMock(return_value=pred)
+
+
+def _stub_route(module: EscalatingFleetModule, *, route: str = "direct") -> None:
+    module.route = MagicMock(return_value=_FakePrediction(route=route))
 
 
 def _stub_summarize(module: EscalatingFleetModule, *, summary: str = "summary") -> None:
@@ -99,41 +100,60 @@ class TestEscalatingFleetModule:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from fleet_rlm.runtime.modules import variable_mode
+        from fleet_rlm.runtime.modules import escalating
 
         calls: list[dict[str, Any]] = []
 
-        def fake_build_variable_mode_rlm(**kwargs: Any) -> MagicMock:
+        def fake_create_runtime_rlm(**kwargs: Any) -> MagicMock:
             calls.append(kwargs)
             return MagicMock()
 
-        monkeypatch.setattr(variable_mode, "build_variable_mode_rlm", fake_build_variable_mode_rlm)
+        monkeypatch.setattr(escalating, "create_runtime_rlm", fake_create_runtime_rlm)
+
+        tool = lambda: None  # noqa: E731
 
         EscalatingFleetModule(
             interpreter=object(),
-            tools=[lambda: None],
+            tools=[tool],
             max_iterations=20,
             max_llm_calls=50,
         )
 
-        url_call = calls[1]
+        assert len(calls) == 3
+        url_call = calls[2]
         assert url_call["max_iterations"] == 4
         assert url_call["max_llm_calls"] == 8
-        assert url_call["extra_tools"] == []
-        assert url_call["include_sub_tools"] is False
+        assert "tools" not in url_call
         assert url_call["include_llm_tools"] is True
+        # The main and workspace RLMs share user tools (plus delegation tools).
+        assert calls[0]["tools"] == [tool]
+        assert calls[1]["tools"] == [tool]
 
-    def test_url_document_prompt_enables_llm_query_by_default(self) -> None:
-        prompt = build_rlm_prompt_context(
-            user_request="analyze https://dspy.ai docs",
-            recent_history="",
-            compressed_history="",
-            core_memory="",
-            url_document_mode=True,
-        )
+    def test_main_rlm_receives_interpreter_delegation_tools(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from types import SimpleNamespace
 
-        assert "llm_query/llm_query_batched on focused snippets" in prompt
-        assert "llm_query" in prompt
+        from fleet_rlm.runtime.modules import escalating
+
+        calls: list[dict[str, Any]] = []
+
+        def fake_create_runtime_rlm(**kwargs: Any) -> MagicMock:
+            calls.append(kwargs)
+            return MagicMock()
+
+        monkeypatch.setattr(escalating, "create_runtime_rlm", fake_create_runtime_rlm)
+        interpreter = SimpleNamespace(sub_rlm=lambda prompt: prompt, sub_rlm_batched=lambda prompts: prompts)
+
+        EscalatingFleetModule(interpreter=interpreter, tools=[])
+
+        assert calls[0]["tools"] == [interpreter.sub_rlm, interpreter.sub_rlm_batched]
+
+    def test_url_document_signature_keeps_llm_query_guidance(self) -> None:
+        from fleet_rlm.runtime.agent.signatures import RLMDocumentTurnSignature
+
+        assert "llm_query" in str(RLMDocumentTurnSignature.__doc__)
 
     def test_needle_guidance_requires_single_verbatim_quote(self) -> None:
         guidance = quote_retrieval_repl_guidance()
@@ -146,9 +166,8 @@ class TestEscalatingFleetModule:
         assert not implies_quote_retrieval("Summarize the foreword themes")
 
     def test_large_context_prompt_adds_needle_guidance_for_exact_quotes(self) -> None:
-        prompt = build_rlm_prompt_context(
+        prompt = build_rlm_core_context(
             user_request="What is the exact quote from Chad Gates, Managing Director?",
-            recent_history="",
             compressed_history="",
             core_memory="",
             url_document_mode=False,
@@ -166,9 +185,8 @@ class TestEscalatingFleetModule:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("FLEET_RLM_URL_REPL_ONLY", "true")
-        prompt = build_rlm_prompt_context(
+        prompt = build_rlm_core_context(
             user_request="analyze https://dspy.ai docs",
-            recent_history="",
             compressed_history="",
             core_memory="",
             url_document_mode=True,
@@ -181,15 +199,15 @@ class TestEscalatingFleetModule:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from fleet_rlm.runtime.modules import variable_mode
+        from fleet_rlm.runtime.modules import escalating
 
         calls: list[dict[str, Any]] = []
 
-        def fake_build_variable_mode_rlm(**kwargs: Any) -> MagicMock:
+        def fake_create_runtime_rlm(**kwargs: Any) -> MagicMock:
             calls.append(kwargs)
             return MagicMock()
 
-        monkeypatch.setattr(variable_mode, "build_variable_mode_rlm", fake_build_variable_mode_rlm)
+        monkeypatch.setattr(escalating, "create_runtime_rlm", fake_create_runtime_rlm)
 
         EscalatingFleetModule(
             interpreter=object(),
@@ -199,16 +217,20 @@ class TestEscalatingFleetModule:
 
         assert calls[0]["max_output_chars"] == 12_345
         assert calls[1]["max_output_chars"] == 12_345
+        assert calls[2]["max_output_chars"] == 12_345
 
-    def test_cot_path_taken_when_no_signal(self) -> None:
+    def test_direct_route_uses_chain_of_thought(self) -> None:
         module = _make_module()
+        _stub_route(module, route="direct")
         _stub_respond(module, reasoning="Just thinking carefully.", response="Here is the answer.")
         result = module(user_request="Hello", execution_mode="auto")
+        module.route.assert_called_once()
         module.respond.assert_called_once()
-        assert getattr(result, "assistant_response", None) == "Here is the answer."
+        assert getattr(result, "response", None) == "Here is the answer."
 
-    def test_cot_path_passes_recency_ordered_history_context(self) -> None:
+    def test_direct_route_passes_history_to_respond(self) -> None:
         module = _make_module()
+        _stub_route(module, route="direct")
         _stub_respond(module, reasoning="Just thinking carefully.", response="Here is the answer.")
         history = dspy.History(
             messages=[
@@ -221,30 +243,65 @@ class TestEscalatingFleetModule:
 
         call_kwargs = module.respond.call_args.kwargs
         assert call_kwargs["history"] is history
-        assert "OLD_MARKER" in call_kwargs["recent_history"]
-        assert "NEW_MARKER" in call_kwargs["recent_history"]
-        assert call_kwargs["recent_history"].rfind("NEW_MARKER") > call_kwargs["recent_history"].rfind("OLD_MARKER")
-        assert "most recent prior turn" in call_kwargs["recent_history"]
+        assert "recent_history" not in call_kwargs
 
-    def test_react_tool_branch_triggered_by_sentinel_in_reasoning(self) -> None:
+    def test_router_failure_degrades_to_direct(self) -> None:
         module = _make_module()
-        _stub_respond(module, reasoning=f"I need a tool {ESCALATION_SENTINEL}", response="step1")
+        module.route = MagicMock(side_effect=RuntimeError("router LM unavailable"))
+        _stub_respond(module, response="direct fallback")
+        result = module(user_request="Hello", execution_mode="auto")
+        module.respond.assert_called_once()
+        assert getattr(result, "response", None) == "direct fallback"
+
+    def test_tools_route_without_tools_degrades_to_direct(self) -> None:
+        module = _make_module()
+        _stub_route(module, route="tools")
+        _stub_respond(module, response="no tools available")
+        react = MagicMock()
+        module._react = react
+
+        result = module(user_request="Use a tool", execution_mode="auto")
+
+        react.assert_not_called()
+        module.respond.assert_called_once()
+        assert getattr(result, "response", None) == "no tools available"
+
+    def test_react_tool_branch_triggered_by_router(self) -> None:
+        module = _make_module()
+        module._tools = [object()]
+        _stub_route(module, route="tools")
+        _stub_respond(module, response="unused")
         react_pred = _FakePrediction(response="tool answer")
         module._react = MagicMock(return_value=react_pred)
         module._rlm = MagicMock()
         _stub_summarize(module)
 
         result = module(user_request="Use a tool", execution_mode="auto")
-        module.respond.assert_called_once()
+        module.respond.assert_not_called()
         module._react.assert_called_once()
         module._rlm.assert_not_called()
         assert getattr(result, "response", None) == "tool answer"
-        assert result["routing_decision"] == "sentinel_react"
+        assert result["routing_decision"] == "tools_react"
+
+    def test_rlm_route_chosen_by_router(self) -> None:
+        module = _make_module()
+        _stub_route(module, route="rlm")
+        _stub_respond(module, response="unused")
+        rlm_pred = _FakePrediction(response="rlm answer")
+        module._rlm = MagicMock(return_value=rlm_pred)
+        _stub_summarize(module)
+
+        result = module(user_request="Analyze this repository", execution_mode="auto")
+        module._rlm.assert_called_once()
+        assert getattr(result, "response", None) == "rlm answer"
+        assert result["routing_decision"] == "router_rlm"
 
     @pytest.mark.asyncio
-    async def test_async_react_tool_branch_uses_acall_for_sentinel(self) -> None:
+    async def test_async_react_tool_branch_uses_acall(self) -> None:
         module = _make_module()
-        _stub_respond(module, reasoning=f"I need a tool {ESCALATION_SENTINEL}", response="step1")
+        module._tools = [object()]
+        _stub_route(module, route="tools")
+        _stub_respond(module, response="unused")
         react_agent = _AsyncReactAgent(_FakePrediction(response="async tool answer"))
         module._react = react_agent  # type: ignore[assignment]
         module._rlm = MagicMock()
@@ -252,52 +309,52 @@ class TestEscalatingFleetModule:
 
         result = await module.aforward(user_request="Use an async tool", execution_mode="auto")
 
-        module.respond.assert_called_once()
+        module.respond.assert_not_called()
         module._rlm.assert_not_called()
         assert react_agent.acall_kwargs is not None
         assert react_agent.acall_kwargs["user_message"] == "Use an async tool"
         assert isinstance(react_agent.acall_kwargs["chat_history"], dspy.History)
         assert getattr(result, "response", None) == "async tool answer"
-        assert result["routing_decision"] == "sentinel_react"
+        assert result["routing_decision"] == "tools_react"
 
     def test_force_escalate_skips_cot(self) -> None:
         module = _make_module()
         _stub_respond(module)
-        rlm_pred = _FakePrediction(answer="forced")
+        rlm_pred = _FakePrediction(response="forced")
         module._rlm = MagicMock(return_value=rlm_pred)
         _stub_summarize(module)
 
         result = module(user_request="do complex thing", force_escalate=True)
         module.respond.assert_not_called()
         module._rlm.assert_called_once()
-        assert getattr(result, "answer", None) == "forced"
+        assert getattr(result, "response", None) == "forced"
 
     def test_execution_mode_rlm_skips_cot(self) -> None:
         module = _make_module()
         _stub_respond(module)
-        rlm_pred = _FakePrediction(answer="rlm_mode")
+        rlm_pred = _FakePrediction(response="rlm_mode")
         module._rlm = MagicMock(return_value=rlm_pred)
         _stub_summarize(module)
 
         result = module(user_request="query", execution_mode="rlm")
         module.respond.assert_not_called()
-        assert getattr(result, "answer", None) == "rlm_mode"
+        assert getattr(result, "response", None) == "rlm_mode"
 
     def test_execution_mode_rlm_only_skips_cot(self) -> None:
         module = _make_module()
         _stub_respond(module)
-        rlm_pred = _FakePrediction(answer="rlm_only_mode")
+        rlm_pred = _FakePrediction(response="rlm_only_mode")
         module._rlm = MagicMock(return_value=rlm_pred)
         _stub_summarize(module)
 
         result = module(user_request="query", execution_mode="rlm_only")
         module.respond.assert_not_called()
-        assert getattr(result, "answer", None) == "rlm_only_mode"
+        assert getattr(result, "response", None) == "rlm_only_mode"
 
     def test_url_document_analysis_auto_routes_to_rlm(self) -> None:
         module = _make_module()
         _stub_respond(module)
-        rlm_pred = _FakePrediction(answer="doc analysis")
+        rlm_pred = _FakePrediction(response="doc analysis")
         module._rlm = MagicMock(return_value=rlm_pred)
         _stub_summarize(module)
 
@@ -308,7 +365,7 @@ class TestEscalatingFleetModule:
 
         module.respond.assert_not_called()
         module._rlm.assert_called_once()
-        assert getattr(result, "answer", None) == "doc analysis"
+        assert getattr(result, "response", None) == "doc analysis"
         assert result["routing_decision"] == "url_document_rlm"
         assert result["source_url"] == "https://dspy.ai"
 
@@ -318,7 +375,7 @@ class TestEscalatingFleetModule:
     ) -> None:
         module = _make_module(interpreter=object())
         _stub_respond(module)
-        rlm_pred = _FakePrediction(answer="doc analysis")
+        rlm_pred = _FakePrediction(response="doc analysis")
         module._url_document_rlm = MagicMock(return_value=rlm_pred)
         _stub_summarize(module)
 
@@ -339,22 +396,23 @@ class TestEscalatingFleetModule:
 
         module._url_document_rlm.assert_called_once()
         call_kwargs = module._url_document_rlm.call_args.kwargs
-        assert call_kwargs["source_url"] == "https://dspy.ai"
-        assert call_kwargs["document_text"] == "# DSPy docs\nRLM details"
-        assert call_kwargs["source_metadata"] == {
+        document = call_kwargs["document"]
+        assert document.source_url == "https://dspy.ai"
+        assert document.text == "# DSPy docs\nRLM details"
+        assert document.metadata == {
             "status": "ok",
             "char_count": "23",
             "source_type": "html",
         }
-        assert "# DSPy docs\nRLM details" not in call_kwargs["prompt"]
-        assert call_kwargs["prompt"].startswith("Task:\nanalyze https://dspy.ai and provide documentation notes")
-        assert "URL document variables" in call_kwargs["prompt"]
-        assert call_kwargs["prompt"].endswith("Repeat task:\nanalyze https://dspy.ai and provide documentation notes")
+        assert call_kwargs["user_request"] == "analyze https://dspy.ai and provide documentation notes"
+        assert "# DSPy docs\nRLM details" not in call_kwargs["core_memory"]
+        assert isinstance(call_kwargs["history"], dspy.History)
 
     def test_tools_only_does_not_auto_route_url_to_rlm(self) -> None:
         module = _make_module()
+        _stub_route(module, route="direct")
         _stub_respond(module, response="tool path")
-        module._rlm = MagicMock(return_value=_FakePrediction(answer="should not run"))
+        module._rlm = MagicMock(return_value=_FakePrediction(response="should not run"))
 
         result = module(
             user_request="analyze https://dspy.ai and provide documentation notes",
@@ -363,7 +421,7 @@ class TestEscalatingFleetModule:
 
         module.respond.assert_called_once()
         module._rlm.assert_not_called()
-        assert getattr(result, "assistant_response", None) == "tool path"
+        assert getattr(result, "response", None) == "tool path"
 
     def test_preview_routing_surfaces_url_document_route_before_execution(self) -> None:
         module = _make_module()
@@ -380,18 +438,20 @@ class TestEscalatingFleetModule:
 
     def test_react_fallback_to_cot_on_error(self) -> None:
         module = _make_module()
-        cot_pred = _FakePrediction(reasoning=ESCALATION_SENTINEL, assistant_response="cot_resp")
-        module.respond = MagicMock(side_effect=[cot_pred, _FakePrediction(assistant_response="fallback")])
+        module._tools = [object()]
+        _stub_route(module, route="tools")
+        module.respond = MagicMock(return_value=_FakePrediction(response="fallback"))
         module._react = MagicMock(side_effect=RuntimeError("ReAct failed"))
         _stub_summarize(module)
 
         result = module(user_request="query", execution_mode="auto")
-        assert getattr(result, "assistant_response", None) == "fallback"
+        assert getattr(result, "response", None) == "fallback"
         assert result["runtime_degraded"] is True
         assert result["runtime_failure_category"] == "react_fallback"
         assert result["runtime_failure_phase"] == "escalating_react"
         assert result["runtime_fallback_used"] is True
         assert result["runtime_warning"]
+        assert result["routing_decision"] == "tools_react"
 
     def test_compress_history_returns_summary(self) -> None:
         module = _make_module()
@@ -407,8 +467,9 @@ class TestEscalatingFleetModule:
         result = module.compress_history(history)
         assert result == ""
 
-    def test_no_sentinel_means_no_escalation(self) -> None:
+    def test_direct_route_does_not_touch_rlm(self) -> None:
         module = _make_module()
+        _stub_route(module, route="direct")
         _stub_respond(module, reasoning="I can handle this directly.")
         module(user_request="Simple question")
         module.respond.assert_called_once()
@@ -456,7 +517,7 @@ class TestAgentRuntimeEscalationFlag:
         rt = AgentRuntime(use_escalation=True)
         rt.agent = _PosthocAgent(
             _FakePrediction(
-                assistant_response="fallback answer",
+                response="fallback answer",
                 runtime_degraded=True,
                 runtime_failure_category="rlm_fallback",
                 runtime_failure_phase="escalating_rlm",
@@ -487,7 +548,7 @@ class TestAgentRuntimeEscalationFlag:
         rt = AgentRuntime(use_escalation=True)
         rt.agent = _PosthocAgent(
             _FakePrediction(
-                answer="analysis complete",
+                response="analysis complete",
                 selected_skills=["long-context"],
                 routing_decision="url_document_rlm",
                 source_url="https://dspy.ai",
@@ -526,7 +587,7 @@ class TestAgentRuntimeEscalationFlag:
         rt.agent = _PosthocAgent(
             _FakePrediction(
                 reasoning="The user wants a concise definition of RLM.",
-                assistant_response="RLM is a recursive long-chain-of-thought framework.",
+                response="RLM is a recursive long-chain-of-thought framework.",
             )
         )
 
@@ -549,7 +610,7 @@ class TestAgentRuntimeEscalationFlag:
         from fleet_rlm.runtime.agent.runtime import AgentRuntime
 
         rt = AgentRuntime(use_escalation=True)
-        rt.agent = _PreviewPosthocAgent(_FakePrediction(answer="analysis complete"))
+        rt.agent = _PreviewPosthocAgent(_FakePrediction(response="analysis complete"))
 
         events = [event async for event in rt.aiter_chat_turn_stream("analyze https://dspy.ai")]
 
@@ -564,7 +625,7 @@ class TestAgentRuntimeEscalationFlag:
 class TestLargeContextRouting:
     def test_preview_routing_large_context_when_turn_context_exceeds_threshold(self, tmp_path) -> None:
         from fleet_rlm.runtime.agent.turn_context import TurnContext
-        from fleet_rlm.runtime.modules.variable_mode import VARIABLE_MODE_THRESHOLD
+        from fleet_rlm.runtime.modules.factory import VARIABLE_MODE_THRESHOLD
 
         module = _make_module()
         turn_context = TurnContext(

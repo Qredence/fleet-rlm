@@ -21,20 +21,30 @@ Transport code may call runtime services and schemas. Runtime code should not im
 FastAPI route modules, or test-only helpers. Configuration/package-root modules must not pull in
 heavy runtime providers such as DSPy, MLflow, PostHog, or Daytona at import time.
 
+Observability callback registration is the exception only after an explicit runtime setup call.
+Register MLflow and PostHog DSPy callbacks through
+`integrations/observability/callback_registry.py` so callback registration stays lazy,
+deduplicated by callback type, and safe when `dspy.configure(...)` rejects non-owner
+threads or async tasks. The registry must preserve active thread-local callback overrides;
+otherwise worker-thread warmup can report success while immediately following DSPy calls miss
+the callbacks.
+
 ## Async Execution Boundary
 
 The sandbox interpreters (Daytona, Modal) expose a synchronous, blocking `execute(...)` that
 performs a network round-trip per code iteration. `dspy.RLM.aforward` only awaits the LM predictor
 calls — it still runs sandbox code through the **synchronous** `repl.execute(...)` (verified in
-dspy 3.2.1). Therefore the heavy RLM turn is driven sync-in-a-thread via
+dspy 3.3.0b1). Therefore the heavy RLM turn is driven sync-in-a-thread via
 `asyncio.to_thread(self.agent, ...)` in `runtime/agent/runtime.py`, which offloads both the LM
 calls and the blocking sandbox I/O to a worker thread and keeps the event loop free.
 
 Do not replace this `asyncio.to_thread` wrapping with a direct `await agent.acall(...)`/`aforward`
 on the RLM heavy path while the interpreter's `execute` stays synchronous — doing so would block the
-event loop on every code-execution iteration and regress server concurrency. The native chat
-streaming path is the exception: it interleaves per-token streaming through `async_planner_step`
-(which uses `acall` on the planner predictor only, not sandbox execution).
+event loop on every code-execution iteration and regress server concurrency. Lightweight branches
+are the exception: the unified streaming path wraps the whole turn in `dspy.streamify`, and the
+direct/tools branches use `acall` so their `response` predictors stream tokens natively. Worker
+threads spawned for blocking work must disable token streaming (`dspy.context(send_stream=None)`),
+because sync LM calls cannot forward stream chunks from plain `asyncio.to_thread` workers.
 
 See also [docs/reference/dspy-daytona-interpreter-boundary.md](../reference/dspy-daytona-interpreter-boundary.md)
 for Daytona snapshot/volume lifecycle notes and RLM budget knobs.

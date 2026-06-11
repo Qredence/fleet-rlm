@@ -289,7 +289,7 @@ class Dataset(SQLModel, table=True):
     format: str | None = Field(default=None, max_length=16)
     module_slug: str | None = Field(default=None, max_length=128)
     input_keys: str | None = None
-    output_key: str = Field(default="assistant_response", max_length=128)
+    output_key: str = Field(default="response", max_length=128)
     created_at: datetime = Field(default_factory=_utc_now)
 
 
@@ -424,7 +424,7 @@ def register_dataset(
     *,
     row_count: int | None = None,
     input_keys: list[str] | None = None,
-    output_key: str = "assistant_response",
+    output_key: str = "response",
 ) -> Dataset:
     with get_session() as db:
         row = Dataset(

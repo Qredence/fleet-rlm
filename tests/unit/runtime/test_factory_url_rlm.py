@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from fleet_rlm.runtime.agent.signatures import RLMLargeDocSignature
+from fleet_rlm.runtime.agent.signatures import RLMDocumentTurnSignature
 from fleet_rlm.runtime.modules.factory import create_runtime_rlm
 
 
 def test_url_document_rlm_enables_llm_tools_by_default() -> None:
     rlm = create_runtime_rlm(
-        signature=RLMLargeDocSignature,
+        signature=RLMDocumentTurnSignature,
         interpreter=MagicMock(),
         max_iterations=4,
         max_llm_calls=8,
@@ -23,7 +23,7 @@ def test_url_document_rlm_enables_llm_tools_by_default() -> None:
 
 def test_url_document_rlm_can_disable_llm_tools() -> None:
     rlm = create_runtime_rlm(
-        signature=RLMLargeDocSignature,
+        signature=RLMDocumentTurnSignature,
         interpreter=MagicMock(),
         max_iterations=4,
         max_llm_calls=8,

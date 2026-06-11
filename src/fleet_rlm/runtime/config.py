@@ -11,7 +11,7 @@ import logging
 import os
 from contextlib import nullcontext
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from dotenv import load_dotenv
 
@@ -355,6 +355,48 @@ def get_planner_lm_from_env(*, env_file: Path | None = None, model_name: str | N
     if planner_lm_kwargs is None:
         return None
     return _build_lm(**planner_lm_kwargs)
+
+
+LmRole = Literal["planner", "delegate", "reflection", "judge"]
+
+
+def resolve_lm(
+    role: LmRole = "planner",
+    *,
+    env_file: Path | None = None,
+    model_name: str | None = None,
+) -> dspy.LM | None:
+    """Resolve a DSPy LM for a runtime role without mutating global settings.
+
+    This is the single LM-resolution entrypoint; callers scope the result via
+    ``build_dspy_context(lm=...)`` rather than ``dspy.configure``.
+
+    Roles:
+        - ``planner``: the primary planner LM from ``DSPY_LM_MODEL``.
+        - ``delegate``: the optional stronger/cheaper delegate LM from
+          ``DSPY_DELEGATE_LM_MODEL``, falling back to the planner LM.
+        - ``reflection``: LM for GEPA's reflection pass — delegate first,
+          then planner.
+        - ``judge``: deterministic (temperature 0) LM for LLM-judge scoring.
+          Requires an explicit *model_name*.
+
+    Returns ``None`` when no configuration is available for the role.
+    """
+    if role == "planner":
+        return get_planner_lm_from_env(env_file=env_file, model_name=model_name)
+    if role in ("delegate", "reflection"):
+        lm = get_delegate_lm_from_env(
+            env_file=env_file,
+            model_name=model_name if role == "delegate" else None,
+        )
+        if lm is not None:
+            return lm
+        return get_planner_lm_from_env(env_file=env_file)
+    if role == "judge":
+        if not model_name:
+            return None
+        return _import_dspy().LM(model_name, temperature=0.0)
+    raise ValueError(f"Unknown LM role: {role!r}")
 
 
 def get_delegate_lm_from_env(

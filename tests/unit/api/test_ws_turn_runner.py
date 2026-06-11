@@ -60,9 +60,11 @@ async def test_emit_stream_event_sends_non_terminal_frame_to_websocket() -> None
     )
 
     assert websocket.messages
-    assert websocket.messages[0]["kind"] == "execution_step"
-    assert websocket.messages[0]["text"] == "Starting turn..."
-    assert websocket.messages[0]["payload"]["source_type"] == "status"
+    assert websocket.messages[0]["type"] == "event"
+    frame = websocket.messages[0]["data"]
+    assert frame["kind"] == "execution_step"
+    assert frame["text"] == "Starting turn..."
+    assert frame["payload"]["source_type"] == "status"
     assert lifecycle.run_completed is False
 
 
@@ -82,9 +84,11 @@ async def test_emit_stream_event_sends_terminal_frame_before_completion() -> Non
     )
 
     assert websocket.messages
-    assert websocket.messages[0]["kind"] == "execution_completed"
-    assert websocket.messages[0]["text"] == "done"
-    assert websocket.messages[0]["payload"]["source_type"] == "turn_completed"
-    assert websocket.messages[0]["payload"]["final_artifact"] is not None
-    assert websocket.messages[0]["payload"]["run_summary"]["status"] == "completed"
+    assert websocket.messages[0]["type"] == "event"
+    frame = websocket.messages[0]["data"]
+    assert frame["kind"] == "execution_completed"
+    assert frame["text"] == "done"
+    assert frame["payload"]["source_type"] == "turn_completed"
+    assert frame["payload"]["final_artifact"] is not None
+    assert frame["payload"]["run_summary"]["status"] == "completed"
     assert lifecycle.run_completed is True

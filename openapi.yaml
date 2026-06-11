@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.5.40
+  version: 0.5.50
 paths:
   /health:
     get:
@@ -1141,7 +1141,8 @@ paths:
       tags:
       - optimization
       summary: Run Optimization
-      description: Trigger a GEPA prompt optimization run.
+      description: Trigger a blocking prompt optimization run (GEPA default, MIPROv2
+        optional).
       operationId: run_optimization_api_v1_optimization_run_post
       requestBody:
         content:
@@ -1175,7 +1176,7 @@ paths:
       tags:
       - optimization
       summary: Create Optimization Run
-      description: 'Create a non-blocking GEPA optimization run.
+      description: 'Create a non-blocking prompt optimization run.
 
 
         Returns immediately with the run_id.  The optimization executes as a
@@ -1918,7 +1919,7 @@ components:
           - medium
           - heavy
           title: Auto
-          description: GEPA optimization intensity level.
+          description: Optimization intensity level.
           default: light
         train_ratio:
           type: number
@@ -1926,6 +1927,14 @@ components:
           description: Fraction of examples to use for training (remainder used for
             validation).
           default: 0.8
+        optimizer:
+          type: string
+          enum:
+          - gepa
+          - miprov2
+          title: Optimizer
+          description: Optimizer backend to use (GEPA default, MIPROv2 optional).
+          default: gepa
       additionalProperties: false
       type: object
       title: GEPAOptimizationRequest
@@ -2075,7 +2084,7 @@ components:
           type: string
           title: Version
           description: Package version currently serving the API.
-          default: 0.5.40
+          default: 0.5.50
       type: object
       title: HealthResponse
       description: Response body for the lightweight health endpoint.
@@ -2894,7 +2903,7 @@ components:
           type: string
           title: Version
           description: Package version currently serving the API.
-          default: 0.5.40
+          default: 0.5.50
         app_env:
           type: string
           enum:

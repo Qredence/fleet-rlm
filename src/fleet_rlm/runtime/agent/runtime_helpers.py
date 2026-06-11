@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import asyncio
 import json
 import uuid
 from typing import Any, cast
@@ -48,11 +47,8 @@ def prediction_value(result: Any, name: str) -> Any:
 
 
 def prediction_response_text(result: Any) -> str:
-    for field_name in ("response", "assistant_response", "answer"):
-        value = prediction_value(result, field_name)
-        if value not in (None, ""):
-            return str(value)
-    return ""
+    value = prediction_value(result, "response")
+    return str(value) if value not in (None, "") else ""
 
 
 def prediction_reasoning_text(result: Any) -> str:
@@ -139,30 +135,6 @@ def routing_status_text(payload: dict[str, Any]) -> str:
     return text
 
 
-def get_streamable_react_program(program: Any) -> Any | None:
-    for candidate in (program, getattr(program, "react", None)):
-        if candidate is None:
-            continue
-        planner = getattr(candidate, "planner", None)
-        extract = getattr(candidate, "extract", None)
-        async_call = getattr(candidate, "async_planner_step", None)
-        if planner is not None and extract is not None and callable(async_call):
-            return candidate
-    return None
-
-
-def format_react_trajectory(program: Any, trajectory_raw: Any) -> str:
-    """Format a ReAct trajectory for extract, with a safe fallback for custom programs."""
-    formatter = getattr(program, "_format_trajectory", None)
-    if callable(formatter):
-        return formatter(trajectory_raw)
-    return str(trajectory_raw)
-
-
-def normalize_tool_args(tool_args: Any) -> dict[str, Any]:
-    return dict(tool_args) if isinstance(tool_args, dict) else {}
-
-
 def observation_record(observation: Any) -> dict[str, Any]:
     if isinstance(observation, dict):
         return observation
@@ -209,35 +181,12 @@ def recursive_child_review_payload(tool_name: str, observation: Any) -> dict[str
     }
 
 
-async def call_react_tool(tool: Any, tool_args: dict[str, Any]) -> Any:
-    acall = getattr(tool, "acall", None)
-    if callable(acall):
-        return await acall(**tool_args)
-    return await asyncio.to_thread(tool, **tool_args)
-
-
 def stream_event_from_runtime_event(event: RuntimeEvent) -> StreamEvent:
     return StreamEvent(
         kind=cast(StreamEventKind, event.kind.value),
         text=event.text,
         payload=dict(event.payload),
         timestamp=event.timestamp,
-    )
-
-
-def build_tool_call_event(*, tool_name: str, tool_args: dict[str, Any], step_index: int) -> RuntimeEvent:
-    return RuntimeEvent.tool_call(
-        tool_name=tool_name,
-        tool_args=tool_args,
-        step_index=step_index,
-    )
-
-
-def build_tool_result_event(*, tool_name: str, observation: Any, step_index: int) -> RuntimeEvent:
-    return RuntimeEvent.tool_result(
-        tool_name=tool_name,
-        observation=observation,
-        step_index=step_index,
     )
 
 

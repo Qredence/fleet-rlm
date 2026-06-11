@@ -1,11 +1,11 @@
-"""CLI command for running GEPA module optimization offline."""
+"""CLI command for running offline prompt optimization."""
 
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional, cast
 
 import typer
 
@@ -34,7 +34,12 @@ def optimize_command(
     auto: str = typer.Option(
         "light",
         "--auto",
-        help="GEPA optimization intensity (light, medium, heavy).",
+        help="Optimization intensity (light, medium, heavy).",
+    ),
+    optimizer: str = typer.Option(
+        "gepa",
+        "--optimizer",
+        help="Optimizer backend (gepa or miprov2).",
     ),
     report: bool = typer.Option(
         False,
@@ -42,9 +47,12 @@ def optimize_command(
         help="Print a markdown report summary after optimization.",
     ),
 ) -> None:
-    """Run GEPA offline optimization for a registered DSPy module."""
+    """Run offline prompt optimization for a registered DSPy module."""
     if auto not in ("light", "medium", "heavy"):
         typer.echo(f"Error: --auto must be light, medium, or heavy, got {auto!r}", err=True)
+        raise typer.Exit(code=1)
+    if optimizer not in ("gepa", "miprov2"):
+        typer.echo(f"Error: --optimizer must be gepa or miprov2, got {optimizer!r}", err=True)
         raise typer.Exit(code=1)
 
     if module == "list":
@@ -77,7 +85,8 @@ def optimize_command(
             dataset_path=dataset,
             output_path=output_path,
             train_ratio=train_ratio,
-            auto=auto,  # type: ignore
+            auto=cast("Literal['light', 'medium', 'heavy']", auto),
+            optimizer=cast(optimization_runner.OptimizerName, optimizer),
         )
     )
 

@@ -287,12 +287,9 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
                 logger.debug("Failed to inspect/configure MLflow auto-assessment", exc_info=True)
 
             if _existing_trace_callback() is None:
-                callbacks = list(getattr(dspy.settings, "callbacks", []) or [])
-                new_callbacks: list[Any] = []
-                if not any(isinstance(cb, ThinkTagStripCallback) for cb in callbacks):
-                    new_callbacks.append(ThinkTagStripCallback())
-                new_callbacks.append(FleetMlflowTraceCallback())
-                dspy.configure(callbacks=[*callbacks, *new_callbacks])
+                from .callback_registry import ensure_dspy_callbacks
+
+                ensure_dspy_callbacks([ThinkTagStripCallback(), FleetMlflowTraceCallback()])
 
             _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity

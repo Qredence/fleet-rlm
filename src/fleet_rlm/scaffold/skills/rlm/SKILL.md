@@ -19,7 +19,7 @@ fleet-rlm routes to `dspy.RLM` when:
 - Auto mode detects URL document analysis (`url_document_rlm`)
 - Auto mode detects large context (`large_context_rlm`, threshold via `FLEET_RLM_LARGE_CONTEXT_THRESHOLD`)
 
-Lightweight chat stays on ChainOfThought; tool-heavy turns use ReAct via `[TOOLS NEEDED]` sentinel.
+Other turns are classified by the typed `RouteTurnSignature` router: `direct` (ChainOfThought), `tools` (dspy.ReAct loop), or `rlm` (sandboxed Python).
 
 ## REPL contract (Daytona interpreter)
 

@@ -1,4 +1,17 @@
-"""Chat turn streaming paths for AgentRuntime (native ReAct and post-hoc fallback)."""
+"""Unified chat-turn streaming for AgentRuntime.
+
+One streaming path serves every cognition module:
+
+1. The turn runs through ``dspy.streamify`` so predictors that produce the
+   user-facing ``response`` field stream tokens natively, and ``dspy.Tool``
+   invocations surface live status messages.
+2. A :class:`~fleet_rlm.runtime.agent.turn_progress_relay.TurnProgressRelay`
+   carries live RLM/sandbox events emitted from worker threads.
+3. After the final prediction arrives, its trajectory is converted once (via
+   :func:`~fleet_rlm.runtime.execution.streaming_events._normalize_trajectory`)
+   into replay events, deduplicated by fingerprint against everything that
+   already streamed live.
+"""
 
 from __future__ import annotations
 
@@ -7,20 +20,28 @@ import logging
 import os
 import time as _time
 from collections.abc import AsyncIterator, Callable
-from typing import Any, cast
+from typing import Any
 
 import dspy
-from dspy.streaming import StreamListener, StreamResponse
+from dspy.streaming import StatusMessage, StreamListener, StreamResponse
 
 from fleet_rlm.runtime.agent import runtime_helpers as rh
 from fleet_rlm.runtime.agent.runtime_history import maybe_refresh_summary
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 from fleet_rlm.runtime.execution.streaming_events import _normalize_trajectory
-from fleet_rlm.runtime.schemas import StreamEvent
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_HEARTBEAT_S = 20.0
+
+# Predictor attribute paths probed for native ``response`` token streaming.
+# Covers EscalatingFleetModule (``respond``/``_react``) and bare dspy.ReAct
+# programs such as FleetAgent (``extract``).
+_RESPONSE_PREDICTOR_PATHS = (
+    "respond.predict",
+    "_react.extract.predict",
+    "extract.predict",
+)
 
 
 class _TurnComplete:
@@ -59,34 +80,157 @@ def _should_skip_replay(event: RuntimeEvent, seen: set[str], relay: Any | None =
     return _event_fingerprint(event) in seen
 
 
+def _streaming_error(exc: BaseException) -> BaseException:
+    """Unwrap single-error ExceptionGroups raised by streamify's task group."""
+    while isinstance(exc, BaseExceptionGroup) and len(exc.exceptions) == 1:
+        exc = exc.exceptions[0]
+    return exc
+
+
+def _response_stream_listeners(program: Any) -> list[StreamListener]:
+    """Build StreamListeners for every predictor that emits the ``response`` field."""
+    if not isinstance(program, dspy.Module):
+        return []
+    listeners: list[StreamListener] = []
+    seen: set[int] = set()
+    for path in _RESPONSE_PREDICTOR_PATHS:
+        target: Any = program
+        for attr in path.split("."):
+            target = getattr(target, attr, None)
+            if target is None:
+                break
+        if not isinstance(target, dspy.Predict) or id(target) in seen:
+            continue
+        output_fields = getattr(getattr(target, "signature", None), "output_fields", {}) or {}
+        if "response" not in output_fields:
+            continue
+        seen.add(id(target))
+        listeners.append(
+            StreamListener(
+                signature_field_name="response",
+                predict=target,
+                predict_name=path.removesuffix(".predict"),
+                allow_reuse=True,
+            )
+        )
+    return listeners
+
+
+async def _execute_turn(
+    runtime: Any,
+    *,
+    message: str,
+    emit: Callable[[RuntimeEvent], None],
+) -> Any:
+    """Run one turn, emitting live token/status events through *emit*.
+
+    Programs with streamable ``response`` predictors run under
+    ``dspy.streamify``; everything else falls back to a plain async (or
+    thread-offloaded sync) forward pass.
+    """
+    program = runtime.agent
+    args = runtime._escalation_call_args(message)
+    listeners = _response_stream_listeners(program)
+
+    if not listeners:
+        async_call = getattr(program, "aforward", None)
+        if callable(async_call):
+            return await async_call(**args)
+        return await asyncio.to_thread(program, **args)
+
+    # ty infers streamify's return as Awaitable; it is a callable returning
+    # an async generator, so widen to Any for the call below.
+    stream: Any = dspy.streamify(
+        program,
+        stream_listeners=listeners,
+        include_final_prediction_in_output_stream=True,
+        is_async_program=True,
+    )
+    prediction: Any = None
+    async for chunk in stream(**args):
+        if isinstance(chunk, StreamResponse):
+            if chunk.signature_field_name == "response" and chunk.chunk:
+                event = RuntimeEvent(
+                    kind=RuntimeEventKind.TEXT,
+                    text=str(chunk.chunk),
+                    payload={"streamed": True, "predict_name": chunk.predict_name},
+                )
+                emit(event)
+        elif isinstance(chunk, StatusMessage):
+            text = str(getattr(chunk, "message", "") or "").strip()
+            if text:
+                emit(RuntimeEvent.status(text, payload={"phase": "module_status"}))
+        elif isinstance(chunk, dspy.Prediction):
+            prediction = chunk
+    if prediction is None:
+        raise RuntimeError("Streaming turn ended without a final prediction.")
+    return prediction
+
+
 async def _await_turn_with_live_progress(
     runtime: Any,
     *,
     message: str,
     cancel_check: Callable[[], bool] | None,
 ) -> AsyncIterator[RuntimeEvent | _TurnComplete]:
-    """Run aforward in a task while draining live progress from the turn relay."""
+    """Run the turn while interleaving streamed chunks, relay events, and heartbeats."""
     relay = getattr(runtime, "_turn_progress_relay", None)
     heartbeat_s = _turn_heartbeat_seconds()
     t0 = _time.monotonic()
+    chunks: asyncio.Queue[RuntimeEvent] = asyncio.Queue()
 
-    async def _run_turn() -> Any:
-        async_call = getattr(runtime.agent, "aforward", None)
-        args = runtime._escalation_call_args(message)
-        if callable(async_call):
-            return await async_call(**args)
-        return await asyncio.to_thread(runtime.agent, **args)
+    task = asyncio.create_task(_execute_turn(runtime, message=message, emit=chunks.put_nowait))
+    chunk_getter: asyncio.Task[RuntimeEvent] | None = None
+    live_getter: asyncio.Task[RuntimeEvent | None] | None = None
 
-    task = asyncio.create_task(_run_turn())
+    def _drain_chunks() -> list[RuntimeEvent]:
+        drained: list[RuntimeEvent] = []
+        while True:
+            try:
+                drained.append(chunks.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        return drained
+
+    def _harvest(getter: asyncio.Task[Any] | None) -> RuntimeEvent | None:
+        """Return a finished getter's event (if any) without consuming pending ones."""
+        if getter is None or not getter.done() or getter.cancelled() or getter.exception() is not None:
+            return None
+        result = getter.result()
+        return result if isinstance(result, RuntimeEvent) else None
+
     try:
-        while not task.done():
+        while True:
+            # Harvest finished getter tasks first so their items are neither
+            # dropped on re-creation nor yielded twice.
+            if chunk_getter is not None and chunk_getter.done():
+                harvested = _harvest(chunk_getter)
+                chunk_getter = None
+                if harvested is not None:
+                    yield harvested
+            if live_getter is not None and live_getter.done():
+                harvested = _harvest(live_getter)
+                live_getter = None
+                if harvested is not None:
+                    yield harvested
+
+            for event in _drain_chunks():
+                yield event
+            if relay is not None:
+                for event in relay.drain_nonblocking():
+                    yield event
+            if task.done():
+                break
+
             if cancel_check is not None and cancel_check():
                 task.cancel()
                 try:
                     await task
                 except asyncio.CancelledError:
-                    # Expected after task.cancel(); cancellation is surfaced below via a DONE event.
+                    # Expected after task.cancel(); cancellation is surfaced via a DONE event.
                     pass
+                except Exception:
+                    logger.debug("Turn task raised while cancelling", exc_info=True)
                 yield RuntimeEvent(
                     kind=RuntimeEventKind.DONE,
                     text="[cancelled]",
@@ -94,26 +238,33 @@ async def _await_turn_with_live_progress(
                 )
                 return
 
+            if chunk_getter is None:
+                chunk_getter = asyncio.create_task(chunks.get())
+            waiters: set[asyncio.Task[Any]] = {task, chunk_getter}
             if relay is not None:
-                for live_event in relay.drain_nonblocking():
-                    yield live_event
-                live = await relay.wait_for_event(timeout=heartbeat_s)
-                if live is not None:
-                    yield live
-                    continue
+                if live_getter is None:
+                    live_getter = asyncio.create_task(relay.wait_for_event(timeout=heartbeat_s))
+                waiters.add(live_getter)
 
-            try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=heartbeat_s)
-                break
-            except asyncio.TimeoutError:
-                # Expected while polling: allow loop to emit periodic progress heartbeat.
-                pass
+            done_set, _ = await asyncio.wait(waiters, timeout=heartbeat_s, return_when=asyncio.FIRST_COMPLETED)
+            if task in done_set:
+                continue
 
-            elapsed = int(_time.monotonic() - t0)
-            yield RuntimeEvent.status(
-                f"RLM execution in progress ({elapsed}s)...",
-                payload={"phase": "rlm_progress", "elapsed_s": elapsed},
-            )
+            # Finished getters are yielded by the harvest pass at the top of
+            # the next iteration; here we only decide on the heartbeat.
+            progressed = chunk_getter in done_set
+            if live_getter is not None and live_getter in done_set:
+                if _harvest(live_getter) is not None:
+                    progressed = True
+                else:
+                    # Relay wait timed out (returned None): recreate next pass.
+                    live_getter = None
+            if not progressed:
+                elapsed = int(_time.monotonic() - t0)
+                yield RuntimeEvent.status(
+                    f"RLM execution in progress ({elapsed}s)...",
+                    payload={"phase": "rlm_progress", "elapsed_s": elapsed},
+                )
 
         result = await task
     except asyncio.CancelledError:
@@ -121,25 +272,35 @@ async def _await_turn_with_live_progress(
     except Exception as exc:
         yield RuntimeEvent(
             kind=RuntimeEventKind.ERROR,
-            text=str(exc),
+            text=str(_streaming_error(exc)),
             payload={"history_turns": runtime.history_turns()},
         )
         return
     finally:
+        for getter in (chunk_getter, live_getter):
+            if getter is None:
+                continue
+            leftover = _harvest(getter)
+            if leftover is not None:
+                yield leftover
+            elif not getter.done():
+                getter.cancel()
+        for event in _drain_chunks():
+            yield event
         if relay is not None:
-            for live_event in relay.drain_nonblocking():
-                yield live_event
+            for event in relay.drain_nonblocking():
+                yield event
 
     yield _TurnComplete(result)
 
 
-async def aiter_chat_turn_stream_posthoc(
+async def aiter_chat_turn_stream(
     runtime: Any,
     *,
     message: str,
     cancel_check: Callable[[], bool] | None,
 ) -> AsyncIterator[RuntimeEvent]:
-    """Fallback stream path that emits events after the turn finishes."""
+    """Stream one chat turn: live progress first, then the trajectory replay."""
     if cancel_check is not None and cancel_check():
         yield RuntimeEvent(
             kind=RuntimeEventKind.DONE,
@@ -163,10 +324,13 @@ async def aiter_chat_turn_stream_posthoc(
             )
 
     result: Any = None
+    response_streamed = False
     async for item in _await_turn_with_live_progress(runtime, message=message, cancel_check=cancel_check):
         if isinstance(item, _TurnComplete):
             result = item.result
             break
+        if item.kind is RuntimeEventKind.TEXT and item.payload.get("streamed"):
+            response_streamed = True
         yield item
 
     if result is None:
@@ -189,6 +353,7 @@ async def aiter_chat_turn_stream_posthoc(
     cot_reasoning = rh.prediction_reasoning_text(result)
     degradation_payload = rh.runtime_degradation_payload(result)
     routing_payload = rh.runtime_routing_payload(result)
+    recursive_child_review: dict[str, Any] | None = None
 
     if routing_payload.get("selected_skills") or routing_payload.get("routing_decision"):
         status_event = RuntimeEvent.status(
@@ -239,6 +404,8 @@ async def aiter_chat_turn_stream_posthoc(
             result_ev.payload["trajectory_index"] = step.get("index")
             if not _should_skip_replay(result_ev, seen_keys, relay):
                 yield result_ev
+            if recursive_child_review is None:
+                recursive_child_review = rh.recursive_child_review_payload(tool_name, observation)
             clar_ev = rh.build_clarification_event(observation)
             if clar_ev is not None and not _should_skip_replay(clar_ev, seen_keys, relay):
                 yield clar_ev
@@ -250,7 +417,7 @@ async def aiter_chat_turn_stream_posthoc(
             payload=degradation_payload,
         )
 
-    if response:
+    if response and not response_streamed:
         yield RuntimeEvent(kind=RuntimeEventKind.TEXT, text=response)
 
     runtime.history = rh.append_turn_to_history(
@@ -270,6 +437,11 @@ async def aiter_chat_turn_stream_posthoc(
     done_payload.update(runtime._runtime_observability_payload())
     done_payload.update(degradation_payload)
     done_payload.update(routing_payload)
+    if recursive_child_review is not None:
+        done_payload["human_review"] = recursive_child_review
+        done_payload.setdefault("runtime_degraded", True)
+        done_payload.setdefault("runtime_failure_category", "recursive_child_degraded")
+        done_payload.setdefault("runtime_failure_phase", "delegate_to_rlm")
     rh.attach_final_artifact(done_payload, answer=response, task=message)
     yield RuntimeEvent(
         kind=RuntimeEventKind.DONE,
@@ -277,215 +449,3 @@ async def aiter_chat_turn_stream_posthoc(
         payload=done_payload,
         context=runtime._runtime_event_context(),
     )
-
-
-async def aiter_chat_turn_stream_native(
-    runtime: Any,
-    *,
-    message: str,
-    cancel_check: Callable[[], bool] | None,
-    react_program: Any,
-) -> AsyncIterator[StreamEvent]:
-    """Native per-token ReAct streaming via dspy.streamify."""
-    if cancel_check is not None and cancel_check():
-        yield StreamEvent(
-            kind="done",
-            text="[cancelled]",
-            payload={"cancelled": True, "history_turns": runtime.history_turns()},
-        )
-        return
-
-    t_turn_start = _time.monotonic()
-
-    yield StreamEvent(kind="status", text="Starting turn...")
-
-    input_args = {
-        "chat_history": runtime.history,
-        "user_message": message,
-    }
-    trajectory_raw: dict[str, Any] = {}
-    extract_prediction: dspy.Prediction | None = None
-    response_streamed = False
-    final_reasoning = ""
-    response = ""
-    recursive_child_review: dict[str, Any] | None = None
-
-    try:
-        max_iters = int(getattr(react_program, "max_iters", 1) or 1)
-        for step_index in range(max_iters):
-            if cancel_check is not None and cancel_check():
-                yield StreamEvent(
-                    kind="done",
-                    text="[cancelled]",
-                    payload={"cancelled": True, "history_turns": runtime.history_turns()},
-                )
-                return
-
-            try:
-                t_planner_start = _time.monotonic()
-                prediction = await react_program.async_planner_step(
-                    trajectory_raw,
-                    **input_args,
-                )
-                t_planner_ms = (_time.monotonic() - t_planner_start) * 1000
-                logger.info("streaming: planner step %d completed in %.0fms", step_index, t_planner_ms)
-            except ValueError as exc:
-                logger.debug(
-                    "streaming: planner step %d raised ValueError, ending iteration: %s",
-                    step_index,
-                    exc,
-                )
-                break
-
-            thought = str(getattr(prediction, "next_thought", "") or "")
-            tool_name = str(getattr(prediction, "next_tool_name", "") or "")
-            tool_args = rh.normalize_tool_args(getattr(prediction, "next_tool_args", {}))
-
-            trajectory_raw[f"thought_{step_index}"] = thought
-            trajectory_raw[f"tool_name_{step_index}"] = tool_name
-            trajectory_raw[f"tool_args_{step_index}"] = tool_args
-
-            is_terminal = (tool_name == "finish") or (not tool_name)
-
-            if thought:
-                if is_terminal:
-                    response = thought
-                    response_streamed = True
-                    yield StreamEvent(kind="text", text=thought)
-                else:
-                    yield StreamEvent(
-                        kind="reasoning",
-                        text=thought,
-                        payload={"phase": "reasoning", "step_index": step_index},
-                    )
-            elif is_terminal:
-                response = ""
-                response_streamed = True
-
-            if not tool_name:
-                break
-
-            if tool_name == "finish":
-                trajectory_raw[f"observation_{step_index}"] = "Completed."
-                break
-
-            tool = react_program.tools[tool_name]
-            yield rh.stream_event_from_runtime_event(
-                rh.build_tool_call_event(tool_name=tool_name, tool_args=tool_args, step_index=step_index)
-            )
-
-            try:
-                observation = await rh.call_react_tool(tool, tool_args)
-            except Exception as err:
-                observation = f"Execution error in {tool_name}: {err}"
-
-            trajectory_raw[f"observation_{step_index}"] = observation
-            if recursive_child_review is None:
-                recursive_child_review = rh.recursive_child_review_payload(tool_name, observation)
-            yield rh.stream_event_from_runtime_event(
-                rh.build_tool_result_event(
-                    tool_name=tool_name,
-                    observation=observation,
-                    step_index=step_index,
-                )
-            )
-
-            clarification_event = rh.build_clarification_event(observation)
-            if clarification_event is not None:
-                yield rh.stream_event_from_runtime_event(clarification_event)
-
-        if response_streamed:
-            t_fast_ms = (_time.monotonic() - t_turn_start) * 1000
-            logger.info(
-                "streaming: terminal planner thought used as final response, skipping extract LLM call (%.0fms since turn start)",
-                t_fast_ms,
-            )
-            extract_prediction = dspy.Prediction(response=response)
-        else:
-            t_extract_start = _time.monotonic()
-            stream_extract = cast(
-                Callable[..., AsyncIterator[Any]],
-                dspy.streamify(
-                    react_program.extract.predict,
-                    stream_listeners=[StreamListener(signature_field_name="response")],
-                    include_final_prediction_in_output_stream=True,
-                    async_streaming=True,
-                ),
-            )
-            async for chunk in stream_extract(
-                **input_args,
-                trajectory=rh.format_react_trajectory(react_program, trajectory_raw),
-            ):
-                if isinstance(chunk, StreamResponse):
-                    if chunk.signature_field_name == "response" and chunk.chunk:
-                        response_streamed = True
-                        response += chunk.chunk
-                        yield StreamEvent(kind="text", text=chunk.chunk)
-                    continue
-
-                if isinstance(chunk, dspy.Prediction):
-                    extract_prediction = chunk
-            t_extract_ms = (_time.monotonic() - t_extract_start) * 1000
-            logger.info("streaming: extract completed in %.0fms", t_extract_ms)
-    except Exception as exc:
-        yield StreamEvent(
-            kind="error",
-            text=str(exc),
-            payload={"history_turns": runtime.history_turns()},
-        )
-        return
-
-    if extract_prediction is None:
-        yield StreamEvent(
-            kind="error",
-            text="Streaming turn ended without a final prediction.",
-            payload={"history_turns": runtime.history_turns()},
-        )
-        return
-
-    if cancel_check is not None and cancel_check():
-        yield StreamEvent(
-            kind="done",
-            text="[cancelled]",
-            payload={"cancelled": True, "history_turns": runtime.history_turns()},
-        )
-        return
-
-    if not response_streamed:
-        response = str(getattr(extract_prediction, "response", "") or response)
-    final_reasoning = str(getattr(extract_prediction, "reasoning", "") or "")
-    trajectory = _normalize_trajectory(trajectory_raw)
-
-    if response and not response_streamed:
-        yield StreamEvent(kind="text", text=response)
-
-    runtime.history = rh.append_turn_to_history(
-        runtime.history,
-        user_message=message,
-        response=response,
-        history_max_turns=runtime.history_max_turns,
-    )
-    maybe_refresh_summary(runtime)
-
-    done_payload: dict[str, Any] = {
-        "trajectory": {"steps": trajectory},
-        "history_turns": runtime.history_turns(),
-    }
-    done_payload.update(runtime._runtime_observability_payload())
-    if recursive_child_review is not None:
-        done_payload.update(
-            {
-                "human_review": recursive_child_review,
-                "runtime_degraded": True,
-                "runtime_failure_category": "recursive_child_degraded",
-                "runtime_failure_phase": "delegate_to_rlm",
-            }
-        )
-    if final_reasoning:
-        done_payload["final_reasoning"] = final_reasoning
-
-    rh.attach_final_artifact(done_payload, answer=response, task=message)
-
-    t_total_ms = (_time.monotonic() - t_turn_start) * 1000
-    logger.info("streaming: turn completed in %.0fms", t_total_ms)
-    yield StreamEvent(kind="done", text=response, payload=done_payload)

@@ -160,31 +160,41 @@ def run_h1_direct_rlm(
     document_text: str,
 ) -> dict[str, Any]:
     """H1 upper bound: RLM with document_text preloaded."""
-    from fleet_rlm.runtime.modules.variable_mode import build_variable_mode_rlm
+    from fleet_rlm.runtime.agent.signatures import RLMWorkspaceTurnSignature
+    from fleet_rlm.runtime.modules.factory import (
+        VARIABLE_MODE_MAX_OUTPUT_CHARS,
+        create_runtime_rlm,
+        interpreter_delegation_tools,
+    )
+    from fleet_rlm.runtime.sandbox_types import WorkspaceContext
 
     _install_trajectory_logger(interpreter)
-    rlm = build_variable_mode_rlm(
+    rlm = create_runtime_rlm(
+        signature=RLMWorkspaceTurnSignature,
         interpreter=interpreter,
         max_iterations=12,
         max_llm_calls=24,
+        max_output_chars=VARIABLE_MODE_MAX_OUTPUT_CHARS,
         verbose=False,
+        tools=interpreter_delegation_tools(interpreter) or None,
         sub_lm=getattr(interpreter, "sub_lm", None),
     )
-    prompt = (
-        "Large PDF needle retrieval task. Search document_text with Python (find/regex) "
-        "before answering. Do not open host filesystem paths.\n\n"
-        f"Task: {item['query']}"
+    core_memory = (
+        "Large PDF needle retrieval task. Search context['document_text'] with Python "
+        "(find/regex) before answering. Do not open host filesystem paths."
     )
     started = time.time()
     try:
         prediction = rlm(
-            task=item["query"],
-            prompt=prompt,
+            user_request=item["query"],
+            core_memory=core_memory,
             history=_bootstrap_history(),
-            document_text=document_text,
-            context_paths=[pdf_path],
+            context=WorkspaceContext(
+                document_text=document_text,
+                context_paths=[pdf_path],
+            ),
         )
-        answer = str(getattr(prediction, "answer", "") or "")
+        answer = str(getattr(prediction, "response", "") or "")
         status = "ok"
         error = ""
     except Exception as exc:
@@ -234,12 +244,7 @@ def run_h2_full_agent(
             execution_mode="auto",
             turn_context=turn_context,
         )
-        answer = str(
-            getattr(prediction, "answer", None)
-            or getattr(prediction, "assistant_response", None)
-            or getattr(prediction, "response", None)
-            or ""
-        )
+        answer = str(getattr(prediction, "response", None) or "")
         status = "ok"
         error = ""
     except Exception as exc:

@@ -205,36 +205,6 @@ def render_final_text(value: Any) -> str:
         return str(value)
 
 
-def history_messages(history: Any) -> list[dict[str, str]]:
-    """Extract message list from a history object."""
-    messages = getattr(history, "messages", [])
-    if isinstance(messages, list):
-        return [item for item in messages if isinstance(item, dict)]
-    return []
-
-
-def normalize_history_turn(raw: dict[str, Any]) -> dict[str, str] | None:
-    """Normalize a single history turn into ``{user_request, assistant_response}``."""
-    user_request = str(raw.get("user_request", "") or "").strip()
-    assistant_response = render_final_text(raw.get("assistant_response", "")).strip()
-    if not user_request and not assistant_response:
-        return None
-    return {
-        "user_request": user_request,
-        "assistant_response": assistant_response,
-    }
-
-
-def normalized_history_messages(history: Any) -> list[dict[str, str]]:
-    """Return a clean list of normalized history turns."""
-    normalized: list[dict[str, str]] = []
-    for item in history_messages(history):
-        turn = normalize_history_turn(item)
-        if turn is not None:
-            normalized.append(turn)
-    return normalized
-
-
 def normalized_context_sources(raw: Any) -> list[ContextSource]:
     """Normalize a raw sources list into validated ``ContextSource`` objects."""
     if not isinstance(raw, list):
@@ -541,10 +511,7 @@ __all__ = [
     "_normalize_optional_text",
     "build_sandbox_spec",
     "default_sandbox_name",
-    "history_messages",
     "merge_sandbox_labels",
-    "normalize_history_turn",
     "normalized_context_sources",
-    "normalized_history_messages",
     "render_final_text",
 ]

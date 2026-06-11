@@ -14,7 +14,7 @@ from fleet_rlm.runtime.modules.context_routing import (
     resolve_effective_context_paths,
     should_auto_route_large_context,
 )
-from fleet_rlm.runtime.modules.variable_mode import VARIABLE_MODE_THRESHOLD
+from fleet_rlm.runtime.modules.factory import VARIABLE_MODE_THRESHOLD
 
 
 def test_estimate_turn_context_includes_message_and_history() -> None:

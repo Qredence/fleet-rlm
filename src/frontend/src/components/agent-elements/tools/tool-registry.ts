@@ -95,6 +95,19 @@ export const toolRegistry: Record<string, ToolMeta> = {
     subtitle: (part) => part.output?.message || part.input?.message || "",
     variant: "simple",
   },
+  "tool-EnvironmentVariables": {
+    icon: Terminal,
+    title: (part) => part.input?.title || "Environment variables",
+    subtitle: (part) => {
+      const variables = part.output?.variables;
+      if (!Array.isArray(variables) || variables.length === 0) return "";
+      return variables
+        .map((variable: { name?: string }) => variable?.name)
+        .filter(Boolean)
+        .join(", ");
+    },
+    variant: "simple",
+  },
   "tool-Skill": {
     icon: Sparkles,
     title: () => "Skill",

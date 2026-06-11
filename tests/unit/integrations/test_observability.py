@@ -30,6 +30,29 @@ class _SettingsStub:
         self.lock = threading.Lock()
 
 
+class _FakeCallback:
+    pass
+
+
+class _OtherFakeCallback:
+    pass
+
+
+def _install_fake_dspy_settings_module(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    main_callbacks: list[object] | None = None,
+    active_overrides: dict[str, list[object]] | None = None,
+) -> SimpleNamespace:
+    import dspy.dsp.utils as dspy_utils
+
+    fake_module = SimpleNamespace(main_thread_config={"callbacks": list(main_callbacks or [])})
+    if active_overrides is not None:
+        fake_module.thread_local_overrides = SimpleNamespace(get=lambda: active_overrides)
+    monkeypatch.setattr(dspy_utils, "settings", fake_module)
+    return fake_module
+
+
 def test_mlflow_config_from_env_parses_runtime_flags(
     clean_runtime_env: pytest.MonkeyPatch,
 ) -> None:
@@ -301,6 +324,109 @@ def test_posthog_config_from_env_and_configure_analytics_is_idempotent(
     assert isinstance(first, PostHogLLMCallback)
     assert first is second
     assert len([callback for callback in settings.callbacks if isinstance(callback, PostHogLLMCallback)]) == 1
+
+
+def test_ensure_dspy_callbacks_deduplicates_configure_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    import dspy
+
+    from fleet_rlm.integrations.observability.callback_registry import ensure_dspy_callbacks
+
+    existing = _FakeCallback()
+    settings = _SettingsStub()
+    settings.callbacks = [existing]
+    configured: list[list[object]] = []
+
+    def fake_configure(*, callbacks: list[object]) -> None:
+        configured.append(callbacks)
+        settings.callbacks = callbacks
+
+    monkeypatch.setattr(dspy, "settings", settings)
+    monkeypatch.setattr(dspy, "configure", fake_configure)
+
+    ensure_dspy_callbacks([_FakeCallback(), _OtherFakeCallback()])
+
+    assert len(configured) == 1
+    assert settings.callbacks[0] is existing
+    assert len([callback for callback in settings.callbacks if isinstance(callback, _FakeCallback)]) == 1
+    assert len([callback for callback in settings.callbacks if isinstance(callback, _OtherFakeCallback)]) == 1
+
+
+def test_ensure_dspy_callbacks_owner_fallback_updates_main_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dspy
+
+    from fleet_rlm.integrations.observability.callback_registry import ensure_dspy_callbacks
+
+    settings = _SettingsStub()
+    dspy_settings_module = _install_fake_dspy_settings_module(monkeypatch)
+
+    def fake_configure(*, callbacks: list[object]) -> None:
+        raise RuntimeError("dspy.settings can only be changed by the thread that initially configured it")
+
+    monkeypatch.setattr(dspy, "settings", settings)
+    monkeypatch.setattr(dspy, "configure", fake_configure)
+
+    ensure_dspy_callbacks([_FakeCallback()])
+
+    callbacks = dspy_settings_module.main_thread_config["callbacks"]
+    assert len(callbacks) == 1
+    assert isinstance(callbacks[0], _FakeCallback)
+
+
+def test_ensure_dspy_callbacks_owner_fallback_updates_active_thread_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dspy
+
+    from fleet_rlm.integrations.observability.callback_registry import ensure_dspy_callbacks
+
+    settings = _SettingsStub()
+    active_overrides: dict[str, list[object]] = {"callbacks": []}
+    dspy_settings_module = _install_fake_dspy_settings_module(
+        monkeypatch,
+        active_overrides=active_overrides,
+    )
+
+    def fake_configure(*, callbacks: list[object]) -> None:
+        raise RuntimeError("can only be called from the same async task")
+
+    monkeypatch.setattr(dspy, "settings", settings)
+    monkeypatch.setattr(dspy, "configure", fake_configure)
+
+    ensure_dspy_callbacks([_FakeCallback()])
+
+    main_callback = dspy_settings_module.main_thread_config["callbacks"][0]
+    assert active_overrides["callbacks"] == [main_callback]
+    assert isinstance(main_callback, _FakeCallback)
+
+
+def test_ensure_dspy_callbacks_owner_fallback_reuses_existing_main_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dspy
+
+    from fleet_rlm.integrations.observability.callback_registry import ensure_dspy_callbacks
+
+    settings = _SettingsStub()
+    existing = _FakeCallback()
+    active_overrides: dict[str, list[object]] = {"callbacks": []}
+    dspy_settings_module = _install_fake_dspy_settings_module(
+        monkeypatch,
+        main_callbacks=[existing],
+        active_overrides=active_overrides,
+    )
+
+    def fake_configure(*, callbacks: list[object]) -> None:
+        raise RuntimeError("dspy.settings can only be changed by the thread that initially configured it")
+
+    monkeypatch.setattr(dspy, "settings", settings)
+    monkeypatch.setattr(dspy, "configure", fake_configure)
+
+    ensure_dspy_callbacks([_FakeCallback()])
+
+    assert dspy_settings_module.main_thread_config["callbacks"] == [existing]
+    assert active_overrides["callbacks"] == [existing]
 
 
 def test_posthog_callback_sanitizes_generation_payloads(monkeypatch: pytest.MonkeyPatch) -> None:

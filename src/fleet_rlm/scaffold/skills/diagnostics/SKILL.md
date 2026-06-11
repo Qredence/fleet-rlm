@@ -21,7 +21,7 @@ description: "Diagnose fleet-rlm runtime failures, API contract drift, sandbox e
    - See `references/contract-surfaces.md` for full field list
 
 3. **"Escalation not triggering"**
-   - Check LLM reasoning output for `[TOOLS NEEDED]` sentinel
+   - Inspect the `routing_decision` payload (`tools_react`, `router_rlm`, `url_document_rlm`, ...) emitted on the turn
    - Verify `execution_mode` is not overridden to `"direct"` in request
    - Confirm `FLEET_RLM_USE_ESCALATING_RUNTIME=true` in environment
    - Check that the escalation module is registered: `uv run fleet-rlm optimize list`

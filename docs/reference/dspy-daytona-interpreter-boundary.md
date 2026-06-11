@@ -1,6 +1,8 @@
 # DSPy RLM and Daytona Interpreter Boundary
 
-This document describes how fleet-rlm integrates DSPy 3.2.x `dspy.RLM` with the Daytona SDK interpreter, and why the async execution model uses `asyncio.to_thread`.
+This document describes how fleet-rlm integrates DSPy 3.3.x `dspy.RLM` with the Daytona SDK interpreter, and why the async execution model uses `asyncio.to_thread`.
+
+Large inputs (documents, staged workspace context) cross the boundary as `dspy.SandboxSerializable` models defined in `src/fleet_rlm/runtime/sandbox_types.py`; recursive delegation (`sub_rlm`, `sub_rlm_batched`, `llm_query`) is passed to `dspy.RLM` as standard tools.
 
 ## Contract
 

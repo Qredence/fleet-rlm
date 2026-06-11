@@ -16,8 +16,9 @@ from fleet_rlm.quality.mlflow_evaluation import (
     load_trace_rows,
     save_evaluation_result,
 )
-from fleet_rlm.quality.mlflow_optimization import (
-    optimize_program_with_mipro,
+from fleet_rlm.quality.optimization_runner import (
+    run_module_optimization,
+    spec_for_program,
 )
 
 
@@ -77,18 +78,29 @@ def do_evaluate(args: argparse.Namespace) -> int:
 
 
 def do_optimize(args: argparse.Namespace) -> int:
-    summary = optimize_program_with_mipro(
-        dataset_path=args.dataset,
-        program_spec=args.program,
-        output_path=args.output,
+    spec = spec_for_program(
+        args.program,
         input_keys=args.input_key or None,
         output_key=args.output_key,
+    )
+    summary = run_module_optimization(
+        spec,
+        dataset_path=args.dataset,
+        output_path=args.output,
         train_ratio=args.train_ratio,
         auto=args.auto,
-        run_name=args.run_name,
+        optimizer=args.optimizer,
     )
-    for key, value in summary.items():
-        print(f"{key}={value}")
+    for key in (
+        "train_examples",
+        "validation_examples",
+        "validation_score",
+        "output_path",
+        "manifest_path",
+        "program_spec",
+        "optimizer",
+    ):
+        print(f"{key}={summary.get(key)}")
     return 0
 
 
@@ -226,15 +238,15 @@ def main() -> int:
     pe.set_defaults(func=do_evaluate)
 
     # Optimize
-    po = subparsers.add_parser("optimize", help="Optimize a DSPy program with MIPROv2")
+    po = subparsers.add_parser("optimize", help="Optimize a DSPy program (MIPROv2 default, GEPA optional)")
     po.add_argument("--dataset", type=Path, required=True)
     po.add_argument("--program", required=True)
     po.add_argument("--input-key", action="append", default=[])
     po.add_argument("--output-key", default="answer")
     po.add_argument("--output", type=Path, default=Path("artifacts/mlflow/optimized-program.json"))
     po.add_argument("--train-ratio", type=float, default=0.8)
-    po.add_argument("--auto", default="light")
-    po.add_argument("--run-name", default=None)
+    po.add_argument("--auto", default="light", choices=("light", "medium", "heavy"))
+    po.add_argument("--optimizer", default="miprov2", choices=("gepa", "miprov2"))
     po.set_defaults(func=do_optimize)
 
     # Scorers
