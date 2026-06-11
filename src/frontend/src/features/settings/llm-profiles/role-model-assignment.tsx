@@ -66,6 +66,8 @@ export function RoleModelAssignment({
 
   const catalogModels = modelsQuery.data?.models ?? [];
   const catalogError = modelsQuery.data?.error;
+  const matchedCatalogModelId =
+    catalogModels.find((model) => modelMatchesCatalog(modelId, model.id))?.id ?? modelId;
   const selectedModelLabel =
     catalogModels.find((model) => modelMatchesCatalog(modelId, model.id))?.label ?? modelId;
 
@@ -140,7 +142,7 @@ export function RoleModelAssignment({
               <Skeleton className="h-9 w-full rounded-md" />
             ) : (
               <Select
-                value={modelId}
+                value={matchedCatalogModelId}
                 onValueChange={(value) => setModelId(value ?? "")}
                 disabled={!profileId || modelsQuery.isPending}
               >

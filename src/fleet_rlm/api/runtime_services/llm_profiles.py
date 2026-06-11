@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from uuid import UUID
 
@@ -63,6 +64,7 @@ from ..schemas.llm_profiles import (
 from ..schemas.runtime import RuntimeConnectivityTestResponse
 
 IMPORT_PROFILE_NAME = "Imported from .env"
+logger = logging.getLogger(__name__)
 
 
 def _ensure_local_writes(config: ServerRuntimeConfig) -> None:
@@ -246,6 +248,7 @@ async def test_profile_connection(
     lm_deps: LmDeps,
     profile_id: UUID,
 ) -> RuntimeConnectivityTestResponse:
+    _ensure_local_writes(config_deps.config)
     store = get_store(persistence_deps)
     profile = await store.get_profile(profile_id)
     if profile is None:
@@ -253,20 +256,21 @@ async def test_profile_connection(
 
     bundle = await store.load_bundle()
     resolved = await _resolve_profile_test_config(profile, role_bindings=bundle.role_bindings)
-    saved_planner = lm_deps.planner_lm
 
     def _build_profile_planner(**_kwargs: object) -> dspy.LM:
         return dspy.LM(**build_lm_kwargs_from_resolved(resolved))
 
-    try:
-        return await run_lm_connection_test(
-            config_deps=config_deps,
-            diagnostics_deps=diagnostics_deps,
-            lm_deps=lm_deps,
-            planner_loader=_build_profile_planner,
-        )
-    finally:
-        lm_deps.planner_lm = saved_planner
+    async with lm_deps.runtime_model_lock:
+        saved_planner = lm_deps.planner_lm
+        try:
+            return await run_lm_connection_test(
+                config_deps=config_deps,
+                diagnostics_deps=diagnostics_deps,
+                lm_deps=lm_deps,
+                planner_loader=_build_profile_planner,
+            )
+        finally:
+            lm_deps.planner_lm = saved_planner
 
 
 async def get_role_bindings(*, persistence_deps: PersistenceDeps) -> LlmRoleBindingsResponse:
@@ -311,39 +315,41 @@ async def apply_role_bindings_patch(
         return LlmRoleBindingsResponse(bindings=_bindings_response(profiles, bindings))
 
     config = config_deps.config
-    runtime_snapshot = _capture_runtime_config_snapshot(config=config, lm_deps=lm_deps)
-    env_text = config.env_path.read_text(encoding="utf-8") if config.env_path.exists() else None
-    env_snapshot = {key: os.environ.get(key) for key in RUNTIME_MODEL_RELOAD_KEYS}
-    apply_env_updates(updates=env_updates, env_path=config.env_path)
-    apply_runtime_settings_to_config(config=config, normalized=env_updates)
+    async with lm_deps.runtime_model_lock:
+        runtime_snapshot = _capture_runtime_config_snapshot(config=config, lm_deps=lm_deps)
+        env_text = config.env_path.read_text(encoding="utf-8") if config.env_path.exists() else None
+        env_snapshot = {key: os.environ.get(key) for key in RUNTIME_MODEL_RELOAD_KEYS}
+        apply_env_updates(updates=env_updates, env_path=config.env_path)
+        apply_runtime_settings_to_config(config=config, normalized=env_updates)
 
-    try:
-        planner_model = env_updates.get("DSPY_LM_MODEL", config.agent_model)
-        delegate_model = env_updates.get("DSPY_DELEGATE_LM_MODEL", config.agent_delegate_model)
-        delegate_small_model = env_updates.get("DSPY_DELEGATE_LM_SMALL_MODEL", config.agent_delegate_small_model)
-        next_planner_lm = await asyncio.to_thread(
-            get_planner_lm_from_env, env_file=config.env_path, model_name=planner_model
-        )
-        next_delegate_lm = await asyncio.to_thread(
-            get_delegate_lm_from_env,
-            env_file=config.env_path,
-            model_name=delegate_model,
-            default_max_tokens=config.agent_delegate_max_tokens,
-        )
-        next_delegate_small_lm = await asyncio.to_thread(
-            get_delegate_small_lm_from_env,
-            env_file=config.env_path,
-            model_name=delegate_small_model,
-            default_max_tokens=config.agent_delegate_max_tokens,
-        )
-    except Exception as exc:
-        _restore_runtime_settings_env(env_path=config.env_path, env_text=env_text, env_snapshot=env_snapshot)
-        _restore_runtime_config_snapshot(config=config, lm_deps=lm_deps, snapshot=runtime_snapshot)
-        raise HTTPException(status_code=400, detail=f"Failed to reload language models: {exc}") from exc
+        try:
+            planner_model = env_updates.get("DSPY_LM_MODEL", config.agent_model)
+            delegate_model = env_updates.get("DSPY_DELEGATE_LM_MODEL", config.agent_delegate_model)
+            delegate_small_model = env_updates.get("DSPY_DELEGATE_LM_SMALL_MODEL", config.agent_delegate_small_model)
+            next_planner_lm = await asyncio.to_thread(
+                get_planner_lm_from_env, env_file=config.env_path, model_name=planner_model
+            )
+            next_delegate_lm = await asyncio.to_thread(
+                get_delegate_lm_from_env,
+                env_file=config.env_path,
+                model_name=delegate_model,
+                default_max_tokens=config.agent_delegate_max_tokens,
+            )
+            next_delegate_small_lm = await asyncio.to_thread(
+                get_delegate_small_lm_from_env,
+                env_file=config.env_path,
+                model_name=delegate_small_model,
+                default_max_tokens=config.agent_delegate_max_tokens,
+            )
+        except Exception as exc:
+            _restore_runtime_settings_env(env_path=config.env_path, env_text=env_text, env_snapshot=env_snapshot)
+            _restore_runtime_config_snapshot(config=config, lm_deps=lm_deps, snapshot=runtime_snapshot)
+            logger.exception("Failed to reload language models after role binding update")
+            raise HTTPException(status_code=400, detail="Failed to reload language models.") from exc
 
-    lm_deps.planner_lm = next_planner_lm
-    lm_deps.delegate_lm = next_delegate_lm
-    lm_deps.delegate_small_lm = next_delegate_small_lm
+        lm_deps.planner_lm = next_planner_lm
+        lm_deps.delegate_lm = next_delegate_lm
+        lm_deps.delegate_small_lm = next_delegate_small_lm
     bundle = await store.load_bundle()
     profiles = {profile.id: profile for profile in bundle.profiles}
     return LlmRoleBindingsResponse(bindings=_bindings_response(profiles, bindings))

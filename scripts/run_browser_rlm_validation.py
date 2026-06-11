@@ -202,7 +202,6 @@ def _count_repl_iterations(events: list[dict[str, Any]], execution_events: list[
         if isinstance(step, dict) and step.get("type") == "repl":
             count += 1
             continue
-        data = _event_data(event)
         payload = _event_payload(event)
         phase = str(payload.get("phase") or "")
         if phase in {"rlm_tool_call", "rlm_reasoning"}:

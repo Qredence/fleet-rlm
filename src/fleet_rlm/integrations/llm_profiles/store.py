@@ -63,13 +63,16 @@ def _binding_record_from_row(row: LlmRoleBinding) -> LlmRoleBindingRecord:
 
 class LlmProfileStore(ABC):
     @abstractmethod
-    async def load_bundle(self) -> LlmProfileBundle: ...
+    async def load_bundle(self) -> LlmProfileBundle:
+        raise NotImplementedError
 
     @abstractmethod
-    async def list_profiles(self) -> list[LlmProviderProfileRecord]: ...
+    async def list_profiles(self) -> list[LlmProviderProfileRecord]:
+        raise NotImplementedError
 
     @abstractmethod
-    async def get_profile(self, profile_id: UUID) -> LlmProviderProfileRecord | None: ...
+    async def get_profile(self, profile_id: UUID) -> LlmProviderProfileRecord | None:
+        raise NotImplementedError
 
     @abstractmethod
     async def create_profile(
@@ -80,7 +83,8 @@ class LlmProfileStore(ABC):
         api_base: str | None,
         api_key: str,
         metadata_json: dict[str, Any] | None = None,
-    ) -> LlmProviderProfileRecord: ...
+    ) -> LlmProviderProfileRecord:
+        raise NotImplementedError
 
     @abstractmethod
     async def update_profile(
@@ -93,18 +97,22 @@ class LlmProfileStore(ABC):
         api_key: str | None = None,
         clear_api_key: bool = False,
         metadata_json: dict[str, Any] | None = None,
-    ) -> LlmProviderProfileRecord: ...
+    ) -> LlmProviderProfileRecord:
+        raise NotImplementedError
 
     @abstractmethod
-    async def delete_profile(self, profile_id: UUID) -> None: ...
+    async def delete_profile(self, profile_id: UUID) -> None:
+        raise NotImplementedError
 
     @abstractmethod
-    async def list_role_bindings(self) -> list[LlmRoleBindingRecord]: ...
+    async def list_role_bindings(self) -> list[LlmRoleBindingRecord]:
+        raise NotImplementedError
 
     @abstractmethod
     async def upsert_role_bindings(
         self, bindings: dict[LlmRoleName, tuple[UUID | None, str]]
-    ) -> list[LlmRoleBindingRecord]: ...
+    ) -> list[LlmRoleBindingRecord]:
+        raise NotImplementedError
 
 
 class JsonLlmProfileStore(LlmProfileStore):
@@ -266,13 +274,14 @@ class PostgresLlmProfileStore(LlmProfileStore):
         self._db_manager = db_manager
 
     async def _ensure_default_bindings(self, session) -> None:
-        existing = await session.execute(select(LlmRoleBinding.role))
-        present = {row[0] for row in existing}
-        missing = [role for role in ROLE_NAMES if role not in present]
-        for role in missing:
-            session.add(LlmRoleBinding(role=role, profile_id=None, model_id=""))
-        if missing:
-            await session.flush()
+        for role in ROLE_NAMES:
+            stmt = (
+                insert(LlmRoleBinding)
+                .values(role=role, profile_id=None, model_id="")
+                .on_conflict_do_nothing(index_elements=[LlmRoleBinding.role])
+            )
+            await session.execute(stmt)
+        await session.flush()
 
     async def load_bundle(self) -> LlmProfileBundle:
         profiles = await self.list_profiles()

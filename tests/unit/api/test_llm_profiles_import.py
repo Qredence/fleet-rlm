@@ -34,11 +34,11 @@ def test_import_env_applies_delegate_api_base(no_db_client, llm_profiles_env, mo
         db_validate_on_startup=False,
         env_path=llm_profiles_env,
     )
-    no_db_client.app.dependency_overrides[get_config_deps] = lambda: type(
-        "ConfigDeps",
-        (),
-        {"config": config},
-    )()
+
+    def _override_config_deps() -> object:
+        return type("ConfigDeps", (), {"config": config})()
+
+    no_db_client.app.dependency_overrides[get_config_deps] = _override_config_deps
 
     def _fake_planner_lm(**_kwargs):
         return object()
