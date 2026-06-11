@@ -27,6 +27,7 @@ from ..schemas.sessions import (
     SessionRestoreResponse,
     SessionStateResponse,
     SessionStatsResponse,
+    SessionTraceListResponse,
     TurnListResponse,
 )
 from ._types import OpenAPIResponses
@@ -168,6 +169,30 @@ async def get_session_turns(
 ) -> TurnListResponse:
     """Return paginated turns for a session."""
     return await SessionService(persistence).get_session_turns(
+        persisted_identity=persisted_identity,
+        session_id=session_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/{session_id}/traces",
+    response_model=SessionTraceListResponse,
+    responses=SESSION_DETAIL_RESPONSES,
+    summary="List session traces",
+    description="Paginated external traces (for example MLflow child delegations) linked to a session.",
+)
+async def get_session_traces(
+    identity: HTTPIdentityDep,
+    persistence: PersistenceDep,
+    persisted_identity: PersistedIdentityDep,
+    session_id: Annotated[str, Path(description="Identifier of the session whose traces to list.")],
+    limit: Annotated[int, Query(ge=1, le=200, description="Page size")] = 50,
+    offset: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
+) -> SessionTraceListResponse:
+    """Return paginated external traces for a session."""
+    return await SessionService(persistence).get_session_traces(
         persisted_identity=persisted_identity,
         session_id=session_id,
         limit=limit,

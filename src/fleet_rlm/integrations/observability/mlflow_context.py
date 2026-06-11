@@ -126,9 +126,25 @@ def _application_turn_span(context: MlflowTraceRequestContext):
         raise
 
 
+def _try_initialize_mlflow_for_turn() -> None:
+    """Ensure MLflow is initialized before the first span in a chat turn."""
+    if not _env_bool(os.getenv("MLFLOW_ENABLED"), default=True):
+        return
+
+    # Deferred import: mlflow_runtime imports this module at load time.
+    from .mlflow_runtime import _import_mlflow, get_mlflow_config, initialize_mlflow
+
+    config = get_mlflow_config()
+    if not config.enabled or _import_mlflow() is None:
+        return
+
+    initialize_mlflow(config)
+
+
 @contextmanager
 def mlflow_request_context(context: MlflowTraceRequestContext):
     """Scope MLflow request metadata to the current execution context."""
+    _try_initialize_mlflow_for_turn()
     context_token = _CURRENT_REQUEST_CONTEXT.set(context)
     trace_token = _CURRENT_TRACE_ID.set(None)
     trace_state = "OK"

@@ -55,6 +55,9 @@ def _register_api_routes(app: FastAPI) -> None:
     api_v1.include_router(ws.router)
     api_v1.include_router(sessions.router)
     api_v1.include_router(runtime.router)
+    from .routers import llm_profiles
+
+    api_v1.include_router(llm_profiles.router)
     api_v1.include_router(sandboxes.router)
     api_v1.include_router(runs.router)
     api_v1.include_router(optimization.router)

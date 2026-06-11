@@ -555,6 +555,22 @@ def test_resolve_snapshot_for_skills_returns_browser_snapshot() -> None:
     assert resolve_snapshot_for_skills(["Playwright automation"]) == BROWSER_SNAPSHOT_NAME
 
 
+def test_bind_interpreter_tool_generates_valid_store_evidence_wrapper() -> None:
+    import ast
+
+    from fleet_rlm.integrations.daytona.bridge import generate_tool_wrapper
+    from fleet_rlm.integrations.daytona.bridge_callbacks import _bind_interpreter_tool
+    from fleet_rlm.integrations.daytona.isolation import store_evidence
+
+    interpreter = MagicMock()
+    wrapper = _bind_interpreter_tool(interpreter, store_evidence)
+    generated = generate_tool_wrapper(tool_name="store_evidence", tool_func=wrapper)
+
+    ast.parse(generated)
+    assert "def store_evidence(key, content" in generated
+    assert "_fn=" not in generated
+
+
 def test_store_evidence_redacts_credentials_from_bridge_errors() -> None:
     from fleet_rlm.integrations.daytona.isolation import store_evidence
 

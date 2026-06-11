@@ -801,6 +801,38 @@ class ChatRepository(RepositoryContextMixin):
             items = list((await session.execute(items_stmt)).scalars().all())
             return items, total
 
+    async def list_external_traces_for_session(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[ExternalTrace], int]:
+        """Return external traces linked to a durable chat session."""
+
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
+            filters = [
+                ExternalTrace.tenant_id == tenant_id,
+                ExternalTrace.workspace_id == resolved_workspace_id,
+                ExternalTrace.session_id == session_id,
+            ]
+            total_stmt = select(func.count()).select_from(ExternalTrace).where(and_(*filters))
+            total = int((await session.execute(total_stmt)).scalar_one())
+            items_stmt = (
+                select(ExternalTrace)
+                .where(and_(*filters))
+                .order_by(ExternalTrace.observed_at.desc(), ExternalTrace.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            items = list((await session.execute(items_stmt)).scalars().all())
+            return items, total
+
     async def store_rlm_trace(
         self,
         *,

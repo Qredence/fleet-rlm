@@ -20,6 +20,7 @@ from fleet_rlm.integrations.config.runtime_settings import (
 from ..bootstrap import (
     cancel_optional_runtime_startup,
     get_delegate_lm_from_env,
+    get_delegate_small_lm_from_env,
     get_planner_lm_from_env,
     schedule_optional_runtime_startup,
 )
@@ -46,6 +47,7 @@ RUNTIME_MODEL_RELOAD_KEYS = frozenset(
         "DSPY_DELEGATE_LM_SMALL_MODEL",
         "DSPY_DELEGATE_LM_MAX_TOKENS",
         "DSPY_LM_API_BASE",
+        "DSPY_DELEGATE_LM_API_BASE",
         "DSPY_LM_MAX_TOKENS",
         "DSPY_ADAPTER",
         "DSPY_ADAPTER_USE_NATIVE_FUNCTION_CALLING",
@@ -73,6 +75,7 @@ class RuntimeConfigSnapshot(TypedDict):
     agent_delegate_max_tokens: int
     planner_lm: object | None
     delegate_lm: object | None
+    delegate_small_lm: object | None
 
 
 def apply_runtime_settings_to_config(*, config: ServerRuntimeConfig, normalized: dict[str, str]) -> None:
@@ -130,6 +133,7 @@ def _capture_runtime_config_snapshot(*, config: ServerRuntimeConfig, lm_deps: Lm
         "agent_delegate_max_tokens": config.agent_delegate_max_tokens,
         "planner_lm": lm_deps.planner_lm,
         "delegate_lm": lm_deps.delegate_lm,
+        "delegate_small_lm": lm_deps.delegate_small_lm,
     }
 
 
@@ -145,6 +149,7 @@ def _restore_runtime_config_snapshot(
     config.agent_delegate_max_tokens = snapshot["agent_delegate_max_tokens"]
     lm_deps.planner_lm = snapshot["planner_lm"]
     lm_deps.delegate_lm = snapshot["delegate_lm"]
+    lm_deps.delegate_small_lm = snapshot["delegate_small_lm"]
 
 
 def _restore_runtime_settings_env(
@@ -231,6 +236,7 @@ async def apply_runtime_settings_patch(
     try:
         planner_model_name = trial_config.agent_model
         delegate_model_name = trial_config.agent_delegate_model
+        delegate_small_model_name = trial_config.agent_delegate_small_model
         resolved_planner_loader = planner_loader or get_planner_lm_from_env
         resolved_delegate_loader = delegate_loader or get_delegate_lm_from_env
         next_planner_lm = await asyncio.to_thread(
@@ -242,6 +248,12 @@ async def apply_runtime_settings_patch(
             resolved_delegate_loader,
             env_file=config.env_path,
             model_name=delegate_model_name,
+            default_max_tokens=trial_config.agent_delegate_max_tokens,
+        )
+        next_delegate_small_lm = await asyncio.to_thread(
+            get_delegate_small_lm_from_env,
+            env_file=config.env_path,
+            model_name=delegate_small_model_name,
             default_max_tokens=trial_config.agent_delegate_max_tokens,
         )
     except Exception:
@@ -257,5 +269,6 @@ async def apply_runtime_settings_patch(
     apply_runtime_settings_to_config(config=config, normalized=applied_updates)
     lm_deps.planner_lm = next_planner_lm
     lm_deps.delegate_lm = next_delegate_lm
+    lm_deps.delegate_small_lm = next_delegate_small_lm
     schedule_optional_runtime_startup(state)
     return RuntimeSettingsUpdateResponse(**result)

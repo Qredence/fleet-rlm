@@ -64,9 +64,7 @@ test("opens settings without runtime exception", async ({ page }) => {
 
   await expect(page.getByRole("button", { name: "Appearance", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Telemetry", exact: true })).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "LiteLLM Integration", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "LLM Providers", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Telemetry", exact: true }).click();
 

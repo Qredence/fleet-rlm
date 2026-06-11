@@ -73,6 +73,13 @@ export interface paths {
      */
     get: operations["get_session_turns_api_v1_sessions__session_id__turns_get"];
   };
+  "/api/v1/sessions/{session_id}/traces": {
+    /**
+     * List session traces
+     * @description Paginated external traces (for example MLflow child delegations) linked to a session.
+     */
+    get: operations["get_session_traces_api_v1_sessions__session_id__traces_get"];
+  };
   "/api/v1/sessions/{session_id}/stats": {
     /**
      * Get session usage stats
@@ -147,6 +154,36 @@ export interface paths {
      * @description List the active workspace volume for the selected provider.
      */
     get: operations["get_volumes_api_v1_runtime_volumes_get"];
+  };
+  "/api/v1/runtime/llm-profiles": {
+    /** List Llm Profiles */
+    get: operations["list_llm_profiles_api_v1_runtime_llm_profiles_get"];
+    /** Create Llm Profile */
+    post: operations["create_llm_profile_api_v1_runtime_llm_profiles_post"];
+  };
+  "/api/v1/runtime/llm-profiles/{profile_id}": {
+    /** Delete Llm Profile */
+    delete: operations["delete_llm_profile_api_v1_runtime_llm_profiles__profile_id__delete"];
+    /** Update Llm Profile */
+    patch: operations["update_llm_profile_api_v1_runtime_llm_profiles__profile_id__patch"];
+  };
+  "/api/v1/runtime/llm-profiles/{profile_id}/models": {
+    /** Get Llm Profile Models */
+    get: operations["get_llm_profile_models_api_v1_runtime_llm_profiles__profile_id__models_get"];
+  };
+  "/api/v1/runtime/llm-profiles/{profile_id}/test": {
+    /** Test Llm Profile */
+    post: operations["test_llm_profile_api_v1_runtime_llm_profiles__profile_id__test_post"];
+  };
+  "/api/v1/runtime/llm-roles": {
+    /** Get Llm Roles */
+    get: operations["get_llm_roles_api_v1_runtime_llm_roles_get"];
+    /** Patch Llm Roles */
+    patch: operations["patch_llm_roles_api_v1_runtime_llm_roles_patch"];
+  };
+  "/api/v1/runtime/llm-profiles/import-env": {
+    /** Import Llm Profiles From Env */
+    post: operations["import_llm_profiles_from_env_api_v1_runtime_llm_profiles_import_env_post"];
   };
   "/api/v1/sandboxes": {
     /**
@@ -747,6 +784,227 @@ export interface components {
        */
       version?: string;
     };
+    /** LlmImportEnvResponse */
+    LlmImportEnvResponse: {
+      /** @description Profile created from current DSPY_* env values. */
+      profile: components["schemas"]["LlmProviderProfileResponse"];
+      /**
+       * Bindings
+       * @description Role bindings created from the imported environment values.
+       */
+      bindings?: components["schemas"]["LlmRoleBindingResponse"][];
+    };
+    /** LlmModelCatalogEntry */
+    LlmModelCatalogEntry: {
+      /**
+       * Id
+       * @description Provider-native model identifier.
+       */
+      id: string;
+      /**
+       * Label
+       * @description Display label for model dropdowns.
+       */
+      label: string;
+      /**
+       * Litellm Model
+       * @description LiteLLM model identifier used by the runtime.
+       */
+      litellm_model: string;
+    };
+    /** LlmModelCatalogResponse */
+    LlmModelCatalogResponse: {
+      /**
+       * Profile Id
+       * Format: uuid
+       * @description Provider profile that supplied the catalog.
+       */
+      profile_id: string;
+      /**
+       * Models
+       * @description Models available for assignment from this profile.
+       */
+      models?: components["schemas"]["LlmModelCatalogEntry"][];
+      /**
+       * Cached
+       * @description Whether the response came from the in-memory cache.
+       * @default true
+       */
+      cached?: boolean;
+      /**
+       * Error
+       * @description Provider fetch error when the catalog is empty or fell back to static models.
+       */
+      error?: string | null;
+    };
+    /** LlmProviderProfileCreateRequest */
+    LlmProviderProfileCreateRequest: {
+      /**
+       * Name
+       * @description Human-readable profile label.
+       */
+      name: string;
+      /**
+       * Provider Type
+       * @description Provider integration type.
+       * @enum {string}
+       */
+      provider_type: "openai" | "anthropic" | "google" | "openai_compatible";
+      /**
+       * Api Base
+       * @description Optional API base URL override.
+       */
+      api_base?: string | null;
+      /**
+       * Api Key
+       * @description Provider API key to encrypt and store.
+       * @default
+       */
+      api_key?: string;
+      /**
+       * Metadata Json
+       * @description Optional provider-specific metadata.
+       */
+      metadata_json?: {
+        [key: string]: unknown;
+      };
+    };
+    /** LlmProviderProfileResponse */
+    LlmProviderProfileResponse: {
+      /**
+       * Id
+       * Format: uuid
+       * @description Stable provider profile identifier.
+       */
+      id: string;
+      /**
+       * Name
+       * @description Human-readable profile label shown in Settings.
+       */
+      name: string;
+      /**
+       * Provider Type
+       * @description Provider integration type.
+       * @enum {string}
+       */
+      provider_type: "openai" | "anthropic" | "google" | "openai_compatible";
+      /**
+       * Api Base
+       * @description Configured API base URL for the provider.
+       * @default
+       */
+      api_base?: string;
+      /**
+       * Api Key Masked
+       * @description Masked API key preview for display.
+       * @default
+       */
+      api_key_masked?: string;
+      /**
+       * Has Api Key
+       * @description Whether a stored API key is configured.
+       * @default false
+       */
+      has_api_key?: boolean;
+      /**
+       * Metadata Json
+       * @description Optional provider-specific metadata.
+       */
+      metadata_json?: {
+        [key: string]: unknown;
+      };
+    };
+    /** LlmProviderProfileUpdateRequest */
+    LlmProviderProfileUpdateRequest: {
+      /**
+       * Name
+       * @description Updated profile label.
+       */
+      name?: string | null;
+      /**
+       * Provider Type
+       * @description Updated provider type.
+       */
+      provider_type?: ("openai" | "anthropic" | "google" | "openai_compatible") | null;
+      /**
+       * Api Base
+       * @description Updated API base URL.
+       */
+      api_base?: string | null;
+      /**
+       * Api Key
+       * @description Replacement API key when rotating credentials.
+       */
+      api_key?: string | null;
+      /**
+       * Clear Api Key
+       * @description When true, remove the stored API key.
+       * @default false
+       */
+      clear_api_key?: boolean;
+      /**
+       * Metadata Json
+       * @description Replacement metadata payload.
+       */
+      metadata_json?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /** LlmRoleBindingResponse */
+    LlmRoleBindingResponse: {
+      /**
+       * Role
+       * @description Runtime role receiving the model binding.
+       * @enum {string}
+       */
+      role: "planner" | "delegate" | "delegate_small";
+      /**
+       * Profile Id
+       * @description Assigned provider profile identifier.
+       */
+      profile_id?: string | null;
+      /**
+       * Profile Name
+       * @description Assigned provider profile label.
+       */
+      profile_name?: string | null;
+      /**
+       * Model Id
+       * @description Provider-native model identifier for the role.
+       * @default
+       */
+      model_id?: string;
+    };
+    /** LlmRoleBindingUpdate */
+    LlmRoleBindingUpdate: {
+      /**
+       * Profile Id
+       * @description Provider profile to bind to the role.
+       */
+      profile_id?: string | null;
+      /**
+       * Model Id
+       * @description Provider-native model identifier for the role.
+       */
+      model_id?: string | null;
+    };
+    /** LlmRoleBindingsResponse */
+    LlmRoleBindingsResponse: {
+      /**
+       * Bindings
+       * @description Current planner, delegate, and delegate_small bindings.
+       */
+      bindings?: components["schemas"]["LlmRoleBindingResponse"][];
+    };
+    /** LlmRoleBindingsUpdateRequest */
+    LlmRoleBindingsUpdateRequest: {
+      /** @description Planner role binding patch. */
+      planner?: components["schemas"]["LlmRoleBindingUpdate"] | null;
+      /** @description Delegate role binding patch. */
+      delegate?: components["schemas"]["LlmRoleBindingUpdate"] | null;
+      /** @description Small delegate role binding patch. */
+      delegate_small?: components["schemas"]["LlmRoleBindingUpdate"] | null;
+    };
     /**
      * OptimizationRunCreatedResponse
      * @description Response when an async optimization run is created.
@@ -1048,6 +1306,36 @@ export interface components {
        * @default
        */
       delegate_small?: string;
+      /**
+       * Planner Profile Id
+       * @description Provider profile id bound to the planner role, when configured.
+       */
+      planner_profile_id?: string | null;
+      /**
+       * Planner Profile Name
+       * @description Human-readable provider profile name for the planner role.
+       */
+      planner_profile_name?: string | null;
+      /**
+       * Delegate Profile Id
+       * @description Provider profile id bound to the delegate role, when configured.
+       */
+      delegate_profile_id?: string | null;
+      /**
+       * Delegate Profile Name
+       * @description Human-readable provider profile name for the delegate role.
+       */
+      delegate_profile_name?: string | null;
+      /**
+       * Delegate Small Profile Id
+       * @description Provider profile id bound to the delegate_small role, when configured.
+       */
+      delegate_small_profile_id?: string | null;
+      /**
+       * Delegate Small Profile Name
+       * @description Human-readable provider profile name for the delegate_small role.
+       */
+      delegate_small_profile_name?: string | null;
     };
     /**
      * RuntimeConnectivityTestResponse
@@ -1102,6 +1390,67 @@ export interface components {
        * @description Error summary when the test failed.
        */
       error?: string | null;
+    };
+    /**
+     * RuntimeMlflowStatus
+     * @description MLflow enablement and startup diagnostics for the runtime settings UI.
+     */
+    RuntimeMlflowStatus: {
+      /**
+       * Enabled
+       * @description Whether MLflow tracing is enabled for this runtime.
+       */
+      enabled: boolean;
+      /**
+       * Tracking Uri
+       * @description Configured MLflow tracking server URI.
+       * @default
+       */
+      tracking_uri?: string;
+      /**
+       * Experiment Name
+       * @description Configured MLflow experiment name.
+       */
+      experiment_name?: string | null;
+      /**
+       * Experiment Id
+       * @description Resolved MLflow experiment id when startup succeeded.
+       */
+      experiment_id?: string | null;
+      /**
+       * Auto Start Enabled
+       * @description Whether the runtime may auto-start a local MLflow tracking server.
+       * @default false
+       */
+      auto_start_enabled?: boolean;
+      /**
+       * Auto Assessment Enabled
+       * @description Whether Fleet-managed MLflow auto-assessment is enabled.
+       * @default false
+       */
+      auto_assessment_enabled?: boolean;
+      /**
+       * Persisted Scorer Count
+       * @description Count of persisted MLflow scorers active on the tracking server.
+       * @default 0
+       */
+      persisted_scorer_count?: number;
+      /**
+       * Persisted Scorers
+       * @description Names of persisted MLflow scorers active on the tracking server.
+       */
+      persisted_scorers?: string[];
+      /**
+       * Startup Status
+       * @description MLflow startup lifecycle status for this runtime.
+       * @default pending
+       */
+      startup_status?: string;
+      /**
+       * Startup Error
+       * @description Startup error summary when MLflow initialization failed.
+       */
+      startup_error?: string | null;
     };
     /**
      * RuntimeSettingsCategory
@@ -1271,13 +1620,8 @@ export interface components {
       llm?: {
         [key: string]: unknown;
       };
-      /**
-       * Mlflow
-       * @description MLflow enablement and startup diagnostics.
-       */
-      mlflow?: {
-        [key: string]: unknown;
-      };
+      /** @description MLflow enablement and startup diagnostics. */
+      mlflow?: components["schemas"]["RuntimeMlflowStatus"];
       /**
        * Daytona
        * @description Daytona configuration and readiness diagnostics.
@@ -1860,6 +2204,85 @@ export interface components {
       model_breakdown?: {
         [key: string]: number;
       };
+    };
+    /**
+     * SessionTraceItem
+     * @description External trace metadata linked to a durable session.
+     */
+    SessionTraceItem: {
+      /**
+       * Trace Id
+       * @description Provider trace identifier (for example an MLflow trace id).
+       */
+      trace_id: string;
+      /**
+       * Client Request Id
+       * @description Optional Fleet client request id correlated with the trace.
+       */
+      client_request_id?: string | null;
+      /**
+       * Turn Id
+       * @description Chat turn id when the trace was recorded.
+       */
+      turn_id?: string | null;
+      /**
+       * Provider
+       * @description External trace provider (for example mlflow).
+       */
+      provider: string;
+      /**
+       * Experiment Id
+       * @description Provider experiment id when known.
+       */
+      experiment_id?: string | null;
+      /**
+       * Experiment Name
+       * @description Provider experiment name when known.
+       */
+      experiment_name?: string | null;
+      /**
+       * Observed At
+       * @description ISO-8601 timestamp when the trace was observed.
+       */
+      observed_at: string;
+      /**
+       * Metadata
+       * @description Provider-specific metadata payload stored with the trace row.
+       */
+      metadata?: {
+        [key: string]: unknown;
+      };
+    };
+    /**
+     * SessionTraceListResponse
+     * @description Paginated external traces for a session.
+     */
+    SessionTraceListResponse: {
+      /**
+       * Items
+       * @description Trace rows linked to the session.
+       */
+      items: components["schemas"]["SessionTraceItem"][];
+      /**
+       * Total
+       * @description Total matching traces.
+       */
+      total: number;
+      /**
+       * Offset
+       * @description Pagination offset.
+       */
+      offset: number;
+      /**
+       * Limit
+       * @description Page size.
+       */
+      limit: number;
+      /**
+       * Has More
+       * @description Whether additional pages are available.
+       */
+      has_more: boolean;
     };
     /**
      * TraceFeedbackRequest
@@ -2636,6 +3059,54 @@ export interface operations {
     };
   };
   /**
+   * List session traces
+   * @description Paginated external traces (for example MLflow child delegations) linked to a session.
+   */
+  get_session_traces_api_v1_sessions__session_id__traces_get: {
+    parameters: {
+      query?: {
+        /** @description Page size */
+        limit?: number;
+        /** @description Pagination offset */
+        offset?: number;
+      };
+      path: {
+        /** @description Identifier of the session whose traces to list. */
+        session_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionTraceListResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The caller does not have permission to access this resource. */
+      403: {
+        content: never;
+      };
+      /** @description Session not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Session services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
    * Get session usage stats
    * @description Aggregated token counts, latency, and model breakdown for all turns in a session.
    */
@@ -3059,6 +3530,306 @@ export interface operations {
       };
       /** @description Volume list timed out before the backend returned a result. */
       504: {
+        content: never;
+      };
+    };
+  };
+  /** List Llm Profiles */
+  list_llm_profiles_api_v1_runtime_llm_profiles_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["LlmProviderProfileResponse"][];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /** Create Llm Profile */
+  create_llm_profile_api_v1_runtime_llm_profiles_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LlmProviderProfileCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["LlmProviderProfileResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description LLM profile writes are allowed only when APP_ENV=local. */
+      403: {
+        content: never;
+      };
+      /** @description Requested profile was not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /** Delete Llm Profile */
+  delete_llm_profile_api_v1_runtime_llm_profiles__profile_id__delete: {
+    parameters: {
+      path: {
+        /** @description Provider profile identifier. */
+        profile_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description LLM profile writes are allowed only when APP_ENV=local. */
+      403: {
+        content: never;
+      };
+      /** @description Requested profile was not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /** Update Llm Profile */
+  update_llm_profile_api_v1_runtime_llm_profiles__profile_id__patch: {
+    parameters: {
+      path: {
+        /** @description Provider profile identifier. */
+        profile_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LlmProviderProfileUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["LlmProviderProfileResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description LLM profile writes are allowed only when APP_ENV=local. */
+      403: {
+        content: never;
+      };
+      /** @description Requested profile was not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /** Get Llm Profile Models */
+  get_llm_profile_models_api_v1_runtime_llm_profiles__profile_id__models_get: {
+    parameters: {
+      query?: {
+        /** @description Bypass cached model catalog results. */
+        refresh?: boolean;
+      };
+      path: {
+        /** @description Provider profile identifier. */
+        profile_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["LlmModelCatalogResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Requested profile was not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /** Test Llm Profile */
+  test_llm_profile_api_v1_runtime_llm_profiles__profile_id__test_post: {
+    parameters: {
+      path: {
+        /** @description Provider profile identifier. */
+        profile_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["RuntimeConnectivityTestResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description LLM profile writes are allowed only when APP_ENV=local. */
+      403: {
+        content: never;
+      };
+      /** @description Requested profile was not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /** Get Llm Roles */
+  get_llm_roles_api_v1_runtime_llm_roles_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["LlmRoleBindingsResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /** Patch Llm Roles */
+  patch_llm_roles_api_v1_runtime_llm_roles_patch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LlmRoleBindingsUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["LlmRoleBindingsResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description LLM profile writes are allowed only when APP_ENV=local. */
+      403: {
+        content: never;
+      };
+      /** @description Requested profile was not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /** Import Llm Profiles From Env */
+  import_llm_profiles_from_env_api_v1_runtime_llm_profiles_import_env_post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["LlmImportEnvResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description LLM profile writes are allowed only when APP_ENV=local. */
+      403: {
+        content: never;
+      };
+      /** @description Requested profile was not found. */
+      404: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
         content: never;
       };
     };

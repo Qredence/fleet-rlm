@@ -175,6 +175,35 @@ vi.mock("@/features/settings/use-runtime-settings", () => ({
   }),
 }));
 
+vi.mock("@/features/settings/use-llm-profiles", () => ({
+  useLlmProfiles: () => ({
+    data: [],
+    isPending: false,
+    isError: false,
+    error: null,
+  }),
+  useLlmRoleBindings: () => ({
+    data: { bindings: [] },
+    isPending: false,
+    isError: false,
+    error: null,
+  }),
+  useLlmProfileModels: () => ({
+    data: { models: [] },
+    isPending: false,
+    isError: false,
+    error: null,
+  }),
+  useLlmProfilesMutations: () => ({
+    createProfile: { isPending: false, mutate: vi.fn() },
+    importFromEnv: { isPending: false, mutate: vi.fn() },
+    saveRoleBindings: { isPending: false, mutate: vi.fn() },
+    testProfile: { isPending: false, mutate: vi.fn() },
+    removeProfile: { isPending: false, mutate: vi.fn() },
+    refreshProfileModels: { isPending: false, mutate: vi.fn() },
+  }),
+}));
+
 describe("GroupedSettingsPane", () => {
   function renderGroupedSettingsPane(props: ComponentProps<typeof GroupedSettingsPane>) {
     const queryClient = new QueryClient();
@@ -190,12 +219,12 @@ describe("GroupedSettingsPane", () => {
 
     expect(html).toContain("Theme");
     expect(html).toContain("Anonymous telemetry");
-    expect(html).toContain("LiteLLM integration");
-    expect(html).toContain("Planner LM model");
-    expect(html).toContain("Delegate LM model");
-    expect(html).toContain("Delegate small LM model");
-    expect(html).toContain("Custom API endpoint");
-    expect(html).toContain("API key");
+    expect(html).toContain("LLM Providers");
+    expect(html).toContain("Import from .env");
+    expect(html).toContain("Add provider profile");
+    expect(html).toContain("Planner model");
+    expect(html).toContain("Delegate model");
+    expect(html).toContain("Delegate small model");
     expect(html).toContain("Runtime Status");
     expect(html).toContain("Test Credentials + Connection");
     expect(html).toContain("Run Runtime tests from Settings -&gt; Runtime.");
@@ -217,7 +246,7 @@ describe("GroupedSettingsPane", () => {
     expect(html).toContain("Anonymous telemetry");
     expect(html).toContain("Telemetry scope");
     expect(html).not.toContain("Theme");
-    expect(html).not.toContain("Planner LM model");
+    expect(html).not.toContain("Planner model");
     expect(html).not.toContain("Runtime Status");
   });
 

@@ -9,6 +9,8 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRunWorkbenchStore } from "@/features/workspace/use-workspace";
+import { useRuntimeStatus } from "@/hooks/use-runtime-status";
+import { buildMlflowTraceUrl } from "@/lib/mlflow/trace-url";
 import { humanizeKind } from "./run-workbench-utils";
 import {
   ArtifactPanel,
@@ -33,6 +35,16 @@ export function RunWorkbench() {
     summary,
     errorMessage,
   } = useRunWorkbenchStore();
+  const runtimeStatus = useRuntimeStatus();
+  const mlflowStatus = runtimeStatus.data?.mlflow;
+  const mlflowTraceUrl =
+    summary?.mlflowTraceId && mlflowStatus?.enabled !== false
+      ? buildMlflowTraceUrl({
+          trackingUri: mlflowStatus?.tracking_uri ?? "http://127.0.0.1:5001",
+          experimentId: mlflowStatus?.experiment_id,
+          traceId: summary.mlflowTraceId,
+        })
+      : null;
 
   const selectedIteration =
     iterations.find((item) => item.id === selectedIterationId) ?? iterations.at(-1) ?? null;
@@ -63,6 +75,27 @@ export function RunWorkbench() {
                 <li key={`summary-warning-${index}`}>{warning}</li>
               ))}
             </ul>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {mlflowTraceUrl ? (
+        <Alert className="shrink-0 border-border-subtle/80 bg-muted/15 text-foreground">
+          <AlertTitle>MLflow trace</AlertTitle>
+          <AlertDescription>
+            <a
+              href={mlflowTraceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-accent underline-offset-4 hover:underline"
+            >
+              Open trace in MLflow
+            </a>
+            {summary?.mlflowClientRequestId ? (
+              <span className="mt-1 block text-xs text-muted-foreground">
+                client_request_id: {summary.mlflowClientRequestId}
+              </span>
+            ) : null}
           </AlertDescription>
         </Alert>
       ) : null}

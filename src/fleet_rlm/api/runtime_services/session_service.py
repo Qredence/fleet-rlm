@@ -28,6 +28,8 @@ from ..schemas.sessions import (
     SessionStateResponse,
     SessionStateSummary,
     SessionStatsResponse,
+    SessionTraceItem,
+    SessionTraceListResponse,
     TurnItem,
     TurnListResponse,
 )
@@ -371,6 +373,52 @@ class SessionService:
         )
         return TurnListResponse(
             items=[_turn_item_from_repo(turn) for turn in items],
+            total=total,
+            offset=offset,
+            limit=limit,
+            has_more=(offset + limit) < total,
+        )
+
+    async def get_session_traces(
+        self,
+        *,
+        persisted_identity: IdentityUpsertResult,
+        session_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> SessionTraceListResponse:
+        """Return paginated external traces linked to a durable session."""
+        session_uuid = parse_session_uuid(session_id)
+        session = await self._persistence.get_chat_session(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        items, total = await self._persistence.list_external_traces_for_session(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            limit=limit,
+            offset=offset,
+        )
+        return SessionTraceListResponse(
+            items=[
+                SessionTraceItem(
+                    trace_id=trace.trace_id,
+                    client_request_id=trace.client_request_id,
+                    turn_id=str(trace.turn_id) if trace.turn_id is not None else None,
+                    provider=trace.provider.value if hasattr(trace.provider, "value") else str(trace.provider),
+                    experiment_id=trace.experiment_id,
+                    experiment_name=trace.experiment_name,
+                    observed_at=trace.observed_at.isoformat(),
+                    metadata=dict(trace.metadata_json or {}),
+                )
+                for trace in items
+            ],
             total=total,
             offset=offset,
             limit=limit,

@@ -12,7 +12,9 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
+from urllib.error import URLError
 from urllib.parse import urlsplit
+from urllib.request import urlopen
 
 from fleet_rlm import __version__
 from fleet_rlm.integrations.observability.config import (
@@ -139,6 +141,90 @@ def build_local_mlflow_unavailable_error(
     )
 
 
+def _local_mlflow_version_url(tracking_uri: str) -> str | None:
+    candidate = tracking_uri.strip()
+    if not is_local_mlflow_tracking_uri(candidate):
+        return None
+
+    parsed = urlsplit(candidate)
+    host = parsed.hostname or "127.0.0.1"
+    port = resolve_mlflow_tracking_port(candidate)
+    return f"http://{host}:{port}/version"
+
+
+def fetch_mlflow_server_version(*, tracking_uri: str, timeout_seconds: float = 2.0) -> str | None:
+    """Return the MLflow tracking server version when *tracking_uri* is local."""
+
+    version_url = _local_mlflow_version_url(tracking_uri)
+    if version_url is None:
+        return None
+
+    try:
+        with urlopen(version_url, timeout=timeout_seconds) as response:
+            body = response.read().decode("utf-8").strip()
+    except (OSError, URLError, UnicodeDecodeError, ValueError):
+        return None
+
+    return body or None
+
+
+def resolve_installed_mlflow_version() -> str | None:
+    """Return the MLflow version installed in the current Python environment."""
+
+    try:
+        import mlflow.version
+    except ImportError:
+        return None
+
+    version = getattr(mlflow.version, "VERSION", None)
+    if not isinstance(version, str):
+        return None
+    normalized = version.strip()
+    return normalized or None
+
+
+def build_mlflow_server_version_mismatch_error(
+    *,
+    tracking_uri: str,
+    backend_store_uri: str,
+    client_version: str,
+    server_version: str,
+) -> str:
+    """Return actionable guidance when the local server and client versions differ."""
+
+    resolved_tracking_uri = tracking_uri.strip() or "http://127.0.0.1:5001"
+    resolved_backend_store_uri = backend_store_uri.strip() or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI
+    port = resolve_mlflow_tracking_port(resolved_tracking_uri)
+    return (
+        f"MLflow tracking server at {resolved_tracking_uri} is running version "
+        f"{server_version}, but this project environment has mlflow {client_version}. "
+        "Stop the stale server, upgrade the backend store if needed, then restart:\n"
+        f"  lsof -ti :{port} | xargs kill\n"
+        f"  uv run mlflow db upgrade {resolved_backend_store_uri}\n"
+        "  make mlflow-server"
+    )
+
+
+def detect_local_mlflow_server_version_mismatch(
+    *,
+    tracking_uri: str,
+    backend_store_uri: str,
+) -> str | None:
+    """Return an actionable error when a local server version differs from the client."""
+
+    client_version = resolve_installed_mlflow_version()
+    server_version = fetch_mlflow_server_version(tracking_uri=tracking_uri)
+    if client_version is None or server_version is None or client_version == server_version:
+        return None
+
+    return build_mlflow_server_version_mismatch_error(
+        tracking_uri=tracking_uri,
+        backend_store_uri=backend_store_uri,
+        client_version=client_version,
+        server_version=server_version,
+    )
+
+
 def resolve_mlflow_auto_start_enabled(
     *,
     app_env: str,
@@ -180,7 +266,17 @@ async def start_mlflow_server(
     resolved_backend_store_uri = backend_store_uri.strip() or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI
 
     if _mlflow_startup_socket_ready(port=port):
-        logger.info("MLflow tracking server already running at %s", tracking_uri)
+        version_mismatch = detect_local_mlflow_server_version_mismatch(
+            tracking_uri=tracking_uri,
+            backend_store_uri=resolved_backend_store_uri,
+        )
+        if version_mismatch:
+            logger.warning(
+                "MLflow tracking server already running at %s with a mismatched version",
+                tracking_uri,
+            )
+        else:
+            logger.info("MLflow tracking server already running at %s", tracking_uri)
         return None
 
     logger.info("Starting MLflow tracking server on port %d...", port)
@@ -298,9 +394,13 @@ async def initialize_mlflow_runtime_service(
     from fleet_rlm.integrations.observability.mlflow_runtime import initialize_mlflow
 
     initialized = await asyncio.to_thread(initialize_mlflow, mlflow_cfg)
-    startup_error = None
+    startup_error = detect_local_mlflow_server_version_mismatch(
+        tracking_uri=mlflow_cfg.tracking_uri,
+        backend_store_uri=mlflow_cfg.local_backend_store_uri,
+    )
     if not initialized:
-        startup_error = "MLflow runtime initialization unavailable"
+        if startup_error is None:
+            startup_error = "MLflow runtime initialization unavailable"
         if auto_start_enabled and not _mlflow_startup_socket_ready(port=tracking_port):
             startup_error = build_local_mlflow_unavailable_error(
                 tracking_uri=mlflow_cfg.tracking_uri,
@@ -309,7 +409,7 @@ async def initialize_mlflow_runtime_service(
     set_optional_service_status(
         diagnostics,
         "mlflow",
-        "ready" if initialized else "degraded",
+        "ready" if initialized and startup_error is None else "degraded",
         error=startup_error,
     )
 

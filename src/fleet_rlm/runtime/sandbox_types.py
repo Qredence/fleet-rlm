@@ -102,8 +102,9 @@ class WorkspaceContext(SandboxSerializable):
         ]
         if not self.document_text:
             parts.append(
-                "document_text is empty; read .fleet-rlm/context/manifest.json in the "
-                "workspace and open each staged .extracted.txt file"
+                "document_text is empty; use sandbox paths from metadata.sandbox_staged_paths or "
+                "read .fleet-rlm/context/manifest.json in the workspace and open each staged "
+                ".extracted.txt file (host context_paths are not readable in the REPL)"
             )
         else:
             snippet = " ".join(self.document_text[:max_chars].split())

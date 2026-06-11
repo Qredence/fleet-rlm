@@ -12,6 +12,21 @@ This guide covers the local runtime settings surfaces exposed under
   cached connectivity test results.
 - `POST /api/v1/runtime/tests/daytona` and `POST /api/v1/runtime/tests/lm`
   run live connectivity checks.
+- `GET/POST/PATCH/DELETE /api/v1/runtime/llm-profiles` manage local provider
+  profiles (OpenAI, Anthropic, Gemini, OpenAI-compatible proxies).
+- `GET/PATCH /api/v1/runtime/llm-roles` read and update per-role profile/model
+  bindings for planner, delegate, and delegate_small.
+- `POST /api/v1/runtime/llm-profiles/import-env` creates a profile from the
+  current `DSPY_*` environment variables.
+
+Provider profiles persist in Postgres when `DATABASE_URL` is configured, or in
+`.fleet/llm-profiles.json` for SQLite-only local development. Profile writes are
+allowed only when `APP_ENV=local`.
+
+Gemini uses the OpenAI-compatible endpoint at
+`https://generativelanguage.googleapis.com/v1beta/openai/`. Anthropic model lists
+are curated statically because Anthropic does not expose a public `/v1/models`
+catalog.
 
 ## Editable Keys
 

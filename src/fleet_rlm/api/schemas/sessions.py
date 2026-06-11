@@ -150,6 +150,35 @@ class SessionPatchRequest(BaseModel):
     )
 
 
+class SessionTraceItem(BaseModel):
+    """External trace metadata linked to a durable session."""
+
+    trace_id: str = Field(description="Provider trace identifier (for example an MLflow trace id).")
+    client_request_id: str | None = Field(
+        default=None,
+        description="Optional Fleet client request id correlated with the trace.",
+    )
+    turn_id: str | None = Field(default=None, description="Chat turn id when the trace was recorded.")
+    provider: str = Field(description="External trace provider (for example mlflow).")
+    experiment_id: str | None = Field(default=None, description="Provider experiment id when known.")
+    experiment_name: str | None = Field(default=None, description="Provider experiment name when known.")
+    observed_at: str = Field(description="ISO-8601 timestamp when the trace was observed.")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Provider-specific metadata payload stored with the trace row.",
+    )
+
+
+class SessionTraceListResponse(BaseModel):
+    """Paginated external traces for a session."""
+
+    items: list[SessionTraceItem] = Field(description="Trace rows linked to the session.")
+    total: int = Field(description="Total matching traces.")
+    offset: int = Field(description="Pagination offset.")
+    limit: int = Field(description="Page size.")
+    has_more: bool = Field(description="Whether additional pages are available.")
+
+
 class SessionStatsResponse(BaseModel):
     """Aggregated usage stats for a session."""
 

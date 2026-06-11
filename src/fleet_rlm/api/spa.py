@@ -32,27 +32,39 @@ def _fleet_ui_package_root() -> Path | None:
     return Path(module_file).resolve().parent
 
 
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def is_source_frontend_checkout() -> bool:
+    """Return True when this process is running from a source tree with ``src/frontend``."""
+    return (_repo_root() / "src" / "frontend" / "package.json").is_file()
+
+
+def _source_frontend_dist_dir() -> Path:
+    ui_package_root = _fleet_ui_package_root()
+    if ui_package_root is None:
+        return _repo_root() / "src" / "frontend" / "dist"
+    return ui_package_root.parents[1] / "frontend" / "dist"
+
+
 def resolve_ui_dist_dir() -> Path | None:
     """Return the frontend build directory that contains the served SPA files.
 
-    In source checkouts, prefer `src/frontend/dist` so `fleet web` reflects the
-    latest local frontend build. For installed packages, fall back to in-package
-    assets at `fleet_rlm/ui/dist`.
+    In source checkouts, only ``src/frontend/dist`` is considered so ``fleet web``
+    never serves stale packaged assets from ``fleet_rlm/ui/dist``. For installed
+    packages, fall back to in-package assets at ``fleet_rlm/ui/dist``.
     """
-    candidates: list[Path] = []
-    ui_package_root = _fleet_ui_package_root()
-    if ui_package_root is not None:
-        candidates.extend(
-            [
-                ui_package_root.parents[2] / "frontend" / "dist",  # source checkout
-                ui_package_root / "dist",  # installed/source package assets
-            ]
-        )
-    for candidate in candidates:
-        resolved = _resolve_ui_web_root(candidate)
+    if is_source_frontend_checkout():
+        resolved = _resolve_ui_web_root(_source_frontend_dist_dir())
         if resolved is not None:
             return resolved
-    return None
+        return None
+
+    ui_package_root = _fleet_ui_package_root()
+    if ui_package_root is None:
+        return None
+    return _resolve_ui_web_root(ui_package_root / "dist")
 
 
 def _collect_reserved_top_level_paths(app: FastAPI) -> tuple[set[str], set[str]]:
@@ -153,8 +165,7 @@ def mount_spa(app: FastAPI, ui_dir: Path) -> None:
 
 def ui_unavailable_payload() -> dict[str, str]:
     """Return a source-aware hint when the web UI bundle is unavailable."""
-    repo_root = Path(__file__).resolve().parents[3]
-    frontend_root = repo_root / "src" / "frontend"
+    frontend_root = _repo_root() / "src" / "frontend"
 
     if (frontend_root / "package.json").exists():
         return {
@@ -162,7 +173,8 @@ def ui_unavailable_payload() -> dict[str, str]:
             "hint": (
                 "Build the frontend with "
                 "'cd src/frontend && pnpm install --frozen-lockfile && pnpm run build' "
-                "and sync packaged UI assets with 'make build-ui' before rebuilding."
+                "to serve it from fleet web on :8000, or run "
+                "'cd src/frontend && pnpm run dev' for HMR on :5173 with API proxy to :8000."
             ),
         }
 
@@ -216,6 +228,7 @@ def mount_frontend_routes(
 
 
 __all__ = [
+    "is_source_frontend_checkout",
     "mount_api_only_root",
     "mount_frontend_routes",
     "mount_spa",

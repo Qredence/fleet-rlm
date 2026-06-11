@@ -19,6 +19,7 @@ from fleet_rlm.integrations.daytona.concurrency import (
     get_current_sandbox_usage,
     reconcile_sandbox_slots,
 )
+from fleet_rlm.integrations.llm_profiles.types import LlmRoleName
 from fleet_rlm.integrations.observability.config import MlflowConfig
 
 from ..bootstrap_observability import resolve_mlflow_auto_start_enabled
@@ -34,6 +35,7 @@ from ..dependencies import (
 from ..schemas.runtime import (
     RuntimeActiveModels,
     RuntimeConnectivityTestResponse,
+    RuntimeMlflowStatus,
     RuntimeStatusResponse,
     RuntimeTestCache,
 )
@@ -391,6 +393,8 @@ def build_runtime_status_response(
     config_deps: ConfigDeps,
     lm_deps: LmDeps,
     diagnostics_deps: DiagnosticsDeps,
+    persistence_deps: PersistenceDeps | None = None,
+    profile_labels: dict[LlmRoleName, tuple[str | None, str | None]] | None = None,
 ) -> RuntimeStatusResponse:
     mlflow_cfg = MlflowConfig.from_env()
     llm_checks, llm_guidance = lm_preflight()
@@ -407,7 +411,7 @@ def build_runtime_status_response(
     state.lm_deps = lm_deps
     state.auth_deps = AuthDeps()
     state.session_cache_deps = SessionCacheDeps()
-    state.persistence_deps = PersistenceDeps()
+    state.persistence_deps = persistence_deps or PersistenceDeps()
     state.diagnostics_deps = diagnostics_deps
 
     ready = state.is_ready and bool(daytona_test is not None and daytona_test.ok and lm_test is not None and lm_test.ok)
@@ -460,6 +464,17 @@ def build_runtime_status_response(
             "`uv run python scripts/mlflow_cli.py scorers stop --name <name>` if unintended."
         )
 
+    mlflow_experiment_id: str | None = None
+    if mlflow_cfg.enabled and mlflow_startup_status == "ready":
+        from fleet_rlm.integrations.observability.mlflow_runtime import get_mlflow_experiment_id
+
+        mlflow_experiment_id = get_mlflow_experiment_id()
+
+    resolved_profile_labels = profile_labels or {}
+    planner_profile = resolved_profile_labels.get("planner", (None, None))
+    delegate_profile = resolved_profile_labels.get("delegate", (None, None))
+    delegate_small_profile = resolved_profile_labels.get("delegate_small", (None, None))
+
     return RuntimeStatusResponse(
         app_env=config_deps.config.app_env,
         write_enabled=config_deps.config.app_env == "local",
@@ -475,6 +490,12 @@ def build_runtime_status_response(
                 config_deps.config.agent_delegate_small_model,
                 "DSPY_DELEGATE_LM_SMALL_MODEL",
             ),
+            planner_profile_id=planner_profile[0],
+            planner_profile_name=planner_profile[1],
+            delegate_profile_id=delegate_profile[0],
+            delegate_profile_name=delegate_profile[1],
+            delegate_small_profile_id=delegate_small_profile[0],
+            delegate_small_profile_name=delegate_small_profile[1],
         ),
         llm={
             **llm_checks,
@@ -482,15 +503,18 @@ def build_runtime_status_response(
             "startup_status": diagnostics_deps.optional_service_status.get("planner_lm", "pending"),
             "startup_error": diagnostics_deps.optional_service_errors.get("planner_lm"),
         },
-        mlflow={
-            "enabled": mlflow_cfg.enabled,
-            "auto_start_enabled": mlflow_auto_start_enabled,
-            "auto_assessment_enabled": mlflow_cfg.enable_auto_assessment,
-            "persisted_scorer_count": len(persisted_scorer_names),
-            "persisted_scorers": persisted_scorer_names,
-            "startup_status": mlflow_startup_status,
-            "startup_error": mlflow_startup_error,
-        },
+        mlflow=RuntimeMlflowStatus(
+            enabled=mlflow_cfg.enabled,
+            tracking_uri=mlflow_cfg.tracking_uri,
+            experiment_name=mlflow_cfg.experiment,
+            experiment_id=mlflow_experiment_id,
+            auto_start_enabled=mlflow_auto_start_enabled,
+            auto_assessment_enabled=mlflow_cfg.enable_auto_assessment,
+            persisted_scorer_count=len(persisted_scorer_names),
+            persisted_scorers=persisted_scorer_names,
+            startup_status=mlflow_startup_status,
+            startup_error=mlflow_startup_error,
+        ),
         daytona={
             **daytona_checks,
             "guidance": daytona_guidance,

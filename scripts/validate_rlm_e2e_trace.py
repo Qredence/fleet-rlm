@@ -57,6 +57,7 @@ class ValidationResult:
     run_status: str
     run_step_count: int
     artifact_count: int
+    mlflow_trace_id: str | None
     output_dir: Path
 
 
@@ -70,7 +71,54 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt", default=_DEFAULT_PROMPT)
     parser.add_argument("--timeout-seconds", type=int, default=_DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--output-dir", default=_DEFAULT_OUTPUT_DIR)
+    parser.add_argument(
+        "--verify-mlflow",
+        action="store_true",
+        help="Assert mlflow_trace_id in the terminal payload and verify the trace exists via mlflow CLI.",
+    )
+    parser.add_argument(
+        "--require-mlflow-trace-id",
+        action="store_true",
+        help="Fail when the terminal payload does not include mlflow_trace_id (respects MLFLOW_ENABLED=false skip).",
+    )
     return parser.parse_args()
+
+
+def _extract_mlflow_trace_id(terminal_payload: dict[str, Any]) -> str | None:
+    candidates: list[dict[str, Any]] = []
+    data = terminal_payload.get("data")
+    if isinstance(data, dict):
+        candidates.append(data)
+        nested = data.get("payload")
+        if isinstance(nested, dict):
+            candidates.append(nested)
+    nested_payload = terminal_payload.get("payload")
+    if isinstance(nested_payload, dict):
+        candidates.append(nested_payload)
+
+    for container in candidates:
+        for key in ("mlflow_trace_id", "mlflowTraceId"):
+            value = container.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _verify_mlflow_trace_exists(trace_id: str) -> None:
+    repo_root = Path(__file__).resolve().parent.parent
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001").strip()
+    env = {**os.environ, "MLFLOW_TRACKING_URI": tracking_uri}
+    result = subprocess.run(
+        ["uv", "run", "mlflow", "traces", "get", "--trace-id", trace_id, "--output", "json"],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"mlflow traces get failed for {trace_id}: {detail}")
 
 
 def _make_ws_url(server_url: str, path: str, query: str = "") -> str:
@@ -316,6 +364,7 @@ async def _run_validation(args: argparse.Namespace) -> ValidationResult:
         raise RuntimeError("DATABASE_ADMIN_URL or DATABASE_URL must be set for DB persistence verification.")
 
     session_id = args.session_id or f"qre301-{uuid.uuid4().hex[:10]}"
+    mlflow_trace_id: str | None = None
     timestamp_str = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     output_dir = Path(args.output_dir) / f"{timestamp_str}-{session_id}"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -400,9 +449,17 @@ async def _run_validation(args: argparse.Namespace) -> ValidationResult:
                 terminal_kind = terminal_chat_payload.get("data", {}).get("kind") or terminal_chat_payload.get("type")
                 if terminal_kind not in {"final", "execution_completed"}:
                     raise RuntimeError(
-                        f"Terminal chat event kind is {terminal_kind!r}; expected 'final' or "
-                        "'execution_completed'."
+                        f"Terminal chat event kind is {terminal_kind!r}; expected 'final' or 'execution_completed'."
                     )
+
+                mlflow_trace_id = _extract_mlflow_trace_id(terminal_chat_payload)
+                if MlflowConfig.from_env().enabled and (args.verify_mlflow or args.require_mlflow_trace_id):
+                    if not mlflow_trace_id:
+                        raise RuntimeError("Terminal chat payload is missing mlflow_trace_id.")
+                    if args.verify_mlflow:
+                        _verify_mlflow_trace_exists(mlflow_trace_id)
+                elif not MlflowConfig.from_env().enabled:
+                    mlflow_trace_id = None
 
                 await _persist_artifact_via_command(
                     chat_ws,
@@ -436,6 +493,7 @@ async def _run_validation(args: argparse.Namespace) -> ValidationResult:
         f"- docs_path: `{args.docs_path}`",
         f"- run_id: `{run_id}`",
         f"- chat terminal kind: `{terminal_kind}`",
+        f"- mlflow_trace_id: `{mlflow_trace_id or 'n/a'}`",
         f"- execution_step events: `{len(step_events)}`",
         f"- DB run status: `{db_verification['run_status']}`",
         f"- DB run_steps: `{db_verification['run_step_count']}`",
@@ -460,6 +518,7 @@ async def _run_validation(args: argparse.Namespace) -> ValidationResult:
         run_status=str(db_verification["run_status"]),
         run_step_count=int(db_verification["run_step_count"]),
         artifact_count=int(db_verification["artifact_count"]),
+        mlflow_trace_id=mlflow_trace_id,
         output_dir=output_dir,
     )
 
@@ -469,6 +528,8 @@ def _print_success(result: ValidationResult) -> None:
     print(f"  run_id: {result.run_id}")
     print(f"  session: {result.workspace_id}/{result.user_id}/{result.session_id}")
     print(f"  terminal chat event: {result.chat_terminal_kind}")
+    if result.mlflow_trace_id:
+        print(f"  mlflow_trace_id: {result.mlflow_trace_id}")
     print(f"  execution steps: {result.execution_step_count}")
     print(
         "  DB persistence: "

@@ -10,7 +10,7 @@ PYTEST := uv run --no-sync pytest
 	check quality-gate check-release check-docs check-duplicates check-security check-deps check-frontend api-check api-sync \
 	build build-ui build-release release release-check \
 	clean cli mlflow precommit-install precommit-run precommit \
-	sync sync-dev sync-all metadata-check docs-check security-check dependency-check frontend-check sync-ui release-artifacts cli-help mlflow-server \
+	sync sync-dev sync-all metadata-check docs-check security-check dependency-check frontend-check sync-ui release-artifacts cli-help mlflow-server mlflow-upgrade \
 	cloud-preflight
 
 help:
@@ -207,6 +207,9 @@ MLFLOW_LOCAL_BACKEND_STORE_URI ?= sqlite:///.data/mlruns.db
 
 mlflow:
 	uv run mlflow server --backend-store-uri $(MLFLOW_LOCAL_BACKEND_STORE_URI) --port 5001
+
+mlflow-upgrade:
+	uv run mlflow db upgrade $(MLFLOW_LOCAL_BACKEND_STORE_URI)
 
 mlflow-server: mlflow
 

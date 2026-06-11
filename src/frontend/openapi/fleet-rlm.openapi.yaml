@@ -412,6 +412,68 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/sessions/{session_id}/traces:
+    get:
+      tags:
+        - sessions
+      summary: List session traces
+      description: Paginated external traces (for example MLflow child delegations)
+        linked to a session.
+      operationId: get_session_traces_api_v1_sessions__session_id__traces_get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Identifier of the session whose traces to list.
+            title: Session Id
+          description: Identifier of the session whose traces to list.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 200
+            minimum: 1
+            description: Page size
+            default: 50
+            title: Limit
+          description: Page size
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            description: Pagination offset
+            default: 0
+            title: Offset
+          description: Pagination offset
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionTraceListResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "403":
+          description: The caller does not have permission to access this resource.
+        "503":
+          description: Session services are unavailable because server startup is
+            incomplete.
+        "404":
+          description: Session not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /api/v1/sessions/{session_id}/stats:
     get:
       tags:
@@ -878,6 +940,293 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/runtime/llm-profiles:
+    get:
+      tags:
+        - runtime
+      summary: List Llm Profiles
+      operationId: list_llm_profiles_api_v1_runtime_llm_profiles_get
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: "#/components/schemas/LlmProviderProfileResponse"
+                type: array
+                title: Response List Llm Profiles Api V1 Runtime Llm Profiles Get
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+    post:
+      tags:
+        - runtime
+      summary: Create Llm Profile
+      operationId: create_llm_profile_api_v1_runtime_llm_profiles_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LlmProviderProfileCreateRequest"
+        required: true
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LlmProviderProfileResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        "403":
+          description: LLM profile writes are allowed only when APP_ENV=local.
+        "404":
+          description: Requested profile was not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/runtime/llm-profiles/{profile_id}:
+    patch:
+      tags:
+        - runtime
+      summary: Update Llm Profile
+      operationId: update_llm_profile_api_v1_runtime_llm_profiles__profile_id__patch
+      parameters:
+        - name: profile_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: Provider profile identifier.
+            title: Profile Id
+          description: Provider profile identifier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LlmProviderProfileUpdateRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LlmProviderProfileResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        "403":
+          description: LLM profile writes are allowed only when APP_ENV=local.
+        "404":
+          description: Requested profile was not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - runtime
+      summary: Delete Llm Profile
+      operationId: delete_llm_profile_api_v1_runtime_llm_profiles__profile_id__delete
+      parameters:
+        - name: profile_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: Provider profile identifier.
+            title: Profile Id
+          description: Provider profile identifier.
+      responses:
+        "204":
+          description: Successful Response
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        "403":
+          description: LLM profile writes are allowed only when APP_ENV=local.
+        "404":
+          description: Requested profile was not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/runtime/llm-profiles/{profile_id}/models:
+    get:
+      tags:
+        - runtime
+      summary: Get Llm Profile Models
+      operationId: get_llm_profile_models_api_v1_runtime_llm_profiles__profile_id__models_get
+      parameters:
+        - name: profile_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: Provider profile identifier.
+            title: Profile Id
+          description: Provider profile identifier.
+        - name: refresh
+          in: query
+          required: false
+          schema:
+            type: boolean
+            description: Bypass cached model catalog results.
+            default: false
+            title: Refresh
+          description: Bypass cached model catalog results.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LlmModelCatalogResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        "404":
+          description: Requested profile was not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/runtime/llm-profiles/{profile_id}/test:
+    post:
+      tags:
+        - runtime
+      summary: Test Llm Profile
+      operationId: test_llm_profile_api_v1_runtime_llm_profiles__profile_id__test_post
+      parameters:
+        - name: profile_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            description: Provider profile identifier.
+            title: Profile Id
+          description: Provider profile identifier.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeConnectivityTestResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        "403":
+          description: LLM profile writes are allowed only when APP_ENV=local.
+        "404":
+          description: Requested profile was not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/runtime/llm-roles:
+    get:
+      tags:
+        - runtime
+      summary: Get Llm Roles
+      operationId: get_llm_roles_api_v1_runtime_llm_roles_get
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LlmRoleBindingsResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+    patch:
+      tags:
+        - runtime
+      summary: Patch Llm Roles
+      operationId: patch_llm_roles_api_v1_runtime_llm_roles_patch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LlmRoleBindingsUpdateRequest"
+        required: true
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LlmRoleBindingsResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        "403":
+          description: LLM profile writes are allowed only when APP_ENV=local.
+        "404":
+          description: Requested profile was not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/runtime/llm-profiles/import-env:
+    post:
+      tags:
+        - runtime
+      summary: Import Llm Profiles From Env
+      operationId: import_llm_profiles_from_env_api_v1_runtime_llm_profiles_import_env_post
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LlmImportEnvResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        "403":
+          description: LLM profile writes are allowed only when APP_ENV=local.
+        "404":
+          description: Requested profile was not found.
   /api/v1/sandboxes:
     get:
       tags:
@@ -2088,6 +2437,275 @@ components:
       type: object
       title: HealthResponse
       description: Response body for the lightweight health endpoint.
+    LlmImportEnvResponse:
+      properties:
+        profile:
+          $ref: "#/components/schemas/LlmProviderProfileResponse"
+          description: Profile created from current DSPY_* env values.
+        bindings:
+          items:
+            $ref: "#/components/schemas/LlmRoleBindingResponse"
+          type: array
+          title: Bindings
+          description: Role bindings created from the imported environment values.
+      type: object
+      required:
+        - profile
+      title: LlmImportEnvResponse
+    LlmModelCatalogEntry:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Provider-native model identifier.
+        label:
+          type: string
+          title: Label
+          description: Display label for model dropdowns.
+        litellm_model:
+          type: string
+          title: Litellm Model
+          description: LiteLLM model identifier used by the runtime.
+      type: object
+      required:
+        - id
+        - label
+        - litellm_model
+      title: LlmModelCatalogEntry
+    LlmModelCatalogResponse:
+      properties:
+        profile_id:
+          type: string
+          format: uuid
+          title: Profile Id
+          description: Provider profile that supplied the catalog.
+        models:
+          items:
+            $ref: "#/components/schemas/LlmModelCatalogEntry"
+          type: array
+          title: Models
+          description: Models available for assignment from this profile.
+        cached:
+          type: boolean
+          title: Cached
+          description: Whether the response came from the in-memory cache.
+          default: true
+        error:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Error
+          description: Provider fetch error when the catalog is empty or fell back
+            to static models.
+      type: object
+      required:
+        - profile_id
+      title: LlmModelCatalogResponse
+    LlmProviderProfileCreateRequest:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Human-readable profile label.
+        provider_type:
+          type: string
+          enum:
+            - openai
+            - anthropic
+            - google
+            - openai_compatible
+          title: Provider Type
+          description: Provider integration type.
+        api_base:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Api Base
+          description: Optional API base URL override.
+        api_key:
+          type: string
+          title: Api Key
+          description: Provider API key to encrypt and store.
+          default: ""
+        metadata_json:
+          additionalProperties: true
+          type: object
+          title: Metadata Json
+          description: Optional provider-specific metadata.
+      type: object
+      required:
+        - name
+        - provider_type
+      title: LlmProviderProfileCreateRequest
+    LlmProviderProfileResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+          description: Stable provider profile identifier.
+        name:
+          type: string
+          title: Name
+          description: Human-readable profile label shown in Settings.
+        provider_type:
+          type: string
+          enum:
+            - openai
+            - anthropic
+            - google
+            - openai_compatible
+          title: Provider Type
+          description: Provider integration type.
+        api_base:
+          type: string
+          title: Api Base
+          description: Configured API base URL for the provider.
+          default: ""
+        api_key_masked:
+          type: string
+          title: Api Key Masked
+          description: Masked API key preview for display.
+          default: ""
+        has_api_key:
+          type: boolean
+          title: Has Api Key
+          description: Whether a stored API key is configured.
+          default: false
+        metadata_json:
+          additionalProperties: true
+          type: object
+          title: Metadata Json
+          description: Optional provider-specific metadata.
+      type: object
+      required:
+        - id
+        - name
+        - provider_type
+      title: LlmProviderProfileResponse
+    LlmProviderProfileUpdateRequest:
+      properties:
+        name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Name
+          description: Updated profile label.
+        provider_type:
+          anyOf:
+            - type: string
+              enum:
+                - openai
+                - anthropic
+                - google
+                - openai_compatible
+            - type: "null"
+          title: Provider Type
+          description: Updated provider type.
+        api_base:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Api Base
+          description: Updated API base URL.
+        api_key:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Api Key
+          description: Replacement API key when rotating credentials.
+        clear_api_key:
+          type: boolean
+          title: Clear Api Key
+          description: When true, remove the stored API key.
+          default: false
+        metadata_json:
+          anyOf:
+            - additionalProperties: true
+              type: object
+            - type: "null"
+          title: Metadata Json
+          description: Replacement metadata payload.
+      type: object
+      title: LlmProviderProfileUpdateRequest
+    LlmRoleBindingResponse:
+      properties:
+        role:
+          type: string
+          enum:
+            - planner
+            - delegate
+            - delegate_small
+          title: Role
+          description: Runtime role receiving the model binding.
+        profile_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Profile Id
+          description: Assigned provider profile identifier.
+        profile_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Profile Name
+          description: Assigned provider profile label.
+        model_id:
+          type: string
+          title: Model Id
+          description: Provider-native model identifier for the role.
+          default: ""
+      type: object
+      required:
+        - role
+      title: LlmRoleBindingResponse
+    LlmRoleBindingUpdate:
+      properties:
+        profile_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Profile Id
+          description: Provider profile to bind to the role.
+        model_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Model Id
+          description: Provider-native model identifier for the role.
+      type: object
+      title: LlmRoleBindingUpdate
+    LlmRoleBindingsResponse:
+      properties:
+        bindings:
+          items:
+            $ref: "#/components/schemas/LlmRoleBindingResponse"
+          type: array
+          title: Bindings
+          description: Current planner, delegate, and delegate_small bindings.
+      type: object
+      title: LlmRoleBindingsResponse
+    LlmRoleBindingsUpdateRequest:
+      properties:
+        planner:
+          anyOf:
+            - $ref: "#/components/schemas/LlmRoleBindingUpdate"
+            - type: "null"
+          description: Planner role binding patch.
+        delegate:
+          anyOf:
+            - $ref: "#/components/schemas/LlmRoleBindingUpdate"
+            - type: "null"
+          description: Delegate role binding patch.
+        delegate_small:
+          anyOf:
+            - $ref: "#/components/schemas/LlmRoleBindingUpdate"
+            - type: "null"
+          description: Small delegate role binding patch.
+      type: object
+      title: LlmRoleBindingsUpdateRequest
     OptimizationRunCreatedResponse:
       properties:
         run_id:
@@ -2410,6 +3028,44 @@ components:
           title: Delegate Small
           description: Small delegate model identifier currently in use, when configured.
           default: ""
+        planner_profile_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Planner Profile Id
+          description: Provider profile id bound to the planner role, when configured.
+        planner_profile_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Planner Profile Name
+          description: Human-readable provider profile name for the planner role.
+        delegate_profile_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Delegate Profile Id
+          description: Provider profile id bound to the delegate role, when configured.
+        delegate_profile_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Delegate Profile Name
+          description: Human-readable provider profile name for the delegate role.
+        delegate_small_profile_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Delegate Small Profile Id
+          description: Provider profile id bound to the delegate_small role, when
+            configured.
+        delegate_small_profile_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Delegate Small Profile Name
+          description: Human-readable provider profile name for the delegate_small
+            role.
       type: object
       title: RuntimeActiveModels
       description: Resolved active model identifiers currently loaded by the runtime.
@@ -2473,6 +3129,68 @@ components:
         - checked_at
       title: RuntimeConnectivityTestResponse
       description: Result payload for runtime connectivity and preflight diagnostics.
+    RuntimeMlflowStatus:
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          description: Whether MLflow tracing is enabled for this runtime.
+        tracking_uri:
+          type: string
+          title: Tracking Uri
+          description: Configured MLflow tracking server URI.
+          default: ""
+        experiment_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Experiment Name
+          description: Configured MLflow experiment name.
+        experiment_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Experiment Id
+          description: Resolved MLflow experiment id when startup succeeded.
+        auto_start_enabled:
+          type: boolean
+          title: Auto Start Enabled
+          description: Whether the runtime may auto-start a local MLflow tracking
+            server.
+          default: false
+        auto_assessment_enabled:
+          type: boolean
+          title: Auto Assessment Enabled
+          description: Whether Fleet-managed MLflow auto-assessment is enabled.
+          default: false
+        persisted_scorer_count:
+          type: integer
+          title: Persisted Scorer Count
+          description: Count of persisted MLflow scorers active on the tracking server.
+          default: 0
+        persisted_scorers:
+          items:
+            type: string
+          type: array
+          title: Persisted Scorers
+          description: Names of persisted MLflow scorers active on the tracking server.
+        startup_status:
+          type: string
+          title: Startup Status
+          description: MLflow startup lifecycle status for this runtime.
+          default: pending
+        startup_error:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Startup Error
+          description: Startup error summary when MLflow initialization failed.
+      type: object
+      required:
+        - enabled
+      title: RuntimeMlflowStatus
+      description: MLflow enablement and startup diagnostics for the runtime settings
+        UI.
     RuntimeSettingsCategory:
       properties:
         id:
@@ -2633,9 +3351,7 @@ components:
           title: Llm
           description: Language-model configuration and readiness diagnostics.
         mlflow:
-          additionalProperties: true
-          type: object
-          title: Mlflow
+          $ref: "#/components/schemas/RuntimeMlflowStatus"
           description: MLflow enablement and startup diagnostics.
         daytona:
           additionalProperties: true
@@ -3260,6 +3976,89 @@ components:
       type: object
       title: SessionStatsResponse
       description: Aggregated usage stats for a session.
+    SessionTraceItem:
+      properties:
+        trace_id:
+          type: string
+          title: Trace Id
+          description: Provider trace identifier (for example an MLflow trace id).
+        client_request_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Client Request Id
+          description: Optional Fleet client request id correlated with the trace.
+        turn_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Turn Id
+          description: Chat turn id when the trace was recorded.
+        provider:
+          type: string
+          title: Provider
+          description: External trace provider (for example mlflow).
+        experiment_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Experiment Id
+          description: Provider experiment id when known.
+        experiment_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Experiment Name
+          description: Provider experiment name when known.
+        observed_at:
+          type: string
+          title: Observed At
+          description: ISO-8601 timestamp when the trace was observed.
+        metadata:
+          additionalProperties: true
+          type: object
+          title: Metadata
+          description: Provider-specific metadata payload stored with the trace row.
+      type: object
+      required:
+        - trace_id
+        - provider
+        - observed_at
+      title: SessionTraceItem
+      description: External trace metadata linked to a durable session.
+    SessionTraceListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/SessionTraceItem"
+          type: array
+          title: Items
+          description: Trace rows linked to the session.
+        total:
+          type: integer
+          title: Total
+          description: Total matching traces.
+        offset:
+          type: integer
+          title: Offset
+          description: Pagination offset.
+        limit:
+          type: integer
+          title: Limit
+          description: Page size.
+        has_more:
+          type: boolean
+          title: Has More
+          description: Whether additional pages are available.
+      type: object
+      required:
+        - items
+        - total
+        - offset
+        - limit
+        - has_more
+      title: SessionTraceListResponse
+      description: Paginated external traces for a session.
     TraceFeedbackRequest:
       properties:
         trace_id:

@@ -1333,6 +1333,17 @@ class LocalStore(PersistenceProtocol):
     ) -> uuid.UUID:
         raise UnsupportedLocalCapabilityError("store_rlm_trace")
 
+    async def list_external_traces_for_session(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[Any], int]:
+        raise UnsupportedLocalCapabilityError("list_external_traces_for_session")
+
     # ------------------------------------------------------------------
     # Datasets
     # ------------------------------------------------------------------
