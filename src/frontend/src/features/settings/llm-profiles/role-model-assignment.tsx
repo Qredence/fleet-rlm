@@ -3,7 +3,13 @@ import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Field, FieldContent, FieldDescription, FieldLabel, FieldTitle } from "@/components/ui/field";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+  FieldTitle,
+} from "@/components/ui/field";
 import {
   Select,
   SelectContent,
@@ -17,7 +23,12 @@ import {
   type useLlmProfilesMutations,
 } from "@/features/settings/use-llm-profiles";
 
-import { SETTINGS_FIELD_CLASSNAME, errorMessage, formatProfileLabel, modelMatchesCatalog } from "./constants";
+import {
+  SETTINGS_FIELD_CLASSNAME,
+  errorMessage,
+  formatProfileLabel,
+  modelMatchesCatalog,
+} from "./constants";
 import type { ProviderProfileSummary } from "./provider-profile-list";
 
 interface RoleModelAssignmentProps {
@@ -51,7 +62,7 @@ export function RoleModelAssignment({
   const selectedProfile = profiles.find((profile) => profile.id === profileId);
   const selectedProfileLabel = selectedProfile
     ? formatProfileLabel(selectedProfile)
-    : binding?.profile_name ?? "";
+    : (binding?.profile_name ?? "");
 
   const catalogModels = modelsQuery.data?.models ?? [];
   const catalogError = modelsQuery.data?.error;
@@ -78,7 +89,8 @@ export function RoleModelAssignment({
       },
       {
         onSuccess: () => toast.success(`${title} updated`),
-        onError: (error) => toast.error("Failed to update role binding", { description: errorMessage(error) }),
+        onError: (error) =>
+          toast.error("Failed to update role binding", { description: errorMessage(error) }),
       },
     );
   };
@@ -103,7 +115,11 @@ export function RoleModelAssignment({
             }}
             disabled={profiles.length === 0}
           >
-            <SelectTrigger id={profileSelectId} className="w-full" aria-label="Select provider profile">
+            <SelectTrigger
+              id={profileSelectId}
+              className="w-full"
+              aria-label="Select provider profile"
+            >
               <SelectValue placeholder="Select provider profile">
                 {selectedProfileLabel || undefined}
               </SelectValue>
@@ -164,8 +180,8 @@ export function RoleModelAssignment({
           ) : null}
           {isStaleModel ? (
             <FieldDescription className="text-amber-600 dark:text-amber-400">
-              Saved model <span className="font-mono">{modelId}</span> is not in the current catalog. Pick a
-              model and save to refresh the binding.
+              Saved model <span className="font-mono">{modelId}</span> is not in the current
+              catalog. Pick a model and save to refresh the binding.
             </FieldDescription>
           ) : null}
           {modelsQuery.isPending && profileId ? (
@@ -176,7 +192,11 @@ export function RoleModelAssignment({
           variant="secondary"
           className="self-start rounded-lg"
           disabled={
-            !writeEnabled || !profileId || !modelId || !isDirty || mutations.saveRoleBindings.isPending
+            !writeEnabled ||
+            !profileId ||
+            !modelId ||
+            !isDirty ||
+            mutations.saveRoleBindings.isPending
           }
           onClick={saveBinding}
         >

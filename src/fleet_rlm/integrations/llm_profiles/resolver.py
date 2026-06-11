@@ -11,6 +11,7 @@ from .store import LlmProfileStore, decrypt_profile_api_key
 from .types import (
     LlmProfileBundle,
     LlmProviderProfileRecord,
+    LlmProviderType,
     LlmRoleBindingRecord,
     LlmRoleName,
     ResolvedRoleLmConfig,
@@ -134,7 +135,7 @@ def import_env_profile_payload() -> dict[str, str]:
     }
 
 
-def infer_provider_type_from_model(model_id: str) -> str:
+def infer_provider_type_from_model(model_id: str) -> LlmProviderType:
     if model_id.startswith("anthropic/"):
         return "anthropic"
     if model_id.startswith("gemini/") or "gemini" in model_id:

@@ -107,8 +107,8 @@ export function ProviderProfilesPanel({ showAllSections, section }: ProviderProf
               <SectionCardHeader className="border-b border-border-subtle/70 pb-4">
                 <SectionCardTitle>Role model assignment</SectionCardTitle>
                 <SectionCardDescription>
-                  Bind each runtime role to a provider profile and model. Changes apply to the active
-                  runtime after save.
+                  Bind each runtime role to a provider profile and model. Changes apply to the
+                  active runtime after save.
                 </SectionCardDescription>
               </SectionCardHeader>
               <SectionCardContent className="flex flex-col gap-0 pt-2">
@@ -129,7 +129,11 @@ export function ProviderProfilesPanel({ showAllSections, section }: ProviderProf
 
             <ImportEnvButton writeEnabled={writeEnabled} mutations={mutations} />
 
-            <ProviderProfileList profiles={profiles} writeEnabled={writeEnabled} mutations={mutations} />
+            <ProviderProfileList
+              profiles={profiles}
+              writeEnabled={writeEnabled}
+              mutations={mutations}
+            />
 
             <SectionCard variant="subtle">
               <SectionCardHeader>

@@ -55,7 +55,8 @@ export function ProviderProfileForm({ writeEnabled, mutations }: ProviderProfile
           setDraftApiKey("");
           toast.success("Provider profile created");
         },
-        onError: (error) => toast.error("Failed to create profile", { description: errorMessage(error) }),
+        onError: (error) =>
+          toast.error("Failed to create profile", { description: errorMessage(error) }),
       },
     );
   };

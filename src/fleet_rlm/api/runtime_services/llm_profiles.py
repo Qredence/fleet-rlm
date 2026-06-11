@@ -32,6 +32,7 @@ from fleet_rlm.integrations.llm_profiles.store import (
 )
 from fleet_rlm.integrations.llm_profiles.types import (
     LlmProviderProfileRecord,
+    LlmProviderType,
     LlmRoleBindingRecord,
     LlmRoleName,
     ResolvedRoleLmConfig,
@@ -351,7 +352,7 @@ async def apply_role_bindings_patch(
 async def _find_or_create_import_profile(
     store: LlmProfileStore,
     *,
-    provider_type: str,
+    provider_type: LlmProviderType,
     api_base: str | None,
     api_key: str,
 ) -> LlmProviderProfileRecord:
@@ -360,13 +361,13 @@ async def _find_or_create_import_profile(
         if existing.name == IMPORT_PROFILE_NAME and (existing.api_base or "") == normalized_base:
             return await store.update_profile(
                 existing.id,
-                provider_type=provider_type,  # type: ignore[arg-type]
+                provider_type=provider_type,
                 api_base=api_base,
                 api_key=api_key,
             )
     return await store.create_profile(
         name=IMPORT_PROFILE_NAME,
-        provider_type=provider_type,  # type: ignore[arg-type]
+        provider_type=provider_type,
         api_base=api_base,
         api_key=api_key,
     )

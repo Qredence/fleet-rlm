@@ -2,8 +2,10 @@ import { rlmApiClient } from "@/lib/rlm-api/client";
 import type { components } from "@/lib/rlm-api/generated/openapi";
 
 export type LlmProviderProfileResponse = components["schemas"]["LlmProviderProfileResponse"];
-export type LlmProviderProfileCreateRequest = components["schemas"]["LlmProviderProfileCreateRequest"];
-export type LlmProviderProfileUpdateRequest = components["schemas"]["LlmProviderProfileUpdateRequest"];
+export type LlmProviderProfileCreateRequest =
+  components["schemas"]["LlmProviderProfileCreateRequest"];
+export type LlmProviderProfileUpdateRequest =
+  components["schemas"]["LlmProviderProfileUpdateRequest"];
 export type LlmModelCatalogResponse = components["schemas"]["LlmModelCatalogResponse"];
 export type LlmModelCatalogEntry = components["schemas"]["LlmModelCatalogEntry"];
 export type LlmRoleBindingsResponse = components["schemas"]["LlmRoleBindingsResponse"];
@@ -59,5 +61,9 @@ export function patchLlmRoleBindings(body: LlmRoleBindingsUpdateRequest, signal?
 }
 
 export function importLlmProfilesFromEnv(signal?: AbortSignal) {
-  return rlmApiClient.post<LlmImportEnvResponse>(`${BASE}/llm-profiles/import-env`, undefined, signal);
+  return rlmApiClient.post<LlmImportEnvResponse>(
+    `${BASE}/llm-profiles/import-env`,
+    undefined,
+    signal,
+  );
 }

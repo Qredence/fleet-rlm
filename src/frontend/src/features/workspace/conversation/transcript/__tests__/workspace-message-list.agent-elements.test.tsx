@@ -33,8 +33,16 @@ vi.mock("@/features/settings/use-llm-profiles", () => ({
   useLlmProfileModels: () => ({
     data: {
       models: [
-        { id: "gemini-3-flash-preview", label: "gemini-3-flash-preview", litellm_model: "openai/gemini-3-flash-preview" },
-        { id: "gemini-3-pro-preview", label: "gemini-3-pro-preview", litellm_model: "openai/gemini-3-pro-preview" },
+        {
+          id: "gemini-3-flash-preview",
+          label: "gemini-3-flash-preview",
+          litellm_model: "openai/gemini-3-flash-preview",
+        },
+        {
+          id: "gemini-3-pro-preview",
+          label: "gemini-3-pro-preview",
+          litellm_model: "openai/gemini-3-pro-preview",
+        },
       ],
     },
   }),

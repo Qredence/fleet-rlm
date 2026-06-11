@@ -30,11 +30,12 @@ def _bind_interpreter_tool(interpreter: Any, tool_func: Callable[..., Any]) -> C
 
     wrapper.__name__ = getattr(tool_func, "__name__", "bridge_tool")
     wrapper.__qualname__ = wrapper.__name__
-    wrapper.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+    bound_wrapper: Any = wrapper
+    bound_wrapper.__signature__ = inspect.Signature(
         parameters=public_params,
         return_annotation=signature.return_annotation,
     )
-    return wrapper
+    return bound_wrapper
 
 
 def reject_unsupported_recursive_callbacks(

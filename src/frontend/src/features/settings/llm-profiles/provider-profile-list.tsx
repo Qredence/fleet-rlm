@@ -40,7 +40,11 @@ interface ProviderProfileListProps {
   mutations: ReturnType<typeof useLlmProfilesMutations>;
 }
 
-export function ProviderProfileList({ profiles, writeEnabled, mutations }: ProviderProfileListProps) {
+export function ProviderProfileList({
+  profiles,
+  writeEnabled,
+  mutations,
+}: ProviderProfileListProps) {
   if (profiles.length === 0) {
     return (
       <SectionCard variant="subtle">
@@ -59,8 +63,8 @@ export function ProviderProfileList({ profiles, writeEnabled, mutations }: Provi
       <SectionCardHeader className="border-b border-border-subtle/70 pb-4">
         <SectionCardTitle>Provider profiles</SectionCardTitle>
         <SectionCardDescription>
-          {profiles.length} saved profile{profiles.length === 1 ? "" : "s"}. Profiles with the same name
-          are disambiguated by provider, API base, and id.
+          {profiles.length} saved profile{profiles.length === 1 ? "" : "s"}. Profiles with the same
+          name are disambiguated by provider, API base, and id.
         </SectionCardDescription>
       </SectionCardHeader>
       <SectionCardContent className="flex flex-col gap-0 pt-2">
@@ -118,12 +122,17 @@ function ProfileCard({
             onClick={() =>
               mutations.testProfile.mutate(profile.id, {
                 onSuccess: (result) => {
-                  const payload = result as { ok?: boolean; error?: string; output_preview?: string };
+                  const payload = result as {
+                    ok?: boolean;
+                    error?: string;
+                    output_preview?: string;
+                  };
                   toast.success(payload.ok ? "Provider connection OK" : "Provider test failed", {
                     description: payload.error ?? payload.output_preview ?? undefined,
                   });
                 },
-                onError: (error) => toast.error("Provider test failed", { description: errorMessage(error) }),
+                onError: (error) =>
+                  toast.error("Provider test failed", { description: errorMessage(error) }),
               })
             }
           >
@@ -151,8 +160,9 @@ function ProfileCard({
           <DialogHeader>
             <DialogTitle>Delete provider profile?</DialogTitle>
             <DialogDescription>
-              This removes <span className="font-medium text-foreground">{profile.name}</span> and any role
-              bindings that reference it. Runtime env values are not rolled back automatically.
+              This removes <span className="font-medium text-foreground">{profile.name}</span> and
+              any role bindings that reference it. Runtime env values are not rolled back
+              automatically.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

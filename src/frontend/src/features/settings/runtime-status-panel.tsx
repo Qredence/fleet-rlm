@@ -71,9 +71,7 @@ export function RuntimeStatusPanel({ status }: RuntimeStatusPanelProps) {
         <div className="flex min-w-0 flex-col items-end gap-1 text-right text-xs text-muted-foreground">
           <div>
             Planner: {activeModels?.planner || "not set"}
-            {activeModels?.planner_profile_name
-              ? ` (${activeModels.planner_profile_name})`
-              : null}
+            {activeModels?.planner_profile_name ? ` (${activeModels.planner_profile_name})` : null}
           </div>
           <div>
             Delegate: {activeModels?.delegate || "not set"}
@@ -102,7 +100,7 @@ export function RuntimeStatusPanel({ status }: RuntimeStatusPanelProps) {
         </FieldContent>
         <div className="flex min-w-0 flex-col items-end gap-1 text-right text-xs text-muted-foreground">
           <Badge variant={mlflowStatusBadgeVariant(mlflow?.startup_status)}>
-            {mlflow?.enabled ? mlflow.startup_status ?? "unknown" : "disabled"}
+            {mlflow?.enabled ? (mlflow.startup_status ?? "unknown") : "disabled"}
           </Badge>
           {mlflow?.tracking_uri ? (
             <a

@@ -78,19 +78,15 @@ export function ProviderProfileEditDialog({
           toast.success("Profile updated");
           setOpen(false);
         },
-        onError: (error) => toast.error("Failed to update profile", { description: errorMessage(error) }),
+        onError: (error) =>
+          toast.error("Failed to update profile", { description: errorMessage(error) }),
       },
     );
   };
 
   return (
     <>
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={!writeEnabled}
-        onClick={() => setOpen(true)}
-      >
+      <Button variant="outline" size="sm" disabled={!writeEnabled} onClick={() => setOpen(true)}>
         <Pencil className="size-4" />
         Edit
       </Button>
@@ -99,8 +95,8 @@ export function ProviderProfileEditDialog({
           <DialogHeader>
             <DialogTitle>Edit provider profile</DialogTitle>
             <DialogDescription>
-              Update the profile label, provider type, or API base. Leave the API key blank to keep the
-              stored secret.
+              Update the profile label, provider type, or API base. Leave the API key blank to keep
+              the stored secret.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">
@@ -173,7 +169,10 @@ export function ProviderProfileEditDialog({
             <Button variant="outline" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button disabled={!writeEnabled || mutations.saveProfile.isPending} onClick={handleSave}>
+            <Button
+              disabled={!writeEnabled || mutations.saveProfile.isPending}
+              onClick={handleSave}
+            >
               Save changes
             </Button>
           </DialogFooter>

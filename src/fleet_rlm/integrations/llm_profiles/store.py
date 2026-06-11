@@ -8,7 +8,7 @@ import uuid
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import delete, select
@@ -44,7 +44,7 @@ def _profile_record_from_row(row: LlmProviderProfile) -> LlmProviderProfileRecor
     return LlmProviderProfileRecord(
         id=row.id,
         name=row.name,
-        provider_type=row.provider_type,  # type: ignore[arg-type]
+        provider_type=cast(LlmProviderType, row.provider_type),
         api_base=row.api_base or "",
         api_key_ciphertext=row.api_key_ciphertext or "",
         metadata_json=dict(row.metadata_json or {}),
@@ -55,7 +55,7 @@ def _profile_record_from_row(row: LlmProviderProfile) -> LlmProviderProfileRecor
 
 def _binding_record_from_row(row: LlmRoleBinding) -> LlmRoleBindingRecord:
     return LlmRoleBindingRecord(
-        role=row.role,  # type: ignore[arg-type]
+        role=cast(LlmRoleName, row.role),
         profile_id=row.profile_id,
         model_id=row.model_id or "",
     )

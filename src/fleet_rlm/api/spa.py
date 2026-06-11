@@ -41,7 +41,7 @@ def is_source_frontend_checkout() -> bool:
     return (_repo_root() / "src" / "frontend" / "package.json").is_file()
 
 
-def _source_frontend_dist_dir() -> Path | None:
+def _source_frontend_dist_dir() -> Path:
     ui_package_root = _fleet_ui_package_root()
     if ui_package_root is None:
         return _repo_root() / "src" / "frontend" / "dist"

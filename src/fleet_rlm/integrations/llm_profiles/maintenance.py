@@ -51,6 +51,7 @@ def normalize_binding_model_id(model_id: str, provider_type: LlmProviderType) ->
 @dataclass(slots=True)
 class LlmProfileRepairReport:
     deduped_profiles: int = 0
+    repaired_plaintext_keys: int = 0
     normalized_bindings: int = 0
     planner_reassigned: bool = False
     env_keys_updated: list[str] = field(default_factory=list)
@@ -128,7 +129,7 @@ def _repair_document(document: dict[str, Any]) -> LlmProfileRepairReport:
             report.normalized_bindings += 1
             invalidate_profile_catalog(str(google_profile.get("id")))
 
-    report.deduped_profiles += _repair_plaintext_api_keys(profiles)
+    report.repaired_plaintext_keys = _repair_plaintext_api_keys(profiles)
 
     referenced_profile_ids = {str(binding.get("profile_id")) for binding in bindings if binding.get("profile_id")}
     remaining_profiles: list[dict[str, Any]] = []
@@ -162,7 +163,12 @@ async def repair_persisted_llm_profiles(
     document = store._read_document()
     before_profiles = len(document.get("profiles", []))
     report = _repair_document(document)
-    if report.deduped_profiles or report.normalized_bindings or report.planner_reassigned:
+    if (
+        report.deduped_profiles
+        or report.repaired_plaintext_keys
+        or report.normalized_bindings
+        or report.planner_reassigned
+    ):
         store._write_document(document)
         logger.info(
             "Repaired LLM profiles: removed %d duplicate imports, normalized %d bindings, planner_reassigned=%s",

@@ -3,16 +3,17 @@ import type { LlmProviderType } from "@/lib/rlm-api/llm-profiles";
 export const SETTINGS_FIELD_CLASSNAME = "gap-5 border-b border-border-subtle py-5 last:border-b-0";
 export const SETTINGS_SECTION_CLASSNAME = "max-w-content gap-4";
 
-export const PROVIDER_OPTIONS: Array<{ id: LlmProviderType; label: string; defaultBase: string }> = [
-  { id: "openai", label: "OpenAI", defaultBase: "https://api.openai.com/v1" },
-  { id: "anthropic", label: "Anthropic", defaultBase: "https://api.anthropic.com" },
-  {
-    id: "google",
-    label: "Google Gemini",
-    defaultBase: "https://generativelanguage.googleapis.com/v1beta/openai/",
-  },
-  { id: "openai_compatible", label: "OpenAI-compatible (LiteLLM, vLLM)", defaultBase: "" },
-];
+export const PROVIDER_OPTIONS: Array<{ id: LlmProviderType; label: string; defaultBase: string }> =
+  [
+    { id: "openai", label: "OpenAI", defaultBase: "https://api.openai.com/v1" },
+    { id: "anthropic", label: "Anthropic", defaultBase: "https://api.anthropic.com" },
+    {
+      id: "google",
+      label: "Google Gemini",
+      defaultBase: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    },
+    { id: "openai_compatible", label: "OpenAI-compatible (LiteLLM, vLLM)", defaultBase: "" },
+  ];
 
 export const ROLE_ROWS = [
   {

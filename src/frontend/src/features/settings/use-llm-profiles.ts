@@ -62,8 +62,13 @@ export function useLlmProfilesMutations() {
   });
 
   const saveProfile = useMutation({
-    mutationFn: ({ profileId, body }: { profileId: string; body: LlmProviderProfileUpdateRequest }) =>
-      updateLlmProfile(profileId, body),
+    mutationFn: ({
+      profileId,
+      body,
+    }: {
+      profileId: string;
+      body: LlmProviderProfileUpdateRequest;
+    }) => updateLlmProfile(profileId, body),
     onSuccess: invalidateAll,
   });
 
