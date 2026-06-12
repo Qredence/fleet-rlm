@@ -149,6 +149,77 @@ class _StreamingRLM(_DSPY_RLM_BASE):
             )
         return processed
 
+    def _execute_code(self, repl: Any, code: str, input_args: dict[str, Any]) -> Any:
+        from fleet_rlm.integrations.observability.mlflow_context import (
+            _bounded_value,
+            mlflow_child_span,
+            set_mlflow_span_outputs,
+        )
+
+        iteration = getattr(self.generate_action, "current_iteration", 0)
+        with mlflow_child_span(
+            "fleet_rlm.rlm_repl_execute",
+            span_type="TOOL",
+            attributes={
+                "fleet_rlm.tool_name": "repl_execute",
+                "fleet_rlm.rlm_iteration": str(iteration),
+                "fleet_rlm.execution_origin": "dspy_rlm_execute_code",
+            },
+            inputs={
+                "tool_name": "repl_execute",
+                "iteration": iteration,
+                "code": _bounded_value(code),
+                "variable_names": sorted(str(key) for key in input_args),
+            },
+        ) as span:
+            result = super()._execute_code(repl, code, input_args)
+            failed = isinstance(result, str) and result.startswith("[Error]")
+            set_mlflow_span_outputs(
+                span,
+                {
+                    "status": "error" if failed else "ok",
+                    "result": _bounded_value(result),
+                },
+            )
+            if failed and span is not None:
+                set_status = getattr(span, "set_status", None)
+                if callable(set_status):
+                    set_status("ERROR")
+            return result
+
+    def _prepare_serializable_vars(self, input_args: dict[str, Any], repl: Any) -> dict[str, Any]:
+        from dspy.predict.rlm import SandboxSerializable
+
+        from fleet_rlm.integrations.observability.mlflow_context import (
+            mlflow_child_span,
+            set_mlflow_span_outputs,
+        )
+
+        serializable_names = sorted(
+            str(name) for name, value in input_args.items() if isinstance(value, SandboxSerializable)
+        )
+        if not serializable_names:
+            return super()._prepare_serializable_vars(input_args, repl)
+
+        with mlflow_child_span(
+            "fleet_rlm.rlm_prepare_variables",
+            span_type="CHAIN",
+            attributes={
+                "fleet_rlm.serializable_variable_count": str(len(serializable_names)),
+                "fleet_rlm.execution_origin": "dspy_rlm_prepare_serializable_vars",
+            },
+            inputs={"serializable_variables": serializable_names},
+        ) as span:
+            regular_args = super()._prepare_serializable_vars(input_args, repl)
+            set_mlflow_span_outputs(
+                span,
+                {
+                    "regular_variable_count": len(regular_args),
+                    "regular_variables": sorted(str(key) for key in regular_args),
+                },
+            )
+            return regular_args
+
     def _record_trajectory_spans(self, result: Any) -> None:
         try:
             from fleet_rlm.integrations.observability.mlflow_context import record_rlm_trajectory_spans

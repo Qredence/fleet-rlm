@@ -9,7 +9,6 @@ from typing import Any
 from fastapi import HTTPException
 
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
-from fleet_rlm.integrations.observability import log_trace_feedback, resolve_trace
 from fleet_rlm.integrations.observability.config import MlflowConfig
 
 from ..schemas.feedback import TraceFeedbackRequest, TraceFeedbackResponse
@@ -92,6 +91,8 @@ class TraceService:
             )
 
         try:
+            from fleet_rlm.integrations.observability import resolve_trace
+
             trace = await run_blocking(
                 partial(
                     resolve_trace,
@@ -129,6 +130,8 @@ class TraceService:
             )
 
         try:
+            from fleet_rlm.integrations.observability import log_trace_feedback
+
             outcome = await run_blocking(
                 partial(
                     log_trace_feedback,

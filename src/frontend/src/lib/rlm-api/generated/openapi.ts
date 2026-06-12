@@ -80,6 +80,13 @@ export interface paths {
      */
     get: operations["get_session_traces_api_v1_sessions__session_id__traces_get"];
   };
+  "/api/v1/sessions/{session_id}/trace-export": {
+    /**
+     * Export session MLflow traces
+     * @description Write full MLflow trace JSON/JSONL artifacts and a distilled GEPA evidence bundle.
+     */
+    post: operations["export_session_traces_endpoint_api_v1_sessions__session_id__trace_export_post"];
+  };
   "/api/v1/sessions/{session_id}/stats": {
     /**
      * Get session usage stats
@@ -235,7 +242,7 @@ export interface paths {
   "/api/v1/optimization/run": {
     /**
      * Run Optimization
-     * @description Trigger a blocking prompt optimization run (GEPA default, MIPROv2 optional).
+     * @description Trigger a blocking GEPA prompt optimization run.
      */
     post: operations["run_optimization_api_v1_optimization_run_post"];
   };
@@ -267,6 +274,20 @@ export interface paths {
      * @description Get a single optimization run by ID.
      */
     get: operations["get_run_api_v1_optimization_runs__run_id__get"];
+  };
+  "/api/v1/optimization/runs/{run_id}/details": {
+    /**
+     * Get Run Details
+     * @description Get a detailed GEPA improvement report for a single optimization run.
+     */
+    get: operations["get_run_details_api_v1_optimization_runs__run_id__details_get"];
+  };
+  "/api/v1/optimization/runs/{run_id}/promotion-drafts": {
+    /**
+     * Create Run Promotion Draft
+     * @description Create or load a non-mutating draft promotion artifact for an optimization run.
+     */
+    post: operations["create_run_promotion_draft_api_v1_optimization_runs__run_id__promotion_drafts_post"];
   };
   "/api/v1/optimization/runs/{run_id}/results": {
     /**
@@ -577,6 +598,32 @@ export interface components {
        */
       required_dataset_keys: string[];
       /**
+       * Input Keys
+       * @description Dataset keys used as DSPy inputs for this optimization target.
+       */
+      input_keys?: string[];
+      /**
+       * Output Keys
+       * @description Dataset keys scored as DSPy outputs for this optimization target.
+       */
+      output_keys?: string[];
+      /**
+       * Runtime Module Name
+       * @description Runtime module registry name when this target adapts a runtime module.
+       */
+      runtime_module_name?: string | null;
+      /**
+       * Signature Class Name
+       * @description DSPy signature class optimized by this target, when available.
+       */
+      signature_class_name?: string | null;
+      /**
+       * Optimization Target Kind
+       * @description Optimization target kind such as custom, runtime-signature, or skill.
+       * @default custom
+       */
+      optimization_target_kind?: string;
+      /**
        * Offline Only
        * @description Whether this module can only be optimized through offline optimization endpoints.
        * @default true
@@ -610,6 +657,31 @@ export interface components {
        */
       module_slug?: string | null;
       /**
+       * Skill Name
+       * @description Bundled or mounted Fleet skill name to optimize as a markdown skill artifact.
+       */
+      skill_name?: string | null;
+      /**
+       * Skill Path
+       * @description Relative path to a SKILL.md-compatible markdown file to optimize.
+       */
+      skill_path?: string | null;
+      /**
+       * Trace Bundle Paths
+       * @description Optional offline trace bundle paths available to the RLM-GEPA instruction proposer.
+       */
+      trace_bundle_paths?: string[];
+      /**
+       * Reflection Profile Id
+       * @description Optional LLM provider profile id for the GEPA proposer/reflection model.
+       */
+      reflection_profile_id?: string | null;
+      /**
+       * Reflection Model Id
+       * @description Optional provider-native model id for the GEPA proposer/reflection model.
+       */
+      reflection_model_id?: string | null;
+      /**
        * Output Path
        * @description Optional filesystem path to save the optimized program.
        */
@@ -622,6 +694,11 @@ export interface components {
        */
       auto?: "light" | "medium" | "heavy";
       /**
+       * Max Metric Calls
+       * @description Optional GEPA metric-call budget override for short offline smoke runs.
+       */
+      max_metric_calls?: number | null;
+      /**
        * Train Ratio
        * @description Fraction of examples to use for training (remainder used for validation).
        * @default 0.8
@@ -629,11 +706,11 @@ export interface components {
       train_ratio?: number;
       /**
        * Optimizer
-       * @description Optimizer backend to use (GEPA default, MIPROv2 optional).
+       * @description Optimizer backend to use. GEPA is the only supported optimizer.
        * @default gepa
-       * @enum {string}
+       * @constant
        */
-      optimizer?: "gepa" | "miprov2";
+      optimizer?: "gepa";
     };
     /**
      * GEPAOptimizationResponse
@@ -683,10 +760,30 @@ export interface components {
        */
       manifest_path?: string | null;
       /**
+       * Feedback Summary
+       * @description Short summary of validation feedback from the GEPA run.
+       */
+      feedback_summary?: string | null;
+      /**
        * Module Slug
        * @description Module slug used for this optimization run, when server-side dispatch was used.
        */
       module_slug?: string | null;
+      /**
+       * Reflection Profile Id
+       * @description LLM provider profile id used for GEPA reflection/proposal, when selected.
+       */
+      reflection_profile_id?: string | null;
+      /**
+       * Reflection Model Id
+       * @description Model id used for GEPA reflection/proposal, when selected.
+       */
+      reflection_model_id?: string | null;
+      /**
+       * Distilled Trace Bundle Path
+       * @description Distilled trace bundle used by the RLM-GEPA proposer.
+       */
+      distilled_trace_bundle_path?: string | null;
       /**
        * Error
        * @description Error message when the optimization run failed.
@@ -1006,6 +1103,216 @@ export interface components {
       delegate_small?: components["schemas"]["LlmRoleBindingUpdate"] | null;
     };
     /**
+     * OptimizationArtifactRef
+     * @description A filesystem artifact produced or consumed by an optimization run.
+     */
+    OptimizationArtifactRef: {
+      /**
+       * Label
+       * @description Human-readable artifact label.
+       */
+      label: string;
+      /**
+       * Path
+       * @description Filesystem path to the artifact.
+       */
+      path: string;
+      /**
+       * Kind
+       * @description Artifact kind such as manifest, output, trace_bundle, or promotion_draft.
+       */
+      kind: string;
+      /**
+       * Exists
+       * @description Whether the artifact exists on the local filesystem.
+       * @default false
+       */
+      exists?: boolean;
+    };
+    /**
+     * OptimizationCandidateDecision
+     * @description A selected or rejected GEPA prompt candidate decision.
+     */
+    OptimizationCandidateDecision: {
+      /**
+       * Candidate Id
+       * @description Stable candidate identifier for display.
+       */
+      candidate_id: string;
+      /**
+       * Status
+       * @description Candidate status: selected, rejected, unavailable, or failed.
+       */
+      status: string;
+      /**
+       * Summary
+       * @description Human-readable decision summary.
+       */
+      summary: string;
+      /**
+       * Rationale
+       * @description Why this candidate was selected or rejected.
+       */
+      rationale?: string | null;
+      /**
+       * Score
+       * @description Candidate score, when available.
+       */
+      score?: number | null;
+      /**
+       * Score Delta
+       * @description Candidate score delta, when available.
+       */
+      score_delta?: number | null;
+      /**
+       * Artifact Path
+       * @description Candidate artifact path, when available.
+       */
+      artifact_path?: string | null;
+      /**
+       * Missing Candidate Artifact
+       * @description Whether the proposer generated ideas but no candidate artifact was persisted.
+       * @default false
+       */
+      missing_candidate_artifact?: boolean;
+    };
+    /**
+     * OptimizationHoldoutSummary
+     * @description Typed holdout validation summary from a GEPA review bundle.
+     */
+    OptimizationHoldoutSummary: {
+      /**
+       * Promotion Ready
+       * @description Whether the run has external holdout validation suitable for promotion.
+       * @default false
+       */
+      promotion_ready?: boolean;
+      /**
+       * External Validation Available
+       * @description Whether a true holdout validation split was available.
+       * @default true
+       */
+      external_validation_available?: boolean;
+      /**
+       * Baseline Score
+       * @description Baseline validation score.
+       */
+      baseline_score?: number | null;
+      /**
+       * Optimized Score
+       * @description Optimized validation score.
+       */
+      optimized_score?: number | null;
+      /**
+       * Score Delta
+       * @description Optimized minus baseline score.
+       */
+      score_delta?: number | null;
+    };
+    /**
+     * OptimizationPromotionDraftResponse
+     * @description A draft promotion artifact for a completed optimization run.
+     */
+    OptimizationPromotionDraftResponse: {
+      /**
+       * Ok
+       * @description Whether the draft was created or loaded.
+       * @default true
+       */
+      ok?: boolean;
+      /**
+       * Draft Id
+       * @description Stable promotion draft identifier.
+       */
+      draft_id: string;
+      /**
+       * Run Id
+       * @description Optimization run id.
+       */
+      run_id: string;
+      /**
+       * Target
+       * @description Skill/module target represented by the draft.
+       */
+      target: string;
+      /**
+       * Status
+       * @description Draft status.
+       * @default draft
+       * @constant
+       */
+      status?: "draft";
+      /**
+       * Summary
+       * @description Human-readable draft summary.
+       */
+      summary: string;
+      /**
+       * Optimized Artifact Path
+       * @description Optimized artifact path.
+       */
+      optimized_artifact_path?: string | null;
+      /**
+       * Manifest Path
+       * @description Source manifest path.
+       */
+      manifest_path?: string | null;
+      /**
+       * Draft Path
+       * @description Filesystem path to the draft artifact.
+       */
+      draft_path: string;
+      /**
+       * Created At
+       * @description ISO timestamp when the draft was created.
+       */
+      created_at: string;
+    };
+    /**
+     * OptimizationPromptDiffItem
+     * @description Before/after prompt text for one optimized predictor or skill artifact.
+     */
+    OptimizationPromptDiffItem: {
+      /**
+       * Predictor Name
+       * @description Predictor or skill component name.
+       */
+      predictor_name: string;
+      /**
+       * Before Prompt
+       * @description Prompt text before GEPA.
+       * @default
+       */
+      before_prompt?: string;
+      /**
+       * After Prompt
+       * @description Prompt text selected after GEPA.
+       * @default
+       */
+      after_prompt?: string;
+      /**
+       * Changed
+       * @description Whether the selected prompt differs semantically from the original text.
+       */
+      changed: boolean;
+    };
+    /**
+     * OptimizationReviewBundle
+     * @description Typed subset of the manifest review bundle used by the optimization UI.
+     */
+    OptimizationReviewBundle: {
+      /**
+       * Version
+       * @description Review bundle schema version.
+       * @default 1
+       */
+      version?: number;
+      /** @description Holdout validation summary for promotion readiness. */
+      holdout?: components["schemas"]["OptimizationHoldoutSummary"] | null;
+      /** @description Canonical GEPA insights written at manifest time. */
+      insights?: components["schemas"]["OptimizationRunInsights"] | null;
+    };
+    /**
      * OptimizationRunCreatedResponse
      * @description Response when an async optimization run is created.
      */
@@ -1021,6 +1328,97 @@ export interface components {
        * @default running
        */
       status?: string;
+    };
+    /**
+     * OptimizationRunDetailResponse
+     * @description Detailed GEPA run report for RLM improvement auditability.
+     */
+    OptimizationRunDetailResponse: {
+      /** @description Base optimization run metadata. */
+      run: components["schemas"]["OptimizationRunResponse"];
+      /**
+       * Manifest Available
+       * @description Whether the manifest file was parsed.
+       */
+      manifest_available: boolean;
+      /**
+       * Manifest
+       * @description Parsed optimization manifest, when available.
+       */
+      manifest?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Review Bundle
+       * @description Parsed manifest review bundle, when available.
+       */
+      review_bundle?: {
+        [key: string]: unknown;
+      } | null;
+      /** @description Typed review bundle fields used by the optimization UI. */
+      typed_review_bundle?: components["schemas"]["OptimizationReviewBundle"] | null;
+      /**
+       * Artifact Refs
+       * @description Important run artifact paths.
+       */
+      artifact_refs: components["schemas"]["OptimizationArtifactRef"][];
+      /** @description Score and split details. */
+      score_summary: components["schemas"]["OptimizationScoreSummary"];
+      /**
+       * Prompt Diffs
+       * @description Full before/after prompt snapshots.
+       */
+      prompt_diffs: components["schemas"]["OptimizationPromptDiffItem"][];
+      /**
+       * Trace Evidence
+       * @description Distilled trace evidence records without raw spans.
+       */
+      trace_evidence: components["schemas"]["OptimizationTraceEvidenceItem"][];
+      /**
+       * Candidate Decisions
+       * @description Selected and rejected candidate decisions when available.
+       */
+      candidate_decisions: components["schemas"]["OptimizationCandidateDecision"][];
+      /** @description Normalized improvement report. */
+      insights: components["schemas"]["OptimizationRunInsights"];
+      /**
+       * Optimized Artifact Text
+       * @description Text content of the selected optimized artifact when it is safely readable.
+       */
+      optimized_artifact_text?: string | null;
+      /**
+       * Optimized Artifact Truncated
+       * @description Whether optimized_artifact_text was truncated.
+       * @default false
+       */
+      optimized_artifact_truncated?: boolean;
+    };
+    /**
+     * OptimizationRunInsights
+     * @description Normalized human-readable improvement insights for a GEPA run.
+     */
+    OptimizationRunInsights: {
+      /**
+       * Selected Outcome
+       * @description Outcome of the selected GEPA artifact.
+       * @enum {string}
+       */
+      selected_outcome: "changed" | "unchanged" | "failed" | "running" | "unknown";
+      /**
+       * Summary
+       * @description Short explanation of what GEPA did for this run.
+       */
+      summary: string;
+      /**
+       * Trace Driven Recommendations
+       * @description Recommendations distilled from trace evidence.
+       */
+      trace_driven_recommendations?: string[];
+      /**
+       * Next Step
+       * @description Recommended next optimization action.
+       */
+      next_step: string;
     };
     /**
      * OptimizationRunResponse
@@ -1070,6 +1468,31 @@ export interface components {
        */
       dataset_path?: string | null;
       /**
+       * Reflection Profile Id
+       * @description LLM provider profile id used for GEPA reflection/proposal, when selected.
+       */
+      reflection_profile_id?: string | null;
+      /**
+       * Reflection Model Id
+       * @description Model id used for GEPA reflection/proposal, when selected.
+       */
+      reflection_model_id?: string | null;
+      /**
+       * Raw Trace Export Path
+       * @description Full raw trace export path, when present.
+       */
+      raw_trace_export_path?: string | null;
+      /**
+       * Distilled Trace Bundle Path
+       * @description Distilled GEPA trace evidence bundle path, when present.
+       */
+      distilled_trace_bundle_path?: string | null;
+      /**
+       * Prompt Snapshot Path
+       * @description Prompt snapshot or diff artifact path, when present.
+       */
+      prompt_snapshot_path?: string | null;
+      /**
        * Train Examples
        * @description Number of training examples used.
        */
@@ -1114,6 +1537,93 @@ export interface components {
        * @description ISO timestamp when the run completed.
        */
       completed_at?: string | null;
+    };
+    /**
+     * OptimizationScoreSummary
+     * @description Score and split summary for a GEPA run.
+     */
+    OptimizationScoreSummary: {
+      /**
+       * Baseline Score
+       * @description Baseline validation score, when available.
+       */
+      baseline_score?: number | null;
+      /**
+       * Optimized Score
+       * @description Optimized validation score, when available.
+       */
+      optimized_score?: number | null;
+      /**
+       * Score Delta
+       * @description Optimized minus baseline score, when available.
+       */
+      score_delta?: number | null;
+      /**
+       * Train Examples
+       * @description Number of training examples.
+       */
+      train_examples?: number | null;
+      /**
+       * Validation Examples
+       * @description Number of validation examples.
+       */
+      validation_examples?: number | null;
+      /**
+       * Train Ratio
+       * @description Requested train/validation split ratio.
+       */
+      train_ratio?: number | null;
+      /**
+       * Split Strategy
+       * @description Dataset split strategy recorded in the manifest.
+       */
+      split_strategy?: string | null;
+    };
+    /**
+     * OptimizationTraceEvidenceItem
+     * @description Distilled trace evidence used by the GEPA proposer.
+     */
+    OptimizationTraceEvidenceItem: {
+      /**
+       * Kind
+       * @description Distilled bundle record kind.
+       */
+      kind: string;
+      /**
+       * Trace Id
+       * @description Supporting MLflow trace id.
+       */
+      trace_id?: string | null;
+      /**
+       * Session Id
+       * @description MLflow/runtime session id.
+       */
+      session_id?: string | null;
+      /**
+       * Client Request Id
+       * @description Client request id, when available.
+       */
+      client_request_id?: string | null;
+      /**
+       * Trace Count
+       * @description Trace count for summary records.
+       */
+      trace_count?: number | null;
+      /**
+       * Span Count
+       * @description Number of spans in the supporting trace.
+       */
+      span_count?: number | null;
+      /**
+       * Failure Categories
+       * @description Distilled failure categories.
+       */
+      failure_categories?: string[];
+      /**
+       * Prompt Change Recommendations
+       * @description Prompt-change recommendations distilled from trace evidence.
+       */
+      prompt_change_recommendations?: string[];
     };
     /**
      * PromptSnapshotItem
@@ -2206,6 +2716,78 @@ export interface components {
       };
     };
     /**
+     * SessionTraceExportRequest
+     * @description Request body for exporting a session's linked MLflow traces.
+     */
+    SessionTraceExportRequest: {
+      /**
+       * Format
+       * @description Trace artifact format to write.
+       * @default both
+       * @enum {string}
+       */
+      format?: "json" | "jsonl" | "both";
+      /**
+       * Mlflow Session Id
+       * @description Optional MLflow trace session id hint. The server validates the hint against authorized runtime session ids for the resolved durable session before export.
+       */
+      mlflow_session_id?: string | null;
+    };
+    /**
+     * SessionTraceExportResponse
+     * @description Trace export artifact paths for a session.
+     */
+    SessionTraceExportResponse: {
+      /**
+       * Ok
+       * @description Whether trace export completed.
+       * @default true
+       */
+      ok?: boolean;
+      /**
+       * Session Id
+       * @description Durable session identifier.
+       */
+      session_id: string;
+      /**
+       * Trace Count
+       * @description Number of MLflow traces exported.
+       */
+      trace_count: number;
+      /**
+       * Json Path
+       * @description Path to the full JSON trace artifact.
+       */
+      json_path?: string | null;
+      /**
+       * Jsonl Path
+       * @description Path to the full JSONL trace artifact.
+       */
+      jsonl_path?: string | null;
+      /**
+       * Distilled Bundle Path
+       * @description Path to the distilled GEPA evidence bundle.
+       */
+      distilled_bundle_path?: string | null;
+      /**
+       * Skipped Trace Ids
+       * @description Trace identifiers that could not be resolved/exported.
+       */
+      skipped_trace_ids?: string[];
+      /**
+       * Errors
+       * @description Non-fatal export errors.
+       */
+      errors?: string[];
+      /**
+       * Summary
+       * @description Distilled trace export summary.
+       */
+      summary?: {
+        [key: string]: unknown;
+      };
+    };
+    /**
      * SessionTraceItem
      * @description External trace metadata linked to a durable session.
      */
@@ -3080,6 +3662,53 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["SessionTraceListResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The caller does not have permission to access this resource. */
+      403: {
+        content: never;
+      };
+      /** @description Session not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Session services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Export session MLflow traces
+   * @description Write full MLflow trace JSON/JSONL artifacts and a distilled GEPA evidence bundle.
+   */
+  export_session_traces_endpoint_api_v1_sessions__session_id__trace_export_post: {
+    parameters: {
+      path: {
+        /** @description Identifier of the session whose traces to export. */
+        session_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SessionTraceExportRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionTraceExportResponse"];
         };
       };
       /** @description Authentication is required or the provided token is invalid. */
@@ -4064,7 +4693,7 @@ export interface operations {
   };
   /**
    * Run Optimization
-   * @description Trigger a blocking prompt optimization run (GEPA default, MIPROv2 optional).
+   * @description Trigger a blocking GEPA prompt optimization run.
    */
   run_optimization_api_v1_optimization_run_post: {
     requestBody: {
@@ -4227,6 +4856,74 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["OptimizationRunResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Run not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Run Details
+   * @description Get a detailed GEPA improvement report for a single optimization run.
+   */
+  get_run_details_api_v1_optimization_runs__run_id__details_get: {
+    parameters: {
+      path: {
+        /** @description Identifier of the optimization run to inspect. */
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OptimizationRunDetailResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Run not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Create Run Promotion Draft
+   * @description Create or load a non-mutating draft promotion artifact for an optimization run.
+   */
+  create_run_promotion_draft_api_v1_optimization_runs__run_id__promotion_drafts_post: {
+    parameters: {
+      path: {
+        /** @description Identifier of the optimization run to draft for promotion. */
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OptimizationPromotionDraftResponse"];
         };
       };
       /** @description Authentication is required or the provided token is invalid. */

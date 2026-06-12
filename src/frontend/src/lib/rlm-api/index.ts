@@ -13,6 +13,21 @@ export {
 } from "@/lib/rlm-api/ws-client";
 export { authEndpoints } from "@/lib/rlm-api/auth";
 export { infoEndpoints } from "@/lib/rlm-api/info";
+export { optimizationEndpoints } from "@/lib/rlm-api/optimization";
+export type {
+  DatasetListResponse,
+  DatasetResponse,
+  GEPAOptimizationRequest,
+  GEPAModuleInfo,
+  GEPAStatusResponse,
+  OptimizationRunCreatedResponse,
+  OptimizationPromotionDraftResponse,
+  OptimizationRunDetailResponse,
+  OptimizationRunResponse,
+  SessionTraceExportRequest,
+  SessionTraceExportResponse,
+  UploadOptimizationDatasetInput,
+} from "@/lib/rlm-api/optimization";
 export type {
   WsTraceMode,
   WsRuntimeMode,

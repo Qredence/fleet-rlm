@@ -445,7 +445,6 @@ def _build_holdout_comparisons(
     return comparisons
 
 
-
 def _build_feedback_summary(results: list[dict[str, Any]], validation_score: float | None) -> str:
     """Summarize the validation outcome for run metadata."""
     if not results:

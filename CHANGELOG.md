@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- **Change:** GEPA is now the only supported public optimizer; MIPROv2 paths were removed from the unified optimization pipeline.
+  **Outcome:** CLI, API, manifests, and the Optimization UI all target one optimizer contract.
+- **Change:** Hardened session trace export with server-first session resolution and validated optional `mlflow_session_id` hints.
+  **Outcome:** Cross-tenant trace export spoofing is blocked and workspace sessions resolve to durable MLflow session ids.
+- **Change:** Split optimization run reporting into `quality/optimization_report.py` with typed review-bundle fields on run detail responses.
+  **Outcome:** The Optimization UI can read holdout promotion readiness without untyped manifest drilling.
+
+### Removed
+
+- **Change:** Removed MIPROv2 from the public optimization surface.
+  **Outcome:** Review bundles, CLI flags, and API requests no longer advertise a second optimizer.
+
+### Notes
+
+- `GET /api/v1/optimization/runs/compare` remains API-ready; the Compare tab UI is deferred to v1.1.
+
 ## [0.5.50] - 2026-06-11
 
 ### Added

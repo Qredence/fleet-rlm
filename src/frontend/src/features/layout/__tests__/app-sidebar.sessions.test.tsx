@@ -38,6 +38,7 @@ vi.mock("lucide-react", () => {
     PanelLeftIcon: Icon,
     XIcon: Icon,
     Database: Icon,
+    FlaskConical: Icon,
     LogIn: Icon,
     MessageCircle: Icon,
     Terminal: Icon,
@@ -137,6 +138,23 @@ describe("AppSidebar session actions", () => {
 
     expect(workspaceShellState.newSession).toHaveBeenCalledOnce();
     expect(navigateToMock).toHaveBeenCalledWith("workspace");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("opens the optimization section from the sidebar", () => {
+    const { container, root } = mountSidebar();
+
+    const button = findButtonByText(container, "Optimization");
+    expect(button).toBeTruthy();
+
+    act(() => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(navigateToMock).toHaveBeenCalledWith("optimization");
 
     act(() => {
       root.unmount();

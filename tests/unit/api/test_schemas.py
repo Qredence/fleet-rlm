@@ -397,9 +397,7 @@ ROUNDTRIP_CASES = [
                     "prompt_change_recommendations": ["Clarify tool use."],
                 }
             ],
-            "candidate_decisions": [
-                {"candidate_id": "selected", "status": "selected", "summary": "Selected prompt"}
-            ],
+            "candidate_decisions": [{"candidate_id": "selected", "status": "selected", "summary": "Selected prompt"}],
             "insights": {
                 "selected_outcome": "changed",
                 "summary": "GEPA selected a prompt change.",

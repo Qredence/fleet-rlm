@@ -179,6 +179,12 @@ class LLMQueryMixin:
         if target_lm is None:
             raise RuntimeError("No LM configured. Use dspy.configure(lm=...) or pass sub_lm to the active interpreter.")
 
+        from fleet_rlm.integrations.observability.mlflow_context import (
+            _bounded_value,
+            mlflow_child_span,
+            set_mlflow_span_outputs,
+        )
+
         # Execute LM call with timeout to prevent hangs
         def _execute_lm() -> str:
             response = target_lm(prompt)
@@ -197,22 +203,45 @@ class LLMQueryMixin:
             executor = self._sub_lm_executor
 
         ctx = contextvars.copy_context()
-        future = executor.submit(ctx.run, _execute_lm)
-        try:
-            result = future.result(timeout=self.llm_call_timeout)
-            return result if isinstance(result, str) else str(result)
-        except FutureTimeoutError as exc:
-            future.cancel()
-            # Running threads cannot be cancelled; discard the exhausted executor
-            # so subsequent calls get a fresh worker pool.
-            with self._sub_lm_executor_lock:
-                if self._sub_lm_executor is not None:
-                    self._sub_lm_executor.shutdown(wait=False)
-                    self._sub_lm_executor = None
-            raise RuntimeError(
-                f"LLM call timed out after {self.llm_call_timeout}s. "
-                "Consider increasing llm_call_timeout or checking API connectivity."
-            ) from exc
+        with mlflow_child_span(
+            "fleet_rlm.llm_query",
+            span_type="LLM",
+            attributes={
+                "fleet_rlm.tool_name": "llm_query",
+                "fleet_rlm.prompt_chars": str(len(prompt)),
+                "fleet_rlm.llm_call_timeout_s": str(self.llm_call_timeout),
+            },
+            inputs={"prompt_chars": len(prompt), "prompt_preview": _bounded_value(prompt, limit=1_000)},
+        ) as span:
+            future = executor.submit(ctx.run, _execute_lm)
+            try:
+                result = future.result(timeout=self.llm_call_timeout)
+                text = result if isinstance(result, str) else str(result)
+                set_mlflow_span_outputs(
+                    span,
+                    {
+                        "status": "ok",
+                        "response_chars": len(text),
+                        "response_preview": _bounded_value(text, limit=1_000),
+                    },
+                )
+                return text
+            except FutureTimeoutError as exc:
+                future.cancel()
+                # Running threads cannot be cancelled; discard the exhausted executor
+                # so subsequent calls get a fresh worker pool.
+                with self._sub_lm_executor_lock:
+                    if self._sub_lm_executor is not None:
+                        self._sub_lm_executor.shutdown(wait=False)
+                        self._sub_lm_executor = None
+                if span is not None:
+                    set_status = getattr(span, "set_status", None)
+                    if callable(set_status):
+                        set_status("ERROR")
+                raise RuntimeError(
+                    f"LLM call timed out after {self.llm_call_timeout}s. "
+                    "Consider increasing llm_call_timeout or checking API connectivity."
+                ) from exc
 
     def llm_query(self, prompt: str) -> str:
         """Query a sub-LLM for semantic analysis.
@@ -262,23 +291,50 @@ class LLMQueryMixin:
             return []
         self._check_and_increment_llm_calls(len(prompts))
 
+        from fleet_rlm.integrations.observability.mlflow_context import (
+            mlflow_child_span,
+            set_mlflow_span_outputs,
+        )
+
         results: dict[int, str] = {}
         errors: list[tuple[int, Exception]] = []
 
-        future_to_idx = {
-            # Copy a fresh context per task. Reusing one Context object
-            # across concurrent threads can raise:
-            # "RuntimeError: cannot enter context ... is already entered".
-            _LLM_BATCH_EXECUTOR.submit(contextvars.copy_context().run, self._query_sub_lm, p): i
-            for i, p in enumerate(prompts)
-        }
-        for future in as_completed(future_to_idx):
-            idx = int(future_to_idx[future])
-            try:
-                value = future.result()
-                results[idx] = value if isinstance(value, str) else str(value)
-            except Exception as exc:
-                errors.append((idx, exc))
+        with mlflow_child_span(
+            "fleet_rlm.llm_query_batched",
+            span_type="CHAIN",
+            attributes={
+                "fleet_rlm.tool_name": "llm_query_batched",
+                "fleet_rlm.prompt_count": str(len(prompts)),
+            },
+            inputs={"prompt_count": len(prompts), "prompt_chars": [len(prompt) for prompt in prompts]},
+        ) as span:
+            future_to_idx = {
+                # Copy a fresh context per task. Reusing one Context object
+                # across concurrent threads can raise:
+                # "RuntimeError: cannot enter context ... is already entered".
+                _LLM_BATCH_EXECUTOR.submit(contextvars.copy_context().run, self._query_sub_lm, p): i
+                for i, p in enumerate(prompts)
+            }
+            for future in as_completed(future_to_idx):
+                idx = int(future_to_idx[future])
+                try:
+                    value = future.result()
+                    results[idx] = value if isinstance(value, str) else str(value)
+                except Exception as exc:
+                    errors.append((idx, exc))
+
+            set_mlflow_span_outputs(
+                span,
+                {
+                    "status": "error" if errors else "ok",
+                    "response_count": len(results),
+                    "error_count": len(errors),
+                },
+            )
+            if errors and span is not None:
+                set_status = getattr(span, "set_status", None)
+                if callable(set_status):
+                    set_status("ERROR")
 
         if errors:
             errors.sort(key=lambda x: x[0])

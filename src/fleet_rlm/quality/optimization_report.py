@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from fleet_rlm.api.schemas.optimization import (
     OptimizationArtifactRef,
@@ -93,7 +93,7 @@ def _optional_str(value: object) -> str | None:
 
 
 def _optional_float(value: object) -> float | None:
-    if value is None:
+    if not isinstance(value, (int, float, str)):
         return None
     try:
         return float(value)
@@ -102,12 +102,18 @@ def _optional_float(value: object) -> float | None:
 
 
 def _optional_int(value: object) -> int | None:
-    if value is None:
+    if not isinstance(value, (int, str)):
         return None
     try:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _optional_bool(value: object, *, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    return default
 
 
 def _list_str(value: object) -> list[str]:
@@ -157,11 +163,12 @@ def _prompt_diffs_from_manifest(review_bundle: dict[str, Any] | None) -> list[Op
     for index, item in enumerate(matched):
         if not isinstance(item, dict):
             continue
-        before_prompt = str(item.get("before_prompt") or "")
-        after_prompt = str(item.get("after_prompt") or "")
+        item_dict = cast(dict[str, Any], item)
+        before_prompt = str(item_dict.get("before_prompt") or "")
+        after_prompt = str(item_dict.get("after_prompt") or "")
         diffs.append(
             OptimizationPromptDiffItem(
-                predictor_name=str(item.get("predictor_name") or f"prompt-{index + 1}"),
+                predictor_name=str(item_dict.get("predictor_name") or f"prompt-{index + 1}"),
                 before_prompt=before_prompt,
                 after_prompt=after_prompt,
                 changed=_semantic_prompt_changed(before_prompt, after_prompt),
@@ -300,17 +307,18 @@ def _candidate_decisions(
     if isinstance(decisions, list) and decisions:
         return [
             OptimizationCandidateDecision(
-                candidate_id=str(item.get("candidate_id") or f"candidate-{index + 1}"),
-                status=str(item.get("status") or "unknown"),
-                summary=str(item.get("summary") or ""),
-                rationale=_optional_str(item.get("rationale")),
-                score=_optional_float(item.get("score")),
-                score_delta=_optional_float(item.get("score_delta")),
-                artifact_path=_optional_str(item.get("artifact_path")),
-                missing_candidate_artifact=bool(item.get("missing_candidate_artifact", False)),
+                candidate_id=str(item_dict.get("candidate_id") or f"candidate-{index + 1}"),
+                status=str(item_dict.get("status") or "unknown"),
+                summary=str(item_dict.get("summary") or ""),
+                rationale=_optional_str(item_dict.get("rationale")),
+                score=_optional_float(item_dict.get("score")),
+                score_delta=_optional_float(item_dict.get("score_delta")),
+                artifact_path=_optional_str(item_dict.get("artifact_path")),
+                missing_candidate_artifact=_optional_bool(item_dict.get("missing_candidate_artifact")),
             )
             for index, item in enumerate(decisions)
             if isinstance(item, dict)
+            for item_dict in [cast(dict[str, Any], item)]
         ]
 
     outcome = _selected_outcome(run, prompt_diffs)
@@ -436,8 +444,12 @@ def _build_insights(
         next_step = "Inspect the manifest and ensure prompt snapshots are persisted for future runs."
     if run.status == "completed" and not has_external_validation:
         next_step = "Add holdout validation examples before treating this draft as promotion-ready."
+    normalized_outcome = cast(
+        Literal["changed", "unchanged", "failed", "running", "unknown"],
+        outcome if outcome in {"changed", "unchanged", "failed", "running", "unknown"} else "unknown",
+    )
     return OptimizationRunInsights(
-        selected_outcome=outcome if outcome in {"changed", "unchanged", "failed", "running", "unknown"} else "unknown",
+        selected_outcome=normalized_outcome,
         summary=summary,
         trace_driven_recommendations=recommendations,
         next_step=next_step,

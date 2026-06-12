@@ -16,7 +16,7 @@ Paths in this map are relative to `src/fleet_rlm/`.
 | `integrations/daytona/bridge.py` | DaytonaToolBridge: Flask broker for sandbox↔host tool calls |
 | `integrations/daytona/isolation.py` | Child isolation policy, delegate child builder |
 | `integrations/daytona/volumes.py` | Durable volume operations |
-| `quality/optimization_runner.py` | GEPA/MIPROv2 optimization pipeline |
+| `quality/optimization_runner.py` | GEPA optimization pipeline |
 | `quality/module_registry.py` | Registered optimizable DSPy modules |
 | `api/routers/ws/endpoint.py` | WebSocket /ws/{session_id} handler |
 | `api/routers/ws/stream.py` | Live chat streaming loop |
