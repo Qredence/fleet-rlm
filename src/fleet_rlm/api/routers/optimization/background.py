@@ -18,59 +18,11 @@ from typing import Any, Literal, cast
 
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.quality import optimization_runner
-from fleet_rlm.quality.optimization_dispatch import (
-    resolve_optimization_spec,
-    run_optimization_for_spec,
-)
 
 from ...runtime_services.common import run_blocking
 from ._deps import OPTIMIZATION_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
-
-
-def _run_optimization_in_thread(
-    *,
-    module_slug: str | None,
-    program_spec: str,
-    dataset_path: Path,
-    output_path: Path | None,
-    default_output_root: Path | None,
-    auto: Literal["light", "medium", "heavy"],
-    train_ratio: float,
-    optimizer: optimization_runner.OptimizerName,
-    run_id: int | None,
-    max_metric_calls: int | None = None,
-    skill_name: str | None = None,
-    skill_path: str | None = None,
-    trace_bundle_paths: list[str] | None = None,
-    reflection_lm_config: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Run the unified optimization pipeline inside a worker thread.
-
-    The runner scopes its own ``dspy.context`` (planner LM from the
-    environment), so no extra DSPy configuration is needed here.
-    """
-    spec = resolve_optimization_spec(
-        module_slug=module_slug,
-        skill_name=skill_name,
-        skill_path=skill_path,
-        program_spec=program_spec,
-        trace_bundle_paths=trace_bundle_paths,
-    )
-    return run_optimization_for_spec(
-        spec,
-        dataset_path=dataset_path,
-        output_path=output_path,
-        default_output_root=default_output_root,
-        train_ratio=train_ratio,
-        auto=auto,
-        max_metric_calls=max_metric_calls,
-        optimizer=optimizer,
-        run_id=run_id,
-        reflection_lm_config=reflection_lm_config,
-        trace_bundle_paths=trace_bundle_paths,
-    )
 
 
 def _resolve_run_uuid(run_id: str | int) -> uuid.UUID:
@@ -305,7 +257,7 @@ async def run_optimization_background(
 
         result = await run_blocking(
             partial(
-                _run_optimization_in_thread,
+                run_optimization_from_request_fields,
                 module_slug=module_slug,
                 program_spec=program_spec,
                 dataset_path=dataset_path,

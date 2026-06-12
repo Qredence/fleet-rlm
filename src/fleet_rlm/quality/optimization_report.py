@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -454,11 +453,6 @@ def _build_insights(
         trace_driven_recommendations=recommendations,
         next_step=next_step,
     )
-
-
-def _slugify(value: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-")
-    return slug or "run"
 
 
 def build_optimization_run_detail(
