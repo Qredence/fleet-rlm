@@ -80,6 +80,11 @@ def list_optimization_modules(
             description=m.get("description", ""),
             program_spec=m["program_spec"],
             required_dataset_keys=m["required_dataset_keys"],
+            input_keys=m.get("input_keys", []),
+            output_keys=m.get("output_keys", []),
+            runtime_module_name=m.get("runtime_module_name"),
+            signature_class_name=m.get("signature_class_name"),
+            optimization_target_kind=m.get("optimization_target_kind", "custom"),
             offline_only=True,
         )
         for m in module_registry.list_module_metadata()

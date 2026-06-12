@@ -109,8 +109,11 @@ class OptimizationContext:
 
 
 def _parse_uuid_id(value: str, *, detail: str) -> uuid.UUID:
+    normalized = value.strip()
+    if normalized.isdecimal():
+        return uuid.UUID(int=int(normalized))
     try:
-        return uuid.UUID(value)
+        return uuid.UUID(normalized)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=detail) from exc
 
@@ -132,6 +135,37 @@ def _extract_metadata_str(metadata: object, key: str) -> str | None:
         if isinstance(parsed, dict):
             val = cast("dict[str, Any]", parsed).get(key)
             return str(val) if val is not None else None
+    return None
+
+
+def _extract_nested_metadata_str(metadata: object, *keys: str) -> str | None:
+    current: object = metadata
+    if isinstance(current, str):
+        try:
+            current = json.loads(current)
+        except json.JSONDecodeError:
+            return None
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = cast("dict[str, Any]", current).get(key)
+    return str(current) if current not in (None, "") else None
+
+
+def _extract_first_trace_bundle_path(metadata: object) -> str | None:
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(metadata, dict):
+        return None
+    direct = cast("dict[str, Any]", metadata).get("distilled_trace_bundle_path")
+    if direct:
+        return str(direct)
+    paths = cast("dict[str, Any]", metadata).get("trace_bundle_paths")
+    if isinstance(paths, list) and paths:
+        return str(paths[0])
     return None
 
 
@@ -267,6 +301,7 @@ async def _resolve_dataset_request(
 def _db_run_to_response(row: Any) -> OptimizationRunResponse:
     """Convert an OptimizationRun SQLModel row to an API response."""
     metadata = getattr(row, "metadata_json", {}) or {}
+    reflection_model = _extract_nested_metadata_str(metadata, "reflection_model", "model")
     return OptimizationRunResponse(
         id=str(row.id),
         status=row.status.value if hasattr(row.status, "value") else str(row.status),
@@ -276,6 +311,14 @@ def _db_run_to_response(row: Any) -> OptimizationRunResponse:
         auto=row.auto,
         train_ratio=row.train_ratio,
         dataset_path=getattr(row, "dataset_path", None) or _extract_metadata_str(metadata, "dataset_path"),
+        reflection_profile_id=_extract_metadata_str(metadata, "reflection_profile_id")
+        or _extract_nested_metadata_str(metadata, "reflection_model", "profile_id"),
+        reflection_model_id=_extract_metadata_str(metadata, "reflection_model_id") or reflection_model,
+        raw_trace_export_path=_extract_metadata_str(metadata, "raw_trace_export_path")
+        or _extract_metadata_str(metadata, "jsonl_path")
+        or _extract_metadata_str(metadata, "json_path"),
+        distilled_trace_bundle_path=_extract_first_trace_bundle_path(metadata),
+        prompt_snapshot_path=_extract_metadata_str(metadata, "prompt_snapshot_path"),
         train_examples=row.train_examples,
         validation_examples=row.validation_examples,
         validation_score=row.validation_score,

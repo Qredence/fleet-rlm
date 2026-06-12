@@ -17,7 +17,11 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
-from fleet_rlm.quality import module_registry, optimization_runner
+from fleet_rlm.quality import optimization_runner
+from fleet_rlm.quality.optimization_dispatch import (
+    resolve_optimization_spec,
+    run_optimization_for_spec,
+)
 
 from ...runtime_services.common import run_blocking
 from ._deps import OPTIMIZATION_TIMEOUT_SECONDS
@@ -36,30 +40,36 @@ def _run_optimization_in_thread(
     train_ratio: float,
     optimizer: optimization_runner.OptimizerName,
     run_id: int | None,
+    max_metric_calls: int | None = None,
+    skill_name: str | None = None,
+    skill_path: str | None = None,
+    trace_bundle_paths: list[str] | None = None,
+    reflection_lm_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the unified optimization pipeline inside a worker thread.
 
     The runner scopes its own ``dspy.context`` (planner LM from the
     environment), so no extra DSPy configuration is needed here.
     """
-    if module_slug:
-        spec = module_registry.get_module_spec(module_slug)
-        if spec is None:
-            raise ValueError(f"Unknown module slug: {module_slug!r}")
-    else:
-        spec = optimization_runner.spec_for_program(program_spec)
-    return cast(
-        dict[str, Any],
-        optimization_runner.run_module_optimization(
-            spec,
-            dataset_path=dataset_path,
-            output_path=output_path,
-            default_output_root=default_output_root,
-            train_ratio=train_ratio,
-            auto=auto,
-            optimizer=optimizer,
-            run_id=run_id,
-        ),
+    spec = resolve_optimization_spec(
+        module_slug=module_slug,
+        skill_name=skill_name,
+        skill_path=skill_path,
+        program_spec=program_spec,
+        trace_bundle_paths=trace_bundle_paths,
+    )
+    return run_optimization_for_spec(
+        spec,
+        dataset_path=dataset_path,
+        output_path=output_path,
+        default_output_root=default_output_root,
+        train_ratio=train_ratio,
+        auto=auto,
+        max_metric_calls=max_metric_calls,
+        optimizer=optimizer,
+        run_id=run_id,
+        reflection_lm_config=reflection_lm_config,
+        trace_bundle_paths=trace_bundle_paths,
     )
 
 
@@ -67,16 +77,13 @@ def _resolve_run_uuid(run_id: str | int) -> uuid.UUID:
     """Convert a canonical run identifier to a UUID for the persistence protocol."""
     if isinstance(run_id, uuid.UUID):
         return run_id
+    normalized = str(run_id).strip()
+    if normalized.isdecimal():
+        return uuid.UUID(int=int(normalized))
     try:
-        return uuid.UUID(str(run_id))
+        return uuid.UUID(normalized)
     except ValueError as exc:
         raise RuntimeError(f"Invalid run_id: {run_id}") from exc
-
-
-def _try_int_run_id(run_id: str | int) -> int | None:
-    """Try to extract an integer run id for MLflow / module optimization tracking."""
-    _ = run_id
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +96,7 @@ def log_optimization_mlflow_run_metadata(
     dataset_path: Path,
     program_spec: str,
     auto: Literal["light", "medium", "heavy"] | None,
+    max_metric_calls: int | None = None,
     train_ratio: float,
     optimizer_label: str,
     module_slug: str | None = None,
@@ -99,13 +107,14 @@ def log_optimization_mlflow_run_metadata(
     """Attach consistent optimization metadata to the active MLflow run."""
 
     if log_params is not None:
-        cast(Any, log_params)(
-            {
-                "gepa.auto": auto or "none",
-                "gepa.train_ratio": train_ratio,
-                "gepa.dataset_name": dataset_path.name,
-            }
-        )
+        params: dict[str, Any] = {
+            "gepa.auto": auto or "none",
+            "gepa.train_ratio": train_ratio,
+            "gepa.dataset_name": dataset_path.name,
+        }
+        if max_metric_calls is not None:
+            params["gepa.max_metric_calls"] = max_metric_calls
+        cast(Any, log_params)(params)
 
     tags = {
         "fleet.optimizer": optimizer_label,
@@ -206,16 +215,20 @@ async def run_optimization_background(
     default_output_root: Path | None,
     auto: Literal["light", "medium", "heavy"],
     train_ratio: float,
+    max_metric_calls: int | None = None,
     optimizer: optimization_runner.OptimizerName = "gepa",
+    skill_name: str | None = None,
+    skill_path: str | None = None,
+    trace_bundle_paths: list[str] | None = None,
+    reflection_lm_config: dict[str, Any] | None = None,
 ) -> None:
     """Execute an optimization run in a background task.
 
     Run state is tracked through the unified *persistence* backend.
     """
     run_uuid = _resolve_run_uuid(run_id)
-    int_run_id = _try_int_run_id(run_id)
-    optimizer_label = "GEPA" if optimizer == "gepa" else "MIPROv2"
-    run_target = module_slug or program_spec
+    optimizer_label = "GEPA"
+    run_target = skill_name or skill_path or module_slug or program_spec
 
     # -- MLflow autologging (best-effort, never blocks the run) -----------
     mlflow_ctx: Any = None
@@ -258,6 +271,7 @@ async def run_optimization_background(
                         dataset_path=dataset_path,
                         program_spec=program_spec,
                         auto=auto,
+                        max_metric_calls=max_metric_calls,
                         train_ratio=train_ratio,
                         optimizer_label=optimizer_label,
                         module_slug=module_slug,
@@ -299,8 +313,13 @@ async def run_optimization_background(
                 default_output_root=default_output_root,
                 train_ratio=train_ratio,
                 auto=auto,
+                max_metric_calls=max_metric_calls,
                 optimizer=optimizer,
-                run_id=int_run_id,
+                run_id=None,
+                skill_name=skill_name,
+                skill_path=skill_path,
+                trace_bundle_paths=trace_bundle_paths,
+                reflection_lm_config=reflection_lm_config,
             ),
             timeout=OPTIMIZATION_TIMEOUT_SECONDS,
         )
@@ -332,40 +351,23 @@ async def run_optimization_background(
             created_by_user_id=persisted_identity.user_id,
             phase="saving",
         )
-        await persistence.save_evaluation_results(
-            tenant_id=persisted_identity.tenant_id,
-            run_id=run_uuid,
-            workspace_id=persisted_identity.workspace_id,
-            created_by_user_id=persisted_identity.user_id,
-            results=result.get("evaluation_results", []),
-        )
-        await persistence.save_prompt_snapshots(
-            tenant_id=persisted_identity.tenant_id,
-            run_id=run_uuid,
-            workspace_id=persisted_identity.workspace_id,
-            created_by_user_id=persisted_identity.user_id,
-            snapshots=result.get("prompt_snapshots", []),
-        )
-        await persistence.complete_optimization_run(
-            tenant_id=persisted_identity.tenant_id,
-            run_id=run_uuid,
-            workspace_id=persisted_identity.workspace_id,
-            created_by_user_id=persisted_identity.user_id,
-            train_examples=result.get("train_examples", 0),
-            validation_examples=result.get("validation_examples", 0),
-            validation_score=result.get("validation_score"),
-            output_path=result.get("output_path"),
-            manifest_path=result.get("manifest_path"),
-            metadata_json=result.get("run_metadata"),
+        from .run_persistence import persist_optimization_run_success
+
+        await persist_optimization_run_success(
+            persistence=persistence,
+            persisted_identity=persisted_identity,
+            run_uuid=run_uuid,
+            result=result,
         )
     except Exception as exc:
         logger.exception("Background optimization failed for run %s", run_id)
         try:
-            await persistence.fail_optimization_run(
-                tenant_id=persisted_identity.tenant_id,
-                run_id=run_uuid,
-                workspace_id=persisted_identity.workspace_id,
-                created_by_user_id=persisted_identity.user_id,
+            from .run_persistence import persist_optimization_run_failure
+
+            await persist_optimization_run_failure(
+                persistence=persistence,
+                persisted_identity=persisted_identity,
+                run_uuid=run_uuid,
                 error=str(exc),
             )
         except Exception:
