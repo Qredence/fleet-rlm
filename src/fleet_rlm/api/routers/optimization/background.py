@@ -18,6 +18,7 @@ from typing import Any, Literal, cast
 
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.quality import optimization_runner
+from fleet_rlm.quality.optimization_dispatch import run_optimization_from_request_fields
 
 from ...runtime_services.common import run_blocking
 from ._deps import OPTIMIZATION_TIMEOUT_SECONDS
