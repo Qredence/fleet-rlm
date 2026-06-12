@@ -170,9 +170,11 @@ async def test_export_session_traces_falls_back_to_mlflow_session_lookup(tmp_pat
 
     searched_session_ids: list[str] = []
 
+    workspace_scoped_session_id = "local-workspace:local-user:frontend-session-1"
+
     def fake_search_traces_by_session_id(session_id: str, **_kwargs):
         searched_session_ids.append(session_id)
-        if session_id == "default:anonymous:frontend-session-1":
+        if session_id == workspace_scoped_session_id:
             return [SimpleNamespace()]
         return []
 
@@ -199,9 +201,67 @@ async def test_export_session_traces_falls_back_to_mlflow_session_lookup(tmp_pat
 
     assert response.trace_count == 1
     assert response.skipped_trace_ids == []
-    assert searched_session_ids == ["default:anonymous:frontend-session-1"]
+    assert searched_session_ids == [workspace_scoped_session_id]
     assert response.jsonl_path is not None
     assert response.distilled_bundle_path is not None
+
+
+@pytest.mark.asyncio
+async def test_export_session_traces_skips_foreign_mlflow_fallback_traces(tmp_path, monkeypatch) -> None:
+    session_id = uuid.UUID(int=42)
+    session = SimpleNamespace(
+        id=session_id,
+        title="frontend-session-1",
+        external_session_id="frontend-session-1",
+        workspace_id="local-workspace",
+        owner_user="local-user",
+    )
+
+    async def unsupported_external_traces(**kwargs):
+        _ = kwargs
+        raise UnsupportedLocalCapabilityError("list_external_traces_for_session")
+
+    persistence = SimpleNamespace(
+        get_chat_session=AsyncMock(return_value=session),
+        list_external_traces_for_session=unsupported_external_traces,
+    )
+    identity = SimpleNamespace(
+        tenant_id=uuid.uuid4(),
+        workspace_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+    )
+
+    from fleet_rlm.integrations.observability import mlflow_traces
+
+    foreign_trace = SimpleNamespace(
+        to_dict=lambda: {
+            "info": {
+                "trace_id": "tr-foreign",
+                "trace_metadata": {
+                    "mlflow.trace.user": "other-user",
+                    "fleet_rlm.workspace_id": "other-workspace",
+                },
+            }
+        }
+    )
+
+    def fake_search_traces_by_session_id(session_id: str, **_kwargs):
+        if session_id == "local-workspace:local-user:frontend-session-1":
+            return [foreign_trace]
+        return []
+
+    monkeypatch.setenv("FLEET_RLM_OPTIMIZATION_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(mlflow_traces, "search_traces_by_session_id", fake_search_traces_by_session_id)
+
+    response = await SessionService(persistence).export_session_traces(
+        persisted_identity=identity,
+        session_id=str(session_id),
+        body=SessionTraceExportRequest(format="jsonl"),
+    )
+
+    assert response.trace_count == 0
+    assert response.skipped_trace_ids == ["tr-foreign"]
+    assert any("ownership" in error for error in response.errors)
 
 
 @pytest.mark.asyncio

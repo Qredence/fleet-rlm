@@ -14,6 +14,8 @@ from fleet_rlm.integrations.persistence_protocol import UnsupportedLocalCapabili
 from ..schemas.sessions import SessionTraceExportRequest, SessionTraceExportResponse
 from .session_helpers import optional_string, parse_session_uuid, session_external_id
 
+MLFLOW_EXPORT_MAX_RESULTS = 500
+
 __all__ = [
     "export_owned_session_traces",
     "ordered_runtime_session_ids",
@@ -33,9 +35,9 @@ def runtime_session_id_candidates(
     if not external_id:
         return []
     candidates = [
-        f"default:anonymous:{external_id}",
         f"{getattr(session, 'workspace_id', '')}:{getattr(session, 'owner_user', '')}:{external_id}",
         f"{persisted_identity.workspace_id}:{persisted_identity.user_id}:{external_id}",
+        f"default:anonymous:{external_id}",
     ]
     seen: set[str] = set()
     ordered: list[str] = []
@@ -67,6 +69,64 @@ def ordered_runtime_session_ids(
             detail="mlflow_session_id is not authorized for this session.",
         )
     return [hint, *[candidate for candidate in candidates if candidate != hint]]
+
+
+def _trace_info_payload(trace: object) -> dict[str, Any]:
+    to_dict = getattr(trace, "to_dict", None)
+    if callable(to_dict):
+        try:
+            payload = to_dict()
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            info = payload.get("info")
+            if isinstance(info, dict):
+                return info
+
+    info = getattr(trace, "info", None)
+    if isinstance(info, dict):
+        return dict(info)
+    if info is None:
+        return {}
+
+    result: dict[str, Any] = {
+        "trace_id": getattr(info, "trace_id", None),
+        "client_request_id": getattr(info, "client_request_id", None),
+    }
+    trace_metadata = getattr(info, "trace_metadata", None)
+    if isinstance(trace_metadata, dict):
+        result["trace_metadata"] = trace_metadata
+    return result
+
+
+def _trace_owned_by_session(
+    trace: Any,
+    *,
+    session: Any,
+    persisted_identity: IdentityUpsertResult,
+) -> bool:
+    """Return True when trace metadata matches the owned session identity."""
+    trace_metadata = _trace_info_payload(trace).get("trace_metadata")
+    if not isinstance(trace_metadata, dict) or not trace_metadata:
+        return True
+
+    trace_user = str(trace_metadata.get("mlflow.trace.user") or "").strip()
+    allowed_users = {
+        str(getattr(session, "owner_user", "") or "").strip(),
+        str(persisted_identity.user_id).strip(),
+    }
+    if trace_user and trace_user not in allowed_users:
+        return False
+
+    trace_workspace = str(trace_metadata.get("fleet_rlm.workspace_id") or "").strip()
+    allowed_workspaces = {
+        str(getattr(session, "workspace_id", "") or "").strip(),
+        str(persisted_identity.workspace_id).strip(),
+    }
+    if trace_workspace and trace_workspace not in allowed_workspaces:
+        return False
+
+    return True
 
 
 async def resolve_owned_chat_session(
@@ -190,10 +250,24 @@ async def export_owned_session_traces(
                 search_traces_by_session_id,
                 runtime_session_id,
                 allow_unfiltered_fallback=False,
+                max_results=MLFLOW_EXPORT_MAX_RESULTS,
             )
             if not direct_traces:
                 continue
             for trace in direct_traces:
+                if not _trace_owned_by_session(
+                    trace,
+                    session=session,
+                    persisted_identity=persisted_identity,
+                ):
+                    trace_info = _trace_info_payload(trace)
+                    skipped_trace_ids.append(
+                        str(trace_info.get("trace_id") or trace_info.get("client_request_id") or "unknown")
+                    )
+                    errors.append(
+                        f"{trace_info.get('trace_id') or 'unknown'}: trace metadata does not match session ownership"
+                    )
+                    continue
                 payloads.append(
                     trace_to_full_payload(
                         trace,
@@ -205,7 +279,8 @@ async def export_owned_session_traces(
                         },
                     )
                 )
-            break
+            if payloads:
+                break
 
     artifacts = await asyncio.to_thread(
         write_session_trace_artifacts,

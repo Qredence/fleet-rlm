@@ -403,6 +403,12 @@ async def create_run_promotion_draft(
     )
     if row is None:
         raise HTTPException(status_code=404, detail=f"Optimization run {run_id} not found.")
+    status = row.status.value if hasattr(row.status, "value") else str(row.status)
+    if status != OptimizationRunStatus.COMPLETED.value:
+        raise HTTPException(
+            status_code=409,
+            detail="Promotion drafts are only available for completed optimization runs.",
+        )
     return create_or_load_promotion_draft(
         _db_run_to_response(row),
         tenant_id=str(persisted_identity.tenant_id),
