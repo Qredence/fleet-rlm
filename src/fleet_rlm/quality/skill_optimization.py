@@ -160,7 +160,8 @@ class SkillInstructionProgram(dspy.Module):
     def forward(self, **kwargs: Any) -> Any:
         return self.skill(**kwargs)
 
-    def save(self, path: str) -> None:
+    def save(self, path, save_program=False, modules_to_serialize=None) -> None:
+        _ = (save_program, modules_to_serialize)
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_text(_predictor_instructions(self.skill), encoding="utf-8")
 
