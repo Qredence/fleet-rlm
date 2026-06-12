@@ -66,4 +66,48 @@ def run_optimization_for_spec(
     )
 
 
-__all__ = ["resolve_optimization_spec", "run_optimization_for_spec"]
+def run_optimization_from_request_fields(
+    *,
+    module_slug: str | None,
+    skill_name: str | None,
+    skill_path: str | None,
+    program_spec: str,
+    dataset_path: Path,
+    output_path: Path | None,
+    default_output_root: Path | None,
+    auto: Literal["light", "medium", "heavy"],
+    train_ratio: float,
+    optimizer: optimization_runner.OptimizerName,
+    run_id: int | None = None,
+    max_metric_calls: int | None = None,
+    trace_bundle_paths: list[str] | None = None,
+    reflection_lm_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Resolve the optimization target and run the unified pipeline."""
+    spec = resolve_optimization_spec(
+        module_slug=module_slug,
+        skill_name=skill_name,
+        skill_path=skill_path,
+        program_spec=program_spec,
+        trace_bundle_paths=trace_bundle_paths,
+    )
+    return run_optimization_for_spec(
+        spec,
+        dataset_path=dataset_path,
+        output_path=output_path,
+        default_output_root=default_output_root,
+        train_ratio=train_ratio,
+        auto=auto,
+        max_metric_calls=max_metric_calls,
+        optimizer=optimizer,
+        run_id=run_id,
+        reflection_lm_config=reflection_lm_config,
+        trace_bundle_paths=trace_bundle_paths,
+    )
+
+
+__all__ = [
+    "resolve_optimization_spec",
+    "run_optimization_for_spec",
+    "run_optimization_from_request_fields",
+]

@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import BackgroundTasks, HTTPException
 
@@ -20,6 +20,7 @@ from fleet_rlm.integrations.llm_profiles.resolver import (
 )
 from fleet_rlm.integrations.llm_profiles.store import resolve_profile_store
 from fleet_rlm.integrations.llm_profiles.types import LlmRoleBindingRecord
+from fleet_rlm.quality.optimization_dispatch import run_optimization_from_request_fields
 
 from ...runtime_services.common import run_blocking
 from ...schemas.optimization import (
@@ -249,51 +250,6 @@ async def prepare_optimization_request(
     )
 
 
-def _run_optimization(
-    *,
-    module_slug: str | None,
-    program_spec: str,
-    dataset_path: Path,
-    output_path: Path | None,
-    default_output_root: Path | None,
-    auto: Literal["light", "medium", "heavy"],
-    train_ratio: float,
-    optimizer: Literal["gepa"],
-    run_id: int | None = None,
-    max_metric_calls: int | None = None,
-    skill_name: str | None = None,
-    skill_path: str | None = None,
-    trace_bundle_paths: list[str] | None = None,
-    reflection_lm_config: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Blocking wrapper around the unified optimization pipeline."""
-    from fleet_rlm.quality.optimization_dispatch import (
-        resolve_optimization_spec,
-        run_optimization_for_spec,
-    )
-
-    spec = resolve_optimization_spec(
-        module_slug=module_slug,
-        skill_name=skill_name,
-        skill_path=skill_path,
-        program_spec=program_spec,
-        trace_bundle_paths=trace_bundle_paths,
-    )
-    return run_optimization_for_spec(
-        spec,
-        dataset_path=dataset_path,
-        output_path=output_path,
-        default_output_root=default_output_root,
-        train_ratio=train_ratio,
-        auto=auto,
-        max_metric_calls=max_metric_calls,
-        optimizer=optimizer,
-        run_id=run_id,
-        reflection_lm_config=reflection_lm_config,
-        trace_bundle_paths=trace_bundle_paths,
-    )
-
-
 async def create_blocking_run_record(
     *,
     request: GEPAOptimizationRequest,
@@ -351,9 +307,10 @@ async def execute_blocking_optimization(
     reflection_lm_config: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Run one blocking optimization request through the worker pool."""
+
     return await run_blocking(
         partial(
-            _run_optimization,
+            run_optimization_from_request_fields,
             module_slug=request.module_slug,
             program_spec=program_spec,
             dataset_path=dataset,
