@@ -11,7 +11,7 @@ import logging
 import os
 from contextlib import nullcontext
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from dotenv import load_dotenv
 
@@ -357,6 +357,81 @@ def get_planner_lm_from_env(*, env_file: Path | None = None, model_name: str | N
     return _build_lm(**planner_lm_kwargs)
 
 
+LmRole = Literal["planner", "delegate", "reflection", "judge"]
+
+
+def resolve_lm(
+    role: LmRole = "planner",
+    *,
+    env_file: Path | None = None,
+    model_name: str | None = None,
+) -> dspy.LM | None:
+    """Resolve a DSPy LM for a runtime role without mutating global settings.
+
+    This is the single LM-resolution entrypoint; callers scope the result via
+    ``build_dspy_context(lm=...)`` rather than ``dspy.configure``.
+
+    Roles:
+        - ``planner``: the primary planner LM from ``DSPY_LM_MODEL``.
+        - ``delegate``: the optional stronger/cheaper delegate LM from
+          ``DSPY_DELEGATE_LM_MODEL``, falling back to the planner LM.
+        - ``reflection``: LM for GEPA's reflection pass — delegate first,
+          then planner.
+        - ``judge``: deterministic (temperature 0) LM for LLM-judge scoring.
+          Requires an explicit *model_name*.
+
+    Returns ``None`` when no configuration is available for the role.
+    """
+    if role == "planner":
+        return get_planner_lm_from_env(env_file=env_file, model_name=model_name)
+    if role in ("delegate", "reflection"):
+        lm = get_delegate_lm_from_env(
+            env_file=env_file,
+            model_name=model_name if role == "delegate" else None,
+        )
+        if lm is not None:
+            return lm
+        return get_planner_lm_from_env(env_file=env_file)
+    if role == "judge":
+        if not model_name:
+            return None
+        return _import_dspy().LM(model_name, temperature=0.0)
+    raise ValueError(f"Unknown LM role: {role!r}")
+
+
+def _delegate_small_lm_kwargs(
+    *,
+    model_name: str | None = None,
+    default_api_key: str | None = None,
+    default_api_base: str | None = None,
+    default_max_tokens: int | str | None = None,
+) -> dict[str, Any] | None:
+    model = model_name or os.environ.get("DSPY_DELEGATE_LM_SMALL_MODEL")
+    if not model:
+        return None
+
+    api_key = (
+        os.environ.get("DSPY_DELEGATE_LM_API_KEY")
+        or default_api_key
+        or os.environ.get("DSPY_LLM_API_KEY")
+        or os.environ.get("DSPY_LM_API_KEY")
+    )
+    if not api_key:
+        logger.warning("Small delegate LM model is configured but no API key is available; using delegate fallback.")
+        return None
+
+    return {
+        "model": model,
+        "api_key": api_key,
+        "api_base": (
+            os.environ.get("DSPY_DELEGATE_LM_API_BASE") or default_api_base or os.environ.get("DSPY_LM_API_BASE")
+        ),
+        "max_tokens": _resolve_max_tokens(
+            default_max_tokens if default_max_tokens is not None else os.environ.get("DSPY_DELEGATE_LM_MAX_TOKENS")
+        ),
+    }
+
+
 def get_delegate_lm_from_env(
     *,
     env_file: Path | None = None,
@@ -391,6 +466,36 @@ def get_delegate_lm_from_env(
     except Exception as exc:
         logger.warning(
             "Failed to initialize delegate LM (%s); using planner fallback.",
+            type(exc).__name__,
+        )
+        return None
+
+
+def get_delegate_small_lm_from_env(
+    *,
+    env_file: Path | None = None,
+    model_name: str | None = None,
+    default_api_key: str | None = None,
+    default_api_base: str | None = None,
+    default_max_tokens: int | None = None,
+) -> dspy.LM | None:
+    """Create and return an optional small delegate DSPy LM from environment."""
+    _prepare_env(env_file=env_file)
+    delegate_small_lm_kwargs = _delegate_small_lm_kwargs(
+        model_name=model_name,
+        default_api_key=default_api_key,
+        default_api_base=default_api_base,
+        default_max_tokens=default_max_tokens
+        if default_max_tokens is not None
+        else os.environ.get("DSPY_DELEGATE_LM_MAX_TOKENS"),
+    )
+    if delegate_small_lm_kwargs is None:
+        return None
+    try:
+        return _build_lm(**delegate_small_lm_kwargs)
+    except Exception as exc:
+        logger.warning(
+            "Failed to initialize small delegate LM (%s); using delegate fallback.",
             type(exc).__name__,
         )
         return None

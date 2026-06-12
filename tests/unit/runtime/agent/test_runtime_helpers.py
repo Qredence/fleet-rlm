@@ -24,30 +24,3 @@ def test_recursive_child_review_payload_for_delegate_tool() -> None:
     assert payload is not None
     assert payload["required"] is True
     assert "child timeout" in payload["reason"]
-
-
-def test_get_streamable_react_program_detects_planner_extract() -> None:
-    class _Program:
-        planner = object()
-        extract = object()
-
-        async def async_planner_step(self, *_args, **_kwargs):
-            return None
-
-    assert rh.get_streamable_react_program(_Program()) is not None
-
-
-def test_format_react_trajectory_uses_program_formatter() -> None:
-    class _Program:
-        def _format_trajectory(self, trajectory_raw: dict[str, str]) -> str:
-            return f"formatted:{trajectory_raw['thought_0']}"
-
-    assert rh.format_react_trajectory(_Program(), {"thought_0": "hi"}) == "formatted:hi"
-
-
-def test_format_react_trajectory_falls_back_to_str_without_formatter() -> None:
-    class _Program:
-        pass
-
-    trajectory = {"thought_0": "hi"}
-    assert rh.format_react_trajectory(_Program(), trajectory) == str(trajectory)

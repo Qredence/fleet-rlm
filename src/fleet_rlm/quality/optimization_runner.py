@@ -1,28 +1,42 @@
-"""Shared GEPA optimization pipeline for worker-native DSPy modules.
+"""Single offline GEPA optimization pipeline for fleet-rlm DSPy modules.
 
-The core compile→evaluate→save→manifest flow extracted from the per-module
-entrypoints.  This runner does **not** force MLflow coupling — the API wrapper
-in ``gepa_optimization.py`` engages tracking when appropriate.
+Dataset → ``dspy.Example`` → GEPA →
+``dspy.Evaluate`` → save + manifest. Both registry modules (via
+``ModuleOptimizationSpec``) and ad-hoc ``module:attr`` program specs (via
+:func:`spec_for_program`) flow through :func:`run_module_optimization`.
+
+This runner does **not** force MLflow coupling — the API background worker
+engages tracking when appropriate.
 """
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
+import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 from .artifacts import build_manifest, resolve_artifact_path, write_manifest
 from .datasets import (
     load_dataset_rows,
+    rows_to_examples,
     split_examples_with_metadata,
     validate_required_keys,
     validation_range_for_indexes,
 )
+from .gepa_evidence import write_gepa_evidence_artifact as _write_gepa_evidence_artifact
 from .module_registry import ModuleOptimizationSpec
+from .optimization_insights import build_manifest_insights as _build_manifest_insights
 
 logger = logging.getLogger(__name__)
+
+OptimizerName = Literal["gepa"]
+
+OPTIMIZER_LABELS: dict[str, str] = {"gepa": "GEPA"}
 
 # Minimum examples required in the validation set for a meaningful evaluation.
 # When the split produces fewer validation examples, the run proceeds without
@@ -46,6 +60,132 @@ class OptimizationResult(TypedDict):
     prompt_snapshots: list[dict[str, str]]
     review_bundle: dict[str, Any]
     run_metadata: dict[str, Any]
+    feedback_summary: str
+
+
+# ---------------------------------------------------------------------------
+# Program building (module:attr specs)
+# ---------------------------------------------------------------------------
+
+
+def load_symbol(spec: str) -> Any:
+    """Resolve a ``module:attr`` symbol reference."""
+    from importlib import import_module
+
+    if ":" not in spec:
+        raise ValueError("Expected symbol in the form 'module:attr'.")
+    module_name, attr_name = spec.split(":", 1)
+    module = import_module(module_name)
+    return getattr(module, attr_name)
+
+
+def build_program(spec: str) -> Any:
+    """Instantiate a DSPy program from a symbol reference."""
+    import dspy
+
+    target = load_symbol(spec)
+    if isinstance(target, dspy.Module):
+        return target
+    if isinstance(target, type) and issubclass(target, dspy.Module):
+        return target()
+    if callable(target):
+        program = target()
+        if isinstance(program, dspy.Module):
+            return program
+    raise TypeError(f"Could not build a DSPy module from '{spec}'.")
+
+
+def build_gepa_feedback_metric(
+    *,
+    output_key: str = "response",
+    score_fn: Callable[..., float | tuple[float, str]] | None = None,
+) -> Callable[..., Any]:
+    """Build a GEPA-compatible feedback metric.
+
+    When *score_fn* is ``None`` the default
+    :func:`~.workspace_metrics.workspace_feedback_metric` is used.  Tuple
+    results ``(score, feedback)`` are wrapped into ``ScoreWithFeedback`` so
+    GEPA's reflection pass can use the textual explanation.
+    """
+    from .dspy_evaluation import _metric_supports_trace
+    from .workspace_metrics import workspace_feedback_metric
+
+    inner = score_fn
+    inner_supports_trace = _metric_supports_trace(inner) if inner is not None else False
+    inner_accepts_kwargs = False
+    inner_param_names: set[str] = set()
+    if inner is not None:
+        try:
+            inner_params = list(inspect.signature(inner).parameters.values())
+            inner_accepts_kwargs = any(param.kind is inspect.Parameter.VAR_KEYWORD for param in inner_params)
+            inner_param_names = {param.name for param in inner_params}
+        except (TypeError, ValueError):
+            inner_accepts_kwargs = False
+            inner_param_names = set()
+
+    def _call_feedback_metric(
+        gold: Any,
+        pred: Any,
+        *,
+        trace: Any = None,
+        pred_name: str | None = None,
+        pred_trace: Any = None,
+    ) -> float | tuple[float, str]:
+        if inner is None:
+            return workspace_feedback_metric(gold, pred, trace=trace, output_key=output_key)
+        if inner_supports_trace:
+            kwargs: dict[str, Any] = {"trace": trace}
+            if inner_accepts_kwargs or "pred_name" in inner_param_names:
+                kwargs["pred_name"] = pred_name
+            if inner_accepts_kwargs or "pred_trace" in inner_param_names:
+                kwargs["pred_trace"] = pred_trace
+            return inner(gold, pred, **kwargs)
+        return inner(gold, pred)
+
+    def metric(
+        gold: Any,
+        pred: Any,
+        trace: Any = None,
+        pred_name: str | None = None,
+        pred_trace: Any = None,
+    ) -> Any:
+        from dspy.teleprompt.gepa.gepa_utils import ScoreWithFeedback
+
+        result = _call_feedback_metric(gold, pred, trace=trace, pred_name=pred_name, pred_trace=pred_trace)
+        if isinstance(result, tuple) and len(result) == 2:
+            score, feedback = result
+            return ScoreWithFeedback(score=float(score), feedback=str(feedback))
+        return float(result)
+
+    return metric
+
+
+def spec_for_program(
+    program_spec: str,
+    *,
+    input_keys: list[str] | None = None,
+    output_key: str = "response",
+    score_fn: Callable[..., float | tuple[float, str]] | None = None,
+) -> ModuleOptimizationSpec:
+    """Build an ad-hoc spec so ``module:attr`` programs use the same pipeline.
+
+    The dataset is expected in the exported MLflow trace-row format
+    (``inputs`` + ``expectations.expected_response`` per row).
+    """
+    slug = "program-" + (re.sub(r"[^a-z0-9]+", "-", program_spec.lower()).strip("-") or "custom")
+    return ModuleOptimizationSpec(
+        module_slug=slug,
+        label=program_spec,
+        program_spec=program_spec,
+        artifact_filename="optimized_program.json",
+        input_keys=list(input_keys or []),
+        required_dataset_keys=[],
+        module_factory=lambda: build_program(program_spec),
+        row_converter=lambda rows: rows_to_examples(rows, input_keys=input_keys, output_key=output_key),
+        metric_builder=lambda: build_gepa_feedback_metric(output_key=output_key, score_fn=score_fn),
+        metric_name="workspace_feedback_metric" if score_fn is None else "custom_score_fn",
+        description=f"Ad-hoc optimization of {program_spec}",
+    )
 
 
 def _persist_run_artifacts(
@@ -72,26 +212,24 @@ def _persist_run_artifacts(
         )
 
 
-def _resolve_reflection_lm() -> Any:
+def _resolve_reflection_lm(reflection_lm_config: dict[str, Any] | None = None) -> Any:
     """Resolve a DSPy LM suitable for GEPA's reflection pass.
 
-    Resolution order:
-    1. ``DSPY_DELEGATE_LM_MODEL`` env var (stronger model for reflection)
-    2. ``DSPY_LM_MODEL`` env var (primary planner model)
-    3. Raises ``RuntimeError`` if no model is configured
-
     GEPA requires ``reflection_lm`` (or a custom ``instruction_proposer``).
-    This helper ensures a concrete LM is always provided.
+    Resolution is delegated to ``resolve_lm("reflection")`` (delegate model
+    first, planner fallback); this helper ensures a concrete LM is provided.
     """
-    from fleet_rlm.runtime.config import (
-        get_delegate_lm_from_env,
-        get_planner_lm_from_env,
-    )
+    if reflection_lm_config:
+        import dspy
 
-    lm = get_delegate_lm_from_env()
-    if lm is not None:
-        return lm
-    lm = get_planner_lm_from_env()
+        lm_kwargs = dict(reflection_lm_config.get("lm_kwargs") or {})
+        if not lm_kwargs:
+            raise RuntimeError("Selected reflection model is missing DSPy LM configuration.")
+        return dspy.LM(**lm_kwargs)
+
+    from fleet_rlm.runtime.config import resolve_lm
+
+    lm = resolve_lm("reflection")
     if lm is not None:
         return lm
     raise RuntimeError(
@@ -110,8 +248,23 @@ def _resolve_model_name(lm: Any) -> str:
     return "unknown"
 
 
-def _reflection_lm_provenance(reflection_lm: Any) -> dict[str, str]:
+def _reflection_lm_provenance(
+    reflection_lm: Any,
+    *,
+    reflection_lm_config: dict[str, Any] | None = None,
+) -> dict[str, str]:
     """Describe which reflection LM was selected and why."""
+    if reflection_lm_config:
+        provenance = {
+            "model": str(reflection_lm_config.get("model_id") or _resolve_model_name(reflection_lm)),
+            "source": "profile",
+        }
+        for key in ("profile_id", "profile_name", "litellm_model"):
+            value = reflection_lm_config.get(key)
+            if value:
+                provenance[key] = str(value)
+        return provenance
+
     delegate_model = (os.environ.get("DSPY_DELEGATE_LM_MODEL") or "").strip()
     planner_model = (os.environ.get("DSPY_LM_MODEL") or "").strip()
     resolved_model = _resolve_model_name(reflection_lm)
@@ -154,55 +307,57 @@ def _capture_prompt_snapshots(module: Any, prompt_type: str) -> list[dict[str, s
     return snapshots
 
 
-def _evaluate_per_example(
-    compiled_module: Any,
+def _serialize_example_inputs(example: Any) -> str:
+    """Serialize a DSPy example's input fields as a JSON string."""
+    if not hasattr(example, "inputs"):
+        return "{}"
+    try:
+        return json.dumps(dict(example.inputs()), default=str)
+    except Exception:
+        return "{}"
+
+
+def _evaluate_validation_set(
+    program: Any,
     validation_set: list[Any],
     metric_fn: Any,
 ) -> list[dict[str, Any]]:
-    """Evaluate each validation example individually, collecting per-example scores.
+    """Score the validation set through ``dspy.Evaluate``, one row per example.
 
-    Each example is evaluated in isolation so that a single failure does not
-    prevent scoring the remaining examples.
+    ``dspy.Evaluate`` provides failure isolation (failed examples receive
+    ``failure_score=0.0``) and returns ``(example, prediction, score)``
+    triples that are reshaped into the persistence row format.
     """
+    import dspy
 
-    def _serialize_inputs(example: Any) -> str:
-        if not hasattr(example, "inputs"):
-            return "{}"
-        return json.dumps(dict(example.inputs()), default=str)
+    from .dspy_evaluation import _build_evaluate_metric
 
-    results: list[dict[str, Any]] = []
-    for idx, example in enumerate(validation_set):
-        try:
-            prediction = compiled_module(**example.inputs())
-            raw_score = metric_fn(example, prediction)
-            # Unwrap ScoreWithFeedback or similar wrappers
-            score = float(getattr(raw_score, "score", raw_score))
-            results.append(
-                {
-                    "example_index": idx,
-                    "input_data": _serialize_inputs(example),
-                    "expected_output": str(getattr(example, "answer", None) or getattr(example, "output", None) or ""),
-                    "predicted_output": str(prediction) if prediction else "",
-                    "score": score,
-                }
-            )
-        except Exception as exc:
-            logger.warning(
-                "Per-example evaluation failed for validation example %s",
-                idx,
-                exc_info=True,
-            )
-            expected_output = getattr(example, "answer", None) or getattr(example, "output", None) or ""
-            results.append(
-                {
-                    "example_index": idx,
-                    "input_data": _serialize_inputs(example),
-                    "expected_output": str(expected_output),
-                    "predicted_output": f"{exc.__class__.__name__}: {exc}",
-                    "score": 0.0,
-                }
-            )
-    return results
+    if not validation_set:
+        return []
+
+    evaluator = dspy.Evaluate(
+        devset=validation_set,
+        metric=_build_evaluate_metric(metric_fn),
+        num_threads=1,
+        display_progress=False,
+        failure_score=0.0,
+    )
+    evaluation = evaluator(program)
+
+    rows: list[dict[str, Any]] = []
+    for idx, (example, prediction, raw_score) in enumerate(getattr(evaluation, "results", []) or []):
+        score = float(getattr(raw_score, "score", raw_score) or 0.0)
+        expected = getattr(example, "answer", None) or getattr(example, "output", None) or ""
+        rows.append(
+            {
+                "example_index": idx,
+                "input_data": _serialize_example_inputs(example),
+                "expected_output": str(expected),
+                "predicted_output": str(prediction) if prediction else "",
+                "score": score,
+            }
+        )
+    return rows
 
 
 def _mean_score(results: list[dict[str, Any]]) -> float | None:
@@ -236,6 +391,24 @@ def _match_prompt_snapshot_pairs(
         }
         for predictor_name in shared
     ]
+
+
+def _supported_kwargs(callable_obj: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Filter kwargs to parameters accepted by *callable_obj*.
+
+    Test doubles often implement only the subset of DSPy's GEPA constructor
+    needed by a unit test. Production DSPy accepts the richer GEPA evidence
+    capture kwargs, so this helper lets the runner enable them without making
+    tests or older installations brittle.
+    """
+    try:
+        signature = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return kwargs
+    parameters = signature.parameters
+    if any(param.kind is inspect.Parameter.VAR_KEYWORD for param in parameters.values()):
+        return kwargs
+    return {key: value for key, value in kwargs.items() if key in parameters}
 
 
 def _build_holdout_comparisons(
@@ -272,23 +445,81 @@ def _build_holdout_comparisons(
     return comparisons
 
 
-def _ensure_dspy_configured() -> None:
-    """Ensure DSPy has a global LM configured for module execution.
+def _build_feedback_summary(results: list[dict[str, Any]], validation_score: float | None) -> str:
+    """Summarize the validation outcome for run metadata."""
+    if not results:
+        return "Validation feedback was not available because no validation examples were evaluated."
+    low_scores = [row for row in results if float(row.get("score", 0.0)) < 0.75]
+    if not low_scores:
+        return f"All validation examples scored strongly; optimized validation score={validation_score}."
+    sample = low_scores[0]
+    expected = str(sample.get("expected_output", ""))[:120]
+    predicted = str(sample.get("predicted_output", ""))[:120]
+    return (
+        f"{len(low_scores)} validation example(s) scored below 0.75; "
+        f"optimized validation score={validation_score}. "
+        f"Lowest-signal sample expected {expected!r} but predicted {predicted!r}."
+    )
 
-    If ``dspy.settings.lm`` is already set (e.g. by an outer caller), this is
-    a no-op.  Otherwise it falls back to ``configure_planner_from_env()``.
+
+def _optimization_dspy_context() -> Any:
+    """Return a ``dspy.context`` scoping the planner LM for this run.
+
+    Never mutates global ``dspy.settings``: if an outer caller already
+    configured an LM the context is a passthrough; otherwise the planner LM is
+    resolved from the environment and applied as a request-scoped override.
     """
     import dspy
 
-    from fleet_rlm.runtime.config import configure_planner_from_env
+    from fleet_rlm.runtime.config import build_dspy_context, resolve_lm
 
     if getattr(dspy.settings, "lm", None) is not None:
-        return
-    if not configure_planner_from_env():
+        return build_dspy_context()
+    planner_lm = resolve_lm("planner")
+    if planner_lm is None:
         raise RuntimeError(
             "DSPy LM is not configured. Set DSPY_LM_MODEL and DSPY_LLM_API_KEY "
             "in the environment before running offline optimization."
         )
+    return build_dspy_context(lm=planner_lm)
+
+
+def _build_optimizer(
+    optimizer: OptimizerName,
+    *,
+    metric: Any,
+    auto: Literal["light", "medium", "heavy"] | None,
+    max_metric_calls: int | None = None,
+    instruction_proposer: Any | None = None,
+    reflection_lm_config: dict[str, Any] | None = None,
+    log_dir: str | Path | None = None,
+) -> tuple[Any, dict[str, str]]:
+    """Instantiate GEPA and its reflection provenance."""
+    if optimizer == "gepa":
+        from dspy.teleprompt import GEPA
+
+        reflection_lm = _resolve_reflection_lm(reflection_lm_config)
+        auto_budget = None if max_metric_calls is not None else auto
+        gepa_kwargs = _supported_kwargs(
+            GEPA,
+            {
+                "metric": metric,
+                "auto": auto_budget,
+                "max_metric_calls": max_metric_calls,
+                "reflection_lm": reflection_lm,
+                "instruction_proposer": instruction_proposer,
+                "log_dir": str(log_dir) if log_dir is not None else None,
+                "track_stats": True,
+                "track_best_outputs": True,
+                "use_mlflow": False,
+                "gepa_kwargs": {"use_cloudpickle": True},
+            },
+        )
+        return (
+            GEPA(**gepa_kwargs),
+            _reflection_lm_provenance(reflection_lm, reflection_lm_config=reflection_lm_config),
+        )
+    raise ValueError(f"Unknown optimizer {optimizer!r}; expected one of {sorted(OPTIMIZER_LABELS)}.")
 
 
 def run_module_optimization(
@@ -299,22 +530,26 @@ def run_module_optimization(
     default_output_root: str | Path | None = None,
     train_ratio: float = 0.8,
     auto: Literal["light", "medium", "heavy"] | None = "light",
+    optimizer: OptimizerName = "gepa",
     run_id: int | None = None,
+    reflection_lm_config: dict[str, Any] | None = None,
+    trace_bundle_paths: list[str] | None = None,
+    max_metric_calls: int | None = None,
 ) -> OptimizationResult:
-    """Run the full offline GEPA optimization pipeline for a registered module.
+    """Run the full offline optimization pipeline for a module spec.
 
     Steps:
-        1. Ensure DSPy LM is configured
-        2. Load and validate the dataset
-        3. Convert rows to DSPy examples via the module's row converter
-        4. Split into train/val
-        5. Build module-specific metric
-        6. Compile with GEPA (capture before/after prompt snapshots)
-        7. Per-example evaluation on the validation set
-        8. Save the optimized artifact
-        9. Write manifest
-        10. Persist evaluation results and prompt snapshots (when run_id given)
-        11. Return a structured summary
+        1. Load and validate the dataset
+        2. Convert rows to DSPy examples via the spec's row converter
+        3. Split into train/val
+        4. Build the spec's metric
+        5. Compile with GEPA inside a scoped ``dspy.context`` (capture
+           before/after prompt snapshots)
+        6. ``dspy.Evaluate`` over the validation set (baseline + optimized)
+        7. Save the optimized artifact
+        8. Write manifest
+        9. Persist evaluation results and prompt snapshots (when run_id given)
+        10. Return a structured summary
 
     When *run_id* is provided, per-example evaluation results and before/after
     prompt snapshots are persisted to the local store.
@@ -327,76 +562,89 @@ def run_module_optimization(
             module execution).
         ValueError: If the dataset is empty or all rows are malformed.
     """
-    import dspy
-    from dspy.teleprompt import GEPA
+    optimizer_label = OPTIMIZER_LABELS.get(optimizer)
+    if optimizer_label is None:
+        raise ValueError(f"Unknown optimizer {optimizer!r}; expected one of {sorted(OPTIMIZER_LABELS)}.")
 
     dataset_path = Path(dataset_path)
-
-    # 1. Ensure DSPy LM is configured for module execution
-    _ensure_dspy_configured()
-
-    # 2. Load + validate
-    rows = load_dataset_rows(dataset_path)
-    valid_rows = validate_required_keys(rows, spec.required_dataset_keys, spec.label)
-
-    # 3. Convert
-    examples = spec.row_converter(valid_rows)
-
-    # 4. Split
-    split = split_examples_with_metadata(examples, train_ratio=train_ratio)
-    trainset, valset = split.train, split.validation
-
-    # 5. Build metric
-    metric = spec.metric_builder()
-
-    # 6. Compile — GEPA requires reflection_lm for prompt evolution
-    program = spec.module_factory()
-    before_snapshots = _capture_prompt_snapshots(program, "before")
-    validation_dataset_indexes = split.validation_indexes
-    baseline_results = _evaluate_per_example(program, valset, metric) if len(valset) >= _MIN_VAL_EXAMPLES else []
-    baseline_validation_score = _mean_score(baseline_results)
-
-    reflection_lm = _resolve_reflection_lm()
-    reflection_provenance = _reflection_lm_provenance(reflection_lm)
-    optimizer = GEPA(metric=metric, auto=auto, reflection_lm=reflection_lm)
-    optimized = optimizer.compile(
-        program,
-        trainset=trainset,
-        valset=valset if len(valset) >= _MIN_VAL_EXAMPLES else None,
-    )
-
-    after_snapshots = _capture_prompt_snapshots(optimized, "after")
-
-    # 7. Per-example evaluation (only when a real validation set exists)
-    validation_score: float | None = None
-    per_example_results: list[dict[str, Any]] = []
-    has_val = len(valset) >= _MIN_VAL_EXAMPLES
-    if has_val:
-        per_example_results = _evaluate_per_example(optimized, valset, metric)
-        if per_example_results:
-            validation_score = _mean_score(per_example_results)
-        else:
-            # Fallback to aggregate evaluator if per-example returned nothing
-            validation_score = float(dspy.Evaluate(devset=valset, metric=metric)(optimized))
-    else:
-        logger.warning(
-            "Validation split is empty for %s — skipping evaluation. "
-            "Provide more examples or a lower --train-ratio for validation scoring.",
-            spec.module_slug,
-        )
-
-    # 8. Save artifact
     resolved_path = resolve_artifact_path(
         spec.module_slug,
         spec.artifact_filename,
         output_path,
         default_root=default_output_root,
     )
+    manifest_path = resolved_path.with_suffix(".manifest.json")
+    gepa_log_dir = resolved_path.with_suffix(".gepa")
+    gepa_evidence_path = resolved_path.with_suffix(".gepa-evidence.json")
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
-    optimized.save(str(resolved_path))
+
+    # 1. Load + validate
+    rows = load_dataset_rows(dataset_path)
+    valid_rows = validate_required_keys(rows, spec.required_dataset_keys, spec.label)
+
+    # 2. Convert
+    examples = spec.row_converter(valid_rows)
+
+    # 3. Split
+    split = split_examples_with_metadata(examples, train_ratio=train_ratio)
+    trainset, valset = split.train, split.validation
+
+    # 4. Build metric
+    metric = spec.metric_builder()
+
+    # 5-7. Compile + evaluate inside a request-scoped LM context (no global
+    # dspy.configure — see _optimization_dspy_context).
+    with _optimization_dspy_context():
+        program = spec.module_factory()
+        before_snapshots = _capture_prompt_snapshots(program, "before")
+        validation_dataset_indexes = split.validation_indexes
+        has_val = len(valset) >= _MIN_VAL_EXAMPLES
+        baseline_results = _evaluate_validation_set(program, valset, metric) if has_val else []
+        baseline_validation_score = _mean_score(baseline_results)
+
+        instruction_proposer = spec.instruction_proposer_factory() if spec.instruction_proposer_factory else None
+        teleprompter, reflection_provenance = _build_optimizer(
+            optimizer,
+            metric=metric,
+            auto=auto,
+            max_metric_calls=max_metric_calls,
+            instruction_proposer=instruction_proposer,
+            reflection_lm_config=reflection_lm_config,
+            log_dir=gepa_log_dir,
+        )
+        optimized = teleprompter.compile(
+            program,
+            trainset=trainset,
+            valset=valset if has_val else None,
+        )
+
+        after_snapshots = _capture_prompt_snapshots(optimized, "after")
+
+        # dspy.Evaluate over the validation set (when one exists)
+        validation_score: float | None = None
+        per_example_results: list[dict[str, Any]] = []
+        if has_val:
+            per_example_results = _evaluate_validation_set(optimized, valset, metric)
+            validation_score = _mean_score(per_example_results)
+        else:
+            logger.warning(
+                "Validation split is empty for %s — skipping evaluation. "
+                "Provide more examples or a lower --train-ratio for validation scoring.",
+                spec.module_slug,
+            )
+
+    # 8. Save artifact
+    writer_metadata: dict[str, Any] = {}
+    if spec.artifact_writer is not None:
+        writer_metadata = dict(spec.artifact_writer(optimized, str(resolved_path)) or {})
+    else:
+        optimized.save(str(resolved_path))
 
     # 9. Write manifest
-    manifest_path = resolved_path.with_suffix(".manifest.json")
+    gepa_evidence, gepa_candidate_decisions = _write_gepa_evidence_artifact(
+        optimized=optimized,
+        evidence_path=gepa_evidence_path,
+    )
     prompt_snapshot_pairs = _match_prompt_snapshot_pairs(
         before_snapshots,
         after_snapshots,
@@ -413,6 +661,16 @@ def run_module_optimization(
         "size_bytes": resolved_path.stat().st_size,
         "loader": "dspy.Module.load",
     }
+    artifact_metadata.update(writer_metadata)
+    feedback_summary = _build_feedback_summary(per_example_results, validation_score)
+    insights = _build_manifest_insights(
+        prompt_snapshot_pairs=prompt_snapshot_pairs,
+        trace_bundle_paths=list(trace_bundle_paths or []),
+        validation_score=validation_score,
+        baseline_validation_score=baseline_validation_score,
+        candidate_decisions=gepa_candidate_decisions,
+        has_external_validation=has_val,
+    )
     review_bundle = {
         "version": 1,
         "artifact": artifact_metadata,
@@ -428,6 +686,9 @@ def run_module_optimization(
                 "validation_range": validation_range_for_indexes(validation_dataset_indexes),
                 "strata": split.strata,
             },
+            "external_validation_available": has_val,
+            "gepa_internal_valset": "validation" if has_val else "trainset_fallback",
+            "promotion_ready": bool(has_val and validation_score is not None),
             "baseline_score": baseline_validation_score,
             "optimized_score": validation_score,
             "score_delta": (
@@ -442,10 +703,27 @@ def run_module_optimization(
             "total_snapshots": len(before_snapshots) + len(after_snapshots),
         },
         "reflection_model": reflection_provenance,
+        "trace_bundle_paths": list(trace_bundle_paths or []),
+        "gepa_evidence": {
+            "available": gepa_evidence is not None,
+            "path": str(gepa_evidence_path) if gepa_evidence is not None else None,
+            "log_dir": str(gepa_log_dir),
+            "candidate_count": (gepa_evidence or {}).get("candidate_count"),
+            "best_candidate_id": (gepa_evidence or {}).get("best_candidate_id"),
+            "total_metric_calls": (gepa_evidence or {}).get("total_metric_calls"),
+            "num_full_val_evals": (gepa_evidence or {}).get("num_full_val_evals"),
+        },
+        "feedback_summary": feedback_summary,
+        "insights": insights,
     }
     run_metadata = {
         "module_slug": spec.module_slug,
         "dataset_path": str(dataset_path),
+        "reflection_profile_id": reflection_provenance.get("profile_id"),
+        "reflection_model_id": reflection_provenance.get("model"),
+        "max_metric_calls": max_metric_calls,
+        "trace_bundle_paths": list(trace_bundle_paths or []),
+        "distilled_trace_bundle_path": (trace_bundle_paths or [None])[0],
         "review_bundle": review_bundle,
     }
     manifest_data = build_manifest(
@@ -454,14 +732,16 @@ def run_module_optimization(
         train_count=len(trainset),
         val_count=len(valset),
         validation_score=validation_score,
-        optimizer="GEPA",
+        optimizer=optimizer_label,
         metric_name=spec.metric_name or None,
         auto=auto,
+        max_metric_calls=max_metric_calls,
         extra_metadata={
             "module_slug": spec.module_slug,
             "output_path": str(resolved_path),
             "artifact": artifact_metadata,
             "review_bundle": review_bundle,
+            "insights": insights,
         },
     )
     write_manifest(manifest_path, manifest_data)
@@ -479,11 +759,12 @@ def run_module_optimization(
         validation_score=validation_score,
         output_path=str(resolved_path),
         manifest_path=str(manifest_path),
-        optimizer="GEPA",
+        optimizer=optimizer_label,
         program_spec=spec.program_spec,
         module_slug=spec.module_slug,
         evaluation_results=per_example_results,
         prompt_snapshots=before_snapshots + after_snapshots,
         review_bundle=review_bundle,
         run_metadata=run_metadata,
+        feedback_summary=feedback_summary,
     )

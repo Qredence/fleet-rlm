@@ -11,7 +11,7 @@ Fleet-RLM requires a reasoning engine capable of complex multi-step tool orchest
 1. Support interactive chat sessions with persistent conversation memory
 2. Orchestrate tool calls with ReAct-style reasoning (thought → action → observation)
 3. Enable recursive delegation to child agents for long-context tasks
-4. Remain optimizable through DSPy's built-in optimization pipelines (BootstrapFewShot, MIPROv2)
+4. Remain optimizable through DSPy's GEPA optimization pipeline
 5. Support streaming responses for real-time user feedback
 
 Traditional approaches like simple LLM chains lack the reasoning depth needed for complex tasks, while fully custom agent frameworks sacrifice interoperability with DSPy's optimization tooling.

@@ -1,6 +1,8 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
 generated_paths=(
   "openapi.yaml"
   "src/frontend/openapi/fleet-rlm.openapi.yaml"
@@ -12,7 +14,8 @@ generated_paths=(
 
 dirty=()
 for path in "${generated_paths[@]}"; do
-  if git status --short -- "$path" 2>/dev/null | grep -q .; then
+  status_output="$(git status --short -- "$path" 2>/dev/null || true)"
+  if [[ -n "$status_output" ]]; then
     dirty+=("$path")
   fi
 done

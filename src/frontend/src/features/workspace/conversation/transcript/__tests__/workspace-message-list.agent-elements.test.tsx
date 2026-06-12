@@ -11,6 +11,46 @@ vi.mock("lottie-react", () => ({
   "module.exports": undefined,
 }));
 
+vi.mock("@/features/settings/use-runtime-settings", () => ({
+  useRuntimeSettings: () => ({
+    statusQuery: { data: { write_enabled: true } },
+  }),
+}));
+
+vi.mock("@/features/settings/use-llm-profiles", () => ({
+  useLlmRoleBindings: () => ({
+    data: {
+      bindings: [
+        {
+          role: "planner",
+          profile_id: "profile-1",
+          profile_name: "Imported from .env",
+          model_id: "gemini-3-flash-preview",
+        },
+      ],
+    },
+  }),
+  useLlmProfileModels: () => ({
+    data: {
+      models: [
+        {
+          id: "gemini-3-flash-preview",
+          label: "gemini-3-flash-preview",
+          litellm_model: "openai/gemini-3-flash-preview",
+        },
+        {
+          id: "gemini-3-pro-preview",
+          label: "gemini-3-pro-preview",
+          litellm_model: "openai/gemini-3-pro-preview",
+        },
+      ],
+    },
+  }),
+  useLlmProfilesMutations: () => ({
+    saveRoleBindings: { mutate: vi.fn(), isPending: false },
+  }),
+}));
+
 import { WorkspaceMessageList } from "@/features/workspace/conversation/transcript/workspace-message-list";
 import type { ChatMessage } from "@/lib/workspace/workspace-types";
 
@@ -328,7 +368,7 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
       onOpenModelSettings,
     });
 
-    expect(container.textContent).toContain("openai/gemini-3-flash-preview");
+    expect(container.textContent).toContain("gemini-3-flash-preview");
 
     const modelButton = container.querySelector('button[aria-label^="Active model"]');
     expect(modelButton).toBeTruthy();
@@ -337,7 +377,7 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
       modelButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(document.body.textContent).toContain("openai/gemini-3-pro-preview");
+    expect(document.body.textContent).toContain("gemini-3-pro-preview");
 
     const settingsButton = Array.from(document.body.querySelectorAll("button")).find((button) =>
       button.textContent?.includes("Model settings"),

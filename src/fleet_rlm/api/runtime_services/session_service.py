@@ -28,6 +28,10 @@ from ..schemas.sessions import (
     SessionStateResponse,
     SessionStateSummary,
     SessionStatsResponse,
+    SessionTraceExportRequest,
+    SessionTraceExportResponse,
+    SessionTraceItem,
+    SessionTraceListResponse,
     TurnItem,
     TurnListResponse,
 )
@@ -37,6 +41,7 @@ from .session_helpers import (
     session_external_id,
     string_or_default,
 )
+from .session_trace_export import export_owned_session_traces
 
 _TURN_COUNT_QUERY_LIMIT = 1
 _TRANSCRIPT_EXPORT_MAX_TURNS = 10_000
@@ -59,6 +64,12 @@ def _canonical_id(value: object) -> str:
     if isinstance(value, int):
         return str(uuid.UUID(int=value))
     return str(value)
+
+
+def _session_external_id_from_row(session: Any) -> str | None:
+    return session_external_id(getattr(session, "metadata_json", None)) or optional_string(
+        getattr(session, "external_session_id", None)
+    )
 
 
 async def _resolve_session_title(
@@ -375,6 +386,67 @@ class SessionService:
             offset=offset,
             limit=limit,
             has_more=(offset + limit) < total,
+        )
+
+    async def get_session_traces(
+        self,
+        *,
+        persisted_identity: IdentityUpsertResult,
+        session_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> SessionTraceListResponse:
+        """Return paginated external traces linked to a durable session."""
+        session_uuid = parse_session_uuid(session_id)
+        session = await self._persistence.get_chat_session(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            user_id=persisted_identity.user_id,
+            workspace_id=persisted_identity.workspace_id,
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        items, total = await self._persistence.list_external_traces_for_session(
+            tenant_id=persisted_identity.tenant_id,
+            session_id=session_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            limit=limit,
+            offset=offset,
+        )
+        return SessionTraceListResponse(
+            items=[
+                SessionTraceItem(
+                    trace_id=trace.trace_id,
+                    client_request_id=trace.client_request_id,
+                    turn_id=str(trace.turn_id) if trace.turn_id is not None else None,
+                    provider=trace.provider.value if hasattr(trace.provider, "value") else str(trace.provider),
+                    experiment_id=trace.experiment_id,
+                    experiment_name=trace.experiment_name,
+                    observed_at=trace.observed_at.isoformat(),
+                    metadata=dict(trace.metadata_json or {}),
+                )
+                for trace in items
+            ],
+            total=total,
+            offset=offset,
+            limit=limit,
+            has_more=(offset + limit) < total,
+        )
+
+    async def export_session_traces(
+        self,
+        *,
+        persisted_identity: IdentityUpsertResult,
+        session_id: str,
+        body: SessionTraceExportRequest,
+    ) -> SessionTraceExportResponse:
+        """Export full MLflow traces and a distilled GEPA evidence bundle."""
+        return await export_owned_session_traces(
+            persistence=self._persistence,
+            persisted_identity=persisted_identity,
+            session_id=session_id,
+            body=body,
         )
 
     async def get_session_stats(

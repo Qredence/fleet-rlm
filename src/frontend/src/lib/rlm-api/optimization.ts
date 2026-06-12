@@ -1,95 +1,46 @@
 import { rlmApiClient } from "@/lib/rlm-api/client";
 import type { components } from "@/lib/rlm-api/generated/openapi";
 
-// ── Generated-type aliases ──────────────────────────────────────────
+export type GEPAStatusResponse = components["schemas"]["GEPAStatusResponse"];
+export type GEPAModuleInfo = components["schemas"]["GEPAModuleInfo"];
+export type GEPAOptimizationRequest = components["schemas"]["GEPAOptimizationRequest"];
 export type DatasetResponse = components["schemas"]["DatasetResponse"];
 export type DatasetListResponse = components["schemas"]["DatasetListResponse"];
-export type DatasetDetailResponse = components["schemas"]["DatasetDetailResponse"];
-export type EvaluationResultItem = components["schemas"]["EvaluationResultItem"];
-export type EvaluationResultsResponse = components["schemas"]["EvaluationResultsResponse"];
-export type RunComparisonItem = components["schemas"]["RunComparisonItem"];
-export type RunComparisonResponse = components["schemas"]["RunComparisonResponse"];
-export type PromptSnapshotItem = components["schemas"]["PromptSnapshotItem"];
+export type SessionTraceExportRequest = components["schemas"]["SessionTraceExportRequest"];
+export type SessionTraceExportResponse = components["schemas"]["SessionTraceExportResponse"];
+export type OptimizationRunCreatedResponse =
+  components["schemas"]["OptimizationRunCreatedResponse"];
+export type OptimizationRunResponse = components["schemas"]["OptimizationRunResponse"];
+export type OptimizationRunDetailResponse = components["schemas"]["OptimizationRunDetailResponse"];
+export type OptimizationPromotionDraftResponse =
+  components["schemas"]["OptimizationPromotionDraftResponse"];
 
-export interface GEPAStatusResponse {
-  available: boolean;
-  module_optimization_available?: boolean;
-  mlflow_dataset_optimization_available?: boolean;
-  mlflow_logging_available?: boolean;
-  mlflow_configured?: boolean;
-  mlflow_enabled: boolean;
-  gepa_installed: boolean;
-  guidance: string[];
+export interface UploadOptimizationDatasetInput {
+  file: File;
+  moduleSlug?: string | null;
 }
 
-export interface GEPAModuleInfo {
-  slug: string;
-  label: string;
-  description?: string;
-  program_spec: string;
-  required_dataset_keys: string[];
+export interface ListOptimizationRunsInput {
+  status?: string;
+  limit?: number;
+  offset?: number;
 }
 
-export interface GEPAOptimizationRequest {
-  dataset_path?: string | null;
-  dataset_id?: string | null;
-  program_spec: string;
-  output_path?: string | null;
-  auto: "light" | "medium" | "heavy";
-  train_ratio: number;
-  module_slug?: string | null;
+export interface ListOptimizationDatasetsInput {
+  moduleSlug?: string | null;
+  limit?: number;
+  offset?: number;
 }
 
-export interface TranscriptTurnInput {
-  user_message?: string | null;
-  assistant_message?: string | null;
+function withQuery(path: string, params: Record<string, string | number | null | undefined>) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null || value === undefined || value === "") continue;
+    search.set(key, String(value));
+  }
+  const query = search.toString();
+  return query ? `${path}?${query}` : path;
 }
-
-export interface TranscriptDatasetRequest {
-  module_slug: string;
-  title?: string | null;
-  turns: TranscriptTurnInput[];
-}
-
-export interface GEPAOptimizationResponse {
-  ok: boolean;
-  optimizer: string;
-  program_spec: string;
-  train_examples: number;
-  validation_examples: number;
-  validation_score: number | null;
-  output_path: string | null;
-  error: string | null;
-  manifest_path?: string | null;
-  module_slug?: string | null;
-}
-
-export interface OptimizationRunCreated {
-  run_id: string;
-  status: string;
-}
-
-export interface OptimizationRunSummary {
-  id: string;
-  status: "running" | "completed" | "failed";
-  module_slug: string | null;
-  program_spec: string;
-  optimizer: string;
-  auto: string | null;
-  train_ratio: number;
-  dataset_path: string | null;
-  train_examples: number | null;
-  validation_examples: number | null;
-  validation_score: number | null;
-  output_path: string | null;
-  manifest_path: string | null;
-  error: string | null;
-  phase: string | null;
-  started_at: string;
-  completed_at: string | null;
-}
-
-// ── Existing optimization endpoints ─────────────────────────────────
 
 export const optimizationEndpoints = {
   status(signal?: AbortSignal) {
@@ -100,52 +51,23 @@ export const optimizationEndpoints = {
     return rlmApiClient.get<GEPAModuleInfo[]>("/api/v1/optimization/modules", signal);
   },
 
-  run(input: GEPAOptimizationRequest, signal?: AbortSignal) {
-    // GEPA optimization can take several minutes; use a 10-minute timeout
-    return rlmApiClient.post<GEPAOptimizationResponse>(
-      "/api/v1/optimization/run",
-      input,
-      signal,
-      600_000,
-    );
-  },
-
-  createRun(input: GEPAOptimizationRequest, signal?: AbortSignal) {
-    return rlmApiClient.post<OptimizationRunCreated>("/api/v1/optimization/runs", input, signal);
-  },
-
-  listRuns(params?: { status?: string; limit?: number; offset?: number }, signal?: AbortSignal) {
-    const searchParams = new URLSearchParams();
-    if (params?.status) searchParams.set("status", params.status);
-    if (params?.limit) searchParams.set("limit", String(params.limit));
-    if (params?.offset) searchParams.set("offset", String(params.offset));
-    const qs = searchParams.toString();
-    return rlmApiClient.get<OptimizationRunSummary[]>(
-      `/api/v1/optimization/runs${qs ? `?${qs}` : ""}`,
+  datasets(input: ListOptimizationDatasetsInput = {}, signal?: AbortSignal) {
+    return rlmApiClient.get<DatasetListResponse>(
+      withQuery("/api/v1/optimization/datasets", {
+        module_slug: input.moduleSlug,
+        limit: input.limit,
+        offset: input.offset,
+      }),
       signal,
     );
   },
 
-  getRun(runId: string, signal?: AbortSignal) {
-    return rlmApiClient.get<OptimizationRunSummary>(`/api/v1/optimization/runs/${runId}`, signal);
-  },
-};
-
-// ── Dataset endpoints ───────────────────────────────────────────────
-
-export const datasetEndpoints = {
-  /** Upload a dataset file (.json/.jsonl) with optional module association. */
-  async upload(
-    file: File,
-    moduleSlug?: string | null,
-    signal?: AbortSignal,
-  ): Promise<DatasetResponse> {
+  uploadDataset(input: UploadOptimizationDatasetInput, signal?: AbortSignal) {
     const formData = new FormData();
-    formData.append("file", file);
-    if (moduleSlug) {
-      formData.append("module_slug", moduleSlug);
+    formData.append("file", input.file);
+    if (input.moduleSlug) {
+      formData.append("module_slug", input.moduleSlug);
     }
-
     return rlmApiClient.postForm<DatasetResponse>(
       "/api/v1/optimization/datasets",
       formData,
@@ -153,81 +75,59 @@ export const datasetEndpoints = {
     );
   },
 
-  /** List registered datasets with optional module filter. */
-  list(params?: { module_slug?: string; limit?: number; offset?: number }, signal?: AbortSignal) {
-    const searchParams = new URLSearchParams();
-    if (params?.module_slug) searchParams.set("module_slug", params.module_slug);
-    if (params?.limit) searchParams.set("limit", String(params.limit));
-    if (params?.offset) searchParams.set("offset", String(params.offset));
-    const qs = searchParams.toString();
-    return rlmApiClient.get<DatasetListResponse>(
-      `/api/v1/optimization/datasets${qs ? `?${qs}` : ""}`,
+  createRun(body: GEPAOptimizationRequest, signal?: AbortSignal) {
+    return rlmApiClient.post<OptimizationRunCreatedResponse>(
+      "/api/v1/optimization/runs",
+      body,
+      signal,
+      120_000,
+    );
+  },
+
+  runs(input: ListOptimizationRunsInput = {}, signal?: AbortSignal) {
+    return rlmApiClient.get<OptimizationRunResponse[]>(
+      withQuery("/api/v1/optimization/runs", {
+        status: input.status,
+        limit: input.limit,
+        offset: input.offset,
+      }),
       signal,
     );
   },
 
-  /** Get dataset detail with sample rows. */
-  get(datasetId: string, signal?: AbortSignal) {
-    return rlmApiClient.get<DatasetDetailResponse>(
-      `/api/v1/optimization/datasets/${datasetId}`,
+  run(runId: string, signal?: AbortSignal) {
+    return rlmApiClient.get<OptimizationRunResponse>(
+      `/api/v1/optimization/runs/${encodeURIComponent(runId)}`,
       signal,
     );
   },
 
-  /** Create a dataset from transcript turns. */
-  createFromTranscript(input: TranscriptDatasetRequest, signal?: AbortSignal) {
-    return rlmApiClient.post<DatasetResponse>(
-      "/api/v1/optimization/transcript-datasets",
-      input,
+  runDetails(runId: string, signal?: AbortSignal) {
+    return rlmApiClient.get<OptimizationRunDetailResponse>(
+      `/api/v1/optimization/runs/${encodeURIComponent(runId)}/details`,
       signal,
     );
   },
-};
 
-// ── Evaluation result endpoints ─────────────────────────────────────
-
-export const evaluationEndpoints = {
-  /** Get paginated per-example evaluation results for a run. */
-  getResults(runId: string, params?: { limit?: number; offset?: number }, signal?: AbortSignal) {
-    const searchParams = new URLSearchParams();
-    if (params?.limit) searchParams.set("limit", String(params.limit));
-    if (params?.offset) searchParams.set("offset", String(params.offset));
-    const qs = searchParams.toString();
-    return rlmApiClient.get<EvaluationResultsResponse>(
-      `/api/v1/optimization/runs/${runId}/results${qs ? `?${qs}` : ""}`,
+  createPromotionDraft(runId: string, signal?: AbortSignal) {
+    return rlmApiClient.post<OptimizationPromotionDraftResponse>(
+      `/api/v1/optimization/runs/${encodeURIComponent(runId)}/promotion-drafts`,
+      {},
       signal,
+      120_000,
     );
   },
-};
 
-// ── Run comparison endpoints ────────────────────────────────────────
-
-export const comparisonEndpoints = {
-  /** Compare prompt diffs and scores across optimization runs. */
-  compare(runIds: string[], signal?: AbortSignal) {
-    const qs = runIds.join(",");
-    return rlmApiClient.get<RunComparisonResponse>(
-      `/api/v1/optimization/runs/compare?run_ids=${qs}`,
+  exportSessionTraces(
+    sessionId: string,
+    body: SessionTraceExportRequest = { format: "both" },
+    signal?: AbortSignal,
+  ) {
+    return rlmApiClient.post<SessionTraceExportResponse>(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/trace-export`,
+      body,
       signal,
+      120_000,
     );
   },
-};
-
-// ── Query key factories ─────────────────────────────────────────────
-
-export const optimizationKeys = {
-  all: ["optimization"] as const,
-  status: () => [...optimizationKeys.all, "status"] as const,
-  modules: () => [...optimizationKeys.all, "modules"] as const,
-  runs: () => [...optimizationKeys.all, "runs"] as const,
-  runsList: (params?: { status?: string }) =>
-    [...optimizationKeys.runs(), "list", params ?? {}] as const,
-  runDetail: (id: string) => [...optimizationKeys.runs(), "detail", id] as const,
-  runResults: (runId: string, params?: { limit?: number; offset?: number }) =>
-    [...optimizationKeys.runs(), "results", runId, params ?? {}] as const,
-  runComparison: (runIds: string[]) => [...optimizationKeys.runs(), "compare", ...runIds] as const,
-  datasets: () => [...optimizationKeys.all, "datasets"] as const,
-  datasetList: (params?: { module_slug?: string }) =>
-    [...optimizationKeys.datasets(), "list", params ?? {}] as const,
-  datasetDetail: (id: string) => [...optimizationKeys.datasets(), "detail", id] as const,
 };

@@ -48,7 +48,7 @@ Active top-level areas under `src/fleet_rlm/`:
 - `api/`: thin FastAPI app, auth, routers, schemas, websocket lifecycle, event shaping, and server utilities (also hosts terminal flow, HITL checkpointing, and hosted policy orchestration)
 - `cli/`: Typer/argparse entrypoints, commands, and runtime builder constructors
 - `runtime/`: shared recursive chat/runtime logic, DSPy modules, execution drivers, content processing, tools, and runtime modules
-  - `runtime/modules/` hosts runtime RLM factories, module registry definitions, variable-mode modules, and the `RecursiveWorkspaceModule` multi-pass orchestrator (L4)
+  - `runtime/modules/` hosts native `dspy.RLM` factories, module registry definitions, the `RecursiveWorkspaceModule` thin orchestrator (`workspace.py`), and its per-phase `dspy.Module`s (`workspace_phases.py`); large inputs cross into the sandbox as `dspy.SandboxSerializable` models from `runtime/sandbox_types.py` (no variable-mode wrapper)
   - `runtime/tools/rlm_delegate.py` owns `delegate_to_rlm` / `delegate_to_rlm_batched` plus host-side trajectory persistence into `external_traces`
 - `integrations/`: config, database, observability, and external-system integrations
   - `integrations/daytona/isolation.py` exposes host-mediated `store_evidence` / `fetch_evidence` / `list_evidence` to sandbox code via `bridge_callbacks.py`; `DATABASE_URL` is never exposed to the sandbox
@@ -89,6 +89,7 @@ Canonical HTTP and websocket surfaces:
 - `DELETE /api/v1/sessions/{id}` — archive (soft-delete) session
 - `POST /api/v1/sessions/{id}/restore` — unarchive a session
 - `POST /api/v1/sessions/{id}/export` — export session as a GEPA dataset
+- `POST /api/v1/sessions/{id}/trace-export` — export raw MLflow traces plus a distilled GEPA bundle
 - `GET/PATCH /api/v1/runtime/settings`
 - `POST /api/v1/runtime/tests/daytona`
 - `POST /api/v1/runtime/tests/lm`
@@ -158,7 +159,7 @@ Runtime ownership:
 - Keep shared evaluation infrastructure in `quality/datasets.py`, `quality/scoring_helpers.py`, `quality/artifacts.py`, `quality/module_registry.py`, and `quality/optimization_runner.py`
 - Keep per-module optimization entrypoints in `quality/optimize_*.py`; each must register a `ModuleOptimizationSpec` in the module registry
 - The module registry (`module_registry.py`) is the single source of truth for optimizable modules, consumed by CLI, API, and frontend. **Note:** `longcot-reasoner` is currently registered via `fleet_rlm.quality.optimize_longcot`; add new `quality/optimize_*.py` entrypoints to `_MODULE_ENTRYPOINTS` as more modules become optimizable.
-- GEPA runs offline only — never in the live request path
+- Optimization is GEPA-only via `quality/optimization_runner.run_module_optimization` and runs offline only — never in the live request path
 - Keep grouped tool helpers under root `runtime/tools/*`
 - Keep DSPy-native MCP tool discovery in `runtime/tools/mcp_tools.py`. It is opt-in:
   servers are configured via the `FLEET_RLM_MCP_SERVERS` env var (JSON array) and
@@ -254,7 +255,7 @@ Phase 7 aligns the `dspy.RLM` path and recursion with the reference implementati
 
 ### P7.1: History as Native REPL Variable
 
-- `RLMVariableSignature` now includes `history: dspy.History` as an `InputField`
+- The RLM turn signatures (`RLMTurnSignature`, `RLMDocumentTurnSignature`, `RLMWorkspaceTurnSignature`) include `history: dspy.History` as an `InputField`
 - `EscalatingFleetModule._run_rlm` always passes the `history` object to the RLM module
 - The model can inspect full prior conversation turns with code (e.g., `history.messages[-1]`) rather than relying solely on flattened recency snippets
 

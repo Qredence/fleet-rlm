@@ -38,6 +38,22 @@ Notes:
 - Startup still succeeds if MLflow cannot be reached; the app reports MLflow as
   degraded instead of failing boot.
 
+### Runtime status: `ready` vs `degraded`
+
+`GET /api/v1/runtime/status` exposes an `mlflow.startup_status` field separate from the
+top-level `ready` flag (which also requires LM and Daytona connection tests).
+
+| `startup_status` | Meaning |
+|---|---|
+| `ready` | MLflow client initialized and tracking URI is reachable. |
+| `degraded` | MLflow is enabled but startup failed (version mismatch, unreachable URI, init error). |
+| `disabled` | `MLFLOW_ENABLED=false`. |
+| `pending` | Background MLflow warmup has not finished yet. |
+
+Chat turns call `initialize_mlflow()` at turn entry, so tracing can recover on the first
+turn even when background startup is still racing. Check `mlflow.startup_error` in
+Settings → Runtime for actionable remediation (for example stale server on port 5001).
+
 If the local startup logs report `Detected out-of-date database schema`, upgrade the configured backend store before retrying:
 
 ```bash
@@ -45,6 +61,40 @@ uv run mlflow db upgrade sqlite:///.data/mlruns.db
 ```
 
 If the local tracking history does not matter, you can also delete the SQLite database file backing `MLFLOW_LOCAL_BACKEND_STORE_URI` and let MLflow recreate it on the next startup.
+
+### Troubleshooting: experiment load / GraphQL version mismatch
+
+If the MLflow UI shows an error like:
+
+```text
+Experiment load error: Cannot query field 'effectiveTraceArchivalRetention' on type 'MlflowExperiment'.
+```
+
+the browser UI is newer than the tracking server still listening on your local port
+(commonly after `uv sync` upgraded MLflow but an older `mlflow server` process was left
+running). MLflow 3.13+ exposes `effectiveTraceArchivalRetention`; a 3.12 server cannot
+answer that GraphQL field.
+
+Check the versions:
+
+```bash
+uv run mlflow --version
+curl -s http://127.0.0.1:5001/version
+```
+
+When they differ, stop the stale server, upgrade the backend store, and restart with the
+project environment:
+
+```bash
+# from repo root
+lsof -ti :5001 | xargs kill
+make mlflow-upgrade
+make mlflow-server
+```
+
+`make mlflow-upgrade` runs `uv run mlflow db upgrade` against `MLFLOW_LOCAL_BACKEND_STORE_URI`
+(default `sqlite:///.data/mlruns.db`). Fleet's local auto-start skips launching MLflow when
+port 5001 is already open, so restarting the server after dependency upgrades is required.
 
 ## 2. Enable MLflow in fleet-rlm
 
@@ -126,6 +176,12 @@ task. If startup cannot reach the tracking server, check `/api/v1/runtime/status
 for the `mlflow.startup_status` and `mlflow.startup_error` fields while you verify
 connectivity, permissions, or auth settings.
 
+MLflow tracing callbacks are registered through Fleet's centralized DSPy callback
+registry during that optional startup. The registry keeps callback registration lazy,
+deduplicated, and safe when startup runs in a worker thread or inside an active
+`dspy.context(...)` override, so initialization success means the current DSPy work can
+see the tracing callbacks.
+
 When MLflow is enabled:
 
 - WebSocket chat turns generate one `mlflow_client_request_id` per turn.
@@ -142,7 +198,7 @@ uv run fleet web
 ```
 
 As you use the app, MLflow traces are recorded in the configured experiment.
-For RLM document-analysis and variable-mode runs, Fleet also materializes
+For `dspy.RLM` document-analysis and workspace-context runs, Fleet also materializes
 trajectory code execution as MLflow `TOOL` spans named `repl_execute`. Those
 spans include bounded `mlflow.spanInputs` / `mlflow.spanOutputs` payloads so the
 MLflow trace tree, external scorers, and the chat transcript all describe the
@@ -239,13 +295,16 @@ workflow lives in the web app under **Optimization**:
 1. Open the **Optimization** surface.
 2. Start from **Modules** if you already know the module you want to optimize, or
    start from **Datasets** if you need to upload JSON/JSONL data or export a
-   session/transcript into a dataset first.
+   session/transcript into a dataset first. From the workspace, use **Export
+   traces for GEPA** on a completed session to write raw MLflow JSON/JSONL plus
+   a distilled trace bundle for the proposer.
 3. Use **Create** to review the GEPA run configuration:
    - selected module / resolved `program_spec`
    - uploaded or exported dataset
    - optimization intensity (`auto`)
    - train ratio
    - optional output path
+   - optional distilled trace bundle paths
 4. Submit the run and monitor it in **Runs**.
 5. Use **Compare** to inspect score deltas, prompt diffs, and per-example changes
    across completed GEPA runs.
@@ -254,7 +313,7 @@ Under the hood, GEPA runs keep MLflow DSPy compile/eval autologging enabled and
 record consistent run metadata so the MLflow experiment reflects the same
 workflow the frontend exposes.
 
-## 8. Use the Offline MIPROv2 Helper
+## 8. Use the Offline GEPA Helper
 
 Exported trace datasets can also drive offline DSPy optimization.
 
@@ -270,7 +329,7 @@ uv run python scripts/mlflow_cli.py optimize \
 
 Notes:
 
-- The optimizer defaults to `dspy.teleprompt.MIPROv2`.
+- The helper uses the same GEPA-only optimization runner as the product API.
 - The script turns on MLflow DSPy compile/eval autologging for the optimization run.
 - The dataset is split into train/validation partitions with `--train-ratio` (default `0.8`).
 - The provided program symbol can be:
@@ -305,6 +364,26 @@ When you need an end-to-end proof that websocket execution, persisted run state,
 ```bash
 uv run python scripts/validate_rlm_e2e_trace.py \
   --server-url http://127.0.0.1:8000
+```
+
+When MLflow is enabled, assert that the terminal websocket payload includes a trace id and
+optionally verify it exists in the tracking server:
+
+```bash
+uv run python scripts/validate_rlm_e2e_trace.py \
+  --server-url http://127.0.0.1:8000 \
+  --require-mlflow-trace-id \
+  --verify-mlflow
+```
+
+CLI verification without the harness:
+
+```bash
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5001
+uv run mlflow traces search \
+  --experiment-id "$(uv run mlflow experiments search --filter-string \"name='fleet-rlm'\" --output json | jq -r '.[0].experiment_id')" \
+  --max-results 5 \
+  --output json
 ```
 
 This requires a running API server plus working database, auth, and runtime configuration. The harness writes captured payloads and validation artifacts under `output/phase-04/qre-301/` by default.

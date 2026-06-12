@@ -27,8 +27,21 @@ interface RuntimeStatusPanelProps {
   status: RuntimeStatusResponse | undefined;
 }
 
+function mlflowStatusBadgeVariant(
+  startupStatus: string | undefined,
+): "default" | "secondary" | "destructive" {
+  if (startupStatus === "ready") {
+    return "default";
+  }
+  if (startupStatus === "disabled") {
+    return "secondary";
+  }
+  return "destructive";
+}
+
 export function RuntimeStatusPanel({ status }: RuntimeStatusPanelProps) {
   const activeModels = status?.active_models;
+  const mlflow = status?.mlflow;
 
   return (
     <>
@@ -56,9 +69,49 @@ export function RuntimeStatusPanel({ status }: RuntimeStatusPanelProps) {
           </FieldDescription>
         </FieldContent>
         <div className="flex min-w-0 flex-col items-end gap-1 text-right text-xs text-muted-foreground">
-          <div>Planner: {activeModels?.planner || "not set"}</div>
-          <div>Delegate: {activeModels?.delegate || "not set"}</div>
-          <div>Delegate small: {activeModels?.delegate_small || "not set"}</div>
+          <div>
+            Planner: {activeModels?.planner || "not set"}
+            {activeModels?.planner_profile_name ? ` (${activeModels.planner_profile_name})` : null}
+          </div>
+          <div>
+            Delegate: {activeModels?.delegate || "not set"}
+            {activeModels?.delegate_profile_name
+              ? ` (${activeModels.delegate_profile_name})`
+              : null}
+          </div>
+          <div>
+            Delegate small: {activeModels?.delegate_small || "not set"}
+            {activeModels?.delegate_small_profile_name
+              ? ` (${activeModels.delegate_small_profile_name})`
+              : null}
+          </div>
+        </div>
+      </Field>
+
+      <Field orientation="responsive" className={STATUS_FIELD_CLASSNAME}>
+        <FieldContent>
+          <FieldTitle>MLflow</FieldTitle>
+          <FieldDescription>
+            {mlflow?.enabled
+              ? `Tracing experiment: ${mlflow.experiment_name ?? "fleet-rlm"}.`
+              : "MLflow tracing is disabled for this runtime."}
+            {mlflow?.startup_error ? ` ${mlflow.startup_error}` : null}
+          </FieldDescription>
+        </FieldContent>
+        <div className="flex min-w-0 flex-col items-end gap-1 text-right text-xs text-muted-foreground">
+          <Badge variant={mlflowStatusBadgeVariant(mlflow?.startup_status)}>
+            {mlflow?.enabled ? (mlflow.startup_status ?? "unknown") : "disabled"}
+          </Badge>
+          {mlflow?.tracking_uri ? (
+            <a
+              href={mlflow.tracking_uri}
+              target="_blank"
+              rel="noreferrer"
+              className="text-accent underline-offset-4 hover:underline"
+            >
+              Open tracking UI
+            </a>
+          ) : null}
         </div>
       </Field>
 

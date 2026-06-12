@@ -629,7 +629,7 @@ class OptimizationRepository(RepositoryContextMixin):
         display_name = module_slug
         description: str | None = None
         required_dataset_keys: list[str] = []
-        output_key = "assistant_response"
+        output_key = "response"
         metadata_json: dict[str, Any] = {}
 
         try:

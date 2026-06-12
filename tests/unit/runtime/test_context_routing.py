@@ -14,7 +14,7 @@ from fleet_rlm.runtime.modules.context_routing import (
     resolve_effective_context_paths,
     should_auto_route_large_context,
 )
-from fleet_rlm.runtime.modules.variable_mode import VARIABLE_MODE_THRESHOLD
+from fleet_rlm.runtime.modules.factory import VARIABLE_MODE_THRESHOLD
 
 
 def test_estimate_turn_context_includes_message_and_history() -> None:
@@ -78,6 +78,28 @@ def test_build_turn_context_pathless_followup_keeps_large_context(tmp_path: Path
     )
     assert turn_context.context_paths == [str(doc)]
     assert should_auto_route_large_context(execution_mode="auto", turn_context=turn_context)
+
+
+def test_load_large_context_kwargs_includes_sandbox_staged_paths(tmp_path: Path) -> None:
+    doc = tmp_path / "oolong.bin"
+    doc.write_bytes(b"x" * 2000)
+    turn_context = build_turn_context(user_request="count", context_paths=[str(doc)])
+    interpreter = type(
+        "Interpreter",
+        (),
+        {
+            "context_sources": [
+                type(
+                    "Source",
+                    (),
+                    {"staged_path": ".fleet-rlm/context/01-oolong/extracted.txt"},
+                )()
+            ]
+        },
+    )()
+    kwargs = load_large_context_rlm_kwargs(turn_context, interpreter=interpreter)
+    assert kwargs["source_metadata"]["sandbox_staged_paths"] == [".fleet-rlm/context/01-oolong/extracted.txt"]
+    assert "host filesystem paths" in kwargs["source_metadata"]["context_staging_hint"].lower()
 
 
 def test_load_large_context_kwargs_staging_hint_without_extractable_single_file(tmp_path: Path) -> None:

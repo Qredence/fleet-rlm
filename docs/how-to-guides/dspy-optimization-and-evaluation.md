@@ -1,25 +1,25 @@
 # DSPy Optimization and Evaluation
 
 This guide covers how to optimize and evaluate worker-native DSPy modules
-using the standardized evaluation subsystem in `runtime/quality/`.
+using the standardized evaluation subsystem in `src/fleet_rlm/quality/`.
 
 ## Overview
 
-Fleet-RLM includes several DSPy modules in the runtime layer, each
-responsible for a recursive reasoning step such as reflection, decomposition,
-context selection, repair, or verification. The evaluation subsystem provides:
+The evaluation subsystem provides:
 
 - **Central module registry** — single source of truth for optimizable modules
 - **Shared dataset helpers** — consistent loading, validation, and splitting
 - **Reusable scoring primitives** — composable scoring helpers for metrics
-- **GEPA optimization pipeline** — compile → evaluate → save → manifest flow
+- **Single optimization pipeline** — dataset → `dspy.Example` → optimizer →
+  `dspy.Evaluate` → save + manifest, with GEPA as the only public optimizer
 - **Artifact/manifest discipline** — Daytona-backed storage with local fallback
 - **Unified CLI** — `fleet-rlm optimize <module> <dataset>`
 - **Frontend module picker** — Optimization page with registry-driven selection
+  and distilled trace-bundle handoff from completed workspace sessions
 
-GEPA (Generative Evolution of Prompts with Assessment) runs are compute-intensive
-and should not be invoked in the live request path; use the CLI or the async
-`POST /api/v1/optimization/runs` endpoint instead.
+Optimization runs are compute-intensive and should not be invoked in the live
+request path; use the CLI or the async `POST /api/v1/optimization/runs`
+endpoint instead.
 
 ### Prerequisites
 
@@ -33,15 +33,19 @@ Set the following environment variables (or provide a `.env` file):
 
 ## Registered Modules
 
-The following modules are registered in the module registry:
+The following modules are registered in the module registry
+(`fleet_rlm.quality.module_registry`):
 
-| Slug                | Label                      | Program Spec                                                            |
-| ------------------- | -------------------------- | ----------------------------------------------------------------------- |
-| `reflect-and-revise`  | Reflect & Revise           | `fleet_rlm.runtime.agent.signatures:ReflectAndReviseWorkspaceStep` |
-| `context-selection`   | Recursive Context Selection | `fleet_rlm.runtime.content.context_assembly:build_context_program`    |
-| `decomposition`       | Recursive Decomposition    | `fleet_rlm.runtime.agent.signatures:RecursiveDecompositionSignature` |
-| `repair`              | Recursive Repair           | `fleet_rlm.runtime.agent.signatures:RecursiveRepairSignature`    |
-| `verification`        | Recursive Verification     | `fleet_rlm.runtime.agent.signatures:RecursiveVerificationSignature` |
+| Slug               | Label              | Program Spec                                              |
+| ------------------ | ------------------ | --------------------------------------------------------- |
+| `longcot-reasoner` | LongCoT QA Reasoner | `fleet_rlm.runtime.agent.signatures:LongCoTQASignature` |
+
+Ad-hoc programs that are not registered can still be optimized by passing a
+`module:attr` program spec — the API (`program_spec` field) and
+`scripts/mlflow_cli.py optimize --program` build an ad-hoc spec via
+`optimization_runner.spec_for_program` and run the same pipeline. Ad-hoc
+datasets use the exported MLflow trace-row format (`inputs` +
+`expectations.expected_response`).
 
 ## Dataset Format
 
@@ -92,7 +96,7 @@ handle loading and validation; the converter handles field mapping.
 
 ### Scoring primitives
 
-Reusable scoring functions in `runtime/quality/scoring_helpers.py`:
+Reusable scoring functions in `src/fleet_rlm/quality/scoring_helpers.py`:
 
 - **`set_overlap_score(expected, actual)`** — Jaccard-style set overlap (0.0–1.0)
 - **`text_presence_score(text)`** — 1.0 if non-empty, 0.0 if empty
@@ -117,20 +121,29 @@ result = builder.build()  # returns ScoreWithFeedback
 
 Each module defines its own `build_*_feedback_metric()` function that returns
 a GEPA-compatible metric callable. Metrics may use shared scoring primitives
-or implement entirely custom scoring logic.
+or implement entirely custom scoring logic. Keep the `trace`, `pred_name`, and
+`pred_trace` parameters in metric signatures so GEPA can request
+component-level feedback.
 
-## Running GEPA Optimization
+## Running Optimization
 
 ### CLI
 
 ```bash
-# Optimize a registered module
-fleet-rlm optimize reflect-and-revise traces.json
+# Optimize a registered module with GEPA
+fleet-rlm optimize longcot-reasoner traces.json
 
 # With options
-fleet-rlm optimize decomposition data.jsonl \
-  --output-path optimized_decomp.json \
+fleet-rlm optimize longcot-reasoner data.jsonl \
+  --output-path optimized_longcot.json \
   --train-ratio 0.75 \
+  --auto medium \
+  --report
+
+# Optimize a markdown skill artifact with offline trace context
+fleet-rlm optimize skill data.jsonl \
+  --skill-name optimization \
+  --trace-bundle-path artifacts/traces/optimization-failures.jsonl \
   --auto medium \
   --report
 
@@ -144,13 +157,14 @@ fleet-rlm optimize list
 from fleet_rlm.quality.module_registry import get_module_spec
 from fleet_rlm.quality.optimization_runner import run_module_optimization
 
-spec = get_module_spec("reflect-and-revise")
+spec = get_module_spec("longcot-reasoner")
 result = run_module_optimization(
     spec,
     dataset_path="traces.json",
     output_path="optimized.json",
     train_ratio=0.8,
     auto="light",
+    optimizer="gepa",
 )
 print(result["validation_score"])
 ```
@@ -160,9 +174,9 @@ print(result["validation_score"])
 The Optimization page provides two tabs:
 
 - **New Run** — module picker that auto-populates the program spec and shows
-  required dataset keys. Select a module, provide a dataset path, and click
-  "Run GEPA". Runs are submitted asynchronously and the UI switches to the
-  Run History tab automatically.
+  required dataset keys. Select a module, choose an existing/uploaded/path
+  dataset, optionally attach distilled trace bundle paths from a workspace
+  session export, and start the async GEPA run.
 - **Run History** — lists all optimization runs with status badges, relative
   timestamps, and a detail panel. Click any run to expand its metadata
   (program spec, optimizer, intensity, train ratio, dataset, phase, duration,
@@ -174,7 +188,12 @@ The Optimization page provides two tabs:
 # Async run (recommended — returns immediately, runs in background)
 curl -X POST http://localhost:8000/api/v1/optimization/runs \
   -H "Content-Type: application/json" \
-  -d '{"module_slug": "reflect-and-revise", "dataset_path": "traces.json", "auto": "light", "train_ratio": 0.8}'
+  -d '{"module_slug": "longcot-reasoner", "dataset_path": "traces.json", "auto": "light", "train_ratio": 0.8, "optimizer": "gepa"}'
+
+# Async skill optimization run
+curl -X POST http://localhost:8000/api/v1/optimization/runs \
+  -H "Content-Type: application/json" \
+  -d '{"skill_name": "optimization", "dataset_path": "skill_cases.jsonl", "trace_bundle_paths": ["artifacts/traces/optimization-failures.jsonl"], "auto": "medium", "optimizer": "gepa"}'
 
 # List runs (with optional status filter and pagination)
 curl -s http://localhost:8000/api/v1/optimization/runs?status=completed&limit=10
@@ -185,7 +204,7 @@ curl -s http://localhost:8000/api/v1/optimization/runs/1
 # Blocking run (backward compatible — waits for completion)
 curl -X POST http://localhost:8000/api/v1/optimization/run \
   -H "Content-Type: application/json" \
-  -d '{"module_slug": "reflect-and-revise", "dataset_path": "traces.json", "auto": "light", "train_ratio": 0.8}'
+  -d '{"module_slug": "longcot-reasoner", "dataset_path": "traces.json", "auto": "light", "train_ratio": 0.8}'
 ```
 
 ### Run lifecycle
@@ -196,6 +215,13 @@ Async runs progress through these phases:
 If any phase fails, the run transitions to `failed` with an error message.
 On server restart, any runs left in `running` status are automatically
 recovered and marked as `failed` with a "Server restarted" message.
+
+### Run comparison (API only for v1)
+
+`GET /api/v1/optimization/runs/compare` compares two completed GEPA runs and
+returns score deltas, prompt diffs, and artifact references. The Optimization
+page at `/app/optimization` exposes run history and detail review in v1; a
+dedicated Compare tab UI is planned for v1.1.
 
 ## Artifacts and Manifests
 
@@ -212,12 +238,12 @@ Each optimization run produces a JSON manifest:
 ```json
 {
   "dataset_path": "traces.json",
-  "module": "fleet_rlm.runtime.agent.signatures:ReflectAndReviseWorkspaceStep",
+  "module": "fleet_rlm.runtime.agent.signatures:LongCoTQASignature",
   "train_examples": 80,
   "validation_examples": 20,
   "validation_score": 0.847,
   "optimizer": "GEPA",
-  "metric": "reflect_and_revise_feedback",
+  "metric": "longcot_qa_metric",
   "auto": "light"
 }
 ```
@@ -227,7 +253,7 @@ Each optimization run produces a JSON manifest:
 Use `--report` with the CLI to print a markdown summary to stdout:
 
 ```bash
-fleet-rlm optimize reflect-and-revise traces.json --report
+fleet-rlm optimize longcot-reasoner traces.json --report
 ```
 
 This prints module info, dataset stats, and validation score.
@@ -235,7 +261,7 @@ This prints module info, dataset stats, and validation score.
 ## Adding Optimization for a New Module
 
 1. **Define the module's optimization entrypoint** in a new file under
-   `src/fleet_rlm/runtime/quality/optimize_<name>.py`:
+   `src/fleet_rlm/quality/optimize_<name>.py`:
 
    ```python
    from fleet_rlm.quality.datasets import load_dataset_rows, validate_required_keys
@@ -271,16 +297,17 @@ This prints module info, dataset stats, and validation score.
    register_module(_MODULE_SPEC)
    ```
 
-2. **Register the import** in `module_registry.py`'s `_ensure_registered()`:
+2. **Register the entrypoint** by appending the module path to
+   `_MODULE_ENTRYPOINTS` in `src/fleet_rlm/quality/module_registry.py`:
 
    ```python
-   try:
-       from . import optimize_my_module as _m6  # noqa: F401
-   except Exception:
-       pass
+   _MODULE_ENTRYPOINTS: tuple[str, ...] = (
+       "fleet_rlm.quality.optimize_longcot",
+       "fleet_rlm.quality.optimize_my_module",
+   )
    ```
 
-3. **Add tests** in `tests/unit/runtime/quality/test_optimize_my_module.py`.
+3. **Add tests** in `tests/unit/quality/test_optimize_my_module.py`.
 
 4. **Export from `__init__.py`** if needed for backward compatibility.
 

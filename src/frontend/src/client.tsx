@@ -1,8 +1,9 @@
 import { StartClient } from "@tanstack/react-start/client";
-import { hydrateRoot } from "react-dom/client";
+import { createRoot, hydrateRoot } from "react-dom/client";
 import posthog from "posthog-js";
 import { PostHogProvider } from "@posthog/react";
 
+import App from "@/app/App";
 import { resolvePostHogWebConfig } from "@/lib/telemetry/posthog";
 import "./styles/globals.css";
 
@@ -38,9 +39,25 @@ window.addEventListener("pageshow", () => {
   sessionStorage.removeItem(PRELOAD_RELOAD_KEY);
 });
 
-hydrateRoot(
-  document,
-  <PostHogProvider client={posthog}>
-    <StartClient />
-  </PostHogProvider>,
+const hasServerRenderedApp = Array.from(document.body.children).some(
+  (child) => child.tagName.toLowerCase() !== "noscript",
 );
+
+if (hasServerRenderedApp) {
+  hydrateRoot(
+    document,
+    <PostHogProvider client={posthog}>
+      <StartClient />
+    </PostHogProvider>,
+  );
+} else {
+  const root = document.createElement("div");
+  root.id = "root";
+  root.className = "isolate";
+  document.body.append(root);
+  createRoot(root).render(
+    <PostHogProvider client={posthog}>
+      <App />
+    </PostHogProvider>,
+  );
+}

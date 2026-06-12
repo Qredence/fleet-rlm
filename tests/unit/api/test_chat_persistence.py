@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from types import SimpleNamespace
 from typing import Any
 
@@ -518,3 +519,43 @@ async def test_switch_session_layout_initialization_does_not_create_daytona_sess
     )
 
     assert layout_calls == [False]
+
+
+@pytest.mark.asyncio
+async def test_link_database_session_uses_local_identity_ownership(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.api.routers.ws import session as ws_session
+    from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+
+    created: dict[str, Any] = {}
+
+    def fake_create_session(**kwargs: Any) -> Any:
+        created.update(kwargs)
+        return SimpleNamespace(id=42)
+
+    monkeypatch.setattr("fleet_rlm.integrations.local_store.create_session", fake_create_session)
+
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+    cached = {"manifest": {}}
+
+    linked_id = await ws_session._link_database_session(
+        cached=cached,
+        sess_id="frontend-session-1",
+        manifest_path="sessions/frontend-session-1/conversation.json",
+        owner_tenant_claim="default",
+        owner_user_claim="anonymous",
+        workspace_id="default",
+        persistence=object(),
+        identity_rows=IdentityUpsertResult(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        ),
+    )
+
+    assert linked_id == "42"
+    assert created["owner_tenant"] == str(tenant_id)
+    assert created["owner_user"] == str(user_id)
+    assert created["workspace_id"] == str(workspace_id)
+    assert cached["manifest"]["metadata"]["db_session_id"] == "42"

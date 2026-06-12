@@ -130,6 +130,14 @@ _RUNTIME_SETTING_DEFINITIONS: tuple[RuntimeSettingDefinition, ...] = (
         placeholder="https://api.openai.com/v1",
     ),
     _definition(
+        "DSPY_DELEGATE_LM_API_BASE",
+        category="llm",
+        label="Delegate API base",
+        description="Optional custom API base URL for delegate and small-delegate model calls.",
+        reload_required=True,
+        placeholder="https://api.openai.com/v1",
+    ),
+    _definition(
         "DSPY_LM_MAX_TOKENS",
         category="llm",
         label="Planner max tokens",

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.5.40
+  version: 0.5.50
 paths:
   /health:
     get:
@@ -397,6 +397,115 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TurnListResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sessions/{session_id}/traces:
+    get:
+      tags:
+      - sessions
+      summary: List session traces
+      description: Paginated external traces (for example MLflow child delegations)
+        linked to a session.
+      operationId: get_session_traces_api_v1_sessions__session_id__traces_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Identifier of the session whose traces to list.
+          title: Session Id
+        description: Identifier of the session whose traces to list.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          description: Page size
+          default: 50
+          title: Limit
+        description: Page size
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          description: Pagination offset
+          default: 0
+          title: Offset
+        description: Pagination offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionTraceListResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The caller does not have permission to access this resource.
+        '503':
+          description: Session services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Session not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/sessions/{session_id}/trace-export:
+    post:
+      tags:
+      - sessions
+      summary: Export session MLflow traces
+      description: Write full MLflow trace JSON/JSONL artifacts and a distilled GEPA
+        evidence bundle.
+      operationId: export_session_traces_endpoint_api_v1_sessions__session_id__trace_export_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Identifier of the session whose traces to export.
+          title: Session Id
+        description: Identifier of the session whose traces to export.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionTraceExportRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionTraceExportResponse'
         '401':
           description: Authentication is required or the provided token is invalid.
         '403':
@@ -878,6 +987,293 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runtime/llm-profiles:
+    get:
+      tags:
+      - runtime
+      summary: List Llm Profiles
+      operationId: list_llm_profiles_api_v1_runtime_llm_profiles_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/LlmProviderProfileResponse'
+                type: array
+                title: Response List Llm Profiles Api V1 Runtime Llm Profiles Get
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+    post:
+      tags:
+      - runtime
+      summary: Create Llm Profile
+      operationId: create_llm_profile_api_v1_runtime_llm_profiles_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LlmProviderProfileCreateRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmProviderProfileResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '403':
+          description: LLM profile writes are allowed only when APP_ENV=local.
+        '404':
+          description: Requested profile was not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runtime/llm-profiles/{profile_id}:
+    patch:
+      tags:
+      - runtime
+      summary: Update Llm Profile
+      operationId: update_llm_profile_api_v1_runtime_llm_profiles__profile_id__patch
+      parameters:
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          description: Provider profile identifier.
+          title: Profile Id
+        description: Provider profile identifier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LlmProviderProfileUpdateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmProviderProfileResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '403':
+          description: LLM profile writes are allowed only when APP_ENV=local.
+        '404':
+          description: Requested profile was not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - runtime
+      summary: Delete Llm Profile
+      operationId: delete_llm_profile_api_v1_runtime_llm_profiles__profile_id__delete
+      parameters:
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          description: Provider profile identifier.
+          title: Profile Id
+        description: Provider profile identifier.
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '403':
+          description: LLM profile writes are allowed only when APP_ENV=local.
+        '404':
+          description: Requested profile was not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runtime/llm-profiles/{profile_id}/models:
+    get:
+      tags:
+      - runtime
+      summary: Get Llm Profile Models
+      operationId: get_llm_profile_models_api_v1_runtime_llm_profiles__profile_id__models_get
+      parameters:
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          description: Provider profile identifier.
+          title: Profile Id
+        description: Provider profile identifier.
+      - name: refresh
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Bypass cached model catalog results.
+          default: false
+          title: Refresh
+        description: Bypass cached model catalog results.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmModelCatalogResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '404':
+          description: Requested profile was not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runtime/llm-profiles/{profile_id}/test:
+    post:
+      tags:
+      - runtime
+      summary: Test Llm Profile
+      operationId: test_llm_profile_api_v1_runtime_llm_profiles__profile_id__test_post
+      parameters:
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          description: Provider profile identifier.
+          title: Profile Id
+        description: Provider profile identifier.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeConnectivityTestResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '403':
+          description: LLM profile writes are allowed only when APP_ENV=local.
+        '404':
+          description: Requested profile was not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runtime/llm-roles:
+    get:
+      tags:
+      - runtime
+      summary: Get Llm Roles
+      operationId: get_llm_roles_api_v1_runtime_llm_roles_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmRoleBindingsResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+    patch:
+      tags:
+      - runtime
+      summary: Patch Llm Roles
+      operationId: patch_llm_roles_api_v1_runtime_llm_roles_patch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LlmRoleBindingsUpdateRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmRoleBindingsResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '403':
+          description: LLM profile writes are allowed only when APP_ENV=local.
+        '404':
+          description: Requested profile was not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runtime/llm-profiles/import-env:
+    post:
+      tags:
+      - runtime
+      summary: Import Llm Profiles From Env
+      operationId: import_llm_profiles_from_env_api_v1_runtime_llm_profiles_import_env_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmImportEnvResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '403':
+          description: LLM profile writes are allowed only when APP_ENV=local.
+        '404':
+          description: Requested profile was not found.
   /api/v1/sandboxes:
     get:
       tags:
@@ -1141,7 +1537,7 @@ paths:
       tags:
       - optimization
       summary: Run Optimization
-      description: Trigger a GEPA prompt optimization run.
+      description: Trigger a blocking GEPA prompt optimization run.
       operationId: run_optimization_api_v1_optimization_run_post
       requestBody:
         content:
@@ -1175,7 +1571,7 @@ paths:
       tags:
       - optimization
       summary: Create Optimization Run
-      description: 'Create a non-blocking GEPA optimization run.
+      description: 'Create a non-blocking prompt optimization run.
 
 
         Returns immediately with the run_id.  The optimization executes as a
@@ -1329,6 +1725,78 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OptimizationRunResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Run not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/optimization/runs/{run_id}/details:
+    get:
+      tags:
+      - optimization
+      summary: Get Run Details
+      description: Get a detailed GEPA improvement report for a single optimization
+        run.
+      operationId: get_run_details_api_v1_optimization_runs__run_id__details_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Identifier of the optimization run to inspect.
+          title: Run Id
+        description: Identifier of the optimization run to inspect.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptimizationRunDetailResponse'
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Run not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/optimization/runs/{run_id}/promotion-drafts:
+    post:
+      tags:
+      - optimization
+      summary: Create Run Promotion Draft
+      description: Create or load a non-mutating draft promotion artifact for an optimization
+        run.
+      operationId: create_run_promotion_draft_api_v1_optimization_runs__run_id__promotion_drafts_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Identifier of the optimization run to draft for promotion.
+          title: Run Id
+        description: Identifier of the optimization run to draft for promotion.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptimizationPromotionDraftResponse'
         '401':
           description: Authentication is required or the provided token is invalid.
         '404':
@@ -1864,6 +2332,37 @@ components:
           type: array
           title: Required Dataset Keys
           description: Dataset keys required for this module's examples.
+        input_keys:
+          items:
+            type: string
+          type: array
+          title: Input Keys
+          description: Dataset keys used as DSPy inputs for this optimization target.
+        output_keys:
+          items:
+            type: string
+          type: array
+          title: Output Keys
+          description: Dataset keys scored as DSPy outputs for this optimization target.
+        runtime_module_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Runtime Module Name
+          description: Runtime module registry name when this target adapts a runtime
+            module.
+        signature_class_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Signature Class Name
+          description: DSPy signature class optimized by this target, when available.
+        optimization_target_kind:
+          type: string
+          title: Optimization Target Kind
+          description: Optimization target kind such as custom, runtime-signature,
+            or skill.
+          default: custom
         offline_only:
           type: boolean
           title: Offline Only
@@ -1905,6 +2404,40 @@ components:
           title: Module Slug
           description: Registered module slug for server-side dispatch. When provided,
             program_spec is auto-resolved from the module registry.
+        skill_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Skill Name
+          description: Bundled or mounted Fleet skill name to optimize as a markdown
+            skill artifact.
+        skill_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Skill Path
+          description: Relative path to a SKILL.md-compatible markdown file to optimize.
+        trace_bundle_paths:
+          items:
+            type: string
+          type: array
+          title: Trace Bundle Paths
+          description: Optional offline trace bundle paths available to the RLM-GEPA
+            instruction proposer.
+        reflection_profile_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reflection Profile Id
+          description: Optional LLM provider profile id for the GEPA proposer/reflection
+            model.
+        reflection_model_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reflection Model Id
+          description: Optional provider-native model id for the GEPA proposer/reflection
+            model.
         output_path:
           anyOf:
           - type: string
@@ -1918,14 +2451,28 @@ components:
           - medium
           - heavy
           title: Auto
-          description: GEPA optimization intensity level.
+          description: Optimization intensity level.
           default: light
+        max_metric_calls:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Max Metric Calls
+          description: Optional GEPA metric-call budget override for short offline
+            smoke runs.
         train_ratio:
           type: number
           title: Train Ratio
           description: Fraction of examples to use for training (remainder used for
             validation).
           default: 0.8
+        optimizer:
+          type: string
+          const: gepa
+          title: Optimizer
+          description: Optimizer backend to use. GEPA is the only supported optimizer.
+          default: gepa
       additionalProperties: false
       type: object
       title: GEPAOptimizationRequest
@@ -1972,6 +2519,12 @@ components:
           - type: 'null'
           title: Manifest Path
           description: Filesystem path to the optimization manifest, when available.
+        feedback_summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Feedback Summary
+          description: Short summary of validation feedback from the GEPA run.
         module_slug:
           anyOf:
           - type: string
@@ -1979,6 +2532,25 @@ components:
           title: Module Slug
           description: Module slug used for this optimization run, when server-side
             dispatch was used.
+        reflection_profile_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reflection Profile Id
+          description: LLM provider profile id used for GEPA reflection/proposal,
+            when selected.
+        reflection_model_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reflection Model Id
+          description: Model id used for GEPA reflection/proposal, when selected.
+        distilled_trace_bundle_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Distilled Trace Bundle Path
+          description: Distilled trace bundle used by the RLM-GEPA proposer.
         error:
           anyOf:
           - type: string
@@ -2075,10 +2647,497 @@ components:
           type: string
           title: Version
           description: Package version currently serving the API.
-          default: 0.5.40
+          default: 0.5.50
       type: object
       title: HealthResponse
       description: Response body for the lightweight health endpoint.
+    LlmImportEnvResponse:
+      properties:
+        profile:
+          $ref: '#/components/schemas/LlmProviderProfileResponse'
+          description: Profile created from current DSPY_* env values.
+        bindings:
+          items:
+            $ref: '#/components/schemas/LlmRoleBindingResponse'
+          type: array
+          title: Bindings
+          description: Role bindings created from the imported environment values.
+      type: object
+      required:
+      - profile
+      title: LlmImportEnvResponse
+    LlmModelCatalogEntry:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Provider-native model identifier.
+        label:
+          type: string
+          title: Label
+          description: Display label for model dropdowns.
+        litellm_model:
+          type: string
+          title: Litellm Model
+          description: LiteLLM model identifier used by the runtime.
+      type: object
+      required:
+      - id
+      - label
+      - litellm_model
+      title: LlmModelCatalogEntry
+    LlmModelCatalogResponse:
+      properties:
+        profile_id:
+          type: string
+          format: uuid
+          title: Profile Id
+          description: Provider profile that supplied the catalog.
+        models:
+          items:
+            $ref: '#/components/schemas/LlmModelCatalogEntry'
+          type: array
+          title: Models
+          description: Models available for assignment from this profile.
+        cached:
+          type: boolean
+          title: Cached
+          description: Whether the response came from the in-memory cache.
+          default: true
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+          description: Provider fetch error when the catalog is empty or fell back
+            to static models.
+      type: object
+      required:
+      - profile_id
+      title: LlmModelCatalogResponse
+    LlmProviderProfileCreateRequest:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Human-readable profile label.
+        provider_type:
+          type: string
+          enum:
+          - openai
+          - anthropic
+          - google
+          - openai_compatible
+          title: Provider Type
+          description: Provider integration type.
+        api_base:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Api Base
+          description: Optional API base URL override.
+        api_key:
+          type: string
+          title: Api Key
+          description: Provider API key to encrypt and store.
+          default: ''
+        metadata_json:
+          additionalProperties: true
+          type: object
+          title: Metadata Json
+          description: Optional provider-specific metadata.
+      type: object
+      required:
+      - name
+      - provider_type
+      title: LlmProviderProfileCreateRequest
+    LlmProviderProfileResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+          description: Stable provider profile identifier.
+        name:
+          type: string
+          title: Name
+          description: Human-readable profile label shown in Settings.
+        provider_type:
+          type: string
+          enum:
+          - openai
+          - anthropic
+          - google
+          - openai_compatible
+          title: Provider Type
+          description: Provider integration type.
+        api_base:
+          type: string
+          title: Api Base
+          description: Configured API base URL for the provider.
+          default: ''
+        api_key_masked:
+          type: string
+          title: Api Key Masked
+          description: Masked API key preview for display.
+          default: ''
+        has_api_key:
+          type: boolean
+          title: Has Api Key
+          description: Whether a stored API key is configured.
+          default: false
+        metadata_json:
+          additionalProperties: true
+          type: object
+          title: Metadata Json
+          description: Optional provider-specific metadata.
+      type: object
+      required:
+      - id
+      - name
+      - provider_type
+      title: LlmProviderProfileResponse
+    LlmProviderProfileUpdateRequest:
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+          description: Updated profile label.
+        provider_type:
+          anyOf:
+          - type: string
+            enum:
+            - openai
+            - anthropic
+            - google
+            - openai_compatible
+          - type: 'null'
+          title: Provider Type
+          description: Updated provider type.
+        api_base:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Api Base
+          description: Updated API base URL.
+        api_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Api Key
+          description: Replacement API key when rotating credentials.
+        clear_api_key:
+          type: boolean
+          title: Clear Api Key
+          description: When true, remove the stored API key.
+          default: false
+        metadata_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Metadata Json
+          description: Replacement metadata payload.
+      type: object
+      title: LlmProviderProfileUpdateRequest
+    LlmRoleBindingResponse:
+      properties:
+        role:
+          type: string
+          enum:
+          - planner
+          - delegate
+          - delegate_small
+          title: Role
+          description: Runtime role receiving the model binding.
+        profile_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Profile Id
+          description: Assigned provider profile identifier.
+        profile_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Profile Name
+          description: Assigned provider profile label.
+        model_id:
+          type: string
+          title: Model Id
+          description: Provider-native model identifier for the role.
+          default: ''
+      type: object
+      required:
+      - role
+      title: LlmRoleBindingResponse
+    LlmRoleBindingUpdate:
+      properties:
+        profile_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Profile Id
+          description: Provider profile to bind to the role.
+        model_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model Id
+          description: Provider-native model identifier for the role.
+      type: object
+      title: LlmRoleBindingUpdate
+    LlmRoleBindingsResponse:
+      properties:
+        bindings:
+          items:
+            $ref: '#/components/schemas/LlmRoleBindingResponse'
+          type: array
+          title: Bindings
+          description: Current planner, delegate, and delegate_small bindings.
+      type: object
+      title: LlmRoleBindingsResponse
+    LlmRoleBindingsUpdateRequest:
+      properties:
+        planner:
+          anyOf:
+          - $ref: '#/components/schemas/LlmRoleBindingUpdate'
+          - type: 'null'
+          description: Planner role binding patch.
+        delegate:
+          anyOf:
+          - $ref: '#/components/schemas/LlmRoleBindingUpdate'
+          - type: 'null'
+          description: Delegate role binding patch.
+        delegate_small:
+          anyOf:
+          - $ref: '#/components/schemas/LlmRoleBindingUpdate'
+          - type: 'null'
+          description: Small delegate role binding patch.
+      type: object
+      title: LlmRoleBindingsUpdateRequest
+    OptimizationArtifactRef:
+      properties:
+        label:
+          type: string
+          title: Label
+          description: Human-readable artifact label.
+        path:
+          type: string
+          title: Path
+          description: Filesystem path to the artifact.
+        kind:
+          type: string
+          title: Kind
+          description: Artifact kind such as manifest, output, trace_bundle, or promotion_draft.
+        exists:
+          type: boolean
+          title: Exists
+          description: Whether the artifact exists on the local filesystem.
+          default: false
+      type: object
+      required:
+      - label
+      - path
+      - kind
+      title: OptimizationArtifactRef
+      description: A filesystem artifact produced or consumed by an optimization run.
+    OptimizationCandidateDecision:
+      properties:
+        candidate_id:
+          type: string
+          title: Candidate Id
+          description: Stable candidate identifier for display.
+        status:
+          type: string
+          title: Status
+          description: 'Candidate status: selected, rejected, unavailable, or failed.'
+        summary:
+          type: string
+          title: Summary
+          description: Human-readable decision summary.
+        rationale:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Rationale
+          description: Why this candidate was selected or rejected.
+        score:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Score
+          description: Candidate score, when available.
+        score_delta:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Score Delta
+          description: Candidate score delta, when available.
+        artifact_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Artifact Path
+          description: Candidate artifact path, when available.
+        missing_candidate_artifact:
+          type: boolean
+          title: Missing Candidate Artifact
+          description: Whether the proposer generated ideas but no candidate artifact
+            was persisted.
+          default: false
+      type: object
+      required:
+      - candidate_id
+      - status
+      - summary
+      title: OptimizationCandidateDecision
+      description: A selected or rejected GEPA prompt candidate decision.
+    OptimizationHoldoutSummary:
+      properties:
+        promotion_ready:
+          type: boolean
+          title: Promotion Ready
+          description: Whether the run has external holdout validation suitable for
+            promotion.
+          default: false
+        external_validation_available:
+          type: boolean
+          title: External Validation Available
+          description: Whether a true holdout validation split was available.
+          default: true
+        baseline_score:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Baseline Score
+          description: Baseline validation score.
+        optimized_score:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Optimized Score
+          description: Optimized validation score.
+        score_delta:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Score Delta
+          description: Optimized minus baseline score.
+      type: object
+      title: OptimizationHoldoutSummary
+      description: Typed holdout validation summary from a GEPA review bundle.
+    OptimizationPromotionDraftResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          description: Whether the draft was created or loaded.
+          default: true
+        draft_id:
+          type: string
+          title: Draft Id
+          description: Stable promotion draft identifier.
+        run_id:
+          type: string
+          title: Run Id
+          description: Optimization run id.
+        target:
+          type: string
+          title: Target
+          description: Skill/module target represented by the draft.
+        status:
+          type: string
+          const: draft
+          title: Status
+          description: Draft status.
+          default: draft
+        summary:
+          type: string
+          title: Summary
+          description: Human-readable draft summary.
+        optimized_artifact_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Optimized Artifact Path
+          description: Optimized artifact path.
+        manifest_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Manifest Path
+          description: Source manifest path.
+        draft_path:
+          type: string
+          title: Draft Path
+          description: Filesystem path to the draft artifact.
+        created_at:
+          type: string
+          title: Created At
+          description: ISO timestamp when the draft was created.
+      type: object
+      required:
+      - draft_id
+      - run_id
+      - target
+      - summary
+      - draft_path
+      - created_at
+      title: OptimizationPromotionDraftResponse
+      description: A draft promotion artifact for a completed optimization run.
+    OptimizationPromptDiffItem:
+      properties:
+        predictor_name:
+          type: string
+          title: Predictor Name
+          description: Predictor or skill component name.
+        before_prompt:
+          type: string
+          title: Before Prompt
+          description: Prompt text before GEPA.
+          default: ''
+        after_prompt:
+          type: string
+          title: After Prompt
+          description: Prompt text selected after GEPA.
+          default: ''
+        changed:
+          type: boolean
+          title: Changed
+          description: Whether the selected prompt differs semantically from the original
+            text.
+      type: object
+      required:
+      - predictor_name
+      - changed
+      title: OptimizationPromptDiffItem
+      description: Before/after prompt text for one optimized predictor or skill artifact.
+    OptimizationReviewBundle:
+      properties:
+        version:
+          type: integer
+          title: Version
+          description: Review bundle schema version.
+          default: 1
+        holdout:
+          anyOf:
+          - $ref: '#/components/schemas/OptimizationHoldoutSummary'
+          - type: 'null'
+          description: Holdout validation summary for promotion readiness.
+        insights:
+          anyOf:
+          - $ref: '#/components/schemas/OptimizationRunInsights'
+          - type: 'null'
+          description: Canonical GEPA insights written at manifest time.
+      type: object
+      title: OptimizationReviewBundle
+      description: Typed subset of the manifest review bundle used by the optimization
+        UI.
     OptimizationRunCreatedResponse:
       properties:
         run_id:
@@ -2095,6 +3154,121 @@ components:
       - run_id
       title: OptimizationRunCreatedResponse
       description: Response when an async optimization run is created.
+    OptimizationRunDetailResponse:
+      properties:
+        run:
+          $ref: '#/components/schemas/OptimizationRunResponse'
+          description: Base optimization run metadata.
+        manifest_available:
+          type: boolean
+          title: Manifest Available
+          description: Whether the manifest file was parsed.
+        manifest:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Manifest
+          description: Parsed optimization manifest, when available.
+        review_bundle:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Review Bundle
+          description: Parsed manifest review bundle, when available.
+        typed_review_bundle:
+          anyOf:
+          - $ref: '#/components/schemas/OptimizationReviewBundle'
+          - type: 'null'
+          description: Typed review bundle fields used by the optimization UI.
+        artifact_refs:
+          items:
+            $ref: '#/components/schemas/OptimizationArtifactRef'
+          type: array
+          title: Artifact Refs
+          description: Important run artifact paths.
+        score_summary:
+          $ref: '#/components/schemas/OptimizationScoreSummary'
+          description: Score and split details.
+        prompt_diffs:
+          items:
+            $ref: '#/components/schemas/OptimizationPromptDiffItem'
+          type: array
+          title: Prompt Diffs
+          description: Full before/after prompt snapshots.
+        trace_evidence:
+          items:
+            $ref: '#/components/schemas/OptimizationTraceEvidenceItem'
+          type: array
+          title: Trace Evidence
+          description: Distilled trace evidence records without raw spans.
+        candidate_decisions:
+          items:
+            $ref: '#/components/schemas/OptimizationCandidateDecision'
+          type: array
+          title: Candidate Decisions
+          description: Selected and rejected candidate decisions when available.
+        insights:
+          $ref: '#/components/schemas/OptimizationRunInsights'
+          description: Normalized improvement report.
+        optimized_artifact_text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Optimized Artifact Text
+          description: Text content of the selected optimized artifact when it is
+            safely readable.
+        optimized_artifact_truncated:
+          type: boolean
+          title: Optimized Artifact Truncated
+          description: Whether optimized_artifact_text was truncated.
+          default: false
+      type: object
+      required:
+      - run
+      - manifest_available
+      - artifact_refs
+      - score_summary
+      - prompt_diffs
+      - trace_evidence
+      - candidate_decisions
+      - insights
+      title: OptimizationRunDetailResponse
+      description: Detailed GEPA run report for RLM improvement auditability.
+    OptimizationRunInsights:
+      properties:
+        selected_outcome:
+          type: string
+          enum:
+          - changed
+          - unchanged
+          - failed
+          - running
+          - unknown
+          title: Selected Outcome
+          description: Outcome of the selected GEPA artifact.
+        summary:
+          type: string
+          title: Summary
+          description: Short explanation of what GEPA did for this run.
+        trace_driven_recommendations:
+          items:
+            type: string
+          type: array
+          title: Trace Driven Recommendations
+          description: Recommendations distilled from trace evidence.
+        next_step:
+          type: string
+          title: Next Step
+          description: Recommended next optimization action.
+      type: object
+      required:
+      - selected_outcome
+      - summary
+      - next_step
+      title: OptimizationRunInsights
+      description: Normalized human-readable improvement insights for a GEPA run.
     OptimizationRunResponse:
       properties:
         id:
@@ -2137,6 +3311,37 @@ components:
           - type: 'null'
           title: Dataset Path
           description: Path to the dataset used.
+        reflection_profile_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reflection Profile Id
+          description: LLM provider profile id used for GEPA reflection/proposal,
+            when selected.
+        reflection_model_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reflection Model Id
+          description: Model id used for GEPA reflection/proposal, when selected.
+        raw_trace_export_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Raw Trace Export Path
+          description: Full raw trace export path, when present.
+        distilled_trace_bundle_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Distilled Trace Bundle Path
+          description: Distilled GEPA trace evidence bundle path, when present.
+        prompt_snapshot_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Prompt Snapshot Path
+          description: Prompt snapshot or diff artifact path, when present.
         train_examples:
           anyOf:
           - type: integer
@@ -2198,6 +3403,106 @@ components:
       - started_at
       title: OptimizationRunResponse
       description: A single optimization run record.
+    OptimizationScoreSummary:
+      properties:
+        baseline_score:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Baseline Score
+          description: Baseline validation score, when available.
+        optimized_score:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Optimized Score
+          description: Optimized validation score, when available.
+        score_delta:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Score Delta
+          description: Optimized minus baseline score, when available.
+        train_examples:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Train Examples
+          description: Number of training examples.
+        validation_examples:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Validation Examples
+          description: Number of validation examples.
+        train_ratio:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Train Ratio
+          description: Requested train/validation split ratio.
+        split_strategy:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Split Strategy
+          description: Dataset split strategy recorded in the manifest.
+      type: object
+      title: OptimizationScoreSummary
+      description: Score and split summary for a GEPA run.
+    OptimizationTraceEvidenceItem:
+      properties:
+        kind:
+          type: string
+          title: Kind
+          description: Distilled bundle record kind.
+        trace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Trace Id
+          description: Supporting MLflow trace id.
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Session Id
+          description: MLflow/runtime session id.
+        client_request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Client Request Id
+          description: Client request id, when available.
+        trace_count:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Trace Count
+          description: Trace count for summary records.
+        span_count:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Span Count
+          description: Number of spans in the supporting trace.
+        failure_categories:
+          items:
+            type: string
+          type: array
+          title: Failure Categories
+          description: Distilled failure categories.
+        prompt_change_recommendations:
+          items:
+            type: string
+          type: array
+          title: Prompt Change Recommendations
+          description: Prompt-change recommendations distilled from trace evidence.
+      type: object
+      required:
+      - kind
+      title: OptimizationTraceEvidenceItem
+      description: Distilled trace evidence used by the GEPA proposer.
     PromptSnapshotItem:
       properties:
         predictor_name:
@@ -2401,6 +3706,44 @@ components:
           title: Delegate Small
           description: Small delegate model identifier currently in use, when configured.
           default: ''
+        planner_profile_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Planner Profile Id
+          description: Provider profile id bound to the planner role, when configured.
+        planner_profile_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Planner Profile Name
+          description: Human-readable provider profile name for the planner role.
+        delegate_profile_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Delegate Profile Id
+          description: Provider profile id bound to the delegate role, when configured.
+        delegate_profile_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Delegate Profile Name
+          description: Human-readable provider profile name for the delegate role.
+        delegate_small_profile_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Delegate Small Profile Id
+          description: Provider profile id bound to the delegate_small role, when
+            configured.
+        delegate_small_profile_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Delegate Small Profile Name
+          description: Human-readable provider profile name for the delegate_small
+            role.
       type: object
       title: RuntimeActiveModels
       description: Resolved active model identifiers currently loaded by the runtime.
@@ -2464,6 +3807,68 @@ components:
       - checked_at
       title: RuntimeConnectivityTestResponse
       description: Result payload for runtime connectivity and preflight diagnostics.
+    RuntimeMlflowStatus:
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          description: Whether MLflow tracing is enabled for this runtime.
+        tracking_uri:
+          type: string
+          title: Tracking Uri
+          description: Configured MLflow tracking server URI.
+          default: ''
+        experiment_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Experiment Name
+          description: Configured MLflow experiment name.
+        experiment_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Experiment Id
+          description: Resolved MLflow experiment id when startup succeeded.
+        auto_start_enabled:
+          type: boolean
+          title: Auto Start Enabled
+          description: Whether the runtime may auto-start a local MLflow tracking
+            server.
+          default: false
+        auto_assessment_enabled:
+          type: boolean
+          title: Auto Assessment Enabled
+          description: Whether Fleet-managed MLflow auto-assessment is enabled.
+          default: false
+        persisted_scorer_count:
+          type: integer
+          title: Persisted Scorer Count
+          description: Count of persisted MLflow scorers active on the tracking server.
+          default: 0
+        persisted_scorers:
+          items:
+            type: string
+          type: array
+          title: Persisted Scorers
+          description: Names of persisted MLflow scorers active on the tracking server.
+        startup_status:
+          type: string
+          title: Startup Status
+          description: MLflow startup lifecycle status for this runtime.
+          default: pending
+        startup_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Startup Error
+          description: Startup error summary when MLflow initialization failed.
+      type: object
+      required:
+      - enabled
+      title: RuntimeMlflowStatus
+      description: MLflow enablement and startup diagnostics for the runtime settings
+        UI.
     RuntimeSettingsCategory:
       properties:
         id:
@@ -2624,9 +4029,7 @@ components:
           title: Llm
           description: Language-model configuration and readiness diagnostics.
         mlflow:
-          additionalProperties: true
-          type: object
-          title: Mlflow
+          $ref: '#/components/schemas/RuntimeMlflowStatus'
           description: MLflow enablement and startup diagnostics.
         daytona:
           additionalProperties: true
@@ -2894,7 +4297,7 @@ components:
           type: string
           title: Version
           description: Package version currently serving the API.
-          default: 0.5.40
+          default: 0.5.50
         app_env:
           type: string
           enum:
@@ -3251,6 +4654,168 @@ components:
       type: object
       title: SessionStatsResponse
       description: Aggregated usage stats for a session.
+    SessionTraceExportRequest:
+      properties:
+        format:
+          type: string
+          enum:
+          - json
+          - jsonl
+          - both
+          title: Format
+          description: Trace artifact format to write.
+          default: both
+        mlflow_session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Mlflow Session Id
+          description: Optional MLflow trace session id hint. The server validates
+            the hint against authorized runtime session ids for the resolved durable
+            session before export.
+      additionalProperties: false
+      type: object
+      title: SessionTraceExportRequest
+      description: Request body for exporting a session's linked MLflow traces.
+    SessionTraceExportResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          description: Whether trace export completed.
+          default: true
+        session_id:
+          type: string
+          title: Session Id
+          description: Durable session identifier.
+        trace_count:
+          type: integer
+          title: Trace Count
+          description: Number of MLflow traces exported.
+        json_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Json Path
+          description: Path to the full JSON trace artifact.
+        jsonl_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Jsonl Path
+          description: Path to the full JSONL trace artifact.
+        distilled_bundle_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Distilled Bundle Path
+          description: Path to the distilled GEPA evidence bundle.
+        skipped_trace_ids:
+          items:
+            type: string
+          type: array
+          title: Skipped Trace Ids
+          description: Trace identifiers that could not be resolved/exported.
+        errors:
+          items:
+            type: string
+          type: array
+          title: Errors
+          description: Non-fatal export errors.
+        summary:
+          additionalProperties: true
+          type: object
+          title: Summary
+          description: Distilled trace export summary.
+      type: object
+      required:
+      - session_id
+      - trace_count
+      title: SessionTraceExportResponse
+      description: Trace export artifact paths for a session.
+    SessionTraceItem:
+      properties:
+        trace_id:
+          type: string
+          title: Trace Id
+          description: Provider trace identifier (for example an MLflow trace id).
+        client_request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Client Request Id
+          description: Optional Fleet client request id correlated with the trace.
+        turn_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Turn Id
+          description: Chat turn id when the trace was recorded.
+        provider:
+          type: string
+          title: Provider
+          description: External trace provider (for example mlflow).
+        experiment_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Experiment Id
+          description: Provider experiment id when known.
+        experiment_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Experiment Name
+          description: Provider experiment name when known.
+        observed_at:
+          type: string
+          title: Observed At
+          description: ISO-8601 timestamp when the trace was observed.
+        metadata:
+          additionalProperties: true
+          type: object
+          title: Metadata
+          description: Provider-specific metadata payload stored with the trace row.
+      type: object
+      required:
+      - trace_id
+      - provider
+      - observed_at
+      title: SessionTraceItem
+      description: External trace metadata linked to a durable session.
+    SessionTraceListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/SessionTraceItem'
+          type: array
+          title: Items
+          description: Trace rows linked to the session.
+        total:
+          type: integer
+          title: Total
+          description: Total matching traces.
+        offset:
+          type: integer
+          title: Offset
+          description: Pagination offset.
+        limit:
+          type: integer
+          title: Limit
+          description: Page size.
+        has_more:
+          type: boolean
+          title: Has More
+          description: Whether additional pages are available.
+      type: object
+      required:
+      - items
+      - total
+      - offset
+      - limit
+      - has_more
+      title: SessionTraceListResponse
+      description: Paginated external traces for a session.
     TraceFeedbackRequest:
       properties:
         trace_id:

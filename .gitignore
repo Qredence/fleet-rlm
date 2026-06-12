@@ -23,6 +23,7 @@ venv/
 .env.*
 !.env.example
 !.env.sample
+.fleet/
 
 # Jupyter
 .ipynb_checkpoints/
@@ -161,3 +162,8 @@ src/frontend/test_output.txt
 
 
 .understand-anything/
+plan-code-change/
+skill-optimization/
+traces/
+plan/
+transcript-vvqo_92l.jsonl

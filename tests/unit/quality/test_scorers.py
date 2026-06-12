@@ -27,23 +27,6 @@ class _FakeJudge:
         self.model = model
 
 
-class _FakeLM:
-    last_messages: list[dict[str, str]] | None = None
-
-    def __init__(self, model: str, temperature: float = 0.0) -> None:
-        self.model = model
-        self.temperature = temperature
-
-    def __call__(self, *, messages: list[dict[str, str]]):
-        _FakeLM.last_messages = messages
-        return ['```json\n{"score": 5, "reason": "Clear step-by-step logic."}\n```']
-
-
-@pytest.fixture(autouse=True)
-def _reset_fake_lm_state() -> None:
-    _FakeLM.last_messages = None
-
-
 def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> None:
     mlflow_module = types.ModuleType("mlflow")
     entities_module = types.ModuleType("mlflow.entities")
@@ -84,12 +67,6 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "mlflow.genai.scorers", scorers_module)
 
 
-def _install_fake_dspy(monkeypatch: pytest.MonkeyPatch) -> None:
-    dspy_module = types.ModuleType("dspy")
-    dspy_module.LM = _FakeLM  # ty: ignore[unresolved-attribute]
-    monkeypatch.setitem(sys.modules, "dspy", dspy_module)
-
-
 def _import_scorers_module(monkeypatch: pytest.MonkeyPatch):
     _install_fake_mlflow(monkeypatch)
     sys.modules.pop("fleet_rlm.quality.scorers", None)
@@ -112,9 +89,21 @@ def test_build_rlm_scorers_uses_env_model_and_optional_reasoning_judge(clean_run
     assert getattr(scorers[3], "_scorer_name") == "reasoning_quality"
 
 
-def test_reasoning_quality_scorer_parses_feedback_and_redacts_trace_inputs(clean_runtime_env, monkeypatch) -> None:
+def test_reasoning_quality_scorer_uses_predict_judge_and_redacts_trace_inputs(clean_runtime_env, monkeypatch) -> None:
     module = _import_scorers_module(monkeypatch)
-    _install_fake_dspy(monkeypatch)
+    fake_lm = SimpleNamespace(model="demo-model")
+    captured: dict[str, object] = {}
+
+    def fake_judge(lm, reasoning_text):
+        captured["lm"] = lm
+        captured["reasoning_text"] = reasoning_text
+        return 5, "Clear step-by-step logic."
+
+    monkeypatch.setattr(module, "_judge_reasoning", fake_judge)
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.config.resolve_lm",
+        lambda role, **kwargs: fake_lm,
+    )
     trace = SimpleNamespace(
         search_spans=lambda: [SimpleNamespace(name="Thought 1", inputs={"token": "super-secret", "note": "keep"})]
     )
@@ -127,10 +116,10 @@ def test_reasoning_quality_scorer_parses_feedback_and_redacts_trace_inputs(clean
         rationale="Clear step-by-step logic.",
         source=_FakeAssessmentSource(source_type="LLM_JUDGE", source_id="demo-model"),
     )
-    assert _FakeLM.last_messages is not None
-    prompt = _FakeLM.last_messages[0]["content"]
-    assert "***" in prompt
-    assert "super-secret" not in prompt
+    assert captured["lm"] is fake_lm
+    reasoning_text = str(captured["reasoning_text"])
+    assert "***" in reasoning_text
+    assert "super-secret" not in reasoning_text
 
 
 def test_get_default_judge_model_returns_repo_default(clean_runtime_env, monkeypatch) -> None:

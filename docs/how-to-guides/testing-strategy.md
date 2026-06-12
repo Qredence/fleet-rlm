@@ -301,6 +301,21 @@ Live LLM tests require secrets configuration:
   run: uv run pytest -q -m "live_llm"
 ```
 
+## MLflow verification lane
+
+For MLflow tracing regressions, use the maintained live harness with optional trace
+assertions (see [MLflow workflows](mlflow-workflows.md)):
+
+```bash
+uv run python scripts/validate_rlm_e2e_trace.py \
+  --server-url http://127.0.0.1:8000 \
+  --require-mlflow-trace-id \
+  --verify-mlflow
+```
+
+The optional `.github/workflows/mlflow-smoke.yml` workflow runs the same harness on
+`workflow_dispatch` when database secrets are configured.
+
 ## Related Documentation
 
 - [Developer Setup Guide](developer-setup.md) - Setting up a local development environment

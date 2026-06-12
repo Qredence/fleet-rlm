@@ -132,7 +132,7 @@ describe("parseWsServerFrame", () => {
     expect(frame.data.payload?.step).toMatchObject({ type: "output" });
   });
 
-  it("parses project_chat envelopes with top-level kind", () => {
+  it("rejects legacy bare-kind envelopes without a type field", () => {
     const frame = parseWsServerFrame({
       kind: "execution_step",
       text: "Planning response.",
@@ -143,11 +143,7 @@ describe("parseWsServerFrame", () => {
       sequence: 4,
     });
 
-    expect(frame).toBeTruthy();
-    if (!frame || frame.type !== "event") return;
-    expect(frame.data.kind).toBe("execution_step");
-    expect(frame.data.payload?.source_type).toBe("reasoning");
-    expect(frame.data.text).toBe("Planning response.");
+    expect(frame).toBeNull();
   });
 
   it("maps execution_step reasoning phase to reasoning source_type", () => {

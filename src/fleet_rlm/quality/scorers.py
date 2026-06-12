@@ -11,6 +11,34 @@ import os
 import re
 from typing import Any
 
+import dspy
+
+
+class ReasoningQualityJudge(dspy.Signature):
+    """Evaluate the reasoning quality of an AI agent based on its execution trace.
+
+    Score the reasoning from 1 to 5:
+    5: Perfectly logical, efficient, and clear reasoning leading to the goal.
+    3: Somewhat convoluted or circular, but eventually makes sense.
+    1: Illogical, hallucinations, or failure to reason about the tool outputs.
+    """
+
+    trace_reasoning: str = dspy.InputField(desc="Reasoning steps extracted from the agent's execution trace.")
+    score: int = dspy.OutputField(desc="Reasoning quality score from 1 (worst) to 5 (best).")
+    reason: str = dspy.OutputField(desc="Short justification for the score.")
+
+
+def _judge_reasoning(lm: Any, reasoning_text: str) -> tuple[int, str]:
+    """Score reasoning text with a typed Predict judge.
+
+    DSPy's adapter handles output parsing, so no manual JSON extraction is
+    needed.
+    """
+    with dspy.context(lm=lm):
+        verdict = dspy.Predict(ReasoningQualityJudge)(trace_reasoning=reasoning_text)
+    score = max(1, min(5, int(verdict.score)))
+    return score, str(verdict.reason or "No justification provided")
+
 
 def _load_mlflow_scorers() -> tuple[Any, Any, Any, Any, Any, Any, Any]:
     """Import MLflow scorer types lazily to avoid import-time side effects."""
@@ -178,8 +206,6 @@ def reasoning_quality_scorer(model: str) -> Any:
 
     @scorer(name="reasoning_quality")
     def judge(trace: Any) -> Feedback:
-        import dspy
-
         spans = trace.search_spans()
 
         reasoning_chunks: list[str] = []
@@ -201,54 +227,20 @@ def reasoning_quality_scorer(model: str) -> Any:
         if len(reasoning_text) > max_reasoning_len:
             reasoning_text = reasoning_text[: max_reasoning_len - 28] + "\n[TRACE TRUNCATED]"
 
-        prompt = f"""
-            Evaluate the reasoning quality of an AI agent based on its execution trace.
-
-            Trace Reasoning Steps:
-            {reasoning_text}
-
-            Score the reasoning from 1 to 5:
-            5: Perfectly logical, efficient, and clear reasoning leading to the goal.
-            3: Somewhat convoluted or circular, but eventually makes sense.
-            1: Illogical, hallucinations, or failure to reason about the tool outputs.
-
-            Return ONLY a JSON object with this format:
-            {{
-                "score": 5,
-                "reason": "Clear step-by-step logic."
-            }}
-        """
-
         try:
+            from fleet_rlm.runtime.config import resolve_lm
+
             # Strip the DSPy-style "provider:/" prefix so the remaining string is
             # a plain LiteLLM model identifier (e.g. "gemini/gemini-3.1-pro-preview").
             lm_model = model.split(":/")[-1] if ":/" in model else model
-            lm = dspy.LM(lm_model, temperature=0.0)
+            lm = resolve_lm("judge", model_name=lm_model)
+            if lm is None:
+                raise ValueError("No judge model configured")
 
-            responses = lm(messages=[{"role": "user", "content": prompt}])
-            # dspy.LM returns list[str | dict]; normalize to plain text.
-            if not responses:
-                raise ValueError("DSPy LM returned an empty response list")
-            raw = responses[0]
-            if isinstance(raw, str):
-                content = raw
-            elif isinstance(raw, dict):
-                content = raw.get("content") or raw.get("text") or (raw.get("message") or {}).get("content") or ""
-            else:
-                raise ValueError(f"Unexpected DSPy LM response type: {type(raw).__name__}")
-
-            if content.startswith("```json"):
-                content = content[7:]
-            if content.startswith("```"):
-                content = content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-
-            payload = json.loads(content.strip())
-
+            score, reason = _judge_reasoning(lm, reasoning_text)
             return Feedback(
-                value=payload.get("score", 1),
-                rationale=payload.get("reason", "Failed to parse reasoning"),
+                value=score,
+                rationale=reason,
                 source=AssessmentSource(
                     source_type="LLM_JUDGE",
                     source_id=lm_model,

@@ -5,11 +5,12 @@ from typing import Any
 import pytest
 
 from fleet_rlm.runtime.agent.runtime import AgentRuntime
+from fleet_rlm.runtime.agent.runtime_streaming import aiter_chat_turn_stream
 from fleet_rlm.runtime.events import RuntimeEventKind
 
 
 class _SyncOnlyAgent:
-    """Simulates EscalatingFleetModule without aforward — must use asyncio.to_thread."""
+    """Simulates a sync-only cognition module — must use asyncio.to_thread."""
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -25,13 +26,14 @@ class _SyncOnlyAgent:
 
 
 @pytest.mark.asyncio
-async def test_posthoc_stream_uses_worker_thread_for_sync_agent() -> None:
+async def test_unified_stream_uses_worker_thread_for_sync_agent() -> None:
     runtime = AgentRuntime(interpreter=None, use_escalation=False, extra_tools=[])
     runtime.agent = _SyncOnlyAgent()
 
     events = [
         event
-        async for event in runtime._aiter_chat_turn_stream_posthoc(
+        async for event in aiter_chat_turn_stream(
+            runtime,
             message="hello",
             cancel_check=None,
         )

@@ -11,7 +11,7 @@ import dspy
 
 from fleet_rlm.runtime.agent.turn_context import TurnContext
 from fleet_rlm.runtime.content.ingestion import read_document_content
-from fleet_rlm.runtime.modules.variable_mode import VARIABLE_MODE_THRESHOLD
+from fleet_rlm.runtime.modules.factory import VARIABLE_MODE_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
@@ -79,16 +79,10 @@ def _history_char_estimate(history: dspy.History | None) -> int:
     messages = list(getattr(history, "messages", []) or []) if history is not None else []
     total = 0
     for message in messages:
-        if isinstance(message, dict):
-            for key in ("user_message", "user_request", "response", "assistant_response", "answer"):
-                value = message.get(key)
-                if value not in (None, ""):
-                    total += len(str(value))
-        else:
-            for key in ("user_message", "user_request", "response", "assistant_response", "answer"):
-                value = getattr(message, key, None)
-                if value not in (None, ""):
-                    total += len(str(value))
+        for key in ("user_message", "response"):
+            value = message.get(key) if isinstance(message, dict) else getattr(message, key, None)
+            if value not in (None, ""):
+                total += len(str(value))
     return total
 
 
@@ -269,7 +263,7 @@ def load_large_context_rlm_kwargs(
 
     kwargs: dict[str, Any] = {}
     manifest: dict[str, str] = {}
-    source_metadata: dict[str, str] = {}
+    source_metadata: dict[str, Any] = {}
 
     docs_path = turn_context.docs_path
     if docs_path:
@@ -300,21 +294,40 @@ def load_large_context_rlm_kwargs(
                     kwargs["document_text"] = text
                     source_metadata.update(meta)
 
-        if "document_text" not in kwargs:
-            source_metadata.setdefault(
-                "context_staging_hint",
-                "Host paths in context_paths are not sandbox paths. "
-                "Read .fleet-rlm/context/manifest.json in the workspace and open each staged_path .extracted.txt file.",
+    if staged_paths and "document_text" not in kwargs:
+        sandbox_paths: list[str] = []
+        if interpreter is not None:
+            volume_mount = getattr(interpreter, "volume_mount_path", None)
+            if volume_mount:
+                source_metadata["volume_mount_path"] = str(volume_mount)
+
+            context_sources = getattr(interpreter, "context_sources", None) or getattr(
+                interpreter,
+                "_persisted_context_sources",
+                None,
+            )
+            if context_sources:
+                for source in context_sources:
+                    staged_path = getattr(source, "staged_path", None)
+                    if staged_path is None and isinstance(source, dict):
+                        staged_path = source.get("staged_path")
+                    if staged_path:
+                        sandbox_paths.append(str(staged_path))
+
+        if sandbox_paths:
+            source_metadata["sandbox_staged_paths"] = sandbox_paths
+            source_metadata["context_staging_hint"] = (
+                "Use sandbox_staged_paths only. Do not open host filesystem paths from context_paths."
+            )
+        else:
+            source_metadata["context_staging_hint"] = (
+                "Host paths in context_paths are not readable inside the Daytona REPL. "
+                "Use sandbox workspace paths from sandbox_staged_paths or read "
+                ".fleet-rlm/context/manifest.json and open each staged_path .extracted.txt file."
             )
 
     if source_metadata:
         kwargs["source_metadata"] = source_metadata
-
-    if interpreter is not None and staged_paths and "document_text" not in kwargs:
-        volume_mount = getattr(interpreter, "volume_mount_path", None)
-        if volume_mount:
-            kwargs.setdefault("source_metadata", {})
-            kwargs["source_metadata"]["volume_mount_path"] = str(volume_mount)
 
     return kwargs
 

@@ -218,7 +218,7 @@ async def _emit_stream_event(
     )
     is_terminal_event = _is_terminal_transport_event(event)
     if websocket is not None:
-        await _try_send_json(websocket, event_dict)
+        await _try_send_json(websocket, {"type": "event", "data": event_dict})
 
     if isinstance(event, RuntimeEvent):
         step = step_builder.from_runtime_event(event)

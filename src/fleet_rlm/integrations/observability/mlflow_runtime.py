@@ -36,6 +36,7 @@ _MLFLOW_IMPORT_LOCK = Lock()
 _INIT_IDENTITY: tuple[Any, ...] | None = None
 _LAST_INIT_WAS_AUTH_FAILURE = False
 _ACTIVE_CONFIG: MlflowConfig | None = None
+_CACHED_EXPERIMENT_ID: str | None = None
 
 
 def _mlflow_identity(config: MlflowConfig) -> tuple[Any, ...]:
@@ -206,12 +207,17 @@ def get_mlflow_config() -> MlflowConfig:
     return _ACTIVE_CONFIG or MlflowConfig.from_env()
 
 
+def get_mlflow_experiment_id() -> str | None:
+    """Return the cached MLflow experiment id from the last successful init."""
+    return _CACHED_EXPERIMENT_ID
+
+
 def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
     """Best-effort idempotent MLflow initialization for DSPy runtimes."""
     resolved = config or MlflowConfig.from_env()
     identity = _mlflow_identity(resolved)
 
-    global _LAST_INIT_WAS_AUTH_FAILURE, _INIT_IDENTITY, _ACTIVE_CONFIG
+    global _CACHED_EXPERIMENT_ID, _LAST_INIT_WAS_AUTH_FAILURE, _INIT_IDENTITY, _ACTIVE_CONFIG
     with _CLIENT_LOCK:
         _ACTIVE_CONFIG = resolved
 
@@ -219,15 +225,18 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
         # tracking endpoint after an auth-forbidden failure until auth changes.
         if identity == _INIT_IDENTITY:
             if _LAST_INIT_WAS_AUTH_FAILURE or not resolved.enabled:
+                _CACHED_EXPERIMENT_ID = None
                 return False
             mlflow = _import_mlflow()
             if mlflow is None:
+                _CACHED_EXPERIMENT_ID = None
                 return False
             return True
 
         if not resolved.enabled:
             _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity
+            _CACHED_EXPERIMENT_ID = None
             return False
 
         mlflow = _import_mlflow()
@@ -235,6 +244,7 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
             logger.debug("MLflow is not installed; skipping runtime initialization.")
             _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity
+            _CACHED_EXPERIMENT_ID = None
             return False
 
         try:
@@ -244,6 +254,7 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
                 try:
                     experiment = mlflow.get_experiment_by_name(resolved.experiment)
                     if experiment is not None:
+                        _CACHED_EXPERIMENT_ID = str(experiment.experiment_id)
                         client = mlflow.MlflowClient()
                         client.set_experiment_tag(
                             experiment.experiment_id,
@@ -287,12 +298,9 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
                 logger.debug("Failed to inspect/configure MLflow auto-assessment", exc_info=True)
 
             if _existing_trace_callback() is None:
-                callbacks = list(getattr(dspy.settings, "callbacks", []) or [])
-                new_callbacks: list[Any] = []
-                if not any(isinstance(cb, ThinkTagStripCallback) for cb in callbacks):
-                    new_callbacks.append(ThinkTagStripCallback())
-                new_callbacks.append(FleetMlflowTraceCallback())
-                dspy.configure(callbacks=[*callbacks, *new_callbacks])
+                from .callback_registry import ensure_dspy_callbacks
+
+                ensure_dspy_callbacks([ThinkTagStripCallback(), FleetMlflowTraceCallback()])
 
             _LAST_INIT_WAS_AUTH_FAILURE = False
             _INIT_IDENTITY = identity
@@ -300,6 +308,7 @@ def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
         except Exception as exc:
             is_auth_failure = _is_auth_forbidden_failure(exc)
             _LAST_INIT_WAS_AUTH_FAILURE = is_auth_failure
+            _CACHED_EXPERIMENT_ID = None
             # Only cache auth failures to avoid hammering the endpoint with bad creds.
             # Non-auth failures (transient errors) are not cached so the next call retries.
             if is_auth_failure:
@@ -637,6 +646,7 @@ __all__ = [
     "current_request_context",
     "flush_mlflow_traces",
     "get_mlflow_config",
+    "get_mlflow_experiment_id",
     "initialize_mlflow",
     "log_trace_feedback",
     "merge_trace_result_metadata",

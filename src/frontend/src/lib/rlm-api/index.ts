@@ -12,8 +12,22 @@ export {
   createBackendSessionId,
 } from "@/lib/rlm-api/ws-client";
 export { authEndpoints } from "@/lib/rlm-api/auth";
-export { traceEndpoints } from "@/lib/rlm-api/traces";
 export { infoEndpoints } from "@/lib/rlm-api/info";
+export { optimizationEndpoints } from "@/lib/rlm-api/optimization";
+export type {
+  DatasetListResponse,
+  DatasetResponse,
+  GEPAOptimizationRequest,
+  GEPAModuleInfo,
+  GEPAStatusResponse,
+  OptimizationRunCreatedResponse,
+  OptimizationPromotionDraftResponse,
+  OptimizationRunDetailResponse,
+  OptimizationRunResponse,
+  SessionTraceExportRequest,
+  SessionTraceExportResponse,
+  UploadOptimizationDatasetInput,
+} from "@/lib/rlm-api/optimization";
 export type {
   WsTraceMode,
   WsRuntimeMode,
@@ -31,8 +45,6 @@ export type {
 } from "@/lib/rlm-api/ws-client";
 export type {
   AuthMeResponse,
-  TraceFeedbackRequest,
-  TraceFeedbackResponse,
   RuntimeConnectivityTestResponse,
   RuntimeSettingsSnapshot,
   RuntimeSettingsUpdateResponse,

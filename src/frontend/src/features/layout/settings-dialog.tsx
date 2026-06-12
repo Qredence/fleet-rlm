@@ -57,7 +57,7 @@ function MobileSectionPicker({
     >
       {settingsSections.map(({ key, label }) => (
         <ToggleGroupItem key={key} value={key} aria-label={label}>
-          {key === "litellm" ? "LiteLLM" : label}
+          {label}
         </ToggleGroupItem>
       ))}
     </ToggleGroup>
@@ -130,7 +130,7 @@ export function SettingsDialog({
 
           <div className="flex items-center justify-between gap-3 px-4 pb-2 shrink-0">
             <div className="min-w-0">
-              <SheetTitle className="text-foreground typo-h3">Settings</SheetTitle>
+              <SheetTitle className="text-foreground typo-h3">{sectionTitle}</SheetTitle>
               <SheetDescription className="mt-1 text-sm text-muted-foreground">
                 {sectionDescription}
               </SheetDescription>
@@ -195,10 +195,10 @@ export function SettingsDialog({
           <main className="flex h-dialog min-w-0 flex-1 flex-col overflow-hidden bg-background">
             <header className="shrink-0 border-b border-border-subtle bg-background px-9 py-5">
               <DialogTitle className="typo-display font-semibold tracking-tight text-foreground">
-                Settings
+                {sectionTitle}
               </DialogTitle>
-              <DialogDescription className="sr-only">
-                Manage appearance, telemetry, LiteLLM integration, and runtime preferences.
+              <DialogDescription className="mt-1 text-sm text-muted-foreground">
+                {sectionDescription}
               </DialogDescription>
             </header>
             <ScrollArea className="flex-1">

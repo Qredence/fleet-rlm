@@ -35,11 +35,30 @@ from .events import ExecutionEventEmitter
 
 logger = logging.getLogger(__name__)
 
+_LLM_MODEL_ENV_KEYS = (
+    "DSPY_LM_MODEL",
+    "DSPY_DELEGATE_LM_MODEL",
+    "DSPY_DELEGATE_LM_SMALL_MODEL",
+    "DSPY_DELEGATE_LM_MAX_TOKENS",
+)
+
+
+def _sync_llm_model_config_from_env(cfg: ServerRuntimeConfig) -> None:
+    """Align in-memory runtime config with current process env model settings."""
+    normalized = {key: os.environ[key] for key in _LLM_MODEL_ENV_KEYS if key in os.environ}
+    if not normalized:
+        return
+
+    from fleet_rlm.api.runtime_services.settings import apply_runtime_settings_to_config
+
+    apply_runtime_settings_to_config(config=cfg, normalized=normalized)
+
 
 def _runtime_config_helpers():
     from fleet_rlm.runtime.config import (
         configure_posthog_analytics_from_env,
         get_delegate_lm_from_env,
+        get_delegate_small_lm_from_env,
         get_planner_lm_from_env,
     )
 
@@ -47,19 +66,26 @@ def _runtime_config_helpers():
         configure_posthog_analytics_from_env,
         get_planner_lm_from_env,
         get_delegate_lm_from_env,
+        get_delegate_small_lm_from_env,
     )
 
 
 def get_planner_lm_from_env(*args, **kwargs):
     """Compatibility shim for lazy planner LM loading."""
-    _, planner_loader, _ = _runtime_config_helpers()
+    _, planner_loader, _, _ = _runtime_config_helpers()
     return planner_loader(*args, **kwargs)
 
 
 def get_delegate_lm_from_env(*args, **kwargs):
     """Compatibility shim for lazy delegate LM loading."""
-    _, _, delegate_loader = _runtime_config_helpers()
+    _, _, delegate_loader, _ = _runtime_config_helpers()
     return delegate_loader(*args, **kwargs)
+
+
+def get_delegate_small_lm_from_env(*args, **kwargs):
+    """Compatibility shim for lazy small delegate LM loading."""
+    _, _, _, delegate_small_loader = _runtime_config_helpers()
+    return delegate_small_loader(*args, **kwargs)
 
 
 def resolve_runtime_config(
@@ -193,7 +219,8 @@ async def initialize_persistence(persistence_deps: PersistenceDeps, cfg: ServerR
 def initialize_lms(lm_deps: LmDeps, config_deps: ConfigDeps) -> None:
     """Load planner/delegate LMs into process state."""
     cfg = config_deps.config
-    configure_posthog, _, _ = _runtime_config_helpers()
+    _sync_llm_model_config_from_env(cfg)
+    configure_posthog, _, _, _ = _runtime_config_helpers()
     configure_posthog()
     model_name = cfg.agent_model
     if model_name is None:
@@ -206,6 +233,11 @@ def initialize_lms(lm_deps: LmDeps, config_deps: ConfigDeps) -> None:
     lm_deps.delegate_lm = get_delegate_lm_from_env(
         env_file=cfg.env_path,
         model_name=cfg.agent_delegate_model,
+        default_max_tokens=cfg.agent_delegate_max_tokens,
+    )
+    lm_deps.delegate_small_lm = get_delegate_small_lm_from_env(
+        env_file=cfg.env_path,
+        model_name=cfg.agent_delegate_small_model,
         default_max_tokens=cfg.agent_delegate_max_tokens,
     )
 
@@ -328,8 +360,22 @@ async def startup_server_state(state: ServerState) -> None:
     cfg = state.config_deps.config
 
     prime_runtime_env(cfg)
+    _sync_llm_model_config_from_env(cfg)
 
     await initialize_persistence(state.persistence_deps, cfg)
+
+    if state.persistence_deps.db_manager is None:
+        from fleet_rlm.integrations.llm_profiles.maintenance import repair_persisted_llm_profiles
+        from fleet_rlm.integrations.llm_profiles.store import resolve_profile_store
+
+        try:
+            await repair_persisted_llm_profiles(
+                resolve_profile_store(state.persistence_deps.db_manager),
+                env_path=cfg.env_path,
+            )
+            _sync_llm_model_config_from_env(cfg)
+        except Exception:
+            logger.warning("LLM profile repair failed during startup", exc_info=True)
 
     # Start the warm interpreter pool (non-fatal if Daytona is unconfigured).
     pool = state.interpreter_pool_deps.pool
@@ -377,6 +423,7 @@ async def shutdown_server_state(state: ServerState) -> None:
 
     state.lm_deps.planner_lm = None
     state.lm_deps.delegate_lm = None
+    state.lm_deps.delegate_small_lm = None
     from fleet_rlm.integrations.observability.client import shutdown_posthog_client
     from fleet_rlm.integrations.observability.mlflow_runtime import shutdown_mlflow
 

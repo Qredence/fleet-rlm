@@ -1,23 +1,23 @@
-"""Escalating fleet agent module — ChainOfThought, ReAct tools, or RLM per turn.
+"""Fleet program — typed per-turn routing across direct, ReAct tools, and RLM paths.
 
 This module implements the unified agent design: a single DSPy Module that
-seamlessly escalates from a lightweight ChainOfThought response to a real,
-tool-using ``dspy.ReAct`` loop or a full ``dspy.RLM`` loop when the situation
-demands it.
+routes each chat turn through a typed ``dspy.Predict`` router instead of a
+free-text sentinel.
 
 Routing:
-- Simple turns are answered by the ChainOfThought fast path.
-- When the fast-path reasoning contains the sentinel ``[TOOLS NEEDED]`` the
-  module runs the shared ``dspy.ReAct`` tool loop (the same ``FleetAgent``
-  program used by the non-escalating runtime).
-- ``execution_mode="rlm"``/``"rlm_only"``, ``force_escalate=True``, or an
-  auto-detected URL-document analysis request route to the ``dspy.RLM`` sandbox.
+- Deterministic signals (``execution_mode="rlm"``/``"rlm_only"``,
+  ``force_escalate=True``, URL-document requests, oversized turn context) go
+  straight to the ``dspy.RLM`` sandbox via :func:`resolve_rlm_routing`.
+- All other turns are classified by :class:`RouteTurnSignature` into
+  ``direct`` (ChainOfThought), ``tools`` (the shared ``dspy.ReAct`` loop), or
+  ``rlm`` (sandboxed Python execution).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,19 +25,27 @@ import dspy
 
 from fleet_rlm.runtime.agent.signatures import (
     ConversationSummarySignature,
+    RLMDocumentTurnSignature,
     RLMReActChatSignature,
+    RLMTurnSignature,
+    RLMWorkspaceTurnSignature,
+    RouteTurnSignature,
 )
 from fleet_rlm.runtime.agent.turn_context import TurnContext
-from fleet_rlm.runtime.modules.rlm_prompts import build_rlm_prompt_context, url_repl_only_enabled
+from fleet_rlm.runtime.modules.factory import (
+    VARIABLE_MODE_MAX_OUTPUT_CHARS,
+    create_runtime_rlm,
+    interpreter_delegation_tools,
+)
+from fleet_rlm.runtime.modules.rlm_prompts import build_rlm_core_context, url_repl_only_enabled
 from fleet_rlm.runtime.modules.rlm_routing import (
     fetch_url_document,
-    is_rlm_execution_mode,
     resolve_rlm_routing,
 )
+from fleet_rlm.runtime.sandbox_types import LargeDocument, WorkspaceContext
 
 logger = logging.getLogger(__name__)
 
-ESCALATION_SENTINEL = "[TOOLS NEEDED]"
 _RLM_FALLBACK_WARNING = "RLM escalation failed; returned a lightweight fallback response."
 _REACT_FALLBACK_WARNING = "ReAct tool loop failed; returned a lightweight fallback response."
 _REACT_MAX_ITERS = 10
@@ -52,22 +60,13 @@ def _prediction_set(prediction: dspy.Prediction, key: str, value: Any) -> None:
         object.__setattr__(prediction, key, value)
 
 
-def _history_value(message: Any, *keys: str) -> str:
+def _history_turn_text(message: Any) -> str:
     if isinstance(message, dict):
-        for key in keys:
-            value = message.get(key)
-            if value not in (None, ""):
-                return str(value)
-    for key in keys:
-        value = getattr(message, key, None)
-        if value not in (None, ""):
-            return str(value)
-    return ""
-
-
-def _format_history_turn(message: Any) -> str:
-    user_text = _history_value(message, "user_message", "user_request")
-    assistant_text = _history_value(message, "response", "assistant_response", "answer")
+        user_text = str(message.get("user_message") or "")
+        assistant_text = str(message.get("response") or "")
+    else:
+        user_text = str(getattr(message, "user_message", "") or "")
+        assistant_text = str(getattr(message, "response", "") or "")
     parts: list[str] = []
     if user_text:
         parts.append(f"User: {user_text}")
@@ -76,24 +75,28 @@ def _format_history_turn(message: Any) -> str:
     return "\n".join(parts)
 
 
-def _format_recent_history_context(history: dspy.History, *, max_turns: int = 4) -> str:
-    """Return an explicit recency-ordered history view for model inputs."""
-    messages = list(getattr(history, "messages", []) or [])
-    if not messages:
-        return ""
+async def _to_thread_unstreamed(fn: Callable[..., Any], /, **kwargs: Any) -> Any:
+    """Run blocking work in a worker thread with dspy token streaming disabled.
 
-    recent = messages[-max_turns:]
-    lines = [
-        "Recent chat history, ordered oldest to newest.",
-        "The final listed turn is the most recent prior user/assistant exchange.",
-    ]
-    for index, message in enumerate(recent, start=1):
-        turn = _format_history_turn(message)
-        if not turn:
+    Under ``dspy.streamify`` the settings carry a ``send_stream``; sync LM
+    calls then try to forward chunks via anyio's thread portal, which raises
+    from plain ``asyncio.to_thread`` workers. Clearing the stream keeps
+    worker-thread predictors on the regular non-streaming path.
+    """
+    with dspy.context(send_stream=None, stream_listeners=[]):
+        return await asyncio.to_thread(fn, **kwargs)
+
+
+def _describe_tools(tools: list[Any]) -> str:
+    """Render a one-line-per-tool inventory for the routing signature."""
+    lines: list[str] = []
+    for tool in tools:
+        name = str(getattr(tool, "name", "") or getattr(tool, "__name__", "") or "")
+        if not name:
             continue
-        marker = "most recent prior turn" if index == len(recent) else f"prior turn {index}"
-        lines.append(f"[{marker}]")
-        lines.append(turn)
+        desc = str(getattr(tool, "desc", "") or getattr(tool, "__doc__", "") or "").strip()
+        first_line = desc.splitlines()[0] if desc else ""
+        lines.append(f"- {name}: {first_line}" if first_line else f"- {name}")
     return "\n".join(lines)
 
 
@@ -113,7 +116,6 @@ def _emit_turn_milestone(interpreter: Any | None, *, phase: str, text: str, **ex
 @dataclass(slots=True)
 class _TurnPrep:
     history: dspy.History
-    recent_history: str
     should_route_rlm: bool
     routing_decision: str
     source_url: str | None
@@ -124,19 +126,20 @@ class _TurnPrep:
 class EscalatingFleetModule(dspy.Module):
     """Unified DSPy Module that scales from lightweight chat to full RLM execution.
 
-    Simple turns are handled by a ``dspy.ChainOfThought`` step.  When the
-    reasoning contains :data:`ESCALATION_SENTINEL` the module runs the shared
-    ``dspy.ReAct`` tool loop (:class:`~fleet_rlm.runtime.agent.agent.FleetAgent`)
-    for real tool use.  Explicit RLM modes, ``force_escalate``, or auto-detected
-    URL-document analysis instead route to an ``RLMVariableExecutionModule`` or a
-    raw ``dspy.RLM`` with the same tool set.
+    Each turn is routed by a typed ``dspy.Predict(RouteTurnSignature)`` step:
+    ``direct`` turns are answered by ``dspy.ChainOfThought``, ``tools`` turns
+    run the shared ``dspy.ReAct`` loop
+    (:class:`~fleet_rlm.runtime.agent.agent.FleetAgent`), and ``rlm`` turns run
+    sandboxed Python via ``dspy.RLM``.  Explicit RLM modes, ``force_escalate``,
+    URL-document analysis, and oversized contexts bypass the router and go
+    deterministically to the RLM path.
 
     Parameters
     ----------
     interpreter:
         Daytona interpreter instance (may be ``None`` for unit tests).
     tools:
-        Tool list to pass to the RLM heavy path.
+        Tool list shared by the ReAct loop and the RLM heavy path.
     max_iterations:
         Maximum RLM iterations for the heavy path.
     max_llm_calls:
@@ -167,6 +170,8 @@ class EscalatingFleetModule(dspy.Module):
         self._interpreter = interpreter
         self._summary_interval = summary_interval
         self._turn_count = 0
+        self._tools = list(tools or [])
+        self._available_tools_text = _describe_tools(self._tools)
 
         from fleet_rlm.runtime.modules.skill_selection import SkillSelectionModule
         from fleet_rlm.runtime.tools._volume_paths import volume_root
@@ -177,68 +182,57 @@ class EscalatingFleetModule(dspy.Module):
             volume_mount_path = str(resolved) if resolved is not None else None
         self._skill_selector = SkillSelectionModule(volume_mount_path=volume_mount_path)
 
+        self.route = dspy.Predict(RouteTurnSignature)
         self.respond = dspy.ChainOfThought(RLMReActChatSignature)
         self.summarize = dspy.ChainOfThought(ConversationSummarySignature)
 
-        # Sentinel tool branch: the shared upstream dspy.ReAct loop (FleetAgent).
-        # When the ChainOfThought fast path emits ESCALATION_SENTINEL the module
-        # runs a real, tool-using ReAct loop here instead of the RLM sandbox,
-        # which stays reserved for forced/long-context and URL-document paths.
-        # Named with a leading underscore so the streaming router
-        # (``_get_streamable_react_program``) does not treat the escalating
-        # module itself as a directly drivable ReAct program; routing stays in
-        # ``forward`` and the posthoc stream surfaces this branch's trajectory.
+        # Tools branch: the shared upstream dspy.ReAct loop (FleetAgent).
+        # The unified streaming path attaches a StreamListener to
+        # ``_react.extract.predict`` so its final response streams tokens,
+        # and replays the branch trajectory after the turn completes.
         from fleet_rlm.runtime.agent.agent import FleetAgent
 
         self._react = FleetAgent(
-            tools=list(tools or []),
+            tools=self._tools,
             max_iters=max(1, min(max_iterations, _REACT_MAX_ITERS)),
         )
 
         self._rlm: dspy.Module | None = None
+        self._workspace_rlm: dspy.Module | None = None
         self._url_document_rlm: dspy.Module | None = None
         if interpreter is not None:
-            from fleet_rlm.runtime.agent.signatures import RLMLargeDocSignature, RLMVariableSignature
-            from fleet_rlm.runtime.modules.variable_mode import build_variable_mode_rlm
-
-            self._rlm = build_variable_mode_rlm(
-                signature=RLMVariableSignature,
+            rlm_tools = [*interpreter_delegation_tools(interpreter), *self._tools]
+            rlm_output_chars = max_output_chars or VARIABLE_MODE_MAX_OUTPUT_CHARS
+            self._rlm = create_runtime_rlm(
+                signature=RLMTurnSignature,
                 interpreter=interpreter,
                 max_iterations=max_iterations,
                 max_llm_calls=max_llm_calls,
-                max_output_chars=max_output_chars,
+                max_output_chars=rlm_output_chars,
                 verbose=verbose,
+                tools=rlm_tools or None,
                 sub_lm=sub_lm,
-                extra_tools=tools or [],
             )
-            self._url_document_rlm = build_variable_mode_rlm(
-                signature=RLMLargeDocSignature,
+            self._workspace_rlm = create_runtime_rlm(
+                signature=RLMWorkspaceTurnSignature,
+                interpreter=interpreter,
+                max_iterations=max_iterations,
+                max_llm_calls=max_llm_calls,
+                max_output_chars=rlm_output_chars,
+                verbose=verbose,
+                tools=rlm_tools or None,
+                sub_lm=sub_lm,
+            )
+            self._url_document_rlm = create_runtime_rlm(
+                signature=RLMDocumentTurnSignature,
                 interpreter=interpreter,
                 max_iterations=max(1, min(max_iterations, _URL_DOCUMENT_MAX_ITERATIONS)),
                 max_llm_calls=max(1, min(max_llm_calls, _URL_DOCUMENT_MAX_LLM_CALLS)),
-                max_output_chars=max_output_chars,
+                max_output_chars=rlm_output_chars,
                 verbose=verbose,
                 sub_lm=sub_lm,
-                extra_tools=[],
-                include_sub_tools=False,
                 include_llm_tools=not url_repl_only_enabled(),
             )
-        else:
-            self._rlm = dspy.ChainOfThought(RLMReActChatSignature)
-
-    def _should_escalate(
-        self,
-        prediction: dspy.Prediction,
-        *,
-        execution_mode: str,
-        force_escalate: bool,
-    ) -> bool:
-        if force_escalate:
-            return True
-        if is_rlm_execution_mode(execution_mode):
-            return True
-        reasoning = str(getattr(prediction, "reasoning", "") or "")
-        return ESCALATION_SENTINEL in reasoning
 
     def preview_routing(
         self,
@@ -271,7 +265,7 @@ class EscalatingFleetModule(dspy.Module):
         if not messages:
             return ""
         history_text = "\n".join(
-            turn_text for turn_text in (_format_history_turn(message) for message in messages) if turn_text
+            turn_text for turn_text in (_history_turn_text(message) for message in messages) if turn_text
         )
         if not history_text:
             return ""
@@ -338,7 +332,6 @@ class EscalatingFleetModule(dspy.Module):
             history = dspy.History(messages=[])
 
         self._turn_count += 1
-        recent_history = _format_recent_history_context(history)
         should_route_rlm, routing_decision, source_url = resolve_rlm_routing(
             execution_mode=execution_mode,
             user_request=user_request,
@@ -354,13 +347,39 @@ class EscalatingFleetModule(dspy.Module):
         )
         return _TurnPrep(
             history=history,
-            recent_history=recent_history,
             should_route_rlm=should_route_rlm,
             routing_decision=routing_decision,
             source_url=source_url,
             core_memory=core_memory,
             selected_skills=selected_skills,
         )
+
+    def _route_turn(
+        self,
+        *,
+        user_request: str,
+        core_memory: str,
+        history: dspy.History,
+    ) -> str:
+        """Classify the turn via the typed router; degrade to ``direct`` on failure."""
+        try:
+            decision = self.route(
+                user_request=user_request,
+                core_memory=core_memory,
+                history=history,
+                available_tools=self._available_tools_text or "(no tools available)",
+            )
+            route = str(getattr(decision, "route", "") or "").strip().lower()
+        except Exception as exc:
+            logger.warning("Turn routing failed (%s), defaulting to direct response", exc)
+            return "direct"
+        if route == "tools" and not self._tools:
+            return "direct"
+        if route == "rlm" and self._rlm is None:
+            return "tools" if self._tools else "direct"
+        if route in {"direct", "tools", "rlm"}:
+            return route
+        return "direct"
 
     def forward(
         self,
@@ -373,7 +392,7 @@ class EscalatingFleetModule(dspy.Module):
         conversation_summary: str = "",
         turn_context: TurnContext | None = None,
     ) -> dspy.Prediction:
-        """Run one turn through the escalating module.
+        """Run one turn through the fleet program.
 
         Parameters
         ----------
@@ -384,13 +403,13 @@ class EscalatingFleetModule(dspy.Module):
         history:
             Prior conversation turns as a :class:`dspy.History`.
         execution_mode:
-            ``"auto"`` to let the escalation signal decide; ``"rlm"`` to force
-            the heavy path; any other value uses the lightweight path.
+            ``"auto"`` to let the typed router decide; ``"rlm"`` to force the
+            heavy path; any other value uses the lightweight path.
         force_escalate:
-            Bypass the signal check and go directly to RLM.
+            Bypass routing and go directly to RLM.
         conversation_summary:
-            Pre-computed session summary; used when ``execution_mode`` is
-            ``"rlm"`` and we skip the ChainOfThought step.
+            Pre-computed session summary; used on the RLM path to avoid an
+            extra compression call.
         """
         prep = self._prepare_turn(
             user_request=user_request,
@@ -403,7 +422,7 @@ class EscalatingFleetModule(dspy.Module):
 
         if prep.should_route_rlm:
             logger.debug(
-                "EscalatingFleetModule: RLM path (mode=%s route=%s)",
+                "EscalatingFleetModule: deterministic RLM path (mode=%s route=%s)",
                 execution_mode,
                 prep.routing_decision,
             )
@@ -411,7 +430,6 @@ class EscalatingFleetModule(dspy.Module):
                 user_request=user_request,
                 core_memory=prep.core_memory,
                 history=prep.history,
-                recent_history=prep.recent_history,
                 conversation_summary=conversation_summary,
                 selected_skills=prep.selected_skills,
                 routing_decision=prep.routing_decision,
@@ -419,23 +437,38 @@ class EscalatingFleetModule(dspy.Module):
                 turn_context=turn_context,
             )
 
-        prediction = self.respond(
+        route = self._route_turn(
             user_request=user_request,
             core_memory=prep.core_memory,
             history=prep.history,
-            recent_history=prep.recent_history,
         )
 
-        if self._should_escalate(prediction, execution_mode=execution_mode, force_escalate=False):
-            logger.debug("EscalatingFleetModule: escalating to ReAct tool loop (sentinel found in reasoning)")
+        if route == "tools":
+            logger.debug("EscalatingFleetModule: router chose ReAct tool loop")
             return self._run_react(
                 user_request=user_request,
                 core_memory=prep.core_memory,
                 history=prep.history,
-                recent_history=prep.recent_history,
                 selected_skills=prep.selected_skills,
             )
+        if route == "rlm":
+            logger.debug("EscalatingFleetModule: router chose RLM path")
+            return self._run_rlm(
+                user_request=user_request,
+                core_memory=prep.core_memory,
+                history=prep.history,
+                conversation_summary=conversation_summary,
+                selected_skills=prep.selected_skills,
+                routing_decision="router_rlm",
+                source_url=None,
+                turn_context=turn_context,
+            )
 
+        prediction = self.respond(
+            user_request=user_request,
+            core_memory=prep.core_memory,
+            history=prep.history,
+        )
         _prediction_set(prediction, "selected_skills", prep.selected_skills)
         return prediction
 
@@ -452,12 +485,14 @@ class EscalatingFleetModule(dspy.Module):
     ) -> dspy.Prediction:
         """Run one turn without blocking async callers.
 
-        Heavy RLM work stays on the synchronous ``forward`` path inside a worker
-        thread because sandbox execution is blocking. The sentinel ReAct branch
-        uses ``acall`` so session-backed async tools, including MCP tools, are
-        awaited correctly.
+        Heavy RLM work stays on the synchronous path inside a worker thread
+        (with token streaming disabled) because sandbox execution is blocking.
+        The tools branch uses ``acall`` so session-backed async tools,
+        including MCP tools, are awaited correctly, and the direct branch uses
+        ``respond.acall`` so its ``response`` field can stream tokens natively
+        under ``dspy.streamify``.
         """
-        prep = await asyncio.to_thread(
+        prep = await _to_thread_unstreamed(
             self._prepare_turn,
             user_request=user_request,
             core_memory=core_memory,
@@ -468,12 +503,11 @@ class EscalatingFleetModule(dspy.Module):
         )
 
         if prep.should_route_rlm:
-            return await asyncio.to_thread(
+            return await _to_thread_unstreamed(
                 self._run_rlm,
                 user_request=user_request,
                 core_memory=prep.core_memory,
                 history=prep.history,
-                recent_history=prep.recent_history,
                 conversation_summary=conversation_summary,
                 selected_skills=prep.selected_skills,
                 routing_decision=prep.routing_decision,
@@ -481,25 +515,58 @@ class EscalatingFleetModule(dspy.Module):
                 turn_context=turn_context,
             )
 
-        prediction = await asyncio.to_thread(
-            self.respond,
+        route = await _to_thread_unstreamed(
+            self._route_turn,
             user_request=user_request,
             core_memory=prep.core_memory,
             history=prep.history,
-            recent_history=prep.recent_history,
         )
 
-        if self._should_escalate(prediction, execution_mode=execution_mode, force_escalate=False):
-            logger.debug("EscalatingFleetModule: async escalating to ReAct tool loop (sentinel found in reasoning)")
+        if route == "tools":
+            logger.debug("EscalatingFleetModule: router chose ReAct tool loop (async)")
             return await self._arun_react(
                 user_request=user_request,
                 core_memory=prep.core_memory,
                 history=prep.history,
-                recent_history=prep.recent_history,
                 selected_skills=prep.selected_skills,
             )
+        if route == "rlm":
+            logger.debug("EscalatingFleetModule: router chose RLM path (async)")
+            return await _to_thread_unstreamed(
+                self._run_rlm,
+                user_request=user_request,
+                core_memory=prep.core_memory,
+                history=prep.history,
+                conversation_summary=conversation_summary,
+                selected_skills=prep.selected_skills,
+                routing_decision="router_rlm",
+                source_url=None,
+                turn_context=turn_context,
+            )
 
+        prediction = await self.respond.acall(
+            user_request=user_request,
+            core_memory=prep.core_memory,
+            history=prep.history,
+        )
         _prediction_set(prediction, "selected_skills", prep.selected_skills)
+        return prediction
+
+    def _react_fallback(
+        self,
+        prediction: dspy.Prediction,
+        *,
+        selected_skills: list[str] | None,
+    ) -> dspy.Prediction:
+        prediction["degraded"] = True
+        prediction["warning"] = _REACT_FALLBACK_WARNING
+        prediction["runtime_degraded"] = True
+        prediction["runtime_failure_category"] = "react_fallback"
+        prediction["runtime_failure_phase"] = "escalating_react"
+        prediction["runtime_fallback_used"] = True
+        prediction["runtime_warning"] = _REACT_FALLBACK_WARNING
+        prediction["selected_skills"] = selected_skills or []
+        prediction["routing_decision"] = "tools_react"
         return prediction
 
     def _run_react(
@@ -508,10 +575,9 @@ class EscalatingFleetModule(dspy.Module):
         user_request: str,
         core_memory: str,
         history: dspy.History,
-        recent_history: str,
         selected_skills: list[str] | None = None,
     ) -> dspy.Prediction:
-        """Run the shared dspy.ReAct tool loop for the sentinel tool branch.
+        """Run the shared dspy.ReAct tool loop for the tools branch.
 
         The ReAct prediction carries its native ``trajectory`` (thought/tool/
         observation per step) so the streaming layer surfaces tool calls and
@@ -521,7 +587,7 @@ class EscalatingFleetModule(dspy.Module):
         try:
             result = self._react(chat_history=history, user_message=user_request)
             _prediction_set(result, "selected_skills", selected_skills or [])
-            _prediction_set(result, "routing_decision", "sentinel_react")
+            _prediction_set(result, "routing_decision", "tools_react")
             return result
         except Exception as exc:
             logger.warning(
@@ -532,18 +598,8 @@ class EscalatingFleetModule(dspy.Module):
                 user_request=user_request,
                 core_memory=core_memory,
                 history=history,
-                recent_history=recent_history,
             )
-            fallback["degraded"] = True
-            fallback["warning"] = _REACT_FALLBACK_WARNING
-            fallback["runtime_degraded"] = True
-            fallback["runtime_failure_category"] = "react_fallback"
-            fallback["runtime_failure_phase"] = "escalating_react"
-            fallback["runtime_fallback_used"] = True
-            fallback["runtime_warning"] = _REACT_FALLBACK_WARNING
-            fallback["selected_skills"] = selected_skills or []
-            fallback["routing_decision"] = "sentinel_react"
-            return fallback
+            return self._react_fallback(fallback, selected_skills=selected_skills)
 
     async def _arun_react(
         self,
@@ -551,37 +607,25 @@ class EscalatingFleetModule(dspy.Module):
         user_request: str,
         core_memory: str,
         history: dspy.History,
-        recent_history: str,
         selected_skills: list[str] | None = None,
     ) -> dspy.Prediction:
         """Async ReAct branch for session-backed tools such as MCP."""
         try:
             result = await self._react.acall(chat_history=history, user_message=user_request)
             _prediction_set(result, "selected_skills", selected_skills or [])
-            _prediction_set(result, "routing_decision", "sentinel_react")
+            _prediction_set(result, "routing_decision", "tools_react")
             return result
         except Exception as exc:
             logger.warning(
                 "EscalatingFleetModule: async ReAct tool loop failed (%s), falling back to ChainOfThought",
                 exc,
             )
-            fallback = await asyncio.to_thread(
-                self.respond,
+            fallback = await self.respond.acall(
                 user_request=user_request,
                 core_memory=core_memory,
                 history=history,
-                recent_history=recent_history,
             )
-            fallback["degraded"] = True
-            fallback["warning"] = _REACT_FALLBACK_WARNING
-            fallback["runtime_degraded"] = True
-            fallback["runtime_failure_category"] = "react_fallback"
-            fallback["runtime_failure_phase"] = "escalating_react"
-            fallback["runtime_fallback_used"] = True
-            fallback["runtime_warning"] = _REACT_FALLBACK_WARNING
-            fallback["selected_skills"] = selected_skills or []
-            fallback["routing_decision"] = "sentinel_react"
-            return fallback
+            return self._react_fallback(fallback, selected_skills=selected_skills)
 
     def _run_rlm(
         self,
@@ -589,7 +633,6 @@ class EscalatingFleetModule(dspy.Module):
         user_request: str,
         core_memory: str,
         history: dspy.History,
-        recent_history: str,
         conversation_summary: str,
         selected_skills: list[str] | None = None,
         routing_decision: str = "rlm",
@@ -597,12 +640,13 @@ class EscalatingFleetModule(dspy.Module):
         turn_context: TurnContext | None = None,
     ) -> dspy.Prediction:
         if self._rlm is None:
-            return self.respond(
+            prediction = self.respond(
                 user_request=user_request,
                 core_memory=core_memory,
                 history=history,
-                recent_history=recent_history,
             )
+            _prediction_set(prediction, "selected_skills", selected_skills or [])
+            return prediction
         _emit_turn_milestone(
             self._interpreter,
             phase="rlm_start",
@@ -619,48 +663,105 @@ class EscalatingFleetModule(dspy.Module):
                 routing_decision=routing_decision,
             )
         context = conversation_summary or self.compress_history(history)
-        rlm = self._url_document_rlm if source_url and self._url_document_rlm is not None else self._rlm
-        url_document_mode = bool(source_url and rlm is self._url_document_rlm)
-        large_context_mode = routing_decision == "large_context_rlm"
-        prompt = build_rlm_prompt_context(
+        url_document_mode = bool(source_url and self._url_document_rlm is not None)
+        large_context_mode = (
+            routing_decision == "large_context_rlm" and turn_context is not None and self._workspace_rlm is not None
+        )
+        core_context = build_rlm_core_context(
             user_request=user_request,
-            recent_history=recent_history,
             compressed_history=context,
             core_memory=core_memory,
             url_document_mode=url_document_mode,
             large_context_mode=large_context_mode,
         )
         call_kwargs: dict[str, Any] = {
-            "task": user_request,
-            "prompt": prompt,
+            "user_request": user_request,
+            "core_memory": core_context,
             "history": history,
         }
+        rlm = self._rlm
         if url_document_mode:
+            from fleet_rlm.integrations.observability.mlflow_context import (
+                mlflow_child_span,
+                set_mlflow_span_outputs,
+            )
+
             _emit_turn_milestone(
                 self._interpreter,
                 phase="document_fetch",
                 text=f"Fetching document from {source_url}...",
                 source_url=source_url,
             )
-            fetched = fetch_url_document(interpreter=self._interpreter, source_url=source_url)
-            call_kwargs["source_url"] = fetched.source_url
-            call_kwargs["document_text"] = fetched.document_text
-            call_kwargs["source_metadata"] = fetched.source_metadata
-        elif large_context_mode and turn_context is not None:
+            with mlflow_child_span(
+                "fleet_rlm.fetch_url_document",
+                span_type="TOOL",
+                attributes={
+                    "fleet_rlm.source_url": str(source_url or ""),
+                    "fleet_rlm.routing_decision": routing_decision,
+                },
+                inputs={"source_url": source_url},
+            ) as span:
+                fetched = fetch_url_document(interpreter=self._interpreter, source_url=source_url)
+                set_mlflow_span_outputs(
+                    span,
+                    {
+                        "source_url": fetched.source_url,
+                        "document_chars": len(fetched.document_text),
+                        "metadata_keys": sorted(str(key) for key in fetched.source_metadata),
+                    },
+                )
+            call_kwargs["document"] = LargeDocument(
+                text=fetched.document_text,
+                source_url=fetched.source_url,
+                metadata=fetched.source_metadata,
+            )
+            rlm = self._url_document_rlm
+        elif large_context_mode:
             from fleet_rlm.runtime.modules.context_routing import load_large_context_rlm_kwargs
 
             large_kwargs = load_large_context_rlm_kwargs(turn_context, interpreter=self._interpreter)
-            if large_kwargs:
-                estimated = getattr(turn_context, "estimated_chars", 0)
-                _emit_turn_milestone(
-                    self._interpreter,
-                    phase="large_context_prepare",
-                    text=f"Large context in REPL variables ({estimated} chars)...",
-                    estimated_chars=estimated,
-                )
-                call_kwargs.update(large_kwargs)
+            estimated = getattr(turn_context, "estimated_chars", 0)
+            _emit_turn_milestone(
+                self._interpreter,
+                phase="large_context_prepare",
+                text=f"Large context in REPL variables ({estimated} chars)...",
+                estimated_chars=estimated,
+            )
+            call_kwargs["context"] = WorkspaceContext(
+                document_text=str(large_kwargs.get("document_text") or ""),
+                context_paths=list(large_kwargs.get("context_paths") or []),
+                manifest=dict(large_kwargs.get("context_manifest") or {}),
+                metadata=dict(large_kwargs.get("source_metadata") or {}),
+            )
+            rlm = self._workspace_rlm
         try:
-            result = rlm(**call_kwargs)
+            from fleet_rlm.integrations.observability.mlflow_context import (
+                mlflow_child_span,
+                set_mlflow_span_outputs,
+            )
+
+            with mlflow_child_span(
+                "fleet_rlm.rlm_run",
+                span_type="CHAIN",
+                attributes={
+                    "fleet_rlm.routing_decision": routing_decision,
+                    "fleet_rlm.rlm_url_document_mode": str(url_document_mode).lower(),
+                    "fleet_rlm.rlm_large_context_mode": str(large_context_mode).lower(),
+                    "fleet_rlm.selected_skills": ",".join(selected_skills or []),
+                },
+                inputs={
+                    "input_fields": sorted(call_kwargs),
+                    "source_url": source_url,
+                },
+            ) as span:
+                result = rlm(**call_kwargs)
+                set_mlflow_span_outputs(
+                    span,
+                    {
+                        "routing_decision": routing_decision,
+                        "has_trajectory": getattr(result, "trajectory", None) is not None,
+                    },
+                )
             _prediction_set(result, "selected_skills", selected_skills or [])
             _prediction_set(result, "routing_decision", routing_decision)
             if source_url:
@@ -672,7 +773,6 @@ class EscalatingFleetModule(dspy.Module):
                 user_request=user_request,
                 core_memory=core_memory,
                 history=history,
-                recent_history=recent_history,
             )
             fallback["degraded"] = True
             fallback["warning"] = _RLM_FALLBACK_WARNING
@@ -689,6 +789,5 @@ class EscalatingFleetModule(dspy.Module):
 
 
 __all__ = [
-    "ESCALATION_SENTINEL",
     "EscalatingFleetModule",
 ]

@@ -1,7 +1,7 @@
 """Workspace-oriented metrics with text feedback for GEPA optimization.
 
 These metrics return ``(score, feedback)`` tuples so that
-:mod:`.gepa_optimization` can feed rich textual explanations back into
+:mod:`.optimization_runner` can feed rich textual explanations back into
 the GEPA reflective prompt evolution loop.
 """
 
@@ -38,7 +38,7 @@ def exact_match_feedback_metric(
     gold: Any,
     pred: Any,
     *,
-    output_key: str = "assistant_response",
+    output_key: str = "response",
     trace: Any = None,
 ) -> tuple[float, str]:
     """Exact-match metric that returns text feedback explaining the result.
@@ -82,7 +82,7 @@ def completeness_feedback_metric(
     gold: Any,
     pred: Any,
     *,
-    output_key: str = "assistant_response",
+    output_key: str = "response",
     trace: Any = None,
 ) -> tuple[float, str]:
     """Score based on whether the prediction addresses key terms from the gold.
@@ -131,11 +131,11 @@ def workspace_feedback_metric(
     pred: Any,
     *,
     trace: Any = None,
-    output_key: str = "assistant_response",
+    output_key: str = "response",
 ) -> tuple[float, str]:
     """Combined workspace metric: weighted blend of exact match and completeness.
 
-    This is the default metric used by :func:`.gepa_optimization.build_gepa_feedback_metric`.
+    This is the default metric used by :func:`.optimization_runner.build_gepa_feedback_metric`.
     It returns ``(score, feedback)`` where feedback is a human-readable
     explanation suitable for GEPA's reflective prompt evolution.
 
@@ -154,7 +154,7 @@ def workspace_score_metric(
     pred: Any,
     *,
     trace: Any = None,
-    output_key: str = "assistant_response",
+    output_key: str = "response",
 ) -> float:
     """Numeric-only companion to :func:`workspace_feedback_metric`.
 

@@ -55,6 +55,7 @@ class LmDeps:
 
     planner_lm: Any | None = None
     delegate_lm: Any | None = None
+    delegate_small_lm: Any | None = None
     runtime_model_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 

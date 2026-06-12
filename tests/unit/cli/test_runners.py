@@ -10,7 +10,7 @@ import pytest
 
 class _FakeChatAgent:
     def __init__(self, result: dict[str, object] | None = None, *, error: Exception | None = None) -> None:
-        self.result = result or {"assistant_response": "done", "trajectory": [{"step": 1}]}
+        self.result = result or {"response": "done", "trajectory": [{"step": 1}]}
         self.error = error
         self.chat_messages: list[str] = []
         self.shutdown_called = False
@@ -70,7 +70,7 @@ def test_run_react_chat_once_invokes_agent(monkeypatch: pytest.MonkeyPatch) -> N
     }
     assert agent.chat_messages == ["hello"]
     assert "trajectory" not in result
-    assert result["assistant_response"] == "done"
+    assert result["response"] == "done"
     assert result["response_preview"] == "done"
 
 

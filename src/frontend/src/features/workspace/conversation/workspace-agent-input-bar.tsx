@@ -1,5 +1,6 @@
-import { useCallback, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { Brain, Settings2, Sparkles, TriangleAlert, Wrench } from "lucide-react";
+import { toast } from "sonner";
 
 import {
   InputBar,
@@ -11,6 +12,14 @@ import { ModeSelector } from "@/components/agent-elements/input/mode-selector";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ExecutionStatusBar } from "@/features/workspace/screen/execution-status-bar";
+import {
+  useLlmProfileModels,
+  useLlmProfilesMutations,
+  useLlmRoleBindings,
+} from "@/features/settings/use-llm-profiles";
+import { errorMessage } from "@/features/settings/runtime-status-panel";
+import { useRuntimeSettings } from "@/features/settings/use-runtime-settings";
+import { createLocalId } from "@/lib/id";
 import type { WsExecutionMode } from "@/lib/rlm-api/ws-types";
 import { cn } from "@/lib/utils";
 
@@ -19,13 +28,6 @@ const EXECUTION_MODE_OPTIONS = [
   { id: "rlm_only", icon: Brain, label: "RLM" },
   { id: "tools_only", icon: Wrench, label: "Tools" },
 ] as const;
-
-function createAttachmentId() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
 interface WorkspaceAgentInputBarProps extends InputBarProps {
   executionMode: WsExecutionMode;
@@ -45,36 +47,6 @@ interface WorkspaceAgentInputBarProps extends InputBarProps {
   };
 }
 
-function activeModelOptions(
-  activeModels: WorkspaceAgentInputBarProps["activeModels"],
-): ModelOption[] {
-  const options = [
-    {
-      id: "planner",
-      label: activeModels?.planner || "Planner model",
-      description: activeModels?.planner ? "Planner runtime" : "Planner model not configured",
-      disabled: !activeModels?.planner,
-    },
-    {
-      id: "delegate",
-      label: activeModels?.delegate || "Delegate model",
-      description: activeModels?.delegate
-        ? "Recursive delegate runtime"
-        : "Delegate model not configured",
-      disabled: !activeModels?.delegate,
-    },
-    {
-      id: "delegate_small",
-      label: activeModels?.delegate_small || "Small delegate model",
-      description: activeModels?.delegate_small
-        ? "Lightweight delegate runtime"
-        : "Small delegate model not configured",
-      disabled: !activeModels?.delegate_small,
-    },
-  ];
-  return options;
-}
-
 function ExecutionModeToggle({
   value,
   onChange,
@@ -86,10 +58,31 @@ function ExecutionModeToggle({
     <ModeSelector
       modes={EXECUTION_MODE_OPTIONS}
       value={value}
-      onChange={(nextValue) => onChange(nextValue as WsExecutionMode)}
-      className="text-an-foreground-muted hover:text-an-foreground"
+      onChange={(mode) => onChange(mode as WsExecutionMode)}
     />
   );
+}
+
+function plannerModelOptions(
+  models: Array<{ id: string; label: string }> | undefined,
+  activePlannerModel: string | undefined,
+): ModelOption[] {
+  const catalog = models ?? [];
+  if (catalog.length === 0) {
+    return [
+      {
+        id: activePlannerModel ?? "planner",
+        label: activePlannerModel || "Planner model",
+        description: "Configure a planner profile in Settings",
+        disabled: true,
+      },
+    ];
+  }
+  return catalog.map((model) => ({
+    id: model.id,
+    label: model.label,
+    description: model.id === activePlannerModel ? "Active planner model" : undefined,
+  }));
 }
 
 export function WorkspaceAgentInputBar({
@@ -107,8 +100,45 @@ export function WorkspaceAgentInputBar({
   onSend,
   ...props
 }: WorkspaceAgentInputBarProps) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [stagedDocuments, setStagedDocuments] = useState<AttachedFile[]>([]);
+  const { statusQuery } = useRuntimeSettings();
+  const rolesQuery = useLlmRoleBindings();
+  const { saveRoleBindings } = useLlmProfilesMutations();
+
+  const plannerBinding = rolesQuery.data?.bindings?.find((binding) => binding.role === "planner");
+  const plannerProfileId = plannerBinding?.profile_id ?? null;
+  const plannerModelId = plannerBinding?.model_id ?? "";
+  const modelsQuery = useLlmProfileModels(plannerProfileId);
+  const writeEnabled = statusQuery.data?.write_enabled !== false;
+
+  const pickerModels = useMemo(
+    () => plannerModelOptions(modelsQuery.data?.models, activeModels?.planner ?? plannerModelId),
+    [modelsQuery.data?.models, activeModels?.planner, plannerModelId],
+  );
+
+  const handlePlannerModelChange = useCallback(
+    (modelId: string) => {
+      if (!writeEnabled || !plannerProfileId) {
+        toast.error("Planner model switching is only available in local write mode.");
+        return;
+      }
+      saveRoleBindings.mutate(
+        {
+          planner: {
+            profile_id: plannerProfileId,
+            model_id: modelId,
+          },
+        },
+        {
+          onError: (error) => {
+            toast.error("Failed to switch planner model", { description: errorMessage(error) });
+          },
+        },
+      );
+    },
+    [plannerProfileId, saveRoleBindings, writeEnabled],
+  );
 
   const handleAddDocument = useCallback(() => {
     onAttach?.();
@@ -116,17 +146,16 @@ export function WorkspaceAgentInputBar({
   }, [onAttach]);
 
   const handleDocumentInputChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.currentTarget.files ?? []);
-    if (files.length > 0) {
-      setStagedDocuments((current) => [
-        ...current,
-        ...files.map((file) => ({
-          id: `document-${createAttachmentId()}`,
-          filename: file.name,
-          size: file.size,
-        })),
-      ]);
-    }
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0) return;
+    setStagedDocuments((current) => [
+      ...current,
+      ...files.map((file) => ({
+        id: createLocalId("document"),
+        filename: file.name,
+        size: file.size,
+      })),
+    ]);
     event.currentTarget.value = "";
   }, []);
 
@@ -145,6 +174,9 @@ export function WorkspaceAgentInputBar({
     },
     [onSend],
   );
+
+  const canSwitchPlanner =
+    writeEnabled && Boolean(plannerProfileId) && pickerModels.some((model) => !model.disabled);
 
   return (
     <div className={cn("mx-auto flex w-full max-w-175 flex-col gap-3", className)}>
@@ -199,9 +231,11 @@ export function WorkspaceAgentInputBar({
           <>
             <ExecutionModeToggle value={executionMode} onChange={onExecutionModeChange} />
             <ModelPicker
-              models={activeModelOptions(activeModels)}
-              value="planner"
+              models={pickerModels}
+              value={plannerModelId || pickerModels[0]?.id}
+              onChange={canSwitchPlanner ? handlePlannerModelChange : undefined}
               onConfigure={onOpenModelSettings}
+              disabled={!canSwitchPlanner && !onOpenModelSettings}
               className="text-an-foreground-muted hover:text-an-foreground"
             />
             {rightActions}

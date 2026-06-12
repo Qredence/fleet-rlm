@@ -363,6 +363,32 @@ class ChatRepository(RepositoryContextMixin):
             result = await session.execute(stmt)
             return result.scalar_one_or_none()
 
+    async def get_chat_session_by_external_id(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        external_session_id: str,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> ChatSession | None:
+        normalized = str(external_session_id or "").strip()
+        if not normalized:
+            return None
+        async with self._db.session() as session, session.begin():
+            await self._set_request_context(session, tenant_id, user_id, workspace_id)
+            stmt: Select[tuple[ChatSession]] = select(ChatSession).where(
+                and_(
+                    ChatSession.tenant_id == tenant_id,
+                    ChatSession.metadata_json["external_session_id"].as_string() == normalized,
+                )
+            )
+            if user_id is not None:
+                stmt = stmt.where(ChatSession.user_id == user_id)
+            if workspace_id is not None:
+                stmt = stmt.where(ChatSession.workspace_id == workspace_id)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
     async def list_chat_turns(
         self,
         *,
@@ -797,6 +823,38 @@ class ChatRepository(RepositoryContextMixin):
 
             items_stmt = (
                 select(RunStep).where(base_filter).order_by(RunStep.step_index.asc()).offset(offset).limit(limit)
+            )
+            items = list((await session.execute(items_stmt)).scalars().all())
+            return items, total
+
+    async def list_external_traces_for_session(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[ExternalTrace], int]:
+        """Return external traces linked to a durable chat session."""
+
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
+            filters = [
+                ExternalTrace.tenant_id == tenant_id,
+                ExternalTrace.workspace_id == resolved_workspace_id,
+                ExternalTrace.session_id == session_id,
+            ]
+            total_stmt = select(func.count()).select_from(ExternalTrace).where(and_(*filters))
+            total = int((await session.execute(total_stmt)).scalar_one())
+            items_stmt = (
+                select(ExternalTrace)
+                .where(and_(*filters))
+                .order_by(ExternalTrace.observed_at.desc(), ExternalTrace.created_at.desc())
+                .limit(limit)
+                .offset(offset)
             )
             items = list((await session.execute(items_stmt)).scalars().all())
             return items, total

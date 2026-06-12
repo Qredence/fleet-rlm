@@ -20,8 +20,11 @@ def optional_string(value: object) -> str | None:
 
 def parse_session_uuid(session_id: str) -> uuid.UUID:
     """Parse the canonical repository-backed session UUID."""
+    normalized = session_id.strip()
+    if normalized.isdecimal():
+        return uuid.UUID(int=int(normalized))
     try:
-        return uuid.UUID(session_id)
+        return uuid.UUID(normalized)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
 

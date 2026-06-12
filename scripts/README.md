@@ -30,6 +30,9 @@ Support boundary:
 | `consolidate_rlm_results.py` | Build a single `RESULTS.md` from benchmark summaries | Generated benchmark summaries under `output/` | `uv run python scripts/consolidate_rlm_results.py --input-dir output/rlm-eval-full` |
 | `benchmarks/sniah.py` | Generate and score S-NIAH benchmark data | None | `uv run python scripts/benchmarks/sniah.py --generate` |
 | `benchmarks/oolong.py` | Generate and score synthetic OOLONG benchmark data | None | `uv run python scripts/benchmarks/oolong.py --generate` |
+| `build_enterprise_2030_gold_set.py` | Build the Enterprise 2030 PDF needle-in-haystack gold set from MarkItDown ingestion | Source PDF under `output/` | `uv run python scripts/build_enterprise_2030_gold_set.py` |
+| `evaluate_pdf_needle_retrieval.py` | Evaluate PDF needle retrieval over the Enterprise 2030 gold set (routing-only or live RLM) | None for `--routing-only`; DSPy/Daytona env for live runs | `uv run python scripts/evaluate_pdf_needle_retrieval.py --routing-only` |
+| `run_frontend_needle_matrix.py` | Simulate the workspace frontend needle matrix and write `frontend-runs.jsonl` | Generated gold set under `.data/datasets/` | `uv run python scripts/run_frontend_needle_matrix.py` |
 
 ## Operator Scripts
 
@@ -41,6 +44,7 @@ Support boundary:
 | `validate_env.py` | Validate `.claude/agents` or Daytona runtime prerequisites | Daytona/LM env for `daytona` mode | `uv run python scripts/validate_env.py daytona --repo https://github.com/qredence/fleet-rlm.git --ref main` |
 | `live_daytona_verify.py` | Verify live Daytona persistent-volume layout and session restore paths | `DAYTONA_API_KEY`, `DAYTONA_API_URL`, optional `DAYTONA_TARGET` | `uv run python scripts/live_daytona_verify.py` |
 | `live_concurrency_verify.py` | Verify live Daytona sandbox slot limits, busy behavior, and cleanup release | Same as above plus `FLEET_MAX_CONCURRENT_SANDBOXES=2` for a bounded test | `FLEET_MAX_CONCURRENT_SANDBOXES=2 uv run python scripts/live_concurrency_verify.py` |
+| `run_browser_rlm_validation.py` | Run browser-backed RLM validation scenarios and write scenario artifacts | Running API/frontend target for the selected scenarios | `uv run python scripts/run_browser_rlm_validation.py --server-url http://127.0.0.1:8000` |
 | `validate_rlm_e2e_trace.py` | Run the live websocket tracing validation harness | Running API server plus DB/auth/runtime env | `uv run python scripts/validate_rlm_e2e_trace.py --server-url http://127.0.0.1:8000` |
 | `deployment_observability.py` | Emit release summaries and optional PostHog deployment markers | GitHub Actions env and optional PostHog creds | `uv run python scripts/deployment_observability.py --environment production --package-name fleet-rlm` |
 | `ensure_frontend_entrypoint.py` | Create `src/frontend/dist/client/index.html` from TanStack Start build metadata when prerendering is disabled for CI/release builds | Existing `src/frontend/dist` build | `uv run python scripts/ensure_frontend_entrypoint.py` |

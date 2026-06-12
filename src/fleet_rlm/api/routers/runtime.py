@@ -7,12 +7,16 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query
 
+from fleet_rlm.integrations.llm_profiles.resolver import profile_labels_from_bundle
+from fleet_rlm.integrations.llm_profiles.store import resolve_profile_store
+
 from ..bootstrap import get_delegate_lm_from_env, get_planner_lm_from_env
 from ..dependencies import (
     ConfigDepsDep,
     DiagnosticsDepsDep,
     HTTPIdentityDep,
     LmDepsDep,
+    PersistenceDepsDep,
 )
 from ..runtime_services.diagnostics import (
     build_runtime_status_response,
@@ -172,15 +176,21 @@ async def get_runtime_status(
     config_deps: ConfigDepsDep,
     lm_deps: LmDepsDep,
     diagnostics_deps: DiagnosticsDepsDep,
+    persistence_deps: PersistenceDepsDep,
     identity: HTTPIdentityDep,
 ) -> RuntimeStatusResponse:
     """Return the combined runtime readiness, model, and provider diagnostics snapshot."""
     _ = identity
+    store = resolve_profile_store(persistence_deps.db_manager)
+    bundle = await store.load_bundle()
+    profile_labels = profile_labels_from_bundle(bundle)
     return await asyncio.to_thread(
         build_runtime_status_response,
         config_deps=config_deps,
         lm_deps=lm_deps,
         diagnostics_deps=diagnostics_deps,
+        persistence_deps=persistence_deps,
+        profile_labels=profile_labels,
     )
 
 

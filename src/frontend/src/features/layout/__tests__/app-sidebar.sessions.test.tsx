@@ -38,6 +38,7 @@ vi.mock("lucide-react", () => {
     PanelLeftIcon: Icon,
     XIcon: Icon,
     Database: Icon,
+    FlaskConical: Icon,
     LogIn: Icon,
     MessageCircle: Icon,
     Terminal: Icon,
@@ -46,13 +47,6 @@ vi.mock("lucide-react", () => {
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: undefined, isLoading: false, isError: false }),
-}));
-
-vi.mock("@/lib/rlm-api/sessions", () => ({
-  sessionKeys: { list: (params: Record<string, unknown>) => ["sessions", "list", params] },
-  sessionEndpoints: {
-    listSessions: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, limit: 20 }),
-  },
 }));
 
 vi.mock("@/components/ui/button", () => ({
@@ -144,6 +138,23 @@ describe("AppSidebar session actions", () => {
 
     expect(workspaceShellState.newSession).toHaveBeenCalledOnce();
     expect(navigateToMock).toHaveBeenCalledWith("workspace");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("opens the optimization section from the sidebar", () => {
+    const { container, root } = mountSidebar();
+
+    const button = findButtonByText(container, "Optimization");
+    expect(button).toBeTruthy();
+
+    act(() => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(navigateToMock).toHaveBeenCalledWith("optimization");
 
     act(() => {
       root.unmount();

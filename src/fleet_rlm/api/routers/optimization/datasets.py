@@ -347,7 +347,8 @@ async def get_dataset_detail(
         limit=10,
         offset=0,
     )
-    output_key = _extract_metadata_str(ds.metadata_json, "output_key")
+    metadata = getattr(ds, "metadata_json", {}) or {}
+    output_key = _extract_metadata_str(metadata, "output_key")
     sample_rows = [_dataset_row_from_example(example, output_key) for example in examples]
     response = _dataset_to_response(ds)
     return DatasetDetailResponse(

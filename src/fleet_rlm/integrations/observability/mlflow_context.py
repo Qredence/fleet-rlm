@@ -6,6 +6,7 @@ import contextvars
 import json
 import os
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from threading import Lock
@@ -126,9 +127,25 @@ def _application_turn_span(context: MlflowTraceRequestContext):
         raise
 
 
+def _try_initialize_mlflow_for_turn() -> None:
+    """Ensure MLflow is initialized before the first span in a chat turn."""
+    if not _env_bool(os.getenv("MLFLOW_ENABLED"), default=True):
+        return
+
+    # Deferred import: mlflow_runtime imports this module at load time.
+    from .mlflow_runtime import _import_mlflow, get_mlflow_config, initialize_mlflow
+
+    config = get_mlflow_config()
+    if not config.enabled or _import_mlflow() is None:
+        return
+
+    initialize_mlflow(config)
+
+
 @contextmanager
 def mlflow_request_context(context: MlflowTraceRequestContext):
     """Scope MLflow request metadata to the current execution context."""
+    _try_initialize_mlflow_for_turn()
     context_token = _CURRENT_REQUEST_CONTEXT.set(context)
     trace_token = _CURRENT_TRACE_ID.set(None)
     trace_state = "OK"
@@ -186,6 +203,67 @@ def _bounded_value(value: Any, *, limit: int = _TRAJECTORY_VALUE_LIMIT) -> Any:
     if len(serialized) <= limit:
         return value
     return serialized[: limit - 3].rstrip() + "..."
+
+
+def _set_span_payload(span: Any, method_name: str, payload: dict[str, Any] | None) -> None:
+    if not payload:
+        return
+    method = getattr(span, method_name, None)
+    if callable(method):
+        method(payload)
+
+
+def _set_span_error_status(span: Any) -> None:
+    set_status = getattr(span, "set_status", None)
+    if callable(set_status):
+        set_status("ERROR")
+
+
+@contextmanager
+def mlflow_child_span(
+    name: str,
+    *,
+    span_type: str = "CHAIN",
+    attributes: dict[str, Any] | None = None,
+    inputs: dict[str, Any] | None = None,
+) -> Iterator[Any | None]:
+    """Best-effort child span for codepaths already inside an MLflow trace."""
+    runtime = _runtime_module()
+    mlflow = runtime._import_mlflow()
+    if mlflow is None or not _has_active_mlflow_trace(mlflow):
+        yield None
+        return
+
+    start_span = getattr(mlflow, "start_span", None)
+    if not callable(start_span):
+        yield None
+        return
+
+    entered = False
+    try:
+        with start_span(name=name, span_type=span_type, attributes=attributes or {}) as span:
+            entered = True
+            _set_span_payload(span, "set_inputs", inputs)
+            try:
+                yield span
+            except BaseException:
+                _set_span_error_status(span)
+                raise
+    except BaseException:
+        if entered:
+            raise
+        runtime.logger.debug("MLflow child span skipped: %s", name, exc_info=True)
+        yield None
+
+
+def set_mlflow_span_outputs(span: Any | None, outputs: dict[str, Any] | None) -> None:
+    """Best-effort output setter for optional spans returned by ``mlflow_child_span``."""
+    if span is None:
+        return
+    try:
+        _set_span_payload(span, "set_outputs", outputs)
+    except Exception:
+        _runtime_module().logger.debug("MLflow span output update skipped.", exc_info=True)
 
 
 def _flat_trajectory_indices(raw: dict[str, Any]) -> list[int]:
@@ -647,8 +725,10 @@ __all__ = [
     "capture_last_active_trace_id",
     "current_request_context",
     "merge_trace_result_metadata",
+    "mlflow_child_span",
     "mlflow_request_context",
     "new_client_request_id",
+    "set_mlflow_span_outputs",
     "trace_result_metadata",
     "update_current_mlflow_trace",
 ]

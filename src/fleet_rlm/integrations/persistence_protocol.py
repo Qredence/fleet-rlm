@@ -142,6 +142,17 @@ class PersistenceProtocol(Protocol):
         """Return a single chat session or None if not found."""
         pass
 
+    async def get_chat_session_by_external_id(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        external_session_id: str,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> ChatSession | None:
+        """Return a chat session linked to a runtime websocket session id."""
+        pass
+
     async def list_chat_turns(
         self,
         *,
@@ -311,6 +322,18 @@ class PersistenceProtocol(Protocol):
         latency_ms: int | None = None,
     ) -> uuid.UUID:
         """Persist an RLM child trajectory trace."""
+        pass
+
+    async def list_external_traces_for_session(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[Sequence[Any], int]:
+        """List external traces associated with a durable chat session."""
         pass
 
     # ------------------------------------------------------------------

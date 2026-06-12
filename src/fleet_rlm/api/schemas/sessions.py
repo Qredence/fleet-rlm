@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -150,6 +150,35 @@ class SessionPatchRequest(BaseModel):
     )
 
 
+class SessionTraceItem(BaseModel):
+    """External trace metadata linked to a durable session."""
+
+    trace_id: str = Field(description="Provider trace identifier (for example an MLflow trace id).")
+    client_request_id: str | None = Field(
+        default=None,
+        description="Optional Fleet client request id correlated with the trace.",
+    )
+    turn_id: str | None = Field(default=None, description="Chat turn id when the trace was recorded.")
+    provider: str = Field(description="External trace provider (for example mlflow).")
+    experiment_id: str | None = Field(default=None, description="Provider experiment id when known.")
+    experiment_name: str | None = Field(default=None, description="Provider experiment name when known.")
+    observed_at: str = Field(description="ISO-8601 timestamp when the trace was observed.")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Provider-specific metadata payload stored with the trace row.",
+    )
+
+
+class SessionTraceListResponse(BaseModel):
+    """Paginated external traces for a session."""
+
+    items: list[SessionTraceItem] = Field(description="Trace rows linked to the session.")
+    total: int = Field(description="Total matching traces.")
+    offset: int = Field(description="Pagination offset.")
+    limit: int = Field(description="Page size.")
+    has_more: bool = Field(description="Whether additional pages are available.")
+
+
 class SessionStatsResponse(BaseModel):
     """Aggregated usage stats for a session."""
 
@@ -178,6 +207,47 @@ class SessionExportRequest(BaseModel):
 
     module_slug: str = Field(
         description="Target GEPA module slug whose dataset keys determine the export column mapping."
+    )
+
+
+class SessionTraceExportRequest(BaseModel):
+    """Request body for exporting a session's linked MLflow traces."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    format: Literal["json", "jsonl", "both"] = Field(
+        default="both",
+        description="Trace artifact format to write.",
+    )
+    mlflow_session_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional MLflow trace session id hint. The server validates the hint against "
+            "authorized runtime session ids for the resolved durable session before export."
+        ),
+    )
+
+
+class SessionTraceExportResponse(BaseModel):
+    """Trace export artifact paths for a session."""
+
+    ok: bool = Field(default=True, description="Whether trace export completed.")
+    session_id: str = Field(description="Durable session identifier.")
+    trace_count: int = Field(description="Number of MLflow traces exported.")
+    json_path: str | None = Field(default=None, description="Path to the full JSON trace artifact.")
+    jsonl_path: str | None = Field(default=None, description="Path to the full JSONL trace artifact.")
+    distilled_bundle_path: str | None = Field(
+        default=None,
+        description="Path to the distilled GEPA evidence bundle.",
+    )
+    skipped_trace_ids: list[str] = Field(
+        default_factory=list,
+        description="Trace identifiers that could not be resolved/exported.",
+    )
+    errors: list[str] = Field(default_factory=list, description="Non-fatal export errors.")
+    summary: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Distilled trace export summary.",
     )
 
 

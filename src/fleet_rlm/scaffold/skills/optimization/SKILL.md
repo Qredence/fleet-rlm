@@ -1,15 +1,22 @@
 ---
 name: optimization
-description: "Optimize fleet-rlm DSPy programs using GEPA or MIPROv2 with MLflow tracking. Use when running optimization loops, designing evaluation metrics, building training datasets, or comparing runs."
+description: "Optimize fleet-rlm DSPy programs and RLM skill bundles using GEPA with MLflow tracking. Use when running optimization loops, designing feedback metrics, building training datasets, or comparing runs."
 ---
 
-# DSPy Program Optimization
+# GEPA Optimization
 
 ## CLI Command
 
 ```bash
-# Optimize a module with auto-level selection
+# Optimize a registered module with auto-level selection
 uv run fleet-rlm optimize <module> <dataset> --auto light|medium|heavy --report
+
+# Optimize a markdown skill artifact without overwriting the bundled skill
+uv run fleet-rlm optimize skill <dataset> \
+    --skill-name optimization \
+    --trace-bundle-path artifacts/traces/optimization-failures.jsonl \
+    --auto medium \
+    --report
 
 # List all optimizable modules registered in the system
 uv run fleet-rlm optimize list
@@ -17,14 +24,10 @@ uv run fleet-rlm optimize list
 
 ---
 
-## GEPA vs MIPROv2 Decision
+## GEPA-Only Model
 
-| Criteria | GEPA | MIPROv2 |
-|----------|------|---------|
-| Text feedback available | Yes — reflective evolution from verbal feedback | No |
-| Scalar metrics only | No | Yes — instruction/few-shot optimization |
-| Prompt evolution needed | Yes — iterative prompt rewriting via feedback | No |
-| Quick instruction tuning | No | Yes — fast convergence on instruction variants |
+GEPA is the only public optimization path. It evolves prompt text from
+GEPA-compatible metrics that return a score plus actionable feedback.
 
 **Auto-level behavior:**
 
@@ -33,6 +36,20 @@ uv run fleet-rlm optimize list
 | `--auto light` | Minimal search, 2-3 candidates | Fast iteration during development |
 | `--auto medium` | Balanced search, 5-10 candidates | Standard optimization runs |
 | `--auto heavy` | Exhaustive search, 20+ candidates | Production-quality prompt selection |
+
+---
+
+## RLM Skill Optimization
+
+Skill optimization treats a markdown `SKILL.md` bundle as the prompt component
+GEPA evolves. The proposer RLM receives current skill text, trace bundle paths,
+metric feedback, and candidate history, then returns revised instructions only.
+The optimized skill is saved as a quality artifact with manifest metadata; it
+never overwrites the source or bundled scaffold skill automatically.
+
+Use `--skill-name` for a bundled scaffold skill, or `--skill-path` for a seed
+skill file under the optimization data root. Add `--trace-bundle-path` one or
+more times when the proposer needs large offline trace bundles.
 
 ---
 
@@ -89,7 +106,7 @@ make mlflow-server  # Runs on port 5001
 ```
 
 **What gets auto-logged per optimization run:**
-- Compile parameters (optimizer type, auto-level, train/dev split ratio)
+- Compile parameters (GEPA, auto-level, train/dev split ratio)
 - Evaluation metrics (per-scorer breakdown, aggregate score)
 - Prompt snapshots (before/after optimization)
 - Dataset metadata (size, source, schema hash)

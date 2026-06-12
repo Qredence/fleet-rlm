@@ -42,8 +42,11 @@ From `src/fleet_rlm/runtime/agent/signatures.py`:
 
 | Signature Class | Fields | Purpose |
 | --- | --- | --- |
-| `RLMReActChatSignature` | `user_request, core_memory, history -> assistant_response` | Lightweight ReAct chat with conversation history |
-| `RLMVariableSignature` | `task, prompt -> answer` | Heavy-path variable-mode execution (Algorithm 1) |
+| `RouteTurnSignature` | `user_request, core_memory, history, available_tools -> route` | Typed per-turn routing: `direct`, `tools`, or `rlm` |
+| `RLMReActChatSignature` | `user_request, core_memory, history -> response` | Lightweight chat with conversation history |
+| `RLMTurnSignature` | `user_request, core_memory, history -> response` | Heavy-path sandboxed REPL execution (Algorithm 1) |
+| `RLMDocumentTurnSignature` | `user_request, core_memory, history, document -> response` | URL-document analysis; `document` is a `LargeDocument` SandboxSerializable |
+| `RLMWorkspaceTurnSignature` | `user_request, core_memory, history, context -> response` | Large local context; `context` is a `WorkspaceContext` SandboxSerializable |
 | `RecursiveSubQuerySignature` | `prompt, context -> answer` | Child delegation — bounded recursive sub-query |
 | `SummarizeLongDocument` | `document, focus -> summary, key_points, coverage_pct` | Long document summarization with focus control |
 | `ExtractFromLogs` | `logs, query -> matches, patterns, time_range` | Log pattern extraction and time-range identification |
@@ -60,18 +63,18 @@ The runtime selects an execution mode based on the request characteristics:
 
 | Mode | Module | When Selected |
 | --- | --- | --- |
-| Default | `EscalatingFleetModule` | CoT first; escalates to RLM if `[TOOLS NEEDED]` detected in output |
-| Variable-mode | `RLMVariableExecutionModule` | Input exceeds 32K chars — LLM sees metadata, explores via code |
+| Default | `EscalatingFleetModule` | Typed `RouteTurnSignature` router picks `direct` (CoT), `tools` (ReAct), or `rlm` per turn |
+| Large-context | `dspy.RLM` + `WorkspaceContext` | Input exceeds 32K chars — LLM sees metadata, explores via code |
 | Grounded-answer | `GroundedAnswerWithCitations` | Evidence-based queries requiring citations |
 | Recursive workspace | `RecursiveWorkspaceModule` | Multi-step workspace operations with tool use |
 | Force RLM | (direct `dspy.RLM`) | Caller sets `execution_mode="rlm"` in request to skip lightweight path |
 
 **Decision flow**:
 1. If `execution_mode="rlm"` is set explicitly, go directly to `dspy.RLM`.
-2. If input length > 32K characters, route to `RLMVariableExecutionModule`.
+2. If input length > 32K characters, route to `dspy.RLM` with the staged context wrapped in a `WorkspaceContext` SandboxSerializable.
 3. If evidence chunks are provided with a query, route to `GroundedAnswerWithCitations`.
-4. Otherwise, start with `EscalatingFleetModule` (lightweight CoT).
-5. If the CoT output contains `[TOOLS NEEDED]`, escalate to full RLM execution.
+4. Otherwise, `EscalatingFleetModule` runs the typed `RouteTurnSignature` router.
+5. The router classifies the turn as `direct` (ChainOfThought), `tools` (dspy.ReAct loop), or `rlm` (sandboxed Python execution).
 
 ---
 
