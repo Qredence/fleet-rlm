@@ -2,7 +2,28 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from fleet_rlm.quality.rlm_gepa import DaytonaRLMProposalProgram, RLMInstructionProposer
+from fleet_rlm.quality.gepa_evidence import best_candidate_index
+from fleet_rlm.quality.rlm_gepa import (
+    DaytonaRLMProposalProgram,
+    RLMInstructionProposer,
+    _file_preview,
+)
+
+
+def test_best_candidate_index_ignores_out_of_bounds_explicit_index() -> None:
+    assert best_candidate_index([0.1, 0.9, 0.5], explicit_best_idx=99) == 1
+
+
+def test_file_preview_reads_only_prefix_for_large_files(tmp_path) -> None:
+    bundle = tmp_path / "bundle.jsonl"
+    bundle.write_text("x" * 200, encoding="utf-8")
+
+    preview = _file_preview(str(bundle), max_chars=50)
+
+    assert preview["status"] == "ok"
+    assert preview["size_bytes"] == 200
+    assert len(preview["preview"]) == 50
+    assert preview["truncated"] is True
 
 
 def test_rlm_instruction_proposer_calls_program_with_reflective_payload() -> None:

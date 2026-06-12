@@ -59,7 +59,9 @@ def best_candidate_index(scores: list[float], explicit_best_idx: Any = None) -> 
     """Resolve GEPA's selected candidate index from explicit metadata or scores."""
     if explicit_best_idx is not None:
         try:
-            return int(explicit_best_idx)
+            idx = int(explicit_best_idx)
+            if 0 <= idx < len(scores):
+                return idx
         except (TypeError, ValueError):
             pass
     if not scores:

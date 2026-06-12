@@ -691,6 +691,18 @@ def test_gepa_optimization_request_rejects_miprov2() -> None:
         )
 
 
+def test_gepa_optimization_request_rejects_whitespace_only_target() -> None:
+    optimization_module = importlib.import_module("fleet_rlm.api.schemas.optimization")
+
+    with pytest.raises(ValidationError, match="One optimization target is required"):
+        optimization_module.GEPAOptimizationRequest.model_validate(
+            {
+                "dataset_id": "dataset-1",
+                "module_slug": "   ",
+            }
+        )
+
+
 def test_gepa_optimization_request_accepts_skill_target() -> None:
     optimization_module = importlib.import_module("fleet_rlm.api.schemas.optimization")
 

@@ -79,9 +79,9 @@ class GEPAOptimizationRequest(BaseModel):
         if self.dataset_id is not None or (self.dataset_path or "").strip():
             targets = [
                 bool((self.program_spec or "").strip()),
-                bool(self.module_slug),
-                bool(self.skill_name),
-                bool(self.skill_path),
+                bool((self.module_slug or "").strip()),
+                bool((self.skill_name or "").strip()),
+                bool((self.skill_path or "").strip()),
             ]
             if sum(targets) == 0:
                 raise ValueError(

@@ -32,13 +32,15 @@ def _file_preview(path: str, *, max_chars: int) -> dict[str, Any]:
     candidate = Path(path)
     if not candidate.exists() or not candidate.is_file():
         return {"path": path, "status": "missing"}
-    text = candidate.read_text(encoding="utf-8", errors="replace")
+    size_bytes = candidate.stat().st_size
+    with candidate.open(encoding="utf-8", errors="replace") as handle:
+        text = handle.read(max_chars)
     return {
         "path": str(candidate),
         "status": "ok",
-        "size_bytes": candidate.stat().st_size,
-        "preview": text[:max_chars],
-        "truncated": len(text) > max_chars,
+        "size_bytes": size_bytes,
+        "preview": text,
+        "truncated": size_bytes > max_chars,
     }
 
 
