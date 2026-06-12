@@ -11,8 +11,7 @@ export type SessionTraceExportResponse = components["schemas"]["SessionTraceExpo
 export type OptimizationRunCreatedResponse =
   components["schemas"]["OptimizationRunCreatedResponse"];
 export type OptimizationRunResponse = components["schemas"]["OptimizationRunResponse"];
-export type OptimizationRunDetailResponse =
-  components["schemas"]["OptimizationRunDetailResponse"];
+export type OptimizationRunDetailResponse = components["schemas"]["OptimizationRunDetailResponse"];
 export type OptimizationPromotionDraftResponse =
   components["schemas"]["OptimizationPromotionDraftResponse"];
 

@@ -94,7 +94,9 @@ function moduleDatasetDescription(module: GEPAModuleInfo | undefined): string {
   const inputs = module.input_keys?.length ? `Inputs: ${module.input_keys.join(", ")}` : "";
   const outputs = module.output_keys?.length ? `Outputs: ${module.output_keys.join(", ")}` : "";
   const pieces = [inputs, outputs].filter(Boolean);
-  return pieces.length ? pieces.join(" · ") : `Required keys: ${module.required_dataset_keys.join(", ")}`;
+  return pieces.length
+    ? pieces.join(" · ")
+    : `Required keys: ${module.required_dataset_keys.join(", ")}`;
 }
 
 function isRunnableDataset(dataset: DatasetResponse): boolean {
@@ -119,7 +121,9 @@ export function OptimizationScreen() {
   const [traceSessionId, setTraceSessionId] = useState("");
   const [traceExport, setTraceExport] = useState<SessionTraceExportResponse | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [promotionDraft, setPromotionDraft] = useState<OptimizationPromotionDraftResponse | null>(null);
+  const [promotionDraft, setPromotionDraft] = useState<OptimizationPromotionDraftResponse | null>(
+    null,
+  );
   const runDetailsQuery = useOptimizationRunDetails(selectedRunId);
 
   const modules = modulesQuery.data ?? EMPTY_MODULES;
@@ -146,7 +150,8 @@ export function OptimizationScreen() {
   }, [form.moduleSlug, modules]);
 
   useEffect(() => {
-    if (form.datasetSource !== "existing" || form.datasetId || runnableDatasets.length === 0) return;
+    if (form.datasetSource !== "existing" || form.datasetId || runnableDatasets.length === 0)
+      return;
     const firstDataset = runnableDatasets[0];
     if (!firstDataset) return;
     setForm((current) => ({ ...current, datasetId: firstDataset.id }));
@@ -195,8 +200,7 @@ export function OptimizationScreen() {
       if (exported.distilled_bundle_path) appendTraceBundlePath(exported.distilled_bundle_path);
       if (exported.trace_count === 0) {
         toast.warning("Trace export completed with no traces", {
-          description:
-            "Run a chat turn first or verify the session is linked to MLflow traces.",
+          description: "Run a chat turn first or verify the session is linked to MLflow traces.",
         });
         return;
       }
@@ -365,10 +369,14 @@ export function OptimizationScreen() {
                                     {selectedModule.optimization_target_kind ?? "custom"}
                                   </Badge>
                                   {selectedModule.signature_class_name ? (
-                                    <Badge variant="secondary">{selectedModule.signature_class_name}</Badge>
+                                    <Badge variant="secondary">
+                                      {selectedModule.signature_class_name}
+                                    </Badge>
                                   ) : null}
                                   {selectedModule.runtime_module_name ? (
-                                    <Badge variant="secondary">{selectedModule.runtime_module_name}</Badge>
+                                    <Badge variant="secondary">
+                                      {selectedModule.runtime_module_name}
+                                    </Badge>
                                   ) : null}
                                 </div>
                                 {selectedModule.description ? (
@@ -384,7 +392,8 @@ export function OptimizationScreen() {
                                 type="single"
                                 value={form.skillTargetMode}
                                 onValueChange={(value) => {
-                                  if (value) updateForm("skillTargetMode", value as SkillTargetMode);
+                                  if (value)
+                                    updateForm("skillTargetMode", value as SkillTargetMode);
                                 }}
                                 variant="outline"
                                 className="w-full"
@@ -464,7 +473,8 @@ export function OptimizationScreen() {
                             <Select
                               value={form.reflectionProfileId || DEFAULT_SELECT_VALUE}
                               onValueChange={(value) => {
-                                const nextValue = value === DEFAULT_SELECT_VALUE ? "" : String(value);
+                                const nextValue =
+                                  value === DEFAULT_SELECT_VALUE ? "" : String(value);
                                 setForm((current) => ({
                                   ...current,
                                   reflectionProfileId: nextValue,
@@ -475,8 +485,9 @@ export function OptimizationScreen() {
                             >
                               <SelectTrigger className="w-full">
                                 <SelectValue>
-                                  {profiles.find((profile) => profile.id === form.reflectionProfileId)
-                                    ?.name ?? "Default reflection model"}
+                                  {profiles.find(
+                                    (profile) => profile.id === form.reflectionProfileId,
+                                  )?.name ?? "Default reflection model"}
                                 </SelectValue>
                               </SelectTrigger>
                               <SelectContent align="start">
@@ -499,13 +510,16 @@ export function OptimizationScreen() {
                             ) : (
                               <Select
                                 value={form.reflectionModelId}
-                                onValueChange={(value) => updateForm("reflectionModelId", String(value))}
+                                onValueChange={(value) =>
+                                  updateForm("reflectionModelId", String(value))
+                                }
                                 disabled={!form.reflectionProfileId || modelOptions.length === 0}
                               >
                                 <SelectTrigger className="w-full">
                                   <SelectValue>
-                                    {modelOptions.find((model) => model.id === form.reflectionModelId)
-                                      ?.label ?? "Select model"}
+                                    {modelOptions.find(
+                                      (model) => model.id === form.reflectionModelId,
+                                    )?.label ?? "Select model"}
                                   </SelectValue>
                                 </SelectTrigger>
                                 <SelectContent align="start">
@@ -544,7 +558,9 @@ export function OptimizationScreen() {
                           <CompactField
                             label="Dataset"
                             description={
-                              selectedDataset ? datasetLabel(selectedDataset) : "Registered JSON/JSONL datasets"
+                              selectedDataset
+                                ? datasetLabel(selectedDataset)
+                                : "Registered JSON/JSONL datasets"
                             }
                           >
                             <Select
@@ -555,7 +571,9 @@ export function OptimizationScreen() {
                               <SelectTrigger className="w-full">
                                 <SelectValue>
                                   {selectedDataset?.name ??
-                                    (datasetsQuery.isLoading ? "Loading datasets" : "Select dataset")}
+                                    (datasetsQuery.isLoading
+                                      ? "Loading datasets"
+                                      : "Select dataset")}
                                 </SelectValue>
                               </SelectTrigger>
                               <SelectContent align="start">
@@ -577,9 +595,15 @@ export function OptimizationScreen() {
                         ) : null}
 
                         {form.datasetSource === "upload" ? (
-                          <CompactField label="Dataset file" description="Upload is registered before run creation.">
+                          <CompactField
+                            label="Dataset file"
+                            description="Upload is registered before run creation."
+                          >
                             <div className="flex min-h-9 items-center gap-2 rounded-md border border-input px-3 py-2">
-                              <Upload className="shrink-0 text-muted-foreground" data-icon="inline-start" />
+                              <Upload
+                                className="shrink-0 text-muted-foreground"
+                                data-icon="inline-start"
+                              />
                               <Input
                                 type="file"
                                 accept=".json,.jsonl,application/json"
@@ -629,7 +653,8 @@ export function OptimizationScreen() {
                             <FileJson className="text-muted-foreground" />
                             <AlertTitle>Trace bundle ready</AlertTitle>
                             <AlertDescription>
-                              {traceExport.trace_count} trace(s). {traceExport.distilled_bundle_path}
+                              {traceExport.trace_count} trace(s).{" "}
+                              {traceExport.distilled_bundle_path}
                             </AlertDescription>
                           </Alert>
                         ) : null}

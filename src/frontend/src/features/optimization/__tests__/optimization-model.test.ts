@@ -133,7 +133,11 @@ describe("optimization GEPA request model", () => {
 
     expect(() =>
       buildOptimizationRequest({
-        form: { ...DEFAULT_OPTIMIZATION_FORM, moduleSlug: "longcot-reasoner", datasetSource: "upload" },
+        form: {
+          ...DEFAULT_OPTIMIZATION_FORM,
+          moduleSlug: "longcot-reasoner",
+          datasetSource: "upload",
+        },
       }),
     ).toThrow("Choose a JSON/JSONL dataset file");
   });

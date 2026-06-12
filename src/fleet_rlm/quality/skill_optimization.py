@@ -95,6 +95,7 @@ def _skill_rows_to_examples(rows: list[dict[str, Any]]) -> list[Any]:
 
 def _make_skill_proposal_signature() -> Any:
     """Build the default proposer module used by RLMInstructionProposer."""
+
     class SkillProposalSignature(dspy.Signature):
         """Rewrite a Fleet markdown skill using GEPA reflective feedback.
 

@@ -21,7 +21,9 @@ import type {
 
 import { errorMessage, formatScore, shortPath, targetLabel } from "./optimization-format";
 
-function holdoutIsPromotionReady(detail: OptimizationRunDetailResponse | undefined): boolean | null {
+function holdoutIsPromotionReady(
+  detail: OptimizationRunDetailResponse | undefined,
+): boolean | null {
   const value = detail?.typed_review_bundle?.holdout?.promotion_ready;
   return typeof value === "boolean" ? value : null;
 }
@@ -139,37 +141,59 @@ export function RunDetailsSheet({
                     <Alert>
                       <AlertTitle>Holdout validation required</AlertTitle>
                       <AlertDescription>
-                        GEPA used the trainset as its internal Pareto valset for this run. Review the draft, but add
-                        holdout validation examples before promotion.
+                        GEPA used the trainset as its internal Pareto valset for this run. Review
+                        the draft, but add holdout validation examples before promotion.
                       </AlertDescription>
                     </Alert>
                   ) : null}
                   <div className="grid gap-3 md:grid-cols-4">
                     <RunDetailMetric label="Outcome" value={detail.insights.selected_outcome} />
-                    <RunDetailMetric label="Baseline" value={formatScore(detail.score_summary.baseline_score)} />
-                    <RunDetailMetric label="Optimized" value={formatScore(detail.score_summary.optimized_score)} />
-                    <RunDetailMetric label="Delta" value={formatScore(detail.score_summary.score_delta)} />
+                    <RunDetailMetric
+                      label="Baseline"
+                      value={formatScore(detail.score_summary.baseline_score)}
+                    />
+                    <RunDetailMetric
+                      label="Optimized"
+                      value={formatScore(detail.score_summary.optimized_score)}
+                    />
+                    <RunDetailMetric
+                      label="Delta"
+                      value={formatScore(detail.score_summary.score_delta)}
+                    />
                   </div>
                   <div className="grid gap-3 md:grid-cols-3">
-                    <RunDetailMetric label="Train examples" value={detail.score_summary.train_examples ?? "-"} />
+                    <RunDetailMetric
+                      label="Train examples"
+                      value={detail.score_summary.train_examples ?? "-"}
+                    />
                     <RunDetailMetric
                       label="Validation examples"
                       value={detail.score_summary.validation_examples ?? "-"}
                     />
-                    <RunDetailMetric label="Reflection" value={detail.run.reflection_model_id ?? "default"} />
+                    <RunDetailMetric
+                      label="Reflection"
+                      value={detail.run.reflection_model_id ?? "default"}
+                    />
                   </div>
                   <div className="space-y-2">
                     <div className="text-sm font-medium">Candidate decisions</div>
                     {candidateDecisions.map((candidate) => (
-                      <div key={candidate.candidate_id} className="rounded-md border border-border-subtle p-3">
+                      <div
+                        key={candidate.candidate_id}
+                        className="rounded-md border border-border-subtle p-3"
+                      >
                         <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant={candidate.status === "selected" ? "default" : "secondary"}>
+                          <Badge
+                            variant={candidate.status === "selected" ? "default" : "secondary"}
+                          >
                             {candidate.status}
                           </Badge>
                           <span className="font-medium">{candidate.summary}</span>
                         </div>
                         {candidate.rationale ? (
-                          <p className="mt-2 text-sm text-muted-foreground">{candidate.rationale}</p>
+                          <p className="mt-2 text-sm text-muted-foreground">
+                            {candidate.rationale}
+                          </p>
                         ) : null}
                         <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
                           {typeof candidate.score === "number" ? (
@@ -178,7 +202,9 @@ export function RunDetailsSheet({
                           {typeof candidate.score_delta === "number" ? (
                             <span>delta {formatScore(candidate.score_delta)}</span>
                           ) : null}
-                          {candidate.artifact_path ? <span>{shortPath(candidate.artifact_path)}</span> : null}
+                          {candidate.artifact_path ? (
+                            <span>{shortPath(candidate.artifact_path)}</span>
+                          ) : null}
                         </div>
                       </div>
                     ))}
@@ -189,7 +215,9 @@ export function RunDetailsSheet({
                   {promptDiffs.length === 0 ? (
                     <Alert>
                       <AlertTitle>No prompt snapshots</AlertTitle>
-                      <AlertDescription>Prompt snapshots were not persisted for this run.</AlertDescription>
+                      <AlertDescription>
+                        Prompt snapshots were not persisted for this run.
+                      </AlertDescription>
                     </Alert>
                   ) : null}
                   {promptDiffs.map((diff) => (
@@ -204,7 +232,8 @@ export function RunDetailsSheet({
                         <Alert>
                           <AlertTitle>No semantic prompt change selected</AlertTitle>
                           <AlertDescription>
-                            GEPA kept the original prompt as the selected artifact for this component.
+                            GEPA kept the original prompt as the selected artifact for this
+                            component.
                           </AlertDescription>
                         </Alert>
                       ) : null}
@@ -239,17 +268,25 @@ export function RunDetailsSheet({
                     <Alert>
                       <AlertTitle>No distilled trace evidence</AlertTitle>
                       <AlertDescription>
-                        This details response does not render raw spans. Add a distilled trace bundle to show evidence.
+                        This details response does not render raw spans. Add a distilled trace
+                        bundle to show evidence.
                       </AlertDescription>
                     </Alert>
                   ) : null}
                   {traceEvidence.map((item, index) => (
-                    <div key={`${item.kind}-${item.trace_id ?? index}`} className="rounded-md border p-3">
+                    <div
+                      key={`${item.kind}-${item.trace_id ?? index}`}
+                      className="rounded-md border p-3"
+                    >
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline">{item.kind}</Badge>
-                        {item.trace_id ? <span className="font-mono text-xs">{item.trace_id}</span> : null}
+                        {item.trace_id ? (
+                          <span className="font-mono text-xs">{item.trace_id}</span>
+                        ) : null}
                         {item.span_count ? (
-                          <span className="text-xs text-muted-foreground">{item.span_count} spans</span>
+                          <span className="text-xs text-muted-foreground">
+                            {item.span_count} spans
+                          </span>
                         ) : null}
                       </div>
                       {(item.failure_categories ?? []).length ? (
@@ -312,8 +349,8 @@ export function RunDetailsSheet({
                   <Alert>
                     <AlertTitle>Draft only</AlertTitle>
                     <AlertDescription>
-                      Creating a promotion draft records the selected artifact for review. It does not overwrite
-                      scaffold skills or live runtime prompts.
+                      Creating a promotion draft records the selected artifact for review. It does
+                      not overwrite scaffold skills or live runtime prompts.
                     </AlertDescription>
                   </Alert>
                   <Button type="button" onClick={onCreateDraft} disabled={isDraftPending || !runId}>
@@ -341,4 +378,3 @@ export function RunDetailsSheet({
     </Sheet>
   );
 }
-
