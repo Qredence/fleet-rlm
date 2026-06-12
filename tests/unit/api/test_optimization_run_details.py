@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+from fastapi import HTTPException
 
 from fleet_rlm.api.routers.optimization import run_details
+from fleet_rlm.api.routers.optimization import runs as runs_module
 from fleet_rlm.api.routers.optimization.run_details import (
     build_optimization_run_detail,
     create_or_load_promotion_draft,
 )
 from fleet_rlm.api.schemas.optimization import OptimizationRunResponse
+from fleet_rlm.integrations.database.models_enums import OptimizationRunStatus
 
 
 def _run(tmp_path: Path, *, manifest_path: Path | None, output_path: Path | None) -> OptimizationRunResponse:
@@ -189,6 +196,28 @@ def test_run_details_marks_trainset_fallback_as_not_promotion_ready(tmp_path: Pa
     assert detail.score_summary.validation_examples == 0
 
 
+def test_promotion_draft_paths_are_isolated_by_tenant(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(run_details, "OPTIMIZATION_DATA_ROOT", tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    run = _run(tmp_path, manifest_path=manifest_path, output_path=None)
+
+    draft_a = create_or_load_promotion_draft(
+        run,
+        tenant_id="tenant-a",
+        workspace_id="workspace-a",
+    )
+    draft_b = create_or_load_promotion_draft(
+        run,
+        tenant_id="tenant-b",
+        workspace_id="workspace-a",
+    )
+
+    assert draft_a.draft_path != draft_b.draft_path
+    assert "tenant-a" in draft_a.draft_path
+    assert "tenant-b" in draft_b.draft_path
+
+
 def test_promotion_draft_is_a_non_mutating_artifact(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(run_details, "OPTIMIZATION_DATA_ROOT", tmp_path)
     source_skill = tmp_path / "source" / "SKILL.md"
@@ -213,3 +242,36 @@ def test_promotion_draft_is_a_non_mutating_artifact(tmp_path: Path, monkeypatch)
     assert Path(draft.draft_path).is_file()
     assert loaded.draft_path == draft.draft_path
     assert source_skill.read_text(encoding="utf-8") == "original skill"
+
+
+@pytest.mark.asyncio
+async def test_create_run_promotion_draft_rejects_non_completed_run(monkeypatch) -> None:
+    run_uuid = uuid.uuid4()
+
+    async def fake_resolve_persisted_identity(**kwargs):
+        _ = kwargs
+        return SimpleNamespace(
+            tenant_id=uuid.uuid4(),
+            workspace_id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+        )
+
+    monkeypatch.setattr(runs_module, "_resolve_persisted_identity", fake_resolve_persisted_identity)
+    persistence = SimpleNamespace(
+        get_optimization_run=AsyncMock(
+            return_value=SimpleNamespace(
+                id=run_uuid,
+                status=OptimizationRunStatus.RUNNING,
+            )
+        )
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await runs_module.create_run_promotion_draft(
+            config_deps=SimpleNamespace(),
+            identity=SimpleNamespace(),
+            persistence=persistence,
+            run_id=str(run_uuid),
+        )
+
+    assert exc_info.value.status_code == 409
