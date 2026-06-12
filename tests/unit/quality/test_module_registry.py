@@ -66,6 +66,11 @@ def test_listing_helpers_return_sorted_modules(monkeypatch) -> None:
             "label": "Alpha",
             "description": "Alpha description",
             "program_spec": "alpha-module:Program",
+            "runtime_module_name": None,
+            "signature_class_name": None,
+            "input_keys": ["prompt"],
+            "output_keys": [],
+            "optimization_target_kind": "custom",
             "required_dataset_keys": ["prompt", "answer"],
         },
         {
@@ -73,6 +78,34 @@ def test_listing_helpers_return_sorted_modules(monkeypatch) -> None:
             "label": "Zeta",
             "description": "Zeta description",
             "program_spec": "zeta-module:Program",
+            "runtime_module_name": None,
+            "signature_class_name": None,
+            "input_keys": ["prompt"],
+            "output_keys": [],
+            "optimization_target_kind": "custom",
             "required_dataset_keys": ["prompt", "answer"],
         },
     ]
+
+
+def test_runtime_signature_targets_are_registered() -> None:
+    module_registry._reset_registry()
+
+    slugs = module_registry.list_module_slugs()
+    metadata = {item["slug"]: item for item in module_registry.list_module_metadata()}
+
+    assert "longcot-reasoner" in slugs
+    assert {
+        "summarize-long-document",
+        "extract-from-logs",
+        "triage-incident-logs",
+        "plan-code-change",
+        "clarification-questions",
+        "memory-action-intent",
+    }.issubset(slugs)
+    plan_code_change = metadata["plan-code-change"]
+    assert plan_code_change["runtime_module_name"] == "plan_code_change"
+    assert plan_code_change["signature_class_name"] == "CodeChangePlan"
+    assert plan_code_change["input_keys"] == ["task", "repo_context", "constraints"]
+    assert plan_code_change["output_keys"] == ["plan_steps", "files_to_touch", "validation_commands", "risks"]
+    assert plan_code_change["optimization_target_kind"] == "runtime-signature"

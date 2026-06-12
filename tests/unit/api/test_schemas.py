@@ -270,6 +270,17 @@ ROUNDTRIP_CASES = [
         },
     ),
     ("fleet_rlm.api.schemas.sessions", "SessionExportRequest", {"module_slug": "longcot-reasoner"}),
+    ("fleet_rlm.api.schemas.sessions", "SessionTraceExportRequest", {"format": "both"}),
+    (
+        "fleet_rlm.api.schemas.sessions",
+        "SessionTraceExportResponse",
+        {
+            "session_id": "session-1",
+            "trace_count": 1,
+            "jsonl_path": "artifacts/traces/session-1.jsonl",
+            "distilled_bundle_path": "artifacts/traces/session-1.distilled.jsonl",
+        },
+    ),
     (
         "fleet_rlm.api.schemas.sessions",
         "TranscriptTurnInput",
@@ -297,7 +308,12 @@ ROUNDTRIP_CASES = [
     (
         "fleet_rlm.api.schemas.optimization",
         "GEPAOptimizationRequest",
-        {"dataset_id": "dataset-1", "program_spec": "package.module:program"},
+        {
+            "dataset_id": "dataset-1",
+            "program_spec": "package.module:program",
+            "reflection_profile_id": "profile-1",
+            "reflection_model_id": "model-1",
+        },
     ),
     (
         "fleet_rlm.api.schemas.optimization",
@@ -308,6 +324,9 @@ ROUNDTRIP_CASES = [
             "validation_examples": 2,
             "validation_score": 0.95,
             "output_path": "optimized/program.py",
+            "reflection_profile_id": "profile-1",
+            "reflection_model_id": "model-1",
+            "distilled_trace_bundle_path": "traces/distilled.jsonl",
         },
     ),
     (
@@ -318,6 +337,11 @@ ROUNDTRIP_CASES = [
             "label": "Long CoT",
             "program_spec": "package.module:program",
             "required_dataset_keys": ["question", "answer"],
+            "input_keys": ["question"],
+            "output_keys": ["reasoning", "answer"],
+            "runtime_module_name": "longcot",
+            "signature_class_name": "LongCoTQASignature",
+            "optimization_target_kind": "runtime-signature",
         },
     ),
     (
@@ -334,6 +358,65 @@ ROUNDTRIP_CASES = [
             "program_spec": "package.module:program",
             "optimizer": "GEPA",
             "started_at": "2024-01-01T00:00:00Z",
+            "reflection_profile_id": "profile-1",
+            "reflection_model_id": "model-1",
+            "distilled_trace_bundle_path": "traces/distilled.jsonl",
+        },
+    ),
+    (
+        "fleet_rlm.api.schemas.optimization",
+        "OptimizationRunDetailResponse",
+        {
+            "run": {
+                "id": "run-1",
+                "status": "completed",
+                "program_spec": "skill:optimization",
+                "optimizer": "gepa",
+                "started_at": "2026-06-11T10:00:00Z",
+            },
+            "manifest_available": True,
+            "manifest": {"optimizer": "GEPA"},
+            "review_bundle": {"feedback_summary": "ok"},
+            "artifact_refs": [
+                {"label": "Manifest", "path": "optimized.manifest.json", "kind": "manifest", "exists": True}
+            ],
+            "score_summary": {"train_examples": 1, "validation_examples": 0},
+            "prompt_diffs": [
+                {
+                    "predictor_name": "skill",
+                    "before_prompt": "before",
+                    "after_prompt": "after",
+                    "changed": True,
+                }
+            ],
+            "trace_evidence": [
+                {
+                    "kind": "trace_evidence",
+                    "trace_id": "tr-1",
+                    "failure_categories": ["bad_tool_use"],
+                    "prompt_change_recommendations": ["Clarify tool use."],
+                }
+            ],
+            "candidate_decisions": [
+                {"candidate_id": "selected", "status": "selected", "summary": "Selected prompt"}
+            ],
+            "insights": {
+                "selected_outcome": "changed",
+                "summary": "GEPA selected a prompt change.",
+                "next_step": "Review draft.",
+            },
+        },
+    ),
+    (
+        "fleet_rlm.api.schemas.optimization",
+        "OptimizationPromotionDraftResponse",
+        {
+            "draft_id": "promotion-draft-run-1",
+            "run_id": "run-1",
+            "target": "skill:optimization",
+            "summary": "Draft only",
+            "draft_path": "promotion-drafts/run-1.json",
+            "created_at": "2026-06-11T10:00:00Z",
         },
     ),
     ("fleet_rlm.api.schemas.optimization", "OptimizationRunCreatedResponse", {"run_id": "run-1"}),
@@ -595,3 +678,32 @@ def test_ws_message_rejects_invalid_payloads(payload, message_fragment):
 
     with pytest.raises(ValidationError, match=message_fragment):
         websocket_module.WSMessage.model_validate(payload)
+
+
+def test_gepa_optimization_request_rejects_miprov2() -> None:
+    optimization_module = importlib.import_module("fleet_rlm.api.schemas.optimization")
+
+    with pytest.raises(ValidationError):
+        optimization_module.GEPAOptimizationRequest.model_validate(
+            {
+                "dataset_id": "dataset-1",
+                "program_spec": "package.module:program",
+                "optimizer": "miprov2",
+            }
+        )
+
+
+def test_gepa_optimization_request_accepts_skill_target() -> None:
+    optimization_module = importlib.import_module("fleet_rlm.api.schemas.optimization")
+
+    request = optimization_module.GEPAOptimizationRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "skill_name": "optimization",
+            "trace_bundle_paths": ["traces/bundle.jsonl"],
+        }
+    )
+
+    assert request.optimizer == "gepa"
+    assert request.skill_name == "optimization"
+    assert request.trace_bundle_paths == ["traces/bundle.jsonl"]

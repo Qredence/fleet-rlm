@@ -34,12 +34,21 @@ class ModuleOptimizationSpec:
 
     metric_name: str = ""
     description: str = ""
+    artifact_writer: Callable[[Any, str], dict[str, Any]] | None = None
+    instruction_proposer_factory: Callable[[], Any] | None = None
+    runtime_module_name: str | None = None
+    signature_class_name: str | None = None
+    output_keys: list[str] | None = None
+    optimization_target_kind: str = "custom"
 
 
 # -- Module registry --------------------------------------------------------
 
 _REGISTRY: dict[str, ModuleOptimizationSpec] = {}
-_MODULE_ENTRYPOINTS: tuple[str, ...] = ("fleet_rlm.quality.optimize_longcot",)
+_MODULE_ENTRYPOINTS: tuple[str, ...] = (
+    "fleet_rlm.quality.optimize_longcot",
+    "fleet_rlm.quality.runtime_signature_optimization",
+)
 
 
 def register_module(spec: ModuleOptimizationSpec) -> None:
@@ -71,6 +80,11 @@ def list_module_metadata() -> list[dict[str, Any]]:
             "label": spec.label,
             "description": spec.description,
             "program_spec": spec.program_spec,
+            "runtime_module_name": spec.runtime_module_name,
+            "signature_class_name": spec.signature_class_name,
+            "input_keys": spec.input_keys,
+            "output_keys": list(spec.output_keys or []),
+            "optimization_target_kind": spec.optimization_target_kind,
             "required_dataset_keys": spec.required_dataset_keys,
         }
         for spec in sorted(_REGISTRY.values(), key=lambda s: s.module_slug)

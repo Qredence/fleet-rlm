@@ -354,6 +354,9 @@ _LONGCOT_SPEC = ModuleOptimizationSpec(
     metric_builder=_metric_builder,
     metric_name="longcot_qa_metric",
     description=("Long chain-of-thought question answering module with explicit reasoning and answer fields."),
+    signature_class_name="LongCoTQASignature",
+    output_keys=["answer"],
+    optimization_target_kind="runtime-signature",
 )
 
 register_module(_LONGCOT_SPEC)

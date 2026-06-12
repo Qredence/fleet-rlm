@@ -20,10 +20,26 @@ _LIST_KEYS = frozenset(
         "contradictions",
         "repair_steps",
         "repair_subqueries",
+        "key_points",
+        "matches",
+        "probable_root_causes",
+        "impacted_components",
+        "recommended_actions",
+        "plan_steps",
+        "files_to_touch",
+        "validation_commands",
+        "risks",
+        "questions",
+        "blocking_unknowns",
+        "target_paths",
+        "content_plan",
+        "current_tree",
     }
 )
-_INT_KEYS = frozenset({"context_budget", "subquery_budget", "repair_budget"})
+_DICT_KEYS = frozenset({"patterns"})
+_INT_KEYS = frozenset({"context_budget", "subquery_budget", "repair_budget", "coverage_pct"})
 _FLOAT_KEYS = frozenset({"confidence"})
+_BOOL_KEYS = frozenset({"proceed_without_answer", "requires_confirmation"})
 
 _TRANSCRIPT_OUTPUT_DEFAULTS: dict[str, dict[str, Any]] = {
     "reflect-and-revise": {"next_action": "finalize"},
@@ -37,6 +53,43 @@ _TRANSCRIPT_OUTPUT_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "repair": {"repair_mode": "no_repair"},
     "verification": {"verification_status": "sufficient"},
+    "summarize-long-document": {"focus": "general", "key_points": [], "coverage_pct": 100},
+    "extract-from-logs": {"query": "notable patterns", "matches": [], "patterns": {}, "time_range": ""},
+    "triage-incident-logs": {
+        "service_context": "",
+        "query": "Identify incident summary",
+        "severity": "low",
+        "probable_root_causes": [],
+        "impacted_components": [],
+        "recommended_actions": [],
+        "time_range": "",
+    },
+    "plan-code-change": {
+        "repo_context": "",
+        "constraints": "",
+        "plan_steps": [],
+        "files_to_touch": [],
+        "validation_commands": [],
+        "risks": [],
+    },
+    "clarification-questions": {
+        "available_context": "",
+        "operation_risk": "medium",
+        "questions": [],
+        "blocking_unknowns": [],
+        "safe_default": "",
+        "proceed_without_answer": False,
+    },
+    "memory-action-intent": {
+        "current_tree": [],
+        "policy_constraints": "",
+        "action_type": "noop",
+        "target_paths": [],
+        "content_plan": [],
+        "risk_level": "low",
+        "requires_confirmation": False,
+        "rationale": "",
+    },
 }
 
 _ASSISTANT_SINKS: dict[str, str] = {
@@ -45,17 +98,33 @@ _ASSISTANT_SINKS: dict[str, str] = {
     "decomposition": "decomposition_rationale",
     "repair": "repair_rationale",
     "verification": "verified_summary",
+    "summarize-long-document": "summary",
+    "extract-from-logs": "matches",
+    "triage-incident-logs": "recommended_actions",
+    "plan-code-change": "plan_steps",
+    "clarification-questions": "questions",
+    "memory-action-intent": "rationale",
 }
 
 
 def _default_value_for_key(key: str) -> Any:
     if key in _LIST_KEYS:
         return []
+    if key in _DICT_KEYS:
+        return {}
     if key in _INT_KEYS:
         return 0
     if key in _FLOAT_KEYS:
         return 0.0
+    if key in _BOOL_KEYS:
+        return False
     return ""
+
+
+def _assistant_value_for_key(key: str, assistant_message: str) -> Any:
+    if key in _LIST_KEYS:
+        return [assistant_message]
+    return assistant_message
 
 
 def _structured_transcript_row(
@@ -75,7 +144,7 @@ def _structured_transcript_row(
 
     assistant_sink = _ASSISTANT_SINKS.get(spec.module_slug)
     if assistant_sink is not None:
-        row[assistant_sink] = assistant_message
+        row[assistant_sink] = _assistant_value_for_key(assistant_sink, assistant_message)
         return row
 
     output_keys = [key for key in spec.required_dataset_keys if key not in input_keys]
