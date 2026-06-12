@@ -142,6 +142,17 @@ class PersistenceProtocol(Protocol):
         """Return a single chat session or None if not found."""
         pass
 
+    async def get_chat_session_by_external_id(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        external_session_id: str,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> ChatSession | None:
+        """Return a chat session linked to a runtime websocket session id."""
+        pass
+
     async def list_chat_turns(
         self,
         *,

@@ -650,18 +650,6 @@ wheels = [
 ]
 
 [[package]]
-name = "colorlog"
-version = "6.10.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a2/61/f083b5ac52e505dfc1c624eafbf8c7589a0d7f32daa398d2e7590efa5fda/colorlog-6.10.1.tar.gz", hash = "sha256:eb4ae5cb65fe7fec7773c2306061a8e63e02efc2c72eba9d27b0fa23c94f1321", size = 17162, upload-time = "2025-10-16T16:14:11.978Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/6d/c1/e419ef3723a074172b68aaa89c9f3de486ed4c2399e2dbd8113a4fdcaf9e/colorlog-6.10.1-py3-none-any.whl", hash = "sha256:2d7e8348291948af66122cff006c9f8da6255d224e7cf8e37d8de2df3bad8c9c", size = 11743, upload-time = "2025-10-16T16:14:10.512Z" },
-]
-
-[[package]]
 name = "comm"
 version = "0.2.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1050,11 +1038,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3c/6c/27fdddb63d8f9fdb2cfe6528e1bb1a85e892979e1256bce349ff6a26bf5b/dspy-3.3.0b1-py3-none-any.whl", hash = "sha256:1e6e34c9ed8e748ec216d0d64e35506c53a4c86adac2f846f957546c05a93871", size = 377844, upload-time = "2026-05-28T01:09:04.021Z" },
 ]
 
-[package.optional-dependencies]
-optuna = [
-    { name = "optuna" },
-]
-
 [[package]]
 name = "email-validator"
 version = "2.3.0"
@@ -1405,7 +1388,7 @@ dependencies = [
     { name = "asyncpg" },
     { name = "boto3" },
     { name = "daytona" },
-    { name = "dspy", extra = ["optuna"] },
+    { name = "dspy" },
     { name = "fastapi", extra = ["standard"] },
     { name = "hydra-core" },
     { name = "joserfc" },
@@ -1500,7 +1483,7 @@ requires-dist = [
     { name = "daytona", specifier = ">=0.184.0,<1" },
     { name = "debugpy", marker = "extra == 'evaluation'", specifier = "==1.8.20" },
     { name = "decorator", marker = "extra == 'evaluation'", specifier = "==5.2.1" },
-    { name = "dspy", extras = ["optuna"], specifier = "==3.3.0b1" },
+    { name = "dspy", specifier = "==3.3.0b1" },
     { name = "executing", marker = "extra == 'evaluation'", specifier = "==2.2.1" },
     { name = "fastapi", extras = ["standard"], specifier = "==0.136.3" },
     { name = "hydra-core", specifier = ">=1.3,<2" },
@@ -3425,24 +3408,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/6c/d8/7bf5e4cec0578ac3c28c18eb7b88f34279139cbc8c568d6aa02b9c5ae53e/opentelemetry_util_http-0.63b1.tar.gz", hash = "sha256:ba1268f00922ee522dba2ae38458060f99486e7385a8056985901ca9685adfff", size = 11102, upload-time = "2026-05-21T16:36:56.675Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e5/f1/34e047e8f6a3c67e5220acf1af7b9f62868c25d77791bca74457bd2180a6/opentelemetry_util_http-0.63b1-py3-none-any.whl", hash = "sha256:6284194028c59cd439f8acfe388145069a6127f11dc077e1344a2094adacc3f8", size = 8205, upload-time = "2026-05-21T16:36:09.736Z" },
-]
-
-[[package]]
-name = "optuna"
-version = "4.9.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "alembic" },
-    { name = "colorlog" },
-    { name = "numpy" },
-    { name = "packaging" },
-    { name = "pyyaml" },
-    { name = "sqlalchemy" },
-    { name = "tqdm" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f4/aa/05f5e3f662cc96a4c478fc3446b8ed6359825a2b504ecb614a9ac84e4a4d/optuna-4.9.0.tar.gz", hash = "sha256:b322e5cbdf1655fb84c37646c4a7a1f391de1b47806bbe222e015825d0a82b87", size = 485834, upload-time = "2026-06-01T06:23:30.424Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ab/f3/e5fcd5d9b15771ed6dc10e3a7eeddc672e418f4f4c4653d216cc1d857e2d/optuna-4.9.0-py3-none-any.whl", hash = "sha256:f52f3be6148654850c92a5860d398fd88ec6b2c84ab68d9c3d07dcff02e7afee", size = 425553, upload-time = "2026-06-01T06:23:28.804Z" },
 ]
 
 [[package]]

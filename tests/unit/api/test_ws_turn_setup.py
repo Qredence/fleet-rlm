@@ -100,3 +100,65 @@ async def test_prepare_daytona_workspace_timeout_raises_diagnostic_error() -> No
         await prepare_daytona_workspace_for_turn(agent=agent, request=request, docs_path=None)
 
     assert exc_info.value.category == "workspace_prep_timeout"
+
+
+def test_build_prepare_stream_adds_local_snapshot_for_code_review(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.api.routers.ws import turn_setup
+    from fleet_rlm.api.schemas import WSMessage
+
+    monkeypatch.setattr(
+        turn_setup,
+        "_local_workspace_snapshot_path",
+        lambda **kwargs: "/tmp/local-workspace-snapshot.md",
+    )
+    msg = WSMessage(
+        type="message",
+        content="Review my recent code changes and suggest improvements",
+        execution_mode="rlm_only",
+        context_paths=None,
+    )
+
+    daytona_request, _prepare = turn_setup._build_prepare_stream(
+        agent=SimpleNamespace(),
+        msg=msg,
+        workspace_id="default",
+        owner_tenant_claim="tenant",
+        owner_user_claim="user",
+        sess_id="session",
+    )
+
+    assert daytona_request.repo_url is None
+    assert daytona_request.context_paths == ["/tmp/local-workspace-snapshot.md"]
+
+
+def test_build_prepare_stream_keeps_remote_repo_without_local_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.api.routers.ws import turn_setup
+    from fleet_rlm.api.schemas import WSMessage
+
+    snapshot_calls: list[dict[str, object]] = []
+
+    def _fake_snapshot(**kwargs: object) -> str:
+        snapshot_calls.append(kwargs)
+        return "/tmp/local-workspace-snapshot.md"
+
+    monkeypatch.setattr(turn_setup, "_local_workspace_snapshot_path", _fake_snapshot)
+    msg = WSMessage(
+        type="message",
+        content="Review my recent code changes and suggest improvements",
+        execution_mode="rlm_only",
+        repo_url="https://github.com/qredence/fleet-rlm",
+        context_paths=None,
+    )
+
+    daytona_request, _prepare = turn_setup._build_prepare_stream(
+        agent=SimpleNamespace(),
+        msg=msg,
+        workspace_id="default",
+        owner_tenant_claim="tenant",
+        owner_user_claim="user",
+        sess_id="session",
+    )
+
+    assert daytona_request.repo_url == "https://github.com/qredence/fleet-rlm"
+    assert daytona_request.context_paths == []
+    assert snapshot_calls == []

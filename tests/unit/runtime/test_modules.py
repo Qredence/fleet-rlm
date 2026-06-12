@@ -97,6 +97,73 @@ def test_streaming_rlm_emits_action_and_result_steps() -> None:
     assert events[-1]["output"] == "12"
 
 
+def test_streaming_rlm_records_real_repl_execution_span(monkeypatch) -> None:
+    from fleet_rlm.integrations.observability import mlflow_context
+    from fleet_rlm.runtime.agent.signatures import RLMTurnSignature
+    from fleet_rlm.runtime.modules.factory import create_runtime_rlm
+
+    captured: list[dict[str, Any]] = []
+
+    class FakeSpan:
+        def __init__(self, name: str, span_type: str | None, attributes: dict[str, Any] | None) -> None:
+            self.record = {"name": name, "span_type": span_type, "attributes": attributes or {}, "status": "OK"}
+
+        def __enter__(self) -> "FakeSpan":
+            captured.append(self.record)
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def set_inputs(self, inputs: Any) -> None:
+            self.record["inputs"] = inputs
+
+        def set_outputs(self, outputs: Any) -> None:
+            self.record["outputs"] = outputs
+
+        def set_status(self, status: str) -> None:
+            self.record["status"] = status
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: object(),
+        start_span=lambda name, span_type=None, attributes=None: FakeSpan(name, span_type, attributes),
+    )
+    monkeypatch.setattr(
+        mlflow_context,
+        "_runtime_module",
+        lambda: SimpleNamespace(
+            _import_mlflow=lambda: fake_mlflow,
+            logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        ),
+    )
+
+    class FakeRepl:
+        def execute(self, code: str, variables: dict[str, Any]) -> str:
+            assert code == "print(user_request)"
+            assert variables == {"user_request": "hello"}
+            return "hello"
+
+    rlm = create_runtime_rlm(
+        signature=RLMTurnSignature,
+        interpreter=SimpleNamespace(),
+        max_iterations=2,
+        max_llm_calls=3,
+        verbose=False,
+    )
+    rlm.generate_action.current_iteration = 2
+
+    result = rlm._execute_code(FakeRepl(), "print(user_request)", {"user_request": "hello"})
+
+    assert result == "hello"
+    assert captured[0]["name"] == "fleet_rlm.rlm_repl_execute"
+    assert captured[0]["span_type"] == "TOOL"
+    assert captured[0]["attributes"]["fleet_rlm.tool_name"] == "repl_execute"
+    assert captured[0]["attributes"]["fleet_rlm.rlm_iteration"] == "2"
+    assert captured[0]["inputs"]["code"] == "print(user_request)"
+    assert captured[0]["outputs"]["status"] == "ok"
+    assert captured[0]["outputs"]["result"] == "hello"
+
+
 def test_no_callback_rlm_scopes_disabled_semantic_callbacks(monkeypatch) -> None:
     import dspy
 

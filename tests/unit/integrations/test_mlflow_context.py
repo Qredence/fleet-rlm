@@ -461,3 +461,66 @@ def test_record_rlm_trajectory_spans_skips_without_active_trace(monkeypatch) -> 
     )
 
     assert mlflow_context.record_rlm_trajectory_spans([{"code": "print('x')"}]) == 0
+
+
+def test_mlflow_child_span_records_inputs_outputs_and_errors(monkeypatch) -> None:
+    from fleet_rlm.integrations.observability import mlflow_context
+
+    captured: list[dict[str, Any]] = []
+
+    class FakeSpan:
+        def __init__(self, name: str, span_type: str | None, attributes: dict[str, Any] | None) -> None:
+            self.record = {"name": name, "span_type": span_type, "attributes": attributes or {}, "status": "OK"}
+
+        def __enter__(self) -> "FakeSpan":
+            captured.append(self.record)
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def set_inputs(self, inputs: Any) -> None:
+            self.record["inputs"] = inputs
+
+        def set_outputs(self, outputs: Any) -> None:
+            self.record["outputs"] = outputs
+
+        def set_status(self, status: str) -> None:
+            self.record["status"] = status
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: object(),
+        start_span=lambda name, span_type=None, attributes=None: FakeSpan(name, span_type, attributes),
+    )
+    monkeypatch.setattr(
+        mlflow_context,
+        "_runtime_module",
+        lambda: SimpleNamespace(
+            _import_mlflow=lambda: fake_mlflow,
+            logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        ),
+    )
+
+    with mlflow_context.mlflow_child_span(
+        "fleet_rlm.example",
+        span_type="TOOL",
+        attributes={"fleet_rlm.phase": "test"},
+        inputs={"value": 1},
+    ) as span:
+        mlflow_context.set_mlflow_span_outputs(span, {"result": "ok"})
+
+    assert captured[0]["name"] == "fleet_rlm.example"
+    assert captured[0]["span_type"] == "TOOL"
+    assert captured[0]["attributes"]["fleet_rlm.phase"] == "test"
+    assert captured[0]["inputs"] == {"value": 1}
+    assert captured[0]["outputs"] == {"result": "ok"}
+    assert captured[0]["status"] == "OK"
+
+    try:
+        with mlflow_context.mlflow_child_span("fleet_rlm.failing") as _span:
+            raise ValueError("boom")
+    except ValueError:
+        pass
+
+    assert captured[1]["name"] == "fleet_rlm.failing"
+    assert captured[1]["status"] == "ERROR"

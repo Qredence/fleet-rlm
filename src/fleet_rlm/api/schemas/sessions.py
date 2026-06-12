@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -207,6 +207,47 @@ class SessionExportRequest(BaseModel):
 
     module_slug: str = Field(
         description="Target GEPA module slug whose dataset keys determine the export column mapping."
+    )
+
+
+class SessionTraceExportRequest(BaseModel):
+    """Request body for exporting a session's linked MLflow traces."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    format: Literal["json", "jsonl", "both"] = Field(
+        default="both",
+        description="Trace artifact format to write.",
+    )
+    mlflow_session_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional MLflow trace session id hint. The server validates the hint against "
+            "authorized runtime session ids for the resolved durable session before export."
+        ),
+    )
+
+
+class SessionTraceExportResponse(BaseModel):
+    """Trace export artifact paths for a session."""
+
+    ok: bool = Field(default=True, description="Whether trace export completed.")
+    session_id: str = Field(description="Durable session identifier.")
+    trace_count: int = Field(description="Number of MLflow traces exported.")
+    json_path: str | None = Field(default=None, description="Path to the full JSON trace artifact.")
+    jsonl_path: str | None = Field(default=None, description="Path to the full JSONL trace artifact.")
+    distilled_bundle_path: str | None = Field(
+        default=None,
+        description="Path to the distilled GEPA evidence bundle.",
+    )
+    skipped_trace_ids: list[str] = Field(
+        default_factory=list,
+        description="Trace identifiers that could not be resolved/exported.",
+    )
+    errors: list[str] = Field(default_factory=list, description="Non-fatal export errors.")
+    summary: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Distilled trace export summary.",
     )
 
 

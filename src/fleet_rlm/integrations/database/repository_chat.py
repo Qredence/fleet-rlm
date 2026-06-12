@@ -363,6 +363,32 @@ class ChatRepository(RepositoryContextMixin):
             result = await session.execute(stmt)
             return result.scalar_one_or_none()
 
+    async def get_chat_session_by_external_id(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        external_session_id: str,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> ChatSession | None:
+        normalized = str(external_session_id or "").strip()
+        if not normalized:
+            return None
+        async with self._db.session() as session, session.begin():
+            await self._set_request_context(session, tenant_id, user_id, workspace_id)
+            stmt: Select[tuple[ChatSession]] = select(ChatSession).where(
+                and_(
+                    ChatSession.tenant_id == tenant_id,
+                    ChatSession.metadata_json["external_session_id"].as_string() == normalized,
+                )
+            )
+            if user_id is not None:
+                stmt = stmt.where(ChatSession.user_id == user_id)
+            if workspace_id is not None:
+                stmt = stmt.where(ChatSession.workspace_id == workspace_id)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
     async def list_chat_turns(
         self,
         *,

@@ -37,6 +37,7 @@ def test_manifest_round_trip_serialization(tmp_path) -> None:
         optimizer="GEPA",
         metric_name="accuracy",
         auto="light",
+        max_metric_calls=8,
         extra_metadata={"module_slug": "reasoner"},
     )
     manifest_path = tmp_path / "nested" / "result.manifest.json"
@@ -50,6 +51,7 @@ def test_manifest_round_trip_serialization(tmp_path) -> None:
         "metric": "accuracy",
         "module": "fleet_rlm.module:Reasoner",
         "module_slug": "reasoner",
+        "max_metric_calls": 8,
         "optimizer": "GEPA",
         "train_examples": 8,
         "validation_examples": 2,

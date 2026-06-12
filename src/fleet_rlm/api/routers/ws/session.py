@@ -146,6 +146,17 @@ async def _link_database_session(
         logger.debug("Local session store unavailable", exc_info=True)
         return None
 
+    local_owner_tenant = str(identity_rows.tenant_id) if identity_rows is not None else owner_tenant_claim
+    local_owner_user = (
+        str(identity_rows.user_id)
+        if identity_rows is not None and identity_rows.user_id is not None
+        else owner_user_claim
+    )
+    local_workspace_id = (
+        str(identity_rows.workspace_id)
+        if identity_rows is not None and identity_rows.workspace_id is not None
+        else workspace_id
+    )
     try:
         linked_id = str(
             (
@@ -153,9 +164,9 @@ async def _link_database_session(
                     _db_create,
                     title=sess_id,
                     external_session_id=sess_id,
-                    owner_tenant=owner_tenant_claim,
-                    owner_user=owner_user_claim,
-                    workspace_id=workspace_id,
+                    owner_tenant=local_owner_tenant,
+                    owner_user=local_owner_user,
+                    workspace_id=local_workspace_id,
                 )
             ).id
         )

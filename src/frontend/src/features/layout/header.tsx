@@ -45,6 +45,9 @@ export function LayoutHeader() {
       </div>
 
       <div className="flex items-center gap-1">
+        {activeNav === "workspace" ? (
+          <div id="workspace-header-actions" className="flex items-center gap-1" />
+        ) : null}
         {PANEL_BUTTONS.map(({ id, label, icon: Icon }) => (
           <Tooltip key={id}>
             <TooltipTrigger asChild>

@@ -9,6 +9,8 @@ The module uses :class:`~fleet_rlm.runtime.agent.signatures.LongCoTQASignature`
 
 from __future__ import annotations
 
+import ast
+import json
 import re
 from collections import Counter
 from difflib import SequenceMatcher
@@ -38,6 +40,7 @@ _VERIFY_RE = re.compile(
     r"\b(check|verify|verified|confirm|double-check|sanity check)\b",
     re.IGNORECASE,
 )
+_SOLUTION_RE = re.compile(r"\bsolution\s*=\s*(?P<payload>.+)", re.IGNORECASE | re.DOTALL)
 
 
 def _normalize_text(value: Any) -> str:
@@ -57,6 +60,47 @@ def _clip_text(text: str, limit: int = 80) -> str:
     return f"{text[: limit - 3]}..."
 
 
+def _extract_solution_payload(text: str) -> tuple[str | None, bool]:
+    """Extract the verifier-facing solution payload when a marker is present."""
+    match = _SOLUTION_RE.search(text)
+    if not match:
+        return None, False
+    return match.group("payload").strip(), True
+
+
+def _parse_answer_payload(payload: str) -> Any:
+    """Parse structured answer payloads without executing arbitrary code."""
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError:
+        pass
+    if len(payload) > 1000:
+        return None
+    try:
+        return ast.literal_eval(payload)
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return None
+
+
+def _structured_mismatch_feedback(expected_value: Any, actual_value: Any, expected: str) -> str:
+    """Describe verifier-visible structured answer mismatches."""
+    missing_detail = ""
+    if isinstance(expected_value, dict) and isinstance(actual_value, dict):
+        missing_keys = sorted(str(key) for key in set(expected_value) - set(actual_value))
+        if missing_keys:
+            missing_detail = f" Missing required keys: {', '.join(missing_keys)}."
+    elif isinstance(expected_value, (list, tuple)) and isinstance(actual_value, (list, tuple)):
+        if len(actual_value) < len(expected_value):
+            missing_detail = " Missing required list entries."
+
+    if missing_detail:
+        return (
+            "Structured solution is incomplete and incorrect for the verifier."
+            f"{missing_detail} Replace it with '{_clip_text(expected)}'."
+        )
+    return f"Structured solution is incorrect. Replace it with '{_clip_text(expected)}'."
+
+
 def _score_answer(expected: str, actual: str) -> tuple[float, str]:
     """Score final-answer quality with exact, partial, related, and failed tiers."""
     expected_normalized = _normalize_text(expected)
@@ -71,6 +115,35 @@ def _score_answer(expected: str, actual: str) -> tuple[float, str]:
     actual_lower = actual_normalized.lower()
     if expected_lower == actual_lower:
         return 1.0, "Answer exactly matches the reference."
+
+    expected_payload, expected_has_solution = _extract_solution_payload(expected_normalized)
+    actual_payload, actual_has_solution = _extract_solution_payload(actual_normalized)
+    if expected_has_solution:
+        if not actual_has_solution or actual_payload is None:
+            return (
+                0.0,
+                "Missing solution = marker, so the final answer is verifier-incompatible.",
+            )
+        if expected_payload is None:
+            return 0.0, "Reference solution marker did not include a comparable payload."
+
+        expected_value = _parse_answer_payload(expected_payload)
+        actual_value = _parse_answer_payload(actual_payload)
+        if expected_value is not None and actual_value is not None:
+            if expected_value == actual_value:
+                return 1.0, "Answer solution payload exactly matches the reference."
+            return 0.0, _structured_mismatch_feedback(
+                expected_value,
+                actual_value,
+                expected_normalized,
+            )
+
+        if expected_payload.lower() == actual_payload.lower():
+            return 1.0, "Answer solution payload exactly matches the reference."
+        return (
+            0.0,
+            f"Solution payload is incorrect. Replace it with '{_clip_text(expected_normalized)}'.",
+        )
 
     expected_tokens = set(_tokenize(expected_normalized))
     actual_tokens = set(_tokenize(actual_normalized))
@@ -250,6 +323,8 @@ def _metric_builder() -> Any:
             (_ANSWER_WEIGHT * answer_score) + (_REASONING_WEIGHT * reasoning_score),
             4,
         )
+        if answer_score <= 0.0:
+            score = min(score, 0.35 if actual_answer else 0.25)
         tier, next_step = _score_tier(score)
         feedback = (
             f"Tier: {tier}. "
@@ -279,6 +354,9 @@ _LONGCOT_SPEC = ModuleOptimizationSpec(
     metric_builder=_metric_builder,
     metric_name="longcot_qa_metric",
     description=("Long chain-of-thought question answering module with explicit reasoning and answer fields."),
+    signature_class_name="LongCoTQASignature",
+    output_keys=["answer"],
+    optimization_target_kind="runtime-signature",
 )
 
 register_module(_LONGCOT_SPEC)

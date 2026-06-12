@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
 import { WorkspaceScreen } from "@/features/workspace/screen/workspace-screen";
 import type { RuntimeStatusResponse } from "@/lib/rlm-api";
@@ -23,6 +24,7 @@ const backendRuntimeState = {
 };
 
 const chatStoreMockState = {
+  sessionId: "test-session-id",
   runtimeMode: "daytona_pilot" as const,
   setRuntimeMode: vi.fn(),
   stopStreaming: vi.fn(),
@@ -103,13 +105,16 @@ vi.mock("@/features/workspace/conversation/transcript/workspace-message-list", (
   WorkspaceMessageList: ({
     showEmptyState,
     runtimeWarning,
+    rightActions,
   }: {
     showEmptyState?: boolean;
     runtimeWarning?: { title: string; guidance: string[] };
+    rightActions?: ReactNode;
   }) => (
     <div data-slot="workspace-agent-chat">
       <div>WorkspaceMessageList</div>
       <div>AgentChat</div>
+      {rightActions}
       {showEmptyState ? <div>Start a conversation</div> : null}
       {runtimeWarning ? (
         <div data-slot="alert">
@@ -159,6 +164,7 @@ describe("WorkspaceScreen empty-state layout", () => {
     expect(html).toContain("Start a conversation");
     expect(html).toContain("WorkspaceMessageList");
     expect(html).toContain("AgentChat");
+    expect(html).not.toContain("Export traces for GEPA");
   });
 
   it("passes runtime warning into the AgentChat input area", () => {

@@ -13,7 +13,7 @@ runtime from Claude Code, Codex, or any agent that loads skill markdown.
 | `delegation`        | Recursive child RLMs, batch fan-out, budget management               |
 | `dspy-programs`     | Signature design, module registry, execution mode selection           |
 | `long-context`      | Chunking strategies, variable-mode, hierarchical map-reduce          |
-| `optimization`      | GEPA/MIPROv2 optimization loops, evaluation metrics, MLflow tracking |
+| `optimization`      | GEPA optimization loops, RLM skill artifacts, evaluation metrics, MLflow tracking |
 | `diagnostics`       | Symptom→cause decision tree, test lane selection, error catalog       |
 | `volume-bootstrap`  | In-sandbox volume filesystem contract, CRUD helpers, persistence guarantees |
 

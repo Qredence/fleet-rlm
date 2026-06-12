@@ -89,6 +89,7 @@ Canonical HTTP and websocket surfaces:
 - `DELETE /api/v1/sessions/{id}` — archive (soft-delete) session
 - `POST /api/v1/sessions/{id}/restore` — unarchive a session
 - `POST /api/v1/sessions/{id}/export` — export session as a GEPA dataset
+- `POST /api/v1/sessions/{id}/trace-export` — export raw MLflow traces plus a distilled GEPA bundle
 - `GET/PATCH /api/v1/runtime/settings`
 - `POST /api/v1/runtime/tests/daytona`
 - `POST /api/v1/runtime/tests/lm`
@@ -158,7 +159,7 @@ Runtime ownership:
 - Keep shared evaluation infrastructure in `quality/datasets.py`, `quality/scoring_helpers.py`, `quality/artifacts.py`, `quality/module_registry.py`, and `quality/optimization_runner.py`
 - Keep per-module optimization entrypoints in `quality/optimize_*.py`; each must register a `ModuleOptimizationSpec` in the module registry
 - The module registry (`module_registry.py`) is the single source of truth for optimizable modules, consumed by CLI, API, and frontend. **Note:** `longcot-reasoner` is currently registered via `fleet_rlm.quality.optimize_longcot`; add new `quality/optimize_*.py` entrypoints to `_MODULE_ENTRYPOINTS` as more modules become optimizable.
-- Optimization (GEPA default, MIPROv2 via the `optimizer` parameter of `quality/optimization_runner.run_module_optimization`) runs offline only — never in the live request path
+- Optimization is GEPA-only via `quality/optimization_runner.run_module_optimization` and runs offline only — never in the live request path
 - Keep grouped tool helpers under root `runtime/tools/*`
 - Keep DSPy-native MCP tool discovery in `runtime/tools/mcp_tools.py`. It is opt-in:
   servers are configured via the `FLEET_RLM_MCP_SERVERS` env var (JSON array) and

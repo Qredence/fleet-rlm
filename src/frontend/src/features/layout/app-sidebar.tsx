@@ -1,6 +1,7 @@
 import { type MouseEvent, useMemo } from "react";
 import {
   Database,
+  FlaskConical,
   LogIn,
   PanelLeftIcon,
   Plus,
@@ -87,6 +88,7 @@ export function AppSidebar() {
   const location = useLocation();
   const isWorkspace = location.pathname.startsWith("/app/workspace");
   const isVolumes = location.pathname.startsWith("/app/volumes");
+  const isOptimization = location.pathname.startsWith("/app/optimization");
   const isSettings = location.pathname.startsWith("/app/settings");
   const sortedConversations = useMemo(() => sortConversations(conversations), [conversations]);
 
@@ -185,6 +187,12 @@ export function AppSidebar() {
                 icon={Database}
                 onClick={() => navigateTo("volumes")}
                 isActive={isVolumes}
+              />
+              <SidebarActionItem
+                label="Optimization"
+                icon={FlaskConical}
+                onClick={() => navigateTo("optimization")}
+                isActive={isOptimization}
               />
             </SidebarMenu>
           </SidebarGroupContent>
