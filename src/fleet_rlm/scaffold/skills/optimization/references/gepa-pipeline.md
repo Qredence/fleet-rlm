@@ -11,7 +11,7 @@ A reflective optimization loop that evolves prompts using textual feedback rathe
 ```text
 Dataset
   → Split (train / dev)
-  → Compile (MIPROv2 or GEPA)
+  → Compile (GEPA)
   → Evaluate (scorers on dev set)
   → Persist artifacts (MLflow + local)
 ```
@@ -26,9 +26,10 @@ Dataset
 | `auto_level` | Search depth: `light`, `medium`, `heavy` | `medium` |
 | `output_path` | Where to save optimized program | `.fleet_rlm/optimized/<module>.json` |
 | `report` | Generate HTML comparison report | `false` |
-| `optimizer` | `gepa` or `miprov2` | Auto-selected based on feedback availability |
-| `max_iterations` | Maximum evolution cycles (GEPA only) | `5` |
+| `max_iterations` | Maximum evolution cycles | `5` |
 | `feedback_source` | Where to get verbal feedback | `auto` (from scorer explanations) |
+| `skill_name` / `skill_path` | Optional seed skill to optimize as markdown instructions | unset |
+| `trace_bundle_paths` | Offline trace bundles available to the RLM proposer | unset |
 
 ---
 
@@ -38,7 +39,7 @@ Each optimization run creates an MLflow run with:
 
 | Artifact | Type | Description |
 |----------|------|-------------|
-| `optimization_type` | param | `gepa` or `miprov2` |
+| `optimization_type` | param | `gepa` |
 | `module_name` | param | Registered module being optimized |
 | `auto_level` | param | Search depth used |
 | `train_size` / `dev_size` | param | Dataset split sizes |
@@ -46,14 +47,14 @@ Each optimization run creates an MLflow run with:
 | `prompt_before` | artifact | Initial prompt text |
 | `prompt_after` | artifact | Optimized prompt text |
 | `evaluation_results` | artifact | Per-example scores on dev set |
-| `feedback_log` | artifact | GEPA feedback iterations (GEPA only) |
+| `feedback_log` | artifact | GEPA feedback iterations |
 | `compile_duration_s` | metric | Time spent in compile phase |
 
 ---
 
 ## The GEPA Reflective Loop
 
-GEPA differs from MIPROv2 by using a verbal feedback cycle:
+GEPA uses a verbal feedback cycle:
 
 ```text
 1. Initial prompt
@@ -85,17 +86,12 @@ GEPA differs from MIPROv2 by using a verbal feedback cycle:
 
 ---
 
-## MIPROv2 Comparison
+## Skill Artifact Mode
 
-When GEPA is not applicable (no textual feedback available), the pipeline falls back to MIPROv2:
-
-| Aspect | GEPA | MIPROv2 |
-|--------|------|---------|
-| Optimization target | Full prompt text | Instructions + few-shot examples |
-| Feedback type | Verbal critique | Scalar metric only |
-| Search method | Reflective rewriting | Bayesian candidate search |
-| Iterations | 3-5 typically sufficient | 5-20 candidates evaluated |
-| Best for | Complex reasoning prompts | Instruction tuning, few-shot selection |
+Skill optimization represents seed markdown as the GEPA prompt component. The
+instruction proposer can inspect large offline trace bundles and candidate
+history, then return revised skill instructions. The optimized file is written
+under quality artifacts with a manifest; deployment remains manual.
 
 ---
 
@@ -106,9 +102,12 @@ When GEPA is not applicable (no textual feedback available), the pipeline falls 
 uv run fleet-rlm optimize grounded_answer ./data/qa_train.jsonl \
     --auto medium --report
 
-# Force MIPROv2 even if feedback is available
-uv run fleet-rlm optimize grounded_answer ./data/qa_train.jsonl \
-    --optimizer miprov2 --auto heavy
+# GEPA skill optimization with offline trace context
+uv run fleet-rlm optimize skill ./data/skill_cases.jsonl \
+    --skill-name optimization \
+    --trace-bundle-path ./artifacts/traces/optimization_failures.jsonl \
+    --auto medium \
+    --report
 
 # Dry run — show what would be optimized without running
 uv run fleet-rlm optimize grounded_answer ./data/qa_train.jsonl \

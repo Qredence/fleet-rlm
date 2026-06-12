@@ -79,7 +79,6 @@ _KEYWORD_OVERRIDES: dict[str, list[str]] = {
     "optimization": [
         "optimi",
         "GEPA",
-        "MIPROv2",
         "scorer",
         "dataset",
         "mlflow",

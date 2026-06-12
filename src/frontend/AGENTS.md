@@ -13,7 +13,7 @@ Before editing:
 1. Read `package.json` for canonical scripts.
 2. Inspect the owning route, feature, component, or lib module.
 3. Do not hand-edit generated files (see list below).
-4. Preserve supported surfaces: **Workbench**, **Volumes**, **Settings**.
+4. Preserve supported surfaces: **Workbench**, **Optimization** (`/app/optimization`), **Volumes**, **Settings**.
 5. Keep retired paths (`taxonomy`, `skills`, `memory`, `analytics`) falling through to `/404`.
 
 ---
@@ -26,7 +26,7 @@ Before editing:
 | Lint/build/import rules | `vite.config.ts`                                          |
 | Routes & surfaces       | `src/routes/*`                                            |
 | App chrome / layout     | `src/features/layout/*`                                   |
-| Product surfaces        | `src/features/{workspace,volumes,settings}/*`             |
+| Product surfaces        | `src/features/{workspace,optimization,volumes,settings}/*` |
 | UI primitives           | `src/components/ui/*` (shadcn/Base UI)                    |
 | Agent Elements (chat)   | `src/components/agent-elements/*`                         |
 | Legacy inspection UI    | `src/components/ai-elements/*` (composer/inspection only) |
@@ -55,7 +55,7 @@ Before editing:
 3. **`src/components/product/*`** — Reusable product compositions (empty states, skeletons, panels). Do not add chat, reasoning, or tool transcript UI here; use Agent Elements.
 4. **`src/components/ai-elements/*`** — **Legacy inspection/composer primitives only** (`prompt-input`, `chain-of-thought`). Do not add new chat/message/tool components here.
 5. **`src/features/layout/*`** — App chrome. Consumes workspace/volumes through feature entrypoints only.
-6. **`src/features/{workspace,volumes,settings}/*`** — Canonical surface ownership.
+6. **`src/features/{workspace,optimization,volumes,settings}/*`** — Canonical surface ownership.
 7. **`src/lib/{rlm-api,workspace}/*`** — API clients, adapters, stores, frame shaping.
 8. **`src/stores/*`** — Cross-app shell/layout and navigation state.
 
@@ -362,6 +362,6 @@ Do **not** install `Message`, `Conversation`, `Tool`, or other chat primitives f
 - `components.json` defines the `@/*` alias and the shadcn/Base UI style baseline.
 - Keep runtime labels, route behavior, and endpoint expectations aligned with the backend contract.
 - `src/screens/*` no longer exists. All feature logic lives in `src/features/*`, `src/lib/*`, or `src/components/product/*`.
-- Optimization and History are not supported product surfaces in the current shell.
+- Optimization is a supported product surface at `/app/optimization`; History remains API-only until v1.1.
 - Do not recreate a screen-layer `workspace-adapter.ts`; adapter logic belongs in `src/lib/workspace/`.
 - The Volumes provider switcher is **page-scoped** and must not become a global runtime setting.

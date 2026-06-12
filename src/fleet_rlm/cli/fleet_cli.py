@@ -29,10 +29,7 @@ from fleet_rlm.integrations.daytona.sdk_ops import (
     DEFAULT_SNAPSHOT_NAME,
 )
 
-from .commands import (
-    optimize_command,
-    serve_api_command,
-)
+from .commands.serve_cmds import serve_api_command
 from .config import (
     initialize_app_config,
     require_current_app_config,
@@ -72,7 +69,71 @@ def _require_config(*, error_message: str | None = None) -> Any:
 
 
 _register_command("serve-api", serve_api_command)
-_register_command("optimize", optimize_command)
+
+
+@app.command("optimize")
+def optimize(
+    module: str = typer.Argument(
+        help="Registered module slug to optimize (use 'list' to see available modules).",
+    ),
+    dataset: Path | None = typer.Argument(
+        None,
+        help="Path to JSON or JSONL dataset.",
+    ),
+    output_path: Path | None = typer.Option(
+        None,
+        "--output-path",
+        "-o",
+        help="Where to save the optimized DSPy module artifact.",
+    ),
+    train_ratio: float = typer.Option(
+        0.8,
+        "--train-ratio",
+        help="Training split ratio for GEPA compilation.",
+    ),
+    auto: str = typer.Option(
+        "light",
+        "--auto",
+        help="Optimization intensity (light, medium, heavy).",
+    ),
+    skill_name: str | None = typer.Option(
+        None,
+        "--skill-name",
+        help="Optimize a bundled or mounted Fleet skill by name instead of a registered module.",
+    ),
+    skill_path: Path | None = typer.Option(
+        None,
+        "--skill-path",
+        help="Optimize a SKILL.md-compatible markdown file instead of a registered module.",
+    ),
+    trace_bundle_path: list[str] = typer.Option(
+        [],
+        "--trace-bundle-path",
+        help="Offline trace bundle path available to the RLM-GEPA instruction proposer.",
+    ),
+    report: bool = typer.Option(
+        False,
+        "--report",
+        help="Print a markdown report summary after optimization.",
+    ),
+) -> None:
+    """Run offline prompt optimization for a registered DSPy module."""
+    try:
+        from .commands.optimize_cmd import optimize_command
+
+        optimize_command(
+            module=module,
+            dataset=dataset,
+            output_path=output_path,
+            train_ratio=train_ratio,
+            auto=auto,
+            skill_name=skill_name,
+            skill_path=skill_path,
+            trace_bundle_path=trace_bundle_path,
+            report=report,
+        )
+    except Exception as exc:
+        _handle_error(exc)
 
 
 # --- Chat commands (remain inline for simplicity) ---

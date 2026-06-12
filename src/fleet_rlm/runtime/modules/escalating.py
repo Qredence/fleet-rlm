@@ -681,13 +681,35 @@ class EscalatingFleetModule(dspy.Module):
         }
         rlm = self._rlm
         if url_document_mode:
+            from fleet_rlm.integrations.observability.mlflow_context import (
+                mlflow_child_span,
+                set_mlflow_span_outputs,
+            )
+
             _emit_turn_milestone(
                 self._interpreter,
                 phase="document_fetch",
                 text=f"Fetching document from {source_url}...",
                 source_url=source_url,
             )
-            fetched = fetch_url_document(interpreter=self._interpreter, source_url=source_url)
+            with mlflow_child_span(
+                "fleet_rlm.fetch_url_document",
+                span_type="TOOL",
+                attributes={
+                    "fleet_rlm.source_url": str(source_url or ""),
+                    "fleet_rlm.routing_decision": routing_decision,
+                },
+                inputs={"source_url": source_url},
+            ) as span:
+                fetched = fetch_url_document(interpreter=self._interpreter, source_url=source_url)
+                set_mlflow_span_outputs(
+                    span,
+                    {
+                        "source_url": fetched.source_url,
+                        "document_chars": len(fetched.document_text),
+                        "metadata_keys": sorted(str(key) for key in fetched.source_metadata),
+                    },
+                )
             call_kwargs["document"] = LargeDocument(
                 text=fetched.document_text,
                 source_url=fetched.source_url,
@@ -713,7 +735,33 @@ class EscalatingFleetModule(dspy.Module):
             )
             rlm = self._workspace_rlm
         try:
-            result = rlm(**call_kwargs)
+            from fleet_rlm.integrations.observability.mlflow_context import (
+                mlflow_child_span,
+                set_mlflow_span_outputs,
+            )
+
+            with mlflow_child_span(
+                "fleet_rlm.rlm_run",
+                span_type="CHAIN",
+                attributes={
+                    "fleet_rlm.routing_decision": routing_decision,
+                    "fleet_rlm.rlm_url_document_mode": str(url_document_mode).lower(),
+                    "fleet_rlm.rlm_large_context_mode": str(large_context_mode).lower(),
+                    "fleet_rlm.selected_skills": ",".join(selected_skills or []),
+                },
+                inputs={
+                    "input_fields": sorted(call_kwargs),
+                    "source_url": source_url,
+                },
+            ) as span:
+                result = rlm(**call_kwargs)
+                set_mlflow_span_outputs(
+                    span,
+                    {
+                        "routing_decision": routing_decision,
+                        "has_trajectory": getattr(result, "trajectory", None) is not None,
+                    },
+                )
             _prediction_set(result, "selected_skills", selected_skills or [])
             _prediction_set(result, "routing_decision", routing_decision)
             if source_url:

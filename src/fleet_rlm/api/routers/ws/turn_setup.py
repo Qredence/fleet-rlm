@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time as _time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from fastapi import WebSocket
@@ -96,6 +98,49 @@ def _normalize_context_paths(*groups: list[str]) -> list[str]:
             seen.add(value)
             normalized.append(value)
     return normalized
+
+
+def _local_workspace_snapshot_path(*, user_request: str, repo_url: str | None) -> str | None:
+    """Materialize a bounded host checkout snapshot for local code-review prompts."""
+
+    if repo_url:
+        return None
+    from fleet_rlm.runtime.tools.rlm_delegate import _build_local_workspace_snapshot
+
+    snapshot = _build_local_workspace_snapshot(query=user_request, context="")
+    if not snapshot:
+        return None
+
+    digest = hashlib.sha256((user_request + "\n" + snapshot[:4096]).encode("utf-8")).hexdigest()[:16]
+    snapshot_dir = Path.cwd() / ".codex" / "tmp" / "local-workspace-snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_path = snapshot_dir / f"local-workspace-snapshot-{digest}.md"
+    snapshot_path.write_text(snapshot, encoding="utf-8")
+    return str(snapshot_path)
+
+
+def _augment_local_workspace_context(
+    *,
+    request: DaytonaChatRequestOptions,
+    user_request: str | None,
+    docs_path: str | None,
+) -> DaytonaChatRequestOptions:
+    if not user_request or docs_path or request.repo_url or request.context_paths:
+        return request
+    snapshot_path = _local_workspace_snapshot_path(
+        user_request=user_request,
+        repo_url=request.repo_url,
+    )
+    if not snapshot_path:
+        return request
+    return DaytonaChatRequestOptions(
+        repo_url=request.repo_url,
+        repo_ref=request.repo_ref,
+        context_paths=[snapshot_path],
+        batch_concurrency=request.batch_concurrency,
+        workspace_id=request.workspace_id,
+        sandbox_labels=request.sandbox_labels,
+    )
 
 
 async def prepare_daytona_workspace_for_turn(
@@ -232,7 +277,7 @@ def _optional_context_paths(
     """Preserve the distinction between unspecified and explicitly empty paths."""
 
     if raw_context_paths is None:
-        return None
+        return list(normalized_context_paths) if normalized_context_paths else None
     return list(normalized_context_paths)
 
 
@@ -253,6 +298,11 @@ def _build_prepare_stream(
             user_claim=owner_user_claim,
             session_id=sess_id,
         ),
+    )
+    daytona_request = _augment_local_workspace_context(
+        request=daytona_request,
+        user_request=msg.content,
+        docs_path=msg.docs_path,
     )
 
     async def _prepare_stream() -> None:

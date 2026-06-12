@@ -295,13 +295,16 @@ workflow lives in the web app under **Optimization**:
 1. Open the **Optimization** surface.
 2. Start from **Modules** if you already know the module you want to optimize, or
    start from **Datasets** if you need to upload JSON/JSONL data or export a
-   session/transcript into a dataset first.
+   session/transcript into a dataset first. From the workspace, use **Export
+   traces for GEPA** on a completed session to write raw MLflow JSON/JSONL plus
+   a distilled trace bundle for the proposer.
 3. Use **Create** to review the GEPA run configuration:
    - selected module / resolved `program_spec`
    - uploaded or exported dataset
    - optimization intensity (`auto`)
    - train ratio
    - optional output path
+   - optional distilled trace bundle paths
 4. Submit the run and monitor it in **Runs**.
 5. Use **Compare** to inspect score deltas, prompt diffs, and per-example changes
    across completed GEPA runs.
@@ -310,7 +313,7 @@ Under the hood, GEPA runs keep MLflow DSPy compile/eval autologging enabled and
 record consistent run metadata so the MLflow experiment reflects the same
 workflow the frontend exposes.
 
-## 8. Use the Offline MIPROv2 Helper
+## 8. Use the Offline GEPA Helper
 
 Exported trace datasets can also drive offline DSPy optimization.
 
@@ -326,7 +329,7 @@ uv run python scripts/mlflow_cli.py optimize \
 
 Notes:
 
-- The optimizer defaults to `dspy.teleprompt.MIPROv2`.
+- The helper uses the same GEPA-only optimization runner as the product API.
 - The script turns on MLflow DSPy compile/eval autologging for the optimization run.
 - The dataset is split into train/validation partitions with `--train-ratio` (default `0.8`).
 - The provided program symbol can be:
