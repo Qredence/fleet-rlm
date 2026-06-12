@@ -27,6 +27,8 @@ from ..schemas.sessions import (
     SessionRestoreResponse,
     SessionStateResponse,
     SessionStatsResponse,
+    SessionTraceExportRequest,
+    SessionTraceExportResponse,
     SessionTraceListResponse,
     TurnListResponse,
 )
@@ -197,6 +199,28 @@ async def get_session_traces(
         session_id=session_id,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.post(
+    "/{session_id}/trace-export",
+    response_model=SessionTraceExportResponse,
+    responses=SESSION_DETAIL_RESPONSES,
+    summary="Export session MLflow traces",
+    description="Write full MLflow trace JSON/JSONL artifacts and a distilled GEPA evidence bundle.",
+)
+async def export_session_traces_endpoint(
+    body: SessionTraceExportRequest,
+    identity: HTTPIdentityDep,
+    persistence: PersistenceDep,
+    persisted_identity: PersistedIdentityDep,
+    session_id: Annotated[str, Path(description="Identifier of the session whose traces to export.")],
+) -> SessionTraceExportResponse:
+    """Export linked MLflow traces for offline GEPA optimization."""
+    return await SessionService(persistence).export_session_traces(
+        persisted_identity=persisted_identity,
+        session_id=session_id,
+        body=body,
     )
 
 
