@@ -649,6 +649,26 @@ def get_chat_session(
         return row
 
 
+def get_chat_session_by_external_id(
+    external_session_id: str,
+    *,
+    owner_tenant: str | None = None,
+    owner_user: str | None = None,
+) -> ChatSession | None:
+    """Return a session by runtime websocket id with ownership check."""
+    normalized = str(external_session_id or "").strip()
+    if not normalized:
+        return None
+    with get_session() as db:
+        stmt = select(ChatSession).where(ChatSession.external_session_id == normalized)
+        if owner_tenant is not None:
+            stmt = stmt.where(ChatSession.owner_tenant == owner_tenant)
+        if owner_user is not None:
+            stmt = stmt.where(ChatSession.owner_user == owner_user)
+        row = db.exec(stmt).first()
+        return row
+
+
 def update_chat_session(
     session_id: int,
     *,
@@ -1128,6 +1148,23 @@ class LocalStore(PersistenceProtocol):
         result = await asyncio.to_thread(
             get_chat_session,
             session_id_int,
+            owner_tenant=str(tenant_id),
+            owner_user=str(user_id) if user_id is not None else None,
+        )
+        return cast(DbChatSession | None, result)
+
+    async def get_chat_session_by_external_id(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        external_session_id: str,
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> DbChatSession | None:
+        _ = workspace_id
+        result = await asyncio.to_thread(
+            get_chat_session_by_external_id,
+            external_session_id,
             owner_tenant=str(tenant_id),
             owner_user=str(user_id) if user_id is not None else None,
         )

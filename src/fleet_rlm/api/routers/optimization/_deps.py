@@ -42,6 +42,7 @@ __all__ = [
     "PersistedIdentityDep",
     "PersistenceDep",
     "_resolve_persisted_identity",
+    "parse_run_uuid",
 ]
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,17 @@ def _resolve_optimization_timeout_seconds() -> int:
 OPTIMIZATION_TIMEOUT_SECONDS = _resolve_optimization_timeout_seconds()
 
 OPTIMIZATION_DATA_ROOT = Path(os.environ.get("FLEET_RLM_OPTIMIZATION_DATA_ROOT", os.getcwd())).resolve()
+
+
+def parse_run_uuid(run_id: str) -> uuid.UUID:
+    """Parse the canonical optimization run UUID."""
+    normalized = run_id.strip()
+    if normalized.isdecimal():
+        return uuid.UUID(int=int(normalized))
+    try:
+        return uuid.UUID(normalized)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Run not found.") from exc
 
 
 # ---------------------------------------------------------------------------
