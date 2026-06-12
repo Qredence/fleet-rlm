@@ -1,4 +1,4 @@
-import type { GEPAOptimizationRequest } from "@/lib/rlm-api";
+import type { DatasetResponse, GEPAOptimizationRequest } from "@/lib/rlm-api";
 
 export type OptimizationTargetMode = "module" | "skill";
 export type SkillTargetMode = "name" | "path";
@@ -46,6 +46,10 @@ export const DEFAULT_OPTIMIZATION_FORM: OptimizationRunFormState = {
   reflectionProfileId: "",
   reflectionModelId: "",
 };
+
+export function isRunnableDataset(dataset: DatasetResponse): boolean {
+  return dataset.row_count > 0;
+}
 
 export function parseTraceBundlePaths(value: string): string[] {
   return value
