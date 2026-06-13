@@ -5,7 +5,7 @@
   --an-input-border-radius: var(--an-border-radius);
   --an-tool-border-radius: 10px;
   --an-message-radius-inner-offset: 4px;
-  --an-max-width: 420px;
+  --an-max-width: 768px;
 
   /* Colors - Light mode defaults */
   --an-background: #ffffff;
