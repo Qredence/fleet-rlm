@@ -89,12 +89,8 @@ src/frontend/.tmp-*.mjs
 .pi/
 .hermes/
 .factory/
-blogs/rlm-capability-evaluation-0-5-1/hero.png
-blogs/rlm-capability-evaluation-0-5-1/remotion
-blogs/rlm-capability-evaluation-0-5-1/hyperframes/
-blogs/rlm-capability-evaluation-0-5-1/fleet-rlm-v0-5-1-launch.mp4
-blogs/rlm-capability-evaluation-0-5-1/fleet-rlm-v0-5-1-remotion-still.png
-blogs/rlm-capability-evaluation-0-5-1/fleet-rlm-v0-5-1-remotion.mp4
+blogs/
+.cursor/
 
 # Output artifacts
 output/*
