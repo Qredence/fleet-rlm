@@ -48,7 +48,7 @@ export const DEFAULT_OPTIMIZATION_FORM: OptimizationRunFormState = {
 };
 
 export function isRunnableDataset(dataset: DatasetResponse): boolean {
-  return dataset.row_count > 0;
+  return (dataset?.row_count ?? 0) > 0;
 }
 
 export function parseTraceBundlePaths(value: string): string[] {
@@ -103,10 +103,20 @@ export function buildOptimizationRequest({
     request.max_metric_calls = maxMetricCalls;
   }
 
-  if (form.datasetSource === "existing" || datasetId) {
-    request.dataset_id = selectedDatasetId;
-  } else if (form.datasetSource === "path") {
-    request.dataset_path = datasetPath;
+  switch (form.datasetSource) {
+    case "existing":
+      request.dataset_id = selectedDatasetId;
+      break;
+    case "upload":
+      request.dataset_id = selectedDatasetId;
+      break;
+    case "path":
+      request.dataset_path = datasetPath;
+      break;
+    default: {
+      const _exhaustive: never = form.datasetSource;
+      throw new Error(`Unhandled dataset source mode: ${_exhaustive}`);
+    }
   }
 
   const outputPath = form.outputPath.trim();

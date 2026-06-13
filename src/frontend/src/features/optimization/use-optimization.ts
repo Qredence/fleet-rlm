@@ -31,11 +31,15 @@ export function useOptimizationModules() {
   });
 }
 
-export function useOptimizationDatasets(moduleSlug?: string | null) {
+export function useOptimizationDatasets(
+  moduleSlug?: string | null,
+  options?: { enabled?: boolean },
+) {
   return useQuery({
     queryKey: optimizationQueryKeys.datasets(moduleSlug),
     queryFn: ({ signal }) =>
       optimizationEndpoints.datasets({ moduleSlug: moduleSlug || null, limit: 100 }, signal),
+    ...options,
   });
 }
 
