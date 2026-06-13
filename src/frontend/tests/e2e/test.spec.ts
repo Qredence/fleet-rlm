@@ -1,8 +1,16 @@
 import { expect, test } from "@playwright/test";
 
 test("workspace chat container renders without errors", async ({ page }) => {
+  page.on("console", (msg) => {
+    console.log(`[BROWSER CONSOLE ${msg.type()}] ${msg.text()}`);
+  });
+  page.on("pageerror", (err) => {
+    console.error(`[BROWSER UNCAUGHT ERROR] ${err.message}\n${err.stack}`);
+  });
+
   await page.goto("/app/workspace");
   await page.waitForURL(/\/app\/workspace$/);
+  await page.waitForFunction(() => (window as any).__hydrated === true);
 
   // Core shell elements must be present
   await expect(page.getByRole("heading", { name: "Unexpected Application Error!" })).toHaveCount(0);

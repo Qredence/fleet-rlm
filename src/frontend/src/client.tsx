@@ -1,9 +1,6 @@
 import { StartClient } from "@tanstack/react-start/client";
-import { createRoot, hydrateRoot } from "react-dom/client";
+import { hydrateRoot } from "react-dom/client";
 import posthog from "posthog-js";
-import { PostHogProvider } from "@posthog/react";
-
-import App from "@/app/App";
 import { resolvePostHogWebConfig } from "@/lib/telemetry/posthog";
 import "./styles/globals.css";
 
@@ -39,25 +36,12 @@ window.addEventListener("pageshow", () => {
   sessionStorage.removeItem(PRELOAD_RELOAD_KEY);
 });
 
-const hasServerRenderedApp = Array.from(document.body.children).some(
-  (child) => child.tagName.toLowerCase() !== "noscript",
-);
+hydrateRoot(document, <StartClient />);
 
-if (hasServerRenderedApp) {
-  hydrateRoot(
-    document,
-    <PostHogProvider client={posthog}>
-      <StartClient />
-    </PostHogProvider>,
-  );
-} else {
-  const root = document.createElement("div");
-  root.id = "root";
-  root.className = "isolate";
-  document.body.append(root);
-  createRoot(root).render(
-    <PostHogProvider client={posthog}>
-      <App />
-    </PostHogProvider>,
-  );
-}
+// Rely on standard browser rendering queue to guarantee React has finished layout and paint.
+requestAnimationFrame(() => {
+  requestAnimationFrame(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__hydrated = true;
+  });
+});

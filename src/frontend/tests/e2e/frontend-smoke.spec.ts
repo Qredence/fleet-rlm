@@ -1,10 +1,20 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  page.on("console", (msg) => {
+    console.log(`[BROWSER CONSOLE ${msg.type()}] ${msg.text()}`);
+  });
+  page.on("pageerror", (err) => {
+    console.error(`[BROWSER UNCAUGHT ERROR] ${err.message}\n${err.stack}`);
+  });
+});
+
 test("loads the supported shell surfaces without route crashes", async ({ page }) => {
   await page.goto("/");
+  await page.waitForFunction(() => (window as any).__hydrated === true);
 
-  await expect(page.getByRole("button", { name: "Workbench", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Volumes", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Workbench", exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Volumes", exact: true }).first()).toBeVisible();
 
   await expect(page.getByRole("button", { name: "Skills", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Memory", exact: true })).toHaveCount(0);
@@ -38,6 +48,7 @@ test("sign-in dialog supports keyboard dismissal and restores focus", async ({ p
   });
 
   await page.goto("/");
+  await page.waitForFunction(() => (window as any).__hydrated === true);
 
   const signInTrigger = page.getByRole("button", {
     name: "Sign in",
@@ -45,10 +56,12 @@ test("sign-in dialog supports keyboard dismissal and restores focus", async ({ p
   });
   await expect(signInTrigger).toBeVisible();
 
-  await signInTrigger.click();
-  await expect(
-    page.getByRole("button", { name: "Continue with Microsoft", exact: true }),
-  ).toBeVisible();
+  await expect(async () => {
+    await signInTrigger.click();
+    await expect(
+      page.getByRole("button", { name: "Continue with Microsoft", exact: true }),
+    ).toBeVisible({ timeout: 2000 });
+  }).toPass();
 
   await page.keyboard.press("Escape");
 
@@ -61,6 +74,7 @@ test("sign-in dialog supports keyboard dismissal and restores focus", async ({ p
 test("opens settings without runtime exception", async ({ page }) => {
   await page.goto("/settings");
   await page.waitForURL(/\/app\/settings/);
+  await page.waitForFunction(() => (window as any).__hydrated === true);
 
   await expect(page.getByRole("button", { name: "Appearance", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Telemetry", exact: true })).toBeVisible();

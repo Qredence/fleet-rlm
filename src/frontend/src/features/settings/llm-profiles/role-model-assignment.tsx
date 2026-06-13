@@ -23,6 +23,13 @@ import {
   type useLlmProfilesMutations,
 } from "@/features/settings/use-llm-profiles";
 
+interface CatalogModel {
+  id: string;
+  label: string;
+}
+
+const EMPTY_MODELS: CatalogModel[] = [];
+
 import {
   SETTINGS_FIELD_CLASSNAME,
   errorMessage,
@@ -64,7 +71,7 @@ export function RoleModelAssignment({
     ? formatProfileLabel(selectedProfile)
     : (binding?.profile_name ?? "");
 
-  const catalogModels = modelsQuery.data?.models ?? [];
+  const catalogModels = modelsQuery.data?.models ?? EMPTY_MODELS;
   const catalogError = modelsQuery.data?.error;
   const matchedCatalogModelId =
     catalogModels.find((model) => modelMatchesCatalog(modelId, model.id))?.id ?? modelId;

@@ -123,3 +123,25 @@ When changing workflow, contracts, or architecture, update the durable docs befo
 - `docs/README.md`, `docs/index.md`, and `docs/SUMMARY.md`.
 - `scripts/README.md`, `Makefile`, `pyproject.toml`, and `src/frontend/package.json` when commands move.
 - `openapi.yaml` and frontend API artifacts when backend request or response shapes move.
+
+## Learned User Preferences
+
+- Always use the `zsh` terminal profile when running CLI commands in the workspace.
+- Always include direct absolute markdown links to `.canvas.tsx` files when creating or mentioning an IDE Canvas (e.g., `[Descriptive Label](/absolute/path/to/canvas.canvas.tsx)`).
+- Prefer preserving Agent Elements custom CSS layout properties (like `--an-max-width`) rather than introducing arbitrary Tailwind utility classes for chat width adjustments.
+- Use the fast single-pass `pnpm run check` command in `src/frontend` to ensure format, types, linter, and unit tests are all verified together.
+
+## Learned Workspace Facts
+
+- The development workspace infrastructure runs on local ports: API on `:8000`, Vite dev server on `:5173`, and MLflow on `:5001` (Python 3.13+).
+- The chat runtime runs in Daytona via `dspy.RLM` and supports major LLM providers as well as custom OpenAI-compatible endpoints with dropdown model selection.
+- Database schema drift checking with `alembic check` requires importing all active SQLAlchemy/SQLModel models (under `src/fleet_rlm/integrations/database/`) inside `migrations/env.py`.
+- Custom IDE Canvases (.canvas.tsx) support specific category colors: `gray`, `purple`, `green`, `yellow`, `pink`, `blue`, and `orange`.
+- IDE Canvases are designed for standalone analytical outputs (e.g., overlap reports, usage trends) but are not used when working directly inside an existing codebase file or artifact.
+- Streaming responses in the runtime are standardized on `RuntimeEvent` (`runtime/events.py`) and projected using `project_chat`, while legacy `StreamEvent` DTOs are cleaned up and unused.
+- The Agent Elements conversation column width can be adjusted by changing the design token `--an-max-width` in `src/frontend/src/components/agent-elements/agent-ui.css`.
+- The linked Neon Postgres project is `fleet-rlm-postgres-cutover` (ID: `old-bird-44339002`) in region `aws-eu-central-1` (Frankfurt) under the `Qredence` organization.
+- Database queries via `FleetRepository` use PostgreSQL Row-Level Security (RLS) policies based on session context parameters like `set_config('app.tenant_id', ...)` to prevent multi-tenant data leaks.
+- On FastAPI Cloud, direct updates to locked environment variables can trigger a `400 Bad Request`; deleting the variable first via `uv run fastapi cloud env delete <VAR> -y` and then setting it resolves this.
+- Deploying to FastAPI Cloud in non-interactive background terminals should use `uv run fastapi deploy --no-wait` to bypass interactive spinners that cause background jobs to hang.
+- Production and staging environments (`APP_ENV=production` or `staging`) enforce `AUTH_REQUIRED=true` at startup, raising a `ValueError` if set to `false`.

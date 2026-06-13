@@ -1,6 +1,8 @@
-import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
+import { createRootRoute, HeadContent, Outlet, Scripts, useRouter } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { lazy, Suspense, type ReactNode } from "react";
+import { PostHogProvider } from "@posthog/react";
+import posthog from "posthog-js";
 
 const Agentation = import.meta.env.DEV
   ? lazy(() => import("agentation").then((m) => ({ default: m.Agentation })))
@@ -8,6 +10,14 @@ const Agentation = import.meta.env.DEV
 const agentationEndpoint = import.meta.env.DEV
   ? (import.meta.env.VITE_AGENTATION_ENDPOINT ?? "http://127.0.0.1:4747")
   : undefined;
+
+function PHProvider({ children }: { children: ReactNode }) {
+  return (
+    <PostHogProvider client={posthog}>
+      {children}
+    </PostHogProvider>
+  );
+}
 
 export const Route = createRootRoute({
   head: () => ({
@@ -34,9 +44,11 @@ export const Route = createRootRoute({
 function RootComponent() {
   return (
     <RootDocument>
-      <Outlet />
+      <PHProvider>
+        <Outlet />
+      </PHProvider>
       {import.meta.env.DEV && import.meta.env.VITE_E2E !== "1" && <TanStackRouterDevtools />}
-      {import.meta.env.DEV ? (
+      {import.meta.env.DEV && import.meta.env.VITE_E2E !== "1" ? (
         <Suspense fallback={null}>
           <Agentation endpoint={agentationEndpoint} />
         </Suspense>
@@ -45,9 +57,34 @@ function RootComponent() {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const processedManifests = new WeakSet<any>();
+
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
+  const router = useRouter();
+  if (typeof window === "undefined") {
+    const manifest = router.ssr?.manifest;
+    if (manifest && !processedManifests.has(manifest)) {
+      processedManifests.add(manifest);
+      if (manifest.routes) {
+        for (const routeId of Object.keys(manifest.routes)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const routeManifest = manifest.routes[routeId] as any;
+          if (routeManifest && !routeManifest.assets && routeManifest.scripts) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            routeManifest.assets = routeManifest.scripts.map((script: any) => ({
+              tag: "script",
+              attrs: script.attrs,
+              children: script.children,
+            }));
+          }
+        }
+      }
+    }
+  }
+
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>
