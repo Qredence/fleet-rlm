@@ -127,7 +127,7 @@ When changing workflow, contracts, or architecture, update the durable docs befo
 ## Learned User Preferences
 
 - Always use the `zsh` terminal profile when running CLI commands in the workspace.
-- Always include direct absolute markdown links to `.canvas.tsx` files when creating or mentioning an IDE Canvas (e.g., [Descriptive Label]\(/absolute/path/to/canvas.canvas.tsx\)).
+- Always include direct absolute markdown links to `.canvas.tsx` files when creating or mentioning an IDE Canvas, e.g. using the format: `[Descriptive Label]` immediately followed by `(/absolute/path/to/canvas.canvas.tsx)`.
 - Prefer preserving Agent Elements custom CSS layout properties (like `--an-max-width`) rather than introducing arbitrary Tailwind utility classes for chat width adjustments.
 - Use the fast single-pass `pnpm run check` command in `src/frontend` to ensure format, types, linter, and unit tests are all verified together.
 
