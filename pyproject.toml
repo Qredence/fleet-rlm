@@ -110,7 +110,7 @@ evaluation = [
     "jupyter-core==5.9.1",
     "matplotlib-inline==0.2.1",
     "nest-asyncio==1.6.0",
-    "parso==0.8.6",
+    "parso==0.8.7",
     "pexpect==4.9.0",
     "psutil==7.2.2",
     "ptyprocess==0.7.0",
