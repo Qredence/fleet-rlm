@@ -10,7 +10,9 @@ test("workspace chat container renders without errors", async ({ page }) => {
 
   await page.goto("/app/workspace");
   await page.waitForURL(/\/app\/workspace$/);
-  await page.waitForFunction(() => (window as unknown as { __hydrated?: boolean }).__hydrated === true);
+  await page.waitForFunction(
+    () => (window as unknown as { __hydrated?: boolean }).__hydrated === true,
+  );
 
   // Core shell elements must be present
   await expect(page.getByRole("heading", { name: "Unexpected Application Error!" })).toHaveCount(0);

@@ -3,7 +3,9 @@ import { expect, test } from "@playwright/test";
 test("settings renders runtime health and connectivity controls", async ({ page }) => {
   await page.goto("/app/settings?section=runtime");
   await page.waitForURL(/\/app\/settings/);
-  await page.waitForFunction(() => (window as unknown as { __hydrated?: boolean }).__hydrated === true);
+  await page.waitForFunction(
+    () => (window as unknown as { __hydrated?: boolean }).__hydrated === true,
+  );
 
   await expect(page.getByRole("heading", { name: "Runtime", exact: true })).toBeVisible();
   await expect(page.getByText("Runtime Status", { exact: true })).toBeVisible();

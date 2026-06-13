@@ -11,7 +11,9 @@ const PANEL_LABEL_PATTERN = /workbench/i;
 test("execution canvas keeps lanes readable and payloads untruncated", async ({ page }) => {
   await page.goto("/");
   await page.waitForURL(/\/app\/workspace$/);
-  await page.waitForFunction(() => (window as unknown as { __hydrated?: boolean }).__hydrated === true);
+  await page.waitForFunction(
+    () => (window as unknown as { __hydrated?: boolean }).__hydrated === true,
+  );
   await expect(page.getByRole("button", { name: PANEL_LABEL_PATTERN }).first()).toBeVisible();
 
   await page.getByRole("button", { name: "Workbench", exact: true }).first().click({ force: true });
