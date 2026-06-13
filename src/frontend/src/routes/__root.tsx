@@ -12,11 +12,7 @@ const agentationEndpoint = import.meta.env.DEV
   : undefined;
 
 function PHProvider({ children }: { children: ReactNode }) {
-  return (
-    <PostHogProvider client={posthog}>
-      {children}
-    </PostHogProvider>
-  );
+  return <PostHogProvider client={posthog}>{children}</PostHogProvider>;
 }
 
 export const Route = createRootRoute({
