@@ -61,11 +61,20 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      (window as unknown as { __hydrated?: boolean }).__hydrated = true;
+    let innerFrame: number | undefined;
+    // Two nested requestAnimationFrames guarantee a paint has occurred before we signal hydration is complete
+    const outerFrame = requestAnimationFrame(() => {
+      innerFrame = requestAnimationFrame(() => {
+        (window as unknown as { __hydrated?: boolean }).__hydrated = true;
+      });
     });
 
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(outerFrame);
+      if (innerFrame !== undefined) {
+        cancelAnimationFrame(innerFrame);
+      }
+    };
   }, []);
 
   return (
@@ -95,7 +104,7 @@ function AppScripts() {
           const route = router.looseRoutesById[match.routeId];
           const routeManifest = route ? manifest.routes?.[route.id] : undefined;
 
-          if (!routeManifest?.scripts || routeManifest.assets) {
+          if (!routeManifest?.scripts) {
             return [];
           }
 
@@ -109,9 +118,13 @@ function AppScripts() {
   return (
     <>
       <Scripts />
-      {fallbackScripts.map((script, index) => (
-        <Asset key={`fleet-ssr-script-fallback-${index}`} {...script} />
-      ))}
+      {fallbackScripts.map((script, index) => {
+        const attrs = script.attrs as Record<string, string | boolean | undefined> | undefined;
+        const stableKey = attrs?.src || attrs?.id || `idx-${index}`;
+        return (
+          <Asset key={`fleet-ssr-script-fallback-${stableKey}`} {...script} />
+        );
+      })}
     </>
   );
 }
