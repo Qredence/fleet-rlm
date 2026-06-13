@@ -124,17 +124,16 @@ When changing workflow, contracts, or architecture, update the durable docs befo
 
 ## Learned User Preferences
 
-- Always use the `zsh` terminal profile when running CLI commands in the workspace.
+- Always use the `zsh` terminal profile for CLI commands. Adjust column width via `--an-max-width` in `agent-ui.css` instead of Tailwind, and use `pnpm run check` in `src/frontend` to verify format, types, linter, and unit tests.
 - Always include direct absolute markdown links to `.canvas.tsx` files when creating or mentioning an IDE Canvas, e.g. using the format: `[Descriptive Label]` immediately followed by `(/absolute/path/to/canvas.canvas.tsx)`.
-- Adjust column width via `--an-max-width` in `agent-ui.css` instead of Tailwind, and use `pnpm run check` in `src/frontend` to verify format, types, linter, and unit tests.
 
 ## Learned Workspace Facts
 
-- The development workspace infrastructure runs on local ports: API on `:8000`, Vite dev server on `:5173`, and MLflow on `:5001` (Python 3.13+).
-- The chat runtime runs in Daytona via `dspy.RLM` and supports major LLM providers as well as custom OpenAI-compatible endpoints with dropdown model selection.
-- Database queries use Row-Level Security (RLS) policies with session tenant IDs to prevent leaks; Alembic schema drift checks require importing all active SQLModel models inside `migrations/env.py`.
+- Local development runs on ports `:8000` (API), `:5173` (Vite dev), and `:5001` (MLflow on Python 3.13+); chat runtime runs in Daytona via `dspy.RLM` with multi-provider dropdown selection.
+- Database queries use Row-Level Security (RLS) policies with session tenant IDs; SQLModel/SQLite fallback handles local offline dev, while Neon Postgres project is `fleet-rlm-postgres-cutover` (ID: `old-bird-44339002`) in `aws-eu-central-1`.
+- Alembic database schema drift checking requires importing all active SQLAlchemy/SQLModel models inside `migrations/env.py`.
 - IDE Canvases are for standalone analytical outputs (not internal files) and support specific category colors: `gray`, `purple`, `green`, `yellow`, `pink`, `blue`, and `orange`.
 - Streaming responses in the runtime are standardized on `RuntimeEvent` (`runtime/events.py`) and projected using `project_chat`, while legacy `StreamEvent` DTOs are cleaned up and unused.
-- The linked Neon Postgres project is `fleet-rlm-postgres-cutover` (ID: `old-bird-44339002`) in region `aws-eu-central-1` (Frankfurt) under the `Qredence` organization.
-- On FastAPI Cloud, delete locked environment variables first via `uv run fastapi cloud env delete <VAR> -y` to avoid `400 Bad Request`, and deploy in non-interactive terminals using `--no-wait` to bypass interactive spinners.
-- Production and staging environments (`APP_ENV=production` or `staging`) enforce `AUTH_REQUIRED=true` at startup, raising a `ValueError` if set to `false`.
+- On FastAPI Cloud, delete locked env vars first via `uv run fastapi cloud env delete <VAR> -y` and deploy with `--no-wait`; production and staging environments enforce `AUTH_REQUIRED=true` at startup.
+- Under TanStack Start, the client hydration entry `client.tsx` sets `(window as any).__hydrated = true` inside nested `requestAnimationFrame` calls to signal successful hydration to Playwright E2E tests.
+- In React 19 / TanStack Start, the `PostHogProvider` must be rendered unconditionally to prevent hydration full-tree unmount loops, while server-side asset manifest mutations must be `WeakSet`-guarded.
