@@ -37,10 +37,3 @@ window.addEventListener("pageshow", () => {
 });
 
 hydrateRoot(document, <StartClient />);
-
-// Rely on standard browser rendering queue to guarantee React has finished layout and paint.
-requestAnimationFrame(() => {
-  requestAnimationFrame(() => {
-    (window as unknown as { __hydrated?: boolean }).__hydrated = true;
-  });
-});
