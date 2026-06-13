@@ -6,6 +6,10 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- **Change:** Consolidated websocket chat streaming on canonical `RuntimeEvent` objects with shared wire source-type projection.
+  **Outcome:** Runtime, persistence, and Web UI consumers now share one typed streaming contract for execution start, step, and completion frames.
+- **Change:** Corrected delayed Daytona startup notifications to emit `status` events and preserve runtime payload fields when enriching websocket frames.
+  **Outcome:** The Workbench receives progress updates without duplicate `execution_started` frames, and partial payload overrides no longer drop event metadata.
 - **Change:** GEPA is now the only supported public optimizer; MIPROv2 paths were removed from the unified optimization pipeline.
   **Outcome:** CLI, API, manifests, and the Optimization UI all target one optimizer contract.
 - **Change:** Hardened session trace export with server-first session resolution and validated optional `mlflow_session_id` hints.

@@ -2,29 +2,12 @@
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
 from typing import Any
 
-from fleet_rlm.api.events.event_adapter import adapt_stream_event, build_chat_event_payload, is_terminal_backend_event
 from fleet_rlm.api.events.project_chat import project_chat
 from fleet_rlm.runtime.events import RuntimeEvent
-from fleet_rlm.runtime.execution.streaming_events import is_terminal_stream_event_kind
-
-from ...runtime_services.chat_runtime import StreamEventLike
-
-
-@dataclass(slots=True)
-class WorkspaceEvent:
-    """Normalized event shape for websocket streaming."""
-
-    kind: str
-    text: str = ""
-    payload: dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    terminal: bool = False
 
 
 @dataclass(slots=True)
@@ -47,43 +30,24 @@ class WorkspaceTaskRequest:
 
 def build_stream_event_dict(
     *,
-    event: StreamEventLike,
-    payload: Any,
+    event: RuntimeEvent,
+    payload: Any = None,
     sequence: int = 0,
     run_id: str | None = None,
 ) -> dict[str, Any]:
-    """Serialize one stream event for websocket delivery.
-
-    Uses the typed :func:`~fleet_rlm.api.events.project_chat.project_chat`
-    projector when *event* is a :class:`~fleet_rlm.runtime.events.RuntimeEvent`,
-    falling back to the legacy ``adapt_stream_event`` path for plain
-    ``WorkspaceEvent`` / ``StreamEventLike`` objects.
-    """
-    if isinstance(event, RuntimeEvent):
-        return project_chat(event, sequence=sequence, run_id=run_id)
-    backend_event = adapt_stream_event(
-        kind=event.kind,
-        text=event.text,
-        payload=payload if isinstance(payload, dict) else None,
-        timestamp=event.timestamp,
+    """Serialize one runtime stream event for websocket delivery."""
+    payload_override = payload if isinstance(payload, dict) and payload is not event.payload else None
+    return project_chat(
+        event,
+        sequence=sequence,
+        run_id=run_id,
+        payload_override=payload_override,
     )
-    event_dict = build_chat_event_payload(backend_event)
-    event_dict.setdefault("event_id", uuid.uuid4().hex)
-    return event_dict
 
 
-def _is_terminal_transport_event(event: StreamEventLike) -> bool:
-    """Return websocket-terminal semantics for worker and runtime events."""
-    if isinstance(event, RuntimeEvent):
-        return event.kind.is_terminal()
-    return bool(getattr(event, "terminal", False)) or is_terminal_backend_event(
-        adapt_stream_event(
-            kind=event.kind,
-            text=event.text,
-            payload=event.payload if isinstance(event.payload, dict) else None,
-            timestamp=event.timestamp,
-        )
-    )
+def _is_terminal_transport_event(event: RuntimeEvent) -> bool:
+    """Return websocket-terminal semantics for one runtime event."""
+    return event.kind.is_terminal()
 
 
 def _build_agent_stream_kwargs(request: WorkspaceTaskRequest) -> dict[str, Any]:
@@ -107,43 +71,22 @@ def _build_agent_stream_kwargs(request: WorkspaceTaskRequest) -> dict[str, Any]:
     return kwargs
 
 
-def _to_workspace_event(event: Any) -> WorkspaceEvent:
-    """Normalize a runtime-style stream event into a workspace event."""
-    raw_ts = getattr(event, "timestamp", None)
-    timestamp = raw_ts if isinstance(raw_ts, datetime) else datetime.now(timezone.utc)
-
-    kind = getattr(event, "kind", "status")
-    if hasattr(kind, "value"):
-        kind = getattr(kind, "value")
-    kind = str(kind)
-
-    return WorkspaceEvent(
-        kind=kind,
-        text=str(getattr(event, "text", "") or ""),
-        payload=dict(getattr(event, "payload", {}) or {}),
-        timestamp=timestamp,
-        terminal=is_terminal_stream_event_kind(kind),
-    )
-
-
 async def stream_agent_turn(
     request: WorkspaceTaskRequest,
-) -> AsyncIterator[WorkspaceEvent]:
+) -> AsyncIterator[RuntimeEvent]:
     """Stream one workspace task directly through the agent without HITL wrapper."""
     if request.execution_mode is not None:
         request.agent.set_execution_mode(request.execution_mode)
     if request.prepare is not None:
         await request.prepare()
     async for runtime_event in request.agent.aiter_chat_turn_stream(**_build_agent_stream_kwargs(request)):
-        yield _to_workspace_event(runtime_event)
+        yield runtime_event
 
 
 __all__ = [
-    "WorkspaceEvent",
     "WorkspaceTaskRequest",
     "build_stream_event_dict",
     "_is_terminal_transport_event",
     "_build_agent_stream_kwargs",
-    "_to_workspace_event",
     "stream_agent_turn",
 ]

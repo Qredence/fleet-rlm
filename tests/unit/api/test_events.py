@@ -152,18 +152,45 @@ def test_summarize_code_for_event_returns_stable_preview(monkeypatch):
     assert summary["code_preview"] == "print( 'hell...[truncated]"
 
 
-def test_startup_status_projects_to_canonical_execution_started_frame():
+def test_startup_status_projects_to_canonical_execution_step_frame():
     persistence_module = importlib.import_module("fleet_rlm.api.runtime_services.chat_persistence")
     stream_module = importlib.import_module("fleet_rlm.api.routers.ws.stream_events")
 
     event = persistence_module.build_startup_status_event()
     frame = stream_module.build_stream_event_dict(event=event, payload=event.payload)
 
-    assert event.kind == "turn_started"
-    assert frame["kind"] == "execution_started"
+    assert event.kind == "status"
+    assert frame["kind"] == "execution_step"
     assert frame["text"] == "Preparing Daytona workspace..."
     assert frame["payload"]["phase"] == "startup"
-    assert frame["payload"]["source_type"] == "turn_started"
+    assert frame["payload"]["source_type"] == "status"
+
+
+def test_status_sandbox_exec_projects_to_sandbox_exec_source_type():
+    project_chat = importlib.import_module("fleet_rlm.api.events.project_chat")
+    events_module = importlib.import_module("fleet_rlm.runtime.events")
+
+    event = events_module.RuntimeEvent.status("Running REPL", payload={"phase": "sandbox_exec"})
+    frame = project_chat.project_chat(event)
+
+    assert frame["kind"] == "execution_step"
+    assert frame["payload"]["source_type"] == "sandbox_exec"
+
+
+def test_payload_override_preserves_runtime_event_payload_fields():
+    project_chat = importlib.import_module("fleet_rlm.api.events.project_chat")
+    events_module = importlib.import_module("fleet_rlm.runtime.events")
+
+    event = events_module.RuntimeEvent.status(
+        "Delegating",
+        payload={"phase": "rlm_delegate", "delegate_id": "child-1", "source_type": "status"},
+    )
+    frame = project_chat.project_chat(event, payload_override={"source_type": "rlm_delegate", "step_index": 2})
+
+    assert frame["payload"]["phase"] == "rlm_delegate"
+    assert frame["payload"]["delegate_id"] == "child-1"
+    assert frame["payload"]["source_type"] == "rlm_delegate"
+    assert frame["payload"]["step_index"] == 2
 
 
 def test_backend_status_projects_to_canonical_execution_step_frame():

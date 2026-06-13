@@ -178,6 +178,7 @@ API ownership:
 Websocket/runtime contract rules:
 
 - Treat `/api/v1/ws/execution` as the canonical conversational websocket stream
+- Canonical runtime streaming events are `RuntimeEvent` in `runtime/events.py`; project them with `api/events/project_chat.py` (not legacy `StreamEvent` DTOs). `runtime/schemas.py` only exports shared `TraceMode`.
 - Treat `/api/v1/ws/execution/events` as the dedicated passive execution/workbench event stream
 - Keep `/api/v1/ws/execution` execution-only:
   - accept auth plus websocket frames

@@ -28,11 +28,46 @@ The main WebSocket endpoint for interactive RLM execution. Handles bidirectional
 /api/v1/ws/execution/events
 ```
 
-Read-only event stream for observability and debugging. Receives all StreamEvents without command dispatch.
+Read-only event stream for observability and debugging. Receives projected execution events without command dispatch.
 
 ---
 
-## WebSocket Message Fields
+## RuntimeEvent (canonical streaming model)
+
+**Source of truth:** `src/fleet_rlm/runtime/events.py`
+
+The runtime emits `RuntimeEvent` objects end-to-end. The websocket layer projects them via `api/events/project_chat.py` into wire frames with kinds:
+
+- `execution_started`
+- `execution_step`
+- `execution_completed`
+
+### RuntimeEventKind values
+
+| Kind | When emitted | Notes |
+|------|-------------|-------|
+| `turn_started` | Session/turn startup | Maps to `execution_started` |
+| `status` | Lifecycle transitions | Includes `phase`, optional `runtime` context |
+| `reasoning` | LLM thinking/CoT | Structured or replayed from trajectory |
+| `tool_call` | Tool invocation starts | `tool` field carries `tool_name`, `tool_args` |
+| `tool_result` | Tool execution completes | `tool` field carries output |
+| `sandbox_exec` | Sandbox REPL step | Status variant with `phase=sandbox_exec` |
+| `rlm_delegate` | Recursive delegate | Status variant with delegate metadata |
+| `text` | Response token/chunk | Live `response` stream or final text |
+| `warning` | Non-fatal issue | |
+| `error` | Terminal failure | Maps to `execution_completed` with `status=failed` |
+| `done` | Turn complete | Canonical hydration in `execution_completed.summary` with summarized trajectory/history turns, citations, and final status metadata |
+| `clarification` | Needs user input | HITL questions |
+
+---
+
+## Legacy StreamEventLike protocol
+
+Transport helpers accept any object satisfying `StreamEventLike` (`kind`, `text`, `payload`, `timestamp`). Prefer `RuntimeEvent` for all new code paths.
+
+---
+
+## RuntimeEvent payload fields (common)
 
 ### Request (client to server)
 
@@ -57,29 +92,14 @@ Canonical Daytona-only fields:
 
 ---
 
-## StreamEvent Kinds
-
-| Kind | When emitted | Payload |
-|------|-------------|---------|
-| `"status"` | Lifecycle transitions | `state`, `reason` |
-| `"reasoning"` | LLM thinking/CoT | `content`, `token_count` |
-| `"tool_call"` | Tool invocation starts | `tool_name`, `tool_input` |
-| `"tool_result"` | Tool execution completes | `tool_name`, `result`, `duration_ms` |
-| `"text"` | Final response text | `content` |
-| `"error"` | Error occurred | `error_type`, `message`, `recoverable` |
-| `"done"` | Turn complete | `trajectory`, `history_turns`, `total_tokens` |
-| `"clarification"` | Needs user input | `questions`, `context` |
-
----
-
-## StreamEvent Payload Fields
+## WebSocket Message Fields
 
 Common fields present on most events:
 
 | Field | Type | Present on | Description |
 |-------|------|-----------|-------------|
 | `tool_name` | `string` | `tool_call`, `tool_result` | Name of the tool invoked |
-| `tool_input` | `dict` | `tool_call` | Arguments passed to the tool |
+| `tool_input` | `string | null` | `tool_call` | Raw tool input passed to the tool |
 | `trajectory` | `list` | `done` | Full execution trace |
 | `history_turns` | `int` | `done` | Number of conversation turns |
 | `runtime_degraded` | `bool` | `status`, `error` | Whether runtime is in degraded mode |

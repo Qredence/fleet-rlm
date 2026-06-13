@@ -1,6 +1,6 @@
-"""Characterization tests locking the unified streaming StreamEvent contract.
+"""Characterization tests locking the unified streaming RuntimeEvent contract.
 
-These tests pin the exact ``StreamEvent`` sequence the websocket layer emits
+These tests pin the exact ``RuntimeEvent`` sequence the websocket layer emits
 through :meth:`AgentRuntime.aiter_chat_turn_stream`. The unified path runs the
 turn (via ``dspy.streamify`` for real DSPy modules, plain ``aforward`` for
 everything else), then replays the final prediction's trajectory as reasoning
