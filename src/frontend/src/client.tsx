@@ -41,7 +41,6 @@ hydrateRoot(document, <StartClient />);
 // Rely on standard browser rendering queue to guarantee React has finished layout and paint.
 requestAnimationFrame(() => {
   requestAnimationFrame(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).__hydrated = true;
+    (window as unknown as { __hydrated?: boolean }).__hydrated = true;
   });
 });

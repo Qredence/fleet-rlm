@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
 
 test("loads the supported shell surfaces without route crashes", async ({ page }) => {
   await page.goto("/");
-  await page.waitForFunction(() => (window as any).__hydrated === true);
+  await page.waitForFunction(() => (window as unknown as { __hydrated?: boolean }).__hydrated === true);
 
   await expect(page.getByRole("button", { name: "Workbench", exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Volumes", exact: true }).first()).toBeVisible();
@@ -48,7 +48,7 @@ test("sign-in dialog supports keyboard dismissal and restores focus", async ({ p
   });
 
   await page.goto("/");
-  await page.waitForFunction(() => (window as any).__hydrated === true);
+  await page.waitForFunction(() => (window as unknown as { __hydrated?: boolean }).__hydrated === true);
 
   const signInTrigger = page.getByRole("button", {
     name: "Sign in",
@@ -74,7 +74,7 @@ test("sign-in dialog supports keyboard dismissal and restores focus", async ({ p
 test("opens settings without runtime exception", async ({ page }) => {
   await page.goto("/settings");
   await page.waitForURL(/\/app\/settings/);
-  await page.waitForFunction(() => (window as any).__hydrated === true);
+  await page.waitForFunction(() => (window as unknown as { __hydrated?: boolean }).__hydrated === true);
 
   await expect(page.getByRole("button", { name: "Appearance", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Telemetry", exact: true })).toBeVisible();
