@@ -169,6 +169,9 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({ 
       }
       await page.waitForURL(/\/app\/workspace$/);
       await page.waitForLoadState("domcontentloaded");
+      await page.waitForFunction(
+        () => (window as unknown as { __hydrated?: boolean }).__hydrated === true,
+      );
     }
   }
 
