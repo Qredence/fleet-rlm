@@ -19,8 +19,7 @@ from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
 from fleet_rlm.runtime.agent import runtime_helpers as rh
 from fleet_rlm.runtime.agent import runtime_mcp, runtime_streaming
 from fleet_rlm.runtime.agent.runtime_history import maybe_refresh_summary
-from fleet_rlm.runtime.events import RuntimeEventContext
-from fleet_rlm.runtime.schemas import StreamEvent
+from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventContext
 from fleet_rlm.runtime.tools import discover_tools
 from fleet_rlm.runtime.tools.binding import bind_runtime_tools, execute_sandbox_tool
 
@@ -396,7 +395,7 @@ class AgentRuntime:
         context_paths: list[str] | None = None,
         batch_concurrency: int | None = None,
         volume_name: str | None = None,
-    ) -> AsyncIterator[StreamEvent]:
+    ) -> AsyncIterator[RuntimeEvent]:
         """Stream one chat turn through the agent, yielding events.
 
         This is the canonical entrypoint used by the websocket streaming
@@ -435,7 +434,7 @@ class AgentRuntime:
                 message=message,
                 cancel_check=cancel_check,
             ):
-                yield rh.stream_event_from_runtime_event(event)
+                yield event
         finally:
             self._turn_context = None
 

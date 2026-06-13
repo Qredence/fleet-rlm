@@ -16,6 +16,8 @@ from typing import Any
 
 from fleet_rlm.runtime.events import EVENT_SCHEMA_VERSION, RuntimeEvent, RuntimeEventKind
 
+from .wire_source_type import derive_wire_source_type
+
 _TURN_STARTED_KINDS: frozenset[RuntimeEventKind] = frozenset({RuntimeEventKind.TURN_STARTED})
 _TERMINAL_KINDS: frozenset[RuntimeEventKind] = frozenset({RuntimeEventKind.DONE, RuntimeEventKind.ERROR})
 
@@ -33,6 +35,7 @@ def project_chat(
     *,
     sequence: int = 0,
     run_id: str | None = None,
+    payload_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Project one ``RuntimeEvent`` to a websocket chat frame dict.
 
@@ -40,12 +43,13 @@ def project_chat(
         event: The canonical runtime event to project.
         sequence: Monotonic per-turn counter, used as the ``event_id``.
         run_id: Optional run identifier prefixed to ``event_id``.
+        payload_override: Optional enriched payload merged before projection.
 
     Returns:
         A dict ready for ``websocket.send_json()``.
     """
-    payload: dict[str, Any] = dict(event.payload)
-    payload.setdefault("source_type", event.kind.value)
+    payload: dict[str, Any] = dict(payload_override if payload_override is not None else event.payload)
+    payload.setdefault("source_type", derive_wire_source_type(event.kind, payload))
 
     if event.context is not None:
         payload["runtime"] = event.context.model_dump(mode="json", exclude_none=True)

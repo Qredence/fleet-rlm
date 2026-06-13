@@ -5,13 +5,12 @@ from __future__ import annotations
 import ast
 import json
 import uuid
-from typing import Any, cast
+from typing import Any
 
 import dspy
 
 from fleet_rlm.runtime.events import RuntimeEvent
 from fleet_rlm.runtime.execution.final_artifact import build_final_artifact_from_answer
-from fleet_rlm.runtime.schemas import StreamEvent, StreamEventKind
 
 
 def default_core_memory() -> dict[str, str]:
@@ -179,15 +178,6 @@ def recursive_child_review_payload(tool_name: str, observation: Any) -> dict[str
         "repair_target": "Review degraded recursive child output before accepting the run.",
         "repair_steps": ["Inspect the preserved child answer and degradation metadata."],
     }
-
-
-def stream_event_from_runtime_event(event: RuntimeEvent) -> StreamEvent:
-    return StreamEvent(
-        kind=cast(StreamEventKind, event.kind.value),
-        text=event.text,
-        payload=dict(event.payload),
-        timestamp=event.timestamp,
-    )
 
 
 def build_clarification_event(observation: Any) -> RuntimeEvent | None:

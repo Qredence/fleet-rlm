@@ -7,6 +7,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_core import PydanticCustomError
 
+from fleet_rlm.runtime.schemas import TraceMode
+
 from .runtime import ExecutionMode
 
 
@@ -27,7 +29,7 @@ class WSMessage(BaseModel):
         default=True,
         description="Whether trace-oriented streaming events should be emitted for the turn.",
     )
-    trace_mode: Literal["compact", "verbose", "off"] | None = Field(
+    trace_mode: TraceMode | None = Field(
         default=None,
         description="Optional trace verbosity override for the websocket session.",
     )

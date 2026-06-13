@@ -166,6 +166,17 @@ def test_startup_status_projects_to_canonical_execution_started_frame():
     assert frame["payload"]["source_type"] == "turn_started"
 
 
+def test_status_sandbox_exec_projects_to_sandbox_exec_source_type():
+    project_chat = importlib.import_module("fleet_rlm.api.events.project_chat")
+    events_module = importlib.import_module("fleet_rlm.runtime.events")
+
+    event = events_module.RuntimeEvent.status("Running REPL", payload={"phase": "sandbox_exec"})
+    frame = project_chat.project_chat(event)
+
+    assert frame["kind"] == "execution_step"
+    assert frame["payload"]["source_type"] == "sandbox_exec"
+
+
 def test_backend_status_projects_to_canonical_execution_step_frame():
     event_adapter = importlib.import_module("fleet_rlm.api.events.event_adapter")
 
