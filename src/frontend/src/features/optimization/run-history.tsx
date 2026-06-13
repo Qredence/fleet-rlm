@@ -23,7 +23,10 @@ const statusTone: Record<string, "default" | "secondary" | "destructive" | "outl
 
 function StatusBadge({ status }: { status: string }) {
   return (
-    <Badge variant={statusTone[status] ?? "outline"} className="capitalize font-medium px-2 py-0.5 typo-body-xs leading-none">
+    <Badge
+      variant={statusTone[status] ?? "outline"}
+      className="capitalize font-medium px-2 py-0.5 typo-body-xs leading-none"
+    >
       {status}
     </Badge>
   );
@@ -43,10 +46,15 @@ export function RunHistory({
   onSelectRun?: (runId: string) => void;
 }) {
   return (
-    <SectionCard variant="subtle" className="border-border bg-card shadow-sm transition-all duration-200">
+    <SectionCard
+      variant="subtle"
+      className="border-border bg-card shadow-sm transition-all duration-200"
+    >
       <SectionCardHeader className="flex-row items-center justify-between gap-4 border-b border-border-subtle bg-muted/10 px-6 py-4">
         <div className="min-w-0">
-          <SectionCardTitle className="text-sm font-semibold tracking-tight">Run History</SectionCardTitle>
+          <SectionCardTitle className="text-sm font-semibold tracking-tight">
+            Run History
+          </SectionCardTitle>
           <SectionCardDescription className="text-muted-foreground typo-helper mt-0.5">
             {runs.length} GEPA run{runs.length === 1 ? "" : "s"}
           </SectionCardDescription>
@@ -58,15 +66,22 @@ export function RunHistory({
           onClick={refetch}
           className="h-8 font-medium transition-colors hover:bg-muted/40 shadow-none border-input"
         >
-          <RefreshCw data-icon="inline-start" className={cn("size-3.5", isLoading && "animate-spin")} />
+          <RefreshCw
+            data-icon="inline-start"
+            className={cn("size-3.5", isLoading && "animate-spin")}
+          />
           Refresh
         </Button>
       </SectionCardHeader>
       <SectionCardContent className="p-6">
         {error ? (
           <Alert className="border-border-subtle bg-muted/10 rounded-lg">
-            <AlertTitle className="text-sm font-semibold text-foreground">Run history unavailable</AlertTitle>
-            <AlertDescription className="text-xs text-muted-foreground mt-0.5">{errorMessage(error)}</AlertDescription>
+            <AlertTitle className="text-sm font-semibold text-foreground">
+              Run history unavailable
+            </AlertTitle>
+            <AlertDescription className="text-xs text-muted-foreground mt-0.5">
+              {errorMessage(error)}
+            </AlertDescription>
           </Alert>
         ) : null}
 
@@ -111,23 +126,39 @@ export function RunHistory({
                     </div>
                   </div>
                   <div className="min-w-0 pr-4">
-                    <div className="truncate font-semibold text-foreground text-xs">{targetLabel(run)}</div>
-                    <div className="truncate typo-helper text-muted-foreground mt-0.5 font-mono uppercase tracking-wider">{run.optimizer}</div>
+                    <div className="truncate font-semibold text-foreground text-xs">
+                      {targetLabel(run)}
+                    </div>
+                    <div className="truncate typo-helper text-muted-foreground mt-0.5 font-mono uppercase tracking-wider">
+                      {run.optimizer}
+                    </div>
                     {run.error ? (
-                      <div className="mt-1 truncate typo-body-xs text-destructive leading-tight">{run.error}</div>
+                      <div className="mt-1 truncate typo-body-xs text-destructive leading-tight">
+                        {run.error}
+                      </div>
                     ) : null}
                   </div>
                   <div className="min-w-0 pr-4">
-                    <div className="truncate text-xs text-foreground font-medium">{run.reflection_model_id ?? "default"}</div>
+                    <div className="truncate text-xs text-foreground font-medium">
+                      {run.reflection_model_id ?? "default"}
+                    </div>
                     <div className="truncate typo-helper text-muted-foreground font-mono mt-0.5">
                       {run.reflection_profile_id ?? ""}
                     </div>
                   </div>
-                  <span className="text-muted-foreground text-xs font-medium">{run.auto ?? "-"}</span>
-                  <span className="font-mono text-xs font-semibold text-foreground">{formatScore(run.validation_score)}</span>
-                  <span className="truncate text-muted-foreground text-xs font-medium">{run.phase ?? "-"}</span>
+                  <span className="text-muted-foreground text-xs font-medium">
+                    {run.auto ?? "-"}
+                  </span>
+                  <span className="font-mono text-xs font-semibold text-foreground">
+                    {formatScore(run.validation_score)}
+                  </span>
+                  <span className="truncate text-muted-foreground text-xs font-medium">
+                    {run.phase ?? "-"}
+                  </span>
                   <div className="min-w-0 pr-4">
-                    <div className="truncate text-xs text-foreground font-mono">{run.output_path ?? "-"}</div>
+                    <div className="truncate text-xs text-foreground font-mono">
+                      {run.output_path ?? "-"}
+                    </div>
                     <div className="truncate typo-helper text-muted-foreground font-mono mt-0.5">
                       {run.distilled_trace_bundle_path ?? run.manifest_path ?? ""}
                     </div>

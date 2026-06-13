@@ -8,10 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/product/page-header";
 import { useIsMobile } from "@/hooks/use-is-mobile";
-import type {
-  OptimizationPromotionDraftResponse,
-  OptimizationRunResponse,
-} from "@/lib/rlm-api";
+import type { OptimizationPromotionDraftResponse, OptimizationRunResponse } from "@/lib/rlm-api";
 
 import { errorMessage } from "./optimization-format";
 import { OptimizationForm } from "./optimization-form";
@@ -97,7 +94,9 @@ export function OptimizationScreen() {
           {statusQuery.data && !statusQuery.data.available ? (
             <Alert className="border-border-subtle bg-muted/10 rounded-lg">
               <FlaskConical className="text-muted-foreground size-4" />
-              <AlertTitle className="text-sm font-semibold text-foreground">GEPA unavailable</AlertTitle>
+              <AlertTitle className="text-sm font-semibold text-foreground">
+                GEPA unavailable
+              </AlertTitle>
               <AlertDescription className="text-xs text-muted-foreground mt-0.5">
                 {statusQuery.data.guidance ?? "The optimizer is not available in this environment."}
               </AlertDescription>
@@ -111,10 +110,23 @@ export function OptimizationScreen() {
           >
             <div className="flex items-center justify-between gap-3 border-b border-border-subtle pb-3">
               <TabsList className="bg-muted/40 p-1">
-                <TabsTrigger value="new-run" className="font-medium text-xs py-1.5 px-3 transition-colors">New Run</TabsTrigger>
-                <TabsTrigger value="history" className="font-medium text-xs py-1.5 px-3 transition-colors">Run History</TabsTrigger>
+                <TabsTrigger
+                  value="new-run"
+                  className="font-medium text-xs py-1.5 px-3 transition-colors"
+                >
+                  New Run
+                </TabsTrigger>
+                <TabsTrigger
+                  value="history"
+                  className="font-medium text-xs py-1.5 px-3 transition-colors"
+                >
+                  Run History
+                </TabsTrigger>
               </TabsList>
-              <Badge variant="outline" className="border-border-subtle bg-muted/20 text-muted-foreground font-medium typo-helper">
+              <Badge
+                variant="outline"
+                className="border-border-subtle bg-muted/20 text-muted-foreground font-medium typo-helper"
+              >
                 RLM-GEPA
               </Badge>
             </div>

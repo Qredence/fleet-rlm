@@ -257,11 +257,16 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
   };
 
   return (
-    <SectionCard variant="subtle" className="border-border bg-card shadow-sm transition-all duration-200">
+    <SectionCard
+      variant="subtle"
+      className="border-border bg-card shadow-sm transition-all duration-200"
+    >
       <SectionCardHeader className="border-b border-border-subtle bg-muted/10 px-6 py-5">
         <div className="flex items-center gap-2">
           <Settings2 className="size-5 text-primary" />
-          <SectionCardTitle className="text-base font-semibold tracking-tight">New GEPA Run</SectionCardTitle>
+          <SectionCardTitle className="text-base font-semibold tracking-tight">
+            New GEPA Run
+          </SectionCardTitle>
         </div>
         <SectionCardDescription className="text-muted-foreground typo-body-sm mt-1">
           {moduleDatasetDescription(selectedModule)}
@@ -283,10 +288,18 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                   className="w-full flex"
                   disabled={isSubmitting}
                 >
-                  <ToggleGroupItem value="module" className="flex-1 font-medium transition-colors" disabled={isSubmitting}>
+                  <ToggleGroupItem
+                    value="module"
+                    className="flex-1 font-medium transition-colors"
+                    disabled={isSubmitting}
+                  >
                     Registered module
                   </ToggleGroupItem>
-                  <ToggleGroupItem value="skill" className="flex-1 font-medium transition-colors" disabled={isSubmitting}>
+                  <ToggleGroupItem
+                    value="skill"
+                    className="flex-1 font-medium transition-colors"
+                    disabled={isSubmitting}
+                  >
                     Skill file
                   </ToggleGroupItem>
                 </ToggleGroup>
@@ -307,7 +320,11 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                     <SelectContent align="start" className="border-border">
                       <SelectGroup>
                         {modules.map((module) => (
-                          <SelectItem key={module.slug} value={module.slug} className="cursor-pointer focus:bg-muted/40">
+                          <SelectItem
+                            key={module.slug}
+                            value={module.slug}
+                            className="cursor-pointer focus:bg-muted/40"
+                          >
                             {module.label}
                           </SelectItem>
                         ))}
@@ -350,10 +367,18 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                       className="w-full flex"
                       disabled={isSubmitting}
                     >
-                      <ToggleGroupItem value="name" className="flex-1 font-medium transition-colors" disabled={isSubmitting}>
+                      <ToggleGroupItem
+                        value="name"
+                        className="flex-1 font-medium transition-colors"
+                        disabled={isSubmitting}
+                      >
                         Bundled name
                       </ToggleGroupItem>
-                      <ToggleGroupItem value="path" className="flex-1 font-medium transition-colors" disabled={isSubmitting}>
+                      <ToggleGroupItem
+                        value="path"
+                        className="flex-1 font-medium transition-colors"
+                        disabled={isSubmitting}
+                      >
                         Skill path
                       </ToggleGroupItem>
                     </ToggleGroup>
@@ -389,7 +414,9 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                 <CompactField label="Auto">
                   <Select
                     value={form.auto}
-                    onValueChange={(value) => updateForm("auto", value as OptimizationRunFormState["auto"])}
+                    onValueChange={(value) =>
+                      updateForm("auto", value as OptimizationRunFormState["auto"])
+                    }
                     disabled={isSubmitting}
                   >
                     <SelectTrigger className="w-full h-10 border-input bg-background px-3 py-2 text-sm shadow-none transition-colors hover:border-border-subtle">
@@ -397,9 +424,15 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                     </SelectTrigger>
                     <SelectContent align="start" className="border-border">
                       <SelectGroup>
-                        <SelectItem value="light" className="cursor-pointer focus:bg-muted/40">light</SelectItem>
-                        <SelectItem value="medium" className="cursor-pointer focus:bg-muted/40">medium</SelectItem>
-                        <SelectItem value="heavy" className="cursor-pointer focus:bg-muted/40">heavy</SelectItem>
+                        <SelectItem value="light" className="cursor-pointer focus:bg-muted/40">
+                          light
+                        </SelectItem>
+                        <SelectItem value="medium" className="cursor-pointer focus:bg-muted/40">
+                          medium
+                        </SelectItem>
+                        <SelectItem value="heavy" className="cursor-pointer focus:bg-muted/40">
+                          heavy
+                        </SelectItem>
                       </SelectGroup>
                     </SelectContent>
                   </Select>
@@ -438,20 +471,33 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                 <CompactField label="Reflection Profile">
                   <Select
                     value={form.reflectionProfileId || DEFAULT_SELECT_VALUE}
-                    onValueChange={(value) => onReflectionProfileChange(value === DEFAULT_SELECT_VALUE || !value ? "" : value)}
+                    onValueChange={(value) =>
+                      onReflectionProfileChange(
+                        value === DEFAULT_SELECT_VALUE || !value ? "" : value,
+                      )
+                    }
                     disabled={isSubmitting || profilesQuery.isLoading}
                   >
                     <SelectTrigger className="w-full h-10 border-input bg-background px-3 py-2 text-sm shadow-none transition-colors hover:border-border-subtle">
                       <SelectValue>
-                        {profiles.find((profile) => profile.id === form.reflectionProfileId)?.name ??
-                          "Default reflection model"}
+                        {profiles.find((profile) => profile.id === form.reflectionProfileId)
+                          ?.name ?? "Default reflection model"}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent align="start" className="border-border">
                       <SelectGroup>
-                        <SelectItem value={DEFAULT_SELECT_VALUE} className="cursor-pointer focus:bg-muted/40">Default reflection model</SelectItem>
+                        <SelectItem
+                          value={DEFAULT_SELECT_VALUE}
+                          className="cursor-pointer focus:bg-muted/40"
+                        >
+                          Default reflection model
+                        </SelectItem>
                         {profiles.map((profile) => (
-                          <SelectItem key={profile.id} value={profile.id} className="cursor-pointer focus:bg-muted/40">
+                          <SelectItem
+                            key={profile.id}
+                            value={profile.id}
+                            className="cursor-pointer focus:bg-muted/40"
+                          >
                             {profile.name}
                           </SelectItem>
                         ))}
@@ -466,18 +512,24 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                     <Select
                       value={form.reflectionModelId}
                       onValueChange={(value) => value && updateForm("reflectionModelId", value)}
-                      disabled={isSubmitting || !form.reflectionProfileId || modelOptions.length === 0}
+                      disabled={
+                        isSubmitting || !form.reflectionProfileId || modelOptions.length === 0
+                      }
                     >
                       <SelectTrigger className="w-full h-10 border-input bg-background px-3 py-2 text-sm shadow-none transition-colors hover:border-border-subtle">
                         <SelectValue>
-                          {modelOptions.find((model) => model.id === form.reflectionModelId)?.label ??
-                            "Select model"}
+                          {modelOptions.find((model) => model.id === form.reflectionModelId)
+                            ?.label ?? "Select model"}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent align="start" className="border-border">
                         <SelectGroup>
                           {modelOptions.map((model) => (
-                            <SelectItem key={model.id} value={model.id} className="cursor-pointer focus:bg-muted/40">
+                            <SelectItem
+                              key={model.id}
+                              value={model.id}
+                              className="cursor-pointer focus:bg-muted/40"
+                            >
                               {model.label}
                             </SelectItem>
                           ))}
@@ -491,7 +543,10 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
 
             {/* Right Column: Dataset Setup & Ingestion */}
             <FieldGroup className="gap-5">
-              <CompactField label="Dataset Source" icon={<DatabaseZap className="size-4 text-primary" />}>
+              <CompactField
+                label="Dataset Source"
+                icon={<DatabaseZap className="size-4 text-primary" />}
+              >
                 <ToggleGroup
                   type="single"
                   value={form.datasetSource}
@@ -502,13 +557,25 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                   className="w-full flex"
                   disabled={isSubmitting}
                 >
-                  <ToggleGroupItem value="existing" className="flex-1 font-medium transition-colors" disabled={isSubmitting}>
+                  <ToggleGroupItem
+                    value="existing"
+                    className="flex-1 font-medium transition-colors"
+                    disabled={isSubmitting}
+                  >
                     Existing
                   </ToggleGroupItem>
-                  <ToggleGroupItem value="upload" className="flex-1 font-medium transition-colors" disabled={isSubmitting}>
+                  <ToggleGroupItem
+                    value="upload"
+                    className="flex-1 font-medium transition-colors"
+                    disabled={isSubmitting}
+                  >
                     Upload file
                   </ToggleGroupItem>
-                  <ToggleGroupItem value="path" className="flex-1 font-medium transition-colors" disabled={isSubmitting}>
+                  <ToggleGroupItem
+                    value="path"
+                    className="flex-1 font-medium transition-colors"
+                    disabled={isSubmitting}
+                  >
                     Server path
                   </ToggleGroupItem>
                 </ToggleGroup>
@@ -518,7 +585,9 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                 <CompactField
                   label="Registered Dataset"
                   description={
-                    selectedDataset ? datasetLabel(selectedDataset) : "Registered JSON/JSONL datasets"
+                    selectedDataset
+                      ? datasetLabel(selectedDataset)
+                      : "Registered JSON/JSONL datasets"
                   }
                 >
                   <Select
@@ -542,7 +611,10 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                             className="cursor-pointer focus:bg-muted/40"
                           >
                             <div className="flex items-center gap-2">
-                              <Database className="size-4 shrink-0 text-muted-foreground" data-icon="inline-start" />
+                              <Database
+                                className="size-4 shrink-0 text-muted-foreground"
+                                data-icon="inline-start"
+                              />
                               <span className="truncate">{datasetLabel(dataset)}</span>
                             </div>
                           </SelectItem>
@@ -559,7 +631,10 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                   description="Upload is registered before run creation."
                 >
                   <div className="flex min-h-10 items-center gap-2 rounded-lg border border-input px-3 py-1 bg-background hover:border-border-subtle transition-colors duration-150">
-                    <Upload className="shrink-0 size-4 text-muted-foreground" data-icon="inline-start" />
+                    <Upload
+                      className="shrink-0 size-4 text-muted-foreground"
+                      data-icon="inline-start"
+                    />
                     <Input
                       key={datasetFile ? "loaded" : "empty"}
                       type="file"
@@ -618,7 +693,9 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
               {traceExport ? (
                 <Alert className="border-border bg-muted/20 rounded-lg">
                   <FileJson className="size-4 text-muted-foreground" />
-                  <AlertTitle className="text-sm font-semibold text-foreground">Trace bundle ready</AlertTitle>
+                  <AlertTitle className="text-sm font-semibold text-foreground">
+                    Trace bundle ready
+                  </AlertTitle>
                   <AlertDescription className="text-xs text-muted-foreground mt-0.5">
                     {traceExport.trace_count} trace(s). {traceExport.distilled_bundle_path}
                   </AlertDescription>
@@ -645,7 +722,11 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                 <span>Optimizer: GEPA &middot; proposer: Daytona RLM</span>
               )}
             </div>
-            <Button type="submit" disabled={isSubmitting} className="font-medium h-10 px-5 shadow-xs transition-colors">
+            <Button
+              type="submit"
+              disabled={isSubmitting}
+              className="font-medium h-10 px-5 shadow-xs transition-colors"
+            >
               {isSubmitting ? "Starting..." : "Start GEPA run"}
             </Button>
           </div>
