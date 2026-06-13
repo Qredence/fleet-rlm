@@ -106,7 +106,7 @@ evaluation = [
     "ipython==9.13.0",
     "ipython-pygments-lexers==1.1.1",
     "jedi==0.19.2",
-    "jupyter-client==8.8.0",
+    "jupyter-client==8.9.1",
     "jupyter-core==5.9.1",
     "matplotlib-inline==0.2.1",
     "nest-asyncio==1.6.0",
