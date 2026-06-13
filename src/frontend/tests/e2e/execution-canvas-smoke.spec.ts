@@ -6,23 +6,17 @@ const LONG_OUTPUT_TEXT =
   "This text intentionally includes a unique tail marker to verify that " +
   "Timeline and Preview panels render full content end-to-end. " +
   TAIL_FRAGMENT;
-const PANEL_LABEL_PATTERN = /workspace/i;
+const PANEL_LABEL_PATTERN = /workbench/i;
 
 test("execution canvas keeps lanes readable and payloads untruncated", async ({ page }) => {
   await page.goto("/");
   await page.waitForURL(/\/app\/workspace$/);
+  await page.waitForFunction(
+    () => (window as unknown as { __hydrated?: boolean }).__hydrated === true,
+  );
   await expect(page.getByRole("button", { name: PANEL_LABEL_PATTERN }).first()).toBeVisible();
 
-  const closeSidePanelButton = page.getByRole("button", {
-    name: new RegExp(`^Hide ${PANEL_LABEL_PATTERN.source}$`, "i"),
-  });
-  if ((await closeSidePanelButton.count()) === 0) {
-    await page
-      .getByRole("button", {
-        name: new RegExp(`^Show ${PANEL_LABEL_PATTERN.source}$`, "i"),
-      })
-      .click({ force: true });
-  }
+  await page.getByRole("button", { name: "Workbench", exact: true }).first().click({ force: true });
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
@@ -175,6 +169,9 @@ test("execution canvas keeps lanes readable and payloads untruncated", async ({ 
       }
       await page.waitForURL(/\/app\/workspace$/);
       await page.waitForLoadState("domcontentloaded");
+      await page.waitForFunction(
+        () => (window as unknown as { __hydrated?: boolean }).__hydrated === true,
+      );
     }
   }
 

@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const isCi = process.env.CI === "true";
 
 export default defineConfig({
   lint: {
@@ -198,11 +197,8 @@ export default defineConfig({
   },
   plugins: [
     tanstackStart({
-      vite: { installDevServerMiddleware: true },
-      pages: [{ path: "/" }],
       prerender: {
-        enabled: !isCi,
-        crawlLinks: false,
+        enabled: false,
       },
     }),
     react(),

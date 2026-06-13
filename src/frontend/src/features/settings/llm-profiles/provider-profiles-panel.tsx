@@ -36,6 +36,15 @@ import { ProviderProfileForm } from "./provider-profile-form";
 import { ProviderProfileList } from "./provider-profile-list";
 import { RoleModelAssignment } from "./role-model-assignment";
 
+interface RoleBinding {
+  role: "planner" | "delegate" | "delegate_small";
+  profile_id?: string | null;
+  profile_name?: string | null;
+  model_id?: string;
+}
+
+const EMPTY_BINDINGS: RoleBinding[] = [];
+
 interface ProviderProfilesPanelProps {
   showAllSections: boolean;
   section?: SettingsSection;
@@ -51,7 +60,7 @@ export function ProviderProfilesPanel({ showAllSections, section }: ProviderProf
   const showSection = (key: SettingsSection) => showAllSections || section === key;
 
   const profiles = profilesQuery.data ?? [];
-  const bindings = rolesQuery.data?.bindings ?? [];
+  const bindings = rolesQuery.data?.bindings ?? EMPTY_BINDINGS;
 
   const bindingByRole = useMemo(() => {
     return Object.fromEntries(bindings.map((binding) => [binding.role, binding]));

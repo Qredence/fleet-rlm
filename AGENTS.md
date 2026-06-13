@@ -102,8 +102,7 @@ make build-ui
 
 ## Drift Checks
 
-Run the harness lane when docs, commands, Codex config, generated contracts, or script inventory
-change:
+Run the harness lane when docs, commands, Codex config, generated contracts, or script inventory change:
 
 ```bash
 # from repo root
@@ -118,8 +117,23 @@ uv run python scripts/check_docs_quality.py
 
 When changing workflow, contracts, or architecture, update the durable docs before finishing:
 
-- `AGENTS.md` and subsystem `AGENTS.md` files.
-- `docs/agent-harness/*`.
+- `AGENTS.md` and subsystem files under `docs/agent-harness/*`.
 - `docs/README.md`, `docs/index.md`, and `docs/SUMMARY.md`.
 - `scripts/README.md`, `Makefile`, `pyproject.toml`, and `src/frontend/package.json` when commands move.
 - `openapi.yaml` and frontend API artifacts when backend request or response shapes move.
+
+## Learned User Preferences
+
+- Always use the `zsh` terminal profile for CLI commands. Adjust column width via `--an-max-width` in `agent-ui.css` instead of Tailwind, and use `pnpm run check` in `src/frontend` to verify format, types, linter, and unit tests.
+- Always include direct absolute markdown links to `.canvas.tsx` files when creating or mentioning an IDE Canvas, e.g. using the format: `[Descriptive Label]` immediately followed by `(/absolute/path/to/canvas.canvas.tsx)`.
+
+## Learned Workspace Facts
+
+- Local development runs on ports `:8000` (API), `:5173` (Vite dev), and `:5001` (MLflow on Python 3.13+); chat runtime runs in Daytona via `dspy.RLM` with multi-provider dropdown selection.
+- Database queries use Row-Level Security (RLS) policies with session tenant IDs; SQLModel/SQLite fallback handles local offline dev, while Neon Postgres project is `fleet-rlm-postgres-cutover` (ID: `old-bird-44339002`) in `aws-eu-central-1`.
+- Alembic database schema drift checking requires importing all active SQLAlchemy/SQLModel models inside `migrations/env.py`.
+- IDE Canvases are for standalone analytical outputs (not internal files) and support specific category colors: `gray`, `purple`, `green`, `yellow`, `pink`, `blue`, and `orange`.
+- Streaming responses in the runtime are standardized on `RuntimeEvent` (`runtime/events.py`) and projected using `project_chat`, while legacy `StreamEvent` DTOs are cleaned up and unused.
+- On FastAPI Cloud, delete locked env vars first via `uv run fastapi cloud env delete <VAR> -y` and deploy with `--no-wait`; production and staging environments enforce `AUTH_REQUIRED=true` at startup.
+- Under TanStack Start, the client hydration entry `client.tsx` sets `(window as any).__hydrated = true` inside nested `requestAnimationFrame` calls to signal successful hydration to Playwright E2E tests.
+- In React 19 / TanStack Start, the `PostHogProvider` must be rendered unconditionally to prevent hydration full-tree unmount loops, while server-side asset manifest mutations must be `WeakSet`-guarded.
