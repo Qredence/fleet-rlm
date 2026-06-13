@@ -11,22 +11,25 @@ interface Props {
 }
 
 function AppProviders({ children }: Props) {
-  const [queryClient] = useState(() => new QueryClient({
-    defaultOptions: {
-      queries: {
-        enabled: typeof window !== "undefined",
-        staleTime: QUERY_STALE_TIME_MS,
-        gcTime: 10 * 60 * 1000,
-        retry: QUERY_RETRY_COUNT,
-        // Disabled globally — individual queries that need freshness opt in explicitly.
-        refetchOnWindowFocus: false,
-        refetchOnReconnect: true,
-      },
-      mutations: {
-        retry: 1,
-      },
-    },
-  }));
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            enabled: typeof window !== "undefined",
+            staleTime: QUERY_STALE_TIME_MS,
+            gcTime: 10 * 60 * 1000,
+            retry: QUERY_RETRY_COUNT,
+            // Disabled globally — individual queries that need freshness opt in explicitly.
+            refetchOnWindowFocus: false,
+            refetchOnReconnect: true,
+          },
+          mutations: {
+            retry: 1,
+          },
+        },
+      }),
+  );
 
   return (
     <QueryClientProvider client={queryClient}>

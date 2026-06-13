@@ -121,9 +121,7 @@ function AppScripts() {
       {fallbackScripts.map((script, index) => {
         const attrs = script.attrs as Record<string, string | boolean | undefined> | undefined;
         const stableKey = attrs?.src || attrs?.id || `idx-${index}`;
-        return (
-          <Asset key={`fleet-ssr-script-fallback-${stableKey}`} {...script} />
-        );
+        return <Asset key={`fleet-ssr-script-fallback-${stableKey}`} {...script} />;
       })}
     </>
   );
