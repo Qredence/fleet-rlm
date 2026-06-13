@@ -48,7 +48,9 @@ def project_chat(
     Returns:
         A dict ready for ``websocket.send_json()``.
     """
-    payload: dict[str, Any] = dict(payload_override if payload_override is not None else event.payload)
+    payload: dict[str, Any] = dict(event.payload)
+    if payload_override is not None:
+        payload.update(payload_override)
     payload.setdefault("source_type", derive_wire_source_type(event.kind, payload))
 
     if event.context is not None:

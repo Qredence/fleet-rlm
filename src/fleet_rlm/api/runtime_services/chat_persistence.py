@@ -34,7 +34,7 @@ EmitStartupEvent = Callable[[Any], Awaitable[None]]
 def build_startup_status_event() -> RuntimeEvent:
     """Return the canonical delayed startup status event."""
     return RuntimeEvent(
-        kind=RuntimeEventKind.TURN_STARTED,
+        kind=RuntimeEventKind.STATUS,
         text="Preparing Daytona workspace...",
         payload={"phase": "startup"},
         context=RuntimeEventContext(runtime_mode="daytona_pilot"),

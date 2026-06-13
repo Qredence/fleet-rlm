@@ -56,7 +56,7 @@ The runtime emits `RuntimeEvent` objects end-to-end. The websocket layer project
 | `text` | Response token/chunk | Live `response` stream or final text |
 | `warning` | Non-fatal issue | |
 | `error` | Terminal failure | Maps to `execution_completed` with `status=failed` |
-| `done` | Turn complete | `trajectory`, `history_turns`, citations |
+| `done` | Turn complete | Canonical hydration in `execution_completed.summary` with summarized trajectory/history turns, citations, and final status metadata |
 | `clarification` | Needs user input | HITL questions |
 
 ---
@@ -99,7 +99,7 @@ Common fields present on most events:
 | Field | Type | Present on | Description |
 |-------|------|-----------|-------------|
 | `tool_name` | `string` | `tool_call`, `tool_result` | Name of the tool invoked |
-| `tool_input` | `dict` | `tool_call` | Arguments passed to the tool |
+| `tool_input` | `string | null` | `tool_call` | Raw tool input passed to the tool |
 | `trajectory` | `list` | `done` | Full execution trace |
 | `history_turns` | `int` | `done` | Number of conversation turns |
 | `runtime_degraded` | `bool` | `status`, `error` | Whether runtime is in degraded mode |
