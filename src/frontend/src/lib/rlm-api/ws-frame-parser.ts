@@ -135,8 +135,10 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
   }
 
   const stepInput = asRecord(step.input);
+  const stepInputPhase = asText(stepInput?.phase).toLowerCase();
+  const stepInputKind = asText(stepInput?.event_kind).toLowerCase();
   const routedSourceType =
-    stepInput?.event_kind === "mlflow_span" || stepInput?.phase === "mlflow_span"
+    stepInputKind === "mlflow_span" || stepInputPhase === "mlflow_span"
       ? "mlflow_span"
       : asText(stepInput?.phase) ||
         asText(stepInput?.event_kind) ||

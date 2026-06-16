@@ -22,9 +22,9 @@ export function ThinkingCollapsed({
   onToggleExpand,
 }: ThinkingCollapsedProps) {
   useToolComplete(state === "animating", step.duration, onComplete);
-  
+
   const [isInternalExpanded, setIsInternalExpanded] = React.useState(defaultOpen ?? false);
-  
+
   React.useEffect(() => {
     if (state === "animating") {
       setIsInternalExpanded(true);

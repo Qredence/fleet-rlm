@@ -12,6 +12,7 @@ import { SearchTool } from "./search-tool";
 import { SubagentTool } from "./subagent-tool";
 import { ToolGroup } from "./tool-group";
 import { deriveFallbackToolPresentation } from "./tool-presentation";
+import { MlflowSpanTool } from "./mlflow-span-tool";
 import { QuestionTool } from "../question/question-tool";
 import type { CustomToolRendererProps } from "../types";
 
@@ -71,6 +72,8 @@ export const ToolRenderer = memo(function ToolRenderer({
       );
     case "tool-Thinking":
       return <ThinkingTool part={part} />;
+    case "tool-MlflowSpan":
+      return <MlflowSpanTool part={part} chatStatus={chatStatus} />;
   }
 
   // MCP tools

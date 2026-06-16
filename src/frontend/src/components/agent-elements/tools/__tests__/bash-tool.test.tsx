@@ -47,8 +47,7 @@ describe("BashToolTerminalCard", () => {
   });
 
   it("handles trailing colons safely without crashing due to out of bounds access", () => {
-    const command =
-      'import os x = 123 for i in range(10):';
+    const command = "import os x = 123 for i in range(10):";
     const { container, root } = renderBashTool(command);
 
     expect(container.textContent).toContain("import os");

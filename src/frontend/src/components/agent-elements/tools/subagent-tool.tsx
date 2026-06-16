@@ -47,9 +47,7 @@ export const SubagentTool = memo(function SubagentTool({
     (part.startedAt as number | undefined);
   const hasNestedTools = nestedTools.length > 0;
   const outputDuration =
-    part.output?.totalDurationMs ||
-    part.output?.duration ||
-    part.output?.duration_ms;
+    part.output?.totalDurationMs || part.output?.duration || part.output?.duration_ms;
 
   useEffect(() => {
     if (isPending && startedAt) {
@@ -73,19 +71,15 @@ export const SubagentTool = memo(function SubagentTool({
     }
 
     if (!description) return "";
-    return description.length > 60
-      ? `${description.slice(0, 57)}...`
-      : description;
+    return description.length > 60 ? `${description.slice(0, 57)}...` : description;
   })();
-  
+
   const elapsedTimeDisplay = formatElapsedTime(
     !isPending && outputDuration ? outputDuration : elapsedMs,
   );
 
   if (isInterrupted && !part.output) {
-    return (
-      <ToolRowBase completeLabel={`${label} interrupted`} isAnimating={false} />
-    );
+    return <ToolRowBase completeLabel={`${label} interrupted`} isAnimating={false} />;
   }
 
   return (
@@ -122,15 +116,15 @@ export const SubagentTool = memo(function SubagentTool({
                 return (
                   <ToolRowBase
                     key={idx}
-                    completeLabel={
-                      nestedPart.type?.replace("tool-", "") ?? "Tool"
-                    }
+                    completeLabel={nestedPart.type?.replace("tool-", "") ?? "Tool"}
                     isAnimating={false}
                   />
                 );
               }
-              const { isPending: nestedIsPending, isError: nestedIsError } =
-                getToolStatus(nestedPart, chatStatus);
+              const { isPending: nestedIsPending, isError: nestedIsError } = getToolStatus(
+                nestedPart,
+                chatStatus,
+              );
               return (
                 <GenericTool
                   key={idx}

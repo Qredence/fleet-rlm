@@ -97,6 +97,26 @@ function payloadLooksSuccessful(payload?: Record<string, unknown>): boolean {
   return false;
 }
 
+function mlflowSpanStatus(payload?: Record<string, unknown>): "started" | "completed" | "error" {
+  const status = asOptionalText(payload?.status)?.toLowerCase();
+  if (status === "error" || status === "failed" || status === "failure") return "error";
+  if (
+    status === "completed" ||
+    status === "complete" ||
+    status === "finished" ||
+    status === "done"
+  ) {
+    return "completed";
+  }
+  return "started";
+}
+
+function mlflowSpanState(status: "started" | "completed" | "error"): ChatRenderToolState {
+  if (status === "started") return "running";
+  if (status === "error") return "output-error";
+  return "output-available";
+}
+
 function textLooksErrored(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   if (!normalized) return false;
@@ -203,15 +223,17 @@ function parseEnvVariablesFromPayload(payload?: Record<string, unknown>): ChatEn
 export function extractRawToolName(payload?: Record<string, unknown>): string | undefined {
   if (!payload) return undefined;
 
-  const step = payload.step && typeof payload.step === "object" && !Array.isArray(payload.step)
-    ? (payload.step as Record<string, unknown>)
-    : undefined;
+  const step =
+    payload.step && typeof payload.step === "object" && !Array.isArray(payload.step)
+      ? (payload.step as Record<string, unknown>)
+      : undefined;
 
-  const stepData = (payload.step_data ?? payload.stepData) &&
+  const stepData =
+    (payload.step_data ?? payload.stepData) &&
     typeof (payload.step_data ?? payload.stepData) === "object" &&
     !Array.isArray(payload.step_data ?? payload.stepData)
-    ? ((payload.step_data ?? payload.stepData) as Record<string, unknown>)
-    : undefined;
+      ? ((payload.step_data ?? payload.stepData) as Record<string, unknown>)
+      : undefined;
 
   const candidates = [
     payload.tool_name,
@@ -251,9 +273,10 @@ export function extractRawToolName(payload?: Record<string, unknown>): string | 
 
 function isSandboxPayload(payload?: Record<string, unknown>): boolean {
   if (!payload) return false;
-  const step = payload.step && typeof payload.step === "object" && !Array.isArray(payload.step)
-    ? (payload.step as Record<string, unknown>)
-    : undefined;
+  const step =
+    payload.step && typeof payload.step === "object" && !Array.isArray(payload.step)
+      ? (payload.step as Record<string, unknown>)
+      : undefined;
   if (step) {
     const stepType = String(step.type ?? "").toLowerCase();
     if (stepType === "repl") return true;
@@ -343,6 +366,11 @@ function toolFromPayload(
   text: string,
   payload?: Record<string, unknown>,
 ): ToolLikeRenderPart {
+  const sourceType = asOptionalText(payload?.source_type ?? payload?.sourceType)?.toLowerCase();
+  if (sourceType === "mlflow_span" || payload?.event_kind === "mlflow_span") {
+    return mlflowSpanFromPayload(text, payload);
+  }
+
   const state = inferToolState(kind, text, payload);
   const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
   const runtimeContext = parseRuntimeContext(payload);
@@ -365,6 +393,59 @@ function toolFromPayload(
   };
 }
 
+function mlflowSpanFromPayload(
+  text: string,
+  payload?: Record<string, unknown>,
+): ToolLikeRenderPart {
+  const status = mlflowSpanStatus(payload);
+  const spanId = asOptionalText(payload?.span_id ?? payload?.spanId) ?? "unknown-span";
+  const parentSpanId = asOptionalText(payload?.parent_span_id ?? payload?.parentSpanId);
+  const traceId = asOptionalText(
+    payload?.trace_id ?? payload?.traceId ?? payload?.mlflow_trace_id ?? payload?.mlflowTraceId,
+  );
+  const durationMs = asOptionalNumber(payload?.duration_ms ?? payload?.durationMs);
+  const startedAt = asOptionalText(payload?.started_at ?? payload?.startedAt);
+  const endedAt = asOptionalText(payload?.ended_at ?? payload?.endedAt);
+  const traceUrl = asOptionalText(payload?.trace_url ?? payload?.traceUrl);
+  const experimentId = asOptionalText(payload?.experiment_id ?? payload?.experimentId);
+  const trackingUri = asOptionalText(payload?.tracking_uri ?? payload?.trackingUri);
+  const spanName =
+    asOptionalText(payload?.name ?? payload?.span_name ?? payload?.spanName) ||
+    text ||
+    "MLflow span";
+  const outputValue = payload?.output ?? payload?.span_output ?? payload?.tool_output;
+  const errorValue = payload?.error;
+  const runtimeContext = parseRuntimeContext(payload);
+
+  return {
+    kind: "tool",
+    title: spanName,
+    toolType: "mlflow_span",
+    state: mlflowSpanState(status),
+    identityKey: `mlflow_span:${spanId}`,
+    input: payload?.input ?? payload?.span_input ?? payload?.tool_input,
+    output:
+      status === "started"
+        ? undefined
+        : (outputValue ?? (status === "error" ? errorValue : undefined)),
+    errorText:
+      status === "error" ? (stringifyUnknown(errorValue ?? outputValue) ?? text) : undefined,
+    mlflowSpan: {
+      spanId,
+      status,
+      ...(parentSpanId ? { parentSpanId } : {}),
+      ...(traceId ? { traceId } : {}),
+      ...(durationMs != null ? { durationMs } : {}),
+      ...(startedAt ? { startedAt } : {}),
+      ...(endedAt ? { endedAt } : {}),
+      ...(traceUrl ? { traceUrl } : {}),
+      ...(experimentId ? { experimentId } : {}),
+      ...(trackingUri ? { trackingUri } : {}),
+    },
+    ...(runtimeContext ? { runtimeContext } : {}),
+  };
+}
+
 type ToolLikeRenderPart = Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>;
 
 function isToolLikePart(part: ChatRenderPart): part is ToolLikeRenderPart {
@@ -372,6 +453,7 @@ function isToolLikePart(part: ChatRenderPart): part is ToolLikeRenderPart {
 }
 
 function toolIdentity(part: ToolLikeRenderPart): string {
+  if (part.kind === "tool" && part.identityKey) return part.identityKey;
   if (part.kind === "tool") return part.toolType || part.title || "tool";
   return part.title || "sandbox";
 }
@@ -382,7 +464,9 @@ function getBetterCode(existing: string | undefined, incoming: string | undefine
 
   const isDictRepr = (s: string) => {
     const trimmed = s.trim();
-    return (trimmed.startsWith("{") && trimmed.endsWith("}")) || trimmed.startsWith("Calling tool:");
+    return (
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) || trimmed.startsWith("Calling tool:")
+    );
   };
 
   if (isDictRepr(existing) && !isDictRepr(incoming)) return incoming;
@@ -403,7 +487,8 @@ function upsertMatchingToolPart(
   text: string,
   traceSource: ChatMessage["traceSource"],
 ): ChatMessage[] | null {
-  if (part.stepIndex == null) return null;
+  const incomingIdentity = toolIdentity(part);
+  if (part.stepIndex == null && !("identityKey" in part && part.identityKey)) return null;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
     if (!message || message.type !== "trace" || message.traceSource !== traceSource) continue;
@@ -412,8 +497,17 @@ function upsertMatchingToolPart(
       const existing = renderParts[j];
       if (!existing || !isToolLikePart(existing)) continue;
       if (existing.kind !== part.kind) continue;
-      if (existing.stepIndex !== part.stepIndex) continue;
-      if (toolIdentity(existing) !== toolIdentity(part)) continue;
+      if (
+        "identityKey" in existing &&
+        existing.identityKey &&
+        "identityKey" in part &&
+        part.identityKey
+      ) {
+        if (existing.identityKey !== part.identityKey) continue;
+      } else {
+        if (existing.stepIndex !== part.stepIndex) continue;
+        if (toolIdentity(existing) !== incomingIdentity) continue;
+      }
       const merged: ChatRenderPart =
         existing.kind === "tool" && part.kind === "tool"
           ? {
@@ -423,6 +517,14 @@ function upsertMatchingToolPart(
               state: part.state ?? existing.state,
               output: part.output ?? existing.output,
               errorText: part.errorText ?? existing.errorText,
+              mlflowSpan: part.mlflowSpan
+                ? {
+                    ...existing.mlflowSpan,
+                    ...part.mlflowSpan,
+                    spanId: part.mlflowSpan.spanId,
+                    status: part.mlflowSpan.status,
+                  }
+                : existing.mlflowSpan,
             }
           : existing.kind === "sandbox" && part.kind === "sandbox"
             ? {

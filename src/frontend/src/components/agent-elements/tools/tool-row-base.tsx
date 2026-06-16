@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Collapsible } from "@base-ui/react/collapsible";
 import { TextShimmer } from "../text-shimmer";
+import { SpiralLoader } from "../spiral-loader";
 import { IconChevronRight } from "@tabler/icons-react";
 import { cn } from "../utils/cn";
 
@@ -36,6 +37,7 @@ export function ToolRowBase({
   const isComplete = !isAnimating;
   const isExpanded = expanded ?? false;
   const canToggle = expandable && (isComplete || isExpanded || isAnimating);
+  const effectiveIcon = icon ?? (isAnimating ? <SpiralLoader size={12} /> : undefined);
 
   const row = (
     <div
@@ -45,7 +47,15 @@ export function ToolRowBase({
       )}
     >
       <div className="flex items-center gap-2 min-w-0 text-sm text-muted-foreground">
-        {icon && <span className="flex items-center justify-center size-3 shrink-0">{icon}</span>}
+        {effectiveIcon && (
+          <span
+            className="flex items-center justify-center size-3 shrink-0"
+            aria-hidden="true"
+            data-agent-elements-loader={isAnimating && !icon ? "spiral" : undefined}
+          >
+            {effectiveIcon}
+          </span>
+        )}
         <div className="flex flex-row items-baseline gap-1.5 min-w-0">
           <span className="font-[450] whitespace-nowrap shrink-0">
             {isAnimating && shimmerLabel ? (

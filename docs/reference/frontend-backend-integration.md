@@ -89,6 +89,7 @@ Common event kinds on this stream:
 - `warning`
 - `tool_call`
 - `tool_result`
+- `mlflow_span`
 - `plan_update`
 - `rlm_executing`
 - `memory_update`
@@ -181,6 +182,15 @@ RLM trajectories that include `{reasoning, code, output}` are normalized into
 `execution_step` frames with `step.type="repl"`. The transcript renders these
 as compact expandable sandbox rows; large code/output payloads stay summarized
 in chat while the workbench receives the structured step payload.
+
+Curated Fleet/DSPy MLflow span activity is surfaced as `execution_step` frames
+with `payload.source_type="mlflow_span"`. Each span payload must include a
+stable `span_id`, display `name`, and lifecycle `status` of `started`,
+`completed`, or `error`; optional detail fields such as `input`, `output`,
+`error`, and `metadata` are sanitized by the backend before websocket
+projection. The frontend pairs lifecycle updates by `span_id` and renders them
+through Agent Elements as a grouped execution activity with redacted expandable
+details and an MLflow trace link when `trace_id` is available.
 
 The adapter stack is:
 

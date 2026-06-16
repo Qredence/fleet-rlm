@@ -59,6 +59,70 @@ function stepInputKind(step: Record<string, unknown>): string {
   );
 }
 
+function mlflowSpanPayload(
+  payload: Record<string, unknown>,
+  text: string,
+): Record<string, unknown> {
+  const stepObj = asRecord(payload.step);
+  const stepInput = asRecord(stepObj?.input);
+  const stepOutput = asRecord(stepObj?.output);
+  const status =
+    asOptionalText(payload.status ?? stepInput?.status ?? stepOutput?.status) ?? "started";
+  const name =
+    asOptionalText(payload.name ?? payload.span_name ?? stepInput?.span_name ?? stepObj?.label) ||
+    text ||
+    "MLflow span";
+
+  return {
+    ...payload,
+    source_type: "mlflow_span",
+    event_kind: "mlflow_span",
+    tool_name: "mlflow_span",
+    span_id: payload.span_id ?? payload.spanId ?? stepInput?.span_id ?? stepInput?.spanId,
+    parent_span_id:
+      payload.parent_span_id ??
+      payload.parentSpanId ??
+      stepInput?.parent_span_id ??
+      stepInput?.parentSpanId,
+    trace_id:
+      payload.trace_id ??
+      payload.traceId ??
+      payload.mlflow_trace_id ??
+      payload.mlflowTraceId ??
+      stepInput?.trace_id ??
+      stepInput?.traceId,
+    name,
+    status,
+    duration_ms:
+      payload.duration_ms ??
+      payload.durationMs ??
+      stepOutput?.duration_ms ??
+      stepOutput?.durationMs,
+    started_at:
+      payload.started_at ?? payload.startedAt ?? stepInput?.started_at ?? stepInput?.startedAt,
+    ended_at: payload.ended_at ?? payload.endedAt ?? stepOutput?.ended_at ?? stepOutput?.endedAt,
+    trace_url: payload.trace_url ?? payload.traceUrl ?? stepInput?.trace_url ?? stepInput?.traceUrl,
+    experiment_id:
+      payload.experiment_id ??
+      payload.experimentId ??
+      stepInput?.experiment_id ??
+      stepInput?.experimentId,
+    tracking_uri:
+      payload.tracking_uri ??
+      payload.trackingUri ??
+      stepInput?.tracking_uri ??
+      stepInput?.trackingUri,
+    input: payload.input ?? payload.span_input ?? stepInput?.span_input ?? stepInput,
+    output: payload.output ?? payload.span_output ?? stepOutput?.span_output ?? stepOutput,
+    error: payload.error ?? stepOutput?.error,
+  };
+}
+
+function mlflowSpanEventKind(payload: Record<string, unknown>): "tool_call" | "tool_result" {
+  const status = asOptionalText(payload.status)?.toLowerCase();
+  return status === "completed" || status === "error" ? "tool_result" : "tool_call";
+}
+
 function routingStatusText(text: string, payload?: Record<string, unknown>): string {
   const selectedSkills = Array.isArray(payload?.selected_skills)
     ? payload.selected_skills.map((item) => String(item)).filter(Boolean)
@@ -86,34 +150,12 @@ export function routeExecutionStepBySourceType(
 
   switch (sourceType) {
     case "mlflow_span": {
-      const stepObj = asRecord(mergedPayload.step);
-      const stepInput = asRecord(stepObj?.input);
-      const stepOutput = asRecord(stepObj?.output);
-      
-      const isCall = stepOutput?.span_output == null && stepObj?.output == null;
-      const kind = isCall ? "tool_call" : "tool_result";
-      
-      const spanName = asOptionalText(stepInput?.span_name) || "MLflow Trace";
-      const spanInputVal = stepInput?.span_input ?? stepInput;
-      const spanOutputVal = stepOutput?.span_output ?? stepOutput;
-      
+      const spanPayload = mlflowSpanPayload(mergedPayload, trimmed);
       return appendToolLikePart(
         messages,
-        kind,
-        trimmed || spanName,
-        {
-          ...mergedPayload,
-          tool_name: "mlflow_span",
-          step_index: mergedPayload.step_index ?? stepObj?.step_index,
-          tool_input: spanInputVal,
-          tool_output: spanOutputVal,
-          step: {
-            type: "mlflow_span",
-            label: spanName,
-            input: spanInputVal,
-            output: spanOutputVal,
-          },
-        },
+        mlflowSpanEventKind(spanPayload),
+        trimmed || asOptionalText(spanPayload.name) || "MLflow span",
+        spanPayload,
         deps.appendTracePart,
       );
     }

@@ -57,6 +57,19 @@ export type ChatRenderToolState =
   | "output-available"
   | "output-error";
 
+export interface ChatMlflowSpanMetadata {
+  spanId: string;
+  parentSpanId?: string;
+  traceId?: string;
+  status: "started" | "completed" | "error";
+  durationMs?: number;
+  startedAt?: string;
+  endedAt?: string;
+  traceUrl?: string;
+  experimentId?: string;
+  trackingUri?: string;
+}
+
 export interface ChatTraceStep {
   id: string;
   index?: number;
@@ -170,9 +183,11 @@ export type ChatRenderPart =
       toolType: string;
       state: ChatRenderToolState;
       stepIndex?: number;
+      identityKey?: string;
       input?: unknown;
       output?: unknown;
       errorText?: string;
+      mlflowSpan?: ChatMlflowSpanMetadata;
       runtimeContext?: RuntimeContext;
     }
   | {

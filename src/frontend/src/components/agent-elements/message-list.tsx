@@ -18,7 +18,6 @@ import { ToolRowBase } from "./tools/tool-row-base";
 import { IconCopy, IconCheck } from "@tabler/icons-react";
 import { ToolRenderer as DefaultToolRenderer } from "./tools/tool-renderer";
 import { normalizeAssistantToolParts } from "./utils/tool-part-normalizer";
-import { SpiralLoader } from "./spiral-loader";
 
 export type MessageListProps = {
   messages: UIMessage[];
@@ -572,7 +571,6 @@ export const MessageList = memo(function MessageList({
 
                 {isLastTurn && showPlanning && (
                   <ToolRowBase
-                    icon={<SpiralLoader size={12} />}
                     shimmerLabel={planningLabel}
                     completeLabel="Done"
                     isAnimating={true}

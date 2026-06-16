@@ -40,6 +40,7 @@ class RuntimeEventKind(str, Enum):
     TURN_STARTED = "turn_started"
     SANDBOX_EXEC = "sandbox_exec"
     RLM_DELEGATE = "rlm_delegate"
+    MLFLOW_SPAN = "mlflow_span"
 
     @classmethod
     def terminal_kinds(cls) -> frozenset[RuntimeEventKind]:
@@ -222,6 +223,65 @@ class RuntimeEvent(BaseModel):
             text=text,
             payload={"phase": "reasoning"},
             actor=actor,
+        )
+
+    @classmethod
+    def mlflow_span(
+        cls,
+        *,
+        span_id: str,
+        name: str,
+        status: str,
+        parent_span_id: str | None = None,
+        trace_id: str | None = None,
+        duration_ms: int | float | None = None,
+        started_at: str | None = None,
+        ended_at: str | None = None,
+        input: Any | None = None,
+        output: Any | None = None,
+        error: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+        actor: RuntimeActorContext | None = None,
+        context: RuntimeEventContext | None = None,
+    ) -> RuntimeEvent:
+        """Factory for a curated MLflow span lifecycle event."""
+        normalized_status = status.strip().lower()
+        if normalized_status not in {"started", "completed", "error"}:
+            raise ValueError("MLflow span status must be started, completed, or error.")
+
+        span_name = name.strip() or "MLflow span"
+        payload: dict[str, Any] = {
+            "event_kind": "mlflow_span",
+            "span_id": span_id,
+            "name": span_name,
+            "status": normalized_status,
+            "tool_name": "mlflow_span",
+        }
+        if parent_span_id:
+            payload["parent_span_id"] = parent_span_id
+        if trace_id:
+            payload["trace_id"] = trace_id
+        if duration_ms is not None:
+            payload["duration_ms"] = duration_ms
+        if started_at:
+            payload["started_at"] = started_at
+        if ended_at:
+            payload["ended_at"] = ended_at
+        if input is not None:
+            payload["input"] = input
+        if output is not None:
+            payload["output"] = output
+        if error is not None:
+            payload["error"] = error
+        if metadata:
+            payload["metadata"] = metadata
+
+        return cls(
+            kind=RuntimeEventKind.MLFLOW_SPAN,
+            text=span_name,
+            payload=payload,
+            actor=actor,
+            context=context,
         )
 
 

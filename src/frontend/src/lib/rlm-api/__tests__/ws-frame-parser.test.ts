@@ -163,6 +163,32 @@ describe("parseWsServerFrame", () => {
     expect(frame.data.text).toBe("Short reasoning summary");
   });
 
+  it("maps execution_step mlflow_span phases to mlflow_span source_type", () => {
+    const frame = parseWsServerFrame({
+      type: "execution_step",
+      step: {
+        type: "tool",
+        label: "Planner model",
+        input: {
+          event_kind: "mlflow_span",
+          span_id: "span-1",
+          span_name: "Planner model",
+          status: "started",
+        },
+      },
+    });
+
+    expect(frame).toBeTruthy();
+    if (!frame || frame.type !== "event") return;
+    expect(frame.data.payload?.source_type).toBe("mlflow_span");
+    expect(frame.data.payload?.step).toMatchObject({
+      input: {
+        span_id: "span-1",
+        status: "started",
+      },
+    });
+  });
+
   it("hoists final_reasoning from execution_completed step payload", () => {
     const frame = parseWsServerFrame({
       type: "execution_completed",

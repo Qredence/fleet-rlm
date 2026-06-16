@@ -2,9 +2,7 @@ import { rlmApiClient } from "@/lib/rlm-api/client";
 import { withQuery } from "@/lib/rlm-api/query";
 import type { components } from "@/lib/rlm-api/generated/openapi";
 
-export type VolumeProvider = NonNullable<
-  components["schemas"]["VolumeTreeResponse"]["provider"]
->;
+export type VolumeProvider = NonNullable<components["schemas"]["VolumeTreeResponse"]["provider"]>;
 export type VolumeTreeNode = components["schemas"]["VolumeTreeNode"];
 export type VolumeTreeResponse = components["schemas"]["VolumeTreeResponse"];
 export type VolumeFileContentResponse = components["schemas"]["VolumeFileContentResponse"];

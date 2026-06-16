@@ -1,4 +1,8 @@
-import type { ChatRenderPart, ChatRenderToolState } from "@/lib/workspace/workspace-types";
+import type {
+  ChatMlflowSpanMetadata,
+  ChatRenderPart,
+  ChatRenderToolState,
+} from "@/lib/workspace/workspace-types";
 
 export type AgentToolState = "input-streaming" | "call" | "output-available" | "output-error";
 
@@ -10,6 +14,7 @@ export type AgentToolPart = {
   output?: unknown;
   startedAt?: number;
   toolName?: string;
+  mlflowSpan?: ChatMlflowSpanMetadata;
 };
 
 type SearchResultRow = { source: string; title: string; date: string };
@@ -272,6 +277,10 @@ function commandInput(part: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }
 function outputRecord(part: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>) {
   if (part.errorText) return { error: part.errorText };
   if (part.kind === "sandbox") return part.output ? { stdout: part.output } : undefined;
+  if (part.toolType === "mlflow_span") {
+    if (part.output == null) return undefined;
+    return isRecord(part.output) ? part.output : { result: part.output };
+  }
   return normalizeSearchOutput(part.output, part.toolType);
 }
 
@@ -284,6 +293,11 @@ export function stableToolCallId(
 ) {
   const suffix = stepIndex == null ? index : stepIndex;
   const base = `${messageId}:${kind}:${suffix}`;
+  return parentId ? `${parentId}:${base}` : base;
+}
+
+function stableToolIdentityCallId(messageId: string, identityKey: string, parentId?: string) {
+  const base = `${messageId}:${identityKey}`;
   return parentId ? `${parentId}:${base}` : base;
 }
 
@@ -310,11 +324,21 @@ export function chatRenderPartToAgentToolPart(
     const state = mapToolState(part.state);
     return {
       type: toolPartType(toolType),
-      toolCallId: stableToolCallId(messageId, toolType, index, part.stepIndex, options?.parentId),
+      toolCallId:
+        part.kind === "tool" && part.identityKey
+          ? stableToolIdentityCallId(messageId, part.identityKey, options?.parentId)
+          : stableToolCallId(messageId, toolType, index, part.stepIndex, options?.parentId),
       state,
-      input: commandInput(part),
+      input:
+        part.kind === "tool" && part.toolType === "mlflow_span" ? part.input : commandInput(part),
       output: outputRecord(part),
-      toolName: part.kind === "sandbox" ? (part.title && part.title !== "Sandbox" ? part.title : "sandbox") : toolType,
+      toolName:
+        part.kind === "sandbox"
+          ? part.title && part.title !== "Sandbox"
+            ? part.title
+            : "sandbox"
+          : toolType,
+      ...(part.kind === "tool" && part.mlflowSpan ? { mlflowSpan: part.mlflowSpan } : {}),
       ...((state === "call" || state === "input-streaming") && options?.startedAt != null
         ? { startedAt: options.startedAt }
         : {}),

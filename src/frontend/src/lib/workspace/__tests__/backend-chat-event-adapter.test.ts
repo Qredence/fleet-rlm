@@ -574,6 +574,55 @@ describe("applyWsFrameToMessages", () => {
     }
   });
 
+  it("merges mlflow_span lifecycle events by span_id", () => {
+    let messages: ChatMessage[] = [];
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("execution_step", "Planner model", {
+        source_type: "mlflow_span",
+        span_id: "span-planner",
+        trace_id: "trace-1",
+        name: "Planner model",
+        status: "started",
+        input: { prompt: "plan" },
+      }),
+    ).messages;
+
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("execution_step", "Planner model", {
+        source_type: "mlflow_span",
+        span_id: "span-planner",
+        trace_id: "trace-1",
+        name: "Planner model",
+        status: "completed",
+        duration_ms: 42,
+        output: { text: "done" },
+      }),
+    ).messages;
+
+    const toolRows = traceRows(
+      messages,
+      (part) => part.kind === "tool" && part.toolType === "mlflow_span",
+    );
+    expect(toolRows).toHaveLength(1);
+
+    const tool = toolRows[0]?.part;
+    if (tool?.kind === "tool") {
+      expect(tool.title).toBe("Planner model");
+      expect(tool.state).toBe("output-available");
+      expect(tool.identityKey).toBe("mlflow_span:span-planner");
+      expect(tool.mlflowSpan).toMatchObject({
+        spanId: "span-planner",
+        traceId: "trace-1",
+        status: "completed",
+        durationMs: 42,
+      });
+      expect(tool.input).toEqual({ prompt: "plan" });
+      expect(tool.output).toEqual({ text: "done" });
+    }
+  });
+
   it("accepts stdout_preview on sandbox_output status events", () => {
     const { messages } = applyWsFrameToMessages(
       [],

@@ -238,12 +238,7 @@ export function WorkspaceScreen() {
         lastSavedStateRef.current.artifactsHash !== currentArtifactsHash;
 
       if (isNewState) {
-        saveConversation(
-          messages,
-          phase,
-          undefined,
-          turnArtifactsByMessageId,
-        );
+        saveConversation(messages, phase, undefined, turnArtifactsByMessageId);
         lastSavedStateRef.current = {
           sessionId,
           messageCount: messages.length,
@@ -254,7 +249,15 @@ export function WorkspaceScreen() {
         };
       }
     }
-  }, [messages, isTyping, phase, turnArtifactsByMessageId, saveConversation, sessionId, getArtifactsHash]);
+  }, [
+    messages,
+    isTyping,
+    phase,
+    turnArtifactsByMessageId,
+    saveConversation,
+    sessionId,
+    getArtifactsHash,
+  ]);
 
   useEffect(() => {
     if (prevSessionRevisionRef.current !== sessionRevision) {

@@ -12,6 +12,7 @@ import {
   IconFilePlus as FilePlus,
   IconChecklist as ListTodo,
   IconLogout as LogOut,
+  IconActivityHeartbeat as ActivityHeartbeat,
 } from "@tabler/icons-react";
 
 export type ToolVariant = "simple" | "collapsible";
@@ -335,6 +336,27 @@ export const toolRegistry: Record<string, ToolMeta> = {
     title: (part) => {
       const isPending = part.state !== "output-available" && part.state !== "output-error";
       return isPending ? "Thinking..." : "Thought";
+    },
+    variant: "collapsible",
+  },
+  "tool-MlflowSpan": {
+    icon: ActivityHeartbeat,
+    title: (part) => {
+      const name =
+        typeof part.title === "string" && part.title.trim() ? part.title.trim() : "MLflow span";
+      const isPending = part.state !== "output-available" && part.state !== "output-error";
+      return isPending ? `Running ${name}` : name;
+    },
+    subtitle: (part) => {
+      const status = typeof part.mlflowSpan?.status === "string" ? part.mlflowSpan.status : "";
+      const durationMs = part.mlflowSpan?.durationMs;
+      const duration =
+        typeof durationMs === "number" && Number.isFinite(durationMs)
+          ? durationMs < 1000
+            ? `${Math.round(durationMs)}ms`
+            : `${(durationMs / 1000).toFixed(durationMs < 10_000 ? 1 : 0)}s`
+          : "";
+      return [status, duration].filter(Boolean).join(" - ");
     },
     variant: "collapsible",
   },

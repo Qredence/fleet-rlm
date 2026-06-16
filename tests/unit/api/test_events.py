@@ -177,6 +177,52 @@ def test_status_sandbox_exec_projects_to_sandbox_exec_source_type():
     assert frame["payload"]["source_type"] == "sandbox_exec"
 
 
+def test_mlflow_span_projects_to_canonical_execution_step_frame():
+    project_chat = importlib.import_module("fleet_rlm.api.events.project_chat")
+    events_module = importlib.import_module("fleet_rlm.runtime.events")
+
+    event = events_module.RuntimeEvent.mlflow_span(
+        span_id="span-1",
+        name="Planner model",
+        status="started",
+        trace_id="trace-1",
+        input={"prompt": "hello"},
+    )
+    frame = project_chat.project_chat(event)
+
+    assert event.kind == events_module.RuntimeEventKind.MLFLOW_SPAN
+    assert frame["kind"] == "execution_step"
+    assert frame["text"] == "Planner model"
+    assert frame["payload"]["source_type"] == "mlflow_span"
+    assert frame["payload"]["event_kind"] == "mlflow_span"
+    assert frame["payload"]["span_id"] == "span-1"
+    assert frame["payload"]["status"] == "started"
+    assert frame["payload"]["trace_id"] == "trace-1"
+
+
+def test_mlflow_span_projection_sanitizes_detail_payload(monkeypatch):
+    project_chat = importlib.import_module("fleet_rlm.api.events.project_chat")
+    sanitizer_module = importlib.import_module("fleet_rlm.api.events.sanitizer")
+    events_module = importlib.import_module("fleet_rlm.runtime.events")
+
+    monkeypatch.setattr(sanitizer_module, "_max_text_chars", lambda: 8)
+    monkeypatch.setattr(sanitizer_module, "_max_collection_items", lambda: 10)
+    monkeypatch.setattr(sanitizer_module, "_max_recursion_depth", lambda: 4)
+
+    event = events_module.RuntimeEvent.mlflow_span(
+        span_id="span-1",
+        name="Provider call",
+        status="completed",
+        input={"api_key": "secret", "prompt": "abcdefghijklmnopqrstuvwxyz"},
+        output={"text": "abcdefghijklmnopqrstuvwxyz"},
+    )
+    frame = project_chat.project_chat(event)
+
+    assert frame["payload"]["input"]["api_key"] == "<redacted>"
+    assert frame["payload"]["input"]["prompt"] == "abcdefgh...[truncated]"
+    assert frame["payload"]["output"]["text"] == "abcdefgh...[truncated]"
+
+
 def test_payload_override_preserves_runtime_event_payload_fields():
     project_chat = importlib.import_module("fleet_rlm.api.events.project_chat")
     events_module = importlib.import_module("fleet_rlm.runtime.events")
