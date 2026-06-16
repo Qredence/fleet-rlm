@@ -21,15 +21,8 @@ import { getWorkspaceRuntimeGuard } from "@/features/workspace/runtime-guard";
 import { detectRepoContext } from "@/lib/utils/repo-context";
 import { detectContextPaths } from "@/lib/utils/source-context";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
-import { rlmApiClient } from "@/lib/rlm-api/client";
-
-type SessionTraceExportResponse = {
-  session_id: string;
-  trace_count: number;
-  distilled_bundle_path: string;
-  json_path: string;
-  jsonl_path: string;
-};
+import { sessionsEndpoints } from "@/lib/rlm-api/sessions";
+import type { SessionTraceExportResponse } from "@/lib/rlm-api/optimization";
 import type { WsExecutionMode } from "@/lib/rlm-api/ws-types";
 import { requestSettingsDialogOpen } from "@/features/settings/settings-events";
 
@@ -96,12 +89,7 @@ export function WorkspaceScreen() {
   const [traceExport, setTraceExport] = useState<SessionTraceExportResponse | null>(null);
   const { mutate: exportTraceMutation, isPending: isExportingTraces } = useMutation({
     mutationFn: (targetSessionId: string) =>
-      rlmApiClient.post<SessionTraceExportResponse>(
-        `/api/v1/sessions/${encodeURIComponent(targetSessionId)}/trace-export`,
-        { format: "both" },
-        undefined,
-        120_000,
-      ),
+      sessionsEndpoints.exportTraces(targetSessionId, { format: "both" }),
     onSuccess: (result) => {
       setTraceExport(result);
       if (result.trace_count === 0) {
@@ -198,6 +186,21 @@ export function WorkspaceScreen() {
   // Chat history
   const { saveConversation, loadConversation: loadConv } = useChatHistoryStore();
 
+  const getArtifactsHash = useCallback((artifacts: Record<string, unknown>) => {
+    return Object.entries(artifacts)
+      .map(([msgId, steps]) => `${msgId}:${Array.isArray(steps) ? steps.length : 0}`)
+      .join(",");
+  }, []);
+
+  const lastSavedStateRef = useRef<{
+    sessionId: string | null;
+    messageCount: number;
+    lastMessageId?: string;
+    lastMessageContent?: string;
+    phase: string;
+    artifactsHash?: string;
+  } | null>(null);
+
   // ── Auto-save on session change ──────────────────────────────────
   // When sessionRevision increments (newSession() called), save the current
   // conversation before the backend runtime resets local chat state.
@@ -211,6 +214,47 @@ export function WorkspaceScreen() {
     turnArtifactsRef.current = turnArtifactsByMessageId;
     phaseRef.current = phase;
   }, [messages, phase, turnArtifactsByMessageId]);
+
+  // ── Auto-save on first message sent or turn completion ───────────
+  useEffect(() => {
+    if (messages.length === 0) return;
+
+    // Condition 1: First user message was just sent (length is exactly 1)
+    // Condition 2: Streaming or execution has finished (isTyping transitions to false)
+    const isFirstMessage = messages.length === 1;
+    const isTurnFinished = !isTyping;
+
+    if (isFirstMessage || isTurnFinished) {
+      const currentArtifactsHash = getArtifactsHash(turnArtifactsByMessageId);
+      const lastMessage = messages[messages.length - 1];
+
+      const isNewState =
+        !lastSavedStateRef.current ||
+        lastSavedStateRef.current.sessionId !== sessionId ||
+        lastSavedStateRef.current.messageCount !== messages.length ||
+        lastSavedStateRef.current.lastMessageId !== lastMessage?.id ||
+        lastSavedStateRef.current.lastMessageContent !== lastMessage?.content ||
+        lastSavedStateRef.current.phase !== phase ||
+        lastSavedStateRef.current.artifactsHash !== currentArtifactsHash;
+
+      if (isNewState) {
+        saveConversation(
+          messages,
+          phase,
+          undefined,
+          turnArtifactsByMessageId,
+        );
+        lastSavedStateRef.current = {
+          sessionId,
+          messageCount: messages.length,
+          lastMessageId: lastMessage?.id,
+          lastMessageContent: lastMessage?.content,
+          phase,
+          artifactsHash: currentArtifactsHash,
+        };
+      }
+    }
+  }, [messages, isTyping, phase, turnArtifactsByMessageId, saveConversation, sessionId, getArtifactsHash]);
 
   useEffect(() => {
     if (prevSessionRevisionRef.current !== sessionRevision) {
@@ -244,6 +288,16 @@ export function WorkspaceScreen() {
       saveConversation(messagesRef.current, phaseRef.current, undefined, turnArtifactsRef.current);
     }
 
+    // Initialize the last saved state ref with the loaded conversation to prevent redundant save on load
+    lastSavedStateRef.current = {
+      sessionId,
+      messageCount: conversation.messages.length,
+      lastMessageId: conversation.messages[conversation.messages.length - 1]?.id,
+      lastMessageContent: conversation.messages[conversation.messages.length - 1]?.content,
+      phase: conversation.phase || "idle",
+      artifactsHash: getArtifactsHash(conversation.turnArtifactsByMessageId || {}),
+    };
+
     loadConversation(conversation);
     clearRequestedConversation();
   }, [
@@ -252,6 +306,8 @@ export function WorkspaceScreen() {
     loadConversation,
     requestedConversationId,
     saveConversation,
+    sessionId,
+    getArtifactsHash,
   ]);
 
   const runtimeGuard = getWorkspaceRuntimeGuard(runtimeStatus.data);

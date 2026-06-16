@@ -1,5 +1,6 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { MessageInspectorPanel } from "@/features/workspace/inspection/message-inspector-panel";
@@ -13,13 +14,49 @@ vi.mock("@/features/workspace/inspection/artifact-graph", () => ({
   ),
 }));
 
+vi.mock("@/hooks/use-runtime-status", () => ({
+  useRuntimeStatus: () => ({ data: { mlflow: { enabled: false } } }),
+}));
+
+vi.mock("@/lib/rlm-api/client", () => ({
+  rlmApiClient: {
+    get: vi.fn(async (path: string) => {
+      if (path.includes("/trace-debug")) {
+        return {
+          trace_id: "tr-test",
+          resolved_from: "trace_id",
+          span_count: 0,
+          renderable_span_count: 0,
+          non_rendered_span_count: 0,
+          spans: [],
+        };
+      }
+      if (path.includes("/traces")) {
+        return {
+          items: [],
+          total: 0,
+          offset: 0,
+          limit: 50,
+          has_more: false,
+        };
+      }
+      return {};
+    }),
+  },
+}));
+
 function mountInspector() {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
+  const queryClient = new QueryClient();
 
   act(() => {
-    root.render(<MessageInspectorPanel />);
+    root.render(
+      <QueryClientProvider client={queryClient}>
+        <MessageInspectorPanel />
+      </QueryClientProvider>,
+    );
   });
 
   return { container, root };
@@ -28,7 +65,7 @@ function mountInspector() {
 function setInspectorState(options: {
   messages: ChatMessage[];
   selectedAssistantTurnId?: string | null;
-  activeInspectorTab?: "message" | "execution" | "graph";
+  activeInspectorTab?: "message" | "execution" | "graph" | "trace";
   turnArtifactsByMessageId?: Record<string, ExecutionStep[]>;
 }) {
   useChatStore.setState({
@@ -167,7 +204,7 @@ describe("MessageInspectorPanel", () => {
       tab.textContent?.trim(),
     );
 
-    expect(tabs).toEqual(["Message"]);
+    expect(tabs).toEqual(["Message", "Trace"]);
     expect(container.textContent).not.toContain("Graph");
     expect(useWorkspaceUiStore.getState().activeInspectorTab).toBe("message");
 
@@ -293,7 +330,7 @@ describe("MessageInspectorPanel", () => {
     const tabList = container.querySelector('[role="tablist"]');
     const tabsRoot = tabList?.parentElement?.parentElement as HTMLElement | null;
 
-    expect(tabs).toEqual(["Message", "Execution", "Graph"]);
+    expect(tabs).toEqual(["Message", "Execution", "Graph", "Trace"]);
     expect(tabsRoot?.classList.contains("flex")).toBe(true);
     expect(tabsRoot?.classList.contains("flex-col")).toBe(true);
     expect(container.textContent).toContain("Relationships");
