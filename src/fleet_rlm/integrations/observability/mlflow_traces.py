@@ -13,13 +13,27 @@ if TYPE_CHECKING:
     from mlflow.entities.trace import Trace
 
 
-def _trace_experiment_ids(config: MlflowConfig) -> list[str]:
+def _configured_mlflow(config: MlflowConfig | None = None) -> tuple[Any | None, MlflowConfig]:
+    """Return MLflow pinned to the configured tracking URI for helper-only paths."""
+
+    resolved = config or runtime.get_mlflow_config()
     mlflow = runtime._import_mlflow()
     if mlflow is None:
+        return None, resolved
+
+    mlflow.set_tracking_uri(resolved.tracking_uri)
+    return mlflow, resolved
+
+
+def _trace_experiment_ids(config: MlflowConfig, *, mlflow: Any | None = None) -> list[str]:
+    resolved = config
+    if mlflow is None:
+        mlflow, resolved = _configured_mlflow(config)
+    if mlflow is None:
         return []
-    if not runtime.initialize_mlflow(config):
+    if not runtime.initialize_mlflow(resolved):
         return []
-    experiment = mlflow.get_experiment_by_name(config.experiment)
+    experiment = mlflow.get_experiment_by_name(resolved.experiment)
     if experiment is None:
         return []
     return [experiment.experiment_id]
@@ -56,12 +70,11 @@ def resolve_trace_by_client_request_id(
     max_results: int = 5000,
 ) -> Trace | None:
     """Resolve the most recent trace for a given client request id."""
-    mlflow = runtime._import_mlflow()
+    mlflow, resolved = _configured_mlflow(config)
     if mlflow is None:
         return None
 
-    resolved = config or runtime.get_mlflow_config()
-    experiment_ids = _trace_experiment_ids(resolved)
+    experiment_ids = _trace_experiment_ids(resolved, mlflow=mlflow)
     if not experiment_ids:
         return None
 
@@ -130,12 +143,11 @@ def search_traces_by_session_id(
     allow_unfiltered_fallback: bool = True,
 ) -> list[Trace]:
     """Return MLflow traces whose trace session id matches a runtime session."""
-    mlflow = runtime._import_mlflow()
+    mlflow, resolved = _configured_mlflow(config)
     if mlflow is None:
         return []
 
-    resolved = config or runtime.get_mlflow_config()
-    experiment_ids = _trace_experiment_ids(resolved)
+    experiment_ids = _trace_experiment_ids(resolved, mlflow=mlflow)
     if not experiment_ids:
         return []
 
@@ -196,7 +208,7 @@ def resolve_trace(
     config: MlflowConfig | None = None,
 ) -> Trace | None:
     """Resolve a trace by explicit trace id or fallback client request id."""
-    mlflow = runtime._import_mlflow()
+    mlflow, resolved = _configured_mlflow(config)
     if mlflow is None:
         return None
 
@@ -214,7 +226,7 @@ def resolve_trace(
     if client_request_id:
         return resolve_trace_by_client_request_id(
             client_request_id,
-            config=config,
+            config=resolved,
         )
     return None
 

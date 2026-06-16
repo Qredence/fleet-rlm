@@ -179,6 +179,58 @@ class SessionTraceListResponse(BaseModel):
     has_more: bool = Field(description="Whether additional pages are available.")
 
 
+class SessionTraceDebugSpan(BaseModel):
+    """One MLflow span classified against the chat transcript component model."""
+
+    span_id: str = Field(description="MLflow/OpenTelemetry span identifier.")
+    parent_span_id: str | None = Field(default=None, description="Parent span identifier when present.")
+    name: str = Field(description="Span name.")
+    span_type: str | None = Field(default=None, description="MLflow span type when present.")
+    status_code: str | None = Field(default=None, description="Span status code.")
+    tool_name: str | None = Field(default=None, description="Resolved tool name when the span is tool-like.")
+    mapped_render_kind: Literal[
+        "assistant_text",
+        "reasoning",
+        "tool",
+        "sandbox",
+        "status_note",
+        "non_rendered",
+    ] = Field(description="Frontend chat render kind the span most closely maps to.")
+    mapped_component_type: str | None = Field(
+        default=None,
+        description="Frontend Agent Elements component/tool type hint when renderable.",
+    )
+    rationale: str = Field(description="Why the span is rendered or intentionally not rendered.")
+    input_preview: str | None = Field(default=None, description="Compact preview of span inputs.")
+    output_preview: str | None = Field(default=None, description="Compact preview of span outputs.")
+    start_time_unix_nano: int | None = Field(default=None, description="Span start timestamp.")
+    end_time_unix_nano: int | None = Field(default=None, description="Span end timestamp.")
+
+
+class SessionTraceDebugResponse(BaseModel):
+    """Session-scoped MLflow trace debug summary for chat component mapping."""
+
+    trace_id: str = Field(description="Resolved MLflow trace identifier.")
+    client_request_id: str | None = Field(
+        default=None,
+        description="Resolved Fleet client request identifier when available.",
+    )
+    state: str | None = Field(default=None, description="Top-level MLflow trace state.")
+    request_preview: str | None = Field(default=None, description="Trace request preview.")
+    response_preview: str | None = Field(default=None, description="Trace response preview.")
+    resolved_from: Literal["trace_id", "client_request_id", "session_row", "runtime_session_id"] = Field(
+        description="How the trace was resolved for this session debug request."
+    )
+    runtime_session_id: str | None = Field(
+        default=None,
+        description="Authorized runtime session id used for fallback lookup when applicable.",
+    )
+    span_count: int = Field(description="Total spans in the resolved trace.")
+    renderable_span_count: int = Field(description="How many spans map to a renderable chat component.")
+    non_rendered_span_count: int = Field(description="How many spans are intentionally observability-only.")
+    spans: list[SessionTraceDebugSpan] = Field(description="Per-span mapping summary.")
+
+
 class SessionStatsResponse(BaseModel):
     """Aggregated usage stats for a session."""
 
