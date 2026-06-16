@@ -1,4 +1,6 @@
 import { rlmApiClient } from "@/lib/rlm-api/client";
+import { withQuery } from "@/lib/rlm-api/query";
+import { sessionsEndpoints } from "@/lib/rlm-api/sessions";
 import type { components } from "@/lib/rlm-api/generated/openapi";
 
 export type GEPAStatusResponse = components["schemas"]["GEPAStatusResponse"];
@@ -30,16 +32,6 @@ export interface ListOptimizationDatasetsInput {
   moduleSlug?: string | null;
   limit?: number;
   offset?: number;
-}
-
-function withQuery(path: string, params: Record<string, string | number | null | undefined>) {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === null || value === undefined || value === "") continue;
-    search.set(key, String(value));
-  }
-  const query = search.toString();
-  return query ? `${path}?${query}` : path;
 }
 
 export const optimizationEndpoints = {
@@ -118,16 +110,12 @@ export const optimizationEndpoints = {
     );
   },
 
+  /** @deprecated Prefer `sessionsEndpoints.exportTraces`; retained for callers. */
   exportSessionTraces(
     sessionId: string,
     body: SessionTraceExportRequest = { format: "both" },
     signal?: AbortSignal,
   ) {
-    return rlmApiClient.post<SessionTraceExportResponse>(
-      `/api/v1/sessions/${encodeURIComponent(sessionId)}/trace-export`,
-      body,
-      signal,
-      120_000,
-    );
+    return sessionsEndpoints.exportTraces(sessionId, body, signal);
   },
 };

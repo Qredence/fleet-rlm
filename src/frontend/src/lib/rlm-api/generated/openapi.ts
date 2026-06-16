@@ -80,6 +80,13 @@ export interface paths {
      */
     get: operations["get_session_traces_api_v1_sessions__session_id__traces_get"];
   };
+  "/api/v1/sessions/{session_id}/trace-debug": {
+    /**
+     * Inspect session MLflow trace mapping
+     * @description Resolve one MLflow trace for the session and classify each span against the workspace chat component model.
+     */
+    get: operations["get_session_trace_debug_api_v1_sessions__session_id__trace_debug_get"];
+  };
   "/api/v1/sessions/{session_id}/trace-export": {
     /**
      * Export session MLflow traces
@@ -2716,6 +2723,146 @@ export interface components {
       };
     };
     /**
+     * SessionTraceDebugResponse
+     * @description Session-scoped MLflow trace debug summary for chat component mapping.
+     */
+    SessionTraceDebugResponse: {
+      /**
+       * Trace Id
+       * @description Resolved MLflow trace identifier.
+       */
+      trace_id: string;
+      /**
+       * Client Request Id
+       * @description Resolved Fleet client request identifier when available.
+       */
+      client_request_id?: string | null;
+      /**
+       * State
+       * @description Top-level MLflow trace state.
+       */
+      state?: string | null;
+      /**
+       * Request Preview
+       * @description Trace request preview.
+       */
+      request_preview?: string | null;
+      /**
+       * Response Preview
+       * @description Trace response preview.
+       */
+      response_preview?: string | null;
+      /**
+       * Resolved From
+       * @description How the trace was resolved for this session debug request.
+       * @enum {string}
+       */
+      resolved_from: "trace_id" | "client_request_id" | "session_row" | "runtime_session_id";
+      /**
+       * Runtime Session Id
+       * @description Authorized runtime session id used for fallback lookup when applicable.
+       */
+      runtime_session_id?: string | null;
+      /**
+       * Span Count
+       * @description Total spans in the resolved trace.
+       */
+      span_count: number;
+      /**
+       * Renderable Span Count
+       * @description How many spans map to a renderable chat component.
+       */
+      renderable_span_count: number;
+      /**
+       * Non Rendered Span Count
+       * @description How many spans are intentionally observability-only.
+       */
+      non_rendered_span_count: number;
+      /**
+       * Spans
+       * @description Per-span mapping summary.
+       */
+      spans: components["schemas"]["SessionTraceDebugSpan"][];
+    };
+    /**
+     * SessionTraceDebugSpan
+     * @description One MLflow span classified against the chat transcript component model.
+     */
+    SessionTraceDebugSpan: {
+      /**
+       * Span Id
+       * @description MLflow/OpenTelemetry span identifier.
+       */
+      span_id: string;
+      /**
+       * Parent Span Id
+       * @description Parent span identifier when present.
+       */
+      parent_span_id?: string | null;
+      /**
+       * Name
+       * @description Span name.
+       */
+      name: string;
+      /**
+       * Span Type
+       * @description MLflow span type when present.
+       */
+      span_type?: string | null;
+      /**
+       * Status Code
+       * @description Span status code.
+       */
+      status_code?: string | null;
+      /**
+       * Tool Name
+       * @description Resolved tool name when the span is tool-like.
+       */
+      tool_name?: string | null;
+      /**
+       * Mapped Render Kind
+       * @description Frontend chat render kind the span most closely maps to.
+       * @enum {string}
+       */
+      mapped_render_kind:
+        | "assistant_text"
+        | "reasoning"
+        | "tool"
+        | "sandbox"
+        | "status_note"
+        | "non_rendered";
+      /**
+       * Mapped Component Type
+       * @description Frontend Agent Elements component/tool type hint when renderable.
+       */
+      mapped_component_type?: string | null;
+      /**
+       * Rationale
+       * @description Why the span is rendered or intentionally not rendered.
+       */
+      rationale: string;
+      /**
+       * Input Preview
+       * @description Compact preview of span inputs.
+       */
+      input_preview?: string | null;
+      /**
+       * Output Preview
+       * @description Compact preview of span outputs.
+       */
+      output_preview?: string | null;
+      /**
+       * Start Time Unix Nano
+       * @description Span start timestamp.
+       */
+      start_time_unix_nano?: number | null;
+      /**
+       * End Time Unix Nano
+       * @description Span end timestamp.
+       */
+      end_time_unix_nano?: number | null;
+    };
+    /**
      * SessionTraceExportRequest
      * @description Request body for exporting a session's linked MLflow traces.
      */
@@ -3662,6 +3809,54 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["SessionTraceListResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The caller does not have permission to access this resource. */
+      403: {
+        content: never;
+      };
+      /** @description Session not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Session services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Inspect session MLflow trace mapping
+   * @description Resolve one MLflow trace for the session and classify each span against the workspace chat component model.
+   */
+  get_session_trace_debug_api_v1_sessions__session_id__trace_debug_get: {
+    parameters: {
+      query?: {
+        /** @description Optional explicit MLflow trace id to inspect. */
+        trace_id?: string | null;
+        /** @description Optional Fleet client request id used to resolve the trace. */
+        client_request_id?: string | null;
+      };
+      path: {
+        /** @description Identifier of the session whose trace to inspect. */
+        session_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SessionTraceDebugResponse"];
         };
       };
       /** @description Authentication is required or the provided token is invalid. */
