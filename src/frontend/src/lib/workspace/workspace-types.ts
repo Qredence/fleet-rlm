@@ -11,6 +11,7 @@ export type InspectorTab =
   | "message"
   | "execution"
   | "graph"
+  | "trace"
   | "workbench"
   | "documents"
   | "memory"
@@ -22,6 +23,10 @@ export interface ChatMessage {
   type: "user" | "assistant" | "system" | "trace" | "hitl" | "clarification" | "reasoning";
   content: string;
   traceSource?: "live" | "trajectory" | "summary";
+  traceMetadata?: {
+    mlflowTraceId?: string;
+    mlflowClientRequestId?: string;
+  };
   phase?: 1 | 2 | 3;
   renderParts?: ChatRenderPart[];
   streaming?: boolean;

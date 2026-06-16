@@ -9,6 +9,7 @@ export type AgentToolPart = {
   input?: unknown;
   output?: unknown;
   startedAt?: number;
+  toolName?: string;
 };
 
 type SearchResultRow = { source: string; title: string; date: string };
@@ -310,6 +311,7 @@ export function chatRenderPartToAgentToolPart(
       state,
       input: commandInput(part),
       output: outputRecord(part),
+      toolName: part.kind === "sandbox" ? (part.title && part.title !== "Sandbox" ? part.title : "sandbox") : toolType,
       ...((state === "call" || state === "input-streaming") && options?.startedAt != null
         ? { startedAt: options.startedAt }
         : {}),

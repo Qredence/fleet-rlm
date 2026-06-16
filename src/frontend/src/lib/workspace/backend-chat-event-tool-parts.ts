@@ -200,14 +200,66 @@ function parseEnvVariablesFromPayload(payload?: Record<string, unknown>): ChatEn
   return null;
 }
 
+export function extractRawToolName(payload?: Record<string, unknown>): string | undefined {
+  if (!payload) return undefined;
+
+  const step = payload.step && typeof payload.step === "object" && !Array.isArray(payload.step)
+    ? (payload.step as Record<string, unknown>)
+    : undefined;
+
+  const stepData = (payload.step_data ?? payload.stepData) &&
+    typeof (payload.step_data ?? payload.stepData) === "object" &&
+    !Array.isArray(payload.step_data ?? payload.stepData)
+    ? ((payload.step_data ?? payload.stepData) as Record<string, unknown>)
+    : undefined;
+
+  const candidates = [
+    payload.tool_name,
+    payload.toolName,
+    payload.name,
+    payload.tool,
+    step?.tool_name,
+    step?.toolName,
+    step?.name,
+    step?.tool,
+    stepData?.tool_name,
+    stepData?.toolName,
+    stepData?.name,
+    stepData?.tool,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  const code = payload.code ?? step?.code;
+  if (code && typeof code === "string" && code.trim()) {
+    return "repl_execute";
+  }
+
+  if (step) {
+    const stepType = String(step.type ?? "").toLowerCase();
+    if (stepType === "repl") {
+      return "repl_execute";
+    }
+  }
+
+  return undefined;
+}
+
 function isSandboxPayload(payload?: Record<string, unknown>): boolean {
   if (!payload) return false;
-  const step = payload.step;
-  if (step && typeof step === "object" && !Array.isArray(step)) {
-    const stepType = String((step as Record<string, unknown>).type ?? "").toLowerCase();
+  const step = payload.step && typeof payload.step === "object" && !Array.isArray(payload.step)
+    ? (payload.step as Record<string, unknown>)
+    : undefined;
+  if (step) {
+    const stepType = String(step.type ?? "").toLowerCase();
     if (stepType === "repl") return true;
   }
-  const toolName = String(payload.tool_name ?? "").toLowerCase();
+  const rawToolName = extractRawToolName(payload);
+  const toolName = String(rawToolName ?? "").toLowerCase();
   return ["python", "repl", "shell", "exec", "interpreter"].some((s) => toolName.includes(s));
 }
 
@@ -222,11 +274,14 @@ function sandboxFromPayload(
       : undefined;
   const stepInput = asRecord(step?.input);
   const stepOutput = asRecord(step?.output);
+  const argsRecord = asRecord(payload?.tool_args);
   const code =
     (typeof step?.input === "string" && step.input) ||
     asOptionalText(stepInput?.code) ||
     asOptionalText(stepInput?.code_preview) ||
     asOptionalText(stepInput?.command) ||
+    asOptionalText(argsRecord?.code) ||
+    asOptionalText(argsRecord?.command) ||
     (typeof payload?.tool_input === "string" && payload.tool_input) ||
     (typeof payload?.tool_args === "string" && payload.tool_args) ||
     "";
@@ -241,9 +296,10 @@ function sandboxFromPayload(
   const state = inferToolState(kind, text, payload);
   const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
   const runtimeContext = parseRuntimeContext(payload);
+  const rawToolName = extractRawToolName(payload);
   return {
     kind: "sandbox",
-    title: String(payload?.tool_name ?? "Sandbox"),
+    title: String(rawToolName ?? "Sandbox"),
     state,
     stepIndex,
     code,
@@ -291,10 +347,12 @@ function toolFromPayload(
   const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
   const runtimeContext = parseRuntimeContext(payload);
   const outputValue = payload?.tool_output ?? payload?.output ?? text;
+  const rawToolName = extractRawToolName(payload);
+
   return {
     kind: "tool",
-    title: String(payload?.tool_name ?? (text || "Tool")),
-    toolType: String(payload?.tool_name ?? "tool"),
+    title: String(rawToolName ?? (text || "Tool")),
+    toolType: String(rawToolName ?? "tool"),
     state,
     stepIndex,
     input: payload?.tool_input ?? payload?.tool_args ?? payload?.input,
@@ -316,6 +374,27 @@ function isToolLikePart(part: ChatRenderPart): part is ToolLikeRenderPart {
 function toolIdentity(part: ToolLikeRenderPart): string {
   if (part.kind === "tool") return part.toolType || part.title || "tool";
   return part.title || "sandbox";
+}
+
+function getBetterCode(existing: string | undefined, incoming: string | undefined): string {
+  if (!existing) return incoming || "";
+  if (!incoming) return existing;
+
+  const isDictRepr = (s: string) => {
+    const trimmed = s.trim();
+    return (trimmed.startsWith("{") && trimmed.endsWith("}")) || trimmed.startsWith("Calling tool:");
+  };
+
+  if (isDictRepr(existing) && !isDictRepr(incoming)) return incoming;
+  if (isDictRepr(incoming) && !isDictRepr(existing)) return existing;
+
+  const existingNewlines = (existing.match(/\n/g) || []).length;
+  const incomingNewlines = (incoming.match(/\n/g) || []).length;
+
+  if (existingNewlines > incomingNewlines) return existing;
+  if (incomingNewlines > existingNewlines) return incoming;
+
+  return existing.length >= incoming.length ? existing : incoming;
 }
 
 function upsertMatchingToolPart(
@@ -349,6 +428,7 @@ function upsertMatchingToolPart(
             ? {
                 ...existing,
                 ...part,
+                code: getBetterCode(existing.code, part.code),
                 state: part.state ?? existing.state,
                 output: part.output ?? existing.output,
                 errorText: part.errorText ?? existing.errorText,
@@ -388,7 +468,7 @@ export function appendToolLikePart(
       messages,
       {
         kind: "environment_variables",
-        title: String(payload?.tool_name ?? "Environment variables"),
+        title: String(payload?.tool_name ?? payload?.toolName ?? "Environment variables"),
         variables: envVars,
       },
       text,

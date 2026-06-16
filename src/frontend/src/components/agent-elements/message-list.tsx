@@ -683,7 +683,9 @@ function AssistantParts({
         const nestedTools =
           (part.type === "tool-Task" || part.type === "tool-Agent") && toolCallId
             ? nestedToolsMap.get(toolCallId) || []
-            : undefined;
+            : part.type === "tool-Group"
+              ? (part as any).nestedTools
+              : undefined;
         elems.push(
           <ToolRendererComponent
             key={part.toolCallId ?? `${msg.id}-tool-${i}`}

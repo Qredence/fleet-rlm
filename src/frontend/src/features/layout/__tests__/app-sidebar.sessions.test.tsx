@@ -26,22 +26,47 @@ const workspaceShellState = {
   clearHistory: vi.fn(),
 };
 
+vi.mock("@hugeicons/react", () => ({
+  HugeiconsIcon: () => <svg aria-hidden="true" />,
+}));
+
+vi.mock("@hugeicons/core-free-icons", () => ({
+  Cancel01Icon: [],
+  ComputerIcon: [],
+  Database01Icon: [],
+  Delete01Icon: [],
+  Login01Icon: [],
+  PencilEdit02Icon: [],
+  Search01Icon: [],
+  Settings01Icon: [],
+  SidebarLeft01Icon: [],
+  SparklesIcon: [],
+}));
+
 vi.mock("lucide-react", () => {
   const Icon = () => <svg aria-hidden="true" />;
   return {
-    Plus: Icon,
-    Search: Icon,
-    Sparkles: Icon,
-    Settings: Icon,
-    Clock3: Icon,
-    Trash2: Icon,
-    PanelLeftIcon: Icon,
-    XIcon: Icon,
+    Bell: Icon,
+    Bot: Icon,
+    Cpu: Icon,
     Database: Icon,
     FlaskConical: Icon,
+    Info: Icon,
+    Moon: Icon,
+    Paintbrush: Icon,
+    PanelLeftIcon: Icon,
+    Plus: Icon,
+    Search: Icon,
+    Settings: Icon,
+    Sparkles: Icon,
+    Sun: Icon,
+    Terminal: Icon,
+    Trash2: Icon,
+    XIcon: Icon,
+    Zap: Icon,
     LogIn: Icon,
     MessageCircle: Icon,
-    Terminal: Icon,
+    ChevronRightIcon: Icon,
   };
 });
 
@@ -73,6 +98,33 @@ vi.mock("@/hooks/use-app-navigate", () => ({
 vi.mock("@/hooks/use-is-mobile", () => ({
   useIsMobile: () => isMobile,
 }));
+
+const openCommandPaletteMock = vi.fn();
+
+vi.mock("@/stores/navigation-store", () => ({
+  useNavigationStore: () => ({
+    openCommandPalette: openCommandPaletteMock,
+  }),
+}));
+
+vi.mock("@/features/settings/settings-content", () => {
+  const Icon = () => <svg aria-hidden="true" />;
+  const settingsSections = [
+    { key: "appearance", label: "Appearance", icon: Icon },
+    { key: "runtime", label: "Runtime", icon: Icon },
+  ] as const;
+
+  return {
+    settingsSections,
+    resolveSettingsSection: (section?: string) =>
+      settingsSections.some((entry) => entry.key === section) ? section : undefined,
+    getSettingsSectionTitle: (section?: string) =>
+      settingsSections.find((entry) => entry.key === section)?.label ?? "Settings",
+    getSettingsSectionDescription: () => "Settings description.",
+    SettingsSectionContent: () => <div>Settings content</div>,
+    SettingsSidebarNav: () => <nav>Settings sidebar nav</nav>,
+  };
+});
 
 vi.mock("@/features/workspace/workspace-layout-contract", () => ({
   useWorkspaceLayoutHistory: () => workspaceShellState.conversations,
@@ -110,6 +162,7 @@ describe("AppSidebar session actions", () => {
   beforeEach(() => {
     navigateToMock.mockReset();
     navigateMock.mockReset();
+    openCommandPaletteMock.mockReset();
     isMobile = false;
     locationState.pathname = "/app/workspace";
     workspaceShellState.conversations = [];
@@ -129,7 +182,7 @@ describe("AppSidebar session actions", () => {
 
     expect(findButtonByText(container, "Workbench")).toBeTruthy();
 
-    const button = findButtonByText(container, "New session");
+    const button = findButtonByText(container, "New Session");
     expect(button).toBeTruthy();
 
     act(() => {
@@ -161,10 +214,48 @@ describe("AppSidebar session actions", () => {
     });
   });
 
+  it("opens command palette search from the sidebar", () => {
+    const { container, root } = mountSidebar();
+
+    const button = findButtonByText(container, "Search sessions");
+    expect(button).toBeTruthy();
+
+    act(() => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(openCommandPaletteMock).toHaveBeenCalledOnce();
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("renders supported navigation items without unsupported history", () => {
+    const { container, root } = mountSidebar();
+
+    expect(findButtonByText(container, "Workbench")).toBeTruthy();
+    expect(findButtonByText(container, "Volumes")).toBeTruthy();
+    expect(findButtonByText(container, "Optimization")).toBeTruthy();
+    expect(findButtonByText(container, "History")).toBeUndefined();
+
+    const volumesButton = findButtonByText(container, "Volumes");
+
+    act(() => {
+      volumesButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(navigateToMock).toHaveBeenCalledWith("volumes");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
   it("renders an empty-state session hint in the left rail", () => {
     const { container, root } = mountSidebar();
 
-    expect(container.textContent).toContain("Chats");
+    expect(container.textContent).toContain("Sessions");
     expect(container.textContent).toContain("No chats yet.");
     expect(container.textContent).toContain("Start a new session to populate this list.");
 
@@ -205,6 +296,33 @@ describe("AppSidebar session actions", () => {
 
     expect(workspaceShellState.requestConversationLoad).toHaveBeenCalledWith("conv-1");
     expect(navigateToMock).toHaveBeenCalledWith("workspace");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("constrains long saved session titles to the sidebar width", () => {
+    const conversation: Conversation = {
+      id: "conv-long",
+      title:
+        "Review my recent code changes and suggest improvements analyze https://github.com/qredence/fleet-rlm with a very long title",
+      messages: [],
+      phase: "complete",
+      createdAt: "2026-03-16T10:00:00.000Z",
+      updatedAt: "2026-03-16T12:00:00.000Z",
+    };
+
+    workspaceShellState.conversations = [conversation];
+
+    const { container, root } = mountSidebar();
+
+    const button = findButtonByText(container, "Review my recent code changes");
+    const label = button?.querySelector("span");
+
+    expect(button?.className).toContain("overflow-hidden");
+    expect(button?.className).toContain("max-w-full");
+    expect(label?.className).toContain("truncate");
 
     act(() => {
       root.unmount();
@@ -277,6 +395,23 @@ describe("AppSidebar session actions", () => {
     });
 
     expect(document.body.textContent).toContain("Mobile conversation");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("opens the local settings dialog from the sidebar", () => {
+    const { container, root } = mountSidebar();
+
+    const button = findButtonByText(container, "Settings");
+    expect(button).toBeTruthy();
+
+    act(() => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(document.body.textContent).toContain("Settings content");
 
     act(() => {
       root.unmount();

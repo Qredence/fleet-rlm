@@ -317,6 +317,50 @@ describe("WorkspaceMessageList Agent Elements integration", () => {
     act(() => root.unmount());
   });
 
+  it("groups lightweight execution rows and avoids generic tool subtitles", () => {
+    const { container, root } = mount([
+      {
+        id: "trace-grouped",
+        type: "trace",
+        content: "",
+        renderParts: [
+          {
+            kind: "status_note",
+            text: "Route: large_context_rlm | skills: long-context, rlm",
+            tone: "neutral",
+          },
+          {
+            kind: "reasoning",
+            parts: [{ type: "text", text: "Inspecting repository structure" }],
+            isStreaming: false,
+          },
+          {
+            kind: "tool",
+            title: "inspect_document",
+            toolType: "tool",
+            state: "output-available",
+            input: { description: "Inspect document headings" },
+            output: { message: "completed" },
+          },
+          {
+            kind: "tool",
+            title: "analyze_content",
+            toolType: "tool",
+            state: "output-available",
+            input: { description: "Analyze repository content" },
+            output: { message: "completed" },
+          },
+        ],
+      },
+    ]);
+
+    expect(container.textContent).not.toContain("Tool tool");
+    expect(container.textContent).toContain("Inspect document headings");
+    expect(container.textContent).toContain("Analyze repository content");
+
+    act(() => root.unmount());
+  });
+
   it("opens the attachment menu and stages a document chip", () => {
     const { container, root } = mount([]);
 

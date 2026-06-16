@@ -258,6 +258,24 @@ describe("applyWsFrameToMessages", () => {
     }
   });
 
+  it("attaches terminal MLflow trace metadata to the assistant turn", () => {
+    let messages: ChatMessage[] = [];
+    messages = applyWsFrameToMessages(messages, makeEvent("text", "Final answer")).messages;
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("done", "Final answer", {
+        mlflow_trace_id: "tr-123",
+        mlflow_client_request_id: "chat-123",
+      }),
+    ).messages;
+
+    const assistant = messages.find((message) => message.type === "assistant");
+    expect(assistant?.traceMetadata).toEqual({
+      mlflowTraceId: "tr-123",
+      mlflowClientRequestId: "chat-123",
+    });
+  });
+
   it("uses payload reasoning labels for live reasoning rows", () => {
     const { messages } = applyWsFrameToMessages(
       [],

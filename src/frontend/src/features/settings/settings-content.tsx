@@ -147,7 +147,7 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
           </div>
 
           <FieldGroup className="gap-0">
-            <Field className={SETTINGS_FIELD_CLASSNAME}>
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>Theme</FieldTitle>
                 <FieldDescription>
@@ -225,7 +225,7 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
           </div>
 
           <FieldGroup className="gap-0">
-            <Field className={SETTINGS_FIELD_CLASSNAME}>
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>Anonymous telemetry</FieldTitle>
                 <FieldDescription>
@@ -252,7 +252,7 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
               />
             </Field>
 
-            <Field className={SETTINGS_FIELD_CLASSNAME}>
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
               <FieldContent>
                 <FieldTitle>Telemetry scope</FieldTitle>
                 <FieldDescription>

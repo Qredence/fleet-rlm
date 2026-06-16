@@ -209,6 +209,10 @@
   max-height: var(--preview-max-h, 32rem);
 }
 
+@utility max-h-command-output {
+  max-height: var(--command-output-max-h, 18.75rem);
+}
+
 /* ── Dialog / sheet height utilities ─────────────────────────────── */
 
 @utility h-sheet-lg {
@@ -229,6 +233,18 @@
 
 @utility h-dialog {
   height: min(82vh, 760px);
+}
+
+@utility max-h-settings-dialog {
+  max-height: min(90dvh, 700px);
+}
+
+@utility h-settings-dialog {
+  height: min(88dvh, 640px);
+}
+
+@utility h-settings-dialog-main {
+  height: 100%;
 }
 
 @utility h-modal {
@@ -253,6 +269,14 @@
 
 @utility max-w-dialog-xl {
   max-width: 1080px;
+}
+
+@utility max-w-settings-dialog-md {
+  max-width: 968px;
+}
+
+@utility max-w-settings-dialog-lg {
+  max-width: 968px;
 }
 
 @utility max-w-4\/5 {
@@ -611,7 +635,7 @@
   --border: color-mix(in oklab, #0d0d0d 10%, transparent);
   --border-subtle: color-mix(in oklab, #0d0d0d 5%, transparent);
   --border-strong: color-mix(in oklab, #0d0d0d 15%, transparent);
-  --input: #fff;
+  --input: color-mix(in oklab, #0d0d0d 15%, transparent);
   --input-background: #fff;
   --ring: #8c8c8c;
   --sidebar: #f9f9f9;
@@ -934,7 +958,7 @@
   --border: color-mix(in oklab, #fff 12%, transparent);
   --border-subtle: color-mix(in oklab, #fff 6%, transparent);
   --border-strong: color-mix(in oklab, #fff 20%, transparent);
-  --input: #212121;
+  --input: color-mix(in oklab, #fff 15%, transparent);
   --input-background: #212121;
   --ring: #8c8c8c;
   --sidebar: #181818;

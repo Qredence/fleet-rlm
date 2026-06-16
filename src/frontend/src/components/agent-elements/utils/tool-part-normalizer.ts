@@ -17,6 +17,33 @@ function parseStructuredJson(value: unknown): unknown {
   }
 }
 
+function isGroupableToolPart(part: unknown): boolean {
+  if (!isRecord(part)) return false;
+  const type = part.type;
+  if (typeof type !== "string" || !type.startsWith("tool-")) return false;
+
+  const nonGroupableTypes = new Set([
+    "tool-Bash",
+    "tool-Edit",
+    "tool-Write",
+    "tool-Task",
+    "tool-Agent",
+    "tool-PlanWrite",
+    "tool-TodoWrite",
+    "tool-Question",
+    "tool-TaskOutput",
+  ]);
+
+  if (nonGroupableTypes.has(type)) return false;
+
+  const toolCallId = part.toolCallId;
+  if (typeof toolCallId === "string" && toolCallId.includes(":")) {
+    return false;
+  }
+
+  return true;
+}
+
 export function normalizeToolPart(part: unknown): unknown {
   if (!isRecord(part)) return part;
   if (typeof part.type !== "string" || !part.type.startsWith("tool-")) return part;
@@ -48,5 +75,40 @@ export function normalizeAssistantToolParts(parts: unknown[]): unknown[] {
     return normalizedPart;
   });
 
-  return changed ? normalizedParts : parts;
+  const groupedParts: unknown[] = [];
+  let i = 0;
+  while (i < normalizedParts.length) {
+    const part = normalizedParts[i]!;
+    if (isGroupableToolPart(part)) {
+      const group: unknown[] = [part];
+      let j = i + 1;
+      while (j < normalizedParts.length && isGroupableToolPart(normalizedParts[j]!)) {
+        group.push(normalizedParts[j]!);
+        j++;
+      }
+      if (group.length >= 2) {
+        changed = true;
+        const groupCallId = (part as AnyRecord).toolCallId ?? `group-${i}`;
+        groupedParts.push({
+          type: "tool-Group",
+          toolCallId: groupCallId,
+          nestedTools: group,
+          state: group.some((p: any) => p.state === "input-streaming" || p.state === "partial-call")
+            ? "input-streaming"
+            : "output-available",
+          startedAt: (part as AnyRecord).startedAt,
+          callProviderMetadata: (part as AnyRecord).callProviderMetadata,
+        });
+        i = j;
+      } else {
+        groupedParts.push(part);
+        i++;
+      }
+    } else {
+      groupedParts.push(part);
+      i++;
+    }
+  }
+
+  return changed ? groupedParts : parts;
 }

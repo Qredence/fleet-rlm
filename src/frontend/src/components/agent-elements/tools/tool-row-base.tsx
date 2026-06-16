@@ -10,6 +10,7 @@ export type ToolRowBaseProps = {
   completeLabel: string;
   isAnimating: boolean;
   detail?: string;
+  subtitle?: string;
   trailingContent?: ReactNode;
   expandable?: boolean;
   expanded?: boolean;
@@ -24,6 +25,7 @@ export function ToolRowBase({
   completeLabel,
   isAnimating,
   detail,
+  subtitle,
   trailingContent,
   expandable = false,
   expanded,
@@ -44,19 +46,26 @@ export function ToolRowBase({
     >
       <div className="flex items-center gap-2 min-w-0 text-sm text-muted-foreground">
         {icon && <span className="flex items-center justify-center size-3 shrink-0">{icon}</span>}
-        <span className="font-[450] whitespace-nowrap shrink-0">
-          {isAnimating && shimmerLabel ? (
-            <TextShimmer
-              as="span"
-              duration={1.2}
-              className="inline-flex items-center leading-none h-4 m-0"
-            >
-              {shimmerLabel}
-            </TextShimmer>
-          ) : (
-            completeLabel
+        <div className="flex flex-row items-baseline gap-1.5 min-w-0">
+          <span className="font-[450] whitespace-nowrap shrink-0">
+            {isAnimating && shimmerLabel ? (
+              <TextShimmer
+                as="span"
+                duration={1.2}
+                className="inline-flex items-center leading-none h-4 m-0"
+              >
+                {shimmerLabel}
+              </TextShimmer>
+            ) : (
+              completeLabel
+            )}
+          </span>
+          {subtitle && (
+            <span className="text-2xs text-muted-foreground/75 font-normal truncate">
+              {subtitle}
+            </span>
           )}
-        </span>
+        </div>
         {detail && (
           <span className="font-normal truncate min-w-0 flex-1 text-an-foreground-muted/60">
             {detail}

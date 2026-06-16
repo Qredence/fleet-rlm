@@ -24,6 +24,7 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
+  SelectPositioner,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -247,6 +248,12 @@ export const PromptInputSelectContent = ({
   ...props
 }: PromptInputSelectContentProps) => (
   <SelectContent className={cn(PROMPT_INPUT_MENU_CONTENT_CLASSNAME, className)} {...props} />
+);
+
+export type PromptInputSelectPositionerProps = ComponentProps<typeof SelectPositioner>;
+
+export const PromptInputSelectPositioner = (props: PromptInputSelectPositionerProps) => (
+  <SelectPositioner {...props} />
 );
 
 export type PromptInputSelectItemProps = ComponentProps<typeof SelectItem>;

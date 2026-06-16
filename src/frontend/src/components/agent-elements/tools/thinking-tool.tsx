@@ -1,4 +1,4 @@
-import { memo } from "react";
+import React, { memo } from "react";
 import type { TimelineStep, StepState } from "../types/timeline";
 import { useToolComplete } from "../hooks/use-tool-complete";
 import { ToolRowBase } from "./tool-row-base";
@@ -22,6 +22,19 @@ export function ThinkingCollapsed({
   onToggleExpand,
 }: ThinkingCollapsedProps) {
   useToolComplete(state === "animating", step.duration, onComplete);
+  
+  const [isInternalExpanded, setIsInternalExpanded] = React.useState(defaultOpen ?? false);
+  
+  React.useEffect(() => {
+    if (state === "animating") {
+      setIsInternalExpanded(true);
+    } else {
+      setIsInternalExpanded(false);
+    }
+  }, [state]);
+
+  const finalExpanded = expanded !== undefined ? expanded : isInternalExpanded;
+  const finalOnToggle = onToggleExpand ?? (() => setIsInternalExpanded((prev) => !prev));
 
   return (
     <ToolRowBase
@@ -30,8 +43,8 @@ export function ThinkingCollapsed({
       isAnimating={state === "animating"}
       expandable={!!step.thoughtContent}
       defaultOpen={defaultOpen}
-      expanded={expanded}
-      onToggleExpand={onToggleExpand}
+      expanded={finalExpanded}
+      onToggleExpand={finalOnToggle}
     >
       <div className="max-h-[175px] overflow-y-auto">
         <p className="text-sm text-muted-foreground whitespace-pre-wrap">{step.thoughtContent}</p>

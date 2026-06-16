@@ -13,6 +13,7 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
+  SelectPositioner,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -312,24 +313,22 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                     onValueChange={(value) => value && updateForm("moduleSlug", value)}
                     disabled={isSubmitting || modulesQuery.isLoading || modules.length === 0}
                   >
-                    <SelectTrigger className="w-full h-10 border-input bg-background px-3 py-2 text-sm shadow-none transition-colors hover:border-border-subtle">
+                    <SelectTrigger className="h-10 w-full">
                       <SelectValue>
                         {selectedModule?.label ?? (form.moduleSlug || "Select module")}
                       </SelectValue>
                     </SelectTrigger>
-                    <SelectContent align="start" className="border-border">
-                      <SelectGroup>
-                        {modules.map((module) => (
-                          <SelectItem
-                            key={module.slug}
-                            value={module.slug}
-                            className="cursor-pointer focus:bg-muted/40"
-                          >
-                            {module.label}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
+                    <SelectPositioner align="start">
+                      <SelectContent className="border-border">
+                        <SelectGroup>
+                          {modules.map((module) => (
+                            <SelectItem key={module.slug} value={module.slug}>
+                              {module.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </SelectPositioner>
                   </Select>
                   {selectedModule ? (
                     <div className="rounded-lg border border-border-subtle bg-muted/10 px-4 py-3 text-xs text-muted-foreground leading-normal transition-all duration-200">
@@ -419,22 +418,18 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                     }
                     disabled={isSubmitting}
                   >
-                    <SelectTrigger className="w-full h-10 border-input bg-background px-3 py-2 text-sm shadow-none transition-colors hover:border-border-subtle">
+                    <SelectTrigger className="h-10 w-full">
                       <SelectValue>{form.auto}</SelectValue>
                     </SelectTrigger>
-                    <SelectContent align="start" className="border-border">
-                      <SelectGroup>
-                        <SelectItem value="light" className="cursor-pointer focus:bg-muted/40">
-                          light
-                        </SelectItem>
-                        <SelectItem value="medium" className="cursor-pointer focus:bg-muted/40">
-                          medium
-                        </SelectItem>
-                        <SelectItem value="heavy" className="cursor-pointer focus:bg-muted/40">
-                          heavy
-                        </SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
+                    <SelectPositioner align="start">
+                      <SelectContent className="border-border">
+                        <SelectGroup>
+                          <SelectItem value="light">light</SelectItem>
+                          <SelectItem value="medium">medium</SelectItem>
+                          <SelectItem value="heavy">heavy</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </SelectPositioner>
                   </Select>
                 </CompactField>
                 <CompactField label="Train Ratio">
@@ -478,31 +473,26 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                     }
                     disabled={isSubmitting || profilesQuery.isLoading}
                   >
-                    <SelectTrigger className="w-full h-10 border-input bg-background px-3 py-2 text-sm shadow-none transition-colors hover:border-border-subtle">
+                    <SelectTrigger className="h-10 w-full">
                       <SelectValue>
                         {profiles.find((profile) => profile.id === form.reflectionProfileId)
                           ?.name ?? "Default reflection model"}
                       </SelectValue>
                     </SelectTrigger>
-                    <SelectContent align="start" className="border-border">
-                      <SelectGroup>
-                        <SelectItem
-                          value={DEFAULT_SELECT_VALUE}
-                          className="cursor-pointer focus:bg-muted/40"
-                        >
-                          Default reflection model
-                        </SelectItem>
-                        {profiles.map((profile) => (
-                          <SelectItem
-                            key={profile.id}
-                            value={profile.id}
-                            className="cursor-pointer focus:bg-muted/40"
-                          >
-                            {profile.name}
+                    <SelectPositioner align="start">
+                      <SelectContent className="border-border">
+                        <SelectGroup>
+                          <SelectItem value={DEFAULT_SELECT_VALUE}>
+                            Default reflection model
                           </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
+                          {profiles.map((profile) => (
+                            <SelectItem key={profile.id} value={profile.id}>
+                              {profile.name}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </SelectPositioner>
                   </Select>
                 </CompactField>
                 <CompactField label="Reflection Model">
@@ -516,25 +506,23 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                         isSubmitting || !form.reflectionProfileId || modelOptions.length === 0
                       }
                     >
-                      <SelectTrigger className="w-full h-10 border-input bg-background px-3 py-2 text-sm shadow-none transition-colors hover:border-border-subtle">
+                      <SelectTrigger className="h-10 w-full">
                         <SelectValue>
                           {modelOptions.find((model) => model.id === form.reflectionModelId)
                             ?.label ?? "Select model"}
                         </SelectValue>
                       </SelectTrigger>
-                      <SelectContent align="start" className="border-border">
-                        <SelectGroup>
-                          {modelOptions.map((model) => (
-                            <SelectItem
-                              key={model.id}
-                              value={model.id}
-                              className="cursor-pointer focus:bg-muted/40"
-                            >
-                              {model.label}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
+                      <SelectPositioner align="start">
+                        <SelectContent className="border-border">
+                          <SelectGroup>
+                            {modelOptions.map((model) => (
+                              <SelectItem key={model.id} value={model.id}>
+                                {model.label}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </SelectPositioner>
                     </Select>
                   )}
                 </CompactField>
@@ -595,32 +583,33 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                     onValueChange={(value) => value && updateForm("datasetId", value)}
                     disabled={isSubmitting || datasetsQuery.isLoading || datasets.length === 0}
                   >
-                    <SelectTrigger className="w-full h-10 border-input bg-background px-3 py-2 text-sm shadow-none transition-colors hover:border-border-subtle">
+                    <SelectTrigger className="h-10 w-full">
                       <SelectValue>
                         {selectedDataset?.name ??
                           (datasetsQuery.isLoading ? "Loading datasets" : "Select dataset")}
                       </SelectValue>
                     </SelectTrigger>
-                    <SelectContent align="start" className="border-border">
-                      <SelectGroup>
-                        {datasets.map((dataset) => (
-                          <SelectItem
-                            key={dataset.id}
-                            value={dataset.id}
-                            disabled={!isRunnableDataset(dataset)}
-                            className="cursor-pointer focus:bg-muted/40"
-                          >
-                            <div className="flex items-center gap-2">
-                              <Database
-                                className="size-4 shrink-0 text-muted-foreground"
-                                data-icon="inline-start"
-                              />
-                              <span className="truncate">{datasetLabel(dataset)}</span>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
+                    <SelectPositioner align="start">
+                      <SelectContent className="border-border">
+                        <SelectGroup>
+                          {datasets.map((dataset) => (
+                            <SelectItem
+                              key={dataset.id}
+                              value={dataset.id}
+                              disabled={!isRunnableDataset(dataset)}
+                            >
+                              <div className="flex items-center gap-2">
+                                <Database
+                                  className="size-4 shrink-0 text-muted-foreground"
+                                  data-icon="inline-start"
+                                />
+                                <span className="truncate">{datasetLabel(dataset)}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </SelectPositioner>
                   </Select>
                 </CompactField>
               ) : null}

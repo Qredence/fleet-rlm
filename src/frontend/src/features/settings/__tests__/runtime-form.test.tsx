@@ -190,6 +190,33 @@ vi.mock("@/features/settings/use-runtime-settings", () => ({
   },
 }));
 
+vi.mock("@/features/settings/use-llm-profiles", () => ({
+  useLlmRoleBindings: () => ({
+    data: {
+      bindings: [
+        {
+          role: "planner",
+          profile_id: "profile-google",
+          profile_name: "Gemini",
+          model_id: "gemini-3-flash-preview",
+        },
+      ],
+    },
+    isPending: false,
+  }),
+  useLlmProfileModels: () => ({
+    data: {
+      models: [
+        {
+          id: "gemini-3-flash-preview",
+          label: "gemini-3-flash-preview",
+        },
+      ],
+    },
+    isPending: false,
+  }),
+}));
+
 describe("RuntimeForm", () => {
   it("hydrates runtime form only when snapshot exists and no unsaved edits", () => {
     expect(shouldHydrateRuntimeForm(undefined, false)).toBe(false);
