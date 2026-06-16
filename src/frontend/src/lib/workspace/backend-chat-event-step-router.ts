@@ -85,6 +85,38 @@ export function routeExecutionStepBySourceType(
   const mergedPayload = payload ?? {};
 
   switch (sourceType) {
+    case "mlflow_span": {
+      const stepObj = asRecord(mergedPayload.step);
+      const stepInput = asRecord(stepObj?.input);
+      const stepOutput = asRecord(stepObj?.output);
+      
+      const isCall = stepOutput?.span_output == null && stepObj?.output == null;
+      const kind = isCall ? "tool_call" : "tool_result";
+      
+      const spanName = asOptionalText(stepInput?.span_name) || "MLflow Trace";
+      const spanInputVal = stepInput?.span_input ?? stepInput;
+      const spanOutputVal = stepOutput?.span_output ?? stepOutput;
+      
+      return appendToolLikePart(
+        messages,
+        kind,
+        trimmed || spanName,
+        {
+          ...mergedPayload,
+          tool_name: "mlflow_span",
+          step_index: mergedPayload.step_index ?? stepObj?.step_index,
+          tool_input: spanInputVal,
+          tool_output: spanOutputVal,
+          step: {
+            type: "mlflow_span",
+            label: spanName,
+            input: spanInputVal,
+            output: spanOutputVal,
+          },
+        },
+        deps.appendTracePart,
+      );
+    }
     case "reasoning":
       return trimmed
         ? deps.appendOrExtendReasoningEvent(messages, trimmed, "live", mergedPayload)
@@ -168,12 +200,16 @@ export function applyCanonicalExecutionStepWithRouter(
   payload: Record<string, unknown> | undefined,
   deps: ExecutionStepRouterDeps,
 ): ChatMessage[] {
+  const sourceType = sourceTypeFromPayload(payload);
+  if (sourceType === "mlflow_span") {
+    return routeExecutionStepBySourceType(messages, text, payload, deps);
+  }
+
   const step = asRecord(payload?.step);
   if (!step) {
     return routeExecutionStepBySourceType(messages, text, payload, deps);
   }
 
-  const sourceType = sourceTypeFromPayload(payload);
   const stepType = asOptionalText(step.type)?.toLowerCase();
   const stepText = canonicalStepText(step, text);
 

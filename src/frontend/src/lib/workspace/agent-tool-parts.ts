@@ -91,6 +91,9 @@ function sanitizeToolName(value: string): string {
 
 export function toolPartType(toolType: string): string {
   const normalized = toolType.toLowerCase();
+  if (normalized === "mlflow_span") {
+    return "tool-MlflowSpan";
+  }
   if (normalized.startsWith("mcp__")) {
     return `tool-${toolType}`;
   }

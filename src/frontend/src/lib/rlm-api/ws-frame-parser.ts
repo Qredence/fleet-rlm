@@ -136,9 +136,11 @@ function parseExecutionEnvelope(parsed: Record<string, unknown>): WsServerEvent 
 
   const stepInput = asRecord(step.input);
   const routedSourceType =
-    asText(stepInput?.phase) ||
-    asText(stepInput?.event_kind) ||
-    (String(step.type ?? "").toLowerCase() === "repl" ? "sandbox_exec" : frameType);
+    stepInput?.event_kind === "mlflow_span" || stepInput?.phase === "mlflow_span"
+      ? "mlflow_span"
+      : asText(stepInput?.phase) ||
+        asText(stepInput?.event_kind) ||
+        (String(step.type ?? "").toLowerCase() === "repl" ? "sandbox_exec" : frameType);
   const stepOutput = asRecord(step.output);
   const text = asText(
     stepOutput?.text ??

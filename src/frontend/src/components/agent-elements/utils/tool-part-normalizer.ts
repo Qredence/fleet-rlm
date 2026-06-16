@@ -36,6 +36,10 @@ function isGroupableToolPart(part: unknown): boolean {
 
   if (nonGroupableTypes.has(type)) return false;
 
+  if (type === "tool-MlflowSpan") {
+    return true;
+  }
+
   const toolCallId = part.toolCallId;
   if (typeof toolCallId === "string" && toolCallId.includes(":")) {
     return false;
