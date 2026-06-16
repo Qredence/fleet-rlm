@@ -83,6 +83,13 @@
   font-family: var(--font-mono);
 }
 
+@utility typo-display-lg {
+  font-size: var(--font-heading-3xl-size);
+  font-weight: var(--font-text-md-weight);
+  line-height: var(--font-heading-3xl-line-height);
+  letter-spacing: var(--font-heading-3xl-tracking);
+}
+
 @utility typo-display {
   font-size: var(--font-heading-xl-size);
   font-weight: var(--font-text-md-weight);

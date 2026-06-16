@@ -52,7 +52,7 @@ export const ModelPicker = memo(function ModelPicker({
       type="button"
       aria-label={`Active model: ${activeModel.label}`}
       className={cn(
-        "inline-flex h-7 min-w-0 max-w-45 items-center gap-1.5 rounded-[6px] px-2 text-[12px] leading-4 text-foreground/60 transition-colors hover:bg-foreground/6 hover:text-foreground",
+        "inline-flex h-7 min-w-0 max-w-45 items-center gap-1.5 rounded-full px-2.5 typo-caption text-foreground/60 transition-colors hover:bg-foreground/6 hover:text-foreground",
         disabled && "cursor-not-allowed opacity-60 hover:bg-transparent hover:text-foreground/60",
         className,
       )}
@@ -87,7 +87,7 @@ export const ModelPicker = memo(function ModelPicker({
                   setOpen(false);
                 }}
                 className={cn(
-                  "flex w-full items-start gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12px] leading-4 transition-colors",
+                  "flex w-full items-start gap-2 rounded-[6px] px-2 py-1.5 text-left typo-caption transition-colors",
                   canSelect && !model.disabled && "hover:bg-foreground/6",
                   isActive && "bg-foreground/6",
                   (model.disabled || !canSelect) && "cursor-default",
@@ -111,7 +111,7 @@ export const ModelPicker = memo(function ModelPicker({
               type="button"
               variant="ghost"
               size="sm"
-              className="h-8 w-full justify-start gap-2 rounded-[6px] px-2 text-[12px]"
+              className="h-8 w-full justify-start gap-2 rounded-[6px] px-2 typo-caption"
               onClick={() => {
                 setOpen(false);
                 onConfigure();

@@ -67,7 +67,7 @@ export function AgentChat({
         emptySuggestionsPosition === "top" ? "mb-3" : "mt-3",
         suggestionConfig.className,
       )}
-      itemClassName={cn("h-8 rounded-md px-3", suggestionConfig.itemClassName)}
+      itemClassName={cn("h-7 rounded-full px-3", suggestionConfig.itemClassName)}
     />
   ) : null;
 
