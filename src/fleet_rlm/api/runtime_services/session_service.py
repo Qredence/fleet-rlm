@@ -41,7 +41,7 @@ from .session_helpers import (
     session_external_id,
     string_or_default,
 )
-from .session_trace_export import export_owned_session_traces
+from .session_trace_export import resolve_owned_chat_session
 
 _TURN_COUNT_QUERY_LIMIT = 1
 _TRANSCRIPT_EXPORT_MAX_TURNS = 10_000
@@ -79,7 +79,7 @@ async def _resolve_session_title(
     persisted_identity: IdentityUpsertResult,
 ) -> str:
     title = optional_string(getattr(session, "title", None))
-    external_id = session_external_id(getattr(session, "metadata_json", None))
+    external_id = _session_external_id_from_row(session)
     fallback = title or external_id or str(getattr(session, "id", "unknown"))
     if title and not is_placeholder_session_title(title, external_session_id=external_id):
         return title
@@ -228,12 +228,17 @@ class SessionService:
             for session in items
             if is_placeholder_session_title(
                 optional_string(getattr(session, "title", None)),
-                external_session_id=session_external_id(getattr(session, "metadata_json", None)),
+                external_session_id=_session_external_id_from_row(session),
             )
         ]
         first_turn_messages: dict[uuid.UUID, str] = {}
-        if placeholder_session_ids:
-            first_turn_messages = await self._persistence.list_first_chat_turn_messages_for_sessions(
+        list_first_turn_messages = getattr(
+            self._persistence,
+            "list_first_chat_turn_messages_for_sessions",
+            None,
+        )
+        if placeholder_session_ids and callable(list_first_turn_messages):
+            first_turn_messages = await list_first_turn_messages(
                 tenant_id=persisted_identity.tenant_id,
                 session_ids=placeholder_session_ids,
                 user_id=persisted_identity.user_id,
@@ -242,7 +247,7 @@ class SessionService:
         resolved_titles: list[str] = []
         for session in items:
             title = optional_string(getattr(session, "title", None))
-            external_id = session_external_id(getattr(session, "metadata_json", None))
+            external_id = _session_external_id_from_row(session)
             fallback = title or external_id or str(getattr(session, "id", "unknown"))
             if title and not is_placeholder_session_title(title, external_session_id=external_id):
                 resolved_titles.append(title)
@@ -259,7 +264,7 @@ class SessionService:
                     title=resolved_titles[index],
                     status=s.status.value if hasattr(s.status, "value") else str(s.status),
                     model_name=s.model_name,
-                    external_session_id=session_external_id(getattr(s, "metadata_json", None)),
+                    external_session_id=_session_external_id_from_row(s),
                     created_at=s.created_at.isoformat(),
                     updated_at=s.updated_at.isoformat(),
                 )
@@ -397,19 +402,15 @@ class SessionService:
         offset: int = 0,
     ) -> SessionTraceListResponse:
         """Return paginated external traces linked to a durable session."""
-        session_uuid = parse_session_uuid(session_id)
-        session = await self._persistence.get_chat_session(
-            tenant_id=persisted_identity.tenant_id,
-            session_id=session_uuid,
-            user_id=persisted_identity.user_id,
-            workspace_id=persisted_identity.workspace_id,
+        session = await resolve_owned_chat_session(
+            persistence=self._persistence,
+            persisted_identity=persisted_identity,
+            session_id=session_id,
         )
-        if session is None:
-            raise HTTPException(status_code=404, detail="Session not found")
 
         items, total = await self._persistence.list_external_traces_for_session(
             tenant_id=persisted_identity.tenant_id,
-            session_id=session_uuid,
+            session_id=session.id,
             workspace_id=persisted_identity.workspace_id,
             limit=limit,
             offset=offset,
@@ -442,6 +443,8 @@ class SessionService:
         body: SessionTraceExportRequest,
     ) -> SessionTraceExportResponse:
         """Export full MLflow traces and a distilled GEPA evidence bundle."""
+        from .session_trace_export import export_owned_session_traces
+
         return await export_owned_session_traces(
             persistence=self._persistence,
             persisted_identity=persisted_identity,

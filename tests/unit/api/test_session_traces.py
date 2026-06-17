@@ -9,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from fleet_rlm.api.runtime_services.session_service import SessionService
+from fleet_rlm.api.runtime_services.session_trace_debug import get_owned_session_trace_debug
 from fleet_rlm.api.schemas.sessions import SessionTraceExportRequest
 from fleet_rlm.integrations.database.models_enums import ExternalTraceProvider
 from fleet_rlm.integrations.observability.mlflow_traces import _trace_session_id
@@ -47,6 +48,108 @@ async def test_get_session_traces_maps_repository_rows() -> None:
     assert response.items[0].trace_id == "tr-abc"
     assert response.items[0].client_request_id == "chat-123"
     assert response.items[0].metadata["fleet_rlm.routing_decision"] == "forced_rlm"
+
+
+@pytest.mark.asyncio
+async def test_get_session_traces_resolves_runtime_external_session_id() -> None:
+    session_id = uuid.uuid4()
+    trace_row = SimpleNamespace(
+        trace_id="tr-runtime",
+        client_request_id="chat-runtime",
+        turn_id=None,
+        provider=ExternalTraceProvider.MLFLOW,
+        experiment_id="1",
+        experiment_name="fleet-rlm",
+        observed_at=datetime.now(UTC),
+        metadata_json={},
+    )
+    persistence = SimpleNamespace(
+        get_chat_session_by_external_id=AsyncMock(return_value=SimpleNamespace(id=session_id)),
+        list_external_traces_for_session=AsyncMock(return_value=([trace_row], 1)),
+    )
+    identity = SimpleNamespace(
+        tenant_id=uuid.uuid4(),
+        workspace_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+    )
+
+    response = await SessionService(persistence).get_session_traces(
+        persisted_identity=identity,
+        session_id="runtime-session-123",
+    )
+
+    persistence.get_chat_session_by_external_id.assert_awaited_once_with(
+        tenant_id=identity.tenant_id,
+        external_session_id="runtime-session-123",
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+    )
+    persistence.list_external_traces_for_session.assert_awaited_once_with(
+        tenant_id=identity.tenant_id,
+        session_id=session_id,
+        workspace_id=identity.workspace_id,
+        limit=50,
+        offset=0,
+    )
+    assert response.items[0].trace_id == "tr-runtime"
+
+
+@pytest.mark.asyncio
+async def test_trace_debug_resolves_runtime_external_session_id(monkeypatch) -> None:
+    session_id = uuid.uuid4()
+    persistence = SimpleNamespace(
+        get_chat_session_by_external_id=AsyncMock(
+            return_value=SimpleNamespace(
+                id=session_id,
+                external_session_id="runtime-session-123",
+                workspace_id="workspace-1",
+                owner_user="user-1",
+            )
+        ),
+    )
+    identity = SimpleNamespace(
+        tenant_id=uuid.uuid4(),
+        workspace_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+    )
+    fake_trace = SimpleNamespace(
+        to_dict=lambda: {
+            "info": {"trace_id": "tr-runtime", "client_request_id": "chat-runtime"},
+            "data": {
+                "spans": [
+                    {
+                        "span_id": "span-1",
+                        "name": "run_command",
+                        "span_type": "TOOL",
+                        "attributes": {"mlflow.spanFunctionName": "run_command"},
+                        "inputs": {"command": "echo hi"},
+                        "outputs": {"stdout": "hi"},
+                    }
+                ]
+            },
+        }
+    )
+
+    from fleet_rlm.integrations.observability import mlflow_traces
+
+    monkeypatch.setattr(mlflow_traces, "resolve_trace", lambda **_kwargs: fake_trace)
+
+    response = await get_owned_session_trace_debug(
+        persistence=persistence,
+        persisted_identity=identity,
+        session_id="runtime-session-123",
+        trace_id="tr-runtime",
+    )
+
+    persistence.get_chat_session_by_external_id.assert_awaited_once_with(
+        tenant_id=identity.tenant_id,
+        external_session_id="runtime-session-123",
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+    )
+    assert response.trace_id == "tr-runtime"
+    assert response.resolved_from == "trace_id"
+    assert response.spans[0].mapped_render_kind == "sandbox"
 
 
 @pytest.mark.asyncio
