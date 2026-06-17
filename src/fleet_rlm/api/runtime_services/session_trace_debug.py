@@ -364,6 +364,8 @@ async def get_owned_session_trace_debug(
     for trace_row in trace_rows:
         row_trace_id = optional_string(getattr(trace_row, "trace_id", None))
         row_client_request_id = optional_string(getattr(trace_row, "client_request_id", None))
+        if not row_trace_id and not row_client_request_id:
+            continue
         try:
             trace = await asyncio.to_thread(
                 resolve_trace,

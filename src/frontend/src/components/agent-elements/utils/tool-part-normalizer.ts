@@ -21,20 +21,21 @@ export function normalizeToolPart(part: unknown): unknown {
   if (!isRecord(part)) return part;
   if (typeof part.type !== "string" || !part.type.startsWith("tool-")) return part;
 
+  const rawPart = part as AnyRecord;
   const normalizedInput = parseStructuredJson(part.input);
   const normalizedOutput = parseStructuredJson(part.output);
   const normalizedResult = parseStructuredJson(part.result);
-  const normalizedNestedTools = Array.isArray(part.nestedTools)
-    ? part.nestedTools.map((nestedPart) => normalizeToolPart(nestedPart))
-    : part.nestedTools;
+  const normalizedNestedTools = Array.isArray(rawPart.nestedTools)
+    ? rawPart.nestedTools.map((nestedPart: unknown) => normalizeToolPart(nestedPart))
+    : rawPart.nestedTools;
 
   const inputChanged = normalizedInput !== part.input;
   const outputChanged = normalizedOutput !== part.output;
   const resultChanged = normalizedResult !== part.result;
   const nestedToolsChanged =
-    Array.isArray(part.nestedTools) &&
+    Array.isArray(rawPart.nestedTools) &&
     normalizedNestedTools.some(
-      (nestedPart: unknown, index: number) => nestedPart !== part.nestedTools[index],
+      (nestedPart: unknown, index: number) => nestedPart !== rawPart.nestedTools[index],
     );
 
   if (!inputChanged && !outputChanged && !resultChanged && !nestedToolsChanged) {

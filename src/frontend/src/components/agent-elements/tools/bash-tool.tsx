@@ -104,7 +104,7 @@ export function BashToolTerminalCard({
 }: BashToolTerminalCardProps) {
   useToolComplete(state === "animating", step.duration, onComplete);
   const isPending = state === "animating";
-  const command = step.bashCommand ?? step.toolDetail;
+  const command = step.bashCommand ?? step.toolDetail ?? "";
   const formattedCommand = cleanAndFormatSnippet(command);
   const summary = extractCommandSummary(formattedCommand);
   const language = inferCodeLanguage(formattedCommand, step.bashLanguage);

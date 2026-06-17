@@ -92,6 +92,7 @@ Object.defineProperty(window, "matchMedia", {
 // -- ResizeObserver -------------------------------------------------------
 // Required by several Radix UI / layout components.
 globalThis.ResizeObserver = class ResizeObserver {
+  constructor(_callback?: ResizeObserverCallback) {}
   observe() {}
   unobserve() {}
   disconnect() {}
