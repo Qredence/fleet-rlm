@@ -2,23 +2,15 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { buildChatDisplayItems } from "@/lib/workspace/chat-display-items";
-import {
-  type AssistantContentModel,
-} from "@/features/workspace/conversation/assistant-content/model";
-import {
-  useChatStore,
-  useWorkspaceUiStore,
-} from "@/features/workspace/use-workspace";
+import { type AssistantContentModel } from "@/features/workspace/conversation/assistant-content/model";
+import { useChatStore, useWorkspaceUiStore } from "@/features/workspace/use-workspace";
 import {
   resolveSessionTraceTarget,
   resolveWorkspaceTraceSessionScope,
   getTraceSpanStatus,
 } from "@/features/workspace/screen/workspace-session-trace-model";
 import { sessionsEndpoints } from "@/lib/rlm-api/sessions";
-import {
-  executionSectionState,
-  statusTone,
-} from "@/features/workspace/inspection/inspector-ui";
+import { executionSectionState, statusTone } from "@/features/workspace/inspection/inspector-ui";
 
 type AssistantTurn = Extract<
   ReturnType<typeof buildChatDisplayItems>[number],

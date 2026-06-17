@@ -456,9 +456,7 @@ export function WorkspaceScreen() {
 
           {!isMobile && sidepanelOpen ? (
             <>
-              <ResizableHandle
-                className="relative bg-border-subtle/70 transition-colors hover:bg-border focus-visible:ring-1 focus-visible:ring-accent after:absolute after:inset-y-0 after:left-1/2 after:w-2 after:-translate-x-1/2"
-              />
+              <ResizableHandle className="relative bg-border-subtle/70 transition-colors hover:bg-border focus-visible:ring-1 focus-visible:ring-accent after:absolute after:inset-y-0 after:left-1/2 after:w-2 after:-translate-x-1/2" />
               <ResizablePanel
                 id="workspace-sidepanel"
                 defaultSize={WORKSPACE_SIDEPANEL_OPEN_SIZE}

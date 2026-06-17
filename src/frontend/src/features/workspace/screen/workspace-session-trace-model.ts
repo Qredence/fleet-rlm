@@ -1,9 +1,6 @@
 import type { Edge, Node } from "@xyflow/react";
 
-import type {
-  SessionTraceDebugSpan,
-  SessionTraceItem,
-} from "@/lib/rlm-api/sessions";
+import type { SessionTraceDebugSpan, SessionTraceItem } from "@/lib/rlm-api/sessions";
 import type { ChatMessage } from "@/lib/workspace/workspace-types";
 
 export type SessionTraceTargetSource = "metadata" | "session-row" | "none";
@@ -114,7 +111,9 @@ export function sortTraceSpans(spans: SessionTraceDebugSpan[]): SessionTraceDebu
 }
 
 export function getTraceSpanStatus(span: SessionTraceDebugSpan): TraceSpanStatus {
-  const status = String(span.status_code ?? "").trim().toLowerCase();
+  const status = String(span.status_code ?? "")
+    .trim()
+    .toLowerCase();
   if (/error|fail|exception|timeout/.test(status)) return "failed";
   if (/ok|success|completed|complete|finished/.test(status)) return "completed";
   if (span.start_time_unix_nano && !span.end_time_unix_nano) return "running";

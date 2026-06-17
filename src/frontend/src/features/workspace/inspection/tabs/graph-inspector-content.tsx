@@ -145,7 +145,9 @@ export function GraphInspectorContent({ steps }: { steps: ExecutionStep[] }) {
 
       {selectedStep ? (
         <Card className={cn(inspectorStyles.card.root, "max-w-full")}>
-          <CardHeader className={cn(inspectorStyles.card.header, "min-w-0 max-w-full overflow-hidden")}>
+          <CardHeader
+            className={cn(inspectorStyles.card.header, "min-w-0 max-w-full overflow-hidden")}
+          >
             <CardTitle className="typo-label font-medium text-foreground">Selected node</CardTitle>
             <CardDescription className="min-w-0 max-w-full truncate">
               {selectedStep.label}

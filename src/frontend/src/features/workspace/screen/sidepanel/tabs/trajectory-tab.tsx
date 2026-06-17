@@ -5,9 +5,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyPanel } from "@/components/product/empty-panel";
-import {
-  buildAssistantContentModel,
-} from "@/features/workspace/conversation/assistant-content/model";
+import { buildAssistantContentModel } from "@/features/workspace/conversation/assistant-content/model";
 import {
   DetailBlock,
   executionSectionState,
@@ -27,11 +25,7 @@ import { type SessionTraceDebugResponse } from "@/lib/rlm-api/sessions";
 import { cn } from "@/lib/utils";
 import { buildChatDisplayItems } from "@/lib/workspace/chat-display-items";
 
-import {
-  type SessionTraceState,
-  selectedTurnStatus,
-  traceStatusTone,
-} from "../use-session-trace";
+import { type SessionTraceState, selectedTurnStatus, traceStatusTone } from "../use-session-trace";
 
 type AssistantTurn = Extract<
   ReturnType<typeof buildChatDisplayItems>[number],
@@ -39,10 +33,7 @@ type AssistantTurn = Extract<
 >;
 
 const trajectoryCardClass = cn(inspectorStyles.card.root, "max-w-full");
-const trajectoryHeaderClass = cn(
-  inspectorStyles.card.header,
-  "min-w-0 max-w-full overflow-hidden",
-);
+const trajectoryHeaderClass = cn(inspectorStyles.card.header, "min-w-0 max-w-full overflow-hidden");
 const trajectoryContentClass = cn(
   inspectorStyles.card.content,
   "min-w-0 max-w-full overflow-hidden",
@@ -344,12 +335,7 @@ export function TrajectoryTimeline({
         </div>
       );
     }
-    return (
-      <TraceErrorPanel
-        title="Trace unavailable"
-        error={traceState.traceDebugQuery.error}
-      />
-    );
+    return <TraceErrorPanel title="Trace unavailable" error={traceState.traceDebugQuery.error} />;
   }
 
   const traceDebug = traceState.traceDebugQuery.data;

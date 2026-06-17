@@ -1860,7 +1860,8 @@ li {
 }
 
 .workspace-trajectory-content,
-.workspace-trajectory-content :where([data-slot="card"], [data-slot="card-header"], [data-slot="card-content"]) {
+.workspace-trajectory-content
+  :where([data-slot="card"], [data-slot="card-header"], [data-slot="card-content"]) {
   min-width: 0;
   max-width: 100%;
 }

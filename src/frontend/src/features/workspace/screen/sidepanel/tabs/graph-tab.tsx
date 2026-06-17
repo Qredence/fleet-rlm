@@ -12,12 +12,7 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import {
-  CircleDot,
-  Clock,
-  GitBranch,
-  TriangleAlert,
-} from "lucide-react";
+import { CircleDot, Clock, GitBranch, TriangleAlert } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -45,10 +40,7 @@ import {
 import { TraceErrorPanel, TraceLoading } from "./trajectory-tab";
 
 const traceNodeTypes: NodeTypes = {
-  traceSpan: memo(function TraceSpanNode({
-    data,
-    selected,
-  }: NodeProps<Node<TraceSpanNodeData>>) {
+  traceSpan: memo(function TraceSpanNode({ data, selected }: NodeProps<Node<TraceSpanNodeData>>) {
     const tone = traceStatusTone(data.status);
     const statusClass =
       data.status === "failed"
@@ -102,11 +94,7 @@ const traceNodeTypes: NodeTypes = {
   }),
 };
 
-function SelectedTraceNodeDetail({
-  node,
-}: {
-  node: Node<TraceSpanNodeData> | undefined;
-}) {
+function SelectedTraceNodeDetail({ node }: { node: Node<TraceSpanNodeData> | undefined }) {
   if (!node) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground typo-caption">
@@ -125,7 +113,10 @@ function SelectedTraceNodeDetail({
             <Badge variant="outline" className={inspectorStyles.badge.meta}>
               {node.data.kind}
             </Badge>
-            <Badge variant={traceStatusTone(node.data.status).variant} className={inspectorStyles.badge.meta}>
+            <Badge
+              variant={traceStatusTone(node.data.status).variant}
+              className={inspectorStyles.badge.meta}
+            >
               {traceStatusTone(node.data.status).label}
             </Badge>
             {node.data.componentType ? (
@@ -148,10 +139,7 @@ function SelectedTraceNodeDetail({
 }
 
 function TraceFlowGraph({ traceDebug }: { traceDebug: SessionTraceDebugResponse }) {
-  const { nodes, edges } = useMemo(
-    () => buildTraceFlowGraph(traceDebug.spans),
-    [traceDebug.spans],
-  );
+  const { nodes, edges } = useMemo(() => buildTraceFlowGraph(traceDebug.spans), [traceDebug.spans]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(nodes[0]?.id ?? null);
 
   useEffect(() => {
@@ -272,10 +260,7 @@ export function GraphTab({ traceState }: { traceState: SessionTraceState }) {
   if (traceState.traceDebugQuery.isError) {
     if (fallbackGraph) return fallbackGraph;
     return (
-      <TraceErrorPanel
-        title="Trace graph unavailable"
-        error={traceState.traceDebugQuery.error}
-      />
+      <TraceErrorPanel title="Trace graph unavailable" error={traceState.traceDebugQuery.error} />
     );
   }
 

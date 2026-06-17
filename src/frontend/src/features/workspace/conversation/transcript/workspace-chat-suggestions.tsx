@@ -42,8 +42,6 @@ export function workspaceChatSuggestionItems(): SuggestionItem[] {
     id: `${suggestion.label}-${index}`,
     label: suggestion.label,
     value: suggestion.prompt,
-    icon: suggestion.Icon ? (
-      <suggestion.Icon className="size-3.5" />
-    ) : undefined,
+    icon: suggestion.Icon ? <suggestion.Icon className="size-3.5" /> : undefined,
   }));
 }

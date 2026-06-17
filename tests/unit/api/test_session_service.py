@@ -44,20 +44,22 @@ async def test_list_sessions_tolerates_missing_first_turn_helper() -> None:
     session_id = uuid.uuid4()
     now = datetime.now(UTC)
     persistence = SimpleNamespace(
-        list_chat_sessions=AsyncMock(return_value=(
-            [
-                SimpleNamespace(
-                    id=session_id,
-                    title="runtime-session",
-                    status=ChatSessionStatus.ACTIVE,
-                    model_name=None,
-                    metadata_json={"external_session_id": "runtime-session"},
-                    created_at=now,
-                    updated_at=now,
-                )
-            ],
-            1,
-        ))
+        list_chat_sessions=AsyncMock(
+            return_value=(
+                [
+                    SimpleNamespace(
+                        id=session_id,
+                        title="runtime-session",
+                        status=ChatSessionStatus.ACTIVE,
+                        model_name=None,
+                        metadata_json={"external_session_id": "runtime-session"},
+                        created_at=now,
+                        updated_at=now,
+                    )
+                ],
+                1,
+            )
+        )
     )
     identity = SimpleNamespace(
         tenant_id=uuid.uuid4(),

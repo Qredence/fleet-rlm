@@ -33,9 +33,7 @@ function MetadataRow({
   return (
     <div className="flex items-center gap-3 py-2">
       <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      <span className="volume-metadata-label shrink-0 text-muted-foreground">
-        {label}
-      </span>
+      <span className="volume-metadata-label shrink-0 text-muted-foreground">{label}</span>
       <span className="truncate text-foreground typo-caption">{value}</span>
     </div>
   );
@@ -209,9 +207,7 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
                     <SkillMarkdown content={resolvedContent} />
                   </div>
                 ) : (
-                  <pre
-                    className="volume-text-preview wrap-break-word overflow-x-auto whitespace-pre-wrap p-4 text-foreground"
-                  >
+                  <pre className="volume-text-preview wrap-break-word overflow-x-auto whitespace-pre-wrap p-4 text-foreground">
                     {resolvedContent}
                   </pre>
                 )

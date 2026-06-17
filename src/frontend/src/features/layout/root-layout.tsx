@@ -50,8 +50,7 @@ function AppLayout() {
   const settingsReturnFocusRef = useRef<HTMLElement | null>(null);
   const panelGroupRef = useRef<GroupImperativeHandle>(null);
   const [isResizing, setIsResizing] = useState(false);
-  const { activeNav, isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } =
-    useNavigationStore();
+  const { activeNav, isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } = useNavigationStore();
   const shellCanvasOpen = activeNav !== "workspace" && isCanvasOpen;
 
   useEffect(() => {
