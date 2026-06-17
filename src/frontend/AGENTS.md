@@ -98,6 +98,29 @@ Responsibility folders under `src/features/workspace/`:
 Assistant transcript/content modeling belongs under:
 `src/features/workspace/conversation/assistant-content/model/`
 
+### Workspace Sidepanel Contract
+
+Workspace chat is the primary surface. The workspace sidepanel is
+workspace-local, collapsible, and resizable; do not promote it into the global
+route shell or replace `/app/volumes`.
+
+Supported sidepanel tabs are exactly:
+
+- `Trajectories`
+- `Graph`
+- `Volume`
+
+`Trajectories` and `Graph` resolve session traces by durable chat session id
+first and by runtime `external_session_id` when present. If MLflow traces are
+missing or unavailable, they must fall back to live transcript and artifact
+data instead of showing a hard-empty trace state.
+
+`Volume` uses the Daytona volume APIs for the current workspace/session. It
+supports inline file preview inside the workspace sidepanel and a resizable
+tree/preview split. The routed `/app/volumes` page remains the full-page
+durable volume browser and should not be collapsed into the workspace
+sidepanel.
+
 **Do not** create feature-local `ui/` folders; `src/components/ui/*` is the only primitive `ui` namespace.
 
 ---

@@ -7,7 +7,7 @@ Daytona-backed workspace runtime.
 ## Shell And Routing
 
 The URL is the source of truth. TanStack Router owns route selection, while the
-shell stores the active nav item and canvas state in Zustand.
+shell stores the active nav item in Zustand.
 
 ```mermaid
 flowchart LR
@@ -20,7 +20,7 @@ flowchart LR
   D --> G
 
   G --> H["RouteSync"]
-  G --> I["Sidebar / Header / Canvas"]
+  G --> I["Sidebar / Header"]
 
   H --> J["NavigationStore"]
   J --> B
@@ -31,13 +31,13 @@ flowchart LR
 Key behavior:
 
 - `/` and `/app/` redirect to `/app/workspace`.
-- `RootLayout` renders the sidebar, header, main content, and optional canvas.
+- `RootLayout` renders the sidebar, header, and main content.
 - `RouteSync` reads the URL and updates shell state. The reverse direction is
   handled by navigation helpers and route transitions.
-- The canvas opens automatically on Volumes, closes on Settings, and stays
-  available on Workbench.
-- Mobile uses a bottom tab bar and a bottom sheet for the canvas. Desktop uses a
-  split panel layout.
+- Workbench owns its own collapsible/resizable sidepanel. `/app/volumes`
+  remains a full-page route.
+- Mobile uses a bottom tab bar; responsive sidepanel behavior stays inside the
+  workspace feature.
 
 ## Workbench Turn
 
@@ -52,17 +52,17 @@ sequenceDiagram
   participant RT as "useWorkspaceRuntime"
   participant WS as "/api/v1/ws/execution"
   participant CH as "chat store + adapters"
-  participant WB as "run-workbench store"
+  participant WB as "sidepanel stores"
   participant EVT as "/api/v1/ws/execution/events"
 
   User->>UI: Enter prompt and send
   UI->>RT: handleSubmit()
   RT->>WS: message payload with session_id and runtime controls
   WS-->>CH: live chat / reasoning / tool / final frames
-  CH-->>WB: hydrate transcript and workbench state
+  CH-->>WB: hydrate transcript, trajectories, graph fallbacks
   WS-->>EVT: execution_started / execution_step / execution_completed
   EVT-->>WB: canonical summary + final artifact hydration
-  WB-->>UI: stable inspector and run panel state
+  WB-->>UI: sidepanel tabs and inline volume preview
 ```
 
 The important rules are:
@@ -75,14 +75,22 @@ The important rules are:
 - `useRunWorkbenchStore` stores the execution summary, artifacts, iterations,
   callbacks, sources, and completion metadata.
 - `run-workbench-hydration.ts` is the canonical reducer for the run panel.
+- The workspace sidepanel has exactly `Trajectories`, `Graph`, and `Volume`
+  tabs. `Trajectories` and `Graph` resolve by durable chat session id or runtime
+  `external_session_id`, then fall back to live transcript/artifact state if
+  MLflow traces are unavailable.
+- The `Volume` tab uses Daytona volume APIs with inline preview and a resizable
+  tree/preview split.
 
 ## Secondary Flows
 
 ### Volumes
 
 - `VolumesScreen` browses the mounted Daytona volume tree.
-- Selecting a file opens the canvas preview.
+- Selecting a file opens the full-page preview region.
 - Leaving Volumes clears the selected file via `RouteSync`.
+- `/app/volumes` remains the full-page durable storage browser; it is not
+  replaced by the workspace `Volume` sidepanel tab.
 
 ### Settings
 

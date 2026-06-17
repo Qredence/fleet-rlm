@@ -139,7 +139,7 @@ The repo intentionally extends Daytona's published guide shape with:
 
 - a minimal sandbox-side broker server for host callbacks
 - injected sandbox helpers for file reads, shell execution, and durable workspace/volume writes
-- richer websocket trace emission for the workspace transcript and canvas
+- richer websocket trace emission for the workspace transcript and sidepanel
 - result shaping that preserves the shared interpreter contract used by the rest of the backend
 
 These are intentional project behaviors, not alternative Daytona SDK semantics.

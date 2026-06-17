@@ -238,9 +238,10 @@ For live websocket-driven runs, use the `mlflow_trace_id` or `mlflow_client_requ
 
 ## 4a. Inspect how a session trace maps to chat components
 
-The workspace side panel now includes a debug-only **Trace** tab that resolves
-the active session's MLflow trace and classifies each span against the chat
-transcript component model.
+The workspace sidepanel includes **Trajectories** and **Graph** tabs that
+resolve the active session's trace by durable chat session id or runtime
+`external_session_id`. When MLflow is unavailable, these tabs fall back to live
+transcript and artifact data instead of requiring a stored MLflow trace.
 
 You can query the same backend surface directly:
 
@@ -253,8 +254,9 @@ curl -s \
 
 If you omit `trace_id`, Fleet first checks persisted session trace rows and then
 falls back to the authorized MLflow runtime session ids for that chat session.
-This is useful when you need to see which spans become `tool`, `sandbox`,
-`status_note`, or intentionally non-rendered transcript elements.
+This is useful when you need to see which spans can become trajectories, graph
+nodes, `tool`, `sandbox`, `status_note`, or intentionally non-rendered
+transcript elements.
 
 ## 5. Export Annotated Traces
 

@@ -31,6 +31,8 @@ The frontend consumes the following backend surfaces:
 - `POST /api/v1/runtime/tests/lm`
 - `POST /api/v1/runtime/tests/daytona`
 - `GET /api/v1/runtime/status`
+- `GET /api/v1/runtime/volume/tree`
+- `GET /api/v1/runtime/volume/file`
 - `GET /api/v1/sessions/state`
 - `GET /api/v1/sessions`
 - `GET /api/v1/sessions/{id}`
@@ -40,7 +42,9 @@ The frontend consumes the following backend surfaces:
 
 The history surface uses the sessions endpoints. The settings surface uses the
 runtime settings and runtime status endpoints. The workspace surface uses
-`/api/v1/auth/me` and runtime status to gate the composer and warnings.
+`/api/v1/auth/me` and runtime status to gate the composer and warnings. The
+workspace sidepanel `Volume` tab and the `/app/volumes` route both use the
+Daytona-backed runtime volume APIs.
 
 ## Websocket Split
 
@@ -110,7 +114,7 @@ Important rules:
 - `session_id` is required as a query parameter.
 - The stream is subscription-only.
 - It does not accept `message`, `cancel`, or `command` frames.
-- It emits execution lifecycle frames for the workbench canvas.
+- It emits execution lifecycle frames for workbench hydration.
 
 ## Runtime And Workbench Contract
 
@@ -219,6 +223,26 @@ Rules:
 - Chat-final `run_result` is only a narrow compatibility backfill path.
 - The workbench should not depend on transcript scraping for its canonical
   completion state.
+
+### Workspace Sidepanel
+
+Workspace chat is primary. The workspace sidepanel is local to
+`/app/workspace`, collapsible, and resizable. It exposes exactly three tabs:
+
+- `Trajectories`
+- `Graph`
+- `Volume`
+
+`Trajectories` and `Graph` resolve the active run by durable chat session id
+first. When runtime metadata exposes `external_session_id`, the frontend and
+backend may use it as the MLflow/runtime trace alias. Missing MLflow data must
+not make the sidepanel unusable; the frontend falls back to live transcript
+rows and artifact summaries already available in workspace state.
+
+`Volume` uses `GET /api/v1/runtime/volume/tree` and
+`GET /api/v1/runtime/volume/file` for Daytona-backed browsing, inline preview,
+and the resizable tree/preview split. `/app/volumes` remains the full-page
+durable volume browser.
 
 ## Session Contract
 
