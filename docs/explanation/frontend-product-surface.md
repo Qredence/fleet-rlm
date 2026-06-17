@@ -12,15 +12,17 @@ The supported product flow is a chat-first execution workbench:
 2. The frontend creates or reuses a session id and opens `/api/v1/ws/execution`.
 3. The backend streams live reasoning, tool, status, and final frames.
 4. The transcript updates in real time.
-5. The run workbench hydrates from the execution summary and final artifact.
-6. The user can inspect volumes or settings from the same shell.
+5. The workspace sidepanel hydrates trajectories, graph, and volume state from
+   execution summary, final artifacts, live transcript data, and Daytona volume
+   APIs.
+6. The user can also open full-page volumes or settings from the same shell.
 
 ## Surface Map
 
 | Surface | Route | Owns | Notes |
 | --- | --- | --- | --- |
-| Workbench | `/app/workspace` | `features/workspace/*` | Main execution and inspection surface |
-| Volumes | `/app/volumes` | `features/volumes/*` | Mounted Daytona volume browser |
+| Workbench | `/app/workspace` | `features/workspace/*` | Primary chat execution surface with workspace-local sidepanel |
+| Volumes | `/app/volumes` | `features/volumes/*` | Full-page mounted Daytona volume browser |
 | Settings | `/app/settings` | `features/settings/*` | Dialog-first settings surface |
 
 ## Layer Structure
@@ -30,8 +32,8 @@ src/frontend/src/
 ├── routes/                # Thin TanStack Router wrappers
 ├── features/
 │   ├── layout/            # Shell chrome, route sync, dialogs, sidebar, header
-│   ├── workspace/         # Workbench UI, transcript, inspector, run panel
-│   ├── volumes/           # Volume browser and file preview
+│   ├── workspace/         # Workbench chat, sidepanel, transcript, session controls
+│   ├── volumes/           # Full-page volume browser and file preview
 │   └── settings/          # Settings dialog and runtime forms
 ├── lib/
 │   ├── workspace/         # Zustand stores, event adapters, hydration reducers
@@ -58,15 +60,25 @@ Rules:
 - The passive execution stream exists only for execution summary and workbench
   hydration.
 
-## Canvas Behavior
+## Workspace Sidepanel Behavior
 
-The shell canvas is route-aware.
+Workspace chat remains the primary surface. The sidepanel belongs to the
+workspace feature, not to the global shell, and it is collapsible and
+resizable.
 
-- On Workbench, it acts as the inspector and run workbench.
-- On Volumes, it shows the file preview.
-- On Settings, it closes.
-- On mobile, the canvas becomes a bottom sheet.
-- On desktop, the canvas is the right-hand resizable panel.
+Supported tabs are exactly:
+
+- `Trajectories`
+- `Graph`
+- `Volume`
+
+`Trajectories` and `Graph` resolve the active run by durable chat session id or
+runtime `external_session_id`. If MLflow traces cannot be loaded, they fall
+back to the live transcript and artifact data already streamed into workspace
+state.
+
+`Volume` browses Daytona volume data inline with a resizable tree/preview split.
+The `/app/volumes` route remains the full-page durable volume browser.
 
 ## What Is Out Of Scope
 

@@ -7,10 +7,13 @@ export type PromptFeature = "library" | "contextMemory" | "capabilities" | "webS
 
 export type PromptMode = "auto" | "workspace" | "webSearch" | "cowork";
 
+export type WorkspaceSidepanelTab = "trajectories" | "graph" | "volume";
+
 export type InspectorTab =
+  | WorkspaceSidepanelTab
   | "message"
   | "execution"
-  | "graph"
+  | "trace"
   | "workbench"
   | "documents"
   | "memory"
@@ -22,6 +25,10 @@ export interface ChatMessage {
   type: "user" | "assistant" | "system" | "trace" | "hitl" | "clarification" | "reasoning";
   content: string;
   traceSource?: "live" | "trajectory" | "summary";
+  traceMetadata?: {
+    mlflowTraceId?: string;
+    mlflowClientRequestId?: string;
+  };
   phase?: 1 | 2 | 3;
   renderParts?: ChatRenderPart[];
   streaming?: boolean;
@@ -51,6 +58,19 @@ export type ChatRenderToolState =
   | "running"
   | "output-available"
   | "output-error";
+
+export interface ChatMlflowSpanMetadata {
+  spanId: string;
+  parentSpanId?: string;
+  traceId?: string;
+  status: "started" | "completed" | "error";
+  durationMs?: number;
+  startedAt?: string;
+  endedAt?: string;
+  traceUrl?: string;
+  experimentId?: string;
+  trackingUri?: string;
+}
 
 export interface ChatTraceStep {
   id: string;
@@ -165,9 +185,11 @@ export type ChatRenderPart =
       toolType: string;
       state: ChatRenderToolState;
       stepIndex?: number;
+      identityKey?: string;
       input?: unknown;
       output?: unknown;
       errorText?: string;
+      mlflowSpan?: ChatMlflowSpanMetadata;
       runtimeContext?: RuntimeContext;
     }
   | {
@@ -257,6 +279,8 @@ export interface Conversation {
   id: string;
   title: string;
   messages: ChatMessage[];
+  runtimeSessionId?: string;
+  durableSessionId?: string | null;
   turnArtifactsByMessageId?: Record<string, ExecutionStep[]>;
   phase: CreationPhase;
   createdAt: string;

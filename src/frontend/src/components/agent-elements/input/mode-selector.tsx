@@ -53,7 +53,7 @@ export const ModeSelector = memo(function ModeSelector({
     <button
       type="button"
       className={cn(
-        "inline-flex h-7 items-center gap-1.5 rounded-[6px] px-2 text-[12px] leading-4 text-foreground/60 transition-colors hover:bg-foreground/6",
+        "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 typo-caption text-foreground/60 transition-colors hover:bg-foreground/6",
         !hasMultiple && "pointer-events-none",
         className,
       )}
@@ -84,7 +84,7 @@ export const ModeSelector = memo(function ModeSelector({
               type="button"
               onClick={() => handleSelect(mode.id)}
               className={cn(
-                "flex w-full items-start gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12px] leading-4 transition-colors hover:bg-foreground/6",
+                "flex w-full items-start gap-2 rounded-[6px] px-2 py-1.5 text-left typo-caption transition-colors hover:bg-foreground/6",
                 isActive && "bg-foreground/6",
               )}
             >

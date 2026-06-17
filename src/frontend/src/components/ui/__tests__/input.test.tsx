@@ -14,9 +14,10 @@ describe("Input primitives", () => {
     const html = renderToStaticMarkup(<Input aria-label="Example input" />);
 
     expect(html).toContain('data-slot="input"');
-    expect(html).toContain("border-border-subtle/70");
-    expect(html).not.toContain("border-input");
-    expect(html).toContain("bg-input-background");
+    expect(html).toContain("selection:bg-primary");
+    expect(html).toContain("border-input");
+    expect(html).toContain("bg-transparent");
+    expect(html).toContain("focus-visible:ring-focus");
   });
 
   it("uses grouped field styling for composed input actions", () => {
@@ -32,9 +33,9 @@ describe("Input primitives", () => {
     );
 
     expect(html).toContain('data-slot="input-group"');
-    expect(html).toContain("border-border-subtle/70");
+    expect(html).toContain("border-input");
     expect(html).toContain("has-[[data-slot=input-group-control]:focus-visible]:border-ring");
     expect(html).toContain('data-slot="input-group-control"');
-    expect(html).toContain("min-w-0");
+    expect(html).toContain("has-[&gt;[data-align=inline-end]]:[&amp;&gt;input]:pr-2");
   });
 });

@@ -16,10 +16,20 @@ from typing import Any
 
 from fleet_rlm.runtime.events import EVENT_SCHEMA_VERSION, RuntimeEvent, RuntimeEventKind
 
+from .sanitizer import sanitize_event_payload
 from .wire_source_type import derive_wire_source_type
 
 _TURN_STARTED_KINDS: frozenset[RuntimeEventKind] = frozenset({RuntimeEventKind.TURN_STARTED})
 _TERMINAL_KINDS: frozenset[RuntimeEventKind] = frozenset({RuntimeEventKind.DONE, RuntimeEventKind.ERROR})
+_MLFLOW_SPAN_DETAIL_KEYS: frozenset[str] = frozenset({"input", "output", "error", "metadata"})
+
+
+def _sanitize_mlflow_span_payload(payload: dict[str, Any]) -> None:
+    if payload.get("source_type") != "mlflow_span" and payload.get("event_kind") != "mlflow_span":
+        return
+    for key in _MLFLOW_SPAN_DETAIL_KEYS:
+        if key in payload:
+            payload[key] = sanitize_event_payload(payload[key])
 
 
 def _frame_kind(event_kind: RuntimeEventKind) -> str:
@@ -52,6 +62,7 @@ def project_chat(
     if payload_override is not None:
         payload.update(payload_override)
     payload.setdefault("source_type", derive_wire_source_type(event.kind, payload))
+    _sanitize_mlflow_span_payload(payload)
 
     if event.context is not None:
         payload["runtime"] = event.context.model_dump(mode="json", exclude_none=True)

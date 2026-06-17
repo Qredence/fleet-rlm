@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.5.50
+  version: 0.6.0
 paths:
   /health:
     get:
@@ -459,6 +459,67 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SessionTraceListResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "403":
+          description: The caller does not have permission to access this resource.
+        "503":
+          description: Session services are unavailable because server startup is
+            incomplete.
+        "404":
+          description: Session not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/sessions/{session_id}/trace-debug:
+    get:
+      tags:
+        - sessions
+      summary: Inspect session MLflow trace mapping
+      description: Resolve one MLflow trace for the session and classify each span
+        against the workspace chat component model.
+      operationId: get_session_trace_debug_api_v1_sessions__session_id__trace_debug_get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Identifier of the session whose trace to inspect.
+            title: Session Id
+          description: Identifier of the session whose trace to inspect.
+        - name: trace_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            description: Optional explicit MLflow trace id to inspect.
+            title: Trace Id
+          description: Optional explicit MLflow trace id to inspect.
+        - name: client_request_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            description: Optional Fleet client request id used to resolve the trace.
+            title: Client Request Id
+          description: Optional Fleet client request id used to resolve the trace.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionTraceDebugResponse"
         "401":
           description: Authentication is required or the provided token is invalid.
         "403":
@@ -2647,7 +2708,7 @@ components:
           type: string
           title: Version
           description: Package version currently serving the API.
-          default: 0.5.50
+          default: 0.6.0
       type: object
       title: HealthResponse
       description: Response body for the lightweight health endpoint.
@@ -4297,7 +4358,7 @@ components:
           type: string
           title: Version
           description: Package version currently serving the API.
-          default: 0.5.50
+          default: 0.6.0
         app_env:
           type: string
           enum:
@@ -4654,6 +4715,168 @@ components:
       type: object
       title: SessionStatsResponse
       description: Aggregated usage stats for a session.
+    SessionTraceDebugResponse:
+      properties:
+        trace_id:
+          type: string
+          title: Trace Id
+          description: Resolved MLflow trace identifier.
+        client_request_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Client Request Id
+          description: Resolved Fleet client request identifier when available.
+        state:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: State
+          description: Top-level MLflow trace state.
+        request_preview:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Request Preview
+          description: Trace request preview.
+        response_preview:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Response Preview
+          description: Trace response preview.
+        resolved_from:
+          type: string
+          enum:
+            - trace_id
+            - client_request_id
+            - session_row
+            - runtime_session_id
+          title: Resolved From
+          description: How the trace was resolved for this session debug request.
+        runtime_session_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Runtime Session Id
+          description: Authorized runtime session id used for fallback lookup when
+            applicable.
+        span_count:
+          type: integer
+          title: Span Count
+          description: Total spans in the resolved trace.
+        renderable_span_count:
+          type: integer
+          title: Renderable Span Count
+          description: How many spans map to a renderable chat component.
+        non_rendered_span_count:
+          type: integer
+          title: Non Rendered Span Count
+          description: How many spans are intentionally observability-only.
+        spans:
+          items:
+            $ref: "#/components/schemas/SessionTraceDebugSpan"
+          type: array
+          title: Spans
+          description: Per-span mapping summary.
+      type: object
+      required:
+        - trace_id
+        - resolved_from
+        - span_count
+        - renderable_span_count
+        - non_rendered_span_count
+        - spans
+      title: SessionTraceDebugResponse
+      description: Session-scoped MLflow trace debug summary for chat component mapping.
+    SessionTraceDebugSpan:
+      properties:
+        span_id:
+          type: string
+          title: Span Id
+          description: MLflow/OpenTelemetry span identifier.
+        parent_span_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Parent Span Id
+          description: Parent span identifier when present.
+        name:
+          type: string
+          title: Name
+          description: Span name.
+        span_type:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Span Type
+          description: MLflow span type when present.
+        status_code:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Status Code
+          description: Span status code.
+        tool_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Tool Name
+          description: Resolved tool name when the span is tool-like.
+        mapped_render_kind:
+          type: string
+          enum:
+            - assistant_text
+            - reasoning
+            - tool
+            - sandbox
+            - status_note
+            - non_rendered
+          title: Mapped Render Kind
+          description: Frontend chat render kind the span most closely maps to.
+        mapped_component_type:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Mapped Component Type
+          description: Frontend Agent Elements component/tool type hint when renderable.
+        rationale:
+          type: string
+          title: Rationale
+          description: Why the span is rendered or intentionally not rendered.
+        input_preview:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Input Preview
+          description: Compact preview of span inputs.
+        output_preview:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Output Preview
+          description: Compact preview of span outputs.
+        start_time_unix_nano:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Start Time Unix Nano
+          description: Span start timestamp (Unix nanoseconds, string-encoded).
+        end_time_unix_nano:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: End Time Unix Nano
+          description: Span end timestamp (Unix nanoseconds, string-encoded).
+      type: object
+      required:
+        - span_id
+        - name
+        - mapped_render_kind
+        - rationale
+      title: SessionTraceDebugSpan
+      description: One MLflow span classified against the chat transcript component
+        model.
     SessionTraceExportRequest:
       properties:
         format:

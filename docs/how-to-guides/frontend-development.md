@@ -23,9 +23,9 @@ Frontend source lives under `src/frontend/src/`.
 | Path | Purpose |
 | --- | --- |
 | `routes/` | Thin TanStack Router wrappers, redirects, auth pages, and not-found handling |
-| `features/layout/` | Shell chrome, route sync, sidebar, header, dialogs, canvas host |
-| `features/workspace/` | Workbench screen, transcript, inspector, run panel, composer |
-| `features/volumes/` | Mounted volume browser and preview flow |
+| `features/layout/` | Shell chrome, route sync, sidebar, header, and dialogs |
+| `features/workspace/` | Workbench chat, transcript, session controls, and workspace sidepanel |
+| `features/volumes/` | Full-page mounted volume browser and preview flow |
 | `features/settings/` | Settings dialog/page and runtime settings forms |
 | `lib/workspace/` | Zustand stores, runtime adapters, hydration reducers, transcript shaping |
 | `lib/rlm-api/` | REST and websocket clients plus generated API types |
@@ -43,6 +43,11 @@ Frontend source lives under `src/frontend/src/`.
 - Route wrappers must stay thin and should not own page logic.
 - New work should target `features/*`, `lib/*`, or `components/product/*`, not
   a resurrected screen layer.
+- Workbench chat is primary. Its sidepanel is workspace-local,
+  collapsible/resizable, and limited to `Trajectories`, `Graph`, and `Volume`
+  tabs.
+- The workspace `Volume` tab uses Daytona volume APIs with inline preview;
+  `/app/volumes` remains the full-page durable volume browser.
 
 ## Runtime And API Contract Rules
 
@@ -56,11 +61,10 @@ Frontend source lives under `src/frontend/src/`.
 
 ## Shell And Layout Rules
 
-- `RootLayout` owns the shell chrome and responsive split layout.
+- `RootLayout` owns shell chrome; workspace owns sidepanel layout.
 - `RouteSync` keeps the URL and shell store aligned.
-- Volumes opens the canvas automatically.
-- Settings closes the canvas.
-- Mobile uses the bottom sheet canvas and bottom tab bar.
+- Mobile uses the bottom tab bar; responsive sidepanel behavior stays inside
+  `features/workspace/*`.
 
 ## Environment
 

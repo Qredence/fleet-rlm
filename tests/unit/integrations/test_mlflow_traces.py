@@ -89,3 +89,50 @@ def test_search_traces_uses_locations_when_supported() -> None:
 
     assert captured["locations"] == ["1"]
     assert captured["experiment_ids"] is None
+
+
+def test_resolve_trace_sets_tracking_uri_before_get_trace(monkeypatch) -> None:
+    from fleet_rlm.integrations.observability import mlflow_runtime, mlflow_traces
+    from fleet_rlm.integrations.observability.config import MlflowConfig
+
+    tracking_uris: list[str] = []
+    sentinel = SimpleNamespace(info=SimpleNamespace(trace_id="tr-explicit"))
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda uri: tracking_uris.append(uri),
+        get_trace=lambda trace_id: sentinel if trace_id == "tr-explicit" else None,
+    )
+    monkeypatch.setattr(mlflow_runtime, "_import_mlflow", lambda: fake_mlflow)
+
+    result = mlflow_traces.resolve_trace(
+        trace_id="tr-explicit",
+        config=MlflowConfig(tracking_uri="http://127.0.0.1:5001"),
+    )
+
+    assert result is sentinel
+    assert tracking_uris == ["http://127.0.0.1:5001"]
+
+
+def test_resolve_trace_by_client_request_id_sets_tracking_uri_before_search(monkeypatch) -> None:
+    from fleet_rlm.integrations.observability import mlflow_runtime, mlflow_traces
+    from fleet_rlm.integrations.observability.config import MlflowConfig
+
+    tracking_uris: list[str] = []
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda uri: tracking_uris.append(uri),
+        get_experiment_by_name=lambda _name: SimpleNamespace(experiment_id="1"),
+    )
+    monkeypatch.setattr(mlflow_runtime, "_import_mlflow", lambda: fake_mlflow)
+    monkeypatch.setattr(mlflow_runtime, "initialize_mlflow", lambda _config: True)
+    monkeypatch.setattr(
+        mlflow_traces,
+        "_search_traces",
+        lambda *_args, **_kwargs: [SimpleNamespace(info=SimpleNamespace(client_request_id="req-1", timestamp_ms=42))],
+    )
+
+    result = mlflow_traces.resolve_trace_by_client_request_id(
+        "req-1",
+        config=MlflowConfig(tracking_uri="http://127.0.0.1:5001", experiment="fleet-rlm"),
+    )
+
+    assert getattr(getattr(result, "info", None), "client_request_id", None) == "req-1"
+    assert tracking_uris == ["http://127.0.0.1:5001"]

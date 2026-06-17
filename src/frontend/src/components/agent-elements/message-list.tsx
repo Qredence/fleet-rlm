@@ -18,7 +18,6 @@ import { ToolRowBase } from "./tools/tool-row-base";
 import { IconCopy, IconCheck } from "@tabler/icons-react";
 import { ToolRenderer as DefaultToolRenderer } from "./tools/tool-renderer";
 import { normalizeAssistantToolParts } from "./utils/tool-part-normalizer";
-import { SpiralLoader } from "./spiral-loader";
 
 export type MessageListProps = {
   messages: UIMessage[];
@@ -572,7 +571,6 @@ export const MessageList = memo(function MessageList({
 
                 {isLastTurn && showPlanning && (
                   <ToolRowBase
-                    icon={<SpiralLoader size={12} />}
                     shimmerLabel={planningLabel}
                     completeLabel="Done"
                     isAnimating={true}
@@ -680,10 +678,15 @@ function AssistantParts({
 
         const chatStreamingStatus = isLast && isStreaming ? "streaming" : undefined;
         const toolCallId = part.toolCallId;
+        const rawNestedTools = (part as { nestedTools?: unknown }).nestedTools;
         const nestedTools =
           (part.type === "tool-Task" || part.type === "tool-Agent") && toolCallId
             ? nestedToolsMap.get(toolCallId) || []
-            : undefined;
+            : part.type === "tool-Group"
+              ? Array.isArray(rawNestedTools)
+                ? rawNestedTools.filter(isV5ToolPart)
+                : []
+              : undefined;
         elems.push(
           <ToolRendererComponent
             key={part.toolCallId ?? `${msg.id}-tool-${i}`}

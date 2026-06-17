@@ -3,14 +3,13 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
-  SectionCard,
-  SectionCardContent,
-  SectionCardDescription,
-  SectionCardFooter,
-  SectionCardHeader,
-  SectionCardTitle,
-} from "@/components/product/section-layout";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldTitle,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   InputGroup,
@@ -18,6 +17,14 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectPositioner,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   computeRuntimeUpdates,
   flattenRuntimeSettingsMaskedValues,
@@ -30,6 +37,8 @@ import {
 import type { RuntimeStatusResponse } from "@/lib/rlm-api";
 import { RuntimeStatusPanel, shouldHydrateRuntimeForm, errorMessage } from "./runtime-status-panel";
 import { RuntimeConnectivityPanel } from "./runtime-connectivity-panel";
+import { useLlmProfileModels, useLlmRoleBindings } from "./use-llm-profiles";
+import { modelMatchesCatalog } from "./llm-profiles/constants";
 
 export { shouldHydrateRuntimeForm, errorMessage } from "./runtime-status-panel";
 
@@ -41,8 +50,108 @@ type RuntimeField = {
   placeholder?: string;
 };
 
+type RuntimeModelRole = "planner" | "delegate" | "delegate_small";
+
+const RUNTIME_MODEL_ROLES: Record<string, RuntimeModelRole> = {
+  DSPY_LM_MODEL: "planner",
+  DSPY_DELEGATE_LM_MODEL: "delegate",
+  DSPY_DELEGATE_LM_SMALL_MODEL: "delegate_small",
+};
+
 function isRuntimeSecretKey(key: string, secretKeys: readonly string[]): boolean {
   return secretKeys.includes(key);
+}
+
+function runtimeEnvModelValue(modelId: string): string {
+  if (!modelId) return "";
+  if (modelId.startsWith("models/")) {
+    return `openai/${modelId.slice("models/".length)}`;
+  }
+  if (modelId.startsWith("gemini-") && !modelId.includes("/")) {
+    return `openai/${modelId}`;
+  }
+  if (modelId.startsWith("gemini/gemini-")) {
+    return `openai/${modelId.slice("gemini/".length)}`;
+  }
+  return modelId;
+}
+
+function RuntimeModelSelect({
+  id,
+  label,
+  role,
+  value,
+  placeholder,
+  onValueChange,
+}: {
+  id: string;
+  label: string;
+  role: RuntimeModelRole;
+  value: string;
+  placeholder?: string;
+  onValueChange: (value: string) => void;
+}) {
+  const rolesQuery = useLlmRoleBindings();
+  const binding = rolesQuery.data?.bindings?.find((candidate) => candidate.role === role);
+  const profileId = binding?.profile_id ?? null;
+  const modelsQuery = useLlmProfileModels(profileId);
+  const catalogModels = modelsQuery.data?.models ?? [];
+  const currentCatalogModel = catalogModels.find(
+    (model) =>
+      modelMatchesCatalog(value, model.id) || runtimeEnvModelValue(model.id) === value.trim(),
+  );
+  const currentSelectValue = currentCatalogModel
+    ? runtimeEnvModelValue(currentCatalogModel.id)
+    : value;
+  const currentDisplayLabel = currentCatalogModel?.label ?? currentSelectValue;
+  const options = currentSelectValue
+    ? [
+        {
+          id: currentSelectValue,
+          label: currentCatalogModel?.label ?? currentSelectValue,
+        },
+        ...catalogModels
+          .map((model) => ({
+            id: runtimeEnvModelValue(model.id),
+            label: model.label,
+          }))
+          .filter((model) => model.id !== currentSelectValue),
+      ]
+    : catalogModels.map((model) => ({
+        id: runtimeEnvModelValue(model.id),
+        label: model.label,
+      }));
+
+  return (
+    <Select
+      value={currentSelectValue}
+      onValueChange={(nextValue) => onValueChange(nextValue ?? "")}
+      disabled={rolesQuery.isPending || (!!profileId && modelsQuery.isPending)}
+    >
+      <SelectTrigger id={id} className="w-full min-w-0 sm:max-w-md" aria-label={label}>
+        <SelectValue
+          placeholder={
+            profileId
+              ? modelsQuery.isPending
+                ? "Loading models..."
+                : (placeholder ?? "Select model")
+              : value || "No provider profile assigned"
+          }
+        >
+          {currentDisplayLabel || undefined}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectPositioner>
+        <SelectContent>
+          {options.map((model) => (
+            <SelectItem key={model.id} value={model.id}>
+              {model.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </SelectPositioner>
+    </Select>
+  );
 }
 
 export function RuntimeForm() {
@@ -284,76 +393,92 @@ export function RuntimeForm() {
         <RuntimeStatusPanel status={status} />
       </FieldGroup>
 
-      <SectionCard variant="subtle">
-        <SectionCardHeader className="border-b border-border-subtle/70">
-          <SectionCardTitle>Runtime Configuration</SectionCardTitle>
-          <SectionCardDescription>
-            Update runtime credentials, Daytona connectivity, and model selection used by the local
-            backend.
-          </SectionCardDescription>
-        </SectionCardHeader>
-        <SectionCardContent className="pt-6">
-          <FieldGroup className="gap-5">
-            {runtimeFields.map((field) => {
-              const secretKey = isRuntimeSecretKey(field.key, runtimeSecretKeys) ? field.key : null;
-              const inputId = `runtime-${field.key.toLowerCase()}`;
-              const inputValue = formValues[field.key] ?? "";
-              return (
-                <Field key={field.key}>
-                  <FieldLabel htmlFor={inputId}>{field.label}</FieldLabel>
-                  {field.isSecret && secretKey ? (
-                    <InputGroup className="max-w-xl">
-                      <InputGroupInput
-                        id={inputId}
-                        type="password"
-                        value={inputValue}
-                        placeholder={field.placeholder}
-                        autoComplete="off"
-                        aria-label={field.label}
-                        onChange={(event) => updateFieldValue(field.key, event.currentTarget.value)}
-                      />
-                      <InputGroupAddon align="inline-end">
-                        <InputGroupButton
-                          type="button"
-                          size="sm"
-                          variant={clearSecretFlags[secretKey] ? "secondary" : "outline"}
-                          className="h-full rounded-none border-y-0 border-r-0 border-l border-border-subtle/70 px-4 shadow-none"
-                          aria-pressed={clearSecretFlags[secretKey] ?? false}
-                          onClick={() => toggleClearSecret(secretKey)}
-                        >
-                          {clearSecretFlags[secretKey] ? "Will clear on save" : "Clear saved value"}
-                        </InputGroupButton>
-                      </InputGroupAddon>
-                    </InputGroup>
-                  ) : (
-                    <Input
+      <FieldGroup className="gap-0">
+        <Field orientation="responsive" className="border-b border-border-subtle py-5">
+          <FieldContent>
+            <FieldTitle>Runtime Configuration</FieldTitle>
+            <FieldDescription>
+              Update runtime credentials, Daytona connectivity, and model selection used by the
+              local backend.
+            </FieldDescription>
+          </FieldContent>
+        </Field>
+        {runtimeFields.map((field) => {
+          const secretKey = isRuntimeSecretKey(field.key, runtimeSecretKeys) ? field.key : null;
+          const inputId = `runtime-${field.key.toLowerCase()}`;
+          const inputValue = formValues[field.key] ?? "";
+          const modelRole = RUNTIME_MODEL_ROLES[field.key];
+          return (
+            <Field
+              key={field.key}
+              orientation="responsive"
+              className="border-b border-border-subtle py-5"
+            >
+              <FieldContent>
+                <FieldLabel htmlFor={inputId}>{field.label}</FieldLabel>
+                <FieldDescription>{field.description}</FieldDescription>
+                {field.isSecret && secretKey ? (
+                  <FieldDescription>
+                    Write-only input. Configured value:{" "}
+                    {maskedValues[secretKey] ? maskedValues[secretKey] : "not set"}.
+                  </FieldDescription>
+                ) : null}
+              </FieldContent>
+              <div className="flex min-w-0 flex-1 justify-start sm:justify-end">
+                {field.isSecret && secretKey ? (
+                  <InputGroup className="w-full min-w-0 sm:max-w-md">
+                    <InputGroupInput
                       id={inputId}
-                      type="text"
+                      type="password"
                       value={inputValue}
                       placeholder={field.placeholder}
                       autoComplete="off"
                       aria-label={field.label}
                       onChange={(event) => updateFieldValue(field.key, event.currentTarget.value)}
-                      className="max-w-xl"
                     />
-                  )}
-                  <FieldDescription>{field.description}</FieldDescription>
-                  {field.isSecret && secretKey ? (
-                    <FieldDescription>
-                      Write-only input. Configured value:{" "}
-                      {maskedValues[secretKey] ? maskedValues[secretKey] : "not set"}.
-                    </FieldDescription>
-                  ) : null}
-                </Field>
-              );
-            })}
-          </FieldGroup>
-        </SectionCardContent>
-        <SectionCardFooter className="border-t border-border-subtle/70 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-muted-foreground">
-            Writes to <code>.env</code> (local only), updates process env, and refreshes the active
-            runtime configuration.
-          </p>
+                    <InputGroupAddon align="inline-end">
+                      <InputGroupButton
+                        type="button"
+                        variant={clearSecretFlags[secretKey] ? "secondary" : "outline"}
+                        aria-pressed={clearSecretFlags[secretKey] ?? false}
+                        onClick={() => toggleClearSecret(secretKey)}
+                      >
+                        {clearSecretFlags[secretKey] ? "Will clear on save" : "Clear saved value"}
+                      </InputGroupButton>
+                    </InputGroupAddon>
+                  </InputGroup>
+                ) : modelRole ? (
+                  <RuntimeModelSelect
+                    id={inputId}
+                    label={field.label}
+                    role={modelRole}
+                    value={inputValue}
+                    placeholder={field.placeholder}
+                    onValueChange={(value) => updateFieldValue(field.key, value)}
+                  />
+                ) : (
+                  <Input
+                    id={inputId}
+                    type="text"
+                    value={inputValue}
+                    placeholder={field.placeholder}
+                    autoComplete="off"
+                    aria-label={field.label}
+                    onChange={(event) => updateFieldValue(field.key, event.currentTarget.value)}
+                    className="w-full min-w-0 sm:max-w-md"
+                  />
+                )}
+              </div>
+            </Field>
+          );
+        })}
+        <Field orientation="responsive" className="py-5">
+          <FieldContent>
+            <FieldDescription>
+              Writes to <code>.env</code> (local only), updates process env, and refreshes the
+              active runtime configuration.
+            </FieldDescription>
+          </FieldContent>
           <Button
             variant="secondary"
             className="rounded-lg"
@@ -362,8 +487,8 @@ export function RuntimeForm() {
           >
             {saveSettings.isPending ? "Saving…" : "Save settings"}
           </Button>
-        </SectionCardFooter>
-      </SectionCard>
+        </Field>
+      </FieldGroup>
 
       <RuntimeConnectivityPanel
         hasUnsavedRuntimeChanges={hasUnsavedRuntimeChanges}

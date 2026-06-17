@@ -135,5 +135,6 @@ When changing workflow, contracts, or architecture, update the durable docs befo
 - IDE Canvases are for standalone analytical outputs (not internal files) and support specific category colors: `gray`, `purple`, `green`, `yellow`, `pink`, `blue`, and `orange`.
 - Streaming responses in the runtime are standardized on `RuntimeEvent` (`runtime/events.py`) and projected using `project_chat`, while legacy `StreamEvent` DTOs are cleaned up and unused.
 - On FastAPI Cloud, delete locked env vars first via `uv run fastapi cloud env delete <VAR> -y` and deploy with `--no-wait`; production and staging environments enforce `AUTH_REQUIRED=true` at startup.
-- Under TanStack Start, the client hydration entry `client.tsx` sets `(window as any).__hydrated = true` inside nested `requestAnimationFrame` calls to signal successful hydration to Playwright E2E tests.
-- In React 19 / TanStack Start, the `PostHogProvider` must be rendered unconditionally to prevent hydration full-tree unmount loops, while server-side asset manifest mutations must be `WeakSet`-guarded.
+- Under TanStack Start, the client hydration entry `client.tsx` sets `(window as any).__hydrated = true` via `requestAnimationFrame` for E2E tests; `PostHogProvider` must render unconditionally, and SSR asset manifest mutations must be `WeakSet`-guarded.
+- Chat sessions auto-create/save on first message, sorted descending (`createdAt`), guarded by `lastSavedStateRef` in `workspace-screen.tsx` to prevent redundant saves.
+- Tool usage: `ToolRowBase` horizontally aligns subtitle tool names; Daytona parsing uses `extractRawToolName` in `backend-chat-event-tool-parts.ts`; Code-repair logic lives in `agent-elements/utils/code-repair.ts`.

@@ -164,8 +164,6 @@ export function WorkspaceMessageList({
       onSelect: (item: { value?: string; label: string }) =>
         onSuggestionClick(item.value ?? item.label),
       className: "w-full justify-center",
-      itemClassName:
-        "h-auto rounded-xl border border-border bg-card/50 px-4 py-3 text-left whitespace-normal hover:bg-card",
     }),
     [onSuggestionClick],
   );

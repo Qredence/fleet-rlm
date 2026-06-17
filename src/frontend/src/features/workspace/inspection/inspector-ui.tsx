@@ -3,6 +3,7 @@ import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Streamdown } from "@/components/ui/streamdown";
 import { VisualJson, TreeView, type JsonValue } from "@visual-json/react";
+import { cn } from "@/lib/utils";
 
 import type { RuntimeContext } from "@/features/workspace/use-workspace";
 import type {
@@ -183,10 +184,10 @@ export function DetailBlock({
   const parsed = tryParseJson(value);
   const insetTone = tone === "error" ? "error" : tone === "warning" ? "warning" : "strong";
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex min-w-0 max-w-full flex-col gap-1.5 overflow-hidden">
       <div className={inspectorStyles.heading.detail}>{label}</div>
       {parsed !== null ? (
-        <div className={inspectorInsetClass(insetTone)}>
+        <div className={cn(inspectorInsetClass(insetTone), "overflow-x-auto")}>
           <VisualJson value={parsed} onChange={() => {}}>
             <TreeView className="text-xs" />
           </VisualJson>

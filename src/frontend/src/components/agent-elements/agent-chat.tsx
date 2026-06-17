@@ -67,7 +67,7 @@ export function AgentChat({
         emptySuggestionsPosition === "top" ? "mb-3" : "mt-3",
         suggestionConfig.className,
       )}
-      itemClassName={cn("h-8 rounded-md px-3", suggestionConfig.itemClassName)}
+      itemClassName={cn("h-7 rounded-full px-3", suggestionConfig.itemClassName)}
     />
   ) : null;
 
@@ -79,7 +79,7 @@ export function AgentChat({
       value={draft}
       onChange={setDraft}
       placeholder="Send a message..."
-      className={cn(classNames?.inputBar, isCenteredEmptyState && "px-0 pb-0")}
+      className={cn(classNames?.inputBar)}
       onAttach={attachments?.onAttach}
       attachedImages={attachments?.images}
       attachedFiles={attachments?.files}
@@ -127,7 +127,6 @@ export function AgentChat({
           <div className="w-full max-w-an">
             {emptyState ? <div className="mb-4">{emptyState}</div> : null}
             {emptySuggestionsPosition === "top" ? emptySuggestionsNode : null}
-            {inputBarNode}
             {emptySuggestionsPosition === "bottom" ? emptySuggestionsNode : null}
           </div>
         </div>
@@ -161,7 +160,7 @@ export function AgentChat({
           suppressQuestionTool={Boolean(pendingQuestion)}
         />
       )}
-      {!isCenteredEmptyState ? inputBarNode : null}
+      {inputBarNode}
     </div>
   );
 }

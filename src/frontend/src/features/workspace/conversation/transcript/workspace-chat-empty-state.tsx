@@ -1,6 +1,6 @@
-import { Terminal } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 
+import { QredenceLogo } from "@/components/brand-mark";
 import { StateNotice } from "@/components/product";
 import { cn } from "@/lib/utils";
 
@@ -23,11 +23,11 @@ export function WorkspaceChatEmptyStateHero({ isMobile }: WorkspaceChatEmptyStat
       )}
     >
       <StateNotice
-        icon={<Terminal className="size-10 text-muted-foreground/40" />}
-        title="Start a conversation"
+        icon={<QredenceLogo className="size-12 text-accent-foreground" />}
+        title="Qredence Fleet"
         description="Type a message below to begin working with the AI assistant"
         className="w-full py-0"
-        titleClassName="text-5xl font-medium leading-tight tracking-tighter-custom"
+        titleClassName="typo-display-lg font-semibold leading-tight tracking-tighter-custom"
       />
     </motion.div>
   );

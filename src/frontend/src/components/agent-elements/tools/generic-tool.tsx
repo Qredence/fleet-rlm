@@ -27,6 +27,7 @@ export type GenericToolProps = {
   icon?: React.ComponentType<{ className?: string }>;
   title: string;
   subtitle?: string;
+  detail?: string;
   isPending: boolean;
   isError?: boolean;
 };
@@ -35,6 +36,7 @@ export const GenericTool = memo(function GenericTool({
   icon,
   title,
   subtitle,
+  detail,
   isPending,
 }: GenericToolProps) {
   const Icon = icon;
@@ -45,7 +47,8 @@ export const GenericTool = memo(function GenericTool({
       shimmerLabel={title}
       completeLabel={title}
       isAnimating={isPending}
-      detail={subtitle}
+      subtitle={subtitle}
+      detail={detail}
     />
   );
 });

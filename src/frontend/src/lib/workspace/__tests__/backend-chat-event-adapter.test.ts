@@ -258,6 +258,24 @@ describe("applyWsFrameToMessages", () => {
     }
   });
 
+  it("attaches terminal MLflow trace metadata to the assistant turn", () => {
+    let messages: ChatMessage[] = [];
+    messages = applyWsFrameToMessages(messages, makeEvent("text", "Final answer")).messages;
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("done", "Final answer", {
+        mlflow_trace_id: "tr-123",
+        mlflow_client_request_id: "chat-123",
+      }),
+    ).messages;
+
+    const assistant = messages.find((message) => message.type === "assistant");
+    expect(assistant?.traceMetadata).toEqual({
+      mlflowTraceId: "tr-123",
+      mlflowClientRequestId: "chat-123",
+    });
+  });
+
   it("uses payload reasoning labels for live reasoning rows", () => {
     const { messages } = applyWsFrameToMessages(
       [],
@@ -556,6 +574,55 @@ describe("applyWsFrameToMessages", () => {
     }
   });
 
+  it("merges mlflow_span lifecycle events by span_id", () => {
+    let messages: ChatMessage[] = [];
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("execution_step", "Planner model", {
+        source_type: "mlflow_span",
+        span_id: "span-planner",
+        trace_id: "trace-1",
+        name: "Planner model",
+        status: "started",
+        input: { prompt: "plan" },
+      }),
+    ).messages;
+
+    messages = applyWsFrameToMessages(
+      messages,
+      makeEvent("execution_step", "Planner model", {
+        source_type: "mlflow_span",
+        span_id: "span-planner",
+        trace_id: "trace-1",
+        name: "Planner model",
+        status: "completed",
+        duration_ms: 42,
+        output: { text: "done" },
+      }),
+    ).messages;
+
+    const toolRows = traceRows(
+      messages,
+      (part) => part.kind === "tool" && part.toolType === "mlflow_span",
+    );
+    expect(toolRows).toHaveLength(1);
+
+    const tool = toolRows[0]?.part;
+    if (tool?.kind === "tool") {
+      expect(tool.title).toBe("Planner model");
+      expect(tool.state).toBe("output-available");
+      expect(tool.identityKey).toBe("mlflow_span:span-planner");
+      expect(tool.mlflowSpan).toMatchObject({
+        spanId: "span-planner",
+        traceId: "trace-1",
+        status: "completed",
+        durationMs: 42,
+      });
+      expect(tool.input).toEqual({ prompt: "plan" });
+      expect(tool.output).toEqual({ text: "done" });
+    }
+  });
+
   it("accepts stdout_preview on sandbox_output status events", () => {
     const { messages } = applyWsFrameToMessages(
       [],
@@ -799,6 +866,29 @@ describe("applyWsFrameToMessages", () => {
     expect(sandbox).toBeDefined();
     if (sandbox?.kind === "sandbox") {
       expect(sandbox.code).toContain("print(1)");
+    }
+  });
+
+  it("prefers structured repl code over flattened tool input strings", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("tool_call", "Calling tool: repl_execute({'code': 'flattened()'})", {
+        tool_name: "repl_execute",
+        tool_input: "Calling tool: repl_execute({'code': 'flattened()'})",
+        tool_args: { code: "fallback()" },
+        step: {
+          type: "repl",
+          input: {
+            code: "structured_code()",
+          },
+        },
+      }),
+    );
+
+    const sandbox = findFirstPart(messages, (p) => p.kind === "sandbox");
+    expect(sandbox).toBeDefined();
+    if (sandbox?.kind === "sandbox") {
+      expect(sandbox.code).toBe("structured_code()");
     }
   });
 

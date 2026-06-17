@@ -23,6 +23,7 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectPositioner,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -122,13 +123,15 @@ export function ProviderProfileEditDialog({
                 <SelectTrigger id={`edit-profile-provider-${profile.id}`} className="w-full">
                   <SelectValue placeholder="Provider type">{selectedProviderLabel}</SelectValue>
                 </SelectTrigger>
-                <SelectContent>
-                  {PROVIDER_OPTIONS.map((option) => (
-                    <SelectItem key={option.id} value={option.id}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
+                <SelectPositioner>
+                  <SelectContent>
+                    {PROVIDER_OPTIONS.map((option) => (
+                      <SelectItem key={option.id} value={option.id}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </SelectPositioner>
               </Select>
             </div>
             <div className="flex flex-col gap-1.5">
@@ -153,9 +156,6 @@ export function ProviderProfileEditDialog({
                 <InputGroupAddon align="inline-end">
                   <InputGroupButton
                     type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-full rounded-none border-y-0 border-r-0 border-l border-border-subtle/70 px-4 shadow-none"
                     aria-pressed={showApiKey}
                     onClick={() => setShowApiKey((current) => !current)}
                   >

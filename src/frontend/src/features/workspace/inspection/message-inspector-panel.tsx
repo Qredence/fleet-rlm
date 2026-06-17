@@ -16,6 +16,7 @@ import { ExecutionInspectorTab } from "./tabs/execution-inspector-tab";
 import { hasMeaningfulGraph } from "./tabs/graph-inspector-content";
 import { GraphInspectorTab } from "./tabs/graph-inspector-tab";
 import { MessageInspectorTab } from "./tabs/message-inspector-tab";
+import { TraceInspectorTab } from "./tabs/trace-inspector-tab";
 
 type TabOption = {
   id: InspectorTab;
@@ -65,6 +66,7 @@ function selectedTurnStatus(
 export function MessageInspectorPanel() {
   const messages = useChatStore((state) => state.messages);
   const isStreaming = useChatStore((state) => state.isStreaming);
+  const sessionId = useChatStore((state) => state.sessionId);
   const turnArtifactsByMessageId = useChatStore((state) => state.turnArtifactsByMessageId);
   const selectedAssistantTurnId = useWorkspaceUiStore((state) => state.selectedAssistantTurnId);
   const activeInspectorTab = useWorkspaceUiStore((state) => state.activeInspectorTab);
@@ -106,6 +108,7 @@ export function MessageInspectorPanel() {
         ? ([{ id: "execution", label: "Execution" }] as TabOption[])
         : []),
       ...(showGraph ? ([{ id: "graph", label: "Graph" }] as TabOption[]) : []),
+      { id: "trace", label: "Trace" },
     ];
   }, [model, showGraph]);
 
@@ -143,6 +146,7 @@ export function MessageInspectorPanel() {
         <MessageInspectorTab model={model} status={selectedTurnStatus(model)} />
         {model.execution.hasContent ? <ExecutionInspectorTab model={model} /> : null}
         {showGraph ? <GraphInspectorTab steps={graphSteps} /> : null}
+        <TraceInspectorTab sessionId={sessionId} selectedTurn={selectedTurn} messages={messages} />
       </Tabs>
     </div>
   );

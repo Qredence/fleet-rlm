@@ -8,7 +8,8 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { rlmApiConfig } from "@/lib/rlm-api/config";
-import { rlmApiClient } from "@/lib/rlm-api/client";
+import { volumesEndpoints } from "@/lib/rlm-api/volumes";
+import type { VolumeTreeNode } from "@/lib/rlm-api/volumes";
 import type { DataSource } from "@/lib/rlm-api/capabilities";
 
 export { useVolumesSelectionStore } from "@/features/volumes/volumes-selection-store";
@@ -29,37 +30,6 @@ export interface FsNode {
   skillId?: string;
 }
 
-// ── API response types ──────────────────────────────────────────────
-
-interface VolumeTreeNode {
-  id: string;
-  name: string;
-  path: string;
-  type: "volume" | "directory" | "file";
-  children: VolumeTreeNode[];
-  size?: number | null;
-  modifiedAt?: string | null;
-}
-
-interface VolumeTreeResponse {
-  provider: VolumeProvider;
-  volumeName: string;
-  rootPath: string;
-  nodes: VolumeTreeNode[];
-  totalFiles: number;
-  totalDirs: number;
-  truncated: boolean;
-}
-
-interface VolumeFileContentResponse {
-  provider: VolumeProvider;
-  path: string;
-  content: string;
-  mime: string;
-  size: number;
-  truncated: boolean;
-}
-
 // ── Conversion ──────────────────────────────────────────────────────
 
 function toFsNode(node: VolumeTreeNode, provider: VolumeProvider): FsNode {
@@ -71,7 +41,7 @@ function toFsNode(node: VolumeTreeNode, provider: VolumeProvider): FsNode {
     type: node.type,
     children: node.children?.map((child) => toFsNode(child, provider)),
     size: node.size ?? undefined,
-    modifiedAt: node.modifiedAt ?? undefined,
+    modifiedAt: node.modified_at ?? undefined,
   };
 }
 
@@ -304,7 +274,20 @@ export function getMockFilesystem(provider: VolumeProvider): FsNode[] {
 
 export const filesystemKeys = {
   all: ["filesystem"] as const,
-  tree: (provider: VolumeProvider) => [...filesystemKeys.all, "tree", provider] as const,
+  tree: (
+    provider: VolumeProvider,
+    options?: {
+      maxDepth?: number;
+      maxEntries?: number;
+    },
+  ) =>
+    [
+      ...filesystemKeys.all,
+      "tree",
+      provider,
+      options?.maxDepth ?? "default",
+      options?.maxEntries ?? "default",
+    ] as const,
   fileContent: (provider: VolumeProvider, path: string) =>
     [...filesystemKeys.all, "file", provider, path] as const,
 };
@@ -328,7 +311,13 @@ interface UseFilesystemReturn {
   refetch: () => void;
 }
 
-export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
+export function useFilesystem(
+  provider: VolumeProvider,
+  options?: {
+    maxDepth?: number;
+    maxEntries?: number;
+  },
+): UseFilesystemReturn {
   const mock = rlmApiConfig.mockMode;
   const canQueryFilesystem = typeof window !== "undefined";
 
@@ -339,7 +328,7 @@ export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
   };
 
   const query = useQuery({
-    queryKey: filesystemKeys.tree(provider),
+    queryKey: filesystemKeys.tree(provider, options),
     queryFn: async ({ signal }): Promise<FilesystemPayload> => {
       if (mock) {
         return {
@@ -349,12 +338,12 @@ export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
         };
       }
 
-      const params = new URLSearchParams({
-        max_depth: "4",
-        provider,
-      });
-      const resp = await rlmApiClient.get<VolumeTreeResponse>(
-        `/api/v1/runtime/volume/tree?${params.toString()}`,
+      const resp = await volumesEndpoints.tree(
+        {
+          provider,
+          maxDepth: options?.maxDepth ?? 4,
+          maxEntries: options?.maxEntries,
+        },
         signal,
       );
       return {
@@ -413,16 +402,7 @@ export function useFileContent(
     queryFn: async ({ signal }) => {
       if (!path) return { content: "", mime: "", size: 0 };
 
-      const params: Record<string, string> = {
-        path,
-        max_bytes: "200000",
-        provider,
-      };
-      const qs = new URLSearchParams(params).toString();
-      const resp = await rlmApiClient.get<VolumeFileContentResponse>(
-        `/api/v1/runtime/volume/file?${qs}`,
-        signal,
-      );
+      const resp = await volumesEndpoints.file({ provider, path, maxBytes: 200000 }, signal);
 
       return {
         content: resp.content,

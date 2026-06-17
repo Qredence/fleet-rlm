@@ -21,27 +21,6 @@ import {
 } from "@/features/volumes/lib/file-utils";
 import { SkillMarkdown } from "./skill-markdown";
 
-const METADATA_LABEL_STYLE = {
-  fontFamily: "var(--font-sans)",
-  fontSize: "var(--font-text-2xs-size)",
-  fontWeight: "var(--font-text-2xs-weight)",
-  lineHeight: "var(--font-text-2xs-line-height)",
-  letterSpacing: "var(--font-text-2xs-tracking)",
-  minWidth: "var(--label-min-width)",
-} as const;
-
-const FILE_PREVIEW_SURFACE_STYLE = {
-  backgroundColor: "var(--color-surface-secondary)",
-} as const;
-
-const TEXT_PREVIEW_STYLE = {
-  fontFamily: "var(--font-mono)",
-  fontSize: "var(--font-text-2xs-size)",
-  fontWeight: "var(--font-text-2xs-weight)",
-  lineHeight: "var(--font-text-xs-line-height)",
-  letterSpacing: "var(--font-text-2xs-tracking)",
-} as const;
-
 function MetadataRow({
   icon: Icon,
   label,
@@ -54,9 +33,7 @@ function MetadataRow({
   return (
     <div className="flex items-center gap-3 py-2">
       <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      <span className="shrink-0 text-muted-foreground" style={METADATA_LABEL_STYLE}>
-        {label}
-      </span>
+      <span className="volume-metadata-label shrink-0 text-muted-foreground">{label}</span>
       <span className="truncate text-foreground typo-caption">{value}</span>
     </div>
   );
@@ -208,10 +185,7 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
                 </Button>
               ) : null}
             </div>
-            <div
-              className="overflow-hidden rounded-lg border-subtle"
-              style={FILE_PREVIEW_SURFACE_STYLE}
-            >
+            <div className="volume-preview-surface overflow-hidden rounded-lg border-subtle">
               {!mock && isContentLoading ? (
                 <div className="flex flex-col items-center gap-2 p-6 text-center">
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground motion-reduce:animate-none" />
@@ -233,10 +207,7 @@ export function VolumeFileDetail({ file, className }: FileDetailProps) {
                     <SkillMarkdown content={resolvedContent} />
                   </div>
                 ) : (
-                  <pre
-                    className="wrap-break-word overflow-x-auto whitespace-pre-wrap p-4 text-foreground"
-                    style={TEXT_PREVIEW_STYLE}
-                  >
+                  <pre className="volume-text-preview wrap-break-word overflow-x-auto whitespace-pre-wrap p-4 text-foreground">
                     {resolvedContent}
                   </pre>
                 )

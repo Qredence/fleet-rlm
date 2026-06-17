@@ -20,6 +20,7 @@ _BACKEND_KIND_VALUES = frozenset(
         "text",
         "turn_completed",
         "turn_failed",
+        "mlflow_span",
     }
 )
 
@@ -27,6 +28,7 @@ _KIND_ALIASES: dict[RuntimeEventKind, str] = {
     RuntimeEventKind.TURN_STARTED: "turn_started",
     RuntimeEventKind.DONE: "turn_completed",
     RuntimeEventKind.ERROR: "turn_failed",
+    RuntimeEventKind.MLFLOW_SPAN: "mlflow_span",
 }
 
 

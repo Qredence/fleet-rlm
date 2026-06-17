@@ -40,6 +40,7 @@ BackendEventKind = Literal[
     "text",
     "turn_completed",
     "turn_failed",
+    "mlflow_span",
 ]
 ExecutionEventType = Literal[
     "execution_started",

@@ -6,11 +6,16 @@ import { toast } from "sonner";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useTelemetry } from "@/lib/telemetry/use-telemetry";
 import { useAppNavigate } from "@/hooks/use-app-navigate";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useRuntimeStatus } from "@/hooks/use-runtime-status";
 import { WorkspaceMessageList } from "@/features/workspace/conversation/transcript/workspace-message-list";
+import {
+  WorkspaceSidepanel,
+  WorkspaceSidepanelToggle,
+} from "@/features/workspace/screen/sidepanel/workspace-sidepanel";
 import {
   useChatHistoryStore,
   useChatStore,
@@ -21,17 +26,16 @@ import { getWorkspaceRuntimeGuard } from "@/features/workspace/runtime-guard";
 import { detectRepoContext } from "@/lib/utils/repo-context";
 import { detectContextPaths } from "@/lib/utils/source-context";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
-import { rlmApiClient } from "@/lib/rlm-api/client";
-
-type SessionTraceExportResponse = {
-  session_id: string;
-  trace_count: number;
-  distilled_bundle_path: string;
-  json_path: string;
-  jsonl_path: string;
-};
+import { sessionsEndpoints } from "@/lib/rlm-api/sessions";
+import type { SessionTraceExportResponse } from "@/lib/rlm-api/optimization";
 import type { WsExecutionMode } from "@/lib/rlm-api/ws-types";
 import { requestSettingsDialogOpen } from "@/features/settings/settings-events";
+
+export const WORKSPACE_CHAT_OPEN_SIZE = "68%";
+export const WORKSPACE_CHAT_MIN_SIZE = "25%";
+export const WORKSPACE_SIDEPANEL_OPEN_SIZE = "32%";
+export const WORKSPACE_SIDEPANEL_MIN_SIZE = "24%";
+export const WORKSPACE_SIDEPANEL_MAX_SIZE = "75%";
 
 /**
  * Composer placeholder text based on current state.
@@ -89,6 +93,8 @@ export function WorkspaceScreen() {
   } = chatRuntime;
   const stopStreaming = useChatStore((state) => state.stopStreaming);
   const sessionId = useChatStore((state) => state.sessionId);
+  const runtimeSessionId = useChatStore((state) => state.runtimeSessionId);
+  const durableSessionId = useChatStore((state) => state.durableSessionId);
   const [executionMode, setExecutionMode] = useState<WsExecutionMode>("auto");
   const runtimeMode = useChatStore((state) => state.runtimeMode);
   const setRuntimeMode = useChatStore((state) => state.setRuntimeMode);
@@ -96,12 +102,7 @@ export function WorkspaceScreen() {
   const [traceExport, setTraceExport] = useState<SessionTraceExportResponse | null>(null);
   const { mutate: exportTraceMutation, isPending: isExportingTraces } = useMutation({
     mutationFn: (targetSessionId: string) =>
-      rlmApiClient.post<SessionTraceExportResponse>(
-        `/api/v1/sessions/${encodeURIComponent(targetSessionId)}/trace-export`,
-        { format: "both" },
-        undefined,
-        120_000,
-      ),
+      sessionsEndpoints.exportTraces(targetSessionId, { format: "both" }),
     onSuccess: (result) => {
       setTraceExport(result);
       if (result.trace_count === 0) {
@@ -198,6 +199,21 @@ export function WorkspaceScreen() {
   // Chat history
   const { saveConversation, loadConversation: loadConv } = useChatHistoryStore();
 
+  const getArtifactsHash = useCallback((artifacts: Record<string, unknown>) => {
+    return Object.entries(artifacts)
+      .map(([msgId, steps]) => `${msgId}:${Array.isArray(steps) ? steps.length : 0}`)
+      .join(",");
+  }, []);
+
+  const lastSavedStateRef = useRef<{
+    sessionId: string | null;
+    messageCount: number;
+    lastMessageId?: string;
+    lastMessageContent?: string;
+    phase: string;
+    artifactsHash?: string;
+  } | null>(null);
+
   // ── Auto-save on session change ──────────────────────────────────
   // When sessionRevision increments (newSession() called), save the current
   // conversation before the backend runtime resets local chat state.
@@ -212,6 +228,55 @@ export function WorkspaceScreen() {
     phaseRef.current = phase;
   }, [messages, phase, turnArtifactsByMessageId]);
 
+  // ── Auto-save on first message sent or turn completion ───────────
+  useEffect(() => {
+    if (messages.length === 0) return;
+
+    // Condition 1: First user message was just sent (length is exactly 1)
+    // Condition 2: Streaming or execution has finished (isTyping transitions to false)
+    const isFirstMessage = messages.length === 1;
+    const isTurnFinished = !isTyping;
+
+    if (isFirstMessage || isTurnFinished) {
+      const currentArtifactsHash = getArtifactsHash(turnArtifactsByMessageId);
+      const lastMessage = messages[messages.length - 1];
+
+      const isNewState =
+        !lastSavedStateRef.current ||
+        lastSavedStateRef.current.sessionId !== sessionId ||
+        lastSavedStateRef.current.messageCount !== messages.length ||
+        lastSavedStateRef.current.lastMessageId !== lastMessage?.id ||
+        lastSavedStateRef.current.lastMessageContent !== lastMessage?.content ||
+        lastSavedStateRef.current.phase !== phase ||
+        lastSavedStateRef.current.artifactsHash !== currentArtifactsHash;
+
+      if (isNewState) {
+        saveConversation(messages, phase, undefined, turnArtifactsByMessageId, {
+          runtimeSessionId,
+          durableSessionId,
+        });
+        lastSavedStateRef.current = {
+          sessionId,
+          messageCount: messages.length,
+          lastMessageId: lastMessage?.id,
+          lastMessageContent: lastMessage?.content,
+          phase,
+          artifactsHash: currentArtifactsHash,
+        };
+      }
+    }
+  }, [
+    messages,
+    isTyping,
+    phase,
+    turnArtifactsByMessageId,
+    saveConversation,
+    sessionId,
+    runtimeSessionId,
+    durableSessionId,
+    getArtifactsHash,
+  ]);
+
   useEffect(() => {
     if (prevSessionRevisionRef.current !== sessionRevision) {
       // Save the old conversation (if it had messages)
@@ -221,6 +286,10 @@ export function WorkspaceScreen() {
           phaseRef.current,
           undefined,
           turnArtifactsRef.current,
+          {
+            runtimeSessionId,
+            durableSessionId,
+          },
         );
         // PostHog: Track conversation saved
         telemetry.capture("conversation_saved", {
@@ -229,7 +298,7 @@ export function WorkspaceScreen() {
       }
       prevSessionRevisionRef.current = sessionRevision;
     }
-  }, [sessionRevision, saveConversation, telemetry]);
+  }, [sessionRevision, saveConversation, telemetry, runtimeSessionId, durableSessionId]);
 
   useEffect(() => {
     if (!requestedConversationId) return;
@@ -241,8 +310,21 @@ export function WorkspaceScreen() {
     }
 
     if (messagesRef.current.length > 0 && messagesRef.current !== conversation.messages) {
-      saveConversation(messagesRef.current, phaseRef.current, undefined, turnArtifactsRef.current);
+      saveConversation(messagesRef.current, phaseRef.current, undefined, turnArtifactsRef.current, {
+        runtimeSessionId,
+        durableSessionId,
+      });
     }
+
+    // Initialize the last saved state ref with the loaded conversation to prevent redundant save on load
+    lastSavedStateRef.current = {
+      sessionId,
+      messageCount: conversation.messages.length,
+      lastMessageId: conversation.messages[conversation.messages.length - 1]?.id,
+      lastMessageContent: conversation.messages[conversation.messages.length - 1]?.content,
+      phase: conversation.phase || "idle",
+      artifactsHash: getArtifactsHash(conversation.turnArtifactsByMessageId || {}),
+    };
 
     loadConversation(conversation);
     clearRequestedConversation();
@@ -252,6 +334,10 @@ export function WorkspaceScreen() {
     loadConversation,
     requestedConversationId,
     saveConversation,
+    sessionId,
+    runtimeSessionId,
+    durableSessionId,
+    getArtifactsHash,
   ]);
 
   const runtimeGuard = getWorkspaceRuntimeGuard(runtimeStatus.data);
@@ -261,6 +347,7 @@ export function WorkspaceScreen() {
   const hasMessages = messages.length > 0;
   const composerCanSubmit = backendEnabled && !isTyping;
   const isReceivingResponse = backendEnabled && isTyping;
+  const sidepanelOpen = useWorkspaceUiStore((state) => state.sidebarOpen);
 
   const composerPlaceholder = getComposerPlaceholder({
     backendEnabled,
@@ -277,80 +364,113 @@ export function WorkspaceScreen() {
     exportTraceMutation(trimmedSessionId);
   }, [exportTraceMutation, sessionId]);
 
-  const traceExportAction = (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      className="h-8 gap-1.5 text-xs"
-      disabled={!sessionId || isExportingTraces}
-      onClick={handleExportTraces}
-      title="Export traces for GEPA"
-    >
-      {isExportingTraces ? (
-        <Loader2 className="animate-spin" data-icon="inline-start" />
-      ) : (
-        <FileJson data-icon="inline-start" />
-      )}
-      Export traces for GEPA
-    </Button>
+  const headerActions = (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-8 gap-1.5 text-xs"
+        disabled={!sessionId || isExportingTraces}
+        onClick={handleExportTraces}
+        title="Export traces for GEPA"
+      >
+        {isExportingTraces ? (
+          <Loader2 className="animate-spin" data-icon="inline-start" />
+        ) : (
+          <FileJson data-icon="inline-start" />
+        )}
+        Export traces for GEPA
+      </Button>
+      <WorkspaceSidepanelToggle />
+    </>
   );
 
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">
-      {headerActionsHost ? createPortal(traceExportAction, headerActionsHost) : null}
+      {headerActionsHost ? createPortal(headerActions, headerActionsHost) : null}
       <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
-        {/* Main chat column */}
-        <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-          {traceExport ? (
-            <div className="px-4 pt-4 md:px-6">
-              <Alert className="mx-auto max-w-175">
-                <FileJson className="text-muted-foreground" />
-                <AlertTitle>Trace export ready for GEPA</AlertTitle>
-                <AlertDescription>
-                  <div className="space-y-1 text-xs">
-                    <div>Session: {traceExport.session_id}</div>
-                    <div>JSON: {traceExport.json_path ?? "-"}</div>
-                    <div>JSONL: {traceExport.jsonl_path ?? "-"}</div>
-                    <div>Distilled: {traceExport.distilled_bundle_path ?? "-"}</div>
-                  </div>
-                </AlertDescription>
-              </Alert>
+        <ResizablePanelGroup
+          orientation="horizontal"
+          defaultLayout={
+            sidepanelOpen ? { "workspace-chat": 68, "workspace-sidepanel": 32 } : undefined
+          }
+          className="min-h-0 flex-1"
+        >
+          <ResizablePanel
+            id="workspace-chat"
+            minSize={sidepanelOpen ? WORKSPACE_CHAT_MIN_SIZE : undefined}
+            defaultSize={sidepanelOpen ? WORKSPACE_CHAT_OPEN_SIZE : "100%"}
+            className="min-w-0"
+          >
+            <div className="flex h-full min-h-0 flex-col overflow-hidden">
+              {traceExport ? (
+                <div className="px-4 pt-4 md:px-6">
+                  <Alert className="mx-auto max-w-175">
+                    <FileJson className="text-muted-foreground" />
+                    <AlertTitle>Trace export ready for GEPA</AlertTitle>
+                    <AlertDescription>
+                      <div className="space-y-1 text-xs">
+                        <div>Session: {traceExport.session_id}</div>
+                        <div>JSON: {traceExport.json_path ?? "-"}</div>
+                        <div>JSONL: {traceExport.jsonl_path ?? "-"}</div>
+                        <div>Distilled: {traceExport.distilled_bundle_path ?? "-"}</div>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                </div>
+              ) : null}
+              <div className="flex-1 min-h-0" data-slot="workspace-agent-chat">
+                <WorkspaceMessageList
+                  messages={messages}
+                  isTyping={isReceivingResponse}
+                  isMobile={isMobile}
+                  showEmptyState={!hasMessages && phase === "idle" && !isTyping}
+                  onSuggestionClick={setInputValue}
+                  onResolveHitl={resolveHitl}
+                  onResolveClarification={resolveClarification}
+                  value={inputValue}
+                  onChange={setInputValue}
+                  onSend={handleSubmit}
+                  onStop={stopStreaming}
+                  executionMode={executionMode}
+                  onExecutionModeChange={setExecutionMode}
+                  canSubmit={composerCanSubmit}
+                  placeholder={composerPlaceholder}
+                  runtimeWarning={
+                    showRuntimeWarning
+                      ? {
+                          title: runtimeWarningTitle,
+                          description: runtimeGuard.description,
+                          guidance: warningGuidance,
+                          onOpenSettings: handleOpenRuntimeSettings,
+                        }
+                      : undefined
+                  }
+                  activeModels={runtimeStatus.data?.active_models}
+                  onOpenModelSettings={handleOpenRuntimeSettings}
+                />
+              </div>
             </div>
+          </ResizablePanel>
+
+          {!isMobile && sidepanelOpen ? (
+            <>
+              <ResizableHandle className="relative bg-border-subtle/70 transition-colors hover:bg-border focus-visible:ring-1 focus-visible:ring-accent after:absolute after:inset-y-0 after:left-1/2 after:w-2 after:-translate-x-1/2" />
+              <ResizablePanel
+                id="workspace-sidepanel"
+                defaultSize={WORKSPACE_SIDEPANEL_OPEN_SIZE}
+                minSize={WORKSPACE_SIDEPANEL_MIN_SIZE}
+                maxSize={WORKSPACE_SIDEPANEL_MAX_SIZE}
+                className="min-w-0"
+              >
+                <WorkspaceSidepanel isMobile={false} />
+              </ResizablePanel>
+            </>
           ) : null}
-          <div className="flex-1 min-h-0" data-slot="workspace-agent-chat">
-            <WorkspaceMessageList
-              messages={messages}
-              isTyping={isReceivingResponse}
-              isMobile={isMobile}
-              showEmptyState={!hasMessages && phase === "idle" && !isTyping}
-              onSuggestionClick={setInputValue}
-              onResolveHitl={resolveHitl}
-              onResolveClarification={resolveClarification}
-              value={inputValue}
-              onChange={setInputValue}
-              onSend={handleSubmit}
-              onStop={stopStreaming}
-              executionMode={executionMode}
-              onExecutionModeChange={setExecutionMode}
-              canSubmit={composerCanSubmit}
-              placeholder={composerPlaceholder}
-              runtimeWarning={
-                showRuntimeWarning
-                  ? {
-                      title: runtimeWarningTitle,
-                      description: runtimeGuard.description,
-                      guidance: warningGuidance,
-                      onOpenSettings: handleOpenRuntimeSettings,
-                    }
-                  : undefined
-              }
-              activeModels={runtimeStatus.data?.active_models}
-              onOpenModelSettings={handleOpenRuntimeSettings}
-            />
-          </div>
-        </div>
+        </ResizablePanelGroup>
       </div>
+      {isMobile ? <WorkspaceSidepanel isMobile /> : null}
     </div>
   );
 }

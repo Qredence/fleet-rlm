@@ -177,6 +177,124 @@ def test_status_sandbox_exec_projects_to_sandbox_exec_source_type():
     assert frame["payload"]["source_type"] == "sandbox_exec"
 
 
+def test_mlflow_span_projects_to_canonical_execution_step_frame():
+    project_chat = importlib.import_module("fleet_rlm.api.events.project_chat")
+    events_module = importlib.import_module("fleet_rlm.runtime.events")
+
+    event = events_module.RuntimeEvent.mlflow_span(
+        span_id="span-1",
+        name="Planner model",
+        status="started",
+        trace_id="trace-1",
+        input={"prompt": "hello"},
+    )
+    frame = project_chat.project_chat(event)
+
+    assert event.kind == events_module.RuntimeEventKind.MLFLOW_SPAN
+    assert frame["kind"] == "execution_step"
+    assert frame["text"] == "Planner model"
+    assert frame["payload"]["source_type"] == "mlflow_span"
+    assert frame["payload"]["event_kind"] == "mlflow_span"
+    assert frame["payload"]["span_id"] == "span-1"
+    assert frame["payload"]["status"] == "started"
+    assert frame["payload"]["trace_id"] == "trace-1"
+
+
+@pytest.mark.parametrize(
+    ("raw_status", "expected_status"),
+    [
+        ("OK", "completed"),
+        ("STATUS_CODE_OK", "completed"),
+        ("StatusCode.OK", "completed"),
+        ("complete", "completed"),
+        ("success", "completed"),
+        ("succeeded", "completed"),
+        ("failed", "error"),
+        ("STATUS_CODE_ERROR", "error"),
+        ("running", "started"),
+        ("in_progress", "started"),
+    ],
+)
+def test_mlflow_span_normalizes_external_status_values(raw_status: str, expected_status: str):
+    events_module = importlib.import_module("fleet_rlm.runtime.events")
+
+    event = events_module.RuntimeEvent.mlflow_span(
+        span_id="span-1",
+        name="Planner model",
+        status=raw_status,
+    )
+
+    assert event.payload["status"] == expected_status
+    assert event.payload["raw_status"] == raw_status
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_status"),
+    [
+        ({"status": ""}, "started"),
+        ({"status": "mystery", "error": {"message": "boom"}}, "error"),
+        ({"status": "mystery", "ended_at": "2026-06-17T15:00:00Z"}, "completed"),
+        ({"status": "mystery", "duration_ms": 12}, "completed"),
+        ({"status": "mystery", "output": {"text": "done"}}, "completed"),
+    ],
+)
+def test_mlflow_span_infers_unknown_status_values(payload: dict[str, object], expected_status: str):
+    events_module = importlib.import_module("fleet_rlm.runtime.events")
+
+    event = events_module.RuntimeEvent.mlflow_span(
+        span_id="span-1",
+        name="Planner model",
+        **payload,
+    )
+
+    assert event.payload["status"] == expected_status
+    if payload["status"]:
+        assert event.payload["raw_status"] == payload["status"]
+    else:
+        assert "raw_status" not in event.payload
+
+
+def test_relay_event_from_rlm_step_normalizes_external_mlflow_status_values():
+    runtime_helpers = importlib.import_module("fleet_rlm.runtime.agent.runtime_helpers")
+
+    event = runtime_helpers.relay_event_from_rlm_step(
+        {
+            "phase": "mlflow_span",
+            "span_id": "span-1",
+            "name": "Provider call",
+            "status": "STATUS_CODE_OK",
+            "trace_id": "trace-1",
+        }
+    )
+
+    assert event is not None
+    assert event.payload["status"] == "completed"
+    assert event.payload["raw_status"] == "STATUS_CODE_OK"
+
+
+def test_mlflow_span_projection_sanitizes_detail_payload(monkeypatch):
+    project_chat = importlib.import_module("fleet_rlm.api.events.project_chat")
+    sanitizer_module = importlib.import_module("fleet_rlm.api.events.sanitizer")
+    events_module = importlib.import_module("fleet_rlm.runtime.events")
+
+    monkeypatch.setattr(sanitizer_module, "_max_text_chars", lambda: 8)
+    monkeypatch.setattr(sanitizer_module, "_max_collection_items", lambda: 10)
+    monkeypatch.setattr(sanitizer_module, "_max_recursion_depth", lambda: 4)
+
+    event = events_module.RuntimeEvent.mlflow_span(
+        span_id="span-1",
+        name="Provider call",
+        status="completed",
+        input={"api_key": "secret", "prompt": "abcdefghijklmnopqrstuvwxyz"},
+        output={"text": "abcdefghijklmnopqrstuvwxyz"},
+    )
+    frame = project_chat.project_chat(event)
+
+    assert frame["payload"]["input"]["api_key"] == "<redacted>"
+    assert frame["payload"]["input"]["prompt"] == "abcdefgh...[truncated]"
+    assert frame["payload"]["output"]["text"] == "abcdefgh...[truncated]"
+
+
 def test_payload_override_preserves_runtime_event_payload_fields():
     project_chat = importlib.import_module("fleet_rlm.api.events.project_chat")
     events_module = importlib.import_module("fleet_rlm.runtime.events")

@@ -4,8 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [0.6.0] - 2026-06-17
+
+### Added
+
+- **Change:** Added a workspace-local, collapsible Workbench sidepanel with `Trajectories`, `Graph`, and `Volume` tabs.
+  **Outcome:** Chat remains the primary workspace surface while trace inspection, graph visualization, and Daytona volume preview stay available in a focused right-side inspector.
+- **Change:** Added session trace timeline and React Flow graph renderers backed by persisted MLflow/debug spans.
+  **Outcome:** Completed workspace runs can be audited chronologically or as parent-child span relationships without selecting legacy shell canvas tabs.
+- **Change:** Added an inline Daytona volume browser with searchable tree, resizable desktop split, and selected-file preview.
+  **Outcome:** Users can inspect workspace volume files without navigating away from `/app/workspace`.
+
 ### Changed
 
+- **Change:** Reworked Workbench layout around a resizable chat/sidepanel split with a subtle resize handle and mobile bottom-sheet fallback.
+  **Outcome:** The sidepanel starts closed, can resize up to 75% of the workspace width, and preserves selected turn/tab/file state when collapsed.
+- **Change:** Hardened workspace trace lookup to resolve both durable chat-session ids and runtime websocket `external_session_id` values.
+  **Outcome:** `Trajectories` and `Graph` can populate from live session traces after a message completes, even before the frontend has a durable session id.
+- **Change:** Tightened markdown, code block, and graph detail containment inside the Workbench sidepanel.
+  **Outcome:** Long trace text, paths, code snippets, and selected-node summaries wrap within the panel instead of creating horizontal overflow.
 - **Change:** Consolidated websocket chat streaming on canonical `RuntimeEvent` objects with shared wire source-type projection.
   **Outcome:** Runtime, persistence, and Web UI consumers now share one typed streaming contract for execution start, step, and completion frames.
 - **Change:** Corrected delayed Daytona startup notifications to emit `status` events and preserve runtime payload fields when enriching websocket frames.
@@ -1133,6 +1150,7 @@ All notable changes to this project are documented in this file.
 - Removed checked-in `__pycache__` directories under `src/fleet_rlm/`.
 - Moved non-runtime memory-topology notes out of package source and into docs.
 
+[0.6.0]: https://github.com/Qredence/fleet-rlm/compare/v0.5.50...v0.6.0
 [0.5.50]: https://github.com/Qredence/fleet-rlm/compare/v0.5.40...v0.5.50
 [0.5.40]: https://github.com/Qredence/fleet-rlm/compare/v0.5.31...v0.5.40
 [0.5.31]: https://github.com/Qredence/fleet-rlm/compare/v0.5.3...v0.5.31

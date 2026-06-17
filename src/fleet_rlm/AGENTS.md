@@ -90,6 +90,9 @@ Canonical HTTP and websocket surfaces:
 - `POST /api/v1/sessions/{id}/restore` — unarchive a session
 - `POST /api/v1/sessions/{id}/export` — export session as a GEPA dataset
 - `POST /api/v1/sessions/{id}/trace-export` — export raw MLflow traces plus a distilled GEPA bundle
+- Session trace lookup surfaces must accept the durable chat session id as the
+  primary selector and may resolve runtime `external_session_id` aliases for
+  MLflow-backed traces
 - `GET/PATCH /api/v1/runtime/settings`
 - `POST /api/v1/runtime/tests/daytona`
 - `POST /api/v1/runtime/tests/lm`
@@ -190,7 +193,10 @@ Websocket/runtime contract rules:
   - do not route message, cancel, or command frames through this socket
   - emit only `execution_started`, `execution_step`, and `execution_completed`
 - Keep websocket workspace/user identity auth-derived on both routes; reject client-supplied `workspace_id` and `user_id`
-- Treat `execution_completed.summary` as the canonical workbench/canvas hydration payload
+- Treat `execution_completed.summary` as the canonical workbench/sidepanel hydration payload
+- Keep session trace and graph lookup tolerant of missing MLflow rows: the
+  frontend workspace sidepanel should still be able to render from live
+  transcript and artifact summaries when trace storage is unavailable.
 - Keep interpreter-originated REPL execution steps wired through `execution_event_callback` and preserve any previously installed callback when bridging hooks
 - Do not reintroduce Daytona-only workbench hydration through chat-final payload scraping
 - Daytona-backed chat should emit live canonical `trajectory_step`, `reasoning_step`, `status`, `warning`, `tool_call`, and `tool_result` events during execution
