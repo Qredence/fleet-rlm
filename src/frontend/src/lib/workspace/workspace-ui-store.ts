@@ -1,10 +1,13 @@
 import { create } from "zustand";
 
-import type { CreationPhase, InspectorTab } from "@/lib/workspace/workspace-types";
+import type {
+  CreationPhase,
+  InspectorTab,
+  WorkspaceSidepanelTab,
+} from "@/lib/workspace/workspace-types";
 import type { WsRuntimeContext } from "@/lib/rlm-api/ws-types";
-import { useNavigationStore } from "@/stores/navigation-store";
 
-export type SidebarTab = "documents" | "memory" | "context" | "checkpoint";
+export type SidebarTab = WorkspaceSidepanelTab;
 
 export interface MemoryEntry {
   id: string;
@@ -12,25 +15,15 @@ export interface MemoryEntry {
   timestamp: string;
 }
 
-function readSidebarOpen(): boolean {
-  try {
-    return localStorage.getItem("workspace.sidebarOpen") === "true";
-  } catch {
-    return false;
-  }
-}
-
-function writeSidebarOpen(value: boolean): void {
-  try {
-    localStorage.setItem("workspace.sidebarOpen", value ? "true" : "false");
-  } catch {
-    // ignore
-  }
+function inspectorTabToSidepanelTab(tab?: InspectorTab): WorkspaceSidepanelTab {
+  if (tab === "graph" || tab === "volume" || tab === "trajectories") return tab;
+  return "trajectories";
 }
 
 export interface WorkspaceUiState {
   selectedAssistantTurnId: string | null;
   activeInspectorTab: InspectorTab;
+  activeSidepanelTab: WorkspaceSidepanelTab;
   creationPhase: CreationPhase;
   sessionRevision: number;
   requestedConversationId: string | null;
@@ -49,34 +42,37 @@ export interface WorkspaceUiState {
   setCreationPhase: (phase: CreationPhase) => void;
   setPendingHitlMessageId: (id: string | null) => void;
   setRuntimeContext: (ctx: WsRuntimeContext | null) => void;
+  openSidepanel: (tab?: WorkspaceSidepanelTab) => void;
+  closeSidepanel: () => void;
+  setSidepanelOpen: (open: boolean) => void;
+  setSidepanelTab: (tab: WorkspaceSidepanelTab) => void;
+  toggleSidepanel: () => void;
   toggleSidebar: () => void;
   setSidebarTab: (tab: SidebarTab) => void;
   addMemoryEntry: (entry: { content: string; timestamp: string }) => void;
   clearMemoryEntries: () => void;
 }
 
-function openShellCanvas() {
-  useNavigationStore.getState().openCanvasPanel("workspace");
-}
-
 let _nextMemoryId = 0;
 
 export const useWorkspaceUiStore = create<WorkspaceUiState>((set, get) => ({
   selectedAssistantTurnId: null,
-  activeInspectorTab: "message",
+  activeInspectorTab: "trajectories",
+  activeSidepanelTab: "trajectories",
   creationPhase: "idle",
   sessionRevision: 0,
   requestedConversationId: null,
   pendingHitlMessageId: null,
   runtimeContext: null,
-  sidebarOpen: readSidebarOpen(),
-  sidebarTab: "memory",
+  sidebarOpen: false,
+  sidebarTab: "trajectories",
   memoryEntries: [],
   newSession: () =>
     set({
       creationPhase: "idle",
       selectedAssistantTurnId: null,
-      activeInspectorTab: "message",
+      activeInspectorTab: "trajectories",
+      activeSidepanelTab: "trajectories",
       requestedConversationId: null,
       runtimeContext: null,
       sessionRevision: get().sessionRevision + 1,
@@ -84,29 +80,35 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set, get) => ({
   requestConversationLoad: (conversationId) =>
     set({
       selectedAssistantTurnId: null,
-      activeInspectorTab: "message",
+      activeInspectorTab: "trajectories",
+      activeSidepanelTab: "trajectories",
       requestedConversationId: conversationId,
     }),
   clearRequestedConversation: () => set({ requestedConversationId: null }),
   openInspector: (turnId, tab) => {
+    const sidepanelTab = inspectorTabToSidepanelTab(tab);
     set((state) => ({
       selectedAssistantTurnId: turnId === undefined ? state.selectedAssistantTurnId : turnId,
-      activeInspectorTab: tab ?? state.activeInspectorTab,
+      activeInspectorTab: tab ?? sidepanelTab,
+      activeSidepanelTab: sidepanelTab,
+      sidebarOpen: true,
     }));
-    openShellCanvas();
   },
   selectInspectorTurn: (turnId, tab) => {
-    set((state) => ({
+    const sidepanelTab = inspectorTabToSidepanelTab(tab);
+    set({
       selectedAssistantTurnId: turnId,
-      activeInspectorTab: tab ?? state.activeInspectorTab,
-    }));
-    openShellCanvas();
+      activeInspectorTab: tab ?? sidepanelTab,
+      activeSidepanelTab: sidepanelTab,
+      sidebarOpen: true,
+    });
   },
   setInspectorTab: (tab) => set({ activeInspectorTab: tab }),
   clearInspectorSelection: () =>
     set({
       selectedAssistantTurnId: null,
-      activeInspectorTab: "message",
+      activeInspectorTab: "trajectories",
+      activeSidepanelTab: "trajectories",
     }),
   setCreationPhase: (creationPhase) => set({ creationPhase }),
   setPendingHitlMessageId: (pendingHitlMessageId) => set({ pendingHitlMessageId }),
@@ -128,13 +130,38 @@ export const useWorkspaceUiStore = create<WorkspaceUiState>((set, get) => ({
       }
       return { runtimeContext: next };
     }),
+  openSidepanel: (tab) =>
+    set((state) => {
+      const nextTab = tab ?? state.activeSidepanelTab;
+      return {
+        sidebarOpen: true,
+        activeSidepanelTab: nextTab,
+        activeInspectorTab: nextTab,
+      };
+    }),
+  closeSidepanel: () => set({ sidebarOpen: false }),
+  setSidepanelOpen: (open) => set({ sidebarOpen: open }),
+  setSidepanelTab: (activeSidepanelTab) =>
+    set({
+      activeSidepanelTab,
+      activeInspectorTab: activeSidepanelTab,
+    }),
+  toggleSidepanel: () =>
+    set((state) => {
+      const next = !state.sidebarOpen;
+      return { sidebarOpen: next };
+    }),
   toggleSidebar: () =>
     set((state) => {
       const next = !state.sidebarOpen;
-      writeSidebarOpen(next);
       return { sidebarOpen: next };
     }),
-  setSidebarTab: (sidebarTab) => set({ sidebarTab }),
+  setSidebarTab: (sidebarTab) =>
+    set({
+      sidebarTab,
+      activeSidepanelTab: sidebarTab,
+      activeInspectorTab: sidebarTab,
+    }),
   addMemoryEntry: ({ content, timestamp }) =>
     set((state) => ({
       memoryEntries: [...state.memoryEntries, { id: `mem-${++_nextMemoryId}`, content, timestamp }],

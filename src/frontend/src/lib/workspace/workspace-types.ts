@@ -7,10 +7,12 @@ export type PromptFeature = "library" | "contextMemory" | "capabilities" | "webS
 
 export type PromptMode = "auto" | "workspace" | "webSearch" | "cowork";
 
+export type WorkspaceSidepanelTab = "trajectories" | "graph" | "volume";
+
 export type InspectorTab =
+  | WorkspaceSidepanelTab
   | "message"
   | "execution"
-  | "graph"
   | "trace"
   | "workbench"
   | "documents"
@@ -277,6 +279,8 @@ export interface Conversation {
   id: string;
   title: string;
   messages: ChatMessage[];
+  runtimeSessionId?: string;
+  durableSessionId?: string | null;
   turnArtifactsByMessageId?: Record<string, ExecutionStep[]>;
   phase: CreationPhase;
   createdAt: string;

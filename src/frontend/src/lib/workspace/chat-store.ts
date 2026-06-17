@@ -24,9 +24,13 @@ interface ChatStore {
   turnArtifactsByMessageId: Record<string, ExecutionStep[]>;
   isStreaming: boolean;
   sessionId: string;
+  runtimeSessionId: string;
+  durableSessionId: string | null;
   error: string | null;
   runtimeMode: WsRuntimeMode;
   setSessionId: (id: string) => void;
+  setRuntimeSessionId: (id: string) => void;
+  setDurableSessionId: (id: string | null) => void;
   resetSession: () => void;
   setRuntimeMode: (mode: WsRuntimeMode) => void;
   setMessages: (messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
@@ -49,24 +53,34 @@ interface ChatStore {
   stopStreaming: () => void;
 }
 
+const initialRuntimeSessionId = createBackendSessionId();
+
 export const useChatStore = create<ChatStore>((set, get) => ({
   messages: [],
   turnArtifactsByMessageId: {},
   isStreaming: false,
-  sessionId: createBackendSessionId(),
+  sessionId: initialRuntimeSessionId,
+  runtimeSessionId: initialRuntimeSessionId,
+  durableSessionId: null,
   error: null,
   runtimeMode: "daytona_pilot",
   streamController: null,
 
-  setSessionId: (id) => set({ sessionId: id }),
-  resetSession: () =>
+  setSessionId: (id) => set({ sessionId: id, runtimeSessionId: id }),
+  setRuntimeSessionId: (id) => set({ sessionId: id, runtimeSessionId: id }),
+  setDurableSessionId: (id) => set({ durableSessionId: id }),
+  resetSession: () => {
+    const nextSessionId = createBackendSessionId();
     set({
-      sessionId: createBackendSessionId(),
+      sessionId: nextSessionId,
+      runtimeSessionId: nextSessionId,
+      durableSessionId: null,
       messages: [],
       turnArtifactsByMessageId: {},
       isStreaming: false,
       error: null,
-    }),
+    });
+  },
   setRuntimeMode: (runtimeMode) => set({ runtimeMode }),
 
   setMessages: (updater) =>

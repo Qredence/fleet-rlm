@@ -50,7 +50,9 @@ function AppLayout() {
   const settingsReturnFocusRef = useRef<HTMLElement | null>(null);
   const panelGroupRef = useRef<GroupImperativeHandle>(null);
   const [isResizing, setIsResizing] = useState(false);
-  const { isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } = useNavigationStore();
+  const { activeNav, isCanvasOpen, setIsCanvasOpen, registerCanvasHandlers } =
+    useNavigationStore();
+  const shellCanvasOpen = activeNav !== "workspace" && isCanvasOpen;
 
   useEffect(() => {
     registerCommandPaletteHandlers({ open: () => setCmdOpen(true) });
@@ -114,8 +116,14 @@ function AppLayout() {
     if (isMobile) {
       return;
     }
-    panelGroupRef.current?.setLayout(isCanvasOpen ? OPEN_LAYOUT : CLOSED_LAYOUT);
-  }, [isCanvasOpen, isMobile]);
+    panelGroupRef.current?.setLayout(shellCanvasOpen ? OPEN_LAYOUT : CLOSED_LAYOUT);
+  }, [isMobile, shellCanvasOpen]);
+
+  useEffect(() => {
+    if (activeNav === "workspace" && isCanvasOpen) {
+      setIsCanvasOpen(false);
+    }
+  }, [activeNav, isCanvasOpen, setIsCanvasOpen]);
 
   useEffect(() => {
     if (!isResizing) {
@@ -168,7 +176,7 @@ function AppLayout() {
                 <ResizablePanelGroup
                   groupRef={panelGroupRef}
                   orientation="horizontal"
-                  defaultLayout={isCanvasOpen ? OPEN_LAYOUT : CLOSED_LAYOUT}
+                  defaultLayout={shellCanvasOpen ? OPEN_LAYOUT : CLOSED_LAYOUT}
                   className="min-h-0 flex-1"
                 >
                   <ResizablePanel id="content" minSize="40%" style={panelStyle}>
@@ -178,10 +186,12 @@ function AppLayout() {
                   <ResizableHandle
                     className={cn(
                       "relative transition-colors",
-                      isCanvasOpen ? "w-px bg-border hover:bg-accent" : "pointer-events-none w-0",
+                      shellCanvasOpen
+                        ? "w-px bg-border hover:bg-accent"
+                        : "pointer-events-none w-0",
                     )}
                     onPointerDown={() => setIsResizing(true)}
-                    disabled={!isCanvasOpen}
+                    disabled={!shellCanvasOpen}
                   />
 
                   <ResizablePanel
@@ -190,15 +200,17 @@ function AppLayout() {
                     collapsedSize="0%"
                     minSize="26%"
                     style={panelStyle}
-                    onResize={({ asPercentage }) => setIsCanvasOpen(asPercentage > 0)}
+                    onResize={({ asPercentage }) =>
+                      setIsCanvasOpen(activeNav !== "workspace" && asPercentage > 0)
+                    }
                   >
                     <div
                       className={cn(
                         "h-full min-h-0 overflow-hidden transition-opacity duration-200",
-                        isCanvasOpen ? "opacity-100" : "opacity-0",
+                        shellCanvasOpen ? "opacity-100" : "opacity-0",
                       )}
                     >
-                      <LayoutSidepanel />
+                      {shellCanvasOpen ? <LayoutSidepanel /> : null}
                     </div>
                   </ResizablePanel>
                 </ResizablePanelGroup>
@@ -209,7 +221,7 @@ function AppLayout() {
       </SidebarProvider>
 
       {isMobile ? (
-        <Sheet open={isCanvasOpen} onOpenChange={setIsCanvasOpen}>
+        <Sheet open={shellCanvasOpen} onOpenChange={setIsCanvasOpen}>
           <SheetContent
             side="bottom"
             showCloseButton={false}
@@ -224,7 +236,7 @@ function AppLayout() {
                 <div className="h-1.5 w-10 rounded-full bg-border" aria-hidden="true" />
               </div>
               <div className="min-h-0 flex-1 overflow-hidden">
-                <LayoutSidepanel />
+                {shellCanvasOpen ? <LayoutSidepanel /> : null}
               </div>
             </div>
           </SheetContent>

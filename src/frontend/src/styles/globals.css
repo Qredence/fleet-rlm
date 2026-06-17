@@ -531,6 +531,56 @@
   background-color: color-mix(in srgb, var(--node-color) 15%, transparent);
 }
 
+@utility volume-tree-row {
+  padding-left: calc(var(--tree-indent-base) + (var(--tree-depth, 0) * var(--tree-indent-step)));
+}
+
+@utility workspace-volume-split {
+  display: grid;
+  grid-template-columns: minmax(0, var(--volume-tree-width, 280px)) 1px minmax(0, 1fr);
+}
+
+@utility workspace-volume-resize-handle {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+
+  &::after {
+    position: absolute;
+    inset-block: 0;
+    left: 50%;
+    width: var(--space-3);
+    transform: translateX(-50%);
+    content: "";
+  }
+}
+
+@utility volume-metadata-label {
+  min-width: var(--label-min-width);
+  font-family: var(--font-sans);
+  font-size: var(--font-text-2xs-size);
+  font-weight: var(--font-text-2xs-weight);
+  line-height: var(--font-text-2xs-line-height);
+  letter-spacing: var(--font-text-2xs-tracking);
+}
+
+@utility volume-preview-surface {
+  background-color: var(--color-surface-secondary);
+}
+
+@utility volume-text-preview {
+  font-family: var(--font-mono);
+  font-size: var(--font-text-2xs-size);
+  font-weight: var(--font-text-2xs-weight);
+  line-height: var(--font-text-xs-line-height);
+  letter-spacing: var(--font-text-2xs-tracking);
+}
+
+@utility artifact-graph-dialog {
+  width: min(80vw, 1120px);
+  height: min(78vh, 780px);
+}
+
 /* Utility: design-token border radii */
 @utility rounded-token {
   border-radius: var(--radius);
@@ -1720,6 +1770,126 @@ li {
   }
 }
 
+/* ── Streamdown containment ─────────────────────────────────────── */
+.streamdown-root,
+.streamdown-content {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+[data-streamdown="code-block"] {
+  max-width: 100%;
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.streamdown-content :where(p, li, blockquote, h1, h2, h3, h4, h5, h6) {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.streamdown-content :where(pre) {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.streamdown-content :where(pre code) {
+  display: block;
+  min-width: max-content;
+  overflow-wrap: normal;
+  white-space: pre;
+  word-break: normal;
+}
+
+.streamdown-content :where(:not(pre) > code) {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.graph-selected-node-content,
+.graph-selected-node-content .streamdown-root,
+.graph-selected-node-content .streamdown-content {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.graph-selected-node-content .streamdown-content {
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+}
+
+.graph-selected-node-content .streamdown-content :where(h1, h2, h3, h4, h5, h6) {
+  margin-block: 0.625rem 0.375rem;
+  font-size: var(--font-text-sm-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--font-text-sm-line-height);
+}
+
+.graph-selected-node-content .streamdown-content :where(p, li, blockquote) {
+  font-size: var(--font-text-xs-size);
+  line-height: var(--font-text-xs-line-height);
+}
+
+.graph-selected-node-content .streamdown-content :where(p, li, blockquote, h1, h2, h3, h4, h5, h6) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.graph-selected-node-content .streamdown-content :where(ul, ol) {
+  padding-inline-start: 1rem;
+}
+
+.graph-selected-node-content .streamdown-content :where(pre) {
+  overflow-x: hidden;
+  white-space: pre-wrap;
+}
+
+.graph-selected-node-content .streamdown-content :where(pre code) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.workspace-trajectory-content,
+.workspace-trajectory-content :where([data-slot="card"], [data-slot="card-header"], [data-slot="card-content"]) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.workspace-trajectory-content :where(.streamdown-root, .streamdown-content) {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.workspace-trajectory-content :where(p, li, blockquote, h1, h2, h3, h4, h5, h6, code) {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.workspace-trajectory-content :where(pre) {
+  max-width: 100%;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+}
+
+.workspace-trajectory-content :where(pre code) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ═══ SECTION 5: Vendor Overrides ═════════════════════════════════ */
 
 /*
@@ -1729,26 +1899,43 @@ li {
  *   - React Flow (node editor / graph visualization)
  */
 /* ── React Flow Minimal Skin ─────────────────────────────────────── */
-.artifact-graph-flow .react-flow__controls {
+.artifact-graph-flow .react-flow__controls,
+.workspace-trace-flow .react-flow__controls {
   border: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--color-surface-elevated) 92%, transparent);
   border-radius: 8px;
   box-shadow: none;
 }
 
-.artifact-graph-flow .react-flow__controls-button {
+.artifact-graph-flow .react-flow__controls-button,
+.workspace-trace-flow .react-flow__controls-button {
   background: transparent;
   border-color: var(--border-subtle);
   color: var(--muted-foreground);
 }
 
-.artifact-graph-flow .react-flow__controls-button:hover {
+.artifact-graph-flow .react-flow__controls-button:hover,
+.workspace-trace-flow .react-flow__controls-button:hover {
   background: color-mix(in srgb, var(--color-background-primary-soft) 42%, transparent);
   color: var(--color-text);
 }
 
-.artifact-graph-flow .react-flow__minimap {
+.artifact-graph-flow .react-flow__minimap,
+.workspace-trace-flow .react-flow__minimap {
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   background: color-mix(in srgb, var(--color-surface-elevated) 90%, transparent);
+}
+
+.workspace-trace-flow .trace-flow-edge-fallback path {
+  stroke-dasharray: 4 4;
+}
+
+.artifact-graph-flow .artifact-graph-edge-chrono path {
+  stroke-dasharray: 4 4;
+}
+
+.artifact-graph-flow .artifact-graph-edge-chrono + .react-flow__edge-textwrapper,
+.artifact-graph-flow .artifact-graph-edge-chrono .react-flow__edge-text {
+  display: none;
 }

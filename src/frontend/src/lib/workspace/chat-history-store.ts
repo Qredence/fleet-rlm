@@ -17,6 +17,7 @@ interface ChatHistoryState {
     phase: CreationPhase,
     conversationId?: string | null,
     turnArtifactsByMessageId?: Record<string, ExecutionStep[]>,
+    sessionIds?: { runtimeSessionId?: string | null; durableSessionId?: string | null },
   ) => string;
   loadConversation: (id: string) => Conversation | null;
   deleteConversation: (id: string) => void;
@@ -113,7 +114,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
     (set, get) => ({
       conversations: [],
 
-      saveConversation: (messages, phase, conversationId, turnArtifactsByMessageId) => {
+      saveConversation: (messages, phase, conversationId, turnArtifactsByMessageId, sessionIds) => {
         const now = new Date().toISOString();
 
         if (messages.length === 0) return conversationId ?? "";
@@ -142,6 +143,8 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
               const updatedConversation: Conversation = {
                 ...existing,
                 messages,
+                runtimeSessionId: sessionIds?.runtimeSessionId ?? existing.runtimeSessionId,
+                durableSessionId: sessionIds?.durableSessionId ?? existing.durableSessionId,
                 turnArtifactsByMessageId,
                 phase,
                 title,
@@ -156,6 +159,8 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
                 id: finalId,
                 title,
                 messages,
+                runtimeSessionId: sessionIds?.runtimeSessionId ?? undefined,
+                durableSessionId: sessionIds?.durableSessionId ?? null,
                 turnArtifactsByMessageId,
                 phase,
                 createdAt: now,
@@ -168,6 +173,8 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
               id: finalId,
               title,
               messages,
+              runtimeSessionId: sessionIds?.runtimeSessionId ?? undefined,
+              durableSessionId: sessionIds?.durableSessionId ?? null,
               turnArtifactsByMessageId,
               phase,
               createdAt: now,

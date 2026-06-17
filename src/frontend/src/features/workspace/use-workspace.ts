@@ -44,4 +44,5 @@ export type {
   RunSummary,
   RunWorkbenchState,
   RuntimeContext,
+  WorkspaceSidepanelTab,
 } from "@/lib/workspace/workspace-types";

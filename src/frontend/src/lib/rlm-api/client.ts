@@ -151,8 +151,8 @@ async function requestFormData<T>(
 }
 
 export const rlmApiClient = {
-  get<T>(path: string, signal?: AbortSignal): Promise<T> {
-    return requestJson<T>("GET", path, { signal });
+  get<T>(path: string, signal?: AbortSignal, timeoutMs?: number): Promise<T> {
+    return requestJson<T>("GET", path, { signal, timeoutMs });
   },
 
   post<T>(path: string, body?: unknown, signal?: AbortSignal, timeoutMs?: number): Promise<T> {

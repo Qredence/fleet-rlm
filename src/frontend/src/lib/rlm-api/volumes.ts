@@ -8,6 +8,7 @@ export type VolumeTreeResponse = components["schemas"]["VolumeTreeResponse"];
 export type VolumeFileContentResponse = components["schemas"]["VolumeFileContentResponse"];
 
 const BASE = "/api/v1/runtime/volume";
+const VOLUME_REQUEST_TIMEOUT_MS = 120_000;
 
 export interface VolumeTreeInput {
   provider: VolumeProvider;
@@ -32,6 +33,7 @@ export const volumesEndpoints = {
         root_path: input.rootPath,
       }),
       signal,
+      VOLUME_REQUEST_TIMEOUT_MS,
     );
   },
 
@@ -43,6 +45,7 @@ export const volumesEndpoints = {
         max_bytes: input.maxBytes,
       }),
       signal,
+      VOLUME_REQUEST_TIMEOUT_MS,
     );
   },
 };

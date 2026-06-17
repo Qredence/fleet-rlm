@@ -65,7 +65,7 @@ export function GraphInspectorContent({ steps }: { steps: ExecutionStep[] }) {
   ).size;
 
   return (
-    <>
+    <div className="flex min-w-0 max-w-full flex-col gap-3 overflow-hidden">
       <div className={inspectorStyles.graph.statsGrid}>
         <Card className={inspectorStyles.card.root}>
           <CardHeader className={inspectorStyles.card.header}>
@@ -99,7 +99,7 @@ export function GraphInspectorContent({ steps }: { steps: ExecutionStep[] }) {
             Parent-child lineage, actor lanes, and delegated branches for this turn.
           </CardDescription>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="min-w-0 max-w-full p-0">
           <div className={cn(inspectorStyles.graph.canvas, "relative")}>
             <ArtifactGraph
               steps={steps}
@@ -118,7 +118,7 @@ export function GraphInspectorContent({ steps }: { steps: ExecutionStep[] }) {
               </MorphingDialogTrigger>
 
               <MorphingDialogContainer>
-                <MorphingDialogContent className="relative flex h-modal max-w-4/5 flex-col overflow-hidden rounded-2xl border border-border-subtle/80 bg-card shadow-2xl">
+                <MorphingDialogContent className="artifact-graph-dialog relative flex flex-col overflow-hidden rounded-2xl border border-border-subtle/80 bg-card shadow-2xl">
                   <ArtifactGraph
                     steps={steps}
                     activeStepId={activeStepId}
@@ -144,16 +144,23 @@ export function GraphInspectorContent({ steps }: { steps: ExecutionStep[] }) {
       </Card>
 
       {selectedStep ? (
-        <Card className={inspectorStyles.card.root}>
-          <CardHeader className={inspectorStyles.card.header}>
+        <Card className={cn(inspectorStyles.card.root, "max-w-full")}>
+          <CardHeader className={cn(inspectorStyles.card.header, "min-w-0 max-w-full overflow-hidden")}>
             <CardTitle className="typo-label font-medium text-foreground">Selected node</CardTitle>
-            <CardDescription>{selectedStep.label}</CardDescription>
+            <CardDescription className="min-w-0 max-w-full truncate">
+              {selectedStep.label}
+            </CardDescription>
           </CardHeader>
-          <CardContent className={inspectorStyles.card.contentStack}>
+          <CardContent
+            className={cn(
+              inspectorStyles.card.contentStack,
+              "graph-selected-node-content max-w-full overflow-hidden",
+            )}
+          >
             <Streamdown
               content={summarizeArtifactStep(selectedStep)}
               streaming={false}
-              className="text-sm text-foreground"
+              className="min-w-0 max-w-full overflow-hidden text-foreground"
             />
             <div className={inspectorStyles.badge.row}>
               <Badge variant="secondary" className={cn(inspectorStyles.badge.meta, "capitalize")}>
@@ -175,6 +182,6 @@ export function GraphInspectorContent({ steps }: { steps: ExecutionStep[] }) {
           </CardContent>
         </Card>
       ) : null}
-    </>
+    </div>
   );
 }

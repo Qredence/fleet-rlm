@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
+  Controls,
+  MiniMap,
   PanOnScrollMode,
   type Edge,
   type Node,
@@ -33,6 +35,8 @@ const nodeTypes: NodeTypes = { step: GraphStepNode };
 
 const ROW_HEIGHT = 210;
 const LANE_WIDTH = NODE_WIDTH + 96;
+const MAX_ROWS_PER_LANE_COLUMN = 8;
+const FIT_VIEW_NODE_WINDOW = 4;
 
 const ACTOR_PRIORITY: Record<ArtifactActorKind, number> = {
   root_rlm: 0,
@@ -46,6 +50,11 @@ interface LaneMeta {
   label: string;
   actorKind: ArtifactActorKind;
   depth?: number;
+}
+
+interface LanePosition {
+  laneIndex: number;
+  rowIndex: number;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -98,16 +107,6 @@ function inferStatus(step: ExecutionStep): "streaming" | "complete" | "error" {
   }
   if (/error|failed|exception/i.test(step.label)) return "error";
   return "complete";
-}
-
-function formatElapsedLabel(ms: number | undefined): string | undefined {
-  if (ms == null || !Number.isFinite(ms) || ms <= 0) return undefined;
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
-  const mins = Math.floor(seconds / 60);
-  const rem = Math.round(seconds % 60);
-  return `${mins}m ${rem}s`;
 }
 
 function summarizeStep(step: ExecutionStep): string {
@@ -195,20 +194,39 @@ export function ArtifactGraph({
   const { nodes, edges } = useMemo(() => {
     const ordered = sortStepsChronologically(steps);
     const lanes = buildLanes(ordered);
-    const laneIndexByKey = new Map(lanes.map((lane, index) => [lane.key, index]));
+    const laneBaseIndexByKey = new Map(lanes.map((lane, index) => [lane.key, index]));
+    const laneCountsByKey = new Map<string, number>();
+    const extraColumnsBeforeLane = new Map<string, number>();
+    let extraColumnCount = 0;
+
+    for (const lane of lanes) {
+      extraColumnsBeforeLane.set(lane.key, extraColumnCount);
+      const laneCount = ordered.filter((step) => deriveLane(step).key === lane.key).length;
+      const extraForLane = Math.max(0, Math.ceil(laneCount / MAX_ROWS_PER_LANE_COLUMN) - 1);
+      extraColumnCount += extraForLane;
+    }
 
     const graphNodes: Node<GraphStepNodeData>[] = [];
     const graphEdges: Edge[] = [];
     const nodeIdByStepId = new Map<string, string>();
+    const nodePositionByStepId = new Map<string, LanePosition>();
 
     for (let index = 0; index < ordered.length; index += 1) {
       const step = ordered[index]!;
       const lane = deriveLane(step);
-      const laneIndex = laneIndexByKey.get(lane.key) ?? 0;
+      const stepLaneIndex = laneCountsByKey.get(lane.key) ?? 0;
+      laneCountsByKey.set(lane.key, stepLaneIndex + 1);
+      const wrappedColumnIndex = Math.floor(stepLaneIndex / MAX_ROWS_PER_LANE_COLUMN);
+      const rowIndex = stepLaneIndex % MAX_ROWS_PER_LANE_COLUMN;
+      const laneIndex =
+        (laneBaseIndexByKey.get(lane.key) ?? 0) +
+        (extraColumnsBeforeLane.get(lane.key) ?? 0) +
+        wrappedColumnIndex;
       const toolBadge = extractToolBadgeFromStep(step);
       const nodeId = `node-${step.id}`;
 
       nodeIdByStepId.set(step.id, nodeId);
+      nodePositionByStepId.set(step.id, { laneIndex, rowIndex });
 
       graphNodes.push({
         id: nodeId,
@@ -232,7 +250,7 @@ export function ArtifactGraph({
         },
         position: {
           x: laneIndex * LANE_WIDTH,
-          y: index * ROW_HEIGHT,
+          y: rowIndex * ROW_HEIGHT,
         },
         selected: step.id === activeStepId,
       });
@@ -243,13 +261,19 @@ export function ArtifactGraph({
       const source = nodeIdByStepId.get(step.parent_id);
       const target = nodeIdByStepId.get(step.id);
       if (!source || !target || source === target) continue;
+      const sourcePosition = nodePositionByStepId.get(step.parent_id);
+      const targetPosition = nodePositionByStepId.get(step.id);
+      const edgeType =
+        sourcePosition && targetPosition && sourcePosition.laneIndex === targetPosition.laneIndex
+          ? "smoothstep"
+          : "default";
 
       const edgeColor = STEP_TYPE_META[step.type]?.color ?? "var(--border)";
       graphEdges.push({
         id: `parent-${source}-${target}`,
         source,
         target,
-        type: "smoothstep",
+        type: edgeType,
         animated: step.id === activeStepId,
         style: { stroke: edgeColor, strokeWidth: 1.35, opacity: 0.86 },
       });
@@ -261,29 +285,24 @@ export function ArtifactGraph({
       const source = nodeIdByStepId.get(previous.id);
       const target = nodeIdByStepId.get(current.id);
       if (!source || !target || source === target) continue;
-      const elapsedLabel = formatElapsedLabel(current.timestamp - previous.timestamp);
+      const sourcePosition = nodePositionByStepId.get(previous.id);
+      const targetPosition = nodePositionByStepId.get(current.id);
+      const edgeType =
+        sourcePosition && targetPosition && sourcePosition.laneIndex === targetPosition.laneIndex
+          ? "smoothstep"
+          : "default";
       graphEdges.push({
         id: `chrono-${source}-${target}`,
         source,
         target,
-        type: "smoothstep",
+        type: edgeType,
         animated: false,
+        className: "artifact-graph-edge-chrono",
         style: {
           stroke: "var(--trace-edge-secondary)",
           strokeWidth: 0.9,
           strokeDasharray: "4 4",
           opacity: 0.65,
-        },
-        label: elapsedLabel,
-        labelShowBg: true,
-        labelBgStyle: {
-          fill: "color-mix(in srgb, var(--background) 85%, transparent)",
-          opacity: 0.95,
-        },
-        labelStyle: {
-          fontSize: 10,
-          fill: "var(--trace-edge-secondary)",
-          fontVariantNumeric: "tabular-nums",
         },
       });
     }
@@ -300,6 +319,29 @@ export function ArtifactGraph({
     },
     [onSelectStep],
   );
+
+  const fitViewNodes = useMemo(() => {
+    if (nodes.length <= FIT_VIEW_NODE_WINDOW) return undefined;
+    const activeIndex = Math.max(
+      0,
+      nodes.findIndex((node) => node.data.representativeStepId === activeStepId),
+    );
+    const activeNode = nodes[activeIndex];
+    const columnNodes = activeNode
+      ? nodes.filter((node) => node.position.x === activeNode.position.x)
+      : nodes;
+    const activeColumnIndex = Math.max(
+      0,
+      columnNodes.findIndex((node) => node.id === activeNode?.id),
+    );
+    const startIndex = Math.max(
+      0,
+      Math.min(activeColumnIndex - 1, columnNodes.length - FIT_VIEW_NODE_WINDOW),
+    );
+    return columnNodes
+      .slice(startIndex, startIndex + FIT_VIEW_NODE_WINDOW)
+      .map((node) => ({ id: node.id }));
+  }, [activeStepId, nodes]);
 
   useEffect(() => {
     if (!isVisible) {
@@ -355,15 +397,15 @@ export function ArtifactGraph({
   }
 
   return (
-    <div className="h-full w-full rounded-xl border border-border-subtle/80 overflow-hidden bg-card/30">
-      <div ref={containerRef} className="h-full min-h-0">
+    <div className="h-full min-w-0 w-full max-w-full overflow-hidden rounded-xl border border-border-subtle/80 bg-card/30">
+      <div ref={containerRef} className="h-full min-h-0 min-w-0 w-full max-w-full overflow-hidden">
         {isVisible && containerReady ? (
           <ReactFlow
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
             fitView
-            fitViewOptions={{ padding: 0.2, maxZoom: 1.2 }}
+            fitViewOptions={{ padding: 0.35, maxZoom: 1.05, nodes: fitViewNodes }}
             nodesDraggable={false}
             nodesConnectable={false}
             panOnScroll
@@ -371,8 +413,11 @@ export function ArtifactGraph({
             selectionOnDrag={false}
             onNodeClick={onNodeClick}
             className="artifact-graph-flow bg-background"
+            style={{ width: "100%", height: "100%" }}
           >
             <Background gap={20} color="var(--border-subtle)" />
+            <Controls />
+            <MiniMap pannable zoomable />
           </ReactFlow>
         ) : isVisible ? (
           <div className="flex h-full min-h-0 items-center justify-center text-sm text-muted-foreground">

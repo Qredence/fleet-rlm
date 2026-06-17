@@ -107,6 +107,8 @@ export function useWorkspace(): ChatRuntime {
     streamMessage,
     stopStreaming,
     resetSession,
+    setRuntimeSessionId,
+    setDurableSessionId,
     setMessages,
     setTurnArtifactsByMessageId,
     snapshotTurnArtifacts,
@@ -404,6 +406,10 @@ export function useWorkspace(): ChatRuntime {
     (conversation: Conversation) => {
       stopStreaming();
       clearArtifactSteps();
+      if (conversation.runtimeSessionId) {
+        setRuntimeSessionId(conversation.runtimeSessionId);
+      }
+      setDurableSessionId(conversation.durableSessionId ?? null);
       setTurnArtifactsByMessageId(conversation.turnArtifactsByMessageId ?? {});
       setMessages(conversation.messages);
       setInputValue("");
@@ -415,8 +421,10 @@ export function useWorkspace(): ChatRuntime {
     [
       clearArtifactSteps,
       resetRunWorkbench,
+      setDurableSessionId,
       setCreationPhase,
       setMessages,
+      setRuntimeSessionId,
       setTurnArtifactsByMessageId,
       stopStreaming,
     ],

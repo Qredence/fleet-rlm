@@ -274,7 +274,20 @@ export function getMockFilesystem(provider: VolumeProvider): FsNode[] {
 
 export const filesystemKeys = {
   all: ["filesystem"] as const,
-  tree: (provider: VolumeProvider) => [...filesystemKeys.all, "tree", provider] as const,
+  tree: (
+    provider: VolumeProvider,
+    options?: {
+      maxDepth?: number;
+      maxEntries?: number;
+    },
+  ) =>
+    [
+      ...filesystemKeys.all,
+      "tree",
+      provider,
+      options?.maxDepth ?? "default",
+      options?.maxEntries ?? "default",
+    ] as const,
   fileContent: (provider: VolumeProvider, path: string) =>
     [...filesystemKeys.all, "file", provider, path] as const,
 };
@@ -298,7 +311,13 @@ interface UseFilesystemReturn {
   refetch: () => void;
 }
 
-export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
+export function useFilesystem(
+  provider: VolumeProvider,
+  options?: {
+    maxDepth?: number;
+    maxEntries?: number;
+  },
+): UseFilesystemReturn {
   const mock = rlmApiConfig.mockMode;
   const canQueryFilesystem = typeof window !== "undefined";
 
@@ -309,7 +328,7 @@ export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
   };
 
   const query = useQuery({
-    queryKey: filesystemKeys.tree(provider),
+    queryKey: filesystemKeys.tree(provider, options),
     queryFn: async ({ signal }): Promise<FilesystemPayload> => {
       if (mock) {
         return {
@@ -319,7 +338,14 @@ export function useFilesystem(provider: VolumeProvider): UseFilesystemReturn {
         };
       }
 
-      const resp = await volumesEndpoints.tree({ provider, maxDepth: 4 }, signal);
+      const resp = await volumesEndpoints.tree(
+        {
+          provider,
+          maxDepth: options?.maxDepth ?? 4,
+          maxEntries: options?.maxEntries,
+        },
+        signal,
+      );
       return {
         volumes: resp.nodes.map((node) => toFsNode(node, resp.provider)),
         dataSource: "api",
