@@ -78,8 +78,7 @@ def _collect_reserved_top_level_paths(app: FastAPI) -> tuple[set[str], set[str]]
     reserved_paths: set[str] = set()
     reserved_prefixes: set[str] = set()
 
-    for route in app.routes:
-        raw_path = getattr(route, "path", None)
+    for raw_path in _iter_route_paths(app.routes):
         if not raw_path or raw_path == "/":
             continue
         # Skip the SPA catch-all itself, once it has been registered.
@@ -101,6 +100,27 @@ def _collect_reserved_top_level_paths(app: FastAPI) -> tuple[set[str], set[str]]
     return reserved_paths, reserved_prefixes
 
 
+def _join_route_path(prefix: str, path: str) -> str:
+    joined = f"{prefix.rstrip('/')}/{path.lstrip('/')}"
+    return joined if joined.startswith("/") else f"/{joined}"
+
+
+def _iter_route_paths(routes: Any, *, prefix: str = ""):
+    """Yield concrete paths from FastAPI's flat or nested route structures."""
+    for route in routes:
+        raw_path = getattr(route, "path", None)
+        if raw_path:
+            yield _join_route_path(prefix, raw_path)
+            continue
+
+        original_router = getattr(route, "original_router", None)
+        nested_routes = getattr(original_router, "routes", None)
+        include_context = getattr(route, "include_context", None)
+        include_prefix = str(getattr(include_context, "prefix", "") or "")
+        if nested_routes is not None:
+            yield from _iter_route_paths(nested_routes, prefix=_join_route_path(prefix, include_prefix))
+
+
 def mount_spa(app: FastAPI, ui_dir: Path) -> None:
     """Mount built frontend assets and SPA fallback route.
 
@@ -109,7 +129,7 @@ def mount_spa(app: FastAPI, ui_dir: Path) -> None:
     mount time.
     """
     # Safety: catching a misordered call early, before it masks real bugs.
-    if not any(getattr(r, "path", "").startswith("/api/") for r in app.routes):
+    if not any(path.startswith("/api/") for path in _iter_route_paths(app.routes)):
         msg = "mount_spa must be called after API routes are registered"
         raise RuntimeError(msg)
 
