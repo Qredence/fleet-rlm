@@ -869,6 +869,29 @@ describe("applyWsFrameToMessages", () => {
     }
   });
 
+  it("prefers structured repl code over flattened tool input strings", () => {
+    const { messages } = applyWsFrameToMessages(
+      [],
+      makeEvent("tool_call", "Calling tool: repl_execute({'code': 'flattened()'})", {
+        tool_name: "repl_execute",
+        tool_input: "Calling tool: repl_execute({'code': 'flattened()'})",
+        tool_args: { code: "fallback()" },
+        step: {
+          type: "repl",
+          input: {
+            code: "structured_code()",
+          },
+        },
+      }),
+    );
+
+    const sandbox = findFirstPart(messages, (p) => p.kind === "sandbox");
+    expect(sandbox).toBeDefined();
+    if (sandbox?.kind === "sandbox") {
+      expect(sandbox.code).toBe("structured_code()");
+    }
+  });
+
   it("renders canonical repl execution steps with compact code and output", () => {
     const { messages } = applyWsFrameToMessages(
       [],

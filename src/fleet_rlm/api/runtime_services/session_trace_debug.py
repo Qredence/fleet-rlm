@@ -311,6 +311,7 @@ async def get_owned_session_trace_debug(
     trace_id: str | None = None,
     client_request_id: str | None = None,
 ) -> SessionTraceDebugResponse:
+    # Lazy import: MLflow trace resolution pulls observability/runtime dependencies.
     from fleet_rlm.integrations.observability.mlflow_traces import (
         resolve_trace,
         search_traces_by_session_id,

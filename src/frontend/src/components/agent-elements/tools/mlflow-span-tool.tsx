@@ -7,6 +7,28 @@ import { getToolStatus } from "../utils/format-tool";
 import { cn } from "../utils/cn";
 import { ToolRowBase } from "./tool-row-base";
 
+type MlflowSpanPart = {
+  type?: string;
+  toolCallId?: string;
+  title?: string;
+  state?: string;
+  input?: unknown;
+  output?: unknown;
+  errorText?: string;
+  mlflowSpan?: {
+    spanId?: string;
+    parentSpanId?: string;
+    traceId?: string;
+    status?: string;
+    durationMs?: number;
+    startedAt?: string;
+    endedAt?: string;
+    traceUrl?: string;
+    experimentId?: string;
+    trackingUri?: string;
+  };
+};
+
 function formatDuration(value: unknown): string {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "";
   if (value < 1000) return `${Math.round(value)}ms`;
@@ -23,7 +45,7 @@ function stringifyDetails(value: unknown): string {
   }
 }
 
-export function mlflowSpanTraceUrl(part: any): string | undefined {
+export function mlflowSpanTraceUrl(part: MlflowSpanPart): string | undefined {
   const span = part?.mlflowSpan;
   if (typeof span?.traceUrl === "string" && span.traceUrl.trim()) return span.traceUrl;
   if (typeof span?.traceId !== "string" || !span.traceId.trim()) return undefined;
@@ -37,24 +59,25 @@ export function mlflowSpanTraceUrl(part: any): string | undefined {
   });
 }
 
-export function mlflowSpanTitle(part: any): string {
+export function mlflowSpanTitle(part: MlflowSpanPart): string {
+  const input = part.input && typeof part.input === "object" ? part.input : undefined;
   const title =
-    typeof part?.input?.name === "string"
-      ? part.input.name
+    input && "name" in input && typeof input.name === "string"
+      ? input.name
       : typeof part?.title === "string"
         ? part.title
         : "";
   return title.trim() || "MLflow span";
 }
 
-export function mlflowSpanSubtitle(part: any): string {
+export function mlflowSpanSubtitle(part: MlflowSpanPart): string {
   const status = part?.mlflowSpan?.status;
   const duration = formatDuration(part?.mlflowSpan?.durationMs);
   return [status, duration].filter(Boolean).join(" - ");
 }
 
 export type MlflowSpanToolProps = {
-  part: any;
+  part: MlflowSpanPart;
   chatStatus?: string;
   defaultOpen?: boolean;
 };

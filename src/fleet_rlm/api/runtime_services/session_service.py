@@ -443,6 +443,7 @@ class SessionService:
         body: SessionTraceExportRequest,
     ) -> SessionTraceExportResponse:
         """Export full MLflow traces and a distilled GEPA evidence bundle."""
+        # Lazy import: trace export pulls MLflow observability helpers only for this endpoint.
         from .session_trace_export import export_owned_session_traces
 
         return await export_owned_session_traces(
@@ -530,6 +531,7 @@ class SessionService:
         body: SessionExportRequest,
     ) -> DatasetResponse:
         """Export a session as a GEPA dataset."""
+        # Lazy imports: dataset export pulls optimization persistence helpers only for this endpoint.
         from fleet_rlm.api.runtime_services.optimization_datasets import (
             build_transcript_dataset_rows,
             persist_jsonl_rows,

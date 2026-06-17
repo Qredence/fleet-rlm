@@ -53,22 +53,26 @@ describe("code-repair utilities", () => {
       expect(shouldRepairSerializedPython("x = 1")).toBe(false);
     });
 
-    it("returns true for single-line serialized python with variables and keywords", () => {
+    it("returns false for single-line serialized python with variables and keywords", () => {
       const serialized =
         "import os, sys # load modules sys.path.append('.') # add path x = 1 # define x and make this string long enough to trigger python serialization repair";
-      expect(shouldRepairSerializedPython(serialized)).toBe(true);
+      expect(shouldRepairSerializedPython(serialized)).toBe(false);
     });
   });
 
   describe("formatSerializedPythonSnippet", () => {
-    it("reconstructs single line python snippets into readable multiline", () => {
+    it("keeps single-line python snippets intact instead of synthesizing indentation", () => {
       const serialized =
         "import sys # load path sys.path.append('.') # append path x = sys.argv[0] # script name and make this string long enough to exceed the length threshold";
       const formatted = formatSerializedPythonSnippet(serialized);
-      expect(formatted).toContain("\n");
-      expect(formatted).toBe(
-        "import sys\n# load path sys.path.append('.')\n# append path\nx = sys.argv[0]\n# script name and make this string long enough to exceed the length threshold",
-      );
+      expect(formatted).toBe(serialized);
+    });
+
+    it("does not create invalid indentation for nested flattened python", () => {
+      const serialized =
+        "values = [1, 2, 3] for value in values: if value > 1: print(value) total = sum(values) # this suffix makes the serialized payload long enough";
+
+      expect(formatSerializedPythonSnippet(serialized)).toBe(serialized);
     });
   });
 

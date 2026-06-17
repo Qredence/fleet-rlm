@@ -24,6 +24,45 @@ from pydantic import BaseModel, Field
 
 EVENT_SCHEMA_VERSION: int = 3
 
+_MLFLOW_SPAN_STARTED_STATUSES = frozenset(
+    {"started", "running", "pending", "in_progress", "in-progress", "in progress"}
+)
+_MLFLOW_SPAN_COMPLETED_STATUSES = frozenset(
+    {"completed", "complete", "success", "succeeded", "ok", "status_code_ok", "statuscode.ok"}
+)
+_MLFLOW_SPAN_ERROR_STATUSES = frozenset(
+    {"error", "errored", "failed", "failure", "fail", "status_code_error", "statuscode.error"}
+)
+
+
+def _normalize_mlflow_span_status(
+    status: str,
+    *,
+    duration_ms: int | float | None = None,
+    ended_at: str | None = None,
+    output: Any | None = None,
+    error: Any | None = None,
+) -> tuple[str, str | None]:
+    """Return the internal span lifecycle status and optional raw external status."""
+    raw_status = str(status or "").strip()
+    status_key = raw_status.lower()
+
+    if status_key in _MLFLOW_SPAN_STARTED_STATUSES:
+        normalized_status = "started"
+    elif status_key in _MLFLOW_SPAN_COMPLETED_STATUSES:
+        normalized_status = "completed"
+    elif status_key in _MLFLOW_SPAN_ERROR_STATUSES:
+        normalized_status = "error"
+    elif error is not None:
+        normalized_status = "error"
+    elif ended_at or duration_ms is not None or output is not None:
+        normalized_status = "completed"
+    else:
+        normalized_status = "started"
+
+    raw_status_payload = raw_status if raw_status and status_key != normalized_status else None
+    return normalized_status, raw_status_payload
+
 
 class RuntimeEventKind(str, Enum):
     """All event kinds emitted by the runtime streaming pipeline."""
@@ -245,9 +284,13 @@ class RuntimeEvent(BaseModel):
         context: RuntimeEventContext | None = None,
     ) -> RuntimeEvent:
         """Factory for a curated MLflow span lifecycle event."""
-        normalized_status = status.strip().lower()
-        if normalized_status not in {"started", "completed", "error"}:
-            raise ValueError("MLflow span status must be started, completed, or error.")
+        normalized_status, raw_status = _normalize_mlflow_span_status(
+            status,
+            duration_ms=duration_ms,
+            ended_at=ended_at,
+            output=output,
+            error=error,
+        )
 
         span_name = name.strip() or "MLflow span"
         payload: dict[str, Any] = {
@@ -257,6 +300,8 @@ class RuntimeEvent(BaseModel):
             "status": normalized_status,
             "tool_name": "mlflow_span",
         }
+        if raw_status:
+            payload["raw_status"] = raw_status
         if parent_span_id:
             payload["parent_span_id"] = parent_span_id
         if trace_id:

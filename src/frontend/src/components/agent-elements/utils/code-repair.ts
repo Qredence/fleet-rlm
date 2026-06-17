@@ -86,38 +86,12 @@ export function dedent(str: string): string {
   return str;
 }
 
-export function shouldRepairSerializedPython(code: string): boolean {
-  const trimmed = code.trim();
-  if (trimmed.includes("\n")) return false;
-  if (trimmed.length < 90) return false;
-  return /\b(import|from|print\(|def|class|for|if)\b/.test(trimmed) && /\b\w+\s=/.test(trimmed);
+export function shouldRepairSerializedPython(_code: string): boolean {
+  return false;
 }
 
 export function formatSerializedPythonSnippet(code: string): string {
-  if (!shouldRepairSerializedPython(code)) return code;
-
-  const lines = code
-    .replace(/\s+#\s+/g, "\n# ")
-    .replace(/\s+(?=(?:from\s+\w+\s+import|import\s+\w+)\b)/g, "\n")
-    .replace(/\s+(?=(?:def|class|for|while|if|elif|else|try|except|finally|with)\b)/g, "\n")
-    .replace(/\s+(?=(?:print|return)\s*\()/g, "\n")
-    .replace(/\s+(?=[A-Za-z_]\w*\s=\s)/g, "\n")
-    .split("\n")
-    .map((line) => line.trimEnd())
-    .filter(Boolean);
-
-  let blockRemainder = 0;
-  return lines
-    .map((line, index) => {
-      const trimmed = line.trim();
-      const formatted = blockRemainder > 0 ? `  ${trimmed}` : trimmed;
-      if (blockRemainder > 0) blockRemainder -= 1;
-      if (trimmed.endsWith(":")) {
-        blockRemainder = lines[index + 1]?.trim()?.startsWith("#") ? 2 : 1;
-      }
-      return formatted;
-    })
-    .join("\n");
+  return code;
 }
 
 export function cleanAndFormatSnippet(rawCode: string): string {
@@ -132,7 +106,7 @@ export function cleanAndFormatSnippet(rawCode: string): string {
   // 3. Normalize indentation without changing semantics
   code = dedent(code);
 
-  // 4. Repair common single-line REPL payloads before highlighting.
+  // 4. Keep single-line Python intact; DSPy RLM exposes structured code when available.
   code = formatSerializedPythonSnippet(code);
 
   // 5. Escape nested triple backticks safely
