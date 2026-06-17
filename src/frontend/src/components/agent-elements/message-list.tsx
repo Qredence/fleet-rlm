@@ -678,11 +678,14 @@ function AssistantParts({
 
         const chatStreamingStatus = isLast && isStreaming ? "streaming" : undefined;
         const toolCallId = part.toolCallId;
+        const rawNestedTools = (part as { nestedTools?: unknown }).nestedTools;
         const nestedTools =
           (part.type === "tool-Task" || part.type === "tool-Agent") && toolCallId
             ? nestedToolsMap.get(toolCallId) || []
             : part.type === "tool-Group"
-              ? (part as any).nestedTools
+              ? Array.isArray(rawNestedTools)
+                ? rawNestedTools.filter(isV5ToolPart)
+                : []
               : undefined;
         elems.push(
           <ToolRendererComponent

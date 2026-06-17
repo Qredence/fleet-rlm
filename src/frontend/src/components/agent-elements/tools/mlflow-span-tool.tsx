@@ -45,9 +45,21 @@ function stringifyDetails(value: unknown): string {
   }
 }
 
+function isSafeExternalUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export function mlflowSpanTraceUrl(part: MlflowSpanPart): string | undefined {
   const span = part?.mlflowSpan;
-  if (typeof span?.traceUrl === "string" && span.traceUrl.trim()) return span.traceUrl;
+  if (typeof span?.traceUrl === "string") {
+    const traceUrl = span.traceUrl.trim();
+    if (traceUrl && isSafeExternalUrl(traceUrl)) return traceUrl;
+  }
   if (typeof span?.traceId !== "string" || !span.traceId.trim()) return undefined;
   return buildMlflowTraceUrl({
     traceId: span.traceId,

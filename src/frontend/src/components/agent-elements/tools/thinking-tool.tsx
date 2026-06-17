@@ -26,12 +26,13 @@ export function ThinkingCollapsed({
   const [isInternalExpanded, setIsInternalExpanded] = React.useState(defaultOpen ?? false);
 
   React.useEffect(() => {
+    if (expanded !== undefined) return;
     if (state === "animating") {
       setIsInternalExpanded(true);
     } else {
-      setIsInternalExpanded(false);
+      setIsInternalExpanded(defaultOpen ?? false);
     }
-  }, [state]);
+  }, [defaultOpen, expanded, state]);
 
   const finalExpanded = expanded !== undefined ? expanded : isInternalExpanded;
   const finalOnToggle = onToggleExpand ?? (() => setIsInternalExpanded((prev) => !prev));

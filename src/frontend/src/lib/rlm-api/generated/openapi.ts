@@ -2853,14 +2853,14 @@ export interface components {
       output_preview?: string | null;
       /**
        * Start Time Unix Nano
-       * @description Span start timestamp.
+       * @description Span start timestamp (Unix nanoseconds, string-encoded).
        */
-      start_time_unix_nano?: number | null;
+      start_time_unix_nano?: string | null;
       /**
        * End Time Unix Nano
-       * @description Span end timestamp.
+       * @description Span end timestamp (Unix nanoseconds, string-encoded).
        */
-      end_time_unix_nano?: number | null;
+      end_time_unix_nano?: string | null;
     };
     /**
      * SessionTraceExportRequest

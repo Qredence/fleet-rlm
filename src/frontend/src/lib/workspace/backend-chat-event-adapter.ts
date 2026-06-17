@@ -215,8 +215,9 @@ function attachTraceMetadataToLatestAssistant(
 ): ChatMessage[] {
   const traceMetadata = traceMetadataFromPayload(payload);
   if (!traceMetadata) return messages;
+  const lastUserIndex = messages.findLastIndex((message) => message.type === "user");
 
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
+  for (let index = messages.length - 1; index > lastUserIndex; index -= 1) {
     const message = messages[index];
     if (!message || message.type !== "assistant") continue;
     const next = [...messages];

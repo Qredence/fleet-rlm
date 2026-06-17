@@ -398,7 +398,7 @@ function mlflowSpanFromPayload(
   payload?: Record<string, unknown>,
 ): ToolLikeRenderPart {
   const status = mlflowSpanStatus(payload);
-  const spanId = asOptionalText(payload?.span_id ?? payload?.spanId) ?? "unknown-span";
+  const spanId = asOptionalText(payload?.span_id ?? payload?.spanId);
   const parentSpanId = asOptionalText(payload?.parent_span_id ?? payload?.parentSpanId);
   const traceId = asOptionalText(
     payload?.trace_id ?? payload?.traceId ?? payload?.mlflow_trace_id ?? payload?.mlflowTraceId,
@@ -422,7 +422,7 @@ function mlflowSpanFromPayload(
     title: spanName,
     toolType: "mlflow_span",
     state: mlflowSpanState(status),
-    identityKey: `mlflow_span:${spanId}`,
+    ...(spanId ? { identityKey: `mlflow_span:${spanId}` } : {}),
     input: payload?.input ?? payload?.span_input ?? payload?.tool_input,
     output:
       status === "started"
@@ -431,7 +431,7 @@ function mlflowSpanFromPayload(
     errorText:
       status === "error" ? (stringifyUnknown(errorValue ?? outputValue) ?? text) : undefined,
     mlflowSpan: {
-      spanId,
+      spanId: spanId ?? "unknown-span",
       status,
       ...(parentSpanId ? { parentSpanId } : {}),
       ...(traceId ? { traceId } : {}),

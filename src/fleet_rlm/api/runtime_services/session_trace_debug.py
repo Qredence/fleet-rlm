@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any, Literal
 
 from fastapi import HTTPException
@@ -31,6 +32,8 @@ MappedRenderKind = Literal[
     "non_rendered",
 ]
 
+logger = logging.getLogger(__name__)
+
 
 def _truncate_text(value: str | None, *, max_chars: int = 240) -> str | None:
     if value is None:
@@ -53,6 +56,14 @@ def _preview_value(value: Any, *, max_chars: int = 240) -> str | None:
     except Exception:
         rendered = str(value)
     return _truncate_text(rendered, max_chars=max_chars)
+
+
+def _unix_nano_string(value: Any) -> str | None:
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
 
 
 def _span_attributes(span: dict[str, Any]) -> dict[str, Any]:
@@ -275,12 +286,8 @@ def build_session_trace_debug_response(
                 rationale=rationale,
                 input_preview=_preview_value(span.get("inputs")),
                 output_preview=_preview_value(span.get("outputs")),
-                start_time_unix_nano=span.get("start_time_unix_nano")
-                if isinstance(span.get("start_time_unix_nano"), int)
-                else None,
-                end_time_unix_nano=span.get("end_time_unix_nano")
-                if isinstance(span.get("end_time_unix_nano"), int)
-                else None,
+                start_time_unix_nano=_unix_nano_string(span.get("start_time_unix_nano")),
+                end_time_unix_nano=_unix_nano_string(span.get("end_time_unix_nano")),
             )
         )
 
@@ -333,7 +340,8 @@ async def get_owned_session_trace_debug(
                 client_request_id=explicit_client_request_id,
             )
         except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"Failed to resolve MLflow trace: {exc}") from exc
+            logger.exception("Failed to resolve MLflow trace for explicit trace debug request.")
+            raise HTTPException(status_code=503, detail="Failed to resolve MLflow trace.") from exc
         if trace is None:
             raise HTTPException(status_code=404, detail="Unable to resolve an MLflow trace for this session.")
         if not _trace_owned_by_session(
@@ -373,7 +381,8 @@ async def get_owned_session_trace_debug(
                 client_request_id=row_client_request_id,
             )
         except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"Failed to resolve MLflow trace: {exc}") from exc
+            logger.exception("Failed to resolve MLflow trace for session trace row.")
+            raise HTTPException(status_code=503, detail="Failed to resolve MLflow trace.") from exc
         if trace is None:
             continue
         if not _trace_owned_by_session(
@@ -398,7 +407,8 @@ async def get_owned_session_trace_debug(
                 max_results=MLFLOW_EXPORT_MAX_RESULTS,
             )
         except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"Failed to search MLflow traces: {exc}") from exc
+            logger.exception("Failed to search MLflow traces for runtime session.")
+            raise HTTPException(status_code=503, detail="Failed to search MLflow traces.") from exc
         for trace in traces:
             if not _trace_owned_by_session(
                 trace,

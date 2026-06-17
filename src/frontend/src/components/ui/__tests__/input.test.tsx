@@ -17,7 +17,7 @@ describe("Input primitives", () => {
     expect(html).toContain("selection:bg-primary");
     expect(html).toContain("border-input");
     expect(html).toContain("bg-transparent");
-    expect(html).toContain("focus-visible:ring-[3px]");
+    expect(html).toContain("focus-visible:ring-focus");
   });
 
   it("uses grouped field styling for composed input actions", () => {

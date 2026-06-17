@@ -4858,16 +4858,16 @@ components:
           description: Compact preview of span outputs.
         start_time_unix_nano:
           anyOf:
-            - type: integer
+            - type: string
             - type: "null"
           title: Start Time Unix Nano
-          description: Span start timestamp.
+          description: Span start timestamp (Unix nanoseconds, string-encoded).
         end_time_unix_nano:
           anyOf:
-            - type: integer
+            - type: string
             - type: "null"
           title: End Time Unix Nano
-          description: Span end timestamp.
+          description: Span end timestamp (Unix nanoseconds, string-encoded).
       type: object
       required:
         - span_id

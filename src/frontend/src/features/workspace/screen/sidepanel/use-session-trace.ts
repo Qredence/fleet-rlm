@@ -93,7 +93,9 @@ export function useSessionTraceState() {
       target.traceId,
       target.clientRequestId,
     ],
-    enabled: Boolean(traceSessionId && hasSessionContent),
+    enabled: Boolean(
+      traceSessionId && hasSessionContent && (target.traceId || target.clientRequestId),
+    ),
     queryFn: ({ signal }) =>
       sessionsEndpoints.traceDebug(
         String(traceSessionId),

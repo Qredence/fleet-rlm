@@ -105,9 +105,9 @@ describe("workspace session trace model", () => {
 
   it("sorts spans chronologically before rendering timeline and graph", () => {
     const ordered = sortTraceSpans([
-      span({ span_id: "late", start_time_unix_nano: 300 }),
-      span({ span_id: "early", start_time_unix_nano: 100 }),
-      span({ span_id: "middle", start_time_unix_nano: 200 }),
+      span({ span_id: "late", start_time_unix_nano: "300" }),
+      span({ span_id: "early", start_time_unix_nano: "100" }),
+      span({ span_id: "middle", start_time_unix_nano: "200" }),
     ]);
 
     expect(ordered.map((item) => item.span_id)).toEqual(["early", "middle", "late"]);
@@ -115,14 +115,14 @@ describe("workspace session trace model", () => {
 
   it("maps parent span ids and parentless spans into React Flow nodes and edges", () => {
     const graph = buildTraceFlowGraph([
-      span({ span_id: "root", start_time_unix_nano: 100, name: "Root" }),
+      span({ span_id: "root", start_time_unix_nano: "100", name: "Root" }),
       span({
         span_id: "tool",
         parent_span_id: "root",
-        start_time_unix_nano: 200,
+        start_time_unix_nano: "200",
         tool_name: "repo_search",
       }),
-      span({ span_id: "orphan", start_time_unix_nano: 300, name: "Orphan" }),
+      span({ span_id: "orphan", start_time_unix_nano: "300", name: "Orphan" }),
     ]);
 
     expect(graph.nodes.map((node) => node.id)).toEqual(["root", "tool", "orphan"]);

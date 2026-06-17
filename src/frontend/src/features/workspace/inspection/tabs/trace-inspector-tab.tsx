@@ -47,18 +47,6 @@ function componentMatchKey(component: TranscriptComponentRow): string {
   return `${component.renderKind}:${normalizeToken(identity)}`;
 }
 
-function latestAssistantTraceMetadata(
-  messages: ChatMessage[],
-): ChatMessage["traceMetadata"] | undefined {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message?.type === "assistant" && message.traceMetadata) {
-      return message.traceMetadata;
-    }
-  }
-  return undefined;
-}
-
 function buildTranscriptComponentRows(
   selectedTurn: AssistantTurnDisplayItem | null,
 ): TranscriptComponentRow[] {
@@ -198,9 +186,8 @@ function traceBadgeTone(traceSource: TranscriptComponentRow["traceSource"]) {
 
 function traceMetadataFromTurn(
   selectedTurn: AssistantTurnDisplayItem | null,
-  messages: ChatMessage[],
 ): ChatMessage["traceMetadata"] | undefined {
-  return selectedTurn?.message?.traceMetadata ?? latestAssistantTraceMetadata(messages);
+  return selectedTurn?.message?.traceMetadata;
 }
 
 function formatObservedAt(value: string) {
@@ -219,10 +206,7 @@ export const TraceInspectorTab = memo(function TraceInspectorTab({
   messages: ChatMessage[];
 }) {
   const runtimeStatus = useRuntimeStatus();
-  const traceMetadata = useMemo(
-    () => traceMetadataFromTurn(selectedTurn, messages),
-    [messages, selectedTurn],
-  );
+  const traceMetadata = useMemo(() => traceMetadataFromTurn(selectedTurn), [selectedTurn]);
   const transcriptRows = useMemo(() => buildTranscriptComponentRows(selectedTurn), [selectedTurn]);
 
   const tracesQuery = useQuery({
@@ -231,10 +215,8 @@ export const TraceInspectorTab = memo(function TraceInspectorTab({
     queryFn: ({ signal }) => sessionsEndpoints.traces(String(sessionId), {}, signal),
   });
 
-  const resolvedTraceId =
-    traceMetadata?.mlflowTraceId ?? tracesQuery.data?.items?.[0]?.trace_id ?? null;
-  const resolvedClientRequestId =
-    traceMetadata?.mlflowClientRequestId ?? tracesQuery.data?.items?.[0]?.client_request_id ?? null;
+  const resolvedTraceId = traceMetadata?.mlflowTraceId ?? null;
+  const resolvedClientRequestId = traceMetadata?.mlflowClientRequestId ?? null;
 
   const traceDebugQuery = useQuery({
     queryKey: [

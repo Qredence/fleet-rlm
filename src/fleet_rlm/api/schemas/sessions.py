@@ -203,8 +203,14 @@ class SessionTraceDebugSpan(BaseModel):
     rationale: str = Field(description="Why the span is rendered or intentionally not rendered.")
     input_preview: str | None = Field(default=None, description="Compact preview of span inputs.")
     output_preview: str | None = Field(default=None, description="Compact preview of span outputs.")
-    start_time_unix_nano: int | None = Field(default=None, description="Span start timestamp.")
-    end_time_unix_nano: int | None = Field(default=None, description="Span end timestamp.")
+    start_time_unix_nano: str | None = Field(
+        default=None,
+        description="Span start timestamp (Unix nanoseconds, string-encoded).",
+    )
+    end_time_unix_nano: str | None = Field(
+        default=None,
+        description="Span end timestamp (Unix nanoseconds, string-encoded).",
+    )
 
 
 class SessionTraceDebugResponse(BaseModel):
