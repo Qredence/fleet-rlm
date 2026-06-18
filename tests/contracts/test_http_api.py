@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from fastapi import FastAPI
 
 CANONICAL_PATHS = {
@@ -20,7 +22,32 @@ RETIRED_PREFIXES = (
 
 
 def _route_paths(app: FastAPI) -> set[str]:
-    return {route.path for route in app.routes if hasattr(route, "path")}  # ty: ignore[invalid-return-type]
+    """Return registered route paths across FastAPI eager and included routers."""
+
+    def walk(routes: Iterable[object]) -> set[str]:
+        paths: set[str] = set()
+        for route in routes:
+            path = getattr(route, "path", None)
+            if isinstance(path, str):
+                paths.add(path)
+
+            for candidate in getattr(route, "_effective_candidates", ()):
+                candidate_path = getattr(candidate, "path", None)
+                if isinstance(candidate_path, str) and candidate_path:
+                    paths.add(candidate_path)
+                    continue
+                starlette_route = getattr(candidate, "starlette_route", None)
+                starlette_path = getattr(starlette_route, "path", None)
+                if isinstance(starlette_path, str):
+                    paths.add(starlette_path)
+
+            original_router = getattr(route, "original_router", None)
+            nested_routes = getattr(original_router, "routes", None)
+            if nested_routes is not None:
+                paths.update(walk(nested_routes))
+        return paths
+
+    return walk(app.routes)
 
 
 def test_canonical_http_routes_return_stable_status_codes(no_db_client, auth_headers: dict[str, str]) -> None:
