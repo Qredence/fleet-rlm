@@ -155,7 +155,6 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
                 </FieldDescription>
               </FieldContent>
               <ToggleGroup
-                type="single"
                 variant="card"
                 value={isDark ? "dark" : "light"}
                 aria-label="Theme mode"

@@ -165,7 +165,8 @@ def get_workspace_context() -> dict[str, object]:
             manifest = _json.loads(manifest_path.read_text(encoding="utf-8", errors="replace"))
         except Exception:
             manifest = {{}}
-        for source in manifest.get("context_sources", []) if isinstance(manifest, dict) else []:
+        sources = manifest.get("context_sources") if isinstance(manifest, dict) else None
+        for source in (sources if isinstance(sources, list) else []):
             if isinstance(source, dict):
                 staged = source.get("staged_path")
                 if staged:

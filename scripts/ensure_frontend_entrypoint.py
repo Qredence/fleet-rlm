@@ -69,7 +69,7 @@ process.exit(0);
     completed = subprocess.run(
         ["node", "--input-type=module", "-e", node_script],
         check=True,
-        capture_output=True,
+        stdout=subprocess.PIPE,
         env=env,
         text=True,
     )

@@ -17,7 +17,6 @@ function ToggleGroup({
   className,
   variant,
   size,
-  type = "single",
   value,
   defaultValue,
   onValueChange,
@@ -29,7 +28,6 @@ function ToggleGroup({
 > &
   Omit<VariantProps<typeof toggleVariants>, "variant"> & {
     variant?: ToggleGroupVariant;
-    type?: "single" | "multiple";
     value?: string;
     defaultValue?: string;
     onValueChange?: (value: string) => void;
@@ -49,7 +47,7 @@ function ToggleGroup({
       data-slot="toggle-group"
       data-variant={variant}
       data-size={size}
-      multiple={type === "multiple"}
+      multiple={false}
       value={arrayValue}
       defaultValue={arrayDefaultValue}
       onValueChange={handleChange}

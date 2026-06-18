@@ -53,7 +53,6 @@ function MobileSectionPicker({
 }) {
   return (
     <ToggleGroup
-      type="single"
       value={section ?? "appearance"}
       variant="outline"
       size="sm"

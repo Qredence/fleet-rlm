@@ -280,7 +280,6 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
             <FieldGroup className="gap-5">
               <CompactField label="Target Mode" icon={<Sparkles className="size-4 text-primary" />}>
                 <ToggleGroup
-                  type="single"
                   value={form.targetMode}
                   onValueChange={(value) => {
                     if (value) updateForm("targetMode", value as OptimizationTargetMode);
@@ -357,7 +356,6 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                 <>
                   <CompactField label="Skill Target Sub-mode">
                     <ToggleGroup
-                      type="single"
                       value={form.skillTargetMode}
                       onValueChange={(value) => {
                         if (value) updateForm("skillTargetMode", value as SkillTargetMode);
@@ -536,7 +534,6 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                 icon={<DatabaseZap className="size-4 text-primary" />}
               >
                 <ToggleGroup
-                  type="single"
                   value={form.datasetSource}
                   onValueChange={(value) => {
                     if (value) setDatasetSource(value as DatasetSourceMode);
