@@ -192,6 +192,7 @@ def test_delegate_to_rlm_marks_broker_failure_as_degraded(monkeypatch: pytest.Mo
         return _run
 
     monkeypatch.setattr(rlm_delegate, "build_recursive_subquery_rlm", fake_build_recursive_subquery_rlm)
+    monkeypatch.setattr(rlm_delegate, "_build_local_workspace_snapshot", lambda **_: "snapshot text")
 
     result = rlm_delegate.delegate_to_rlm("compare Fleet RLM", interpreter=FakeInterpreter())
 

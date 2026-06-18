@@ -68,7 +68,9 @@ def _compact_repl_history_for_action(history: Any) -> Any:
     return REPLHistory(
         entries=compact_entries,
         max_output_chars=min(
-            int(getattr(history, "max_output_chars", RLM_ACTION_HISTORY_OUTPUT_CHARS) or RLM_ACTION_HISTORY_OUTPUT_CHARS),
+            int(
+                getattr(history, "max_output_chars", RLM_ACTION_HISTORY_OUTPUT_CHARS) or RLM_ACTION_HISTORY_OUTPUT_CHARS
+            ),
             RLM_ACTION_HISTORY_OUTPUT_CHARS,
         ),
     )

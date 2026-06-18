@@ -255,7 +255,9 @@ class SessionTracePerformanceSummary(BaseModel):
     adapter_fallback_count: int = Field(default=0, description="Detected adapter fallback or retry signals.")
     parse_error_count: int = Field(default=0, description="Detected parser/adapter parse error signals.")
     selected_skills: list[str] = Field(default_factory=list, description="Selected RLM skill names.")
-    rlm_action_max_tokens: int | None = Field(default=None, description="Configured RLM action-generation token budget.")
+    rlm_action_max_tokens: int | None = Field(
+        default=None, description="Configured RLM action-generation token budget."
+    )
     rlm_max_output_chars: int | None = Field(default=None, description="Configured RLM REPL output character budget.")
     slowest_llm_span: SessionTracePerformanceSpanSummary | None = Field(
         default=None,

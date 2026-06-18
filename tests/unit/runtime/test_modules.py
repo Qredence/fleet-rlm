@@ -207,7 +207,9 @@ def test_streaming_rlm_scopes_json_adapter_without_disabling_semantic_callbacks(
         fake_forward,
     )
 
-    result = rlm.forward(user_request="inspect", core_memory="", history=dspy.History(messages=[]), active_skills=ActiveSkills())
+    result = rlm.forward(
+        user_request="inspect", core_memory="", history=dspy.History(messages=[]), active_skills=ActiveSkills()
+    )
 
     assert result.response == "done"
     assert observed["semantic_callbacks_enabled_during_call"] is True
@@ -313,7 +315,9 @@ def test_no_callback_rlm_scopes_disabled_semantic_callbacks(monkeypatch) -> None
         fake_forward,
     )
 
-    result = rlm.forward(user_request="inspect", core_memory="", history=dspy.History(messages=[]), active_skills=ActiveSkills())
+    result = rlm.forward(
+        user_request="inspect", core_memory="", history=dspy.History(messages=[]), active_skills=ActiveSkills()
+    )
 
     assert result.response == "done"
     assert observed["semantic_callbacks_enabled_during_call"] is False
@@ -343,9 +347,21 @@ def test_runtime_module_registry_flags_and_signature_fields_are_stable() -> None
 
     assert set(RLMTurnSignature.input_fields) == {"user_request", "core_memory", "history", "active_skills"}
     assert set(RLMTurnSignature.output_fields) == {"response"}
-    assert set(RLMDocumentTurnSignature.input_fields) == {"user_request", "core_memory", "history", "document", "active_skills"}
+    assert set(RLMDocumentTurnSignature.input_fields) == {
+        "user_request",
+        "core_memory",
+        "history",
+        "document",
+        "active_skills",
+    }
     assert set(RLMDocumentTurnSignature.output_fields) == {"response"}
-    assert set(RLMWorkspaceTurnSignature.input_fields) == {"user_request", "core_memory", "history", "context", "active_skills"}
+    assert set(RLMWorkspaceTurnSignature.input_fields) == {
+        "user_request",
+        "core_memory",
+        "history",
+        "context",
+        "active_skills",
+    }
     assert set(RLMWorkspaceTurnSignature.output_fields) == {"response"}
     assert {"query", "evidence_chunks", "response_style"} <= set(GroundedAnswerWithCitations.input_fields)
     assert {"answer", "citations", "confidence", "coverage_notes"} <= set(GroundedAnswerWithCitations.output_fields)
