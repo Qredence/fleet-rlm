@@ -172,7 +172,7 @@ jobs:
         if: steps.frontend.outputs.enabled == 'true'
         run: |
           cd src/frontend
-          pnpm exec playwright install --with-deps chromium
+          pnpm exec playwright install chromium
 
       - name: Frontend quality gate
         if: steps.frontend.outputs.enabled == 'true'
