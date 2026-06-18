@@ -1,5 +1,6 @@
 import * as React from "react";
-import { Slot } from "@radix-ui/react-slot";
+import { mergeProps } from "@base-ui/react/merge-props";
+import { useRender } from "@base-ui/react/use-render";
 
 import { cn } from "@/lib/utils";
 
@@ -27,16 +28,17 @@ export function ButtonGroup({ className, orientation = "horizontal", ...props }:
   );
 }
 
-export type ButtonGroupTextProps = React.HTMLAttributes<HTMLSpanElement> & {
-  asChild?: boolean;
+export type ButtonGroupTextProps = useRender.ComponentProps<"span"> & {
+  className?: string;
 };
 
-export function ButtonGroupText({ className, asChild = false, ...props }: ButtonGroupTextProps) {
-  const Comp = asChild ? Slot : "span";
-  return (
-    <Comp
-      className={cn("flex items-center justify-center px-3 py-1 text-sm", className)}
-      {...props}
-    />
-  );
+export function ButtonGroupText({ className, render, ...props }: ButtonGroupTextProps) {
+  return useRender({
+    defaultTagName: "span",
+    props: mergeProps<"span">(
+      { className: cn("flex items-center justify-center px-3 py-1 text-sm", className) },
+      props,
+    ),
+    render,
+  });
 }

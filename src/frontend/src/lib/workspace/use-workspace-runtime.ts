@@ -2,7 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { sendCommandOverWs, subscribeToExecutionStream, type WsServerMessage } from "@/lib/rlm-api";
+import {
+  sendCommandOverWs,
+  sessionsEndpoints,
+  subscribeToExecutionStream,
+  type TurnItem,
+  type WsServerMessage,
+} from "@/lib/rlm-api";
 import { useArtifactStore } from "@/lib/workspace/artifact-store";
 import { applyWsFrameToArtifacts } from "@/lib/workspace/backend-artifact-event-adapter";
 import { applyWsFrameToMessages } from "@/lib/workspace/backend-chat-event-adapter";
@@ -10,6 +16,7 @@ import { asRecord } from "@/lib/workspace/backend-chat-event-payload";
 import type { WsRuntimeContext } from "@/lib/rlm-api/ws-types";
 import { useChatStore } from "@/lib/workspace/chat-store";
 import { useRunWorkbenchStore } from "@/lib/workspace/run-workbench-store";
+import { chatMessagesFromTurns } from "@/lib/workspace/session-turns";
 import { useWorkspaceUiStore } from "@/lib/workspace/workspace-ui-store";
 import type {
   ChatMessage,
@@ -56,6 +63,19 @@ function latestAssistantTurnId(messages: ChatMessage[]): string | null {
     if (msg?.type === "assistant") return msg.id;
   }
   return null;
+}
+
+async function loadAllSessionTurns(sessionId: string): Promise<TurnItem[]> {
+  const turns: TurnItem[] = [];
+  let offset = 0;
+  const limit = 200;
+
+  while (true) {
+    const page = await sessionsEndpoints.turns(sessionId, { limit, offset });
+    turns.push(...page.items);
+    if (!page.has_more) return turns;
+    offset += limit;
+  }
 }
 
 function applyOptimisticHitlResolution(
@@ -403,18 +423,39 @@ export function useWorkspace(): ChatRuntime {
   );
 
   const loadConversation = useCallback(
-    (conversation: Conversation) => {
+    async (conversation: Conversation) => {
       stopStreaming();
       clearArtifactSteps();
       if (conversation.runtimeSessionId) {
         setRuntimeSessionId(conversation.runtimeSessionId);
       }
       setDurableSessionId(conversation.durableSessionId ?? null);
-      setTurnArtifactsByMessageId(conversation.turnArtifactsByMessageId ?? {});
-      setMessages(conversation.messages);
+      setTurnArtifactsByMessageId({});
+
+      let loadedMessages = conversation.messages;
+      if (conversation.durableSessionId) {
+        try {
+          loadedMessages = chatMessagesFromTurns(
+            await loadAllSessionTurns(conversation.durableSessionId),
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown session load error";
+          toast.error("Could not load saved session transcript", { description: message });
+        }
+      } else if (conversation.isCompactHistoryRecord && conversation.messages.length === 0) {
+        toast.warning("Saved session preview only", {
+          description: "This local record has no durable backend transcript to restore.",
+        });
+      }
+
+      setMessages(loadedMessages);
       setInputValue("");
-      setPhase(conversation.phase);
-      setCreationPhase(conversation.phase);
+      const loadedPhase =
+        loadedMessages.length > 0 && conversation.durableSessionId
+          ? "complete"
+          : conversation.phase;
+      setPhase(loadedPhase);
+      setCreationPhase(loadedPhase);
       setIsTyping(false);
       resetRunWorkbench();
     },

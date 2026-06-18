@@ -42,13 +42,16 @@ def _stub_summarize(module: EscalatingFleetModule, *, summary: str = "summary") 
 def test_enrich_with_skills_uses_scaffold_when_volume_unmounted() -> None:
     module = _make_module(interpreter=None)
 
-    enriched, selected = module._enrich_with_skills(
+    enriched, selected, active_skills = module._enrich_with_skills(
         "Analyze the whole documentation of https://dspy.ai",
         "",
     )
 
     assert "long-context" in selected
-    assert "[Active Skills]" in enriched or "[Skill:" in enriched
+    assert "[Active Skills]" in enriched
+    assert "[Skill:" not in enriched
+    assert "long-context" in active_skills.selected
+    assert active_skills.instructions["long-context"].startswith("---")
 
 
 def _disable_runtime_tool_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -180,6 +183,16 @@ class TestEscalatingFleetModule:
         assert "character-for-character" in prompt
         assert "Do not open host context_paths" in prompt
 
+    def test_review_draft_prompt_adds_early_submit_guidance(self) -> None:
+        prompt = build_rlm_core_context(
+            user_request="Review my uncommitted changes and draft findings.",
+            compressed_history="",
+            core_memory="",
+        )
+
+        assert "Early stop for review/draft tasks" in prompt
+        assert "call SUBMIT(response=...) immediately" in prompt
+
     def test_url_document_prompt_disables_llm_query_when_repl_only_env(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -218,6 +231,30 @@ class TestEscalatingFleetModule:
         assert calls[0]["max_output_chars"] == 12_345
         assert calls[1]["max_output_chars"] == 12_345
         assert calls[2]["max_output_chars"] == 12_345
+
+    def test_escalating_module_passes_action_max_tokens_to_rlm_wrappers(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from fleet_rlm.runtime.modules import escalating
+
+        calls: list[dict[str, Any]] = []
+
+        def fake_create_runtime_rlm(**kwargs: Any) -> MagicMock:
+            calls.append(kwargs)
+            return MagicMock()
+
+        monkeypatch.setattr(escalating, "create_runtime_rlm", fake_create_runtime_rlm)
+
+        EscalatingFleetModule(
+            interpreter=object(),
+            tools=[],
+            action_max_tokens=4096,
+        )
+
+        assert calls[0]["action_max_tokens"] == 4096
+        assert calls[1]["action_max_tokens"] == 4096
+        assert calls[2]["action_max_tokens"] == 4096
 
     def test_direct_route_uses_chain_of_thought(self) -> None:
         module = _make_module()
@@ -677,8 +714,10 @@ class TestBuildChatAgentRuntimeDefault:
             rlm_max_iterations=9,
             rlm_max_llm_calls=11,
             rlm_max_output_chars=12_345,
+            rlm_action_max_tokens=4096,
         )
 
         assert rt.rlm_max_iterations == 9
         assert rt.rlm_max_llm_calls == 11
         assert rt.rlm_max_output_chars == 12_345
+        assert rt.rlm_action_max_tokens == 4096

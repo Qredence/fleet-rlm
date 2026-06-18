@@ -4,8 +4,8 @@ import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { VolumeFileDetail } from "@/features/volumes/components/file-detail";
-import { VolumesBrowser } from "@/features/volumes/volumes-screen";
+import { VolumeFileDetail } from "@/features/volumes/file-preview/file-detail";
+import { VolumesBrowser } from "@/features/volumes";
 import type { FsNode, VolumeProvider } from "@/features/volumes/use-volumes";
 
 let contentState: {
@@ -45,11 +45,11 @@ vi.mock("@/stores/navigation-store", () => ({
     selector({ openCanvas }),
 }));
 
-vi.mock("@/hooks/use-is-mobile", () => ({
+vi.mock("@/hooks/ui/use-is-mobile", () => ({
   useIsMobile: () => false,
 }));
 
-vi.mock("@/hooks/use-runtime-status", () => ({
+vi.mock("@/hooks/runtime/use-runtime-status", () => ({
   useRuntimeStatus: () => ({
     data: {
       sandbox_provider: "daytona",

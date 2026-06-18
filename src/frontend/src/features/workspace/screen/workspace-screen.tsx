@@ -1,21 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useMutation } from "@tanstack/react-query";
-import { FileJson, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useTelemetry } from "@/lib/telemetry/use-telemetry";
 import { useAppNavigate } from "@/hooks/use-app-navigate";
-import { useIsMobile } from "@/hooks/use-is-mobile";
-import { useRuntimeStatus } from "@/hooks/use-runtime-status";
+import { useIsMobile } from "@/hooks/ui/use-is-mobile";
+import { useRuntimeStatus } from "@/hooks/runtime/use-runtime-status";
 import { WorkspaceMessageList } from "@/features/workspace/conversation/transcript/workspace-message-list";
 import {
   WorkspaceSidepanel,
   WorkspaceSidepanelToggle,
-} from "@/features/workspace/screen/sidepanel/workspace-sidepanel";
+} from "@/features/workspace/sidepanel/workspace-sidepanel";
 import {
   useChatHistoryStore,
   useChatStore,
@@ -26,10 +22,8 @@ import { getWorkspaceRuntimeGuard } from "@/features/workspace/runtime-guard";
 import { detectRepoContext } from "@/lib/utils/repo-context";
 import { detectContextPaths } from "@/lib/utils/source-context";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
-import { sessionsEndpoints } from "@/lib/rlm-api/sessions";
-import type { SessionTraceExportResponse } from "@/lib/rlm-api/optimization";
 import type { WsExecutionMode } from "@/lib/rlm-api/ws-types";
-import { requestSettingsDialogOpen } from "@/features/settings/settings-events";
+import { requestSettingsDialogOpen } from "@/features/settings";
 
 export const WORKSPACE_CHAT_OPEN_SIZE = "68%";
 export const WORKSPACE_CHAT_MIN_SIZE = "25%";
@@ -99,28 +93,6 @@ export function WorkspaceScreen() {
   const runtimeMode = useChatStore((state) => state.runtimeMode);
   const setRuntimeMode = useChatStore((state) => state.setRuntimeMode);
   const [headerActionsHost, setHeaderActionsHost] = useState<HTMLElement | null>(null);
-  const [traceExport, setTraceExport] = useState<SessionTraceExportResponse | null>(null);
-  const { mutate: exportTraceMutation, isPending: isExportingTraces } = useMutation({
-    mutationFn: (targetSessionId: string) =>
-      sessionsEndpoints.exportTraces(targetSessionId, { format: "both" }),
-    onSuccess: (result) => {
-      setTraceExport(result);
-      if (result.trace_count === 0) {
-        toast.warning("Trace export completed with no traces", {
-          description: "Run a chat turn first or verify the session is linked to MLflow traces.",
-        });
-        return;
-      }
-      toast.success("Trace export ready", {
-        description: result.distilled_bundle_path ?? result.jsonl_path ?? result.json_path,
-      });
-    },
-    onError: (error) => {
-      toast.error("Trace export failed", {
-        description: error instanceof Error ? error.message : String(error),
-      });
-    },
-  });
 
   const didInitRuntimeMode = useRef(false);
   useEffect(() => {
@@ -355,36 +327,7 @@ export function WorkspaceScreen() {
     hasMessages,
   });
 
-  const handleExportTraces = useCallback(() => {
-    const trimmedSessionId = (sessionId ?? "").trim();
-    if (!trimmedSessionId) {
-      toast.error("No active runtime session id is available.");
-      return;
-    }
-    exportTraceMutation(trimmedSessionId);
-  }, [exportTraceMutation, sessionId]);
-
-  const headerActions = (
-    <>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="h-8 gap-1.5 text-xs"
-        disabled={!sessionId || isExportingTraces}
-        onClick={handleExportTraces}
-        title="Export traces for GEPA"
-      >
-        {isExportingTraces ? (
-          <Loader2 className="animate-spin" data-icon="inline-start" />
-        ) : (
-          <FileJson data-icon="inline-start" />
-        )}
-        Export traces for GEPA
-      </Button>
-      <WorkspaceSidepanelToggle />
-    </>
-  );
+  const headerActions = <WorkspaceSidepanelToggle />;
 
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">
@@ -404,22 +347,6 @@ export function WorkspaceScreen() {
             className="min-w-0"
           >
             <div className="flex h-full min-h-0 flex-col overflow-hidden">
-              {traceExport ? (
-                <div className="px-4 pt-4 md:px-6">
-                  <Alert className="mx-auto max-w-175">
-                    <FileJson className="text-muted-foreground" />
-                    <AlertTitle>Trace export ready for GEPA</AlertTitle>
-                    <AlertDescription>
-                      <div className="space-y-1 text-xs">
-                        <div>Session: {traceExport.session_id}</div>
-                        <div>JSON: {traceExport.json_path ?? "-"}</div>
-                        <div>JSONL: {traceExport.jsonl_path ?? "-"}</div>
-                        <div>Distilled: {traceExport.distilled_bundle_path ?? "-"}</div>
-                      </div>
-                    </AlertDescription>
-                  </Alert>
-                </div>
-              ) : null}
               <div className="flex-1 min-h-0" data-slot="workspace-agent-chat">
                 <WorkspaceMessageList
                   messages={messages}

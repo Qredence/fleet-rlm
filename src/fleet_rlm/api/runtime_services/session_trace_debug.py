@@ -12,7 +12,12 @@ from fastapi import HTTPException
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.integrations.persistence_protocol import UnsupportedLocalCapabilityError
 
-from ..schemas.sessions import SessionTraceDebugResponse, SessionTraceDebugSpan
+from ..schemas.sessions import (
+    SessionTraceDebugResponse,
+    SessionTraceDebugSpan,
+    SessionTracePerformanceSpanSummary,
+    SessionTracePerformanceSummary,
+)
 from .session_helpers import optional_string
 from .session_trace_export import (
     MLFLOW_EXPORT_MAX_RESULTS,
@@ -76,6 +81,225 @@ def _span_status_code(span: dict[str, Any]) -> str | None:
     if isinstance(status, dict):
         return optional_string(status.get("code"))
     return None
+
+
+def _int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            return int(float(value.strip()))
+        except ValueError:
+            return None
+    return None
+
+
+def _span_timestamp(value: Any) -> int | None:
+    return _int_or_none(value)
+
+
+def _span_duration_ms(span: dict[str, Any]) -> int | None:
+    start = _span_timestamp(span.get("start_time_unix_nano"))
+    end = _span_timestamp(span.get("end_time_unix_nano"))
+    if start is None or end is None or end <= start:
+        return None
+    return int((end - start) / 1_000_000)
+
+
+def _jsonish_value(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return value
+    if text[0] not in '[{"':
+        return value
+    try:
+        return json.loads(text)
+    except Exception:
+        return value
+
+
+def _span_inputs(span: dict[str, Any]) -> Any:
+    if "inputs" in span:
+        return _jsonish_value(span.get("inputs"))
+    return _jsonish_value(_span_attributes(span).get("mlflow.spanInputs"))
+
+
+def _span_outputs(span: dict[str, Any]) -> Any:
+    if "outputs" in span:
+        return _jsonish_value(span.get("outputs"))
+    return _jsonish_value(_span_attributes(span).get("mlflow.spanOutputs"))
+
+
+def _output_chars(span: dict[str, Any]) -> int | None:
+    output = _span_outputs(span)
+    if output is None:
+        return None
+    if isinstance(output, str):
+        return len(output)
+    try:
+        return len(json.dumps(output, ensure_ascii=True, sort_keys=True))
+    except Exception:
+        return len(str(output))
+
+
+def _token_usage(span: dict[str, Any]) -> tuple[int | None, int | None, int | None]:
+    attributes = _span_attributes(span)
+    usage = _jsonish_value(attributes.get("mlflow.chat.tokenUsage"))
+    if not isinstance(usage, dict):
+        usage = _jsonish_value(attributes.get("mlflow.chat.tokenUsageJson"))
+    if not isinstance(usage, dict):
+        usage = {}
+
+    input_tokens = _int_or_none(
+        usage.get("input_tokens")
+        or usage.get("prompt_tokens")
+        or usage.get("inputTokens")
+        or attributes.get("mlflow.chat.inputTokens")
+    )
+    output_tokens = _int_or_none(
+        usage.get("output_tokens")
+        or usage.get("completion_tokens")
+        or usage.get("outputTokens")
+        or attributes.get("mlflow.chat.outputTokens")
+    )
+    total_tokens = _int_or_none(
+        usage.get("total_tokens") or usage.get("totalTokens") or attributes.get("mlflow.chat.totalTokens")
+    )
+    if total_tokens is None and (input_tokens is not None or output_tokens is not None):
+        total_tokens = int(input_tokens or 0) + int(output_tokens or 0)
+    return input_tokens, output_tokens, total_tokens
+
+
+def _fallback_reason(span: dict[str, Any]) -> str | None:
+    haystack_parts = [
+        optional_string(span.get("name")),
+        optional_string(_span_status_code(span)),
+        optional_string(span.get("status", {}).get("message") if isinstance(span.get("status"), dict) else None),
+        _preview_value(_span_inputs(span), max_chars=500),
+        _preview_value(_span_outputs(span), max_chars=500),
+        _preview_value(_span_attributes(span), max_chars=500),
+    ]
+    haystack = " ".join(part for part in haystack_parts if part).lower()
+    if "adapterparseerror" in haystack or "failed to parse" in haystack or "parse error" in haystack:
+        return "adapter_parse_error"
+    if "jsonadapter" in haystack and ("fallback" in haystack or "retry" in haystack):
+        return "json_adapter_fallback"
+    if "chatadapter" in haystack and ("fallback" in haystack or "retry" in haystack):
+        return "chat_adapter_fallback"
+    if "fallback" in haystack and "adapter" in haystack:
+        return "adapter_fallback"
+    return None
+
+
+def _span_summary(span: dict[str, Any]) -> SessionTracePerformanceSpanSummary:
+    input_tokens, output_tokens, total_tokens = _token_usage(span)
+    return SessionTracePerformanceSpanSummary(
+        span_id=str(span.get("span_id") or ""),
+        name=str(span.get("name") or "unknown"),
+        duration_ms=_span_duration_ms(span),
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        output_chars=_output_chars(span),
+    )
+
+
+def _csv_attr_values(value: Any) -> list[str]:
+    text = optional_string(value)
+    if not text:
+        return []
+    return [item.strip() for item in text.split(",") if item.strip()]
+
+
+def _build_performance_summary(spans: list[dict[str, Any]]) -> SessionTracePerformanceSummary:
+    llm_duration = 0
+    repl_duration = 0
+    tool_duration = 0
+    input_tokens_total = 0
+    output_tokens_total = 0
+    total_tokens_total = 0
+    parse_error_count = 0
+    fallback_count = 0
+    selected_skills: list[str] = []
+    action_max_tokens: int | None = None
+    max_output_chars: int | None = None
+    root_duration: int | None = None
+    slowest_llm: dict[str, Any] | None = None
+    largest_output: dict[str, Any] | None = None
+
+    for span in spans:
+        duration = _span_duration_ms(span) or 0
+        span_type = (_span_type(span) or "").upper()
+        name = str(span.get("name") or "")
+        attributes = _span_attributes(span)
+
+        if span.get("parent_span_id") is None and duration:
+            root_duration = duration if root_duration is None else max(root_duration, duration)
+
+        if span_type in {"LLM", "CHAT_MODEL"} or name == "LM.__call__":
+            llm_duration += duration
+            if slowest_llm is None or duration > (_span_duration_ms(slowest_llm) or 0):
+                slowest_llm = span
+        elif span_type == "TOOL" and "repl" in name.lower():
+            repl_duration += duration
+        elif span_type == "TOOL":
+            tool_duration += duration
+
+        input_tokens, output_tokens, total_tokens = _token_usage(span)
+        input_tokens_total += int(input_tokens or 0)
+        output_tokens_total += int(output_tokens or 0)
+        total_tokens_total += int(total_tokens or 0)
+
+        output_chars = _output_chars(span) or 0
+        if largest_output is None or output_chars > (_output_chars(largest_output) or 0):
+            largest_output = span
+
+        reason = _fallback_reason(span)
+        if reason is not None:
+            if "parse" in reason:
+                parse_error_count += 1
+            if "fallback" in reason or "retry" in reason or reason == "adapter_parse_error":
+                fallback_count += 1
+
+        for skill in _csv_attr_values(attributes.get("fleet_rlm.selected_skills")):
+            if skill not in selected_skills:
+                selected_skills.append(skill)
+
+        action_max_tokens = action_max_tokens or _int_or_none(attributes.get("fleet_rlm.rlm_action_max_tokens"))
+        max_output_chars = max_output_chars or _int_or_none(attributes.get("fleet_rlm.rlm_max_output_chars"))
+
+    known_duration = llm_duration + repl_duration + tool_duration
+    root_overhead = None
+    if root_duration is not None:
+        root_overhead = max(0, root_duration - known_duration)
+
+    expected_total = input_tokens_total + output_tokens_total
+    token_total_mismatch = bool(total_tokens_total and total_tokens_total != expected_total)
+
+    return SessionTracePerformanceSummary(
+        total_duration_ms=root_duration,
+        llm_duration_ms=llm_duration,
+        repl_duration_ms=repl_duration,
+        tool_duration_ms=tool_duration,
+        root_overhead_ms=root_overhead,
+        input_tokens=input_tokens_total,
+        output_tokens=output_tokens_total,
+        total_tokens=total_tokens_total or expected_total,
+        token_total_mismatch=token_total_mismatch,
+        adapter_fallback_count=fallback_count,
+        parse_error_count=parse_error_count,
+        selected_skills=selected_skills,
+        rlm_action_max_tokens=action_max_tokens,
+        rlm_max_output_chars=max_output_chars,
+        slowest_llm_span=_span_summary(slowest_llm) if slowest_llm is not None else None,
+        largest_output_span=_span_summary(largest_output) if largest_output is not None else None,
+    )
 
 
 def _span_type(span: dict[str, Any]) -> str | None:
@@ -284,10 +508,16 @@ def build_session_trace_debug_response(
                 mapped_render_kind=mapped_render_kind,
                 mapped_component_type=mapped_component_type,
                 rationale=rationale,
-                input_preview=_preview_value(span.get("inputs")),
-                output_preview=_preview_value(span.get("outputs")),
+                input_preview=_preview_value(_span_inputs(span)),
+                output_preview=_preview_value(_span_outputs(span)),
                 start_time_unix_nano=_unix_nano_string(span.get("start_time_unix_nano")),
                 end_time_unix_nano=_unix_nano_string(span.get("end_time_unix_nano")),
+                duration_ms=_span_duration_ms(span),
+                input_tokens=_token_usage(span)[0],
+                output_tokens=_token_usage(span)[1],
+                total_tokens=_token_usage(span)[2],
+                output_chars=_output_chars(span),
+                retry_or_fallback_reason=_fallback_reason(span),
             )
         )
 
@@ -306,6 +536,7 @@ def build_session_trace_debug_response(
         span_count=len(mapped_spans),
         renderable_span_count=renderable_count,
         non_rendered_span_count=len(mapped_spans) - renderable_count,
+        performance_summary=_build_performance_summary(spans),
         spans=mapped_spans,
     )
 

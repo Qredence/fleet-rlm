@@ -22,7 +22,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Sidebar, SidebarProvider } from "@/components/ui/sidebar";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useIsMobile } from "@/hooks/ui/use-is-mobile";
 import {
   getSettingsSectionDescription,
   getSettingsSectionTitle,
@@ -31,7 +31,7 @@ import {
   settingsSections,
   SettingsSidebarNav,
   type SettingsSection,
-} from "@/features/settings/settings-content";
+} from "@/features/settings/screen/settings-content";
 import { useThemeStore } from "@/stores/theme-store";
 
 interface SettingsDialogProps {
@@ -53,7 +53,6 @@ function MobileSectionPicker({
 }) {
   return (
     <ToggleGroup
-      type="single"
       value={section ?? "appearance"}
       variant="outline"
       size="sm"
@@ -180,11 +179,7 @@ export function SettingsDialog({
 
   return (
     <Dialog open={resolvedOpen} onOpenChange={handleOpenChange}>
-      {showTrigger ? (
-        <DialogTrigger asChild>
-          <Button size="sm">Open Dialog</Button>
-        </DialogTrigger>
-      ) : null}
+      {showTrigger ? <DialogTrigger render={<Button size="sm">Open Dialog</Button>} /> : null}
       <DialogContent className="overflow-hidden p-0 md:h-settings-dialog md:max-h-settings-dialog md:max-w-settings-dialog-md lg:max-w-settings-dialog-lg">
         <DialogTitle className="sr-only">Settings</DialogTitle>
         <DialogDescription className="sr-only">

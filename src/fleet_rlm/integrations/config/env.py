@@ -273,8 +273,12 @@ class RlmSettings(BaseModel):
         description="Maximum LLM calls per task.",
     )
     max_output_chars: int = Field(
-        default=100000,
-        description="Maximum output characters.",
+        default=5000,
+        description="Maximum REPL output characters exposed back to the RLM per step.",
+    )
+    action_max_tokens: int = Field(
+        default=4096,
+        description="Maximum model tokens for each RLM action-generation call.",
     )
     delegate_max_calls_per_turn: int = Field(
         default=8,

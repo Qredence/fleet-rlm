@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from fleet_rlm.api import spa
 
@@ -57,6 +59,43 @@ def test_resolve_ui_dist_dir_source_checkout_prefers_frontend_dist(
     assert (resolved / "index.html").read_text(encoding="utf-8") == "<html>fresh</html>"
 
 
+def test_resolve_ui_dist_dir_source_checkout_prefers_nested_client_dist(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    frontend_dist = repo_root / "src" / "frontend" / "dist"
+    client_dist = frontend_dist / "client"
+    client_dist.mkdir(parents=True)
+    (frontend_dist / "index.html").write_text("<html>stale</html>", encoding="utf-8")
+    (client_dist / "index.html").write_text("<html>fresh client</html>", encoding="utf-8")
+
+    monkeypatch.setattr(spa, "_repo_root", lambda: repo_root)
+    monkeypatch.setattr(spa, "is_source_frontend_checkout", lambda: True)
+    monkeypatch.setattr(spa, "_source_frontend_dist_dir", lambda: frontend_dist)
+
+    resolved = spa.resolve_ui_dist_dir()
+    assert resolved == client_dist.resolve()
+    assert (resolved / "index.html").read_text(encoding="utf-8") == "<html>fresh client</html>"
+
+
+def test_resolve_ui_dist_dir_source_checkout_rejects_stale_root_when_client_dist_exists(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    frontend_dist = repo_root / "src" / "frontend" / "dist"
+    client_dist = frontend_dist / "client"
+    client_dist.mkdir(parents=True)
+    (frontend_dist / "index.html").write_text("<html>stale</html>", encoding="utf-8")
+
+    monkeypatch.setattr(spa, "_repo_root", lambda: repo_root)
+    monkeypatch.setattr(spa, "is_source_frontend_checkout", lambda: True)
+    monkeypatch.setattr(spa, "_source_frontend_dist_dir", lambda: frontend_dist)
+
+    assert spa.resolve_ui_dist_dir() is None
+
+
 def test_resolve_ui_dist_dir_installed_package_uses_packaged_dist(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -83,3 +122,27 @@ def test_ui_unavailable_payload_mentions_dev_server(monkeypatch: pytest.MonkeyPa
     payload = spa.ui_unavailable_payload()
     assert "pnpm run dev" in payload["hint"]
     assert ":5173" in payload["hint"]
+
+
+def test_mount_spa_handles_entrypoint_deleted_after_startup(tmp_path: Path) -> None:
+    ui_root = tmp_path / "dist" / "client"
+    ui_root.mkdir(parents=True)
+    index_path = ui_root / "index.html"
+    index_path.write_text("<html>fresh</html>", encoding="utf-8")
+
+    app = FastAPI()
+
+    @app.get("/api/health")
+    async def api_health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    spa.mount_spa(app, ui_root)
+    index_path.unlink()
+
+    response = TestClient(app).get("/app/workspace")
+
+    assert response.status_code == 503
+    assert response.json()["error"] in {
+        "UI build not found.",
+        "Packaged UI assets are missing from this installation.",
+    }

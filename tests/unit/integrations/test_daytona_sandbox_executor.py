@@ -11,7 +11,7 @@ def test_bridge_tools_can_disable_semantic_callbacks() -> None:
     from fleet_rlm.integrations.daytona.bridge_callbacks import bridge_tools
 
     interpreter = SimpleNamespace(
-        _tools={},
+        _tools={"list_files": lambda path=".": [], "sandbox_search_files": lambda path, pattern: []},
         semantic_callbacks_enabled=False,
         sub_rlm=lambda prompt: prompt,
         llm_query=lambda prompt: prompt,
@@ -20,10 +20,43 @@ def test_bridge_tools_can_disable_semantic_callbacks() -> None:
 
     tools = bridge_tools(interpreter)
 
+    assert "list_files" not in tools
+    assert "sandbox_search_files" not in tools
     assert "llm_query" not in tools
     assert "llm_query_batched" not in tools
     assert "sub_rlm" in tools
     assert "fetch_document_text" in tools
+
+
+def test_daytona_repl_setup_keeps_native_file_helpers_fast_and_flexible(tmp_path) -> None:
+    from fleet_rlm.integrations.daytona.sandbox_executor import _base_setup_code, inject_variables
+
+    workspace = tmp_path / "workspace"
+    memory = tmp_path / "memory"
+    (workspace / "src").mkdir(parents=True)
+    memory.mkdir()
+    (workspace / "src" / "app.py").write_text("print('hello')\n", encoding="utf-8")
+    (workspace / "skills-lock.json").write_text("{}\n", encoding="utf-8")
+    context_dir = workspace / ".fleet-rlm" / "context" / "ctx"
+    context_dir.mkdir(parents=True)
+    (workspace / ".fleet-rlm" / "context" / "manifest.json").write_text(
+        '{"context_sources":[{"staged_path":".fleet-rlm/context/ctx/snapshot.md"}]}',
+        encoding="utf-8",
+    )
+
+    sandbox_globals: dict[str, Any] = {}
+    exec(_base_setup_code(workspace_path=str(workspace), volume_mount_path=str(memory)), sandbox_globals)
+    exec(inject_variables(SimpleNamespace(), "result = list_files('src', '*.py')", {}), sandbox_globals)
+
+    assert sandbox_globals["result"] == [str(workspace / "src" / "app.py")]
+    assert sandbox_globals["sandbox_search_files"]("skills-lock.json") == [str(workspace / "skills-lock.json")]
+    assert sandbox_globals["active_skills"] == {
+        "selected": [],
+        "catalog": {},
+        "instructions": {},
+        "sources": {},
+    }
+    assert sandbox_globals["context"]["metadata"]["sandbox_staged_paths"] == [".fleet-rlm/context/ctx/snapshot.md"]
 
 
 def test_broker_start_failure_latches_and_blocks_immediate_retry() -> None:

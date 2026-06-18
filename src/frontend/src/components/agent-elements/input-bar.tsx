@@ -398,9 +398,7 @@ export const InputBar = memo(function InputBar({
   const attachButtonNode =
     showAttach && onAttach ? (
       <Popover open={isAttachMenuOpen} onOpenChange={setIsAttachMenuOpen}>
-        <PopoverTrigger asChild>
-          <AttachmentButton />
-        </PopoverTrigger>
+        <PopoverTrigger render={<AttachmentButton />} />
         <PopoverContent
           align="start"
           side="top"

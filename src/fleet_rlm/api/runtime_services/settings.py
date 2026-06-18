@@ -54,6 +54,7 @@ RUNTIME_MODEL_RELOAD_KEYS = frozenset(
         "DSPY_LLM_API_KEY",
         "DSPY_LM_API_KEY",
         "DSPY_DELEGATE_LM_API_KEY",
+        "FLEET_RLM_ACTION_MAX_TOKENS",
     }
 )
 
@@ -73,6 +74,7 @@ class RuntimeConfigSnapshot(TypedDict):
     agent_delegate_model: str | None
     agent_delegate_small_model: str | None
     agent_delegate_max_tokens: int
+    rlm_action_max_tokens: int
     planner_lm: object | None
     delegate_lm: object | None
     delegate_small_lm: object | None
@@ -95,6 +97,12 @@ def apply_runtime_settings_to_config(*, config: ServerRuntimeConfig, normalized:
         config.agent_delegate_max_tokens = _settings_positive_int(
             normalized["DSPY_DELEGATE_LM_MAX_TOKENS"],
             default=64000,
+        )
+
+    if "FLEET_RLM_ACTION_MAX_TOKENS" in normalized:
+        config.rlm_action_max_tokens = _settings_positive_int(
+            normalized["FLEET_RLM_ACTION_MAX_TOKENS"],
+            default=4096,
         )
 
     if "VOLUME_NAME" in normalized:
@@ -131,6 +139,7 @@ def _capture_runtime_config_snapshot(*, config: ServerRuntimeConfig, lm_deps: Lm
         "agent_delegate_model": config.agent_delegate_model,
         "agent_delegate_small_model": config.agent_delegate_small_model,
         "agent_delegate_max_tokens": config.agent_delegate_max_tokens,
+        "rlm_action_max_tokens": config.rlm_action_max_tokens,
         "planner_lm": lm_deps.planner_lm,
         "delegate_lm": lm_deps.delegate_lm,
         "delegate_small_lm": lm_deps.delegate_small_lm,
@@ -147,6 +156,7 @@ def _restore_runtime_config_snapshot(
     config.agent_delegate_model = snapshot["agent_delegate_model"]
     config.agent_delegate_small_model = snapshot["agent_delegate_small_model"]
     config.agent_delegate_max_tokens = snapshot["agent_delegate_max_tokens"]
+    config.rlm_action_max_tokens = snapshot["rlm_action_max_tokens"]
     lm_deps.planner_lm = snapshot["planner_lm"]
     lm_deps.delegate_lm = snapshot["delegate_lm"]
     lm_deps.delegate_small_lm = snapshot["delegate_small_lm"]

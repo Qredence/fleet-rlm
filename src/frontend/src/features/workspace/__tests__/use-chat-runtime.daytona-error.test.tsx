@@ -18,6 +18,7 @@ import {
 const mocked = vi.hoisted(() => ({
   toastError: vi.fn(),
   streamMessage: vi.fn(),
+  sessionsTurns: vi.fn(),
   stopStreaming: vi.fn(),
   resetSession: vi.fn(),
   clearArtifactSteps: vi.fn(),
@@ -49,6 +50,10 @@ vi.mock("@/lib/rlm-api", async () => {
   return {
     ...actual,
     sendCommandOverWs: vi.fn(),
+    sessionsEndpoints: {
+      ...actual.sessionsEndpoints,
+      turns: mocked.sessionsTurns,
+    },
     subscribeToExecutionStream: vi.fn(() => () => {}),
     rlmApiConfig: {
       ...actual.rlmApiConfig,
@@ -87,6 +92,7 @@ function resetState() {
   });
 
   mocked.streamMessage.mockReset();
+  mocked.sessionsTurns.mockReset();
   mocked.stopStreaming.mockReset();
   mocked.resetSession.mockReset();
   mocked.daytonaStoreState.reset.mockReset();
@@ -163,5 +169,61 @@ describe("useWorkspace Daytona transport failures", () => {
       description:
         "No response arrived from the server within 60 seconds. Try again or check the backend logs.",
     });
+  });
+
+  it("loads durable saved conversations from backend turns", async () => {
+    mocked.sessionsTurns.mockResolvedValue({
+      items: [
+        {
+          id: "turn-1",
+          turn_index: 0,
+          user_message: "Stored user request",
+          assistant_message: "Stored assistant response",
+          created_at: "2026-06-18T10:00:00.000Z",
+        },
+      ],
+      total: 1,
+      offset: 0,
+      limit: 200,
+      has_more: false,
+    });
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <Harness />
+        </QueryClientProvider>,
+      );
+    });
+
+    await act(async () => {
+      await runtime?.loadConversation({
+        id: "conv-1",
+        title: "Stored session",
+        messages: [],
+        runtimeSessionId: "runtime-1",
+        durableSessionId: "durable-1",
+        phase: "idle",
+        createdAt: "2026-06-18T10:00:00.000Z",
+        updatedAt: "2026-06-18T10:00:00.000Z",
+      });
+    });
+
+    expect(mocked.sessionsTurns).toHaveBeenCalledWith("durable-1", { limit: 200, offset: 0 });
+    expect(useChatStore.getState().messages).toEqual([
+      {
+        id: "turn-turn-1-user",
+        type: "user",
+        content: "Stored user request",
+      },
+      {
+        id: "turn-turn-1-assistant",
+        type: "assistant",
+        content: "Stored assistant response",
+        streaming: false,
+      },
+    ]);
+    expect(useChatStore.getState().turnArtifactsByMessageId).toEqual({});
+    expect(mocked.setCreationPhase).toHaveBeenCalledWith("complete");
   });
 });

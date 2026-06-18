@@ -5,20 +5,22 @@ from unittest.mock import MagicMock
 import dspy
 
 from fleet_rlm.runtime.modules.skill_selection import SkillSelectionModule
+from fleet_rlm.runtime.sandbox_types import ActiveSkills
 
 
 def test_browser_interaction_skill_is_cataloged_and_keyword_selected() -> None:
     from fleet_rlm.runtime.modules.skill_selection import AVAILABLE_SKILLS
 
     module = SkillSelectionModule()
-    module._load_skills = MagicMock(return_value="[Skill: browser-interaction]\nInstructions")
 
     result = module(user_request="Use playwright to inspect this javascript page")
 
     assert "browser-interaction" in AVAILABLE_SKILLS
     assert result.selected_skills == ["browser-interaction"]
-    assert result.skill_context == "[Skill: browser-interaction]\nInstructions"
-    module._load_skills.assert_called_once_with(["browser-interaction"])
+    assert "[Active Skills]" in result.skill_context
+    assert "browser-interaction" in result.skill_context
+    assert result.active_skills.selected == ["browser-interaction"]
+    assert result.active_skills.instructions["browser-interaction"].startswith("---")
 
 
 def test_skill_selection_no_keyword_match_skips_llm_selector() -> None:
@@ -41,21 +43,29 @@ def test_skill_selection_caps_selected_skills_to_loaded_context() -> None:
             reasoning="diagnostics is the best fit",
         )
     )
-    module._load_skills = MagicMock(return_value="[Skill: diagnostics]\nInstructions")
+    module._load_active_skills = MagicMock(
+        return_value=ActiveSkills(
+            selected=["diagnostics"],
+            catalog={"diagnostics": "Debug runtime failures"},
+            instructions={"diagnostics": "Instructions"},
+            sources={"diagnostics": "scaffold:diagnostics"},
+        )
+    )
 
     result = module(user_request="debug a broken sandbox dspy module")
 
     module.select.assert_called_once()
-    module._load_skills.assert_called_once_with(["diagnostics"])
+    module._load_active_skills.assert_called_once_with(["diagnostics"])
     assert result.selected_skills == ["diagnostics"]
-    assert result.skill_context == "[Skill: diagnostics]\nInstructions"
+    assert "[Active Skills]" in result.skill_context
+    assert "diagnostics: Debug runtime failures" in result.skill_context
+    assert result.active_skills.instructions["diagnostics"] == "Instructions"
     assert result.reasoning == "diagnostics is the best fit"
 
 
 def test_skill_selection_falls_back_when_llm_returns_no_valid_skills() -> None:
     module = SkillSelectionModule(max_skills=2)
     module.select = MagicMock(return_value=dspy.Prediction(skills=["unknown"], reasoning="bad parse"))
-    module._load_skills = MagicMock(return_value="[Skill: fallback]\nInstructions")
 
     result = module(user_request="debug a broken sandbox dspy module")
 

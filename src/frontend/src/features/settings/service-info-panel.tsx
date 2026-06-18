@@ -1,7 +1,7 @@
 import { Info } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Field, FieldContent, FieldDescription, FieldTitle } from "@/components/ui/field";
-import { useServiceInfo } from "@/hooks/use-service-info";
+import { useServiceInfo } from "@/hooks/runtime/use-service-info";
 
 const PANEL_FIELD_CLASSNAME = "border-b border-border-subtle py-4 last:border-b-0";
 

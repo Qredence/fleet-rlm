@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
 
-import { useControllableState } from "@/hooks/use-controllable-state";
+import { useControllableState } from "@/hooks/ui/use-controllable-state";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { useStreamdownPlugins } from "@/lib/utils/streamdown-plugins";

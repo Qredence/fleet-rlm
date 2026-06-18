@@ -113,7 +113,7 @@ vi.mock("@/features/workspace/use-workspace", () => ({
   useRunWorkbenchStore: () => mockedWorkbenchStore,
 }));
 
-vi.mock("@/hooks/use-runtime-status", () => ({
+vi.mock("@/hooks/runtime/use-runtime-status", () => ({
   useRuntimeStatus: () => ({
     data: {
       mlflow: {

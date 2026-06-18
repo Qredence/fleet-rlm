@@ -42,7 +42,7 @@ from fleet_rlm.runtime.modules.rlm_routing import (
     fetch_url_document,
     resolve_rlm_routing,
 )
-from fleet_rlm.runtime.sandbox_types import LargeDocument, WorkspaceContext
+from fleet_rlm.runtime.sandbox_types import ActiveSkills, LargeDocument, WorkspaceContext
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +121,7 @@ class _TurnPrep:
     source_url: str | None
     core_memory: str
     selected_skills: list[str]
+    active_skills: ActiveSkills
 
 
 class EscalatingFleetModule(dspy.Module):
@@ -146,6 +147,8 @@ class EscalatingFleetModule(dspy.Module):
         Maximum LLM calls for the heavy path.
     max_output_chars:
         Maximum REPL output characters exposed back to the RLM per step.
+    action_max_tokens:
+        Maximum model tokens for each RLM action-generation call.
     verbose:
         Pass ``verbose=True`` to the inner RLM for debug output.
     sub_lm:
@@ -162,6 +165,7 @@ class EscalatingFleetModule(dspy.Module):
         max_iterations: int = 20,
         max_llm_calls: int = 50,
         max_output_chars: int | None = None,
+        action_max_tokens: int | None = None,
         verbose: bool = False,
         sub_lm: dspy.LM | None = None,
         summary_interval: int = 10,
@@ -209,6 +213,7 @@ class EscalatingFleetModule(dspy.Module):
                 max_iterations=max_iterations,
                 max_llm_calls=max_llm_calls,
                 max_output_chars=rlm_output_chars,
+                action_max_tokens=action_max_tokens,
                 verbose=verbose,
                 tools=rlm_tools or None,
                 sub_lm=sub_lm,
@@ -219,6 +224,7 @@ class EscalatingFleetModule(dspy.Module):
                 max_iterations=max_iterations,
                 max_llm_calls=max_llm_calls,
                 max_output_chars=rlm_output_chars,
+                action_max_tokens=action_max_tokens,
                 verbose=verbose,
                 tools=rlm_tools or None,
                 sub_lm=sub_lm,
@@ -229,6 +235,7 @@ class EscalatingFleetModule(dspy.Module):
                 max_iterations=max(1, min(max_iterations, _URL_DOCUMENT_MAX_ITERATIONS)),
                 max_llm_calls=max(1, min(max_llm_calls, _URL_DOCUMENT_MAX_LLM_CALLS)),
                 max_output_chars=rlm_output_chars,
+                action_max_tokens=action_max_tokens,
                 verbose=verbose,
                 sub_lm=sub_lm,
                 include_llm_tools=not url_repl_only_enabled(),
@@ -294,8 +301,8 @@ class EscalatingFleetModule(dspy.Module):
         execution_mode: str = "auto",
         routing_decision: str | None = None,
         is_first_turn: bool = False,
-    ) -> tuple[str, list[str]]:
-        """Select relevant skills and append their instructions to core_memory."""
+    ) -> tuple[str, list[str], ActiveSkills]:
+        """Select relevant skills and expose full instructions as RLM variables."""
         volume_mount_path = self._resolve_skill_volume_mount_path()
         if volume_mount_path != self._skill_selector._volume_mount_path:
             self._skill_selector._volume_mount_path = volume_mount_path
@@ -309,14 +316,17 @@ class EscalatingFleetModule(dspy.Module):
             )
             skill_context = str(getattr(selection, "skill_context", "") or "")
             selected = [str(item) for item in list(getattr(selection, "selected_skills", []) or [])]
+            active_skills = getattr(selection, "active_skills", None)
+            if not isinstance(active_skills, ActiveSkills):
+                active_skills = ActiveSkills(selected=selected)
             if skill_context:
-                logger.debug("SkillSelection: injected %s", selected)
-                enriched = f"{core_memory}\n\n[Active Skills]\n{skill_context}" if core_memory else skill_context
-                return enriched, selected
-            return core_memory, selected
+                logger.debug("SkillSelection: selected %s", selected)
+                enriched = f"{core_memory}\n\n{skill_context}" if core_memory else skill_context
+                return enriched, selected, active_skills
+            return core_memory, selected, active_skills
         except Exception as exc:
             logger.debug("SkillSelection: skipped (%s)", exc)
-        return core_memory, []
+        return core_memory, [], ActiveSkills()
 
     def _prepare_turn(
         self,
@@ -338,7 +348,7 @@ class EscalatingFleetModule(dspy.Module):
             force_escalate=force_escalate,
             turn_context=turn_context,
         )
-        core_memory, selected_skills = self._enrich_with_skills(
+        core_memory, selected_skills, active_skills = self._enrich_with_skills(
             user_request,
             core_memory,
             execution_mode=execution_mode,
@@ -352,6 +362,7 @@ class EscalatingFleetModule(dspy.Module):
             source_url=source_url,
             core_memory=core_memory,
             selected_skills=selected_skills,
+            active_skills=active_skills,
         )
 
     def _route_turn(
@@ -432,6 +443,7 @@ class EscalatingFleetModule(dspy.Module):
                 history=prep.history,
                 conversation_summary=conversation_summary,
                 selected_skills=prep.selected_skills,
+                active_skills=prep.active_skills,
                 routing_decision=prep.routing_decision,
                 source_url=prep.source_url,
                 turn_context=turn_context,
@@ -459,6 +471,7 @@ class EscalatingFleetModule(dspy.Module):
                 history=prep.history,
                 conversation_summary=conversation_summary,
                 selected_skills=prep.selected_skills,
+                active_skills=prep.active_skills,
                 routing_decision="router_rlm",
                 source_url=None,
                 turn_context=turn_context,
@@ -510,6 +523,7 @@ class EscalatingFleetModule(dspy.Module):
                 history=prep.history,
                 conversation_summary=conversation_summary,
                 selected_skills=prep.selected_skills,
+                active_skills=prep.active_skills,
                 routing_decision=prep.routing_decision,
                 source_url=prep.source_url,
                 turn_context=turn_context,
@@ -539,6 +553,7 @@ class EscalatingFleetModule(dspy.Module):
                 history=prep.history,
                 conversation_summary=conversation_summary,
                 selected_skills=prep.selected_skills,
+                active_skills=prep.active_skills,
                 routing_decision="router_rlm",
                 source_url=None,
                 turn_context=turn_context,
@@ -635,6 +650,7 @@ class EscalatingFleetModule(dspy.Module):
         history: dspy.History,
         conversation_summary: str,
         selected_skills: list[str] | None = None,
+        active_skills: ActiveSkills | None = None,
         routing_decision: str = "rlm",
         source_url: str | None = None,
         turn_context: TurnContext | None = None,
@@ -678,6 +694,7 @@ class EscalatingFleetModule(dspy.Module):
             "user_request": user_request,
             "core_memory": core_context,
             "history": history,
+            "active_skills": active_skills or ActiveSkills(selected=selected_skills or []),
         }
         rlm = self._rlm
         if url_document_mode:
@@ -748,6 +765,9 @@ class EscalatingFleetModule(dspy.Module):
                     "fleet_rlm.rlm_url_document_mode": str(url_document_mode).lower(),
                     "fleet_rlm.rlm_large_context_mode": str(large_context_mode).lower(),
                     "fleet_rlm.selected_skills": ",".join(selected_skills or []),
+                    "fleet_rlm.active_skills_variable": str(active_skills is not None).lower(),
+                    "fleet_rlm.rlm_action_max_tokens": str(getattr(rlm, "action_max_tokens", "") or ""),
+                    "fleet_rlm.rlm_max_output_chars": str(getattr(rlm, "max_output_chars", "") or ""),
                 },
                 inputs={
                     "input_fields": sorted(call_kwargs),

@@ -4,7 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
 import { ErrorBoundary } from "@/components/product/error-boundary";
 import { PageSkeleton } from "@/components/product/page-skeleton";
-import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useIsMobile } from "@/hooks/ui/use-is-mobile";
 import { fades } from "@/lib/utils/motion";
 
 export function LayoutRouteOutlet() {

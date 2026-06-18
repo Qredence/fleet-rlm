@@ -23,9 +23,7 @@ describe("PopoverContent", () => {
     act(() => {
       root.render(
         <Popover open>
-          <PopoverTrigger asChild>
-            <button type="button">Trigger</button>
-          </PopoverTrigger>
+          <PopoverTrigger render={<button type="button">Trigger</button>} />
           <PopoverContent forceMount>Runtime modes</PopoverContent>
         </Popover>,
       );

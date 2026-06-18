@@ -147,7 +147,9 @@ agent's RLM wrappers directly:
 
 - `rlm_max_iterations` -> `dspy.RLM(max_iterations=...)`
 - `rlm_max_llm_calls` -> `dspy.RLM(max_llm_calls=...)`
-- `agent_max_output_chars` -> `dspy.RLM(max_output_chars=...)`
+- `agent_max_output_chars` -> `dspy.RLM(max_output_chars=...)`; defaults to 5000
+  characters per REPL step so repeated sandbox iterations do not fold large
+  file or diff dumps back into every follow-up prompt.
 
 The backend enriches frames with runtime context. The frontend treats these keys
 as stable when present:

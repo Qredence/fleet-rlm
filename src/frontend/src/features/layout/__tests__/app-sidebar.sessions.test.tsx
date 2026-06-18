@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import { AppSidebar } from "@/features/layout/app-sidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import type { Conversation } from "@/features/workspace/workspace-layout-contract";
+import type { Conversation } from "@/features/workspace";
 
 (
   globalThis as typeof globalThis & {
@@ -95,7 +95,7 @@ vi.mock("@/hooks/use-app-navigate", () => ({
   useAppNavigate: () => ({ navigateTo: navigateToMock }),
 }));
 
-vi.mock("@/hooks/use-is-mobile", () => ({
+vi.mock("@/hooks/ui/use-is-mobile", () => ({
   useIsMobile: () => isMobile,
 }));
 
@@ -107,7 +107,7 @@ vi.mock("@/stores/navigation-store", () => ({
   }),
 }));
 
-vi.mock("@/features/settings/settings-content", () => {
+vi.mock("@/features/settings/screen/settings-content", () => {
   const Icon = () => <svg aria-hidden="true" />;
   const settingsSections = [
     { key: "appearance", label: "Appearance", icon: Icon },
@@ -126,7 +126,7 @@ vi.mock("@/features/settings/settings-content", () => {
   };
 });
 
-vi.mock("@/features/workspace/workspace-layout-contract", () => ({
+vi.mock("@/features/workspace", () => ({
   useWorkspaceLayoutHistory: () => workspaceShellState.conversations,
   useWorkspaceLayoutActions: () => ({
     newSession: workspaceShellState.newSession,

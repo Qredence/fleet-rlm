@@ -42,10 +42,61 @@ function logicalSessionKey(messages: ChatMessage[]): string | null {
   return `${firstMessage.type}:${firstMessage.id}`;
 }
 
+function conversationSessionKey(conversation: Conversation): string | null {
+  if (conversation.durableSessionId) return `durable:${conversation.durableSessionId}`;
+  if (conversation.runtimeSessionId) return `runtime:${conversation.runtimeSessionId}`;
+  return logicalSessionKey(conversation.messages);
+}
+
 function sortByUpdatedAtDesc(conversations: Conversation[]): Conversation[] {
   return [...conversations].sort(
     (first, second) => new Date(second.updatedAt).getTime() - new Date(first.updatedAt).getTime(),
   );
+}
+
+function messagePreview(message: ChatMessage | undefined): string {
+  const text = String(message?.content ?? "").trim();
+  if (!text) return "";
+  return text.length > 240 ? `${text.slice(0, 237)}...` : text;
+}
+
+function lastMessagePreview(messages: ChatMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const preview = messagePreview(messages[index]);
+    if (preview) return preview;
+  }
+  return "";
+}
+
+function compactConversationForStorage(conversation: Conversation): Conversation {
+  const messageCount = conversation.messageCount ?? conversation.messages.length;
+  const preview = conversation.lastMessagePreview || lastMessagePreview(conversation.messages);
+  return {
+    id: conversation.id,
+    title: conversation.title,
+    messages: [],
+    runtimeSessionId: conversation.runtimeSessionId,
+    durableSessionId: conversation.durableSessionId ?? null,
+    messageCount,
+    lastMessagePreview: preview,
+    isCompactHistoryRecord: true,
+    phase: conversation.phase,
+    createdAt: conversation.createdAt,
+    updatedAt: conversation.updatedAt,
+  };
+}
+
+function compactPersistedValue(
+  value: StorageValue<ChatHistoryPersistedState>,
+): StorageValue<ChatHistoryPersistedState> {
+  return {
+    ...value,
+    state: {
+      conversations: normalizeConversations(value.state.conversations).map(
+        compactConversationForStorage,
+      ),
+    },
+  };
 }
 
 function normalizeConversations(conversations: Conversation[]): Conversation[] {
@@ -53,7 +104,7 @@ function normalizeConversations(conversations: Conversation[]): Conversation[] {
   const withoutSessionKey: Conversation[] = [];
 
   for (const conversation of sortByUpdatedAtDesc(conversations)) {
-    const sessionKey = logicalSessionKey(conversation.messages);
+    const sessionKey = conversationSessionKey(conversation);
     if (!sessionKey) {
       withoutSessionKey.push(conversation);
       continue;
@@ -66,8 +117,48 @@ function normalizeConversations(conversations: Conversation[]): Conversation[] {
   return [...dedupedBySession.values(), ...withoutSessionKey].slice(0, MAX_CONVERSATIONS);
 }
 
+function toConversation(value: unknown): Conversation | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const record = value as Partial<Conversation>;
+  if (typeof record.id !== "string" || !record.id.trim()) {
+    return null;
+  }
+  const rawMessages = Array.isArray(record.messages) ? (record.messages as ChatMessage[]) : [];
+  return {
+    id: record.id,
+    title:
+      typeof record.title === "string" && record.title.trim()
+        ? record.title
+        : "Untitled conversation",
+    messages: record.isCompactHistoryRecord ? [] : rawMessages,
+    runtimeSessionId:
+      typeof record.runtimeSessionId === "string" ? record.runtimeSessionId : undefined,
+    durableSessionId:
+      typeof record.durableSessionId === "string"
+        ? record.durableSessionId
+        : record.durableSessionId === null
+          ? null
+          : null,
+    messageCount:
+      typeof record.messageCount === "number" ? record.messageCount : rawMessages.length,
+    lastMessagePreview:
+      typeof record.lastMessagePreview === "string"
+        ? record.lastMessagePreview
+        : lastMessagePreview(rawMessages),
+    isCompactHistoryRecord: record.isCompactHistoryRecord === true,
+    phase: record.phase ?? "idle",
+    createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString(),
+  };
+}
+
 function toConversationArray(value: unknown): Conversation[] | null {
-  return Array.isArray(value) ? normalizeConversations(value as Conversation[]) : null;
+  if (!Array.isArray(value)) return null;
+  return normalizeConversations(
+    value.map(toConversation).filter((item): item is Conversation => item !== null),
+  ).map(compactConversationForStorage);
 }
 
 function toPersistedChatHistory(value: unknown): StorageValue<ChatHistoryPersistedState> | null {
@@ -102,7 +193,31 @@ const chatHistoryStorage: PersistStorage<ChatHistoryPersistedState> = {
     return toPersistedChatHistory(parseStoredJson(localStorage.getItem(name)));
   },
   setItem: (name, value) => {
-    localStorage.setItem(name, JSON.stringify(value));
+    let compactValue = compactPersistedValue(value);
+    while (true) {
+      try {
+        localStorage.setItem(name, JSON.stringify(compactValue));
+        return;
+      } catch (error) {
+        if (
+          typeof error !== "object" ||
+          error === null ||
+          !("name" in error) ||
+          !["QuotaExceededError", "NS_ERROR_DOM_QUOTA_REACHED"].includes(String(error.name))
+        ) {
+          return;
+        }
+        if (compactValue.state.conversations.length === 0) {
+          return;
+        }
+        compactValue = {
+          ...compactValue,
+          state: {
+            conversations: compactValue.state.conversations.slice(0, -1),
+          },
+        };
+      }
+    }
   },
   removeItem: (name) => {
     localStorage.removeItem(name);

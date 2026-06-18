@@ -74,6 +74,16 @@ vi.mock("@/features/settings/use-runtime-settings", () => ({
                 secret: false,
                 editable: true,
               },
+              {
+                key: "FLEET_RLM_ACTION_MAX_TOKENS",
+                label: "RLM action max tokens",
+                description:
+                  "Maximum model tokens for each RLM action-generation call. This is separate from REPL max_output_chars.",
+                value: "4096",
+                masked_value: "4096",
+                secret: false,
+                editable: true,
+              },
             ],
           },
           {
@@ -235,6 +245,8 @@ describe("RuntimeForm", () => {
     expect(html).toContain("Write-only input. Configured value");
     expect(html).toContain("Clear saved value");
     expect(html).toContain("Runtime Configuration");
+    expect(html).toContain("RLM action max tokens");
+    expect(html).toContain("separate from REPL max_output_chars");
     expect(html).toContain("Execution target/backend for Daytona provisioning");
     expect(html).toContain("Daytona API URL");
     expect(html).toContain("Daytona Smoke");

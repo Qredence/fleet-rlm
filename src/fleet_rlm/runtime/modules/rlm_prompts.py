@@ -10,11 +10,13 @@ Static REPL guidance lives in the RLM signature docstrings
 from __future__ import annotations
 
 import os
+import re
 
 from fleet_rlm.runtime.execution.final_artifact import output_format_guidance_for_task
 from fleet_rlm.runtime.task_intent import implies_quote_retrieval, quote_retrieval_repl_guidance
 
 _URL_REPL_ONLY_ENV = "FLEET_RLM_URL_REPL_ONLY"
+_REVIEW_DRAFT_PATTERN = re.compile(r"\b(review|draft|write[- ]?up|critique|findings)\b", re.IGNORECASE)
 
 
 def url_repl_only_enabled() -> bool:
@@ -35,6 +37,12 @@ def build_rlm_core_context(
     output_guidance = output_format_guidance_for_task(user_request)
     if output_guidance:
         sections.append(output_guidance)
+    if _REVIEW_DRAFT_PATTERN.search(user_request):
+        sections.append(
+            "Early stop for review/draft tasks: once a complete review, findings list, or final draft exists "
+            "in a REPL variable or output, call SUBMIT(response=...) immediately. Do not regenerate the same "
+            "draft, print full history, or continue into another large action-generation attempt."
+        )
     if url_document_mode and url_repl_only_enabled():
         sections.append(
             "llm_query and llm_query_batched are disabled in this URL-document path; "

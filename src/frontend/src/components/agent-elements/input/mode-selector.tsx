@@ -69,7 +69,7 @@ export const ModeSelector = memo(function ModeSelector({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      <PopoverTrigger render={trigger} />
       <PopoverContent
         align="start"
         side="top"

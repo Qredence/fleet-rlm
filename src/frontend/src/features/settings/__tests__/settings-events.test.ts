@@ -9,7 +9,7 @@ import {
   getSettingsSectionDescription,
   getSettingsSectionTitle,
   resolveSettingsSection,
-} from "@/features/settings/settings-screen";
+} from "@/features/settings";
 
 describe("settings section helpers", () => {
   it("resolves supported sections and ignores unknown values", () => {
