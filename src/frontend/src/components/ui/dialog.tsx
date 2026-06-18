@@ -1,5 +1,4 @@
 import type * as React from "react";
-import { Slot } from "@radix-ui/react-slot";
 import { Dialog as BaseDialog } from "@base-ui/react";
 import { XIcon } from "lucide-react";
 
@@ -8,16 +7,11 @@ import { cn } from "@/lib/utils";
 const Dialog = BaseDialog.Root;
 
 function DialogTrigger({
-  asChild,
   ref,
   ...props
 }: React.ComponentPropsWithoutRef<typeof BaseDialog.Trigger> & {
-  asChild?: boolean;
   ref?: React.ComponentPropsWithRef<typeof BaseDialog.Trigger>["ref"];
 }) {
-  if (asChild) {
-    return <BaseDialog.Trigger render={<Slot />} ref={ref} {...props} />;
-  }
   return <BaseDialog.Trigger ref={ref} {...props} />;
 }
 

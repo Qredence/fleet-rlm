@@ -11,7 +11,7 @@ from typing import Literal, TypedDict
 
 import dspy
 
-from fleet_rlm.runtime.sandbox_types import LargeDocument, WorkspaceContext
+from fleet_rlm.runtime.sandbox_types import ActiveSkills, LargeDocument, WorkspaceContext
 
 
 class GroundedCitation(TypedDict):
@@ -453,12 +453,13 @@ class RLMTurnSignature(dspy.Signature):
     """Solve the user's request by writing Python in the sandboxed REPL.
 
     All input fields are stored as REPL variables — only metadata and previews
-    appear in the LM context. Inspect slices, lengths, keywords, and structure
-    with code instead of printing large values. Treat available tools (including
-    ``sub_rlm``/``sub_rlm_batched`` recursive delegation) as ordinary Python
-    callables, use ``llm_query``/``llm_query_batched`` on focused snippets for
-    semantics, and call ``SUBMIT(response=...)`` with the final answer. Never
-    print or return credentials, environment variables, or hidden configuration.
+    appear in the LM context. Inspect slices, lengths, keywords, skill markdown,
+    and structure with code instead of printing large values. Treat available
+    tools (including ``sub_rlm``/``sub_rlm_batched`` recursive delegation) as
+    ordinary Python callables, use ``llm_query``/``llm_query_batched`` on focused
+    snippets for semantics, and call ``SUBMIT(response=...)`` with the final
+    answer. Never print or return credentials, environment variables, hidden
+    configuration, or full skill files.
     """
 
     user_request: str = dspy.InputField(desc="The current user request to solve")
@@ -469,6 +470,13 @@ class RLMTurnSignature(dspy.Signature):
         desc=(
             "Prior chat turns stored as a REPL variable (each message has keys "
             "user_message and response); inspect with Python for full continuity"
+        )
+    )
+    active_skills: ActiveSkills = dspy.InputField(
+        desc=(
+            "Selected skill guidance stored as a REPL dict with selected names, catalog descriptions, "
+            "sources, and full markdown instructions. Inspect active_skills['instructions'][name] only "
+            "when needed; do not print entire skill markdown."
         )
     )
     response: str = dspy.OutputField(
@@ -487,7 +495,8 @@ class RLMDocumentTurnSignature(dspy.Signature):
     ``source_url``, and ``metadata`` — write Python to inspect headings, links,
     and sections of ``document["text"]`` before any semantic pass; never print
     it wholesale. Use ``llm_query()`` on focused snippets when semantic
-    callbacks are enabled, and call ``SUBMIT(response=...)`` for the final answer.
+    callbacks are enabled, inspect selected guidance through ``active_skills``
+    when needed, and call ``SUBMIT(response=...)`` for the final answer.
     """
 
     user_request: str = dspy.InputField(desc="Instruction for how to process the document")
@@ -499,6 +508,12 @@ class RLMDocumentTurnSignature(dspy.Signature):
     )
     document: LargeDocument = dspy.InputField(
         desc="Fetched document in the sandbox as a dict with keys text, source_url, metadata"
+    )
+    active_skills: ActiveSkills = dspy.InputField(
+        desc=(
+            "Selected skill guidance stored as a REPL dict. Inspect only the relevant skill markdown "
+            "through active_skills['instructions']; do not print whole skill files."
+        )
     )
     response: str = dspy.OutputField(
         desc=(
@@ -516,8 +531,9 @@ class RLMWorkspaceTurnSignature(dspy.Signature):
     ``document_text`` is empty, read ``.fleet-rlm/context/manifest.json`` in the
     workspace and open each staged ``.extracted.txt`` file; ``context_paths``
     are host paths recorded for reference only. Inspect with Python slices and
-    regex, use ``llm_query`` on focused excerpts, and call
-    ``SUBMIT(response=...)`` for the final answer.
+    regex, use ``llm_query`` on focused excerpts, inspect selected workflow
+    guidance through ``active_skills``, and call ``SUBMIT(response=...)`` for
+    the final answer.
     """
 
     user_request: str = dspy.InputField(desc="The current user request to solve")
@@ -530,6 +546,12 @@ class RLMWorkspaceTurnSignature(dspy.Signature):
     context: WorkspaceContext = dspy.InputField(
         desc=(
             "Staged local context in the sandbox as a dict with keys document_text, context_paths, manifest, metadata"
+        )
+    )
+    active_skills: ActiveSkills = dspy.InputField(
+        desc=(
+            "Selected skill guidance stored as a REPL dict. Inspect only the relevant skill markdown "
+            "through active_skills['instructions']; do not print whole skill files."
         )
     )
     response: str = dspy.OutputField(

@@ -34,7 +34,6 @@ src/frontend/src/
 │   ├── layout/          # Shell chrome, route sync, sidebar, header, dialogs
 │   ├── workspace/       # Chat-first workbench plus workspace-local sidepanel
 │   ├── volumes/         # Full-page mounted Daytona volume browser
-│   ├── history/         # Session history list/detail and replay views
 │   ├── optimization/    # GEPA prompt optimization UI
 │   └── settings/        # Settings dialog/page and runtime settings forms
 ├── lib/
@@ -42,12 +41,13 @@ src/frontend/src/
 │   └── rlm-api/         # REST and websocket clients plus generated API types
 ├── stores/              # Shell/navigation state shared across the app
 ├── components/ui/       # shadcn/Base UI primitives and thin local extensions
-├── components/ai-elements/  # AI Elements rendering primitives
+├── components/agent-elements/ # Canonical chat and tool transcript UI
+├── components/ai-elements/  # Legacy composer-only helpers
 ├── components/product/  # App-owned reusable composition built from registry layers
 └── app/                 # App bootstrap/providers
 ```
 
-Route wrappers should point at `features/*` modules directly.
+Route wrappers should point at `features/*/index.ts` entrypoints directly.
 
 ## Route Tree
 
@@ -64,9 +64,10 @@ The live route tree is intentionally small and explicit:
 The shell route files are thin wrappers only:
 
 - `src/routes/app.tsx` mounts `RootLayout`
-- `src/routes/app/workspace.tsx` lazy-loads `features/workspace/workspace-screen`
-- `src/routes/app/volumes.tsx` lazy-loads `features/volumes/volumes-screen`
-- `src/routes/app/settings.tsx` lazy-loads `features/settings/settings-screen`
+- `src/routes/app/workspace.tsx` lazy-loads `features/workspace`
+- `src/routes/app/volumes.tsx` lazy-loads `features/volumes`
+- `src/routes/app/optimization.tsx` lazy-loads `features/optimization`
+- `src/routes/app/settings.tsx` lazy-loads `features/settings`
 
 ## Shell And Layout Behavior
 

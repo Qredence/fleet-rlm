@@ -19,7 +19,7 @@ vi.mock("@/hooks/use-app-navigate", () => ({
   useAppNavigate: () => ({ navigateTo: vi.fn() }),
 }));
 
-vi.mock("@/hooks/use-is-mobile", () => ({
+vi.mock("@/hooks/ui/use-is-mobile", () => ({
   useIsMobile: () => false,
 }));
 
@@ -33,17 +33,14 @@ vi.mock("@/components/ui/tooltip", () => ({
   TooltipContent: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
-vi.mock("@/features/volumes/volumes-canvas-panel", () => ({
+vi.mock("@/features/volumes", () => ({
   VolumesCanvasPanel: () => <div>VolumeFileDetail:README.md</div>,
 }));
 
-vi.mock("@/features/workspace/screen/workspace-canvas-panel", () => ({
+vi.mock("@/features/workspace", () => ({
+  GraphCanvasPanel: () => <div>GraphCanvas</div>,
   WorkspaceCanvasPanel: () => <div>MessageInspectorPanel</div>,
   WorkspaceCanvasUnavailablePanel: () => <div>WorkspaceUnavailable</div>,
-}));
-
-vi.mock("@/features/workspace/screen/graph-canvas-panel", () => ({
-  GraphCanvasPanel: () => <div>GraphCanvas</div>,
 }));
 
 vi.mock("@/lib/rlm-api", () => ({

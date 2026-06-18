@@ -27,6 +27,9 @@ export interface TraceSpanNodeData extends Record<string, unknown> {
   toolName?: string;
   componentType?: string;
   durationLabel?: string;
+  tokenLabel?: string;
+  outputSizeLabel?: string;
+  fallbackReason?: string;
   summary?: string;
 }
 
@@ -122,18 +125,39 @@ export function getTraceSpanStatus(span: SessionTraceDebugSpan): TraceSpanStatus
 }
 
 export function formatTraceDuration(span: SessionTraceDebugSpan): string | undefined {
+  if (typeof span.duration_ms === "number" && Number.isFinite(span.duration_ms)) {
+    return formatTraceDurationMs(span.duration_ms);
+  }
   const start = spanStart(span);
   const end = spanEnd(span);
   if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= start) {
     return undefined;
   }
-  const milliseconds = (end - start) / 1_000_000;
+  return formatTraceDurationMs((end - start) / 1_000_000);
+}
+
+export function formatTraceDurationMs(milliseconds: number): string | undefined {
   if (milliseconds < 1000) return `${Math.round(milliseconds)}ms`;
   const seconds = milliseconds / 1000;
   if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
   const minutes = Math.floor(seconds / 60);
   const remainder = Math.round(seconds % 60);
   return `${minutes}m ${remainder}s`;
+}
+
+export function formatTraceCount(value: number | null | undefined): string | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
+export function formatTraceTokens(value: number | null | undefined): string | undefined {
+  const formatted = formatTraceCount(value);
+  return formatted ? `${formatted} tokens` : undefined;
+}
+
+export function formatTraceOutputChars(value: number | null | undefined): string | undefined {
+  const formatted = formatTraceCount(value);
+  return formatted ? `${formatted} chars` : undefined;
 }
 
 export function traceSpanLabel(span: SessionTraceDebugSpan): string {
@@ -224,6 +248,9 @@ export function buildTraceFlowGraph(spans: SessionTraceDebugSpan[]): {
         toolName: trimToken(span.tool_name) ?? undefined,
         componentType: trimToken(span.mapped_component_type) ?? undefined,
         durationLabel: formatTraceDuration(span),
+        tokenLabel: formatTraceTokens(span.total_tokens),
+        outputSizeLabel: formatTraceOutputChars(span.output_chars),
+        fallbackReason: trimToken(span.retry_or_fallback_reason) ?? undefined,
         summary: traceSpanSummary(span),
       },
     };

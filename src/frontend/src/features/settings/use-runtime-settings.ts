@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { runtimeStatusQueryKey, useRuntimeStatus } from "@/hooks/use-runtime-status";
+import { runtimeStatusQueryKey, useRuntimeStatus } from "@/hooks/runtime/use-runtime-status";
 import { runtimeEndpoints } from "@/lib/rlm-api/runtime";
 import type { RuntimeSettingsSnapshot } from "@/lib/rlm-api";
 

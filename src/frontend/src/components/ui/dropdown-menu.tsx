@@ -1,5 +1,4 @@
 import type * as React from "react";
-import { Slot } from "@radix-ui/react-slot";
 import { Menu as BaseMenu } from "@base-ui/react";
 import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react";
 
@@ -9,16 +8,11 @@ const DropdownMenu = BaseMenu.Root;
 const DropdownMenuPortal = BaseMenu.Portal;
 
 function DropdownMenuTrigger({
-  asChild,
   ref,
   ...props
 }: React.ComponentPropsWithoutRef<typeof BaseMenu.Trigger> & {
-  asChild?: boolean;
   ref?: React.ComponentPropsWithRef<typeof BaseMenu.Trigger>["ref"];
 }) {
-  if (asChild) {
-    return <BaseMenu.Trigger render={<Slot />} ref={ref} {...props} />;
-  }
   return <BaseMenu.Trigger ref={ref} {...props} />;
 }
 
@@ -67,30 +61,13 @@ function DropdownMenuItem({
   className,
   inset,
   variant = "default",
-  asChild,
   ref,
   ...props
 }: React.ComponentPropsWithoutRef<typeof BaseMenu.Item> & {
   inset?: boolean;
   variant?: "default" | "destructive";
-  asChild?: boolean;
   ref?: React.Ref<React.ComponentRef<typeof BaseMenu.Item>>;
 }) {
-  if (asChild) {
-    return (
-      <BaseMenu.Item
-        ref={ref}
-        data-inset={inset}
-        data-variant={variant}
-        className={cn(
-          "focus:bg-muted data-highlighted:bg-muted relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-inset:pl-8",
-          className,
-        )}
-        render={<Slot />}
-        {...props}
-      />
-    );
-  }
   return (
     <BaseMenu.Item
       ref={ref}

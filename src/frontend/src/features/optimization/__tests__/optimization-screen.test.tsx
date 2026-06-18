@@ -3,8 +3,8 @@ import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { RunDetailsSheet } from "@/features/optimization/run-details-sheet";
-import { RunHistory } from "@/features/optimization/run-history";
+import { RunDetailsSheet } from "@/features/optimization/run-details/run-details-sheet";
+import { RunHistory } from "@/features/optimization/run-history/run-history";
 
 (
   globalThis as typeof globalThis & {

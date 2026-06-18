@@ -10,7 +10,7 @@ import {
   WORKSPACE_VOLUME_TREE_MAX_WIDTH,
   WORKSPACE_VOLUME_TREE_MIN_WIDTH,
   WORKSPACE_VOLUME_PREVIEW_MIN_WIDTH,
-} from "@/features/workspace/screen/sidepanel/tabs/volume-tab";
+} from "@/features/workspace/sidepanel/tabs/volume-tab";
 
 describe("workspace sidepanel layout constants", () => {
   it("keeps chat primary while allowing the inspector to resize wider", () => {

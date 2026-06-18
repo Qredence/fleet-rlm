@@ -16,8 +16,13 @@ def _resolve_ui_web_root(candidate: Path) -> Path | None:
     """Return the directory that contains the served SPA entrypoint, if any."""
     candidate = candidate.resolve()
     nested_client_root = candidate / "client"
-    if (nested_client_root / "index.html").is_file():
-        return nested_client_root
+    if nested_client_root.is_dir():
+        # TanStack Start writes fresh browser assets under dist/client. If that
+        # tree exists without an entrypoint, do not fall back to a stale legacy
+        # dist/index.html from an older build.
+        if (nested_client_root / "index.html").is_file():
+            return nested_client_root
+        return None
     if (candidate / "index.html").is_file():
         return candidate
     return None
@@ -142,9 +147,6 @@ def mount_spa(app: FastAPI, ui_dir: Path) -> None:
 
     ui_root = ui_dir.resolve()
     index_path = ui_root / "index.html"
-    # Cached at mount time. If the index is deleted after boot that is an
-    # operational issue, not a request-path concern.
-    index_exists = index_path.is_file()
 
     reserved_paths, reserved_prefixes = _collect_reserved_top_level_paths(app)
 
@@ -174,6 +176,7 @@ def mount_spa(app: FastAPI, ui_dir: Path) -> None:
         if requested_file is not None:
             return FileResponse(requested_file)
 
+        index_exists = await asyncio.to_thread(index_path.is_file)
         if index_exists and should_serve_spa_index(full_path):
             return FileResponse(index_path)
 

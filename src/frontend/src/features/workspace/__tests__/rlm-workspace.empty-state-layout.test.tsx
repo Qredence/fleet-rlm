@@ -48,7 +48,7 @@ vi.mock("@posthog/react", () => ({
   usePostHog: () => ({ capture: vi.fn() }),
 }));
 
-vi.mock("@/hooks/use-is-mobile", () => ({
+vi.mock("@/hooks/ui/use-is-mobile", () => ({
   useIsMobile: () => isMobileMock,
 }));
 
@@ -91,7 +91,7 @@ vi.mock("@/features/workspace/use-workspace", async () => {
   } as unknown as typeof actual;
 });
 
-vi.mock("@/hooks/use-runtime-status", () => ({
+vi.mock("@/hooks/runtime/use-runtime-status", () => ({
   useRuntimeStatus: () => runtimeStatusMock,
   runtimeStatusQueryKey: ["runtime-status"],
 }));

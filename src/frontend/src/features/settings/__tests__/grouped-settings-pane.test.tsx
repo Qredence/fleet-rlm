@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ComponentProps } from "react";
 
-import { GroupedSettingsPane } from "@/features/settings/settings-screen";
+import { GroupedSettingsPane } from "@/features/settings";
 
 vi.mock("@/features/settings/use-runtime-settings", () => ({
   flattenRuntimeSettingsValues: (snapshot?: {

@@ -1,5 +1,6 @@
 import * as React from "react";
-import * as ToggleGroupPrimitive from "@radix-ui/react-toggle-group";
+import { Toggle as TogglePrimitive } from "@base-ui/react/toggle";
+import { ToggleGroup as ToggleGroupPrimitive } from "@base-ui/react/toggle-group";
 import { type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
@@ -16,17 +17,42 @@ function ToggleGroup({
   className,
   variant,
   size,
+  type = "single",
+  value,
+  defaultValue,
+  onValueChange,
   children,
   ...props
-}: React.ComponentProps<typeof ToggleGroupPrimitive.Root> &
+}: Omit<
+  React.ComponentProps<typeof ToggleGroupPrimitive>,
+  "value" | "defaultValue" | "onValueChange" | "multiple"
+> &
   Omit<VariantProps<typeof toggleVariants>, "variant"> & {
     variant?: ToggleGroupVariant;
+    type?: "single" | "multiple";
+    value?: string;
+    defaultValue?: string;
+    onValueChange?: (value: string) => void;
   }) {
+  const arrayValue = value != null ? [value] : undefined;
+  const arrayDefaultValue = defaultValue != null ? [defaultValue] : undefined;
+
+  const handleChange = React.useCallback(
+    (values: readonly string[]) => {
+      onValueChange?.(values[0] ?? "");
+    },
+    [onValueChange],
+  );
+
   return (
-    <ToggleGroupPrimitive.Root
+    <ToggleGroupPrimitive
       data-slot="toggle-group"
       data-variant={variant}
       data-size={size}
+      multiple={type === "multiple"}
+      value={arrayValue}
+      defaultValue={arrayDefaultValue}
+      onValueChange={handleChange}
       className={cn(
         variant === "card"
           ? "group/toggle-group flex w-full flex-wrap items-stretch gap-2"
@@ -38,7 +64,7 @@ function ToggleGroup({
       <ToggleGroupContext.Provider value={{ variant, size }}>
         {children}
       </ToggleGroupContext.Provider>
-    </ToggleGroupPrimitive.Root>
+    </ToggleGroupPrimitive>
   );
 }
 
@@ -48,7 +74,7 @@ function ToggleGroupItem({
   variant,
   size,
   ...props
-}: React.ComponentProps<typeof ToggleGroupPrimitive.Item> &
+}: React.ComponentProps<typeof TogglePrimitive> &
   Omit<VariantProps<typeof toggleVariants>, "variant"> & {
     variant?: ToggleGroupVariant;
   }) {
@@ -57,13 +83,13 @@ function ToggleGroupItem({
   const resolvedSize = context.size ?? size ?? "default";
 
   return (
-    <ToggleGroupPrimitive.Item
+    <TogglePrimitive
       data-slot="toggle-group-item"
       data-variant={resolvedVariant}
       data-size={resolvedSize}
       className={cn(
         resolvedVariant === "card"
-          ? "inline-flex min-w-0 items-start justify-start gap-3 rounded-xl border border-border-subtle bg-background px-3 py-3 text-left whitespace-normal shadow-none transition-[color,box-shadow,background-color,border-color] hover:bg-muted/40 focus:z-10 focus-visible:z-10 data-[state=on]:border-primary/35 data-[state=on]:bg-accent/40 data-[state=on]:text-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+          ? "inline-flex min-w-0 items-start justify-start gap-3 rounded-xl border border-border-subtle bg-background px-3 py-3 text-left whitespace-normal shadow-none transition-[color,box-shadow,background-color,border-color] hover:bg-muted/40 focus:z-10 focus-visible:z-10 data-pressed:border-primary/35 data-pressed:bg-accent/40 data-pressed:text-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
           : cn(
               toggleVariants({
                 size: resolvedSize,
@@ -76,7 +102,7 @@ function ToggleGroupItem({
       {...props}
     >
       {children}
-    </ToggleGroupPrimitive.Item>
+    </TogglePrimitive>
   );
 }
 

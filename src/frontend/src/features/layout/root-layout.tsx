@@ -12,13 +12,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
-import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useIsMobile } from "@/hooks/ui/use-is-mobile";
 import { cn } from "@/lib/utils";
-import {
-  OPEN_SETTINGS_EVENT,
-  type OpenSettingsEventDetail,
-} from "@/features/settings/settings-events";
-import type { SettingsSection } from "@/features/settings/settings-screen";
+import { OPEN_SETTINGS_EVENT, type OpenSettingsEventDetail } from "@/features/settings";
+import type { SettingsSection } from "@/features/settings";
 import { useNavigationStore } from "@/stores/navigation-store";
 
 import { LayoutSidebar } from "./app-sidebar";

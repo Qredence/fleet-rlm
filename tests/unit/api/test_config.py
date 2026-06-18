@@ -17,6 +17,8 @@ def test_server_runtime_config_defaults_and_computed_lists(clean_runtime_env):
     assert defaults.serve_ui is True
     assert defaults.expose_docs is True
     assert defaults.expose_root is True
+    assert defaults.agent_max_output_chars == 5000
+    assert defaults.rlm_action_max_tokens == 4096
 
     cfg = config_module.ServerRuntimeConfig(
         cors_allowed_origins=" https://app.example , https://admin.example ",

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { RootLayout } from "@/features/layout";
 import { useNavigationStore } from "@/stores/navigation-store";
 
-vi.mock("@/hooks/use-is-mobile", () => ({
+vi.mock("@/hooks/ui/use-is-mobile", () => ({
   useIsMobile: () => true,
 }));
 

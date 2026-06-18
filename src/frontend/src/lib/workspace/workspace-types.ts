@@ -282,6 +282,9 @@ export interface Conversation {
   runtimeSessionId?: string;
   durableSessionId?: string | null;
   turnArtifactsByMessageId?: Record<string, ExecutionStep[]>;
+  messageCount?: number;
+  lastMessagePreview?: string;
+  isCompactHistoryRecord?: boolean;
   phase: CreationPhase;
   createdAt: string;
   updatedAt: string;
@@ -297,7 +300,7 @@ export interface ChatRuntime {
   handleSubmit: (options?: ChatSubmitOptions) => void;
   resolveHitl: (msgId: string, actionLabel: string) => void;
   resolveClarification: (msgId: string, answer: string) => void;
-  loadConversation: (conversation: Conversation) => void;
+  loadConversation: (conversation: Conversation) => Promise<void>;
 }
 
 export type RunStatus =

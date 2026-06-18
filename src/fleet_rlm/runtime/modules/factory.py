@@ -17,6 +17,61 @@ VARIABLE_MODE_THRESHOLD = 32_000
 # through REPL variables (peek, grep, sub_rlm) instead of printing large
 # output back into its own context.
 VARIABLE_MODE_MAX_OUTPUT_CHARS = 5_000
+RLM_ACTION_HISTORY_RECENT_ENTRIES = 4
+RLM_ACTION_HISTORY_MAX_ENTRIES = 8
+RLM_ACTION_HISTORY_OUTPUT_CHARS = 1_500
+RLM_ACTION_HISTORY_CODE_CHARS = 1_200
+RLM_ACTION_HISTORY_REASONING_CHARS = 600
+
+
+def _compact_text(value: Any, *, max_chars: int) -> str:
+    text = str(value or "")
+    if len(text) <= max_chars:
+        return text
+    head = max_chars // 2
+    tail = max_chars - head
+    omitted = len(text) - max_chars
+    return f"{text[:head]}\n... ({omitted:,} chars omitted) ...\n{text[-tail:]}"
+
+
+def _compact_repl_history_for_action(history: Any) -> Any:
+    """Return a compact prompt-only REPL history for action generation."""
+    entries = list(getattr(history, "entries", []) or [])
+    if len(entries) <= RLM_ACTION_HISTORY_MAX_ENTRIES:
+        return history
+
+    from dspy.primitives.repl_types import REPLEntry, REPLHistory
+
+    older = entries[:-RLM_ACTION_HISTORY_RECENT_ENTRIES]
+    recent = entries[-RLM_ACTION_HISTORY_RECENT_ENTRIES:]
+    summary_lines: list[str] = []
+    for index, entry in enumerate(older, start=1):
+        code = _compact_text(getattr(entry, "code", ""), max_chars=240).replace("\n", "\\n")
+        output = _compact_text(getattr(entry, "output", ""), max_chars=320).replace("\n", "\\n")
+        summary_lines.append(f"step {index}: code={code!r}; output={output!r}")
+
+    compact_entries = [
+        REPLEntry(
+            reasoning=f"Compressed {len(older)} earlier REPL steps for action prompt budget.",
+            code="# Earlier REPL steps were compressed for this action-generation prompt.",
+            output="\n".join(summary_lines),
+        )
+    ]
+    compact_entries.extend(
+        REPLEntry(
+            reasoning=_compact_text(getattr(entry, "reasoning", ""), max_chars=RLM_ACTION_HISTORY_REASONING_CHARS),
+            code=_compact_text(getattr(entry, "code", ""), max_chars=RLM_ACTION_HISTORY_CODE_CHARS),
+            output=_compact_text(getattr(entry, "output", ""), max_chars=RLM_ACTION_HISTORY_OUTPUT_CHARS),
+        )
+        for entry in recent
+    )
+    return REPLHistory(
+        entries=compact_entries,
+        max_output_chars=min(
+            int(getattr(history, "max_output_chars", RLM_ACTION_HISTORY_OUTPUT_CHARS) or RLM_ACTION_HISTORY_OUTPUT_CHARS),
+            RLM_ACTION_HISTORY_OUTPUT_CHARS,
+        ),
+    )
 
 
 def interpreter_delegation_tools(interpreter: Any | None) -> list[Any]:
@@ -44,6 +99,7 @@ class _EmittingAction(dspy.Module):
         self._inner = inner
         self._emit = emit
         self.current_iteration = 0
+        self.action_max_tokens: int | None = None
 
     def __getattr__(self, name: str) -> Any:
         # Delegate predictor attributes (signature, demos, ...) to the wrapped
@@ -88,12 +144,24 @@ class _EmittingAction(dspy.Module):
 
     def forward(self, **kwargs: Any) -> Any:
         self.current_iteration = self._iteration_index(kwargs)
+        if "repl_history" in kwargs:
+            kwargs["repl_history"] = _compact_repl_history_for_action(kwargs["repl_history"])
+        if self.action_max_tokens is not None:
+            config = dict(kwargs.pop("config", {}) or {})
+            config["max_tokens"] = self.action_max_tokens
+            kwargs["config"] = config
         prediction = self._inner(**kwargs)
         self._emit_action(prediction, self.current_iteration)
         return prediction
 
     async def aforward(self, **kwargs: Any) -> Any:
         self.current_iteration = self._iteration_index(kwargs)
+        if "repl_history" in kwargs:
+            kwargs["repl_history"] = _compact_repl_history_for_action(kwargs["repl_history"])
+        if self.action_max_tokens is not None:
+            config = dict(kwargs.pop("config", {}) or {})
+            config["max_tokens"] = self.action_max_tokens
+            kwargs["config"] = config
         prediction = await self._inner.acall(**kwargs)
         self._emit_action(prediction, self.current_iteration)
         return prediction
@@ -107,9 +175,11 @@ class _StreamingRLM(_DSPY_RLM_BASE):
     ``_process_execution_result`` (sandbox output streaming).
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, action_max_tokens: int | None = None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.generate_action = _EmittingAction(self.generate_action, self._emit_step)
+        self.generate_action.action_max_tokens = action_max_tokens
+        self.action_max_tokens = action_max_tokens
 
     def _emit_step(self, payload: dict[str, Any]) -> None:
         interpreter = getattr(self, "_interpreter", None)
@@ -122,6 +192,10 @@ class _StreamingRLM(_DSPY_RLM_BASE):
             callback(payload)
         except Exception:
             return
+
+    def _structured_action_context(self) -> Any:
+        """Use JSONAdapter for RLM action generation to avoid ChatAdapter fallback retries."""
+        return dspy.settings.context(adapter=dspy.JSONAdapter())
 
     def _process_execution_result(
         self,
@@ -229,12 +303,14 @@ class _StreamingRLM(_DSPY_RLM_BASE):
             return
 
     def forward(self, **input_args: Any) -> dspy.Prediction:
-        result = super().forward(**input_args)
+        with self._structured_action_context():
+            result = super().forward(**input_args)
         self._record_trajectory_spans(result)
         return result
 
     async def aforward(self, **input_args: Any) -> dspy.Prediction:
-        result = await super().aforward(**input_args)
+        with self._structured_action_context():
+            result = await super().aforward(**input_args)
         self._record_trajectory_spans(result)
         return result
 
@@ -303,6 +379,7 @@ def create_runtime_rlm(
     max_iterations: int,
     max_llm_calls: int,
     max_output_chars: int | None = None,
+    action_max_tokens: int | None = None,
     verbose: bool,
     tools: list[Any] | None = None,
     sub_lm: dspy.LM | None = None,
@@ -317,6 +394,8 @@ def create_runtime_rlm(
         "max_llm_calls": max_llm_calls,
         "verbose": verbose,
     }
+    if action_max_tokens is not None:
+        kwargs["action_max_tokens"] = action_max_tokens
     if max_output_chars is not None:
         kwargs["max_output_chars"] = max_output_chars
     if tools is not None:
@@ -339,6 +418,7 @@ def build_recursive_subquery_rlm(
     max_iterations: int,
     max_llm_calls: int,
     max_output_chars: int | None = None,
+    action_max_tokens: int | None = None,
     verbose: bool,
     sub_lm: dspy.LM | None = None,
 ) -> dspy.Module:
@@ -352,6 +432,7 @@ def build_recursive_subquery_rlm(
         max_iterations=max_iterations,
         max_llm_calls=max_llm_calls,
         max_output_chars=max_output_chars,
+        action_max_tokens=action_max_tokens,
         verbose=verbose,
         sub_lm=sub_lm,
     )
@@ -366,6 +447,7 @@ class RuntimeModuleBuildConfig:
     max_llm_calls: int
     verbose: bool
     max_output_chars: int | None = None
+    action_max_tokens: int | None = None
     sub_lm: dspy.LM | None = None
 
 
@@ -376,6 +458,7 @@ def build_runtime_module_config(
     max_llm_calls: int,
     verbose: bool,
     max_output_chars: int | None = None,
+    action_max_tokens: int | None = None,
     sub_lm: dspy.LM | None = None,
 ) -> RuntimeModuleBuildConfig:
     """Construct a ``RuntimeModuleBuildConfig`` from keyword arguments."""
@@ -385,6 +468,7 @@ def build_runtime_module_config(
         max_llm_calls=max_llm_calls,
         verbose=verbose,
         max_output_chars=max_output_chars,
+        action_max_tokens=action_max_tokens,
         sub_lm=sub_lm,
     )
 
@@ -402,6 +486,7 @@ def _create_configured_runtime_rlm(
         max_iterations=config.max_iterations,
         max_llm_calls=config.max_llm_calls,
         max_output_chars=config.max_output_chars,
+        action_max_tokens=config.action_max_tokens,
         verbose=config.verbose,
         tools=tools,
         sub_lm=config.sub_lm,

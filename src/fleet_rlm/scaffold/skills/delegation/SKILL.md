@@ -109,6 +109,71 @@ SUBMIT(summaries=results)
 
 ---
 
+## Map-Reduce Decomposition Pattern
+
+Use map-reduce when one request has independent sub-problems that can be
+answered separately, then synthesized by the parent. Keep each child focused:
+pass only the relevant file names, snippets, variables, handles, or extracted
+evidence for that sub-task. The parent owns the global synthesis.
+
+### Host-Side Map-Reduce
+
+```python
+from fleet_rlm.runtime.tools.rlm_delegate import delegate_to_rlm_batched
+
+result = delegate_to_rlm_batched(
+    queries=[
+        "Review authentication endpoints for security risks.",
+        "Review session validation and token refresh behavior.",
+        "Review browser token storage and client-side exposure.",
+    ],
+    context="Pass only the relevant route files, auth helpers, and storage snippets.",
+    interpreter=parent_interpreter,
+)
+
+successful = result.get("results", [])
+errors = result.get("errors", [])
+reviews = result.get("reviews", [])
+
+synthesis_prompt = (
+    "Synthesize this security review.\n\n"
+    f"Successful child findings:\n{successful}\n\n"
+    f"Child errors to account for:\n{errors}\n\n"
+    f"Needs-human-review child findings:\n{reviews}"
+)
+final_report = llm_query(synthesis_prompt)
+```
+
+Treat `errors` and `reviews` as reduce inputs. Do not silently drop them; tell
+the user which sub-task failed, degraded, or needs human review.
+
+### In-Sandbox Map-Reduce
+
+```python
+# Inside Daytona sandbox code:
+results = sub_rlm_batched(
+    [
+        "Summarize only the auth endpoint file and list security concerns.",
+        "Summarize only the session refresh helper and list correctness risks.",
+        "Summarize only the browser token store and list client-side risks.",
+    ],
+    concurrency=3,
+)
+
+synthesis = llm_query(
+    "Combine these independent child findings into one concise review:\n\n"
+    + "\n\n---\n\n".join(str(item) for item in results)
+)
+SUBMIT(response=synthesis)
+```
+
+- Start with 2-3 children for most tasks; max 4 workers is the hard ceiling.
+- Near `max_recursion_depth`, merge sub-tasks and solve sequentially or with a
+  focused `llm_query` instead of spawning more children.
+- Prefer narrow child prompts plus evidence references over broad shared context.
+
+---
+
 ## Fast-Path Local Solvers
 
 These bypass child sandbox creation entirely for deterministic tasks that do

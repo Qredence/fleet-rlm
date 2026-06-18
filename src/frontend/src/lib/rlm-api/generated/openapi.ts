@@ -2778,6 +2778,8 @@ export interface components {
        * @description How many spans are intentionally observability-only.
        */
       non_rendered_span_count: number;
+      /** @description Performance, token, and fallback summary derived from raw spans. */
+      performance_summary: components["schemas"]["SessionTracePerformanceSummary"];
       /**
        * Spans
        * @description Per-span mapping summary.
@@ -2861,6 +2863,36 @@ export interface components {
        * @description Span end timestamp (Unix nanoseconds, string-encoded).
        */
       end_time_unix_nano?: string | null;
+      /**
+       * Duration Ms
+       * @description Span duration in milliseconds when timestamps exist.
+       */
+      duration_ms?: number | null;
+      /**
+       * Input Tokens
+       * @description Input token count reported for this span.
+       */
+      input_tokens?: number | null;
+      /**
+       * Output Tokens
+       * @description Output token count reported for this span.
+       */
+      output_tokens?: number | null;
+      /**
+       * Total Tokens
+       * @description Total token count reported for this span.
+       */
+      total_tokens?: number | null;
+      /**
+       * Output Chars
+       * @description Character count of the raw span output payload.
+       */
+      output_chars?: number | null;
+      /**
+       * Retry Or Fallback Reason
+       * @description Parse, retry, or adapter fallback signal detected for this span.
+       */
+      retry_or_fallback_reason?: string | null;
     };
     /**
      * SessionTraceExportRequest
@@ -3012,6 +3044,136 @@ export interface components {
        * @description Whether additional pages are available.
        */
       has_more: boolean;
+    };
+    /**
+     * SessionTracePerformanceSpanSummary
+     * @description Compact span reference used in trace performance summaries.
+     */
+    SessionTracePerformanceSpanSummary: {
+      /**
+       * Span Id
+       * @description Span identifier.
+       */
+      span_id: string;
+      /**
+       * Name
+       * @description Span name.
+       */
+      name: string;
+      /**
+       * Duration Ms
+       * @description Span duration in milliseconds.
+       */
+      duration_ms?: number | null;
+      /**
+       * Input Tokens
+       * @description Input token count.
+       */
+      input_tokens?: number | null;
+      /**
+       * Output Tokens
+       * @description Output token count.
+       */
+      output_tokens?: number | null;
+      /**
+       * Total Tokens
+       * @description Total token count.
+       */
+      total_tokens?: number | null;
+      /**
+       * Output Chars
+       * @description Output payload character count.
+       */
+      output_chars?: number | null;
+    };
+    /**
+     * SessionTracePerformanceSummary
+     * @description Performance and token summary derived from raw MLflow trace spans.
+     */
+    SessionTracePerformanceSummary: {
+      /**
+       * Total Duration Ms
+       * @description Root trace duration in milliseconds.
+       */
+      total_duration_ms?: number | null;
+      /**
+       * Llm Duration Ms
+       * @description Total duration of LLM/chat-model spans.
+       * @default 0
+       */
+      llm_duration_ms?: number;
+      /**
+       * Repl Duration Ms
+       * @description Total duration of REPL execution spans.
+       * @default 0
+       */
+      repl_duration_ms?: number;
+      /**
+       * Tool Duration Ms
+       * @description Total duration of non-REPL tool spans.
+       * @default 0
+       */
+      tool_duration_ms?: number;
+      /**
+       * Root Overhead Ms
+       * @description Root duration minus known LLM, REPL, and tool durations.
+       */
+      root_overhead_ms?: number | null;
+      /**
+       * Input Tokens
+       * @description Summed input tokens from span usage.
+       * @default 0
+       */
+      input_tokens?: number;
+      /**
+       * Output Tokens
+       * @description Summed output tokens from span usage.
+       * @default 0
+       */
+      output_tokens?: number;
+      /**
+       * Total Tokens
+       * @description Summed total tokens from span usage.
+       * @default 0
+       */
+      total_tokens?: number;
+      /**
+       * Token Total Mismatch
+       * @description Whether total_tokens differs from input_tokens + output_tokens.
+       * @default false
+       */
+      token_total_mismatch?: boolean;
+      /**
+       * Adapter Fallback Count
+       * @description Detected adapter fallback or retry signals.
+       * @default 0
+       */
+      adapter_fallback_count?: number;
+      /**
+       * Parse Error Count
+       * @description Detected parser/adapter parse error signals.
+       * @default 0
+       */
+      parse_error_count?: number;
+      /**
+       * Selected Skills
+       * @description Selected RLM skill names.
+       */
+      selected_skills?: string[];
+      /**
+       * Rlm Action Max Tokens
+       * @description Configured RLM action-generation token budget.
+       */
+      rlm_action_max_tokens?: number | null;
+      /**
+       * Rlm Max Output Chars
+       * @description Configured RLM REPL output character budget.
+       */
+      rlm_max_output_chars?: number | null;
+      /** @description Slowest detected LLM/chat-model span. */
+      slowest_llm_span?: components["schemas"]["SessionTracePerformanceSpanSummary"] | null;
+      /** @description Span with the largest output payload. */
+      largest_output_span?: components["schemas"]["SessionTracePerformanceSpanSummary"] | null;
     };
     /**
      * TraceFeedbackRequest

@@ -1,5 +1,4 @@
 import type * as React from "react";
-import { Slot } from "@radix-ui/react-slot";
 import { Tooltip as BaseTooltip } from "@base-ui/react";
 
 import { cn } from "@/lib/utils";
@@ -13,16 +12,11 @@ function TooltipProvider({ children }: { children: React.ReactNode; [key: string
 const Tooltip = BaseTooltip.Root;
 
 function TooltipTrigger({
-  asChild,
   ref,
   ...props
 }: React.ComponentPropsWithoutRef<typeof BaseTooltip.Trigger> & {
-  asChild?: boolean;
   ref?: React.ComponentPropsWithRef<typeof BaseTooltip.Trigger>["ref"];
 }) {
-  if (asChild) {
-    return <BaseTooltip.Trigger render={<Slot />} ref={ref} {...props} />;
-  }
   return <BaseTooltip.Trigger ref={ref} {...props} />;
 }
 

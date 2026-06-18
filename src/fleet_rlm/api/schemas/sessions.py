@@ -211,6 +211,60 @@ class SessionTraceDebugSpan(BaseModel):
         default=None,
         description="Span end timestamp (Unix nanoseconds, string-encoded).",
     )
+    duration_ms: int | None = Field(default=None, description="Span duration in milliseconds when timestamps exist.")
+    input_tokens: int | None = Field(default=None, description="Input token count reported for this span.")
+    output_tokens: int | None = Field(default=None, description="Output token count reported for this span.")
+    total_tokens: int | None = Field(default=None, description="Total token count reported for this span.")
+    output_chars: int | None = Field(default=None, description="Character count of the raw span output payload.")
+    retry_or_fallback_reason: str | None = Field(
+        default=None,
+        description="Parse, retry, or adapter fallback signal detected for this span.",
+    )
+
+
+class SessionTracePerformanceSpanSummary(BaseModel):
+    """Compact span reference used in trace performance summaries."""
+
+    span_id: str = Field(description="Span identifier.")
+    name: str = Field(description="Span name.")
+    duration_ms: int | None = Field(default=None, description="Span duration in milliseconds.")
+    input_tokens: int | None = Field(default=None, description="Input token count.")
+    output_tokens: int | None = Field(default=None, description="Output token count.")
+    total_tokens: int | None = Field(default=None, description="Total token count.")
+    output_chars: int | None = Field(default=None, description="Output payload character count.")
+
+
+class SessionTracePerformanceSummary(BaseModel):
+    """Performance and token summary derived from raw MLflow trace spans."""
+
+    total_duration_ms: int | None = Field(default=None, description="Root trace duration in milliseconds.")
+    llm_duration_ms: int = Field(default=0, description="Total duration of LLM/chat-model spans.")
+    repl_duration_ms: int = Field(default=0, description="Total duration of REPL execution spans.")
+    tool_duration_ms: int = Field(default=0, description="Total duration of non-REPL tool spans.")
+    root_overhead_ms: int | None = Field(
+        default=None,
+        description="Root duration minus known LLM, REPL, and tool durations.",
+    )
+    input_tokens: int = Field(default=0, description="Summed input tokens from span usage.")
+    output_tokens: int = Field(default=0, description="Summed output tokens from span usage.")
+    total_tokens: int = Field(default=0, description="Summed total tokens from span usage.")
+    token_total_mismatch: bool = Field(
+        default=False,
+        description="Whether total_tokens differs from input_tokens + output_tokens.",
+    )
+    adapter_fallback_count: int = Field(default=0, description="Detected adapter fallback or retry signals.")
+    parse_error_count: int = Field(default=0, description="Detected parser/adapter parse error signals.")
+    selected_skills: list[str] = Field(default_factory=list, description="Selected RLM skill names.")
+    rlm_action_max_tokens: int | None = Field(default=None, description="Configured RLM action-generation token budget.")
+    rlm_max_output_chars: int | None = Field(default=None, description="Configured RLM REPL output character budget.")
+    slowest_llm_span: SessionTracePerformanceSpanSummary | None = Field(
+        default=None,
+        description="Slowest detected LLM/chat-model span.",
+    )
+    largest_output_span: SessionTracePerformanceSpanSummary | None = Field(
+        default=None,
+        description="Span with the largest output payload.",
+    )
 
 
 class SessionTraceDebugResponse(BaseModel):
@@ -234,6 +288,9 @@ class SessionTraceDebugResponse(BaseModel):
     span_count: int = Field(description="Total spans in the resolved trace.")
     renderable_span_count: int = Field(description="How many spans map to a renderable chat component.")
     non_rendered_span_count: int = Field(description="How many spans are intentionally observability-only.")
+    performance_summary: SessionTracePerformanceSummary = Field(
+        description="Performance, token, and fallback summary derived from raw spans."
+    )
     spans: list[SessionTraceDebugSpan] = Field(description="Per-span mapping summary.")
 
 

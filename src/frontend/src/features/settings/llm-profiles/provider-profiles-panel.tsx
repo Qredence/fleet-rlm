@@ -12,8 +12,8 @@ import {
   FieldTitle,
 } from "@/components/ui/field";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { SettingsSection } from "@/features/settings/settings-content";
-import { sectionDescriptions } from "@/features/settings/settings-content";
+import type { SettingsSection } from "@/features/settings/screen/settings-content";
+import { sectionDescriptions } from "@/features/settings/screen/settings-content";
 import {
   useLlmProfiles,
   useLlmProfilesMutations,

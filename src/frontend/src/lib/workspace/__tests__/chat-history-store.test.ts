@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const STORAGE_KEY = "hax-fleet:chat-history:v2";
 
-function createMemoryStorage(): Storage {
+function createMemoryStorage(
+  options: { maxValueLength?: number; alwaysThrowQuota?: boolean } = {},
+): Storage {
   const values = new Map<string, string>();
 
   return {
@@ -18,6 +20,12 @@ function createMemoryStorage(): Storage {
       values.delete(key);
     },
     setItem: (key, value) => {
+      if (
+        options.alwaysThrowQuota ||
+        (options.maxValueLength && value.length > options.maxValueLength)
+      ) {
+        throw new DOMException("storage quota exceeded", "QuotaExceededError");
+      }
       values.set(key, value);
     },
   };
@@ -32,6 +40,14 @@ const conversationFixture = {
       type: "user" as const,
       content: "Hello from storage",
       phase: 1 as const,
+      renderParts: [
+        {
+          kind: "sandbox" as const,
+          title: "repl_execute",
+          state: "output-available" as const,
+          output: "large output that must not persist",
+        },
+      ],
     },
   ],
   phase: "idle" as const,
@@ -63,7 +79,16 @@ describe("useChatHistoryStore", () => {
 
     await useChatHistoryStore.persist.rehydrate();
 
-    expect(useChatHistoryStore.getState().conversations).toEqual([conversationFixture]);
+    expect(useChatHistoryStore.getState().conversations).toEqual([
+      expect.objectContaining({
+        id: "conv-1",
+        title: "Stored conversation",
+        messages: [],
+        messageCount: 1,
+        lastMessagePreview: "Hello from storage",
+        isCompactHistoryRecord: true,
+      }),
+    ]);
   });
 
   it("keeps only the newest stored item for the same logical chat session", async () => {
@@ -93,15 +118,18 @@ describe("useChatHistoryStore", () => {
     await useChatHistoryStore.persist.rehydrate();
 
     expect(useChatHistoryStore.getState().conversations).toEqual([
-      {
-        ...conversationFixture,
+      expect.objectContaining({
         id: "conv-newer",
+        messages: [],
+        messageCount: 1,
+        lastMessagePreview: "Hello from storage",
+        isCompactHistoryRecord: true,
         updatedAt: "2026-03-09T11:00:00.000Z",
-      },
+      }),
     ]);
   });
 
-  it("persists turn-scoped artifacts with saved conversations", async () => {
+  it("keeps rich state in memory but persists only compact records", async () => {
     const { useChatHistoryStore } = await import("@/lib/workspace/chat-history-store");
 
     const conversationId = useChatHistoryStore.getState().saveConversation(
@@ -130,6 +158,10 @@ describe("useChatHistoryStore", () => {
           },
         ],
       },
+      {
+        runtimeSessionId: "runtime-1",
+        durableSessionId: "durable-1",
+      },
     );
 
     const loaded = useChatHistoryStore.getState().loadConversation(conversationId);
@@ -137,6 +169,10 @@ describe("useChatHistoryStore", () => {
       state?: {
         conversations?: Array<{
           turnArtifactsByMessageId?: Record<string, unknown[]>;
+          messages?: unknown[];
+          messageCount?: number;
+          lastMessagePreview?: string;
+          durableSessionId?: string | null;
         }>;
       };
     } | null;
@@ -151,16 +187,34 @@ describe("useChatHistoryStore", () => {
         },
       ],
     });
-    expect(persisted?.state?.conversations?.[0]?.turnArtifactsByMessageId).toEqual({
-      "assistant-1": [
-        {
-          id: "step-1",
-          type: "llm",
-          label: "Planned answer",
-          timestamp: 1,
-        },
-      ],
+    expect(persisted?.state?.conversations?.[0]?.turnArtifactsByMessageId).toBeUndefined();
+    expect(persisted?.state?.conversations?.[0]?.messages).toEqual([]);
+    expect(persisted?.state?.conversations?.[0]?.messageCount).toBe(2);
+    expect(persisted?.state?.conversations?.[0]?.lastMessagePreview).toBe("Done");
+    expect(persisted?.state?.conversations?.[0]?.durableSessionId).toBe("durable-1");
+  });
+
+  it("does not throw when localStorage rejects chat-history writes", async () => {
+    const storage = createMemoryStorage({ alwaysThrowQuota: true });
+    vi.stubGlobal("localStorage", storage);
+    Object.defineProperty(window, "localStorage", {
+      value: storage,
+      configurable: true,
     });
+    const { useChatHistoryStore } = await import("@/lib/workspace/chat-history-store");
+
+    expect(() =>
+      useChatHistoryStore.getState().saveConversation(
+        [
+          {
+            id: "user-1",
+            type: "user",
+            content: "This still stays in memory.",
+          },
+        ],
+        "idle",
+      ),
+    ).not.toThrow();
   });
 
   it("updates the existing saved item when the same chat session is saved again", async () => {

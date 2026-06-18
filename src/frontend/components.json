@@ -25,7 +25,6 @@
     "@ai-elements": "https://ai-sdk.dev/elements/api/registry/{name}.json",
     "@agent-elements": "https://agent-elements.21st.dev/r/{name}.json",
     "@basecn": "https://basecn.dev/r/{name}.json",
-    "@prompt-kit": "https://www.prompt-kit.com/c/{name}.json",
-    "@tool-ui": "https://www.tool-ui.com/r/{name}.json"
+    "@prompt-kit": "https://www.prompt-kit.com/c/{name}.json"
   }
 }

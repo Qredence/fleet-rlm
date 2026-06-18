@@ -2,7 +2,7 @@ import { Database, GitBranch, Terminal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useIsMobile } from "@/hooks/ui/use-is-mobile";
 import { cn } from "@/lib/utils";
 import { useNavigationStore } from "@/stores/navigation-store";
 import type { CanvasPanel } from "@/stores/navigation-types";
@@ -49,19 +49,21 @@ export function LayoutHeader() {
         {activeNav !== "workspace"
           ? PANEL_BUTTONS.map(({ id, label, icon: Icon }) => (
               <Tooltip key={id}>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant={isCanvasOpen && canvasPanel === id ? "secondary" : "ghost"}
-                    aria-label={label}
-                    aria-pressed={isCanvasOpen && canvasPanel === id}
-                    className={cn("rounded-lg", isMobile ? "size-9" : "size-8")}
-                    onClick={() => handlePanelButton(id)}
-                  >
-                    <Icon className="size-4" />
-                  </Button>
-                </TooltipTrigger>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant={isCanvasOpen && canvasPanel === id ? "secondary" : "ghost"}
+                      aria-label={label}
+                      aria-pressed={isCanvasOpen && canvasPanel === id}
+                      className={cn("rounded-lg", isMobile ? "size-9" : "size-8")}
+                      onClick={() => handlePanelButton(id)}
+                    >
+                      <Icon className="size-4" />
+                    </Button>
+                  }
+                />
                 <TooltipContent side="bottom" className="text-xs">
                   {label}
                 </TooltipContent>

@@ -36,6 +36,8 @@ def test_build_session_trace_debug_response_maps_tool_and_observability_spans():
                         "name": "repl_execute",
                         "span_type": "TOOL",
                         "status": {"code": "STATUS_CODE_OK"},
+                        "start_time_unix_nano": "1000000000",
+                        "end_time_unix_nano": "2500000000",
                         "inputs": {"code": "print('hi')"},
                         "outputs": {"stdout": "hi"},
                     },
@@ -44,6 +46,8 @@ def test_build_session_trace_debug_response_maps_tool_and_observability_spans():
                         "name": "read_file",
                         "span_type": "TOOL",
                         "status": {"code": "STATUS_CODE_OK"},
+                        "start_time_unix_nano": "3000000000",
+                        "end_time_unix_nano": "4000000000",
                         "inputs": {"path": "README.md"},
                         "outputs": {"content": "hello"},
                     },
@@ -52,6 +56,43 @@ def test_build_session_trace_debug_response_maps_tool_and_observability_spans():
                         "name": "rlm_available_tools",
                         "span_type": "LLM",
                         "status": {"code": "STATUS_CODE_OK"},
+                    },
+                    {
+                        "span_id": "s-4",
+                        "name": "fleet_rlm.chat_turn",
+                        "span_type": "CHAIN",
+                        "parent_span_id": None,
+                        "status": {"code": "STATUS_CODE_OK"},
+                        "start_time_unix_nano": "0",
+                        "end_time_unix_nano": "10000000000",
+                    },
+                    {
+                        "span_id": "s-5",
+                        "name": "LM.__call__",
+                        "span_type": "LLM",
+                        "status": {"code": "STATUS_CODE_OK"},
+                        "start_time_unix_nano": "5000000000",
+                        "end_time_unix_nano": "9000000000",
+                        "attributes": {
+                            "mlflow.chat.tokenUsage": {
+                                "input_tokens": 100,
+                                "output_tokens": 25,
+                                "total_tokens": 125,
+                            },
+                        },
+                        "outputs": {"choices": [{"message": {"content": "large output"}}]},
+                    },
+                    {
+                        "span_id": "s-6",
+                        "name": "fleet_rlm.rlm_run",
+                        "span_type": "CHAIN",
+                        "status": {"code": "STATUS_CODE_OK"},
+                        "attributes": {
+                            "fleet_rlm.selected_skills": "long-context,rlm",
+                            "fleet_rlm.rlm_action_max_tokens": "4096",
+                            "fleet_rlm.rlm_max_output_chars": "5000",
+                        },
+                        "outputs": {"error": "AdapterParseError failed to parse the LM response; JSONAdapter fallback"},
                     },
                 ]
             },
@@ -62,14 +103,30 @@ def test_build_session_trace_debug_response_maps_tool_and_observability_spans():
 
     assert response.trace_id == "tr-test"
     assert response.renderable_span_count == 2
-    assert response.non_rendered_span_count == 1
-    assert [span.mapped_render_kind for span in response.spans] == [
+    assert response.non_rendered_span_count == 4
+    assert [span.mapped_render_kind for span in response.spans[:3]] == [
         "sandbox",
         "tool",
         "non_rendered",
     ]
     assert response.spans[0].mapped_component_type == "tool-Bash"
     assert response.spans[1].mapped_component_type == "tool-Read"
+    assert response.spans[0].duration_ms == 1500
+    assert response.spans[4].total_tokens == 125
+    assert response.performance_summary.total_duration_ms == 10000
+    assert response.performance_summary.llm_duration_ms == 4000
+    assert response.performance_summary.repl_duration_ms == 1500
+    assert response.performance_summary.tool_duration_ms == 1000
+    assert response.performance_summary.input_tokens == 100
+    assert response.performance_summary.output_tokens == 25
+    assert response.performance_summary.total_tokens == 125
+    assert response.performance_summary.adapter_fallback_count == 1
+    assert response.performance_summary.parse_error_count == 1
+    assert response.performance_summary.selected_skills == ["long-context", "rlm"]
+    assert response.performance_summary.rlm_action_max_tokens == 4096
+    assert response.performance_summary.rlm_max_output_chars == 5000
+    assert response.performance_summary.slowest_llm_span
+    assert response.performance_summary.slowest_llm_span.name == "LM.__call__"
 
 
 @pytest.mark.asyncio

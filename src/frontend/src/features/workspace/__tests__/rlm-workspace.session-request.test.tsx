@@ -57,7 +57,7 @@ vi.mock("@/hooks/use-app-navigate", () => ({
   useAppNavigate: () => ({ navigate: vi.fn(), navigateTo: vi.fn() }),
 }));
 
-vi.mock("@/hooks/use-is-mobile", () => ({
+vi.mock("@/hooks/ui/use-is-mobile", () => ({
   useIsMobile: () => false,
 }));
 
@@ -65,7 +65,7 @@ vi.mock("@/lib/telemetry/use-telemetry", () => ({
   useTelemetry: () => ({ capture: vi.fn() }),
 }));
 
-vi.mock("@/hooks/use-runtime-status", () => ({
+vi.mock("@/hooks/runtime/use-runtime-status", () => ({
   useRuntimeStatus: () => ({ data: { ready: true, guidance: [] } }),
 }));
 

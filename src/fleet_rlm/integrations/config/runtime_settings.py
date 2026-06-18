@@ -147,6 +147,15 @@ _RUNTIME_SETTING_DEFINITIONS: tuple[RuntimeSettingDefinition, ...] = (
         default="64000",
     ),
     _definition(
+        "FLEET_RLM_ACTION_MAX_TOKENS",
+        category="llm",
+        label="RLM action max tokens",
+        description="Maximum token budget for each RLM action-generation call; separate from REPL output truncation.",
+        reload_required=True,
+        placeholder="4096",
+        default="4096",
+    ),
+    _definition(
         "DSPY_ADAPTER",
         category="llm",
         label="DSPy adapter",

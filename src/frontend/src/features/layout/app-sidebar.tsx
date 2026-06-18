@@ -31,7 +31,7 @@ import {
   type Conversation,
   useWorkspaceLayoutActions,
   useWorkspaceLayoutHistory,
-} from "@/features/workspace/workspace-layout-contract";
+} from "@/features/workspace";
 
 import { SettingsDialog } from "./settings-dialog";
 
@@ -78,22 +78,24 @@ function SidebarActionItem({
 }) {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={onClick}
-          data-active={isActive}
-          className={sidebarActionButtonClassName}
-        >
-          <SidebarIcon
-            icon={icon}
-            className="group-data-[active=true]/button:text-sidebar-foreground"
-          />
-          <span className="typo-label-regular tracking-tight-custom">{label}</span>
-        </Button>
-      </TooltipTrigger>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onClick}
+            data-active={isActive}
+            className={sidebarActionButtonClassName}
+          >
+            <SidebarIcon
+              icon={icon}
+              className="group-data-[active=true]/button:text-sidebar-foreground"
+            />
+            <span className="typo-label-regular tracking-tight-custom">{label}</span>
+          </Button>
+        }
+      />
       <TooltipContent side="right">{label}</TooltipContent>
     </Tooltip>
   );
@@ -153,7 +155,7 @@ function SidebarSessions({
         Sessions
       </div>
       <div className="min-h-0 w-full min-w-0 max-w-full flex-1 overflow-hidden">
-        <ScrollArea className="h-full w-full min-w-0 max-w-full [&_[data-radix-scroll-area-viewport]>div]:!block [&_[data-radix-scroll-area-viewport]>div]:!w-full [&_[data-radix-scroll-area-viewport]>div]:!min-w-0">
+        <ScrollArea className="h-full w-full min-w-0 max-w-full [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:!w-full [&_[data-slot=scroll-area-viewport]>div]:!min-w-0">
           <div className="flex w-full min-w-0 max-w-full flex-col gap-px overflow-hidden px-2 pb-2">
             {sessions.length === 0 ? (
               <div className="w-full min-w-0 max-w-full px-1.5 py-2 leading-6 text-sidebar-foreground/45 typo-caption">
@@ -246,21 +248,23 @@ export function AppSidebar() {
               </Button>
             ) : null}
             <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  onClick={toggleSidebar}
-                  aria-label={isCollapsed ? "Open sidebar" : "Close sidebar"}
-                  className={cn(
-                    "size-8 rounded-lg text-sidebar-foreground/75 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
-                    isCollapsed && "mx-auto",
-                  )}
-                >
-                  <SidebarIcon icon={SidebarLeft01Icon} className="min-w-0" />
-                </Button>
-              </TooltipTrigger>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    onClick={toggleSidebar}
+                    aria-label={isCollapsed ? "Open sidebar" : "Close sidebar"}
+                    className={cn(
+                      "size-8 rounded-lg text-sidebar-foreground/75 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
+                      isCollapsed && "mx-auto",
+                    )}
+                  >
+                    <SidebarIcon icon={SidebarLeft01Icon} className="min-w-0" />
+                  </Button>
+                }
+              />
               <TooltipContent side="right">
                 {isCollapsed ? "Open Sidebar" : "Close Sidebar"}
               </TooltipContent>
@@ -312,38 +316,42 @@ export function AppSidebar() {
         <SidebarFooter className="border-t border-transparent px-2 py-3">
           <div className="flex flex-col gap-1">
             <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleOpenLogin}
-                  title={isCollapsed ? "Sign in" : undefined}
-                  className={sidebarActionButtonClassName}
-                >
-                  <SidebarIcon icon={Login01Icon} />
-                  <span className="typo-label-regular tracking-tight-custom">Sign in</span>
-                </Button>
-              </TooltipTrigger>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleOpenLogin}
+                    title={isCollapsed ? "Sign in" : undefined}
+                    className={sidebarActionButtonClassName}
+                  >
+                    <SidebarIcon icon={Login01Icon} />
+                    <span className="typo-label-regular tracking-tight-custom">Sign in</span>
+                  </Button>
+                }
+              />
               <TooltipContent side="right">Sign in</TooltipContent>
             </Tooltip>
             <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={(event) => {
-                    settingsReturnFocusRef.current = event.currentTarget;
-                    setSettingsOpen(true);
-                  }}
-                  title={isCollapsed ? "Settings" : undefined}
-                  className={sidebarActionButtonClassName}
-                >
-                  <SidebarIcon icon={Settings01Icon} />
-                  <span className="typo-label-regular tracking-tight-custom">Settings</span>
-                </Button>
-              </TooltipTrigger>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={(event) => {
+                      settingsReturnFocusRef.current = event.currentTarget;
+                      setSettingsOpen(true);
+                    }}
+                    title={isCollapsed ? "Settings" : undefined}
+                    className={sidebarActionButtonClassName}
+                  >
+                    <SidebarIcon icon={Settings01Icon} />
+                    <span className="typo-label-regular tracking-tight-custom">Settings</span>
+                  </Button>
+                }
+              />
               <TooltipContent side="right">Settings</TooltipContent>
             </Tooltip>
           </div>

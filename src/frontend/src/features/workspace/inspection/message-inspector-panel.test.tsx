@@ -14,7 +14,7 @@ vi.mock("@/features/workspace/inspection/artifact-graph", () => ({
   ),
 }));
 
-vi.mock("@/hooks/use-runtime-status", () => ({
+vi.mock("@/hooks/runtime/use-runtime-status", () => ({
   useRuntimeStatus: () => ({ data: { mlflow: { enabled: false } } }),
 }));
 
@@ -28,6 +28,24 @@ vi.mock("@/lib/rlm-api/client", () => ({
           span_count: 0,
           renderable_span_count: 0,
           non_rendered_span_count: 0,
+          performance_summary: {
+            total_duration_ms: null,
+            llm_duration_ms: 0,
+            repl_duration_ms: 0,
+            tool_duration_ms: 0,
+            root_overhead_ms: null,
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+            token_total_mismatch: false,
+            adapter_fallback_count: 0,
+            parse_error_count: 0,
+            selected_skills: [],
+            rlm_action_max_tokens: null,
+            rlm_max_output_chars: null,
+            slowest_llm_span: null,
+            largest_output_span: null,
+          },
           spans: [],
         };
       }

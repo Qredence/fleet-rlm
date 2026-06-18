@@ -296,6 +296,7 @@ def _chat_agent_builder_kwargs(runtime: PreparedChatRuntime) -> dict[str, Any]:
         "rlm_max_iterations": runtime.cfg.rlm_max_iterations,
         "rlm_max_llm_calls": runtime.cfg.rlm_max_llm_calls,
         "rlm_max_output_chars": runtime.cfg.agent_max_output_chars,
+        "rlm_action_max_tokens": runtime.cfg.rlm_action_max_tokens,
         "planner_lm": runtime.planner_lm,
         "delegate_lm": runtime.delegate_lm,
         "repository": runtime.repository,

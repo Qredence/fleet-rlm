@@ -17,9 +17,7 @@ describe("TooltipContent", () => {
     act(() => {
       root.render(
         <Tooltip open>
-          <TooltipTrigger asChild>
-            <button type="button">Trigger</button>
-          </TooltipTrigger>
+          <TooltipTrigger render={<button type="button">Trigger</button>} />
           <TooltipContent forceMount>Shared tooltip</TooltipContent>
         </Tooltip>,
       );

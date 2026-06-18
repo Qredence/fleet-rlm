@@ -108,10 +108,12 @@ def read_file(path: str) -> str:
     with open(resolve_path(path), "r", encoding="utf-8", errors="replace") as handle:
         return handle.read()
 
-def list_files(path: str = ".") -> list[str]:
+def list_files(path: str = ".", pattern: str | None = None) -> list[str]:
     target = _pathlib.Path(resolve_path(path))
     if not target.exists():
         return []
+    if pattern:
+        return sorted(str(item) for item in target.glob(str(pattern)))
     return sorted(str(item) for item in target.iterdir())
 
 def find_files(path: str = ".", pattern: str = "*") -> list[str]:
@@ -119,6 +121,61 @@ def find_files(path: str = ".", pattern: str = "*") -> list[str]:
     if not target.exists():
         return []
     return sorted(_glob.glob(str(target / pattern), recursive=True))
+
+def sandbox_list_files(path: str = ".", pattern: str | None = None) -> list[str]:
+    return list_files(path, pattern)
+
+def sandbox_read_file(path: str) -> str:
+    return read_file(path)
+
+def sandbox_search_files(path: str = ".", pattern: str | None = None) -> list[str]:
+    raw_path = str(path or ".")
+    raw_pattern = "*" if pattern is None else str(pattern or "*")
+    if pattern is None and raw_path not in {{"", "."}}:
+        candidate = _pathlib.Path(resolve_path(raw_path))
+        if candidate.is_file():
+            return [str(candidate)]
+        if not candidate.exists():
+            return find_files(".", raw_path)
+    return find_files(raw_path or ".", raw_pattern)
+
+def sandbox_find_in_files(path: str = ".", pattern: str = "") -> list[dict[str, object]]:
+    if not pattern:
+        return []
+    hits: list[dict[str, object]] = []
+    for file_path in find_files(path, "**/*"):
+        target = _pathlib.Path(file_path)
+        if not target.is_file():
+            continue
+        try:
+            lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line_no, line in enumerate(lines, start=1):
+            if _re.search(pattern, line):
+                hits.append({{"file": str(target), "line": line_no, "content": line}})
+    return hits
+
+def get_workspace_context() -> dict[str, object]:
+    manifest_path = _pathlib.Path(REPO_PATH) / ".fleet-rlm" / "context" / "manifest.json"
+    manifest: dict[str, object] = {{}}
+    staged_paths: list[str] = []
+    if manifest_path.exists():
+        try:
+            manifest = _json.loads(manifest_path.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            manifest = {{}}
+        for source in manifest.get("context_sources", []) if isinstance(manifest, dict) else []:
+            if isinstance(source, dict):
+                staged = source.get("staged_path")
+                if staged:
+                    staged_paths.append(str(staged))
+    return {{
+        "document_text": "",
+        "context_paths": staged_paths,
+        "manifest": manifest,
+        "metadata": {{"sandbox_staged_paths": staged_paths}},
+    }}
 
 def peek(text: str, start: int = 0, length: int = 2000) -> str:
     source = str(text or "")
@@ -1094,10 +1151,14 @@ def inject_variables(
     variables: dict[str, Any],
 ) -> str:
     del owner
+    fallback_assignments = [
+        "if 'active_skills' not in globals(): active_skills = {'selected': [], 'catalog': {}, 'instructions': {}, 'sources': {}}",
+        "if 'context' not in globals() and 'get_workspace_context' in globals(): context = get_workspace_context()",
+    ]
     if not variables:
-        return code
+        return "\n".join(fallback_assignments) + "\n" + code
     assignments = [f"{name} = {literal(value)}" for name, value in variables.items()]
-    return "\n".join(assignments) + "\n" + code
+    return "\n".join(fallback_assignments + assignments) + "\n" + code
 
 
 def literal(value: Any) -> str:

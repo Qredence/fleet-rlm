@@ -36,10 +36,6 @@ where the durable rules live and which commands prove a change.
 # from repo root
 uv sync --all-extras --dev
 cd src/frontend && pnpm install --frozen-lockfile
-```
-
-```bash
-# from repo root
 zsh .codex/workspace-bootstrap.zsh
 ```
 
@@ -126,6 +122,7 @@ When changing workflow, contracts, or architecture, update the durable docs befo
 
 - Always use the `zsh` terminal profile for CLI commands. Adjust column width via `--an-max-width` in `agent-ui.css` instead of Tailwind, and use `pnpm run check` in `src/frontend` to verify format, types, linter, and unit tests.
 - Always include direct absolute markdown links to `.canvas.tsx` files when creating or mentioning an IDE Canvas, e.g. using the format: `[Descriptive Label]` immediately followed by `(/absolute/path/to/canvas.canvas.tsx)`.
+- For landing page suggestions in `workspace-message-list.tsx`, use the canonical `/agent-elements` `Suggestion` chip component with uncolored icon fills and a larger "Qredence Fleet" title, avoiding card-like empty states or colored icon accents.
 
 ## Learned Workspace Facts
 
@@ -138,3 +135,5 @@ When changing workflow, contracts, or architecture, update the durable docs befo
 - Under TanStack Start, the client hydration entry `client.tsx` sets `(window as any).__hydrated = true` via `requestAnimationFrame` for E2E tests; `PostHogProvider` must render unconditionally, and SSR asset manifest mutations must be `WeakSet`-guarded.
 - Chat sessions auto-create/save on first message, sorted descending (`createdAt`), guarded by `lastSavedStateRef` in `workspace-screen.tsx` to prevent redundant saves.
 - Tool usage: `ToolRowBase` horizontally aligns subtitle tool names; Daytona parsing uses `extractRawToolName` in `backend-chat-event-tool-parts.ts`; Code-repair logic lives in `agent-elements/utils/code-repair.ts`.
+- The frontend in `src/frontend` uses `pnpm` exclusively (e.g., `pnpm run dev`, `pnpm run check`), and `CLAUDE.md` specifies these developer commands to prevent the use of invalid `vp` commands.
+- Under `uv build`, packaging commands in `setup.py` delegate to `src/fleet_rlm/ui/build.py`, which runs `scripts/ensure_frontend_entrypoint.py` to reconstruct the static SPA `index.html` (supporting legacy `clientEntry` and modern `tsrStartManifest` schemas) before copying assets to `src/fleet_rlm/ui/dist` for serving on port `:8000`.

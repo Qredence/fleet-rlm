@@ -14,6 +14,12 @@ All notable changes to this project are documented in this file.
   **Outcome:** Completed workspace runs can be audited chronologically or as parent-child span relationships without selecting legacy shell canvas tabs.
 - **Change:** Added an inline Daytona volume browser with searchable tree, resizable desktop split, and selected-file preview.
   **Outcome:** Users can inspect workspace volume files without navigating away from `/app/workspace`.
+- **Change:** Added per-trace performance summaries, span durations, token counts, output sizes, selected-skill metadata, and adapter fallback signals to the session trace debug contract.
+  **Outcome:** The Workbench sidepanel can diagnose slow or noisy RLM runs directly from the same durable trace lookup used by the timeline and graph.
+- **Change:** Added active scaffold-skill injection as a sandbox variable for RLM turns, document turns, and workspace turns.
+  **Outcome:** Selected skill markdown is available to the REPL when needed without stuffing full instructions into every model prompt.
+- **Change:** Added a bounded RLM action-generation token budget with runtime settings metadata and trace attribution.
+  **Outcome:** Operators can cap action prompts separately from REPL output truncation and inspect the effective budget in trace diagnostics.
 
 ### Changed
 
@@ -33,11 +39,25 @@ All notable changes to this project are documented in this file.
   **Outcome:** Cross-tenant trace export spoofing is blocked and workspace sessions resolve to durable MLflow session ids.
 - **Change:** Split optimization run reporting into `quality/optimization_report.py` with typed review-bundle fields on run detail responses.
   **Outcome:** The Optimization UI can read holdout promotion readiness without untyped manifest drilling.
+- **Change:** Reorganized frontend feature modules behind top-level feature entrypoints and moved runtime/UI hooks into scoped hook namespaces.
+  **Outcome:** Routes and layout modules consume stable public feature contracts while import-boundary linting blocks deep feature coupling.
+- **Change:** Migrated the remaining shadcn-style primitives from Radix wrappers to Base UI primitives and refreshed the frontend dependency set.
+  **Outcome:** The UI stack is aligned on Base UI while preserving the existing button, tooltip, popover, dialog, menu, scroll-area, and toggle contracts.
+- **Change:** Compact local chat-history persistence now stores session previews and durable session ids instead of full rendered transcripts and artifact payloads.
+  **Outcome:** Local storage quota failures no longer break chat saves, while durable sessions reload transcripts from the backend turn history.
+- **Change:** Hardened TanStack Start static entrypoint generation and packaged UI serving for `dist/client` builds.
+  **Outcome:** `fleet web`, package builds, and FastAPI SPA mounting serve the fresh client entrypoint and avoid falling back to stale root `dist/index.html` files.
+- **Change:** Tightened Daytona sandbox helper availability for native file/search helpers, workspace context, and default active-skills variables.
+  **Outcome:** RLM REPL actions can inspect staged context, files, and selected skills with lower prompt overhead and fewer bridge round trips.
+- **Change:** Compacted long REPL histories before RLM action generation and scoped action generation through `JSONAdapter`.
+  **Outcome:** Long-running RLM sessions spend fewer tokens on prior tool output and avoid avoidable chat-adapter fallback retries.
 
 ### Removed
 
 - **Change:** Removed MIPROv2 from the public optimization surface.
   **Outcome:** Review bundles, CLI flags, and API requests no longer advertise a second optimizer.
+- **Change:** Removed retired Tool UI option-list/shared action helpers after the Agent Elements tool rendering path became canonical.
+  **Outcome:** The frontend has fewer parallel tool-rendering contracts to maintain.
 
 ### Notes
 
