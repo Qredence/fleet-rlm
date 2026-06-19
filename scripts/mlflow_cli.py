@@ -89,7 +89,7 @@ def do_optimize(args: argparse.Namespace) -> int:
         output_path=args.output,
         train_ratio=args.train_ratio,
         auto=args.auto,
-        optimizer=args.optimizer,
+        optimizer="gepa",
     )
     for key in (
         "train_examples",
@@ -238,7 +238,7 @@ def main() -> int:
     pe.set_defaults(func=do_evaluate)
 
     # Optimize
-    po = subparsers.add_parser("optimize", help="Optimize a DSPy program (MIPROv2 default, GEPA optional)")
+    po = subparsers.add_parser("optimize", help="Optimize a DSPy program with GEPA")
     po.add_argument("--dataset", type=Path, required=True)
     po.add_argument("--program", required=True)
     po.add_argument("--input-key", action="append", default=[])
@@ -246,7 +246,6 @@ def main() -> int:
     po.add_argument("--output", type=Path, default=Path("artifacts/mlflow/optimized-program.json"))
     po.add_argument("--train-ratio", type=float, default=0.8)
     po.add_argument("--auto", default="light", choices=("light", "medium", "heavy"))
-    po.add_argument("--optimizer", default="miprov2", choices=("gepa", "miprov2"))
     po.set_defaults(func=do_optimize)
 
     # Scorers

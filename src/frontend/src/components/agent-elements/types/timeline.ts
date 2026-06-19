@@ -29,6 +29,7 @@ export type TimelineStep =
       diffLines?: { type: "add" | "remove" | "context"; content: string }[];
       bashCommand?: string;
       bashOutput?: string;
+      bashLanguage?: string;
       bashSuccess?: boolean;
     }
   | {

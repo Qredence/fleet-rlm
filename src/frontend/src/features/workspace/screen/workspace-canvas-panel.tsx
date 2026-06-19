@@ -14,6 +14,7 @@ import { ExecutionInspectorTab } from "@/features/workspace/inspection/tabs/exec
 import { GraphInspectorTab } from "@/features/workspace/inspection/tabs/graph-inspector-tab";
 import { hasMeaningfulGraph } from "@/features/workspace/inspection/tabs/graph-inspector-content";
 import { MessageInspectorTab } from "@/features/workspace/inspection/tabs/message-inspector-tab";
+import { TraceInspectorTab } from "@/features/workspace/inspection/tabs/trace-inspector-tab";
 import { RunWorkbench } from "@/features/workspace/workbench/run-workbench";
 import {
   useChatStore,
@@ -257,6 +258,7 @@ export function WorkspaceCanvasPanel() {
   /* ---- chat / inspector state ---- */
   const messages = useChatStore((s) => s.messages);
   const isStreaming = useChatStore((s) => s.isStreaming);
+  const sessionId = useChatStore((s) => s.sessionId);
   const turnArtifactsByMessageId = useChatStore((s) => s.turnArtifactsByMessageId);
 
   const selectedAssistantTurnId = useWorkspaceUiStore((s) => s.selectedAssistantTurnId);
@@ -313,6 +315,7 @@ export function WorkspaceCanvasPanel() {
     if (hasRunContent) list.push({ id: "workbench", label: "Workbench" });
 
     // Session context tabs — always visible
+    list.push({ id: "trace", label: "Trace" });
     list.push({ id: "documents", label: "Docs" });
     list.push({ id: "memory", label: "Memory" });
     list.push({ id: "context", label: "Context" });
@@ -333,6 +336,7 @@ export function WorkspaceCanvasPanel() {
   if (!model && !hasRunContent) {
     // Show session tabs even without inspector content
     const sessionTabs: TabOption[] = [
+      { id: "trace", label: "Trace" },
       { id: "documents", label: "Docs" },
       { id: "memory", label: "Memory" },
       { id: "context", label: "Context" },
@@ -356,6 +360,7 @@ export function WorkspaceCanvasPanel() {
           </TabsList>
         </div>
         <Separator className="bg-border-subtle/70" />
+        <TraceInspectorTab sessionId={sessionId} selectedTurn={selectedTurn} messages={messages} />
         <TabsContent value="documents" className="mt-0 min-h-0 flex-1 overflow-auto">
           <DocumentsTabContent messages={messages} />
         </TabsContent>
@@ -399,6 +404,8 @@ export function WorkspaceCanvasPanel() {
           {showGraph ? <GraphInspectorTab steps={graphSteps} /> : null}
         </>
       ) : null}
+
+      <TraceInspectorTab sessionId={sessionId} selectedTurn={selectedTurn} messages={messages} />
 
       {hasRunContent ? (
         <TabsContent value="workbench" className="mt-0 min-h-0 flex-1 overflow-hidden px-3 py-3">

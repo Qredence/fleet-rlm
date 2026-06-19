@@ -36,10 +36,6 @@ where the durable rules live and which commands prove a change.
 # from repo root
 uv sync --all-extras --dev
 cd src/frontend && pnpm install --frozen-lockfile
-```
-
-```bash
-# from repo root
 zsh .codex/workspace-bootstrap.zsh
 ```
 
@@ -102,8 +98,7 @@ make build-ui
 
 ## Drift Checks
 
-Run the harness lane when docs, commands, Codex config, generated contracts, or script inventory
-change:
+Run the harness lane when docs, commands, Codex config, generated contracts, or script inventory change:
 
 ```bash
 # from repo root
@@ -118,8 +113,27 @@ uv run python scripts/check_docs_quality.py
 
 When changing workflow, contracts, or architecture, update the durable docs before finishing:
 
-- `AGENTS.md` and subsystem `AGENTS.md` files.
-- `docs/agent-harness/*`.
+- `AGENTS.md` and subsystem files under `docs/agent-harness/*`.
 - `docs/README.md`, `docs/index.md`, and `docs/SUMMARY.md`.
 - `scripts/README.md`, `Makefile`, `pyproject.toml`, and `src/frontend/package.json` when commands move.
 - `openapi.yaml` and frontend API artifacts when backend request or response shapes move.
+
+## Learned User Preferences
+
+- Always use the `zsh` terminal profile for CLI commands. Adjust column width via `--an-max-width` in `agent-ui.css` instead of Tailwind, and use `pnpm run check` in `src/frontend` to verify format, types, linter, and unit tests.
+- Always include direct absolute markdown links to `.canvas.tsx` files when creating or mentioning an IDE Canvas, e.g. using the format: `[Descriptive Label]` immediately followed by `(/absolute/path/to/canvas.canvas.tsx)`.
+- For landing page suggestions in `workspace-message-list.tsx`, use the canonical `/agent-elements` `Suggestion` chip component with uncolored icon fills and a larger "Qredence Fleet" title, avoiding card-like empty states or colored icon accents.
+
+## Learned Workspace Facts
+
+- Local development runs on ports `:8000` (API), `:5173` (Vite dev), and `:5001` (MLflow on Python 3.13+); chat runtime runs in Daytona via `dspy.RLM` with multi-provider dropdown selection.
+- Database queries use Row-Level Security (RLS) policies with session tenant IDs; SQLModel/SQLite fallback handles local offline dev, while Neon Postgres project is `fleet-rlm-postgres-cutover` (ID: `old-bird-44339002`) in `aws-eu-central-1`.
+- Alembic database schema drift checking requires importing all active SQLAlchemy/SQLModel models inside `migrations/env.py`.
+- IDE Canvases are for standalone analytical outputs (not internal files) and support specific category colors: `gray`, `purple`, `green`, `yellow`, `pink`, `blue`, and `orange`.
+- Streaming responses in the runtime are standardized on `RuntimeEvent` (`runtime/events.py`) and projected using `project_chat`, while legacy `StreamEvent` DTOs are cleaned up and unused.
+- On FastAPI Cloud, delete locked env vars first via `uv run fastapi cloud env delete <VAR> -y` and deploy with `--no-wait`; production and staging environments enforce `AUTH_REQUIRED=true` at startup.
+- Under TanStack Start, the client hydration entry `client.tsx` sets `(window as any).__hydrated = true` via `requestAnimationFrame` for E2E tests; `PostHogProvider` must render unconditionally, and SSR asset manifest mutations must be `WeakSet`-guarded.
+- Chat sessions auto-create/save on first message, sorted descending (`createdAt`), guarded by `lastSavedStateRef` in `workspace-screen.tsx` to prevent redundant saves.
+- Tool usage: `ToolRowBase` horizontally aligns subtitle tool names; Daytona parsing uses `extractRawToolName` in `backend-chat-event-tool-parts.ts`; Code-repair logic lives in `agent-elements/utils/code-repair.ts`.
+- The frontend in `src/frontend` uses `pnpm` exclusively (e.g., `pnpm run dev`, `pnpm run check`), and `CLAUDE.md` specifies these developer commands to prevent the use of invalid `vp` commands.
+- Under `uv build`, packaging commands in `setup.py` delegate to `src/fleet_rlm/ui/build.py`, which runs `scripts/ensure_frontend_entrypoint.py` to reconstruct the static SPA `index.html` (supporting legacy `clientEntry` and modern `tsrStartManifest` schemas) before copying assets to `src/fleet_rlm/ui/dist` for serving on port `:8000`.

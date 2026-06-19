@@ -17,7 +17,7 @@ from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.integrations.observability.trace_context import (
     runtime_telemetry_enabled_context,
 )
-from fleet_rlm.runtime.events import RuntimeEvent
+from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from ...events import (
@@ -33,13 +33,11 @@ from ...runtime_services.chat_runtime import (
     ChatAgentProtocol,
     LocalPersistFn,
     SessionContext,
-    StreamEventLike,
 )
 from ...runtime_services.run_lifecycle import ExecutionLifecycleManager
 from ...runtime_services.stream_failures import classify_stream_failure
 from .repl_bridge import ReplHookBridge
 from .stream_events import (
-    WorkspaceEvent,
     _is_terminal_transport_event,
     build_stream_event_dict,
     stream_agent_turn,
@@ -57,11 +55,11 @@ from .turn_setup import PreparedStreamingTurn
 logger = logging.getLogger(__name__)
 
 
-def _terminal_run_status(event: StreamEventLike) -> RunStatus:
+def _terminal_run_status(event: RuntimeEvent) -> RunStatus:
     """Return the authoritative terminal run status for one event."""
-    if event.kind == "done" and (isinstance(event.payload, dict) and event.payload.get("cancelled")):
+    if event.kind == RuntimeEventKind.DONE and (isinstance(event.payload, dict) and event.payload.get("cancelled")):
         return RunStatus.CANCELLED
-    if event.kind == "done":
+    if event.kind == RuntimeEventKind.DONE:
         payload = event.payload if isinstance(event.payload, dict) else {}
         return RunStatus.FAILED if final_event_failed(payload) else RunStatus.COMPLETED
     return RunStatus.FAILED
@@ -71,7 +69,7 @@ async def handle_terminal_stream_event(
     *,
     websocket: WebSocket | None,
     lifecycle: ExecutionLifecycleManager,
-    event: StreamEventLike,
+    event: RuntimeEvent,
     event_dict: dict[str, Any],
     step: ExecutionStep | None,
     persist_session_state: LocalPersistFn,
@@ -85,7 +83,7 @@ async def handle_terminal_stream_event(
         run_id=lifecycle.run_id,
     )
 
-    if event.kind == "done":
+    if event.kind == RuntimeEventKind.DONE:
         try:
             await persist_session_state(include_volume_save=True, release_idle_session=True)
         except Exception:
@@ -109,7 +107,9 @@ async def handle_terminal_stream_event(
             exc_info=True,
         )
 
-    error_json: dict[str, Any] | None = {"error": event.text, "kind": event.kind} if event.kind == "error" else None
+    error_json: dict[str, Any] | None = (
+        {"error": event.text, "kind": event.kind.value} if event.kind == RuntimeEventKind.ERROR else None
+    )
     await lifecycle.complete_run(
         _terminal_run_status(event),
         step=step,
@@ -173,11 +173,10 @@ async def handle_stream_error(
             "code": error_code,
         },
         summary=build_execution_completion_summary(
-            event=WorkspaceEvent(
-                kind="error",
+            event=RuntimeEvent(
+                kind=RuntimeEventKind.ERROR,
                 text=error_text,
                 payload=error_payload,
-                terminal=True,
             ),
             request_message=request_message,
             run_id=lifecycle.run_id,
@@ -190,7 +189,7 @@ async def _emit_stream_event(
     websocket: WebSocket | None,
     lifecycle: ExecutionLifecycleManager,
     step_builder: ExecutionStepBuilder,
-    event: WorkspaceEvent | StreamEventLike,
+    event: RuntimeEvent,
     orchestration_session: SessionContext | None = None,
     persist_session_state: LocalPersistFn,
     request_message: str,
@@ -198,7 +197,7 @@ async def _emit_stream_event(
 ) -> None:
     lifecycle.raise_if_persistence_error()
     payload = event.payload if isinstance(event.payload, dict) else {}
-    if event.kind in {"done", "error"}:
+    if event.kind in {RuntimeEventKind.DONE, RuntimeEventKind.ERROR}:
         payload = merge_trace_result_metadata(
             payload,
             response_preview=event.text,
@@ -220,18 +219,10 @@ async def _emit_stream_event(
     if websocket is not None:
         await _try_send_json(websocket, {"type": "event", "data": event_dict})
 
-    if isinstance(event, RuntimeEvent):
-        step = step_builder.from_runtime_event(event)
-    else:
-        step = step_builder.from_stream_event(
-            kind=event.kind,
-            text=event.text,
-            payload=payload,
-            timestamp=event.timestamp.timestamp(),
-        )
+    step = step_builder.from_runtime_event(event)
 
     if step is not None:
-        if event.kind == "text":
+        if event.kind == RuntimeEventKind.TEXT:
             await lifecycle.emit_step(step)
         else:
             await asyncio.gather(

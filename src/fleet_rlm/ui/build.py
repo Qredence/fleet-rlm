@@ -90,6 +90,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: Build failed, {source_dist} not found.", file=sys.stderr)
         return 1
 
+    ensure_script = _repo_root() / "scripts" / "ensure_frontend_entrypoint.py"
+    if ensure_script.exists():
+        print(f"Running '{ensure_script}' on {source_dist}...")
+        try:
+            subprocess.run(
+                [sys.executable, str(ensure_script), "--dist-dir", str(source_dist)],
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            print(f"Error running ensure_frontend_entrypoint: {exc}", file=sys.stderr)
+            return 1
+    else:
+        print(f"Warning: {ensure_script} not found. Skipping entrypoint generation.")
+
     target_ui_dir.mkdir(parents=True, exist_ok=True)
     init_py = target_ui_dir / "__init__.py"
     if not init_py.exists():

@@ -1,5 +1,4 @@
 import type * as React from "react";
-import { Slot } from "@radix-ui/react-slot";
 import { Popover as BasePopover } from "@base-ui/react";
 
 import { cn } from "@/lib/utils";
@@ -7,16 +6,11 @@ import { cn } from "@/lib/utils";
 const Popover = BasePopover.Root;
 
 function PopoverTrigger({
-  asChild,
   ref,
   ...props
 }: React.ComponentPropsWithoutRef<typeof BasePopover.Trigger> & {
-  asChild?: boolean;
   ref?: React.ComponentPropsWithRef<typeof BasePopover.Trigger>["ref"];
 }) {
-  if (asChild) {
-    return <BasePopover.Trigger render={<Slot />} ref={ref} {...props} />;
-  }
   return <BasePopover.Trigger ref={ref} {...props} />;
 }
 

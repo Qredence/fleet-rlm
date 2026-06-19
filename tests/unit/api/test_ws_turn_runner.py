@@ -7,7 +7,7 @@ import pytest
 from fleet_rlm.api.events import ExecutionStepBuilder
 from fleet_rlm.api.routers.ws.turn_runner import _emit_stream_event
 from fleet_rlm.api.runtime_services.run_lifecycle import ExecutionLifecycleManager
-from fleet_rlm.runtime.schemas import StreamEvent
+from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 
 
 class _FakeEmitter:
@@ -53,7 +53,7 @@ async def test_emit_stream_event_sends_non_terminal_frame_to_websocket() -> None
         websocket=websocket,  # type: ignore[arg-type]
         lifecycle=lifecycle,
         step_builder=step_builder,
-        event=StreamEvent(kind="status", text="Starting turn..."),
+        event=RuntimeEvent.status("Starting turn..."),
         persist_session_state=_persist_session_state,
         request_message="hello",
         execution_emitter=emitter,  # type: ignore[arg-type]
@@ -77,7 +77,11 @@ async def test_emit_stream_event_sends_terminal_frame_before_completion() -> Non
         websocket=websocket,  # type: ignore[arg-type]
         lifecycle=lifecycle,
         step_builder=step_builder,
-        event=StreamEvent(kind="done", text="done", payload={"history_turns": 1}),
+        event=RuntimeEvent(
+            kind=RuntimeEventKind.DONE,
+            text="done",
+            payload={"history_turns": 1},
+        ),
         persist_session_state=_persist_session_state,
         request_message="hello",
         execution_emitter=emitter,  # type: ignore[arg-type]

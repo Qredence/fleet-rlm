@@ -33,6 +33,7 @@ import {
   PromptInputSelectContent,
   PromptInputSelectGroup,
   PromptInputSelectItem,
+  PromptInputSelectPositioner,
   PromptInputSelectTrigger,
   PromptInputSelectValue,
   PromptInputSubmit,
@@ -150,19 +151,21 @@ function ExecutionModeSelect({
       >
         <PromptInputSelectValue>{currentOption.label}</PromptInputSelectValue>
       </PromptInputSelectTrigger>
-      <PromptInputSelectContent align="end" alignItemWithTrigger={false} className="w-44">
-        <PromptInputSelectGroup>
-          {EXECUTION_MODE_OPTIONS.map((option) => {
-            const OptionIcon = option.icon;
-            return (
-              <PromptInputSelectItem key={option.id} value={option.id}>
-                <OptionIcon className="shrink-0" />
-                <span>{option.label}</span>
-              </PromptInputSelectItem>
-            );
-          })}
-        </PromptInputSelectGroup>
-      </PromptInputSelectContent>
+      <PromptInputSelectPositioner align="end" alignItemWithTrigger={false}>
+        <PromptInputSelectContent className="w-44">
+          <PromptInputSelectGroup>
+            {EXECUTION_MODE_OPTIONS.map((option) => {
+              const OptionIcon = option.icon;
+              return (
+                <PromptInputSelectItem key={option.id} value={option.id}>
+                  <OptionIcon className="shrink-0" />
+                  <span>{option.label}</span>
+                </PromptInputSelectItem>
+              );
+            })}
+          </PromptInputSelectGroup>
+        </PromptInputSelectContent>
+      </PromptInputSelectPositioner>
     </PromptInputSelect>
   );
 }

@@ -25,38 +25,38 @@ export const inspectorStyles = {
   /** Vertical stacking scales. */
   stack: {
     /** Section-level: heading + children. */
-    section: "flex flex-col gap-2",
+    section: "flex min-w-0 flex-col gap-2",
     /** Repeated card list. */
-    cards: "flex flex-col gap-3",
+    cards: "flex min-w-0 flex-col gap-3",
     /** Inner card content stacking. */
-    content: "flex flex-col gap-3",
+    content: "flex min-w-0 flex-col gap-3",
     /** Dense detail stacking. */
-    compact: "flex flex-col gap-2",
+    compact: "flex min-w-0 flex-col gap-2",
   },
 
   /** Text headings. */
   heading: {
     /** Section heading (e.g. "Citations", "Tool sessions", "Execution"). */
-    section: "typo-body-xs font-medium tracking-[0.04em] text-muted-foreground",
+    section: "typo-body-xs font-medium tracking-wide-custom text-muted-foreground",
     /** Micro label inside detail blocks (e.g. "Input", "Output", "Code"). */
-    detail: "typo-helper uppercase tracking-[0.16em] text-muted-foreground",
+    detail: "typo-helper uppercase tracking-wide-custom text-muted-foreground",
   },
 
   /** Card chrome. */
   card: {
     /** Outer card shell. */
-    root: "gap-3 rounded-2xl border-border-subtle/80 shadow-none",
+    root: "min-w-0 gap-3 overflow-hidden rounded-2xl border-border-subtle/80 shadow-none",
     /** Card header padding. */
     header: "px-4 pt-4",
     /** Card content padding (no internal stack). */
-    content: "px-4 pb-4",
+    content: "min-w-0 px-4 pb-4",
     /** Card content padding with stacking. */
-    contentStack: "flex flex-col gap-3 px-4 pb-4",
+    contentStack: "flex min-w-0 flex-col gap-3 px-4 pb-4",
   },
 
   /** Inset detail blocks (rounded-xl). Combine with a tone helper. */
   inset: {
-    root: "rounded-xl border border-border-subtle/80 px-3 py-2",
+    root: "min-w-0 max-w-full overflow-hidden rounded-xl border border-border-subtle/80 px-3 py-2",
     default: "bg-muted/20 text-muted-foreground",
     strong: "bg-muted/20 text-foreground",
     warning: "border-amber-500/25 bg-amber-500/8 text-amber-700 dark:text-amber-300",
@@ -68,7 +68,7 @@ export const inspectorStyles = {
     /** Status badges: Pending / Running / Completed / Failed. */
     status: "rounded-full",
     /** Meta/runtime/count badges. */
-    meta: "rounded-full text-xs font-medium",
+    meta: "rounded-full typo-caption font-medium",
     /** Standard badge row. */
     row: "flex flex-wrap gap-1.5",
   },
@@ -87,7 +87,8 @@ export const inspectorStyles = {
 
   /** Graph tab specifics. */
   graph: {
-    canvas: "h-105 overflow-hidden rounded-xl border border-border-subtle/80 bg-card/30",
+    canvas:
+      "h-105 min-w-0 w-full max-w-full overflow-hidden rounded-xl border border-border-subtle/80 bg-card/30",
     statsGrid: "grid gap-3 md:grid-cols-3",
   },
 } as const;

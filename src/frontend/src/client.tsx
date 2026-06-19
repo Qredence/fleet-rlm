@@ -2,7 +2,6 @@ import { StartClient } from "@tanstack/react-start/client";
 import { hydrateRoot } from "react-dom/client";
 import posthog from "posthog-js";
 import { PostHogProvider } from "@posthog/react";
-
 import { resolvePostHogWebConfig } from "@/lib/telemetry/posthog";
 import "./styles/globals.css";
 
@@ -44,3 +43,10 @@ hydrateRoot(
     <StartClient />
   </PostHogProvider>,
 );
+
+// Rely on standard browser rendering queue to guarantee React has finished layout and paint.
+requestAnimationFrame(() => {
+  requestAnimationFrame(() => {
+    (window as unknown as { __hydrated?: boolean }).__hydrated = true;
+  });
+});

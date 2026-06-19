@@ -6,7 +6,7 @@ import dspy
 import pytest
 
 from fleet_rlm.runtime.agent.runtime import AgentRuntime
-from fleet_rlm.runtime.schemas import StreamEvent
+from fleet_rlm.runtime.events import RuntimeEvent
 
 
 class _StreamingAgent:
@@ -22,7 +22,7 @@ async def test_agent_runtime_unified_stream_emits_done_event() -> None:
     runtime = AgentRuntime(interpreter=None, use_escalation=False, extra_tools=[])
     runtime.agent = _StreamingAgent()
 
-    events: list[StreamEvent] = [
+    events: list[RuntimeEvent] = [
         event
         async for event in runtime.aiter_chat_turn_stream(
             message="integration hello",

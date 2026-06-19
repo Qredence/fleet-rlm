@@ -10,7 +10,7 @@ vi.mock("@/hooks/use-app-navigate", () => ({
   useAppNavigate: () => ({ navigateTo: vi.fn() }),
 }));
 
-vi.mock("@/hooks/use-is-mobile", () => ({
+vi.mock("@/hooks/ui/use-is-mobile", () => ({
   useIsMobile: () => false,
 }));
 
@@ -25,16 +25,13 @@ vi.mock("@/components/ui/tooltip", () => ({
 }));
 
 const workspaceCanvas = vi.fn(() => <div>MessageInspectorPanel</div>);
-vi.mock("@/features/workspace/screen/workspace-canvas-panel", () => ({
+vi.mock("@/features/workspace", () => ({
+  GraphCanvasPanel: () => <div>GraphCanvas</div>,
   WorkspaceCanvasPanel: () => workspaceCanvas(),
   WorkspaceCanvasUnavailablePanel: () => <div>WorkspaceUnavailable</div>,
 }));
 
-vi.mock("@/features/workspace/screen/graph-canvas-panel", () => ({
-  GraphCanvasPanel: () => <div>GraphCanvas</div>,
-}));
-
-vi.mock("@/features/volumes/volumes-canvas-panel", () => ({
+vi.mock("@/features/volumes", () => ({
   VolumesCanvasPanel: () => <div>VolumeCanvas</div>,
 }));
 

@@ -28,7 +28,7 @@ vi.mock("@/stores/navigation-store", () => ({
   }),
 }));
 
-vi.mock("@/hooks/use-is-mobile", () => ({
+vi.mock("@/hooks/ui/use-is-mobile", () => ({
   useIsMobile: () => false,
 }));
 

@@ -1,4 +1,4 @@
-import type { SettingsSection } from "./settings-content";
+import type { SettingsSection } from "./screen/settings-content";
 import { ProviderProfilesPanel } from "./llm-profiles/provider-profiles-panel";
 
 interface LiteLlmFormProps {

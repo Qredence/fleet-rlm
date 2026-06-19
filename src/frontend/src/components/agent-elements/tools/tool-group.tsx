@@ -1,13 +1,16 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { toolRegistry } from "./tool-registry";
 import { GenericTool } from "./generic-tool";
 import { getToolStatus } from "../utils/format-tool";
 import { cn } from "../utils/cn";
 import { ToolRowBase } from "./tool-row-base";
+import { deriveFallbackToolPresentation } from "./tool-presentation";
+import { MlflowSpanTool, mlflowSpanTraceUrl } from "./mlflow-span-tool";
 
 export type ToolGroupProps = {
   part: any;
   nestedTools?: any[];
+  children?: ReactNode;
   chatStatus?: string;
   completeLabel: string;
   shimmerLabel?: string;
@@ -36,18 +39,26 @@ function summarizeNestedTools(nestedTools: any[]): string {
   const fileTypes = new Set(["tool-Read", "tool-Edit", "tool-Write"]);
   const searchTypes = new Set(["tool-Search", "tool-Grep", "tool-Glob", "tool-WebSearch"]);
   const commandTypes = new Set(["tool-Bash"]);
+  const thoughtTypes = new Set(["tool-Thinking"]);
+  const spanTypes = new Set(["tool-MlflowSpan"]);
 
   let fileCount = 0;
   let searchCount = 0;
   let commandCount = 0;
+  let thoughtCount = 0;
+  let spanCount = 0;
 
   for (const tool of nestedTools) {
     if (fileTypes.has(tool.type)) fileCount += 1;
     else if (searchTypes.has(tool.type)) searchCount += 1;
     else if (commandTypes.has(tool.type)) commandCount += 1;
+    else if (thoughtTypes.has(tool.type)) thoughtCount += 1;
+    else if (spanTypes.has(tool.type)) spanCount += 1;
   }
 
   const parts: string[] = [];
+  if (spanCount > 0) parts.push(formatCount(spanCount, "span"));
+  if (thoughtCount > 0) parts.push(formatCount(thoughtCount, "thought"));
   if (fileCount > 0) parts.push(formatCount(fileCount, "file"));
   if (searchCount > 0) parts.push(`${searchCount} ${searchCount === 1 ? "search" : "searches"}`);
   if (commandCount > 0) parts.push(formatCount(commandCount, "command"));
@@ -61,19 +72,32 @@ function summarizeNestedTools(nestedTools: any[]): string {
 function getNestedCounts(nestedTools: any[]) {
   const fileTypes = new Set(["tool-Read", "tool-Edit", "tool-Write"]);
   const searchTypes = new Set(["tool-Search", "tool-Grep", "tool-Glob", "tool-WebSearch"]);
+  const thoughtTypes = new Set(["tool-Thinking"]);
+  const spanTypes = new Set(["tool-MlflowSpan"]);
   let fileCount = 0;
   let searchCount = 0;
+  let thoughtCount = 0;
+  let spanCount = 0;
 
   for (const tool of nestedTools) {
     if (fileTypes.has(tool.type)) fileCount += 1;
     else if (searchTypes.has(tool.type)) searchCount += 1;
+    else if (thoughtTypes.has(tool.type)) thoughtCount += 1;
+    else if (spanTypes.has(tool.type)) spanCount += 1;
   }
 
-  return { fileCount, searchCount };
+  return { fileCount, searchCount, thoughtCount, spanCount };
 }
 
-function formatStreamCounts(fileCount: number, searchCount: number): string {
+function formatStreamCounts(
+  fileCount: number,
+  searchCount: number,
+  thoughtCount: number,
+  spanCount: number,
+): string {
   const parts: string[] = [];
+  if (spanCount > 0) parts.push(formatCount(spanCount, "span"));
+  if (thoughtCount > 0) parts.push(formatCount(thoughtCount, "thought"));
   if (fileCount > 0) parts.push(formatCount(fileCount, "file"));
   if (searchCount > 0) parts.push(`${searchCount} ${searchCount === 1 ? "search" : "searches"}`);
   return parts.join(", ");
@@ -82,6 +106,7 @@ function formatStreamCounts(fileCount: number, searchCount: number): string {
 export const ToolGroup = memo(function ToolGroup({
   part,
   nestedTools = [],
+  children,
   chatStatus,
   completeLabel,
   shimmerLabel,
@@ -90,7 +115,9 @@ export const ToolGroup = memo(function ToolGroup({
   defaultOpen,
   showElapsed = true,
 }: ToolGroupProps) {
-  const { isPending, isInterrupted } = getToolStatus(part, chatStatus);
+  const toolStatus = getToolStatus(part, chatStatus);
+  const isPending = toolStatus.isPending;
+  const { isInterrupted } = toolStatus;
   const description = part.input?.description || "";
   const [elapsedMs, setElapsedMs] = useState(0);
   const [expanded, setExpanded] = useState(defaultOpen ?? false);
@@ -99,6 +126,7 @@ export const ToolGroup = memo(function ToolGroup({
     (part.callProviderMetadata?.custom?.startedAt as number | undefined) ??
     (part.startedAt as number | undefined);
   const hasNestedTools = nestedTools.length > 0;
+  const hasCustomChildren = children != null;
   const streamKey = part.toolCallId ?? part.id ?? "";
   const outputDuration =
     part.output?.totalDurationMs || part.output?.duration || part.output?.duration_ms;
@@ -108,12 +136,28 @@ export const ToolGroup = memo(function ToolGroup({
   const wasPendingRef = useRef(isPending);
   const userToggledRef = useRef(false);
   const openTimerRef = useRef<number | null>(null);
-  const { fileCount, searchCount } = useMemo(() => {
+  const { fileCount, searchCount, thoughtCount, spanCount } = useMemo(() => {
     const visibleTools = isPending ? nestedTools.slice(0, Math.max(visibleCount, 0)) : nestedTools;
     return getNestedCounts(visibleTools);
   }, [isPending, nestedTools, visibleCount]);
-  const streamCounts = formatStreamCounts(fileCount, searchCount);
+  const streamCounts = formatStreamCounts(fileCount, searchCount, thoughtCount, spanCount);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const traceUrl = useMemo(() => {
+    for (const tool of nestedTools) {
+      const url = mlflowSpanTraceUrl(tool);
+      if (url) return url;
+    }
+    return undefined;
+  }, [nestedTools]);
+
+  function nestedToolKey(part: any, index: number): string {
+    return (
+      part.toolCallId ??
+      part.id ??
+      part.mlflowSpan?.spanId ??
+      `${part.type ?? "tool"}-${part.toolName ?? "unknown"}-${index}`
+    );
+  }
 
   useEffect(() => {
     if (isPending && startedAt) {
@@ -199,63 +243,105 @@ export const ToolGroup = memo(function ToolGroup({
       shimmerLabel={shimmerLabel}
       isAnimating={isPending}
       detail={subtitle}
-      expandable={hasNestedTools}
+      expandable={hasNestedTools || hasCustomChildren}
       expanded={expanded}
       onToggleExpand={() => {
         userToggledRef.current = true;
         setExpanded((prev) => !prev);
       }}
       trailingContent={
-        showElapsed && elapsedTimeDisplay ? (
-          <span className="font-normal tabular-nums shrink-0 text-an-foreground-muted/60">
-            {elapsedTimeDisplay}
+        traceUrl || (showElapsed && elapsedTimeDisplay) ? (
+          <span className="inline-flex shrink-0 items-center gap-2">
+            {traceUrl ? (
+              <a
+                href={traceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-an-foreground-muted/60 transition-colors hover:text-an-foreground"
+                aria-label="Open MLflow trace"
+                onClick={(event) => event.stopPropagation()}
+              >
+                trace
+              </a>
+            ) : null}
+            {showElapsed && elapsedTimeDisplay ? (
+              <span className="font-normal tabular-nums text-an-foreground-muted/60">
+                {elapsedTimeDisplay}
+              </span>
+            ) : null}
           </span>
         ) : undefined
       }
     >
       <div className="relative">
-        {isPending && expanded && visibleToolCount > maskThreshold && (
-          <div className="absolute inset-x-0 top-0 h-10 z-10 pointer-events-none bg-linear-to-b from-an-background to-transparent" />
-        )}
-        <div
-          ref={listRef}
-          className={cn(
-            nestedTools.length > 1 ? "space-y-2" : "space-y-0",
-            isPending && expanded && visibleToolCount > maskThreshold && "overflow-y-auto",
-          )}
-          style={
-            isPending && expanded && visibleToolCount > maskThreshold
-              ? { height: `${streamHeight}px` }
-              : undefined
-          }
-        >
-          {(isPending ? nestedTools.slice(0, Math.max(visibleCount, 0)) : nestedTools).map(
-            (nestedPart, idx) => {
-              const derivedPart = isPending
-                ? {
-                    ...nestedPart,
-                    state: idx === visibleCount - 1 ? "input-streaming" : "output-available",
+        {hasCustomChildren ? (
+          children
+        ) : (
+          <>
+            {isPending && expanded && visibleToolCount > maskThreshold && (
+              <div className="absolute inset-x-0 top-0 h-10 z-10 pointer-events-none bg-linear-to-b from-an-background to-transparent" />
+            )}
+            <div
+              ref={listRef}
+              className={cn(
+                nestedTools.length > 1 ? "space-y-2" : "space-y-0",
+                isPending && expanded && visibleToolCount > maskThreshold && "overflow-y-auto",
+              )}
+              style={
+                isPending && expanded && visibleToolCount > maskThreshold
+                  ? { height: `${streamHeight}px` }
+                  : undefined
+              }
+            >
+              {(isPending ? nestedTools.slice(0, Math.max(visibleCount, 0)) : nestedTools).map(
+                (nestedPart, idx) => {
+                  const derivedPart = isPending
+                    ? {
+                        ...nestedPart,
+                        state: idx === visibleCount - 1 ? "input-streaming" : "output-available",
+                      }
+                    : nestedPart;
+                  const nestedMeta = toolRegistry[derivedPart.type];
+                  const { isPending: nestedIsPending, isError: nestedIsError } = getToolStatus(
+                    derivedPart,
+                    chatStatus,
+                  );
+                  if (!nestedMeta) {
+                    const fallback = deriveFallbackToolPresentation(derivedPart);
+                    return (
+                      <GenericTool
+                        key={nestedToolKey(derivedPart, idx)}
+                        title={fallback.title}
+                        subtitle={fallback.subtitle}
+                        isPending={nestedIsPending}
+                        isError={nestedIsError}
+                      />
+                    );
                   }
-                : nestedPart;
-              const nestedMeta = toolRegistry[derivedPart.type];
-              if (!nestedMeta) return null;
-              const { isPending: nestedIsPending, isError: nestedIsError } = getToolStatus(
-                derivedPart,
-                chatStatus,
-              );
-              return (
-                <GenericTool
-                  key={idx}
-                  icon={nestedMeta.icon}
-                  title={nestedMeta.title(derivedPart)}
-                  subtitle={nestedMeta.subtitle?.(derivedPart)}
-                  isPending={nestedIsPending}
-                  isError={nestedIsError}
-                />
-              );
-            },
-          )}
-        </div>
+                  if (derivedPart.type === "tool-MlflowSpan") {
+                    return (
+                      <MlflowSpanTool
+                        key={nestedToolKey(derivedPart, idx)}
+                        part={derivedPart}
+                        chatStatus={chatStatus}
+                      />
+                    );
+                  }
+                  return (
+                    <GenericTool
+                      key={nestedToolKey(derivedPart, idx)}
+                      icon={nestedMeta.icon}
+                      title={nestedMeta.title(derivedPart)}
+                      subtitle={nestedMeta.subtitle?.(derivedPart)}
+                      isPending={nestedIsPending}
+                      isError={nestedIsError}
+                    />
+                  );
+                },
+              )}
+            </div>
+          </>
+        )}
       </div>
     </ToolRowBase>
   );

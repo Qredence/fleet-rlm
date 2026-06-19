@@ -11,14 +11,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldContent, FieldDescription, FieldTitle } from "@/components/ui/field";
 import {
-  SectionCard,
-  SectionCardContent,
-  SectionCardDescription,
-  SectionCardHeader,
-  SectionCardTitle,
-} from "@/components/product/section-layout";
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldTitle,
+} from "@/components/ui/field";
 import type { useLlmProfilesMutations } from "@/features/settings/use-llm-profiles";
 import type { LlmProviderType } from "@/lib/rlm-api/llm-profiles";
 
@@ -47,37 +46,37 @@ export function ProviderProfileList({
 }: ProviderProfileListProps) {
   if (profiles.length === 0) {
     return (
-      <SectionCard variant="subtle">
-        <SectionCardHeader>
-          <SectionCardTitle>Provider profiles</SectionCardTitle>
-          <SectionCardDescription>
+      <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
+        <FieldContent>
+          <FieldTitle>Provider profiles</FieldTitle>
+          <FieldDescription>
             Import from .env or add a profile below to start assigning models per role.
-          </SectionCardDescription>
-        </SectionCardHeader>
-      </SectionCard>
+          </FieldDescription>
+        </FieldContent>
+      </Field>
     );
   }
 
   return (
-    <SectionCard variant="subtle">
-      <SectionCardHeader className="border-b border-border-subtle/70 pb-4">
-        <SectionCardTitle>Provider profiles</SectionCardTitle>
-        <SectionCardDescription>
-          {profiles.length} saved profile{profiles.length === 1 ? "" : "s"}. Profiles with the same
-          name are disambiguated by provider, API base, and id.
-        </SectionCardDescription>
-      </SectionCardHeader>
-      <SectionCardContent className="flex flex-col gap-0 pt-2">
-        {profiles.map((profile) => (
-          <ProfileCard
-            key={profile.id}
-            profile={profile}
-            writeEnabled={writeEnabled}
-            mutations={mutations}
-          />
-        ))}
-      </SectionCardContent>
-    </SectionCard>
+    <FieldGroup className="gap-0">
+      <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
+        <FieldContent>
+          <FieldTitle>Provider profiles</FieldTitle>
+          <FieldDescription>
+            {profiles.length} saved profile{profiles.length === 1 ? "" : "s"}. Profiles with the
+            same name are disambiguated by provider, API base, and id.
+          </FieldDescription>
+        </FieldContent>
+      </Field>
+      {profiles.map((profile) => (
+        <ProfileCard
+          key={profile.id}
+          profile={profile}
+          writeEnabled={writeEnabled}
+          mutations={mutations}
+        />
+      ))}
+    </FieldGroup>
   );
 }
 
@@ -104,17 +103,17 @@ function ProfileCard({
 
   return (
     <>
-      <Field className={SETTINGS_FIELD_CLASSNAME}>
-        <FieldContent>
-          <FieldTitle className="flex items-center gap-2">
-            <Bot className="size-4" />
-            {formatProfileLabel(profile)}
+      <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
+        <FieldContent className="min-w-0">
+          <FieldTitle className="flex min-w-0 max-w-full items-center gap-2">
+            <Bot className="size-4 shrink-0" />
+            <span className="truncate">{formatProfileLabel(profile)}</span>
           </FieldTitle>
           <FieldDescription>
             key {profile.has_api_key ? profile.api_key_masked : "not set"}
           </FieldDescription>
         </FieldContent>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex min-w-0 flex-wrap justify-start gap-2 sm:justify-end">
           <Button
             variant="outline"
             size="sm"

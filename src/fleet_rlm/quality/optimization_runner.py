@@ -1,7 +1,7 @@
-"""Single offline optimization pipeline for fleet-rlm DSPy modules.
+"""Single offline GEPA optimization pipeline for fleet-rlm DSPy modules.
 
-Dataset → ``dspy.Example`` → optimizer (GEPA default, MIPROv2 optional) →
-``dspy.Evaluate`` → save + manifest.  Both registry modules (via
+Dataset → ``dspy.Example`` → GEPA →
+``dspy.Evaluate`` → save + manifest. Both registry modules (via
 ``ModuleOptimizationSpec``) and ad-hoc ``module:attr`` program specs (via
 :func:`spec_for_program`) flow through :func:`run_module_optimization`.
 
@@ -11,6 +11,7 @@ engages tracking when appropriate.
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
@@ -27,13 +28,15 @@ from .datasets import (
     validate_required_keys,
     validation_range_for_indexes,
 )
+from .gepa_evidence import write_gepa_evidence_artifact as _write_gepa_evidence_artifact
 from .module_registry import ModuleOptimizationSpec
+from .optimization_insights import build_manifest_insights as _build_manifest_insights
 
 logger = logging.getLogger(__name__)
 
-OptimizerName = Literal["gepa", "miprov2"]
+OptimizerName = Literal["gepa"]
 
-OPTIMIZER_LABELS: dict[str, str] = {"gepa": "GEPA", "miprov2": "MIPROv2"}
+OPTIMIZER_LABELS: dict[str, str] = {"gepa": "GEPA"}
 
 # Minimum examples required in the validation set for a meaningful evaluation.
 # When the split produces fewer validation examples, the run proceeds without
@@ -57,6 +60,7 @@ class OptimizationResult(TypedDict):
     prompt_snapshots: list[dict[str, str]]
     review_bundle: dict[str, Any]
     run_metadata: dict[str, Any]
+    feedback_summary: str
 
 
 # ---------------------------------------------------------------------------
@@ -108,12 +112,34 @@ def build_gepa_feedback_metric(
 
     inner = score_fn
     inner_supports_trace = _metric_supports_trace(inner) if inner is not None else False
+    inner_accepts_kwargs = False
+    inner_param_names: set[str] = set()
+    if inner is not None:
+        try:
+            inner_params = list(inspect.signature(inner).parameters.values())
+            inner_accepts_kwargs = any(param.kind is inspect.Parameter.VAR_KEYWORD for param in inner_params)
+            inner_param_names = {param.name for param in inner_params}
+        except (TypeError, ValueError):
+            inner_accepts_kwargs = False
+            inner_param_names = set()
 
-    def _call_feedback_metric(gold: Any, pred: Any, *, trace: Any = None) -> float | tuple[float, str]:
+    def _call_feedback_metric(
+        gold: Any,
+        pred: Any,
+        *,
+        trace: Any = None,
+        pred_name: str | None = None,
+        pred_trace: Any = None,
+    ) -> float | tuple[float, str]:
         if inner is None:
             return workspace_feedback_metric(gold, pred, trace=trace, output_key=output_key)
         if inner_supports_trace:
-            return inner(gold, pred, trace=trace)
+            kwargs: dict[str, Any] = {"trace": trace}
+            if inner_accepts_kwargs or "pred_name" in inner_param_names:
+                kwargs["pred_name"] = pred_name
+            if inner_accepts_kwargs or "pred_trace" in inner_param_names:
+                kwargs["pred_trace"] = pred_trace
+            return inner(gold, pred, **kwargs)
         return inner(gold, pred)
 
     def metric(
@@ -125,8 +151,7 @@ def build_gepa_feedback_metric(
     ) -> Any:
         from dspy.teleprompt.gepa.gepa_utils import ScoreWithFeedback
 
-        _ = pred_name, pred_trace
-        result = _call_feedback_metric(gold, pred, trace=trace)
+        result = _call_feedback_metric(gold, pred, trace=trace, pred_name=pred_name, pred_trace=pred_trace)
         if isinstance(result, tuple) and len(result) == 2:
             score, feedback = result
             return ScoreWithFeedback(score=float(score), feedback=str(feedback))
@@ -187,13 +212,21 @@ def _persist_run_artifacts(
         )
 
 
-def _resolve_reflection_lm() -> Any:
+def _resolve_reflection_lm(reflection_lm_config: dict[str, Any] | None = None) -> Any:
     """Resolve a DSPy LM suitable for GEPA's reflection pass.
 
     GEPA requires ``reflection_lm`` (or a custom ``instruction_proposer``).
     Resolution is delegated to ``resolve_lm("reflection")`` (delegate model
     first, planner fallback); this helper ensures a concrete LM is provided.
     """
+    if reflection_lm_config:
+        import dspy
+
+        lm_kwargs = dict(reflection_lm_config.get("lm_kwargs") or {})
+        if not lm_kwargs:
+            raise RuntimeError("Selected reflection model is missing DSPy LM configuration.")
+        return dspy.LM(**lm_kwargs)
+
     from fleet_rlm.runtime.config import resolve_lm
 
     lm = resolve_lm("reflection")
@@ -215,8 +248,23 @@ def _resolve_model_name(lm: Any) -> str:
     return "unknown"
 
 
-def _reflection_lm_provenance(reflection_lm: Any) -> dict[str, str]:
+def _reflection_lm_provenance(
+    reflection_lm: Any,
+    *,
+    reflection_lm_config: dict[str, Any] | None = None,
+) -> dict[str, str]:
     """Describe which reflection LM was selected and why."""
+    if reflection_lm_config:
+        provenance = {
+            "model": str(reflection_lm_config.get("model_id") or _resolve_model_name(reflection_lm)),
+            "source": "profile",
+        }
+        for key in ("profile_id", "profile_name", "litellm_model"):
+            value = reflection_lm_config.get(key)
+            if value:
+                provenance[key] = str(value)
+        return provenance
+
     delegate_model = (os.environ.get("DSPY_DELEGATE_LM_MODEL") or "").strip()
     planner_model = (os.environ.get("DSPY_LM_MODEL") or "").strip()
     resolved_model = _resolve_model_name(reflection_lm)
@@ -345,6 +393,24 @@ def _match_prompt_snapshot_pairs(
     ]
 
 
+def _supported_kwargs(callable_obj: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Filter kwargs to parameters accepted by *callable_obj*.
+
+    Test doubles often implement only the subset of DSPy's GEPA constructor
+    needed by a unit test. Production DSPy accepts the richer GEPA evidence
+    capture kwargs, so this helper lets the runner enable them without making
+    tests or older installations brittle.
+    """
+    try:
+        signature = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return kwargs
+    parameters = signature.parameters
+    if any(param.kind is inspect.Parameter.VAR_KEYWORD for param in parameters.values()):
+        return kwargs
+    return {key: value for key, value in kwargs.items() if key in parameters}
+
+
 def _build_holdout_comparisons(
     *,
     dataset_indexes: list[int],
@@ -379,6 +445,23 @@ def _build_holdout_comparisons(
     return comparisons
 
 
+def _build_feedback_summary(results: list[dict[str, Any]], validation_score: float | None) -> str:
+    """Summarize the validation outcome for run metadata."""
+    if not results:
+        return "Validation feedback was not available because no validation examples were evaluated."
+    low_scores = [row for row in results if float(row.get("score", 0.0)) < 0.75]
+    if not low_scores:
+        return f"All validation examples scored strongly; optimized validation score={validation_score}."
+    sample = low_scores[0]
+    expected = str(sample.get("expected_output", ""))[:120]
+    predicted = str(sample.get("predicted_output", ""))[:120]
+    return (
+        f"{len(low_scores)} validation example(s) scored below 0.75; "
+        f"optimized validation score={validation_score}. "
+        f"Lowest-signal sample expected {expected!r} but predicted {predicted!r}."
+    )
+
+
 def _optimization_dspy_context() -> Any:
     """Return a ``dspy.context`` scoping the planner LM for this run.
 
@@ -406,20 +489,36 @@ def _build_optimizer(
     *,
     metric: Any,
     auto: Literal["light", "medium", "heavy"] | None,
+    max_metric_calls: int | None = None,
+    instruction_proposer: Any | None = None,
+    reflection_lm_config: dict[str, Any] | None = None,
+    log_dir: str | Path | None = None,
 ) -> tuple[Any, dict[str, str]]:
-    """Instantiate the requested teleprompter and its reflection provenance."""
+    """Instantiate GEPA and its reflection provenance."""
     if optimizer == "gepa":
         from dspy.teleprompt import GEPA
 
-        reflection_lm = _resolve_reflection_lm()
-        return (
-            GEPA(metric=metric, auto=auto, reflection_lm=reflection_lm),
-            _reflection_lm_provenance(reflection_lm),
+        reflection_lm = _resolve_reflection_lm(reflection_lm_config)
+        auto_budget = None if max_metric_calls is not None else auto
+        gepa_kwargs = _supported_kwargs(
+            GEPA,
+            {
+                "metric": metric,
+                "auto": auto_budget,
+                "max_metric_calls": max_metric_calls,
+                "reflection_lm": reflection_lm,
+                "instruction_proposer": instruction_proposer,
+                "log_dir": str(log_dir) if log_dir is not None else None,
+                "track_stats": True,
+                "track_best_outputs": True,
+                "use_mlflow": False,
+                "gepa_kwargs": {"use_cloudpickle": True},
+            },
         )
-    if optimizer == "miprov2":
-        from dspy.teleprompt import MIPROv2
-
-        return MIPROv2(metric=metric, auto=auto), {}
+        return (
+            GEPA(**gepa_kwargs),
+            _reflection_lm_provenance(reflection_lm, reflection_lm_config=reflection_lm_config),
+        )
     raise ValueError(f"Unknown optimizer {optimizer!r}; expected one of {sorted(OPTIMIZER_LABELS)}.")
 
 
@@ -433,6 +532,9 @@ def run_module_optimization(
     auto: Literal["light", "medium", "heavy"] | None = "light",
     optimizer: OptimizerName = "gepa",
     run_id: int | None = None,
+    reflection_lm_config: dict[str, Any] | None = None,
+    trace_bundle_paths: list[str] | None = None,
+    max_metric_calls: int | None = None,
 ) -> OptimizationResult:
     """Run the full offline optimization pipeline for a module spec.
 
@@ -441,9 +543,8 @@ def run_module_optimization(
         2. Convert rows to DSPy examples via the spec's row converter
         3. Split into train/val
         4. Build the spec's metric
-        5. Compile with the requested optimizer (GEPA default, MIPROv2
-           optional) inside a scoped ``dspy.context`` (capture before/after
-           prompt snapshots)
+        5. Compile with GEPA inside a scoped ``dspy.context`` (capture
+           before/after prompt snapshots)
         6. ``dspy.Evaluate`` over the validation set (baseline + optimized)
         7. Save the optimized artifact
         8. Write manifest
@@ -466,6 +567,16 @@ def run_module_optimization(
         raise ValueError(f"Unknown optimizer {optimizer!r}; expected one of {sorted(OPTIMIZER_LABELS)}.")
 
     dataset_path = Path(dataset_path)
+    resolved_path = resolve_artifact_path(
+        spec.module_slug,
+        spec.artifact_filename,
+        output_path,
+        default_root=default_output_root,
+    )
+    manifest_path = resolved_path.with_suffix(".manifest.json")
+    gepa_log_dir = resolved_path.with_suffix(".gepa")
+    gepa_evidence_path = resolved_path.with_suffix(".gepa-evidence.json")
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
 
     # 1. Load + validate
     rows = load_dataset_rows(dataset_path)
@@ -491,7 +602,16 @@ def run_module_optimization(
         baseline_results = _evaluate_validation_set(program, valset, metric) if has_val else []
         baseline_validation_score = _mean_score(baseline_results)
 
-        teleprompter, reflection_provenance = _build_optimizer(optimizer, metric=metric, auto=auto)
+        instruction_proposer = spec.instruction_proposer_factory() if spec.instruction_proposer_factory else None
+        teleprompter, reflection_provenance = _build_optimizer(
+            optimizer,
+            metric=metric,
+            auto=auto,
+            max_metric_calls=max_metric_calls,
+            instruction_proposer=instruction_proposer,
+            reflection_lm_config=reflection_lm_config,
+            log_dir=gepa_log_dir,
+        )
         optimized = teleprompter.compile(
             program,
             trainset=trainset,
@@ -514,17 +634,17 @@ def run_module_optimization(
             )
 
     # 8. Save artifact
-    resolved_path = resolve_artifact_path(
-        spec.module_slug,
-        spec.artifact_filename,
-        output_path,
-        default_root=default_output_root,
-    )
-    resolved_path.parent.mkdir(parents=True, exist_ok=True)
-    optimized.save(str(resolved_path))
+    writer_metadata: dict[str, Any] = {}
+    if spec.artifact_writer is not None:
+        writer_metadata = dict(spec.artifact_writer(optimized, str(resolved_path)) or {})
+    else:
+        optimized.save(str(resolved_path))
 
     # 9. Write manifest
-    manifest_path = resolved_path.with_suffix(".manifest.json")
+    gepa_evidence, gepa_candidate_decisions = _write_gepa_evidence_artifact(
+        optimized=optimized,
+        evidence_path=gepa_evidence_path,
+    )
     prompt_snapshot_pairs = _match_prompt_snapshot_pairs(
         before_snapshots,
         after_snapshots,
@@ -541,6 +661,16 @@ def run_module_optimization(
         "size_bytes": resolved_path.stat().st_size,
         "loader": "dspy.Module.load",
     }
+    artifact_metadata.update(writer_metadata)
+    feedback_summary = _build_feedback_summary(per_example_results, validation_score)
+    insights = _build_manifest_insights(
+        prompt_snapshot_pairs=prompt_snapshot_pairs,
+        trace_bundle_paths=list(trace_bundle_paths or []),
+        validation_score=validation_score,
+        baseline_validation_score=baseline_validation_score,
+        candidate_decisions=gepa_candidate_decisions,
+        has_external_validation=has_val,
+    )
     review_bundle = {
         "version": 1,
         "artifact": artifact_metadata,
@@ -556,6 +686,9 @@ def run_module_optimization(
                 "validation_range": validation_range_for_indexes(validation_dataset_indexes),
                 "strata": split.strata,
             },
+            "external_validation_available": has_val,
+            "gepa_internal_valset": "validation" if has_val else "trainset_fallback",
+            "promotion_ready": bool(has_val and validation_score is not None),
             "baseline_score": baseline_validation_score,
             "optimized_score": validation_score,
             "score_delta": (
@@ -570,10 +703,27 @@ def run_module_optimization(
             "total_snapshots": len(before_snapshots) + len(after_snapshots),
         },
         "reflection_model": reflection_provenance,
+        "trace_bundle_paths": list(trace_bundle_paths or []),
+        "gepa_evidence": {
+            "available": gepa_evidence is not None,
+            "path": str(gepa_evidence_path) if gepa_evidence is not None else None,
+            "log_dir": str(gepa_log_dir),
+            "candidate_count": (gepa_evidence or {}).get("candidate_count"),
+            "best_candidate_id": (gepa_evidence or {}).get("best_candidate_id"),
+            "total_metric_calls": (gepa_evidence or {}).get("total_metric_calls"),
+            "num_full_val_evals": (gepa_evidence or {}).get("num_full_val_evals"),
+        },
+        "feedback_summary": feedback_summary,
+        "insights": insights,
     }
     run_metadata = {
         "module_slug": spec.module_slug,
         "dataset_path": str(dataset_path),
+        "reflection_profile_id": reflection_provenance.get("profile_id"),
+        "reflection_model_id": reflection_provenance.get("model"),
+        "max_metric_calls": max_metric_calls,
+        "trace_bundle_paths": list(trace_bundle_paths or []),
+        "distilled_trace_bundle_path": (trace_bundle_paths or [None])[0],
         "review_bundle": review_bundle,
     }
     manifest_data = build_manifest(
@@ -585,11 +735,13 @@ def run_module_optimization(
         optimizer=optimizer_label,
         metric_name=spec.metric_name or None,
         auto=auto,
+        max_metric_calls=max_metric_calls,
         extra_metadata={
             "module_slug": spec.module_slug,
             "output_path": str(resolved_path),
             "artifact": artifact_metadata,
             "review_bundle": review_bundle,
+            "insights": insights,
         },
     )
     write_manifest(manifest_path, manifest_data)
@@ -614,4 +766,5 @@ def run_module_optimization(
         prompt_snapshots=before_snapshots + after_snapshots,
         review_bundle=review_bundle,
         run_metadata=run_metadata,
+        feedback_summary=feedback_summary,
     )

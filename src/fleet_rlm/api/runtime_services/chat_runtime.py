@@ -13,6 +13,7 @@ from fastapi import WebSocket
 
 from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.runtime.events import RuntimeEvent
 from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.runtime.factory import build_chat_agent
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
@@ -66,8 +67,7 @@ class SessionContext:
 class StreamEventLike(Protocol):
     """Minimal worker-event surface required by WS terminal/completion helpers.
 
-    ``WorkspaceEvent`` satisfies this protocol directly, and transport-created
-    compatibility events can do the same without depending on runtime models.
+    :class:`~fleet_rlm.runtime.events.RuntimeEvent` is the canonical streaming event type.
     """
 
     @property
@@ -145,7 +145,7 @@ class ChatAgentProtocol(Protocol):
         context_paths: list[str] | None = None,
         batch_concurrency: int | None = None,
         volume_name: str | None = None,
-    ) -> AsyncIterator[object]:
+    ) -> AsyncIterator[RuntimeEvent]:
         pass
 
     def load_document(self, path: str, alias: str = "active") -> None:
@@ -296,6 +296,7 @@ def _chat_agent_builder_kwargs(runtime: PreparedChatRuntime) -> dict[str, Any]:
         "rlm_max_iterations": runtime.cfg.rlm_max_iterations,
         "rlm_max_llm_calls": runtime.cfg.rlm_max_llm_calls,
         "rlm_max_output_chars": runtime.cfg.agent_max_output_chars,
+        "rlm_action_max_tokens": runtime.cfg.rlm_action_max_tokens,
         "planner_lm": runtime.planner_lm,
         "delegate_lm": runtime.delegate_lm,
         "repository": runtime.repository,

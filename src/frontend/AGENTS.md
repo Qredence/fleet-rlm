@@ -13,29 +13,29 @@ Before editing:
 1. Read `package.json` for canonical scripts.
 2. Inspect the owning route, feature, component, or lib module.
 3. Do not hand-edit generated files (see list below).
-4. Preserve supported surfaces: **Workbench**, **Volumes**, **Settings**.
+4. Preserve supported surfaces: **Workbench**, **Optimization** (`/app/optimization`), **Volumes**, **Settings**.
 5. Keep retired paths (`taxonomy`, `skills`, `memory`, `analytics`) falling through to `/404`.
 
 ---
 
 ## Source-of-Truth Files
 
-| Concern                 | File(s)                                                   |
-| ----------------------- | --------------------------------------------------------- |
-| Scripts & validation    | `package.json`                                            |
-| Lint/build/import rules | `vite.config.ts`                                          |
-| Routes & surfaces       | `src/routes/*`                                            |
-| App chrome / layout     | `src/features/layout/*`                                   |
-| Product surfaces        | `src/features/{workspace,volumes,settings}/*`             |
-| UI primitives           | `src/components/ui/*` (shadcn/Base UI)                    |
-| Agent Elements (chat)   | `src/components/agent-elements/*`                         |
-| Legacy inspection UI    | `src/components/ai-elements/*` (composer/inspection only) |
-| Product compositions    | `src/components/product/*`                                |
-| API clients & types     | `src/lib/rlm-api/*`                                       |
-| Workspace adapters      | `src/lib/workspace/*`                                     |
-| Theme / tokens          | `src/styles/globals.css`                                  |
-| shadcn config           | `components.json`                                         |
-| API contract            | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts`    |
+| Concern                 | File(s)                                                           |
+| ----------------------- | ----------------------------------------------------------------- |
+| Scripts & validation    | `package.json`                                                    |
+| Lint/build/import rules | `vite.config.ts`                                                  |
+| Routes & surfaces       | `src/routes/*`                                                    |
+| App chrome / layout     | `src/features/layout/*`                                           |
+| Product surfaces        | `src/features/{workspace,optimization,volumes,settings}/index.ts` |
+| UI primitives           | `src/components/ui/*` (shadcn/Base UI)                            |
+| Agent Elements (chat)   | `src/components/agent-elements/*`                                 |
+| Legacy inspection UI    | `src/components/ai-elements/*` (composer/inspection only)         |
+| Product compositions    | `src/components/product/*`                                        |
+| API clients & types     | `src/lib/rlm-api/*`                                               |
+| Workspace adapters      | `src/lib/workspace/*`                                             |
+| Theme / tokens          | `src/styles/globals.css`                                          |
+| shadcn config           | `components.json`                                                 |
+| API contract            | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts`            |
 
 ### Generated / Synced — Do Not Hand-Edit
 
@@ -50,12 +50,12 @@ Before editing:
 
 ### Component Layers (outer → inner)
 
-1. **`src/components/ui/*`** — shadcn/Base UI primitives. Thin, semantic, no feature/runtime imports.
+1. **`src/components/ui/*`** — shadcn/Base UI primitives. Thin, semantic, no feature imports.
 2. **`src/components/agent-elements/*`** — **Canonical agent/chat UI** ([Agent Elements](https://agent-elements.21st.dev/docs) shadcn registry). `AgentChat`, `InputBar`, tool cards, `UIMessage`-shaped transcripts.
 3. **`src/components/product/*`** — Reusable product compositions (empty states, skeletons, panels). Do not add chat, reasoning, or tool transcript UI here; use Agent Elements.
 4. **`src/components/ai-elements/*`** — **Legacy inspection/composer primitives only** (`prompt-input`, `chain-of-thought`). Do not add new chat/message/tool components here.
-5. **`src/features/layout/*`** — App chrome. Consumes workspace/volumes through feature entrypoints only.
-6. **`src/features/{workspace,volumes,settings}/*`** — Canonical surface ownership.
+5. **`src/features/layout/*`** — App chrome. Consumes workspace/volumes/settings through feature entrypoints only.
+6. **`src/features/{workspace,optimization,volumes,settings}/*`** — Canonical surface ownership with `index.ts` as the public contract.
 7. **`src/lib/{rlm-api,workspace}/*`** — API clients, adapters, stores, frame shaping.
 8. **`src/stores/*`** — Cross-app shell/layout and navigation state.
 
@@ -73,15 +73,16 @@ backend WS frames
 
 ### Import Boundaries (enforced in `vite.config.ts`)
 
-- `src/components/{ui,ai-elements,agent-elements,product}/*` **must not** import from `src/screens/*`.
+- `src/components/{ui,ai-elements,agent-elements,product}/*` **must not** import from `src/features/*` or `src/screens/*`.
 - `src/lib/workspace/*` **must not** depend on workspace UI modules.
-- `src/features/layout/*` **must** consume workspace/volumes through their feature entrypoints or explicit public contracts.
+- `src/routes/*` **must** import feature entrypoints, not deep feature modules.
+- `src/features/layout/*` **must** consume workspace/volumes/settings through their feature entrypoints or explicit public contracts.
 - `@/lib/utils` is the canonical `cn()` import path.
 
 ### Route Ownership
 
 - `src/router.tsx` owns the router instance.
-- `src/routes/` defines file-based routes. Keep route wrappers thin; compose feature entry modules (e.g., `screen/*`).
+- `src/routes/` defines file-based routes. Keep route wrappers thin; compose feature entry modules through `src/features/*/index.ts`.
 - `src/routeTree.gen.ts` is generated.
 
 ### Workspace Structure
@@ -91,12 +92,36 @@ Responsibility folders under `src/features/workspace/`:
 - `screen/` — route entry
 - `conversation/` — chat rendering
 - `composer/` — input / prompt UI
+- `sidepanel/` — workspace-local sidepanel, trace fallback, graph, and volume tabs
 - `inspection/` — detail panels
 - `workbench/` — execution trace / workbench
 - `session/` — session management
 
 Assistant transcript/content modeling belongs under:
 `src/features/workspace/conversation/assistant-content/model/`
+
+### Workspace Sidepanel Contract
+
+Workspace chat is the primary surface. The workspace sidepanel is
+workspace-local, collapsible, and resizable; do not promote it into the global
+route shell or replace `/app/volumes`.
+
+Supported sidepanel tabs are exactly:
+
+- `Trajectories`
+- `Graph`
+- `Volume`
+
+`Trajectories` and `Graph` resolve session traces by durable chat session id
+first and by runtime `external_session_id` when present. If MLflow traces are
+missing or unavailable, they must fall back to live transcript and artifact
+data instead of showing a hard-empty trace state.
+
+`Volume` uses the Daytona volume APIs for the current workspace/session. It
+supports inline file preview inside the workspace sidepanel and a resizable
+tree/preview split. The routed `/app/volumes` page remains the full-page
+durable volume browser and should not be collapsed into the workspace
+sidepanel.
 
 **Do not** create feature-local `ui/` folders; `src/components/ui/*` is the only primitive `ui` namespace.
 
@@ -219,7 +244,8 @@ pnpm run check
 - Prefer **React 19 direct ref passing** over `forwardRef` by default.
 - `daytona_pilot` is the public runtime label. Request controls: `execution_mode`, `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`.
 - Runtime labels shown to users should describe the Daytona-backed workbench path only.
-- Shared runtime status queries: `src/hooks/use-runtime-status.ts`.
+- Shared runtime status queries: `src/hooks/runtime/use-runtime-status.ts`.
+- Generic browser/UI hooks live in `src/hooks/ui/*`.
 - The **Volumes** surface represents mounted durable storage, not the transient live workspace.
 
 ## Naming Conventions
@@ -232,7 +258,7 @@ pnpm run check
 ## Testing Conventions
 
 - Colocate tests under `__tests__/` when practical.
-- Tests for `src/lib/workspace/*` and `src/features/workspace/{conversation,composer,inspection,screen,session,workbench}/*` should import owners directly, not via route wrappers or compatibility barrels.
+- Tests for `src/lib/workspace/*` and `src/features/workspace/{conversation,composer,inspection,screen,sidepanel,session,workbench}/*` should import owners directly, not via route wrappers or compatibility barrels.
 
 ---
 
@@ -362,6 +388,7 @@ Do **not** install `Message`, `Conversation`, `Tool`, or other chat primitives f
 - `components.json` defines the `@/*` alias and the shadcn/Base UI style baseline.
 - Keep runtime labels, route behavior, and endpoint expectations aligned with the backend contract.
 - `src/screens/*` no longer exists. All feature logic lives in `src/features/*`, `src/lib/*`, or `src/components/product/*`.
-- Optimization and History are not supported product surfaces in the current shell.
+- `components/tool-ui/*` is retired; tool transcript UI belongs under `components/agent-elements/tools/*`.
+- Optimization is a supported product surface at `/app/optimization`; History remains API-only until v1.1.
 - Do not recreate a screen-layer `workspace-adapter.ts`; adapter logic belongs in `src/lib/workspace/`.
 - The Volumes provider switcher is **page-scoped** and must not become a global runtime setting.

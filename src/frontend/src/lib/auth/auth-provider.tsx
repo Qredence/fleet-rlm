@@ -67,7 +67,7 @@ function AuthProvider({ children }: AuthProviderProps) {
           authEndpoints.clearLocalAuth();
           setUser(null);
         }
-      } catch (error) {
+      } catch {
         if (cancelled) return;
         authEndpoints.clearLocalAuth();
         setUser(null);

@@ -11,16 +11,9 @@ import {
   FieldSet,
   FieldTitle,
 } from "@/components/ui/field";
-import {
-  SectionCard,
-  SectionCardContent,
-  SectionCardDescription,
-  SectionCardHeader,
-  SectionCardTitle,
-} from "@/components/product/section-layout";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { SettingsSection } from "@/features/settings/settings-content";
-import { sectionDescriptions } from "@/features/settings/settings-content";
+import type { SettingsSection } from "@/features/settings/screen/settings-content";
+import { sectionDescriptions } from "@/features/settings/screen/settings-content";
 import {
   useLlmProfiles,
   useLlmProfilesMutations,
@@ -35,6 +28,15 @@ import { ImportEnvButton } from "./import-env-button";
 import { ProviderProfileForm } from "./provider-profile-form";
 import { ProviderProfileList } from "./provider-profile-list";
 import { RoleModelAssignment } from "./role-model-assignment";
+
+interface RoleBinding {
+  role: "planner" | "delegate" | "delegate_small";
+  profile_id?: string | null;
+  profile_name?: string | null;
+  model_id?: string;
+}
+
+const EMPTY_BINDINGS: RoleBinding[] = [];
 
 interface ProviderProfilesPanelProps {
   showAllSections: boolean;
@@ -51,7 +53,7 @@ export function ProviderProfilesPanel({ showAllSections, section }: ProviderProf
   const showSection = (key: SettingsSection) => showAllSections || section === key;
 
   const profiles = profilesQuery.data ?? [];
-  const bindings = rolesQuery.data?.bindings ?? [];
+  const bindings = rolesQuery.data?.bindings ?? EMPTY_BINDINGS;
 
   const bindingByRole = useMemo(() => {
     return Object.fromEntries(bindings.map((binding) => [binding.role, binding]));
@@ -73,7 +75,7 @@ export function ProviderProfilesPanel({ showAllSections, section }: ProviderProf
 
       <FieldGroup className="gap-4">
         {!writeEnabled ? (
-          <Field className={SETTINGS_FIELD_CLASSNAME}>
+          <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
             <FieldContent>
               <FieldTitle>Write Protection</FieldTitle>
               <FieldDescription>
@@ -103,29 +105,27 @@ export function ProviderProfilesPanel({ showAllSections, section }: ProviderProf
           <>
             <ActiveBindingsSummary bindings={bindings} />
 
-            <SectionCard variant="subtle">
-              <SectionCardHeader className="border-b border-border-subtle/70 pb-4">
-                <SectionCardTitle>Role model assignment</SectionCardTitle>
-                <SectionCardDescription>
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
+              <FieldContent>
+                <FieldTitle>Role model assignment</FieldTitle>
+                <FieldDescription>
                   Bind each runtime role to a provider profile and model. Changes apply to the
                   active runtime after save.
-                </SectionCardDescription>
-              </SectionCardHeader>
-              <SectionCardContent className="flex flex-col gap-0 pt-2">
-                {ROLE_ROWS.map((row) => (
-                  <RoleModelAssignment
-                    key={row.role}
-                    role={row.role}
-                    title={row.title}
-                    description={row.description}
-                    profiles={profiles}
-                    binding={bindingByRole[row.role]}
-                    writeEnabled={writeEnabled}
-                    mutations={mutations}
-                  />
-                ))}
-              </SectionCardContent>
-            </SectionCard>
+                </FieldDescription>
+              </FieldContent>
+            </Field>
+            {ROLE_ROWS.map((row) => (
+              <RoleModelAssignment
+                key={row.role}
+                role={row.role}
+                title={row.title}
+                description={row.description}
+                profiles={profiles}
+                binding={bindingByRole[row.role]}
+                writeEnabled={writeEnabled}
+                mutations={mutations}
+              />
+            ))}
 
             <ImportEnvButton writeEnabled={writeEnabled} mutations={mutations} />
 
@@ -135,17 +135,15 @@ export function ProviderProfilesPanel({ showAllSections, section }: ProviderProf
               mutations={mutations}
             />
 
-            <SectionCard variant="subtle">
-              <SectionCardHeader>
-                <SectionCardTitle>Add provider profile</SectionCardTitle>
-                <SectionCardDescription>
+            <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
+              <FieldContent>
+                <FieldTitle>Add provider profile</FieldTitle>
+                <FieldDescription>
                   Store provider credentials once, then assign models per runtime role above.
-                </SectionCardDescription>
-              </SectionCardHeader>
-              <SectionCardContent className="pt-2">
-                <ProviderProfileForm writeEnabled={writeEnabled} mutations={mutations} />
-              </SectionCardContent>
-            </SectionCard>
+                </FieldDescription>
+              </FieldContent>
+            </Field>
+            <ProviderProfileForm writeEnabled={writeEnabled} mutations={mutations} />
           </>
         )}
       </FieldGroup>

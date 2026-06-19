@@ -10,6 +10,9 @@ import { McpTool, unwrapMcpOutput } from "./mcp-tool";
 import { ThinkingTool } from "./thinking-tool";
 import { SearchTool } from "./search-tool";
 import { SubagentTool } from "./subagent-tool";
+import { ToolGroup } from "./tool-group";
+import { deriveFallbackToolPresentation } from "./tool-presentation";
+import { MlflowSpanTool } from "./mlflow-span-tool";
 import { QuestionTool } from "../question/question-tool";
 import type { CustomToolRendererProps } from "../types";
 
@@ -56,8 +59,21 @@ export const ToolRenderer = memo(function ToolRenderer({
     case "tool-Task":
     case "tool-Agent":
       return <SubagentTool part={part} nestedTools={nestedTools} chatStatus={chatStatus} />;
+    case "tool-Group":
+      return (
+        <ToolGroup
+          part={part}
+          nestedTools={nestedTools}
+          chatStatus={chatStatus}
+          completeLabel="Execution activity"
+          shimmerLabel="Running activity"
+          interruptedLabel="Activity interrupted"
+        />
+      );
     case "tool-Thinking":
       return <ThinkingTool part={part} />;
+    case "tool-MlflowSpan":
+      return <MlflowSpanTool part={part} chatStatus={chatStatus} />;
   }
 
   // MCP tools
@@ -87,7 +103,8 @@ export const ToolRenderer = memo(function ToolRenderer({
     return (
       <GenericTool
         title={meta.title(part)}
-        subtitle={meta.subtitle?.(part)}
+        subtitle={partType === "tool-Status" ? undefined : part.toolName}
+        detail={meta.subtitle?.(part)}
         isPending={isPending}
         isError={isError}
       />
@@ -95,11 +112,12 @@ export const ToolRenderer = memo(function ToolRenderer({
   }
 
   // Fallback: show tool name
-  const toolName = partType.startsWith("tool-") ? partType.slice(5) : partType;
   const { isPending, isError } = getToolStatus(part, chatStatus);
+  const fallback = deriveFallbackToolPresentation(part);
   return (
     <GenericTool
-      title={isPending ? `Running ${toolName}` : toolName}
+      title={isPending ? `Running ${fallback.title}` : fallback.title}
+      subtitle={fallback.subtitle}
       isPending={isPending}
       isError={isError}
     />

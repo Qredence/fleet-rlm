@@ -10,7 +10,6 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -19,6 +18,7 @@ from fastapi import WebSocketDisconnect
 from fleet_rlm.api.runtime_services.run_lifecycle import ExecutionLifecycleManager
 from fleet_rlm.api.runtime_services.stream_failures import PersistenceRequiredError
 from fleet_rlm.integrations.database import RunStatus
+from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventContext, RuntimeEventKind
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 logger = logging.getLogger(__name__)
@@ -31,16 +31,13 @@ logger = logging.getLogger(__name__)
 EmitStartupEvent = Callable[[Any], Awaitable[None]]
 
 
-def build_startup_status_event() -> Any:
+def build_startup_status_event() -> RuntimeEvent:
     """Return the canonical delayed startup status event."""
-    return SimpleNamespace(
-        kind="turn_started",
+    return RuntimeEvent(
+        kind=RuntimeEventKind.STATUS,
         text="Preparing Daytona workspace...",
-        payload={
-            "phase": "startup",
-            "runtime": {"runtime_mode": "daytona_pilot"},
-        },
-        timestamp=datetime.now(timezone.utc),
+        payload={"phase": "startup"},
+        context=RuntimeEventContext(runtime_mode="daytona_pilot"),
     )
 
 

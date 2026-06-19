@@ -23,8 +23,8 @@ retired screen shell.
 
 | Route | Surface | Owning feature module | Purpose |
 | --- | --- | --- | --- |
-| `/app/workspace` | Workbench | `features/workspace/workspace-screen.tsx` | Primary task execution surface |
-| `/app/volumes` | Volumes | `features/volumes/volumes-screen.tsx` | Mounted Daytona volume browser |
+| `/app/workspace` | Workbench | `features/workspace/screen/*` | Primary chat execution surface with workspace-local sidepanel |
+| `/app/volumes` | Volumes | `features/volumes/*` | Full-page mounted Daytona volume browser |
 | `/app/settings` | Settings | `features/settings/settings-screen.tsx` | Runtime and app settings |
 
 ## Workbench Spec
@@ -41,17 +41,19 @@ a chat box.
 - `useChatStore` owns live transcript state.
 - `useRunWorkbenchStore` owns execution summaries, artifacts, iterations,
   callbacks, and completion metadata.
+- `workspace-ui-store` owns workspace-local sidepanel state, including
+  collapsed/resized layout and active tab.
 
 ### Regions
 
 | Region | Purpose | Main modules |
 | --- | --- | --- |
-| Header | Page identity, sidebar toggle, canvas toggle | `features/layout/header.tsx` |
-| Transcript | Live user/assistant/trace rendering | `features/workspace/ui/transcript/*` |
-| Composer | Submit, stop, execution mode, attachments | `features/workspace/ui/workspace-composer.tsx` |
-| Canvas / Inspector | Turn details, graph, execution panel, run panel | `features/workspace/workspace-canvas-panel.tsx` and `features/workspace/ui/*` |
-| HITL | Human review / approval | `features/workspace/ui/hitl-approval-modal.tsx` |
-| Session sidebar | Local conversation history and session actions | `features/workspace/ui/session-sidebar.tsx` |
+| Header | Page identity, sidebar toggle, workspace sidepanel toggle | `features/layout/header.tsx` |
+| Transcript | Live user/assistant/trace rendering | `features/workspace/conversation/*` |
+| Composer | Submit, stop, execution mode, attachments | `features/workspace/composer/*` |
+| Sidepanel | Trajectories, graph, and inline volume browsing | `features/workspace/screen/*`, `features/workspace/workbench/*`, `lib/workspace/*` |
+| HITL | Human review / approval | `features/workspace/conversation/*` and `features/workspace/inspection/*` |
+| Session sidebar | Local conversation history and session actions | `features/workspace/session/*` |
 
 ### Workbench States
 
@@ -86,15 +88,33 @@ Key render categories:
 The transcript is summary-friendly, but the canonical completion state belongs
 in the workbench panel.
 
+### Workspace Sidepanel
+
+Workspace chat is primary. The sidepanel is local to Workbench, collapsible,
+and resizable; it should not be modeled as the global shell canvas.
+
+Supported tabs are exactly:
+
+- `Trajectories`
+- `Graph`
+- `Volume`
+
+`Trajectories` and `Graph` resolve traces by durable chat session id first and
+runtime `external_session_id` when available. If MLflow traces are unavailable,
+they fall back to live transcript rows and artifact summary data.
+
+`Volume` uses Daytona volume APIs, includes inline preview, and supports a
+resizable tree/preview split.
+
 ## Volumes Spec
 
-The Volumes surface is a browser for the mounted Daytona volume tree.
+The Volumes surface is the full-page browser for the mounted Daytona volume
+tree. It remains distinct from the workspace sidepanel `Volume` tab.
 
 Rules:
 
-- selecting a file opens the shell canvas
+- selecting a file opens the full-page preview region
 - leaving the Volumes route clears the selected file
-- the canvas is a preview/detail area, not the primary browser
 - the volume tree should be treated as mounted durable storage, not the live
   workspace session
 
@@ -121,7 +141,6 @@ Rules:
 
 - `RootLayout` owns the shell chrome.
 - `RouteSync` keeps the URL and navigation store aligned.
-- `NavigationStore` is the client-side shell state for active nav and canvas
-  visibility.
+- `NavigationStore` is the client-side shell state for active navigation.
 - `layout` owns the shell UX; product surfaces own their own internal logic.
 - route files stay thin and should not acquire page-level business logic.

@@ -115,9 +115,14 @@ class FakeChatAgent:
         self.last_stream_kwargs = {"message": message, "trace": trace, "docs_path": docs_path, **kwargs}
         for event in self._events:
             if cancel_check is not None and cancel_check():
-                from fleet_rlm.runtime.schemas import StreamEvent
+                from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 
-                yield StreamEvent(kind="done", text="[cancelled]", payload={"cancelled": True}, timestamp=ts())
+                yield RuntimeEvent(
+                    kind=RuntimeEventKind.DONE,
+                    text="[cancelled]",
+                    payload={"cancelled": True},
+                    timestamp=ts(),
+                )
                 return
             await asyncio.sleep(0.001)
             yield event

@@ -17,6 +17,7 @@ from ..runtime_services.session_service import (
     _TRANSCRIPT_EXPORT_MAX_TURNS,  # noqa: F401
     SessionService,
 )
+from ..runtime_services.session_trace_debug import get_owned_session_trace_debug
 from ..schemas.optimization import DatasetResponse
 from ..schemas.sessions import (
     SessionDeleteResponse,
@@ -27,6 +28,9 @@ from ..schemas.sessions import (
     SessionRestoreResponse,
     SessionStateResponse,
     SessionStatsResponse,
+    SessionTraceDebugResponse,
+    SessionTraceExportRequest,
+    SessionTraceExportResponse,
     SessionTraceListResponse,
     TurnListResponse,
 )
@@ -197,6 +201,61 @@ async def get_session_traces(
         session_id=session_id,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.get(
+    "/{session_id}/trace-debug",
+    response_model=SessionTraceDebugResponse,
+    responses=SESSION_DETAIL_RESPONSES,
+    summary="Inspect session MLflow trace mapping",
+    description=(
+        "Resolve one MLflow trace for the session and classify each span against the workspace chat component model."
+    ),
+)
+async def get_session_trace_debug(
+    _identity: HTTPIdentityDep,
+    persistence: PersistenceDep,
+    persisted_identity: PersistedIdentityDep,
+    session_id: Annotated[str, Path(description="Identifier of the session whose trace to inspect.")],
+    trace_id: Annotated[
+        str | None,
+        Query(description="Optional explicit MLflow trace id to inspect."),
+    ] = None,
+    client_request_id: Annotated[
+        str | None,
+        Query(description="Optional Fleet client request id used to resolve the trace."),
+    ] = None,
+) -> SessionTraceDebugResponse:
+    """Return one session-scoped MLflow trace mapped to frontend chat component hints."""
+    return await get_owned_session_trace_debug(
+        persistence=persistence,
+        persisted_identity=persisted_identity,
+        session_id=session_id,
+        trace_id=trace_id,
+        client_request_id=client_request_id,
+    )
+
+
+@router.post(
+    "/{session_id}/trace-export",
+    response_model=SessionTraceExportResponse,
+    responses=SESSION_DETAIL_RESPONSES,
+    summary="Export session MLflow traces",
+    description="Write full MLflow trace JSON/JSONL artifacts and a distilled GEPA evidence bundle.",
+)
+async def export_session_traces_endpoint(
+    body: SessionTraceExportRequest,
+    identity: HTTPIdentityDep,
+    persistence: PersistenceDep,
+    persisted_identity: PersistedIdentityDep,
+    session_id: Annotated[str, Path(description="Identifier of the session whose traces to export.")],
+) -> SessionTraceExportResponse:
+    """Export linked MLflow traces for offline GEPA optimization."""
+    return await SessionService(persistence).export_session_traces(
+        persisted_identity=persisted_identity,
+        session_id=session_id,
+        body=body,
     )
 
 

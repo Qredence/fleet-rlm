@@ -16,8 +16,13 @@ def _resolve_ui_web_root(candidate: Path) -> Path | None:
     """Return the directory that contains the served SPA entrypoint, if any."""
     candidate = candidate.resolve()
     nested_client_root = candidate / "client"
-    if (nested_client_root / "index.html").is_file():
-        return nested_client_root
+    if nested_client_root.is_dir():
+        # TanStack Start writes fresh browser assets under dist/client. If that
+        # tree exists without an entrypoint, do not fall back to a stale legacy
+        # dist/index.html from an older build.
+        if (nested_client_root / "index.html").is_file():
+            return nested_client_root
+        return None
     if (candidate / "index.html").is_file():
         return candidate
     return None
@@ -78,8 +83,7 @@ def _collect_reserved_top_level_paths(app: FastAPI) -> tuple[set[str], set[str]]
     reserved_paths: set[str] = set()
     reserved_prefixes: set[str] = set()
 
-    for route in app.routes:
-        raw_path = getattr(route, "path", None)
+    for raw_path in _iter_route_paths(app.routes):
         if not raw_path or raw_path == "/":
             continue
         # Skip the SPA catch-all itself, once it has been registered.
@@ -101,6 +105,27 @@ def _collect_reserved_top_level_paths(app: FastAPI) -> tuple[set[str], set[str]]
     return reserved_paths, reserved_prefixes
 
 
+def _join_route_path(prefix: str, path: str) -> str:
+    joined = f"{prefix.rstrip('/')}/{path.lstrip('/')}"
+    return joined if joined.startswith("/") else f"/{joined}"
+
+
+def _iter_route_paths(routes: Any, *, prefix: str = ""):
+    """Yield concrete paths from FastAPI's flat or nested route structures."""
+    for route in routes:
+        raw_path = getattr(route, "path", None)
+        if raw_path:
+            yield _join_route_path(prefix, raw_path)
+            continue
+
+        original_router = getattr(route, "original_router", None)
+        nested_routes = getattr(original_router, "routes", None)
+        include_context = getattr(route, "include_context", None)
+        include_prefix = str(getattr(include_context, "prefix", "") or "")
+        if nested_routes is not None:
+            yield from _iter_route_paths(nested_routes, prefix=_join_route_path(prefix, include_prefix))
+
+
 def mount_spa(app: FastAPI, ui_dir: Path) -> None:
     """Mount built frontend assets and SPA fallback route.
 
@@ -109,7 +134,7 @@ def mount_spa(app: FastAPI, ui_dir: Path) -> None:
     mount time.
     """
     # Safety: catching a misordered call early, before it masks real bugs.
-    if not any(getattr(r, "path", "").startswith("/api/") for r in app.routes):
+    if not any(path.startswith("/api/") for path in _iter_route_paths(app.routes)):
         msg = "mount_spa must be called after API routes are registered"
         raise RuntimeError(msg)
 
@@ -122,9 +147,6 @@ def mount_spa(app: FastAPI, ui_dir: Path) -> None:
 
     ui_root = ui_dir.resolve()
     index_path = ui_root / "index.html"
-    # Cached at mount time. If the index is deleted after boot that is an
-    # operational issue, not a request-path concern.
-    index_exists = index_path.is_file()
 
     reserved_paths, reserved_prefixes = _collect_reserved_top_level_paths(app)
 
@@ -154,6 +176,7 @@ def mount_spa(app: FastAPI, ui_dir: Path) -> None:
         if requested_file is not None:
             return FileResponse(requested_file)
 
+        index_exists = await asyncio.to_thread(index_path.is_file)
         if index_exists and should_serve_spa_index(full_path):
             return FileResponse(index_path)
 

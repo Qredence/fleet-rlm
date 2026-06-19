@@ -9,6 +9,7 @@ from typing import Any
 import dspy
 
 from fleet_rlm.runtime.agent.signatures import SkillSelectionSignature
+from fleet_rlm.runtime.sandbox_types import ActiveSkills
 from fleet_rlm.runtime.task_intent import has_url, has_url_document_intent
 from fleet_rlm.runtime.tools.skill_tools import _load_skill_impl, discover_scaffold_skills
 
@@ -79,7 +80,6 @@ _KEYWORD_OVERRIDES: dict[str, list[str]] = {
     "optimization": [
         "optimi",
         "GEPA",
-        "MIPROv2",
         "scorer",
         "dataset",
         "mlflow",
@@ -229,20 +229,50 @@ class SkillSelectionModule(dspy.Module):
         self._volume_mount_path = volume_mount_path
         self._max_skills = max_skills
 
-    def _load_skills(self, names: list[str]) -> str:
-        loaded: list[str] = []
+    def _load_active_skills(self, names: list[str]) -> ActiveSkills:
+        instructions: dict[str, str] = {}
+        sources: dict[str, str] = {}
+        catalog: dict[str, str] = {}
         for name in names[: self._max_skills]:
             result = _load_skill_impl(name, volume_mount_path=self._volume_mount_path)
             if result.status == "ok" and result.instructions:
-                loaded.append(f"[Skill: {name}]\n{result.instructions}")
-        return "\n\n".join(loaded)
+                instructions[name] = result.instructions
+                source = str(result.scope or "")
+                path = str(result.path or "")
+                sources[name] = f"{source}:{path}" if source and path else source or path
+                catalog[name] = AVAILABLE_SKILLS.get(name, f"Bundled fleet-rlm skill: {name}")
+        selected = [name for name in names[: self._max_skills] if name in instructions]
+        return ActiveSkills(
+            selected=selected,
+            catalog=catalog,
+            instructions=instructions,
+            sources=sources,
+        )
+
+    def _skill_summary(self, active_skills: ActiveSkills) -> str:
+        if not active_skills.selected:
+            return ""
+        lines = ["[Active Skills]", "Selected skill guidance is available in the REPL variable `active_skills`."]
+        for name in active_skills.selected:
+            description = active_skills.catalog.get(name, "")
+            source = active_skills.sources.get(name, "")
+            detail = f"- {name}"
+            if description:
+                detail += f": {description}"
+            if source:
+                detail += f" ({source})"
+            lines.append(detail)
+        lines.append("Inspect only relevant sections; do not print or copy full skill markdown.")
+        return "\n".join(lines)
 
     def _prediction(self, *, selected: list[str], reasoning: str = "") -> dspy.Prediction:
         selected = selected[: self._max_skills]
-        skill_context = self._load_skills(selected) if selected else ""
+        active_skills = self._load_active_skills(selected) if selected else ActiveSkills()
+        skill_context = self._skill_summary(active_skills)
         return dspy.Prediction(
-            selected_skills=selected,
+            selected_skills=active_skills.selected,
             skill_context=skill_context,
+            active_skills=active_skills,
             reasoning=reasoning,
         )
 

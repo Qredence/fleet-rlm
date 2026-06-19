@@ -13,6 +13,36 @@ export {
 } from "@/lib/rlm-api/ws-client";
 export { authEndpoints } from "@/lib/rlm-api/auth";
 export { infoEndpoints } from "@/lib/rlm-api/info";
+export { optimizationEndpoints } from "@/lib/rlm-api/optimization";
+export { sessionsEndpoints } from "@/lib/rlm-api/sessions";
+export { volumesEndpoints } from "@/lib/rlm-api/volumes";
+export { withQuery } from "@/lib/rlm-api/query";
+export type {
+  SessionListItem,
+  SessionListResponse,
+  SessionDetailResponse,
+  SessionStatsResponse,
+  TurnItem,
+  TurnListResponse,
+  SessionTraceItem,
+  SessionTraceListResponse,
+  SessionTraceDebugSpan,
+  SessionTraceDebugResponse,
+} from "@/lib/rlm-api/sessions";
+export type {
+  DatasetListResponse,
+  DatasetResponse,
+  GEPAOptimizationRequest,
+  GEPAModuleInfo,
+  GEPAStatusResponse,
+  OptimizationRunCreatedResponse,
+  OptimizationPromotionDraftResponse,
+  OptimizationRunDetailResponse,
+  OptimizationRunResponse,
+  SessionTraceExportRequest,
+  SessionTraceExportResponse,
+  UploadOptimizationDatasetInput,
+} from "@/lib/rlm-api/optimization";
 export type {
   WsTraceMode,
   WsRuntimeMode,

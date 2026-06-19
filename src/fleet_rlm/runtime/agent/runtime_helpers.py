@@ -5,13 +5,12 @@ from __future__ import annotations
 import ast
 import json
 import uuid
-from typing import Any, cast
+from typing import Any
 
 import dspy
 
 from fleet_rlm.runtime.events import RuntimeEvent
 from fleet_rlm.runtime.execution.final_artifact import build_final_artifact_from_answer
-from fleet_rlm.runtime.schemas import StreamEvent, StreamEventKind
 
 
 def default_core_memory() -> dict[str, str]:
@@ -181,15 +180,6 @@ def recursive_child_review_payload(tool_name: str, observation: Any) -> dict[str
     }
 
 
-def stream_event_from_runtime_event(event: RuntimeEvent) -> StreamEvent:
-    return StreamEvent(
-        kind=cast(StreamEventKind, event.kind.value),
-        text=event.text,
-        payload=dict(event.payload),
-        timestamp=event.timestamp,
-    )
-
-
 def build_clarification_event(observation: Any) -> RuntimeEvent | None:
     if not isinstance(observation, dict) or observation.get("status") != "clarification_needed":
         return None
@@ -207,8 +197,28 @@ def relay_event_from_rlm_step(payload: dict[str, Any]) -> RuntimeEvent | None:
     if not isinstance(payload, dict):
         return None
     phase = str(payload.get("phase", "")).strip().lower()
+    event_kind = str(payload.get("event_kind", "")).strip().lower()
     iteration = payload.get("iteration")
     step_index = int(iteration) if isinstance(iteration, int) else None
+
+    if phase == "mlflow_span" or event_kind == "mlflow_span":
+        span_id = str(payload.get("span_id") or "").strip()
+        if not span_id:
+            return None
+        return RuntimeEvent.mlflow_span(
+            span_id=span_id,
+            name=str(payload.get("name") or payload.get("span_name") or "MLflow span"),
+            status=str(payload.get("status") or "started"),
+            parent_span_id=str(payload["parent_span_id"]) if payload.get("parent_span_id") else None,
+            trace_id=str(payload["trace_id"]) if payload.get("trace_id") else None,
+            duration_ms=payload.get("duration_ms") if isinstance(payload.get("duration_ms"), (int, float)) else None,
+            started_at=str(payload["started_at"]) if payload.get("started_at") else None,
+            ended_at=str(payload["ended_at"]) if payload.get("ended_at") else None,
+            input=payload.get("input", payload.get("span_input")),
+            output=payload.get("output", payload.get("span_output")),
+            error=payload.get("error"),
+            metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
+        )
 
     if phase == "rlm_reasoning":
         reasoning = str(payload.get("reasoning") or "").strip()

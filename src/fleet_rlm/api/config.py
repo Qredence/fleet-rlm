@@ -81,6 +81,7 @@ class ServerRuntimeConfig(BaseSettings):
     enable_adaptive_iters: bool = True
     rlm_max_iterations: int = 30
     rlm_max_llm_calls: int = 50
+    rlm_action_max_tokens: int = Field(default=4096, alias="FLEET_RLM_ACTION_MAX_TOKENS")
     rlm_max_depth: int = 2
     rlm_child_isolation_mode: Literal["auto", "context"] = Field(default="auto", alias="RLM_CHILD_ISOLATION_MODE")
     rlm_child_fork_fallback: Literal["clean", "fail"] = Field(default="clean", alias="RLM_CHILD_FORK_FALLBACK")
@@ -105,7 +106,7 @@ class ServerRuntimeConfig(BaseSettings):
     interpreter_pool_cpu_per_sandbox: int = Field(default=2, alias="INTERPRETER_POOL_CPU_PER_SANDBOX")
     agent_guardrail_mode: Literal["off", "warn", "strict"] = "off"
     agent_min_substantive_chars: int = 20
-    agent_max_output_chars: int = 10000
+    agent_max_output_chars: int = 5000
     ws_default_workspace_id: str = "default"
     ws_default_user_id: str = "anonymous"
     ws_enforce_react_interlocutor: bool = True
@@ -175,6 +176,7 @@ class ServerRuntimeConfig(BaseSettings):
             "enable_adaptive_iters": config.rlm_settings.enable_adaptive_iters,
             "rlm_max_iterations": config.llm.rlm_max_iterations,
             "rlm_max_llm_calls": config.rlm_settings.max_llm_calls,
+            "rlm_action_max_tokens": config.rlm_settings.action_max_tokens,
             "rlm_max_depth": config.rlm_settings.max_depth,
             "rlm_child_isolation_mode": config.rlm_settings.child_isolation_mode,
             "rlm_child_fork_fallback": config.rlm_settings.child_fork_fallback,

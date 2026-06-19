@@ -3,7 +3,7 @@ import { Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field, FieldContent, FieldGroup, FieldLabel, FieldTitle } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   InputGroup,
@@ -15,6 +15,7 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectPositioner,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -62,19 +63,26 @@ export function ProviderProfileForm({ writeEnabled, mutations }: ProviderProfile
   };
 
   return (
-    <Field className="gap-4 border-0 py-0">
-      <div className="flex w-full flex-col gap-3">
-        <div className="flex flex-col gap-1.5">
+    <FieldGroup className="gap-0">
+      <Field orientation="responsive" className="border-b border-border-subtle py-3">
+        <FieldContent>
           <FieldLabel htmlFor="llm-profile-name">Profile name</FieldLabel>
+        </FieldContent>
+        <div className="flex min-w-0 flex-1 justify-start sm:justify-end">
           <Input
             id="llm-profile-name"
             value={draftName}
             onChange={(event) => setDraftName(event.target.value)}
             placeholder="Profile name"
+            className="w-full min-w-0 sm:max-w-sm"
           />
         </div>
-        <div className="flex flex-col gap-1.5">
+      </Field>
+      <Field orientation="responsive" className="border-b border-border-subtle py-3">
+        <FieldContent>
           <FieldLabel htmlFor="llm-profile-provider">Provider type</FieldLabel>
+        </FieldContent>
+        <div className="flex min-w-0 flex-1 justify-start sm:justify-end">
           <Select
             value={draftProviderType}
             onValueChange={(value) => {
@@ -84,30 +92,45 @@ export function ProviderProfileForm({ writeEnabled, mutations }: ProviderProfile
               if (option) setDraftApiBase(option.defaultBase);
             }}
           >
-            <SelectTrigger id="llm-profile-provider" className="w-full" aria-label="Provider type">
+            <SelectTrigger
+              id="llm-profile-provider"
+              className="w-full min-w-0 sm:max-w-sm"
+              aria-label="Provider type"
+            >
               <SelectValue placeholder="Provider type">{selectedProviderLabel}</SelectValue>
             </SelectTrigger>
-            <SelectContent>
-              {PROVIDER_OPTIONS.map((option) => (
-                <SelectItem key={option.id} value={option.id}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
+            <SelectPositioner>
+              <SelectContent>
+                {PROVIDER_OPTIONS.map((option) => (
+                  <SelectItem key={option.id} value={option.id}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </SelectPositioner>
           </Select>
         </div>
-        <div className="flex flex-col gap-1.5">
+      </Field>
+      <Field orientation="responsive" className="border-b border-border-subtle py-3">
+        <FieldContent>
           <FieldLabel htmlFor="llm-profile-api-base">API base URL</FieldLabel>
+        </FieldContent>
+        <div className="flex min-w-0 flex-1 justify-start sm:justify-end">
           <Input
             id="llm-profile-api-base"
             value={draftApiBase}
             onChange={(event) => setDraftApiBase(event.target.value)}
             placeholder="API base URL"
+            className="w-full min-w-0 sm:max-w-sm"
           />
         </div>
-        <div className="flex flex-col gap-1.5">
+      </Field>
+      <Field orientation="responsive" className="border-b border-border-subtle py-3">
+        <FieldContent>
           <FieldLabel htmlFor="llm-profile-api-key">API key</FieldLabel>
-          <InputGroup>
+        </FieldContent>
+        <div className="flex min-w-0 flex-1 justify-start sm:justify-end">
+          <InputGroup className="w-full min-w-0 sm:max-w-sm">
             <InputGroupInput
               id="llm-profile-api-key"
               type={showApiKey ? "text" : "password"}
@@ -119,9 +142,6 @@ export function ProviderProfileForm({ writeEnabled, mutations }: ProviderProfile
             <InputGroupAddon align="inline-end">
               <InputGroupButton
                 type="button"
-                size="sm"
-                variant="outline"
-                className="h-full rounded-none border-y-0 border-r-0 border-l border-border-subtle/70 px-4 shadow-none"
                 aria-pressed={showApiKey}
                 onClick={() => setShowApiKey((current) => !current)}
               >
@@ -130,15 +150,22 @@ export function ProviderProfileForm({ writeEnabled, mutations }: ProviderProfile
             </InputGroupAddon>
           </InputGroup>
         </div>
-        <Button
-          className="self-start rounded-lg"
-          disabled={!writeEnabled || mutations.createProfile.isPending || !draftApiKey.trim()}
-          onClick={handleCreateProfile}
-        >
-          <Plus className="size-4" />
-          Add profile
-        </Button>
-      </div>
-    </Field>
+      </Field>
+      <Field orientation="responsive" className="py-3">
+        <FieldContent className="sr-only">
+          <FieldTitle>Create provider profile</FieldTitle>
+        </FieldContent>
+        <div className="flex min-w-0 flex-1 justify-start sm:justify-end">
+          <Button
+            className="self-start rounded-lg"
+            disabled={!writeEnabled || mutations.createProfile.isPending || !draftApiKey.trim()}
+            onClick={handleCreateProfile}
+          >
+            <Plus className="size-4" />
+            Add profile
+          </Button>
+        </div>
+      </Field>
+    </FieldGroup>
   );
 }

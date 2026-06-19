@@ -5,8 +5,6 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, Final, TypeVar
 
-from dspy.primitives import FinalOutput
-
 from .errors import DaytonaDiagnosticError, DaytonaRunCancelled, DaytonaSmokeResult, VolumeNotReadyError
 
 __all__ = [
@@ -85,6 +83,12 @@ def _run_timed(
         phase_timings_ms[phase] = int((time.perf_counter() - started) * 1000)
 
 
+def _is_final_output(value: Any) -> bool:
+    from dspy.primitives import FinalOutput
+
+    return isinstance(value, FinalOutput)
+
+
 def run_daytona_smoke(
     *,
     repo: str,
@@ -159,7 +163,7 @@ def run_daytona_smoke(
                 )
             ),
         )
-        if isinstance(first, FinalOutput):
+        if _is_final_output(first):
             raise RuntimeError("Smoke validation finalized too early on the first execution step.")
 
         termination_phase = "exec_step_2"
@@ -168,7 +172,7 @@ def run_daytona_smoke(
             "exec_step_2",
             lambda: interpreter.execute("counter += 3\nSUBMIT(output=counter)"),
         )
-        if not isinstance(second, FinalOutput):
+        if not _is_final_output(second):
             raise RuntimeError("Smoke validation did not produce a final artifact.")
 
         output = getattr(second, "output", None)

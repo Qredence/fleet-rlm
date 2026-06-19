@@ -1,6 +1,8 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
 payload="$(cat)"
 
 if command -v jq >/dev/null 2>&1; then
@@ -13,9 +15,9 @@ if command -v jq >/dev/null 2>&1; then
       empty
     ' 2>/dev/null || true
   )"
-elif command -v python3 >/dev/null 2>&1; then
+elif command -v uv >/dev/null 2>&1; then
   file_path="$(
-    printf '%s' "$payload" | python3 -c '
+    printf '%s' "$payload" | uv run python -c '
 import json
 import sys
 
@@ -38,8 +40,8 @@ else
 fi
 
 if [[ "$file_path" == ".env" || "$file_path" == */.env ]]; then
-  printf '{"decision":"block","reason":"Direct edits to .env are blocked. Edit .env.example or document required variables instead."}\n'
-  exit 2
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Direct edits to .env are blocked. Edit .env.example or document required variables instead."}}\n'
+  exit 0
 fi
 
 exit 0

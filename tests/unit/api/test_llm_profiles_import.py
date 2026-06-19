@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture
@@ -20,10 +22,17 @@ def llm_profiles_env(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("FLEET_LLM_PROFILES_PATH", str(profiles_path))
     env_path = tmp_path / ".env"
     env_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("FLEET_RLM_ENV_PATH", str(env_path))
     return env_path
 
 
-def test_import_env_applies_delegate_api_base(no_db_client, llm_profiles_env, monkeypatch) -> None:
+@pytest.fixture
+def llm_profiles_client(llm_profiles_env, no_db_app) -> Iterator[TestClient]:
+    with TestClient(no_db_app) as client:
+        yield client
+
+
+def test_import_env_applies_delegate_api_base(llm_profiles_env, llm_profiles_client, monkeypatch) -> None:
     from fleet_rlm.api.config import ServerRuntimeConfig
     from fleet_rlm.api.dependencies import get_config_deps
 
@@ -38,7 +47,7 @@ def test_import_env_applies_delegate_api_base(no_db_client, llm_profiles_env, mo
     def _override_config_deps() -> object:
         return type("ConfigDeps", (), {"config": config})()
 
-    no_db_client.app.dependency_overrides[get_config_deps] = _override_config_deps
+    llm_profiles_client.app.dependency_overrides[get_config_deps] = _override_config_deps
 
     def _fake_planner_lm(**_kwargs):
         return object()
@@ -56,7 +65,7 @@ def test_import_env_applies_delegate_api_base(no_db_client, llm_profiles_env, mo
         _fake_planner_lm,
     )
 
-    response = no_db_client.post("/api/v1/runtime/llm-profiles/import-env")
+    response = llm_profiles_client.post("/api/v1/runtime/llm-profiles/import-env")
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["profile"]["name"] == "Imported from .env"
@@ -67,12 +76,12 @@ def test_import_env_applies_delegate_api_base(no_db_client, llm_profiles_env, mo
     assert "https://api.openai.com/v1" in env_text
 
     monkeypatch.setenv("DSPY_LLM_API_KEY", "sk-rotated-import")
-    repeat = no_db_client.post("/api/v1/runtime/llm-profiles/import-env")
+    repeat = llm_profiles_client.post("/api/v1/runtime/llm-profiles/import-env")
     assert repeat.status_code == 200, repeat.text
     repeat_body = repeat.json()
     assert repeat_body["profile"]["id"] == body["profile"]["id"]
 
-    listed = no_db_client.get("/api/v1/runtime/llm-profiles")
+    listed = llm_profiles_client.get("/api/v1/runtime/llm-profiles")
     assert listed.status_code == 200
     imported = [item for item in listed.json() if item["name"] == "Imported from .env"]
     assert len(imported) == 1

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.5.50
+  version: 0.6.0
 paths:
   /health:
     get:
@@ -459,6 +459,114 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SessionTraceListResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "403":
+          description: The caller does not have permission to access this resource.
+        "503":
+          description: Session services are unavailable because server startup is
+            incomplete.
+        "404":
+          description: Session not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/sessions/{session_id}/trace-debug:
+    get:
+      tags:
+        - sessions
+      summary: Inspect session MLflow trace mapping
+      description: Resolve one MLflow trace for the session and classify each span
+        against the workspace chat component model.
+      operationId: get_session_trace_debug_api_v1_sessions__session_id__trace_debug_get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Identifier of the session whose trace to inspect.
+            title: Session Id
+          description: Identifier of the session whose trace to inspect.
+        - name: trace_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            description: Optional explicit MLflow trace id to inspect.
+            title: Trace Id
+          description: Optional explicit MLflow trace id to inspect.
+        - name: client_request_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            description: Optional Fleet client request id used to resolve the trace.
+            title: Client Request Id
+          description: Optional Fleet client request id used to resolve the trace.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionTraceDebugResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "403":
+          description: The caller does not have permission to access this resource.
+        "503":
+          description: Session services are unavailable because server startup is
+            incomplete.
+        "404":
+          description: Session not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/sessions/{session_id}/trace-export:
+    post:
+      tags:
+        - sessions
+      summary: Export session MLflow traces
+      description: Write full MLflow trace JSON/JSONL artifacts and a distilled GEPA
+        evidence bundle.
+      operationId: export_session_traces_endpoint_api_v1_sessions__session_id__trace_export_post
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Identifier of the session whose traces to export.
+            title: Session Id
+          description: Identifier of the session whose traces to export.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionTraceExportRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionTraceExportResponse"
         "401":
           description: Authentication is required or the provided token is invalid.
         "403":
@@ -1490,8 +1598,7 @@ paths:
       tags:
         - optimization
       summary: Run Optimization
-      description: Trigger a blocking prompt optimization run (GEPA default, MIPROv2
-        optional).
+      description: Trigger a blocking GEPA prompt optimization run.
       operationId: run_optimization_api_v1_optimization_run_post
       requestBody:
         content:
@@ -1679,6 +1786,78 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OptimizationRunResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: Run not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/runs/{run_id}/details:
+    get:
+      tags:
+        - optimization
+      summary: Get Run Details
+      description: Get a detailed GEPA improvement report for a single optimization
+        run.
+      operationId: get_run_details_api_v1_optimization_runs__run_id__details_get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Identifier of the optimization run to inspect.
+            title: Run Id
+          description: Identifier of the optimization run to inspect.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptimizationRunDetailResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: Run not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/runs/{run_id}/promotion-drafts:
+    post:
+      tags:
+        - optimization
+      summary: Create Run Promotion Draft
+      description: Create or load a non-mutating draft promotion artifact for an optimization
+        run.
+      operationId: create_run_promotion_draft_api_v1_optimization_runs__run_id__promotion_drafts_post
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Identifier of the optimization run to draft for promotion.
+            title: Run Id
+          description: Identifier of the optimization run to draft for promotion.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptimizationPromotionDraftResponse"
         "401":
           description: Authentication is required or the provided token is invalid.
         "404":
@@ -2214,6 +2393,37 @@ components:
           type: array
           title: Required Dataset Keys
           description: Dataset keys required for this module's examples.
+        input_keys:
+          items:
+            type: string
+          type: array
+          title: Input Keys
+          description: Dataset keys used as DSPy inputs for this optimization target.
+        output_keys:
+          items:
+            type: string
+          type: array
+          title: Output Keys
+          description: Dataset keys scored as DSPy outputs for this optimization target.
+        runtime_module_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Runtime Module Name
+          description: Runtime module registry name when this target adapts a runtime
+            module.
+        signature_class_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Signature Class Name
+          description: DSPy signature class optimized by this target, when available.
+        optimization_target_kind:
+          type: string
+          title: Optimization Target Kind
+          description: Optimization target kind such as custom, runtime-signature,
+            or skill.
+          default: custom
         offline_only:
           type: boolean
           title: Offline Only
@@ -2255,6 +2465,40 @@ components:
           title: Module Slug
           description: Registered module slug for server-side dispatch. When provided,
             program_spec is auto-resolved from the module registry.
+        skill_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Skill Name
+          description: Bundled or mounted Fleet skill name to optimize as a markdown
+            skill artifact.
+        skill_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Skill Path
+          description: Relative path to a SKILL.md-compatible markdown file to optimize.
+        trace_bundle_paths:
+          items:
+            type: string
+          type: array
+          title: Trace Bundle Paths
+          description: Optional offline trace bundle paths available to the RLM-GEPA
+            instruction proposer.
+        reflection_profile_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Reflection Profile Id
+          description: Optional LLM provider profile id for the GEPA proposer/reflection
+            model.
+        reflection_model_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Reflection Model Id
+          description: Optional provider-native model id for the GEPA proposer/reflection
+            model.
         output_path:
           anyOf:
             - type: string
@@ -2270,6 +2514,14 @@ components:
           title: Auto
           description: Optimization intensity level.
           default: light
+        max_metric_calls:
+          anyOf:
+            - type: integer
+              minimum: 1.0
+            - type: "null"
+          title: Max Metric Calls
+          description: Optional GEPA metric-call budget override for short offline
+            smoke runs.
         train_ratio:
           type: number
           title: Train Ratio
@@ -2278,11 +2530,9 @@ components:
           default: 0.8
         optimizer:
           type: string
-          enum:
-            - gepa
-            - miprov2
+          const: gepa
           title: Optimizer
-          description: Optimizer backend to use (GEPA default, MIPROv2 optional).
+          description: Optimizer backend to use. GEPA is the only supported optimizer.
           default: gepa
       additionalProperties: false
       type: object
@@ -2330,6 +2580,12 @@ components:
             - type: "null"
           title: Manifest Path
           description: Filesystem path to the optimization manifest, when available.
+        feedback_summary:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Feedback Summary
+          description: Short summary of validation feedback from the GEPA run.
         module_slug:
           anyOf:
             - type: string
@@ -2337,6 +2593,25 @@ components:
           title: Module Slug
           description: Module slug used for this optimization run, when server-side
             dispatch was used.
+        reflection_profile_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Reflection Profile Id
+          description: LLM provider profile id used for GEPA reflection/proposal,
+            when selected.
+        reflection_model_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Reflection Model Id
+          description: Model id used for GEPA reflection/proposal, when selected.
+        distilled_trace_bundle_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Distilled Trace Bundle Path
+          description: Distilled trace bundle used by the RLM-GEPA proposer.
         error:
           anyOf:
             - type: string
@@ -2433,7 +2708,7 @@ components:
           type: string
           title: Version
           description: Package version currently serving the API.
-          default: 0.5.50
+          default: 0.6.0
       type: object
       title: HealthResponse
       description: Response body for the lightweight health endpoint.
@@ -2706,6 +2981,224 @@ components:
           description: Small delegate role binding patch.
       type: object
       title: LlmRoleBindingsUpdateRequest
+    OptimizationArtifactRef:
+      properties:
+        label:
+          type: string
+          title: Label
+          description: Human-readable artifact label.
+        path:
+          type: string
+          title: Path
+          description: Filesystem path to the artifact.
+        kind:
+          type: string
+          title: Kind
+          description: Artifact kind such as manifest, output, trace_bundle, or promotion_draft.
+        exists:
+          type: boolean
+          title: Exists
+          description: Whether the artifact exists on the local filesystem.
+          default: false
+      type: object
+      required:
+        - label
+        - path
+        - kind
+      title: OptimizationArtifactRef
+      description: A filesystem artifact produced or consumed by an optimization run.
+    OptimizationCandidateDecision:
+      properties:
+        candidate_id:
+          type: string
+          title: Candidate Id
+          description: Stable candidate identifier for display.
+        status:
+          type: string
+          title: Status
+          description: "Candidate status: selected, rejected, unavailable, or failed."
+        summary:
+          type: string
+          title: Summary
+          description: Human-readable decision summary.
+        rationale:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Rationale
+          description: Why this candidate was selected or rejected.
+        score:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Score
+          description: Candidate score, when available.
+        score_delta:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Score Delta
+          description: Candidate score delta, when available.
+        artifact_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Artifact Path
+          description: Candidate artifact path, when available.
+        missing_candidate_artifact:
+          type: boolean
+          title: Missing Candidate Artifact
+          description: Whether the proposer generated ideas but no candidate artifact
+            was persisted.
+          default: false
+      type: object
+      required:
+        - candidate_id
+        - status
+        - summary
+      title: OptimizationCandidateDecision
+      description: A selected or rejected GEPA prompt candidate decision.
+    OptimizationHoldoutSummary:
+      properties:
+        promotion_ready:
+          type: boolean
+          title: Promotion Ready
+          description: Whether the run has external holdout validation suitable for
+            promotion.
+          default: false
+        external_validation_available:
+          type: boolean
+          title: External Validation Available
+          description: Whether a true holdout validation split was available.
+          default: true
+        baseline_score:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Baseline Score
+          description: Baseline validation score.
+        optimized_score:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Optimized Score
+          description: Optimized validation score.
+        score_delta:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Score Delta
+          description: Optimized minus baseline score.
+      type: object
+      title: OptimizationHoldoutSummary
+      description: Typed holdout validation summary from a GEPA review bundle.
+    OptimizationPromotionDraftResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          description: Whether the draft was created or loaded.
+          default: true
+        draft_id:
+          type: string
+          title: Draft Id
+          description: Stable promotion draft identifier.
+        run_id:
+          type: string
+          title: Run Id
+          description: Optimization run id.
+        target:
+          type: string
+          title: Target
+          description: Skill/module target represented by the draft.
+        status:
+          type: string
+          const: draft
+          title: Status
+          description: Draft status.
+          default: draft
+        summary:
+          type: string
+          title: Summary
+          description: Human-readable draft summary.
+        optimized_artifact_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Optimized Artifact Path
+          description: Optimized artifact path.
+        manifest_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Manifest Path
+          description: Source manifest path.
+        draft_path:
+          type: string
+          title: Draft Path
+          description: Filesystem path to the draft artifact.
+        created_at:
+          type: string
+          title: Created At
+          description: ISO timestamp when the draft was created.
+      type: object
+      required:
+        - draft_id
+        - run_id
+        - target
+        - summary
+        - draft_path
+        - created_at
+      title: OptimizationPromotionDraftResponse
+      description: A draft promotion artifact for a completed optimization run.
+    OptimizationPromptDiffItem:
+      properties:
+        predictor_name:
+          type: string
+          title: Predictor Name
+          description: Predictor or skill component name.
+        before_prompt:
+          type: string
+          title: Before Prompt
+          description: Prompt text before GEPA.
+          default: ""
+        after_prompt:
+          type: string
+          title: After Prompt
+          description: Prompt text selected after GEPA.
+          default: ""
+        changed:
+          type: boolean
+          title: Changed
+          description: Whether the selected prompt differs semantically from the original
+            text.
+      type: object
+      required:
+        - predictor_name
+        - changed
+      title: OptimizationPromptDiffItem
+      description: Before/after prompt text for one optimized predictor or skill artifact.
+    OptimizationReviewBundle:
+      properties:
+        version:
+          type: integer
+          title: Version
+          description: Review bundle schema version.
+          default: 1
+        holdout:
+          anyOf:
+            - $ref: "#/components/schemas/OptimizationHoldoutSummary"
+            - type: "null"
+          description: Holdout validation summary for promotion readiness.
+        insights:
+          anyOf:
+            - $ref: "#/components/schemas/OptimizationRunInsights"
+            - type: "null"
+          description: Canonical GEPA insights written at manifest time.
+      type: object
+      title: OptimizationReviewBundle
+      description: Typed subset of the manifest review bundle used by the optimization
+        UI.
     OptimizationRunCreatedResponse:
       properties:
         run_id:
@@ -2722,6 +3215,121 @@ components:
         - run_id
       title: OptimizationRunCreatedResponse
       description: Response when an async optimization run is created.
+    OptimizationRunDetailResponse:
+      properties:
+        run:
+          $ref: "#/components/schemas/OptimizationRunResponse"
+          description: Base optimization run metadata.
+        manifest_available:
+          type: boolean
+          title: Manifest Available
+          description: Whether the manifest file was parsed.
+        manifest:
+          anyOf:
+            - additionalProperties: true
+              type: object
+            - type: "null"
+          title: Manifest
+          description: Parsed optimization manifest, when available.
+        review_bundle:
+          anyOf:
+            - additionalProperties: true
+              type: object
+            - type: "null"
+          title: Review Bundle
+          description: Parsed manifest review bundle, when available.
+        typed_review_bundle:
+          anyOf:
+            - $ref: "#/components/schemas/OptimizationReviewBundle"
+            - type: "null"
+          description: Typed review bundle fields used by the optimization UI.
+        artifact_refs:
+          items:
+            $ref: "#/components/schemas/OptimizationArtifactRef"
+          type: array
+          title: Artifact Refs
+          description: Important run artifact paths.
+        score_summary:
+          $ref: "#/components/schemas/OptimizationScoreSummary"
+          description: Score and split details.
+        prompt_diffs:
+          items:
+            $ref: "#/components/schemas/OptimizationPromptDiffItem"
+          type: array
+          title: Prompt Diffs
+          description: Full before/after prompt snapshots.
+        trace_evidence:
+          items:
+            $ref: "#/components/schemas/OptimizationTraceEvidenceItem"
+          type: array
+          title: Trace Evidence
+          description: Distilled trace evidence records without raw spans.
+        candidate_decisions:
+          items:
+            $ref: "#/components/schemas/OptimizationCandidateDecision"
+          type: array
+          title: Candidate Decisions
+          description: Selected and rejected candidate decisions when available.
+        insights:
+          $ref: "#/components/schemas/OptimizationRunInsights"
+          description: Normalized improvement report.
+        optimized_artifact_text:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Optimized Artifact Text
+          description: Text content of the selected optimized artifact when it is
+            safely readable.
+        optimized_artifact_truncated:
+          type: boolean
+          title: Optimized Artifact Truncated
+          description: Whether optimized_artifact_text was truncated.
+          default: false
+      type: object
+      required:
+        - run
+        - manifest_available
+        - artifact_refs
+        - score_summary
+        - prompt_diffs
+        - trace_evidence
+        - candidate_decisions
+        - insights
+      title: OptimizationRunDetailResponse
+      description: Detailed GEPA run report for RLM improvement auditability.
+    OptimizationRunInsights:
+      properties:
+        selected_outcome:
+          type: string
+          enum:
+            - changed
+            - unchanged
+            - failed
+            - running
+            - unknown
+          title: Selected Outcome
+          description: Outcome of the selected GEPA artifact.
+        summary:
+          type: string
+          title: Summary
+          description: Short explanation of what GEPA did for this run.
+        trace_driven_recommendations:
+          items:
+            type: string
+          type: array
+          title: Trace Driven Recommendations
+          description: Recommendations distilled from trace evidence.
+        next_step:
+          type: string
+          title: Next Step
+          description: Recommended next optimization action.
+      type: object
+      required:
+        - selected_outcome
+        - summary
+        - next_step
+      title: OptimizationRunInsights
+      description: Normalized human-readable improvement insights for a GEPA run.
     OptimizationRunResponse:
       properties:
         id:
@@ -2764,6 +3372,37 @@ components:
             - type: "null"
           title: Dataset Path
           description: Path to the dataset used.
+        reflection_profile_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Reflection Profile Id
+          description: LLM provider profile id used for GEPA reflection/proposal,
+            when selected.
+        reflection_model_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Reflection Model Id
+          description: Model id used for GEPA reflection/proposal, when selected.
+        raw_trace_export_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Raw Trace Export Path
+          description: Full raw trace export path, when present.
+        distilled_trace_bundle_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Distilled Trace Bundle Path
+          description: Distilled GEPA trace evidence bundle path, when present.
+        prompt_snapshot_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Prompt Snapshot Path
+          description: Prompt snapshot or diff artifact path, when present.
         train_examples:
           anyOf:
             - type: integer
@@ -2825,6 +3464,106 @@ components:
         - started_at
       title: OptimizationRunResponse
       description: A single optimization run record.
+    OptimizationScoreSummary:
+      properties:
+        baseline_score:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Baseline Score
+          description: Baseline validation score, when available.
+        optimized_score:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Optimized Score
+          description: Optimized validation score, when available.
+        score_delta:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Score Delta
+          description: Optimized minus baseline score, when available.
+        train_examples:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Train Examples
+          description: Number of training examples.
+        validation_examples:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Validation Examples
+          description: Number of validation examples.
+        train_ratio:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Train Ratio
+          description: Requested train/validation split ratio.
+        split_strategy:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Split Strategy
+          description: Dataset split strategy recorded in the manifest.
+      type: object
+      title: OptimizationScoreSummary
+      description: Score and split summary for a GEPA run.
+    OptimizationTraceEvidenceItem:
+      properties:
+        kind:
+          type: string
+          title: Kind
+          description: Distilled bundle record kind.
+        trace_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Trace Id
+          description: Supporting MLflow trace id.
+        session_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Session Id
+          description: MLflow/runtime session id.
+        client_request_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Client Request Id
+          description: Client request id, when available.
+        trace_count:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Trace Count
+          description: Trace count for summary records.
+        span_count:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Span Count
+          description: Number of spans in the supporting trace.
+        failure_categories:
+          items:
+            type: string
+          type: array
+          title: Failure Categories
+          description: Distilled failure categories.
+        prompt_change_recommendations:
+          items:
+            type: string
+          type: array
+          title: Prompt Change Recommendations
+          description: Prompt-change recommendations distilled from trace evidence.
+      type: object
+      required:
+        - kind
+      title: OptimizationTraceEvidenceItem
+      description: Distilled trace evidence used by the GEPA proposer.
     PromptSnapshotItem:
       properties:
         predictor_name:
@@ -3619,7 +4358,7 @@ components:
           type: string
           title: Version
           description: Package version currently serving the API.
-          default: 0.5.50
+          default: 0.6.0
         app_env:
           type: string
           enum:
@@ -3976,6 +4715,288 @@ components:
       type: object
       title: SessionStatsResponse
       description: Aggregated usage stats for a session.
+    SessionTraceDebugResponse:
+      properties:
+        trace_id:
+          type: string
+          title: Trace Id
+          description: Resolved MLflow trace identifier.
+        client_request_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Client Request Id
+          description: Resolved Fleet client request identifier when available.
+        state:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: State
+          description: Top-level MLflow trace state.
+        request_preview:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Request Preview
+          description: Trace request preview.
+        response_preview:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Response Preview
+          description: Trace response preview.
+        resolved_from:
+          type: string
+          enum:
+            - trace_id
+            - client_request_id
+            - session_row
+            - runtime_session_id
+          title: Resolved From
+          description: How the trace was resolved for this session debug request.
+        runtime_session_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Runtime Session Id
+          description: Authorized runtime session id used for fallback lookup when
+            applicable.
+        span_count:
+          type: integer
+          title: Span Count
+          description: Total spans in the resolved trace.
+        renderable_span_count:
+          type: integer
+          title: Renderable Span Count
+          description: How many spans map to a renderable chat component.
+        non_rendered_span_count:
+          type: integer
+          title: Non Rendered Span Count
+          description: How many spans are intentionally observability-only.
+        performance_summary:
+          $ref: "#/components/schemas/SessionTracePerformanceSummary"
+          description: Performance, token, and fallback summary derived from raw spans.
+        spans:
+          items:
+            $ref: "#/components/schemas/SessionTraceDebugSpan"
+          type: array
+          title: Spans
+          description: Per-span mapping summary.
+      type: object
+      required:
+        - trace_id
+        - resolved_from
+        - span_count
+        - renderable_span_count
+        - non_rendered_span_count
+        - performance_summary
+        - spans
+      title: SessionTraceDebugResponse
+      description: Session-scoped MLflow trace debug summary for chat component mapping.
+    SessionTraceDebugSpan:
+      properties:
+        span_id:
+          type: string
+          title: Span Id
+          description: MLflow/OpenTelemetry span identifier.
+        parent_span_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Parent Span Id
+          description: Parent span identifier when present.
+        name:
+          type: string
+          title: Name
+          description: Span name.
+        span_type:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Span Type
+          description: MLflow span type when present.
+        status_code:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Status Code
+          description: Span status code.
+        tool_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Tool Name
+          description: Resolved tool name when the span is tool-like.
+        mapped_render_kind:
+          type: string
+          enum:
+            - assistant_text
+            - reasoning
+            - tool
+            - sandbox
+            - status_note
+            - non_rendered
+          title: Mapped Render Kind
+          description: Frontend chat render kind the span most closely maps to.
+        mapped_component_type:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Mapped Component Type
+          description: Frontend Agent Elements component/tool type hint when renderable.
+        rationale:
+          type: string
+          title: Rationale
+          description: Why the span is rendered or intentionally not rendered.
+        input_preview:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Input Preview
+          description: Compact preview of span inputs.
+        output_preview:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Output Preview
+          description: Compact preview of span outputs.
+        start_time_unix_nano:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Start Time Unix Nano
+          description: Span start timestamp (Unix nanoseconds, string-encoded).
+        end_time_unix_nano:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: End Time Unix Nano
+          description: Span end timestamp (Unix nanoseconds, string-encoded).
+        duration_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Duration Ms
+          description: Span duration in milliseconds when timestamps exist.
+        input_tokens:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Input Tokens
+          description: Input token count reported for this span.
+        output_tokens:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Output Tokens
+          description: Output token count reported for this span.
+        total_tokens:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Total Tokens
+          description: Total token count reported for this span.
+        output_chars:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Output Chars
+          description: Character count of the raw span output payload.
+        retry_or_fallback_reason:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Retry Or Fallback Reason
+          description: Parse, retry, or adapter fallback signal detected for this
+            span.
+      type: object
+      required:
+        - span_id
+        - name
+        - mapped_render_kind
+        - rationale
+      title: SessionTraceDebugSpan
+      description: One MLflow span classified against the chat transcript component
+        model.
+    SessionTraceExportRequest:
+      properties:
+        format:
+          type: string
+          enum:
+            - json
+            - jsonl
+            - both
+          title: Format
+          description: Trace artifact format to write.
+          default: both
+        mlflow_session_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Mlflow Session Id
+          description: Optional MLflow trace session id hint. The server validates
+            the hint against authorized runtime session ids for the resolved durable
+            session before export.
+      additionalProperties: false
+      type: object
+      title: SessionTraceExportRequest
+      description: Request body for exporting a session's linked MLflow traces.
+    SessionTraceExportResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          description: Whether trace export completed.
+          default: true
+        session_id:
+          type: string
+          title: Session Id
+          description: Durable session identifier.
+        trace_count:
+          type: integer
+          title: Trace Count
+          description: Number of MLflow traces exported.
+        json_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Json Path
+          description: Path to the full JSON trace artifact.
+        jsonl_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Jsonl Path
+          description: Path to the full JSONL trace artifact.
+        distilled_bundle_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Distilled Bundle Path
+          description: Path to the distilled GEPA evidence bundle.
+        skipped_trace_ids:
+          items:
+            type: string
+          type: array
+          title: Skipped Trace Ids
+          description: Trace identifiers that could not be resolved/exported.
+        errors:
+          items:
+            type: string
+          type: array
+          title: Errors
+          description: Non-fatal export errors.
+        summary:
+          additionalProperties: true
+          type: object
+          title: Summary
+          description: Distilled trace export summary.
+      type: object
+      required:
+        - session_id
+        - trace_count
+      title: SessionTraceExportResponse
+      description: Trace export artifact paths for a session.
     SessionTraceItem:
       properties:
         trace_id:
@@ -4059,6 +5080,142 @@ components:
         - has_more
       title: SessionTraceListResponse
       description: Paginated external traces for a session.
+    SessionTracePerformanceSpanSummary:
+      properties:
+        span_id:
+          type: string
+          title: Span Id
+          description: Span identifier.
+        name:
+          type: string
+          title: Name
+          description: Span name.
+        duration_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Duration Ms
+          description: Span duration in milliseconds.
+        input_tokens:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Input Tokens
+          description: Input token count.
+        output_tokens:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Output Tokens
+          description: Output token count.
+        total_tokens:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Total Tokens
+          description: Total token count.
+        output_chars:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Output Chars
+          description: Output payload character count.
+      type: object
+      required:
+        - span_id
+        - name
+      title: SessionTracePerformanceSpanSummary
+      description: Compact span reference used in trace performance summaries.
+    SessionTracePerformanceSummary:
+      properties:
+        total_duration_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Total Duration Ms
+          description: Root trace duration in milliseconds.
+        llm_duration_ms:
+          type: integer
+          title: Llm Duration Ms
+          description: Total duration of LLM/chat-model spans.
+          default: 0
+        repl_duration_ms:
+          type: integer
+          title: Repl Duration Ms
+          description: Total duration of REPL execution spans.
+          default: 0
+        tool_duration_ms:
+          type: integer
+          title: Tool Duration Ms
+          description: Total duration of non-REPL tool spans.
+          default: 0
+        root_overhead_ms:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Root Overhead Ms
+          description: Root duration minus known LLM, REPL, and tool durations.
+        input_tokens:
+          type: integer
+          title: Input Tokens
+          description: Summed input tokens from span usage.
+          default: 0
+        output_tokens:
+          type: integer
+          title: Output Tokens
+          description: Summed output tokens from span usage.
+          default: 0
+        total_tokens:
+          type: integer
+          title: Total Tokens
+          description: Summed total tokens from span usage.
+          default: 0
+        token_total_mismatch:
+          type: boolean
+          title: Token Total Mismatch
+          description: Whether total_tokens differs from input_tokens + output_tokens.
+          default: false
+        adapter_fallback_count:
+          type: integer
+          title: Adapter Fallback Count
+          description: Detected adapter fallback or retry signals.
+          default: 0
+        parse_error_count:
+          type: integer
+          title: Parse Error Count
+          description: Detected parser/adapter parse error signals.
+          default: 0
+        selected_skills:
+          items:
+            type: string
+          type: array
+          title: Selected Skills
+          description: Selected RLM skill names.
+        rlm_action_max_tokens:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Rlm Action Max Tokens
+          description: Configured RLM action-generation token budget.
+        rlm_max_output_chars:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Rlm Max Output Chars
+          description: Configured RLM REPL output character budget.
+        slowest_llm_span:
+          anyOf:
+            - $ref: "#/components/schemas/SessionTracePerformanceSpanSummary"
+            - type: "null"
+          description: Slowest detected LLM/chat-model span.
+        largest_output_span:
+          anyOf:
+            - $ref: "#/components/schemas/SessionTracePerformanceSpanSummary"
+            - type: "null"
+          description: Span with the largest output payload.
+      type: object
+      title: SessionTracePerformanceSummary
+      description: Performance and token summary derived from raw MLflow trace spans.
     TraceFeedbackRequest:
       properties:
         trace_id:

@@ -1,6 +1,15 @@
 import * as React from "react";
-import { X } from "lucide-react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Cancel01Icon } from "@hugeicons/core-free-icons";
 
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,7 +22,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Sidebar, SidebarProvider } from "@/components/ui/sidebar";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useIsMobile } from "@/hooks/ui/use-is-mobile";
 import {
   getSettingsSectionDescription,
   getSettingsSectionTitle,
@@ -22,7 +31,7 @@ import {
   settingsSections,
   SettingsSidebarNav,
   type SettingsSection,
-} from "@/features/settings/settings-content";
+} from "@/features/settings/screen/settings-content";
 import { useThemeStore } from "@/stores/theme-store";
 
 interface SettingsDialogProps {
@@ -44,7 +53,6 @@ function MobileSectionPicker({
 }) {
   return (
     <ToggleGroup
-      type="single"
       value={section ?? "appearance"}
       variant="outline"
       size="sm"
@@ -143,7 +151,7 @@ export function SettingsDialog({
               aria-label="Close settings"
               className="touch-target shrink-0"
             >
-              <X />
+              <HugeiconsIcon icon={Cancel01Icon} size={20} strokeWidth={1.5} />
             </Button>
           </div>
 
@@ -171,38 +179,44 @@ export function SettingsDialog({
 
   return (
     <Dialog open={resolvedOpen} onOpenChange={handleOpenChange}>
-      {showTrigger ? (
-        <DialogTrigger asChild>
-          <Button size="sm">Open Dialog</Button>
-        </DialogTrigger>
-      ) : null}
-      <DialogContent className="overflow-hidden rounded-[1.75rem] border-border-subtle/80 bg-background p-0 md:max-h-dialog md:max-w-dialog-lg lg:max-w-dialog-xl">
-        <SidebarProvider
-          className="items-stretch"
-          defaultOpen
-          style={
-            {
-              "--sidebar-width": "15rem",
-            } as React.CSSProperties
-          }
-        >
+      {showTrigger ? <DialogTrigger render={<Button size="sm">Open Dialog</Button>} /> : null}
+      <DialogContent className="overflow-hidden p-0 md:h-settings-dialog md:max-h-settings-dialog md:max-w-settings-dialog-md lg:max-w-settings-dialog-lg">
+        <DialogTitle className="sr-only">Settings</DialogTitle>
+        <DialogDescription className="sr-only">
+          Manage your application settings and preferences.
+        </DialogDescription>
+
+        <SidebarProvider className="h-full min-h-0 items-start" defaultOpen>
           <Sidebar
             collapsible="none"
             className="hidden border-r border-sidebar-border/70 bg-sidebar/40 md:flex"
           >
             <SettingsSidebarNav section={activeSection} onSectionChange={handleSectionChange} />
           </Sidebar>
-          <main className="flex h-dialog min-w-0 flex-1 flex-col overflow-hidden bg-background">
-            <header className="shrink-0 border-b border-border-subtle bg-background px-9 py-5">
-              <DialogTitle className="typo-display font-semibold tracking-tight text-foreground">
-                {sectionTitle}
-              </DialogTitle>
-              <DialogDescription className="mt-1 text-sm text-muted-foreground">
-                {sectionDescription}
-              </DialogDescription>
+          <main className="flex h-settings-dialog-main min-w-0 flex-1 flex-col overflow-hidden">
+            <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+              <div className="flex min-w-0 items-center gap-2 px-4">
+                <Breadcrumb>
+                  <BreadcrumbList>
+                    <BreadcrumbItem className="hidden md:block">
+                      <BreadcrumbLink href="#" onClick={(event) => event.preventDefault()}>
+                        Settings
+                      </BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator className="hidden md:block" />
+                    <BreadcrumbItem>
+                      <BreadcrumbPage className="line-clamp-1">{sectionTitle}</BreadcrumbPage>
+                    </BreadcrumbItem>
+                  </BreadcrumbList>
+                </Breadcrumb>
+              </div>
             </header>
             <ScrollArea className="flex-1">
-              <div className="flex flex-col gap-6 px-9 py-8">
+              <div className="flex flex-col gap-4 p-4 pt-0">
+                <div className="sr-only">
+                  <h2>{sectionTitle}</h2>
+                  <p>{sectionDescription}</p>
+                </div>
                 <SettingsSectionContent
                   isDark={isDark}
                   onToggleTheme={toggleTheme}

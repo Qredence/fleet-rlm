@@ -14,6 +14,7 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectPositioner,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -22,6 +23,13 @@ import {
   useLlmProfileModels,
   type useLlmProfilesMutations,
 } from "@/features/settings/use-llm-profiles";
+
+interface CatalogModel {
+  id: string;
+  label: string;
+}
+
+const EMPTY_MODELS: CatalogModel[] = [];
 
 import {
   SETTINGS_FIELD_CLASSNAME,
@@ -64,7 +72,7 @@ export function RoleModelAssignment({
     ? formatProfileLabel(selectedProfile)
     : (binding?.profile_name ?? "");
 
-  const catalogModels = modelsQuery.data?.models ?? [];
+  const catalogModels = modelsQuery.data?.models ?? EMPTY_MODELS;
   const catalogError = modelsQuery.data?.error;
   const matchedCatalogModelId =
     catalogModels.find((model) => modelMatchesCatalog(modelId, model.id))?.id ?? modelId;
@@ -101,12 +109,12 @@ export function RoleModelAssignment({
   const modelSelectId = `llm-role-${role}-model`;
 
   return (
-    <Field className={SETTINGS_FIELD_CLASSNAME}>
+    <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
       <FieldContent>
         <FieldTitle>{title}</FieldTitle>
         <FieldDescription>{description}</FieldDescription>
       </FieldContent>
-      <div className="flex w-full flex-col gap-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-3 sm:max-w-sm">
         <div className="flex flex-col gap-1.5">
           <FieldLabel htmlFor={profileSelectId}>Provider profile</FieldLabel>
           <Select
@@ -119,25 +127,27 @@ export function RoleModelAssignment({
           >
             <SelectTrigger
               id={profileSelectId}
-              className="w-full"
+              className="w-full min-w-0 max-w-full"
               aria-label="Select provider profile"
             >
               <SelectValue placeholder="Select provider profile">
                 {selectedProfileLabel || undefined}
               </SelectValue>
             </SelectTrigger>
-            <SelectContent>
-              {profiles.map((profile) => (
-                <SelectItem key={profile.id} value={profile.id}>
-                  {formatProfileLabel(profile)}
-                </SelectItem>
-              ))}
-            </SelectContent>
+            <SelectPositioner>
+              <SelectContent>
+                {profiles.map((profile) => (
+                  <SelectItem key={profile.id} value={profile.id}>
+                    {formatProfileLabel(profile)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </SelectPositioner>
           </Select>
         </div>
         <div className="flex flex-col gap-1.5">
           <FieldLabel htmlFor={modelSelectId}>Model</FieldLabel>
-          <div className="flex gap-2">
+          <div className="flex min-w-0 gap-2">
             {modelsQuery.isPending && profileId ? (
               <Skeleton className="h-9 w-full rounded-md" />
             ) : (
@@ -146,18 +156,24 @@ export function RoleModelAssignment({
                 onValueChange={(value) => setModelId(value ?? "")}
                 disabled={!profileId || modelsQuery.isPending}
               >
-                <SelectTrigger id={modelSelectId} className="w-full" aria-label="Select model">
+                <SelectTrigger
+                  id={modelSelectId}
+                  className="w-full min-w-0 flex-1"
+                  aria-label="Select model"
+                >
                   <SelectValue placeholder={profileId ? "Select model" : "Choose a profile first"}>
                     {modelId ? selectedModelLabel : undefined}
                   </SelectValue>
                 </SelectTrigger>
-                <SelectContent>
-                  {catalogModels.map((model) => (
-                    <SelectItem key={model.id} value={model.id}>
-                      {model.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
+                <SelectPositioner>
+                  <SelectContent>
+                    {catalogModels.map((model) => (
+                      <SelectItem key={model.id} value={model.id}>
+                        {model.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </SelectPositioner>
               </Select>
             )}
             <Button

@@ -84,6 +84,28 @@ def test_build_transcript_dataset_rows_applies_known_output_defaults(monkeypatch
     ]
 
 
+def test_build_transcript_dataset_rows_supports_plan_code_change_target() -> None:
+    module_registry._reset_registry()
+
+    rows, label = build_transcript_dataset_rows(
+        module_slug="plan-code-change",
+        turns=[("Add a dashboard filter", "Update the filter state and add focused tests.")],
+    )
+
+    assert label == "Plan Code Change"
+    assert rows == [
+        {
+            "task": "Add a dashboard filter",
+            "repo_context": "",
+            "constraints": "",
+            "plan_steps": ["Update the filter state and add focused tests."],
+            "files_to_touch": [],
+            "validation_commands": [],
+            "risks": [],
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("module_slug", "turns", "message"),
     [

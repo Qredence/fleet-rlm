@@ -6,12 +6,12 @@ import { ErrorBoundary } from "@/components/product/error-boundary";
 import { isRlmCoreEnabled } from "@/lib/rlm-api";
 import { useNavigationStore } from "@/stores/navigation-store";
 import type { CanvasPanel } from "@/stores/navigation-types";
-import { VolumesCanvasPanel } from "@/features/volumes/volumes-canvas-panel";
+import { VolumesCanvasPanel } from "@/features/volumes";
 import {
   GraphCanvasPanel,
   WorkspaceCanvasPanel,
   WorkspaceCanvasUnavailablePanel,
-} from "@/features/workspace/screen/workspace-canvas-panel";
+} from "@/features/workspace";
 
 const PANEL_LABELS: Record<CanvasPanel, string> = {
   workspace: "Workbench",
@@ -62,18 +62,20 @@ export function LayoutSidepanel() {
         </div>
 
         <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
-              aria-label="Close panel"
-              onClick={closeCanvas}
-            >
-              <X className="size-3.5" />
-            </Button>
-          </TooltipTrigger>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
+                aria-label="Close panel"
+                onClick={closeCanvas}
+              >
+                <X className="size-3.5" />
+              </Button>
+            }
+          />
           <TooltipContent side="bottom" className="text-xs">
             Close panel
           </TooltipContent>

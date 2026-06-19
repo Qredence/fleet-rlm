@@ -9,7 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRunWorkbenchStore } from "@/features/workspace/use-workspace";
-import { useRuntimeStatus } from "@/hooks/use-runtime-status";
+import { useRuntimeStatus } from "@/hooks/runtime/use-runtime-status";
 import { buildMlflowTraceUrl } from "@/lib/mlflow/trace-url";
 import { humanizeKind } from "./run-workbench-utils";
 import {

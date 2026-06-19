@@ -10,6 +10,7 @@ from typing import Literal, Optional, cast
 import typer
 
 from fleet_rlm.quality import module_registry, optimization_runner
+from fleet_rlm.quality.skill_optimization import spec_for_skill
 
 
 def optimize_command(
@@ -36,10 +37,20 @@ def optimize_command(
         "--auto",
         help="Optimization intensity (light, medium, heavy).",
     ),
-    optimizer: str = typer.Option(
-        "gepa",
-        "--optimizer",
-        help="Optimizer backend (gepa or miprov2).",
+    skill_name: str | None = typer.Option(
+        None,
+        "--skill-name",
+        help="Optimize a bundled or mounted Fleet skill by name instead of a registered module.",
+    ),
+    skill_path: Path | None = typer.Option(
+        None,
+        "--skill-path",
+        help="Optimize a SKILL.md-compatible markdown file instead of a registered module.",
+    ),
+    trace_bundle_path: list[str] = typer.Option(
+        [],
+        "--trace-bundle-path",
+        help="Offline trace bundle path available to the RLM-GEPA instruction proposer.",
     ),
     report: bool = typer.Option(
         False,
@@ -51,8 +62,8 @@ def optimize_command(
     if auto not in ("light", "medium", "heavy"):
         typer.echo(f"Error: --auto must be light, medium, or heavy, got {auto!r}", err=True)
         raise typer.Exit(code=1)
-    if optimizer not in ("gepa", "miprov2"):
-        typer.echo(f"Error: --optimizer must be gepa or miprov2, got {optimizer!r}", err=True)
+    if skill_name and skill_path:
+        typer.echo("Error: provide either --skill-name or --skill-path, not both.", err=True)
         raise typer.Exit(code=1)
 
     if module == "list":
@@ -72,12 +83,19 @@ def optimize_command(
         typer.echo(f"Error: Dataset file is not readable: {dataset}", err=True)
         raise typer.Exit(code=1)
 
-    spec = module_registry.get_module_spec(module)
-    if spec is None:
-        slugs = module_registry.list_module_slugs()
-        typer.echo(f"Error: Unknown module slug {module!r}.", err=True)
-        typer.echo(f"Available modules: {', '.join(slugs)}", err=True)
-        raise typer.Exit(code=1)
+    if skill_name or skill_path:
+        spec = spec_for_skill(
+            skill_name=skill_name,
+            skill_path=skill_path,
+            trace_bundle_paths=trace_bundle_path,
+        )
+    else:
+        spec = module_registry.get_module_spec(module)
+        if spec is None:
+            slugs = module_registry.list_module_slugs()
+            typer.echo(f"Error: Unknown module slug {module!r}.", err=True)
+            typer.echo(f"Available modules: {', '.join(slugs)}", err=True)
+            raise typer.Exit(code=1)
 
     result = dict(
         optimization_runner.run_module_optimization(
@@ -86,7 +104,7 @@ def optimize_command(
             output_path=output_path,
             train_ratio=train_ratio,
             auto=cast("Literal['light', 'medium', 'heavy']", auto),
-            optimizer=cast(optimization_runner.OptimizerName, optimizer),
+            optimizer="gepa",
         )
     )
 

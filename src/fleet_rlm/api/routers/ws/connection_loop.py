@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
-from types import SimpleNamespace
-from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
+
+from fleet_rlm.runtime.events import RuntimeEvent
 
 from ...dependencies import DiagnosticsDeps, SessionCacheDeps
 from ...events import ExecutionEventEmitter, ExecutionSubscription
@@ -61,7 +60,7 @@ def _agent_turn_count(agent: ChatAgentProtocol) -> int:
     return 0
 
 
-def _build_routing_preview_event(agent: ChatAgentProtocol, msg: WSMessage) -> Any | None:
+def _build_routing_preview_event(agent: ChatAgentProtocol, msg: WSMessage) -> RuntimeEvent | None:
     preview_routing = getattr(agent, "preview_routing", None)
     if not callable(preview_routing):
         return None
@@ -91,11 +90,9 @@ def _build_routing_preview_event(agent: ChatAgentProtocol, msg: WSMessage) -> An
     )
     if preview_skills:
         payload = {**payload, "selected_skills": preview_skills}
-    return SimpleNamespace(
-        kind="status",
-        text=routing_status_text(payload),
+    return RuntimeEvent.status(
+        routing_status_text(payload),
         payload={**payload, "phase": "routing"},
-        timestamp=datetime.now(timezone.utc),
     )
 
 

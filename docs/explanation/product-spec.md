@@ -33,6 +33,14 @@ It is where a user:
 - attaches optional context such as files, URLs, or repo refs
 - watches reasoning, tool use, sandbox activity, and HITL state
 - inspects the final answer, summary, artifacts, and evidence
+- opens the workspace-local sidepanel with exactly `Trajectories`, `Graph`, and
+  `Volume` tabs
+
+The Workbench sidepanel is collapsible and resizable. `Trajectories` and
+`Graph` resolve trace data by durable chat session id or runtime
+`external_session_id`, and they fall back to live transcript and artifact data
+when MLflow traces are unavailable. `Volume` uses Daytona volume APIs for an
+inline file tree and preview split.
 
 ### Volumes
 
@@ -43,6 +51,9 @@ It is where a user:
 - inspects persisted files
 - retrieves generated artifacts
 - understands what survived beyond the live turn
+
+`/app/volumes` remains the full-page durable volume browser. It complements,
+but is not replaced by, the Workbench `Volume` sidepanel tab.
 
 ### Settings
 

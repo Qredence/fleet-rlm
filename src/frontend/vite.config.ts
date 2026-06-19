@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const isCi = process.env.CI === "true";
 
 export default defineConfig({
   lint: {
@@ -124,7 +123,7 @@ export default defineConfig({
           "src/components/ui/**/*.{ts,tsx}",
           "src/components/ai-elements/**/*.{ts,tsx}",
           "src/components/agent-elements/**/*.{ts,tsx}",
-          "src/components/patterns/**/*.{ts,tsx}",
+          "src/components/product/**/*.{ts,tsx}",
         ],
         rules: {
           "@typescript-eslint/no-explicit-any": "off",
@@ -133,8 +132,24 @@ export default defineConfig({
             {
               patterns: [
                 {
-                  group: ["@/screens/*"],
-                  message: "Shared components must not depend on screen-owned modules.",
+                  group: ["@/features/*", "@/features/*/**", "@/screens/*"],
+                  message: "Shared components must not depend on feature-owned modules.",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        files: ["src/routes/**/*.{ts,tsx}"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              patterns: [
+                {
+                  group: ["@/features/*/**"],
+                  message: "Routes must import feature entrypoints, not deep feature modules.",
                 },
               ],
             },
@@ -180,10 +195,8 @@ export default defineConfig({
                   group: [
                     "@/features/workspace/**",
                     "@/features/volumes/**",
-                    "!@/features/workspace/screen/workspace-canvas-panel",
-                    "!@/features/workspace/workspace-layout-contract",
-                    "!@/features/volumes/volumes-canvas-panel",
-                    "!@/features/volumes/volumes-layout-contract",
+                    "!@/features/workspace",
+                    "!@/features/volumes",
                   ],
                   message:
                     "Layout modules must import feature-owned panels through top-level feature contracts only.",
@@ -198,11 +211,8 @@ export default defineConfig({
   },
   plugins: [
     tanstackStart({
-      vite: { installDevServerMiddleware: true },
-      pages: [{ path: "/" }],
       prerender: {
-        enabled: !isCi,
-        crawlLinks: false,
+        enabled: false,
       },
     }),
     react(),
@@ -240,15 +250,15 @@ export default defineConfig({
     },
     warmup: {
       clientFiles: [
-        "src/app/app.tsx",
+        "src/app/App.tsx",
         "src/features/layout/root-layout.tsx",
         "src/features/workspace/screen/workspace-screen.tsx",
         "src/features/workspace/conversation/transcript/workspace-message-list.tsx",
         "src/features/workspace/composer/workspace-composer.tsx",
-        "src/features/settings/settings-screen.tsx",
+        "src/features/settings/screen/settings-screen.tsx",
         "src/features/settings/runtime-form.tsx",
-        "src/features/volumes/volumes-screen.tsx",
-        "src/features/volumes/volumes-canvas-panel.tsx",
+        "src/features/volumes/screen/volumes-screen.tsx",
+        "src/features/volumes/screen/volumes-canvas-panel.tsx",
       ],
     },
   },

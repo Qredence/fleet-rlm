@@ -3,11 +3,32 @@ from __future__ import annotations
 import importlib
 
 
+def _join_route_path(prefix: str, path: str) -> str:
+    joined = f"{prefix.rstrip('/')}/{path.lstrip('/')}"
+    return joined if joined.startswith("/") else f"/{joined}"
+
+
+def _route_paths(routes, *, prefix: str = "") -> set[str]:
+    paths: set[str] = set()
+    for route in routes:
+        raw_path = getattr(route, "path", None)
+        if raw_path:
+            paths.add(_join_route_path(prefix, raw_path))
+            continue
+        original_router = getattr(route, "original_router", None)
+        nested_routes = getattr(original_router, "routes", None)
+        include_context = getattr(route, "include_context", None)
+        include_prefix = str(getattr(include_context, "prefix", "") or "")
+        if nested_routes is not None:
+            paths.update(_route_paths(nested_routes, prefix=_join_route_path(prefix, include_prefix)))
+    return paths
+
+
 def test_build_api_router_includes_expected_route_tree():
     composition_module = importlib.import_module("fleet_rlm.api.routers._composition")
 
     router = composition_module.build_api_router()
-    route_paths = {route.path for route in router.routes}  # ty: ignore[unresolved-attribute]
+    route_paths = _route_paths(router.routes)
 
     assert router.prefix == "/api/v1"
     assert {

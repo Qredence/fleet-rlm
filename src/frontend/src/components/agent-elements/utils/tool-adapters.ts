@@ -113,6 +113,7 @@ export function mapToolInvocationToStep(
 
   if (toolName === "Bash") {
     step.bashCommand = args?.command ? String(args.command) : undefined;
+    step.bashLanguage = args?.language ? String(args.language) : undefined;
     if (toolInvocation.state === "result" && result) {
       if (typeof result === "string") {
         step.bashOutput = result;

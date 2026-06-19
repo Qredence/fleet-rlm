@@ -20,21 +20,23 @@ export function ImportEnvButton({ writeEnabled, mutations }: ImportEnvButtonProp
   };
 
   return (
-    <Field className={SETTINGS_FIELD_CLASSNAME}>
+    <Field orientation="responsive" className={SETTINGS_FIELD_CLASSNAME}>
       <FieldContent>
         <FieldTitle>Import from .env</FieldTitle>
         <FieldDescription>
           Create a provider profile from the current DSPY_* environment variables.
         </FieldDescription>
       </FieldContent>
-      <Button
-        variant="outline"
-        className="self-start rounded-lg"
-        disabled={!writeEnabled || mutations.importFromEnv.isPending}
-        onClick={handleImportEnv}
-      >
-        Import from .env
-      </Button>
+      <div className="flex min-w-0 flex-1 justify-start sm:justify-end">
+        <Button
+          variant="outline"
+          className="self-start rounded-lg"
+          disabled={!writeEnabled || mutations.importFromEnv.isPending}
+          onClick={handleImportEnv}
+        >
+          Import from .env
+        </Button>
+      </div>
     </Field>
   );
 }

@@ -120,7 +120,7 @@ jobs:
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
         run: |
           cd src/frontend
-          pnpm dlx playwright install --with-deps chromium
+          pnpm exec playwright install chromium
 
       - name: Frontend quality gate
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
@@ -160,14 +160,26 @@ jobs:
           cache: "pnpm"
           cache-dependency-path: "src/frontend/pnpm-lock.yaml"
 
-      - name: Build packaged frontend assets
+      - name: Install packaged frontend dependencies
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
         run: |
           cd src/frontend
           pnpm install --frozen-lockfile
-          ./node_modules/.bin/vp build
-          cd ../..
-          uv run python scripts/ensure_frontend_entrypoint.py
+
+      - name: Build packaged frontend assets
+        if: ${{ hashFiles('src/frontend/package.json') != '' }}
+        run: |
+          cd src/frontend
+          timeout 10m ./node_modules/.bin/vp build > /tmp/fleet-rlm-frontend-build.log 2>&1 || {
+            tail -n 200 /tmp/fleet-rlm-frontend-build.log
+            exit 1
+          }
+          tail -n 40 /tmp/fleet-rlm-frontend-build.log
+
+      - name: Stage packaged frontend assets
+        if: ${{ hashFiles('src/frontend/package.json') != '' }}
+        run: |
+          python scripts/ensure_frontend_entrypoint.py
           rm -rf src/fleet_rlm/ui/dist
           mkdir -p src/fleet_rlm/ui
           cp -R src/frontend/dist src/fleet_rlm/ui/dist

@@ -31,10 +31,9 @@ flowchart TB
 src/frontend/src/
 ├── routes/              # TanStack Router file tree and not-found/login/logout/signup routes
 ├── features/
-│   ├── layout/          # Shell chrome, route sync, sidebar, header, dialogs, canvas host
-│   ├── workspace/       # Chat-first execution workbench, transcript, inspector, run panel
-│   ├── volumes/         # Mounted Daytona volume browser and file preview flow
-│   ├── history/         # Session history list/detail and replay views
+│   ├── layout/          # Shell chrome, route sync, sidebar, header, dialogs
+│   ├── workspace/       # Chat-first workbench plus workspace-local sidepanel
+│   ├── volumes/         # Full-page mounted Daytona volume browser
 │   ├── optimization/    # GEPA prompt optimization UI
 │   └── settings/        # Settings dialog/page and runtime settings forms
 ├── lib/
@@ -42,12 +41,13 @@ src/frontend/src/
 │   └── rlm-api/         # REST and websocket clients plus generated API types
 ├── stores/              # Shell/navigation state shared across the app
 ├── components/ui/       # shadcn/Base UI primitives and thin local extensions
-├── components/ai-elements/  # AI Elements rendering primitives
+├── components/agent-elements/ # Canonical chat and tool transcript UI
+├── components/ai-elements/  # Legacy composer-only helpers
 ├── components/product/  # App-owned reusable composition built from registry layers
 └── app/                 # App bootstrap/providers
 ```
 
-Route wrappers should point at `features/*` modules directly.
+Route wrappers should point at `features/*/index.ts` entrypoints directly.
 
 ## Route Tree
 
@@ -64,9 +64,10 @@ The live route tree is intentionally small and explicit:
 The shell route files are thin wrappers only:
 
 - `src/routes/app.tsx` mounts `RootLayout`
-- `src/routes/app/workspace.tsx` lazy-loads `features/workspace/workspace-screen`
-- `src/routes/app/volumes.tsx` lazy-loads `features/volumes/volumes-screen`
-- `src/routes/app/settings.tsx` lazy-loads `features/settings/settings-screen`
+- `src/routes/app/workspace.tsx` lazy-loads `features/workspace`
+- `src/routes/app/volumes.tsx` lazy-loads `features/volumes`
+- `src/routes/app/optimization.tsx` lazy-loads `features/optimization`
+- `src/routes/app/settings.tsx` lazy-loads `features/settings`
 
 ## Shell And Layout Behavior
 
@@ -74,25 +75,40 @@ The shell route files are thin wrappers only:
 
 - `AppProviders`
 - the sidebar, header, and route outlet
-- the desktop resizable split between content and canvas
-- the mobile bottom sheet canvas
 - login and settings dialogs
 - the command palette
 - the toast host
 
 `RouteSync` is the URL-to-state bridge. It keeps the shell state in sync with
-the current route, and it clears the selected volume file when leaving Volumes.
+the current route, and it clears full-page volume selection when leaving Volumes.
 The reverse direction is handled by navigation helpers and route-triggered
 actions.
 
 Important shell behavior:
 
-- Workbench keeps the inspector/canvas available.
-- Volumes opens the canvas automatically so the file preview stays adjacent to
-  the browser.
-- Settings closes the canvas.
-- Mobile and desktop share the same route ownership, but the canvas is rendered
-  as a bottom sheet on mobile.
+- Workbench owns its own collapsible and resizable sidepanel beside the chat.
+- Volumes remains the full-page durable storage browser at `/app/volumes`.
+- Settings does not own workspace sidepanel state.
+- Mobile and desktop share the same route ownership; responsive sidepanel
+  presentation stays inside the owning feature.
+
+## Workspace Sidepanel
+
+Workspace chat is the primary workbench surface. The sidepanel is
+workspace-local and has exactly three tabs:
+
+- `Trajectories`
+- `Graph`
+- `Volume`
+
+`Trajectories` and `Graph` resolve traces from the durable chat session id
+first, then from the runtime `external_session_id` when the backend exposes
+one. If MLflow traces are unavailable, both tabs should fall back to live
+transcript rows and artifact summaries already present in workspace state.
+
+`Volume` uses the Daytona volume APIs and renders an inline file preview with a
+resizable tree/preview split. It is a workspace convenience view, not a
+replacement for the `/app/volumes` route.
 
 ## State And Runtime Model
 
@@ -105,12 +121,14 @@ The frontend uses three main state layers:
 
 Key stores and adapters:
 
-- `src/stores/navigation-store.ts` owns active nav and canvas state.
+- `src/stores/navigation-store.ts` owns active nav state.
 - `src/features/workspace/use-workspace.ts` owns workspace session history,
   backend streaming, and runtime orchestration.
 - `src/lib/workspace/chat-store.ts` owns the live transcript and session id.
 - `src/lib/workspace/run-workbench-store.ts` owns execution summary state and
   artifact hydration.
+- `src/lib/workspace/workspace-ui-store.ts` owns workspace-local UI state such
+  as sidepanel visibility, selected tab, and split sizing.
 - `src/lib/workspace/backend-chat-event-adapter.ts` turns websocket chat frames
   into transcript rows.
 - `src/lib/workspace/backend-artifact-event-adapter.ts` turns execution steps

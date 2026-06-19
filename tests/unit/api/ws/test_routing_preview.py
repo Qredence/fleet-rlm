@@ -35,3 +35,22 @@ def test_routing_preview_passes_turn_context_and_skills(tmp_path) -> None:
     assert agent.last_kwargs["turn_context"] is not None
     assert event.payload["routing_decision"] == "large_context_rlm"
     assert "selected_skills" in event.payload
+
+
+def test_routing_preview_serializes_to_websocket_frame() -> None:
+    from fleet_rlm.api.routers.ws.stream_events import build_stream_event_dict
+
+    agent = _PreviewAgent()
+    msg = WSMessage(
+        type="message",
+        content="Summarize https://example.com with routing preview.",
+        execution_mode="auto",
+    )
+    event = _build_routing_preview_event(agent, msg)
+
+    assert event is not None
+    frame = build_stream_event_dict(event=event, payload=event.payload)
+
+    assert frame["kind"] == "execution_step"
+    assert frame["payload"]["source_type"] == "status"
+    assert frame["payload"]["phase"] == "routing"

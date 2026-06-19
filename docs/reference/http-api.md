@@ -1044,7 +1044,7 @@ Sent when an error occurs that doesn't fit the event stream model.
 
 ### `WS /api/v1/ws/execution/events`
 
-Dedicated passive execution observability stream for Artifact Canvas consumers. Provides structured execution graph events separate from the chat stream.
+Dedicated passive execution observability stream for workbench sidepanel consumers. Provides structured execution graph events separate from the chat stream.
 
 **Connection:**
 

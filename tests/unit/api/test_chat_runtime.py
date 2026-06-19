@@ -14,6 +14,7 @@ def test_chat_agent_builder_kwargs_forwards_rlm_limits_from_server_config() -> N
         rlm_max_iterations=31,
         rlm_max_llm_calls=17,
         agent_max_output_chars=12_345,
+        rlm_action_max_tokens=4096,
     )
     runtime = PreparedChatRuntime(
         cfg=cfg,  # type: ignore[arg-type]
@@ -31,3 +32,4 @@ def test_chat_agent_builder_kwargs_forwards_rlm_limits_from_server_config() -> N
     assert kwargs["rlm_max_iterations"] == 31
     assert kwargs["rlm_max_llm_calls"] == 17
     assert kwargs["rlm_max_output_chars"] == 12_345
+    assert kwargs["rlm_action_max_tokens"] == 4096

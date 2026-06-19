@@ -195,6 +195,45 @@ function resolveFinalAssistantText(text: string, payload?: Record<string, unknow
   return preferred ?? text;
 }
 
+function traceMetadataFromPayload(
+  payload?: Record<string, unknown>,
+): ChatMessage["traceMetadata"] | undefined {
+  const mlflowTraceId = asOptionalText(payload?.mlflow_trace_id ?? payload?.mlflowTraceId);
+  const mlflowClientRequestId = asOptionalText(
+    payload?.mlflow_client_request_id ?? payload?.mlflowClientRequestId,
+  );
+  if (!mlflowTraceId && !mlflowClientRequestId) return undefined;
+  return {
+    ...(mlflowTraceId ? { mlflowTraceId } : {}),
+    ...(mlflowClientRequestId ? { mlflowClientRequestId } : {}),
+  };
+}
+
+function attachTraceMetadataToLatestAssistant(
+  messages: ChatMessage[],
+  payload?: Record<string, unknown>,
+): ChatMessage[] {
+  const traceMetadata = traceMetadataFromPayload(payload);
+  if (!traceMetadata) return messages;
+  const lastUserIndex = messages.findLastIndex((message) => message.type === "user");
+
+  for (let index = messages.length - 1; index > lastUserIndex; index -= 1) {
+    const message = messages[index];
+    if (!message || message.type !== "assistant") continue;
+    const next = [...messages];
+    next[index] = {
+      ...message,
+      traceMetadata: {
+        ...message.traceMetadata,
+        ...traceMetadata,
+      },
+    };
+    return next;
+  }
+
+  return messages;
+}
+
 function readGuardrailWarnings(payload: Record<string, unknown> | undefined): string[] {
   const raw = payload?.guardrail_warnings;
   if (!Array.isArray(raw)) return [];
@@ -232,6 +271,7 @@ function applyCanonicalExecutionCompleted(
   }
 
   let next = completeAssistant(messages, resolveFinalAssistantText(text, payload));
+  next = attachTraceMetadataToLatestAssistant(next, payload);
   next = finishReasoning(next);
   next = finalizeTraceParts(next);
   next = appendFinalTrajectoryThoughts(next, payload);

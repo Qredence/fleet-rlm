@@ -53,9 +53,11 @@ pnpm run dev
 With the app running, smoke-test:
 
 1. Workbench loads and the composer is usable.
-2. One secondary surface loads: `Settings`, `Volumes`, `Optimization`, or `History`.
-3. `GET /health` returns a healthy response.
-4. `GET /api/v1/runtime/status` returns structured runtime status, even when live Daytona or LLM
+2. One secondary surface loads: `Settings` or full-page `Volumes`.
+3. The Workbench sidepanel can show its `Trajectories`, `Graph`, and `Volume`
+   tabs without replacing chat as the primary surface.
+4. `GET /health` returns a healthy response.
+5. `GET /api/v1/runtime/status` returns structured runtime status, even when live Daytona or LLM
    credentials are not configured.
 
 Use the Codex browser, Playwright, or the local browser tool already available in the session. Do

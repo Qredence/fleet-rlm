@@ -21,15 +21,24 @@ export function normalizeToolPart(part: unknown): unknown {
   if (!isRecord(part)) return part;
   if (typeof part.type !== "string" || !part.type.startsWith("tool-")) return part;
 
+  const rawPart = part as AnyRecord;
   const normalizedInput = parseStructuredJson(part.input);
   const normalizedOutput = parseStructuredJson(part.output);
   const normalizedResult = parseStructuredJson(part.result);
+  const normalizedNestedTools = Array.isArray(rawPart.nestedTools)
+    ? rawPart.nestedTools.map((nestedPart: unknown) => normalizeToolPart(nestedPart))
+    : rawPart.nestedTools;
 
   const inputChanged = normalizedInput !== part.input;
   const outputChanged = normalizedOutput !== part.output;
   const resultChanged = normalizedResult !== part.result;
+  const nestedToolsChanged =
+    Array.isArray(rawPart.nestedTools) &&
+    normalizedNestedTools.some(
+      (nestedPart: unknown, index: number) => nestedPart !== rawPart.nestedTools[index],
+    );
 
-  if (!inputChanged && !outputChanged && !resultChanged) {
+  if (!inputChanged && !outputChanged && !resultChanged && !nestedToolsChanged) {
     return part;
   }
 
@@ -37,6 +46,7 @@ export function normalizeToolPart(part: unknown): unknown {
   if (inputChanged) normalizedPart.input = normalizedInput;
   if (outputChanged) normalizedPart.output = normalizedOutput;
   if (resultChanged) normalizedPart.result = normalizedResult;
+  if (nestedToolsChanged) normalizedPart.nestedTools = normalizedNestedTools;
   return normalizedPart;
 }
 
@@ -47,6 +57,5 @@ export function normalizeAssistantToolParts(parts: unknown[]): unknown[] {
     if (normalizedPart !== part) changed = true;
     return normalizedPart;
   });
-
   return changed ? normalizedParts : parts;
 }

@@ -11,11 +11,11 @@ The evaluation subsystem provides:
 - **Shared dataset helpers** — consistent loading, validation, and splitting
 - **Reusable scoring primitives** — composable scoring helpers for metrics
 - **Single optimization pipeline** — dataset → `dspy.Example` → optimizer →
-  `dspy.Evaluate` → save + manifest, with the optimizer as a parameter
-  (GEPA default, MIPROv2 optional)
+  `dspy.Evaluate` → save + manifest, with GEPA as the only public optimizer
 - **Artifact/manifest discipline** — Daytona-backed storage with local fallback
 - **Unified CLI** — `fleet-rlm optimize <module> <dataset>`
 - **Frontend module picker** — Optimization page with registry-driven selection
+  and distilled trace-bundle handoff from completed workspace sessions
 
 Optimization runs are compute-intensive and should not be invoked in the live
 request path; use the CLI or the async `POST /api/v1/optimization/runs`
@@ -121,14 +121,16 @@ result = builder.build()  # returns ScoreWithFeedback
 
 Each module defines its own `build_*_feedback_metric()` function that returns
 a GEPA-compatible metric callable. Metrics may use shared scoring primitives
-or implement entirely custom scoring logic.
+or implement entirely custom scoring logic. Keep the `trace`, `pred_name`, and
+`pred_trace` parameters in metric signatures so GEPA can request
+component-level feedback.
 
 ## Running Optimization
 
 ### CLI
 
 ```bash
-# Optimize a registered module (GEPA by default)
+# Optimize a registered module with GEPA
 fleet-rlm optimize longcot-reasoner traces.json
 
 # With options
@@ -136,7 +138,13 @@ fleet-rlm optimize longcot-reasoner data.jsonl \
   --output-path optimized_longcot.json \
   --train-ratio 0.75 \
   --auto medium \
-  --optimizer miprov2 \
+  --report
+
+# Optimize a markdown skill artifact with offline trace context
+fleet-rlm optimize skill data.jsonl \
+  --skill-name optimization \
+  --trace-bundle-path artifacts/traces/optimization-failures.jsonl \
+  --auto medium \
   --report
 
 # List available modules
@@ -156,7 +164,7 @@ result = run_module_optimization(
     output_path="optimized.json",
     train_ratio=0.8,
     auto="light",
-    optimizer="gepa",  # or "miprov2"
+    optimizer="gepa",
 )
 print(result["validation_score"])
 ```
@@ -166,9 +174,9 @@ print(result["validation_score"])
 The Optimization page provides two tabs:
 
 - **New Run** — module picker that auto-populates the program spec and shows
-  required dataset keys. Select a module, provide a dataset path, and click
-  "Run GEPA". Runs are submitted asynchronously and the UI switches to the
-  Run History tab automatically.
+  required dataset keys. Select a module, choose an existing/uploaded/path
+  dataset, optionally attach distilled trace bundle paths from a workspace
+  session export, and start the async GEPA run.
 - **Run History** — lists all optimization runs with status badges, relative
   timestamps, and a detail panel. Click any run to expand its metadata
   (program spec, optimizer, intensity, train ratio, dataset, phase, duration,
@@ -181,6 +189,11 @@ The Optimization page provides two tabs:
 curl -X POST http://localhost:8000/api/v1/optimization/runs \
   -H "Content-Type: application/json" \
   -d '{"module_slug": "longcot-reasoner", "dataset_path": "traces.json", "auto": "light", "train_ratio": 0.8, "optimizer": "gepa"}'
+
+# Async skill optimization run
+curl -X POST http://localhost:8000/api/v1/optimization/runs \
+  -H "Content-Type: application/json" \
+  -d '{"skill_name": "optimization", "dataset_path": "skill_cases.jsonl", "trace_bundle_paths": ["artifacts/traces/optimization-failures.jsonl"], "auto": "medium", "optimizer": "gepa"}'
 
 # List runs (with optional status filter and pagination)
 curl -s http://localhost:8000/api/v1/optimization/runs?status=completed&limit=10
@@ -202,6 +215,13 @@ Async runs progress through these phases:
 If any phase fails, the run transitions to `failed` with an error message.
 On server restart, any runs left in `running` status are automatically
 recovered and marked as `failed` with a "Server restarted" message.
+
+### Run comparison (API only for v1)
+
+`GET /api/v1/optimization/runs/compare` compares two completed GEPA runs and
+returns score deltas, prompt diffs, and artifact references. The Optimization
+page at `/app/optimization` exposes run history and detail review in v1; a
+dedicated Compare tab UI is planned for v1.1.
 
 ## Artifacts and Manifests
 

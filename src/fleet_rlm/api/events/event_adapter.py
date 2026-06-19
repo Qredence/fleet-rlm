@@ -8,23 +8,7 @@ from typing import Any, cast
 from fleet_rlm.runtime.execution.streaming_events import is_terminal_stream_event_kind
 
 from .events import BackendEvent, BackendEventKind, ExecutionActorKind, RuntimeEventContext
-
-_BACKEND_EVENT_KIND_VALUES = frozenset(
-    {
-        "turn_started",
-        "status",
-        "reasoning",
-        "tool_call",
-        "tool_result",
-        "sandbox_exec",
-        "rlm_delegate",
-        "warning",
-        "clarification",
-        "text",
-        "turn_completed",
-        "turn_failed",
-    }
-)
+from .wire_source_type import derive_wire_source_type
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -69,19 +53,7 @@ def _event_timestamp(raw_timestamp: Any) -> datetime:
 
 
 def _derive_backend_kind(kind: str, payload: dict[str, Any]) -> BackendEventKind:
-    if kind == "done":
-        return "turn_completed"
-    if kind == "error":
-        return "turn_failed"
-    if kind == "status":
-        phase = _as_str(payload.get("phase"))
-        if phase == "sandbox_exec":
-            return "sandbox_exec"
-        if phase == "delegate" or payload.get("delegate") is True:
-            return "rlm_delegate"
-    if kind in _BACKEND_EVENT_KIND_VALUES:
-        return cast(BackendEventKind, kind)
-    return "text"
+    return cast(BackendEventKind, derive_wire_source_type(kind, payload))
 
 
 def extract_runtime_context(payload: dict[str, Any]) -> RuntimeEventContext | None:

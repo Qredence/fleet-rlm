@@ -15,6 +15,7 @@ import hashlib
 import logging
 import os
 import re
+import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
@@ -643,11 +644,18 @@ def _build_local_workspace_snapshot(*, query: str, context: str) -> str | None:
         "# Fleet-RLM Local Workspace Snapshot",
         f"Repository root: {root}",
         "",
-        "## File manifest",
-        manifest,
-        "",
-        "## Selected file excerpts",
     ]
+    git_context = _local_git_change_summary(root)
+    if git_context:
+        sections.extend(["## Git changes", git_context, ""])
+    sections.extend(
+        [
+            "## File manifest",
+            manifest,
+            "",
+            "## Selected file excerpts",
+        ]
+    )
     remaining_chars = 180_000
     for path in selected:
         rel = path.relative_to(root)
@@ -672,9 +680,14 @@ def _needs_local_workspace_snapshot(text: str) -> bool:
     lowered = text.lower()
     indicators = {
         "codebase",
+        "code",
+        "changes",
+        "diff",
         "repository",
         "implementation",
         "inspect",
+        "review",
+        "uncommitted",
         "architecture",
         "sandbox",
         "budget",
@@ -687,6 +700,47 @@ def _needs_local_workspace_snapshot(text: str) -> bool:
         "rlm",
     }
     return any(indicator in lowered for indicator in indicators)
+
+
+def _local_git_change_summary(root: Path) -> str | None:
+    """Return bounded git status/diff context for local workspace review prompts."""
+
+    if not (root / ".git").exists():
+        return None
+
+    commands = (
+        ("status", ["git", "status", "--short"]),
+        ("diff_stat", ["git", "diff", "--stat"]),
+        ("staged_diff_stat", ["git", "diff", "--cached", "--stat"]),
+        ("diff", ["git", "diff", "--", ":(exclude)uv.lock"]),
+        ("staged_diff", ["git", "diff", "--cached", "--", ":(exclude)uv.lock"]),
+    )
+    sections: list[str] = []
+    remaining_chars = 80_000
+    for label, command in commands:
+        try:
+            result = subprocess.run(
+                command,
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            output = f"<failed to collect {label}: {exc}>"
+        else:
+            output = (result.stdout or result.stderr or "").strip()
+        if not output:
+            continue
+        section = f"### {label}\n```text\n{output}\n```"
+        if len(section) > remaining_chars:
+            section = section[: max(0, remaining_chars)] + "\n...<truncated>"
+        sections.append(section)
+        remaining_chars -= len(section)
+        if remaining_chars <= 0:
+            break
+    return "\n\n".join(sections) or None
 
 
 def _workspace_snapshot_candidates(root: Path) -> list[Path]:

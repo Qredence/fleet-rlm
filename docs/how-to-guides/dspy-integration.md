@@ -484,7 +484,7 @@ Fleet also records an `rlm_available_tools` `LLM` span that advertises the
 that schema as the available-tool set and then evaluate the concrete
 `repl_execute` `TOOL` spans as the calls that actually ran.
 
-### Optimize with MIPROv2
+### Optimize with GEPA
 
 Use collected traces for DSPy optimization:
 

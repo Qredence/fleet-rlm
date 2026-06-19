@@ -4,6 +4,65 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [0.6.0] - 2026-06-17
+
+### Added
+
+- **Change:** Added a workspace-local, collapsible Workbench sidepanel with `Trajectories`, `Graph`, and `Volume` tabs.
+  **Outcome:** Chat remains the primary workspace surface while trace inspection, graph visualization, and Daytona volume preview stay available in a focused right-side inspector.
+- **Change:** Added session trace timeline and React Flow graph renderers backed by persisted MLflow/debug spans.
+  **Outcome:** Completed workspace runs can be audited chronologically or as parent-child span relationships without selecting legacy shell canvas tabs.
+- **Change:** Added an inline Daytona volume browser with searchable tree, resizable desktop split, and selected-file preview.
+  **Outcome:** Users can inspect workspace volume files without navigating away from `/app/workspace`.
+- **Change:** Added per-trace performance summaries, span durations, token counts, output sizes, selected-skill metadata, and adapter fallback signals to the session trace debug contract.
+  **Outcome:** The Workbench sidepanel can diagnose slow or noisy RLM runs directly from the same durable trace lookup used by the timeline and graph.
+- **Change:** Added active scaffold-skill injection as a sandbox variable for RLM turns, document turns, and workspace turns.
+  **Outcome:** Selected skill markdown is available to the REPL when needed without stuffing full instructions into every model prompt.
+- **Change:** Added a bounded RLM action-generation token budget with runtime settings metadata and trace attribution.
+  **Outcome:** Operators can cap action prompts separately from REPL output truncation and inspect the effective budget in trace diagnostics.
+
+### Changed
+
+- **Change:** Reworked Workbench layout around a resizable chat/sidepanel split with a subtle resize handle and mobile bottom-sheet fallback.
+  **Outcome:** The sidepanel starts closed, can resize up to 75% of the workspace width, and preserves selected turn/tab/file state when collapsed.
+- **Change:** Hardened workspace trace lookup to resolve both durable chat-session ids and runtime websocket `external_session_id` values.
+  **Outcome:** `Trajectories` and `Graph` can populate from live session traces after a message completes, even before the frontend has a durable session id.
+- **Change:** Tightened markdown, code block, and graph detail containment inside the Workbench sidepanel.
+  **Outcome:** Long trace text, paths, code snippets, and selected-node summaries wrap within the panel instead of creating horizontal overflow.
+- **Change:** Consolidated websocket chat streaming on canonical `RuntimeEvent` objects with shared wire source-type projection.
+  **Outcome:** Runtime, persistence, and Web UI consumers now share one typed streaming contract for execution start, step, and completion frames.
+- **Change:** Corrected delayed Daytona startup notifications to emit `status` events and preserve runtime payload fields when enriching websocket frames.
+  **Outcome:** The Workbench receives progress updates without duplicate `execution_started` frames, and partial payload overrides no longer drop event metadata.
+- **Change:** GEPA is now the only supported public optimizer; MIPROv2 paths were removed from the unified optimization pipeline.
+  **Outcome:** CLI, API, manifests, and the Optimization UI all target one optimizer contract.
+- **Change:** Hardened session trace export with server-first session resolution and validated optional `mlflow_session_id` hints.
+  **Outcome:** Cross-tenant trace export spoofing is blocked and workspace sessions resolve to durable MLflow session ids.
+- **Change:** Split optimization run reporting into `quality/optimization_report.py` with typed review-bundle fields on run detail responses.
+  **Outcome:** The Optimization UI can read holdout promotion readiness without untyped manifest drilling.
+- **Change:** Reorganized frontend feature modules behind top-level feature entrypoints and moved runtime/UI hooks into scoped hook namespaces.
+  **Outcome:** Routes and layout modules consume stable public feature contracts while import-boundary linting blocks deep feature coupling.
+- **Change:** Migrated the remaining shadcn-style primitives from Radix wrappers to Base UI primitives and refreshed the frontend dependency set.
+  **Outcome:** The UI stack is aligned on Base UI while preserving the existing button, tooltip, popover, dialog, menu, scroll-area, and toggle contracts.
+- **Change:** Compact local chat-history persistence now stores session previews and durable session ids instead of full rendered transcripts and artifact payloads.
+  **Outcome:** Local storage quota failures no longer break chat saves, while durable sessions reload transcripts from the backend turn history.
+- **Change:** Hardened TanStack Start static entrypoint generation and packaged UI serving for `dist/client` builds.
+  **Outcome:** `fleet web`, package builds, and FastAPI SPA mounting serve the fresh client entrypoint and avoid falling back to stale root `dist/index.html` files.
+- **Change:** Tightened Daytona sandbox helper availability for native file/search helpers, workspace context, and default active-skills variables.
+  **Outcome:** RLM REPL actions can inspect staged context, files, and selected skills with lower prompt overhead and fewer bridge round trips.
+- **Change:** Compacted long REPL histories before RLM action generation and scoped action generation through `JSONAdapter`.
+  **Outcome:** Long-running RLM sessions spend fewer tokens on prior tool output and avoid avoidable chat-adapter fallback retries.
+
+### Removed
+
+- **Change:** Removed MIPROv2 from the public optimization surface.
+  **Outcome:** Review bundles, CLI flags, and API requests no longer advertise a second optimizer.
+- **Change:** Removed retired Tool UI option-list/shared action helpers after the Agent Elements tool rendering path became canonical.
+  **Outcome:** The frontend has fewer parallel tool-rendering contracts to maintain.
+
+### Notes
+
+- `GET /api/v1/optimization/runs/compare` remains API-ready; the Compare tab UI is deferred to v1.1.
+
 ## [0.5.50] - 2026-06-11
 
 ### Added
@@ -1111,6 +1170,7 @@ All notable changes to this project are documented in this file.
 - Removed checked-in `__pycache__` directories under `src/fleet_rlm/`.
 - Moved non-runtime memory-topology notes out of package source and into docs.
 
+[0.6.0]: https://github.com/Qredence/fleet-rlm/compare/v0.5.50...v0.6.0
 [0.5.50]: https://github.com/Qredence/fleet-rlm/compare/v0.5.40...v0.5.50
 [0.5.40]: https://github.com/Qredence/fleet-rlm/compare/v0.5.31...v0.5.40
 [0.5.31]: https://github.com/Qredence/fleet-rlm/compare/v0.5.3...v0.5.31

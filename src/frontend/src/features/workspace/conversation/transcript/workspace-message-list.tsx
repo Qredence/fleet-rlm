@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import type { ChatStatus } from "ai";
 
 import { AgentChat } from "@/components/agent-elements/agent-chat";
@@ -41,6 +41,7 @@ interface WorkspaceMessageListProps {
     delegate_small?: string | null;
   };
   onOpenModelSettings?: () => void;
+  rightActions?: ReactNode;
   showStatusBar?: boolean;
   className?: string;
 }
@@ -68,6 +69,7 @@ export function WorkspaceMessageList({
   runtimeWarning,
   activeModels,
   onOpenModelSettings,
+  rightActions,
   showStatusBar = true,
   className,
 }: WorkspaceMessageListProps) {
@@ -112,6 +114,7 @@ export function WorkspaceMessageList({
             onExecutionModeChange={onExecutionModeChange}
             activeModels={activeModels}
             onOpenModelSettings={onOpenModelSettings}
+            rightActions={rightActions}
             showStatusBar={showStatusBar}
             runtimeWarning={runtimeWarning}
           />
@@ -124,6 +127,7 @@ export function WorkspaceMessageList({
       onExecutionModeChange,
       onOpenModelSettings,
       placeholder,
+      rightActions,
       runtimeWarning,
       showStatusBar,
     ],
@@ -160,8 +164,6 @@ export function WorkspaceMessageList({
       onSelect: (item: { value?: string; label: string }) =>
         onSuggestionClick(item.value ?? item.label),
       className: "w-full justify-center",
-      itemClassName:
-        "h-auto rounded-xl border border-border bg-card/50 px-4 py-3 text-left whitespace-normal hover:bg-card",
     }),
     [onSuggestionClick],
   );

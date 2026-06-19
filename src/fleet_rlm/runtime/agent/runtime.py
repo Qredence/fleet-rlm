@@ -19,8 +19,7 @@ from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
 from fleet_rlm.runtime.agent import runtime_helpers as rh
 from fleet_rlm.runtime.agent import runtime_mcp, runtime_streaming
 from fleet_rlm.runtime.agent.runtime_history import maybe_refresh_summary
-from fleet_rlm.runtime.events import RuntimeEventContext
-from fleet_rlm.runtime.schemas import StreamEvent
+from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventContext
 from fleet_rlm.runtime.tools import discover_tools
 from fleet_rlm.runtime.tools.binding import bind_runtime_tools, execute_sandbox_tool
 
@@ -48,6 +47,7 @@ class AgentRuntime:
         rlm_max_iterations: int | None = None,
         rlm_max_llm_calls: int | None = None,
         rlm_max_output_chars: int | None = None,
+        rlm_action_max_tokens: int | None = None,
         history_max_turns: int | None = 6,
         extra_tools: list[Any] | None = None,
         repository: Any | None = None,
@@ -77,6 +77,7 @@ class AgentRuntime:
         self.rlm_max_iterations = rlm_max_iterations if rlm_max_iterations is not None else max_iters
         self.rlm_max_llm_calls = rlm_max_llm_calls if rlm_max_llm_calls is not None else 50
         self.rlm_max_output_chars = rlm_max_output_chars
+        self.rlm_action_max_tokens = rlm_action_max_tokens
 
         # Conversation summary for context compression (Phase 2)
         self.conversation_summary: str = ""
@@ -120,6 +121,7 @@ class AgentRuntime:
                 max_iterations=self.rlm_max_iterations,
                 max_llm_calls=self.rlm_max_llm_calls,
                 max_output_chars=self.rlm_max_output_chars,
+                action_max_tokens=self.rlm_action_max_tokens,
                 summary_interval=self._summary_interval,
             )
         return FleetAgent(
@@ -205,6 +207,7 @@ class AgentRuntime:
                 "max_iterations": self.rlm_max_iterations,
                 "max_llm_calls": self.rlm_max_llm_calls,
                 "max_output_chars": self.rlm_max_output_chars,
+                "action_max_tokens": self.rlm_action_max_tokens,
             },
         }
 
@@ -396,7 +399,7 @@ class AgentRuntime:
         context_paths: list[str] | None = None,
         batch_concurrency: int | None = None,
         volume_name: str | None = None,
-    ) -> AsyncIterator[StreamEvent]:
+    ) -> AsyncIterator[RuntimeEvent]:
         """Stream one chat turn through the agent, yielding events.
 
         This is the canonical entrypoint used by the websocket streaming
@@ -435,7 +438,7 @@ class AgentRuntime:
                 message=message,
                 cancel_check=cancel_check,
             ):
-                yield rh.stream_event_from_runtime_event(event)
+                yield event
         finally:
             self._turn_context = None
 

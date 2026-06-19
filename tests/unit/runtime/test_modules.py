@@ -20,7 +20,7 @@ def test_interpreter_delegation_tools_collects_sub_rlm_callables() -> None:
 def test_sandbox_types_serialize_to_json_dicts() -> None:
     import json
 
-    from fleet_rlm.runtime.sandbox_types import LargeDocument, WorkspaceContext
+    from fleet_rlm.runtime.sandbox_types import ActiveSkills, LargeDocument, WorkspaceContext
 
     doc = LargeDocument(text="body text", source_url="https://example.com", metadata={"status": "ok"})
     payload = json.loads(doc.to_sandbox().decode("utf-8"))
@@ -33,6 +33,20 @@ def test_sandbox_types_serialize_to_json_dicts() -> None:
     assert payload["context_paths"] == ["/tmp/a.pdf"]
     assert payload["manifest"] == {"/tmp/a.pdf": "1024"}
     assert "manifest.json" in ctx.rlm_preview()
+
+    skills = ActiveSkills(
+        selected=["long-context"],
+        catalog={"long-context": "Process large context"},
+        instructions={"long-context": "SECRET FULL MARKDOWN"},
+        sources={"long-context": "scaffold:fleet_rlm.scaffold.skills.long-context.SKILL.md"},
+    )
+    payload = json.loads(skills.to_sandbox().decode("utf-8"))
+    assert payload["selected"] == ["long-context"]
+    assert payload["instructions"]["long-context"] == "SECRET FULL MARKDOWN"
+    preview = skills.rlm_preview()
+    assert "long-context" in preview
+    assert "Process large context" in preview
+    assert "SECRET FULL MARKDOWN" not in preview
 
 
 def test_create_runtime_rlm_without_llm_tools_removes_callback_instructions() -> None:
@@ -97,11 +111,186 @@ def test_streaming_rlm_emits_action_and_result_steps() -> None:
     assert events[-1]["output"] == "12"
 
 
+def test_streaming_rlm_records_real_repl_execution_span(monkeypatch) -> None:
+    from fleet_rlm.integrations.observability import mlflow_context
+    from fleet_rlm.runtime.agent.signatures import RLMTurnSignature
+    from fleet_rlm.runtime.modules.factory import create_runtime_rlm
+
+    captured: list[dict[str, Any]] = []
+
+    class FakeSpan:
+        def __init__(self, name: str, span_type: str | None, attributes: dict[str, Any] | None) -> None:
+            self.record = {"name": name, "span_type": span_type, "attributes": attributes or {}, "status": "OK"}
+
+        def __enter__(self) -> "FakeSpan":
+            captured.append(self.record)
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def set_inputs(self, inputs: Any) -> None:
+            self.record["inputs"] = inputs
+
+        def set_outputs(self, outputs: Any) -> None:
+            self.record["outputs"] = outputs
+
+        def set_status(self, status: str) -> None:
+            self.record["status"] = status
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: object(),
+        start_span=lambda name, span_type=None, attributes=None: FakeSpan(name, span_type, attributes),
+    )
+    monkeypatch.setattr(
+        mlflow_context,
+        "_runtime_module",
+        lambda: SimpleNamespace(
+            _import_mlflow=lambda: fake_mlflow,
+            logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        ),
+    )
+
+    class FakeRepl:
+        def execute(self, code: str, variables: dict[str, Any]) -> str:
+            assert code == "print(user_request)"
+            assert variables == {"user_request": "hello"}
+            return "hello"
+
+    rlm = create_runtime_rlm(
+        signature=RLMTurnSignature,
+        interpreter=SimpleNamespace(),
+        max_iterations=2,
+        max_llm_calls=3,
+        verbose=False,
+    )
+    rlm.generate_action.current_iteration = 2
+
+    result = rlm._execute_code(FakeRepl(), "print(user_request)", {"user_request": "hello"})
+
+    assert result == "hello"
+    assert captured[0]["name"] == "fleet_rlm.rlm_repl_execute"
+    assert captured[0]["span_type"] == "TOOL"
+    assert captured[0]["attributes"]["fleet_rlm.tool_name"] == "repl_execute"
+    assert captured[0]["attributes"]["fleet_rlm.rlm_iteration"] == "2"
+    assert captured[0]["inputs"]["code"] == "print(user_request)"
+    assert captured[0]["outputs"]["status"] == "ok"
+    assert captured[0]["outputs"]["result"] == "hello"
+
+
+def test_streaming_rlm_scopes_json_adapter_without_disabling_semantic_callbacks(monkeypatch) -> None:
+    import dspy
+
+    from fleet_rlm.runtime.agent.signatures import RLMTurnSignature
+    from fleet_rlm.runtime.modules.factory import create_runtime_rlm
+    from fleet_rlm.runtime.sandbox_types import ActiveSkills
+
+    interpreter = SimpleNamespace(semantic_callbacks_enabled=True)
+    observed: dict[str, Any] = {}
+
+    rlm = create_runtime_rlm(
+        signature=RLMTurnSignature,
+        interpreter=interpreter,
+        max_iterations=2,
+        max_llm_calls=3,
+        verbose=False,
+    )
+
+    def fake_forward(self: Any, **kwargs: Any) -> dspy.Prediction:
+        _ = self, kwargs
+        observed["semantic_callbacks_enabled_during_call"] = interpreter.semantic_callbacks_enabled
+        observed["adapter_during_call"] = dspy.settings.adapter
+        return dspy.Prediction(response="done")
+
+    monkeypatch.setattr(
+        "fleet_rlm.runtime.modules.factory._DSPY_RLM_BASE.forward",
+        fake_forward,
+    )
+
+    result = rlm.forward(
+        user_request="inspect", core_memory="", history=dspy.History(messages=[]), active_skills=ActiveSkills()
+    )
+
+    assert result.response == "done"
+    assert observed["semantic_callbacks_enabled_during_call"] is True
+    assert isinstance(observed["adapter_during_call"], dspy.JSONAdapter)
+    assert interpreter.semantic_callbacks_enabled is True
+
+
+def test_streaming_rlm_applies_action_max_tokens_to_action_predictor() -> None:
+    import dspy
+
+    from fleet_rlm.runtime.agent.signatures import RLMTurnSignature
+    from fleet_rlm.runtime.modules.factory import create_runtime_rlm
+
+    observed: dict[str, Any] = {}
+    rlm = create_runtime_rlm(
+        signature=RLMTurnSignature,
+        interpreter=SimpleNamespace(),
+        max_iterations=2,
+        max_llm_calls=3,
+        max_output_chars=5000,
+        action_max_tokens=1234,
+        verbose=False,
+    )
+
+    class FakeInner:
+        def __call__(self, **kwargs: Any) -> dspy.Prediction:
+            observed.update(kwargs)
+            return dspy.Prediction(reasoning="bounded", code="SUBMIT(response='ok')")
+
+    rlm.generate_action._inner = FakeInner()
+    rlm.generate_action(variables_info=[], repl_history=None, iteration="1/2")
+
+    assert observed["config"]["max_tokens"] == 1234
+
+
+def test_streaming_rlm_compacts_repl_history_for_action_prompt() -> None:
+    import dspy
+    from dspy.primitives.repl_types import REPLHistory
+
+    from fleet_rlm.runtime.agent.signatures import RLMTurnSignature
+    from fleet_rlm.runtime.modules.factory import create_runtime_rlm
+
+    history = REPLHistory()
+    for index in range(10):
+        history = history.append(
+            reasoning=f"reasoning {index}" * 200,
+            code=f"print('step {index}')\n" + ("x = 1\n" * 400),
+            output=f"output {index}\n" + ("large output\n" * 400),
+        )
+
+    observed: dict[str, Any] = {}
+    rlm = create_runtime_rlm(
+        signature=RLMTurnSignature,
+        interpreter=SimpleNamespace(),
+        max_iterations=2,
+        max_llm_calls=3,
+        verbose=False,
+    )
+
+    class FakeInner:
+        def __call__(self, **kwargs: Any) -> dspy.Prediction:
+            observed.update(kwargs)
+            return dspy.Prediction(reasoning="bounded", code="SUBMIT(response='ok')")
+
+    rlm.generate_action._inner = FakeInner()
+    rlm.generate_action(variables_info=[], repl_history=history, iteration="1/2")
+
+    compact_history = observed["repl_history"]
+    assert len(history.entries) == 10
+    assert len(compact_history.entries) == 5
+    assert "Compressed 6 earlier REPL steps" in compact_history.entries[0].reasoning
+    assert "step 9" in compact_history.entries[-1].code
+    assert len(compact_history.format()) < len(history.format())
+
+
 def test_no_callback_rlm_scopes_disabled_semantic_callbacks(monkeypatch) -> None:
     import dspy
 
     from fleet_rlm.runtime.agent.signatures import RLMTurnSignature
     from fleet_rlm.runtime.modules.factory import _NoCallbackRLM, create_runtime_rlm
+    from fleet_rlm.runtime.sandbox_types import ActiveSkills
 
     interpreter = SimpleNamespace(semantic_callbacks_enabled=True)
     observed: dict[str, Any] = {}
@@ -126,7 +315,9 @@ def test_no_callback_rlm_scopes_disabled_semantic_callbacks(monkeypatch) -> None
         fake_forward,
     )
 
-    result = rlm.forward(user_request="inspect", core_memory="", history=dspy.History(messages=[]))
+    result = rlm.forward(
+        user_request="inspect", core_memory="", history=dspy.History(messages=[]), active_skills=ActiveSkills()
+    )
 
     assert result.response == "done"
     assert observed["semantic_callbacks_enabled_during_call"] is False
@@ -154,11 +345,23 @@ def test_runtime_module_registry_flags_and_signature_fields_are_stable() -> None
     assert RUNTIME_MODULE_REGISTRY["extract_from_logs"].variable_mode is True
     assert RUNTIME_MODULE_REGISTRY["grounded_answer"].variable_mode is False
 
-    assert set(RLMTurnSignature.input_fields) == {"user_request", "core_memory", "history"}
+    assert set(RLMTurnSignature.input_fields) == {"user_request", "core_memory", "history", "active_skills"}
     assert set(RLMTurnSignature.output_fields) == {"response"}
-    assert set(RLMDocumentTurnSignature.input_fields) == {"user_request", "core_memory", "history", "document"}
+    assert set(RLMDocumentTurnSignature.input_fields) == {
+        "user_request",
+        "core_memory",
+        "history",
+        "document",
+        "active_skills",
+    }
     assert set(RLMDocumentTurnSignature.output_fields) == {"response"}
-    assert set(RLMWorkspaceTurnSignature.input_fields) == {"user_request", "core_memory", "history", "context"}
+    assert set(RLMWorkspaceTurnSignature.input_fields) == {
+        "user_request",
+        "core_memory",
+        "history",
+        "context",
+        "active_skills",
+    }
     assert set(RLMWorkspaceTurnSignature.output_fields) == {"response"}
     assert {"query", "evidence_chunks", "response_style"} <= set(GroundedAnswerWithCitations.input_fields)
     assert {"answer", "citations", "confidence", "coverage_notes"} <= set(GroundedAnswerWithCitations.output_fields)

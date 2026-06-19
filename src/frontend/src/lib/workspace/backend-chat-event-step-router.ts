@@ -59,6 +59,70 @@ function stepInputKind(step: Record<string, unknown>): string {
   );
 }
 
+function mlflowSpanPayload(
+  payload: Record<string, unknown>,
+  text: string,
+): Record<string, unknown> {
+  const stepObj = asRecord(payload.step);
+  const stepInput = asRecord(stepObj?.input);
+  const stepOutput = asRecord(stepObj?.output);
+  const status =
+    asOptionalText(payload.status ?? stepInput?.status ?? stepOutput?.status) ?? "started";
+  const name =
+    asOptionalText(payload.name ?? payload.span_name ?? stepInput?.span_name ?? stepObj?.label) ||
+    text ||
+    "MLflow span";
+
+  return {
+    ...payload,
+    source_type: "mlflow_span",
+    event_kind: "mlflow_span",
+    tool_name: "mlflow_span",
+    span_id: payload.span_id ?? payload.spanId ?? stepInput?.span_id ?? stepInput?.spanId,
+    parent_span_id:
+      payload.parent_span_id ??
+      payload.parentSpanId ??
+      stepInput?.parent_span_id ??
+      stepInput?.parentSpanId,
+    trace_id:
+      payload.trace_id ??
+      payload.traceId ??
+      payload.mlflow_trace_id ??
+      payload.mlflowTraceId ??
+      stepInput?.trace_id ??
+      stepInput?.traceId,
+    name,
+    status,
+    duration_ms:
+      payload.duration_ms ??
+      payload.durationMs ??
+      stepOutput?.duration_ms ??
+      stepOutput?.durationMs,
+    started_at:
+      payload.started_at ?? payload.startedAt ?? stepInput?.started_at ?? stepInput?.startedAt,
+    ended_at: payload.ended_at ?? payload.endedAt ?? stepOutput?.ended_at ?? stepOutput?.endedAt,
+    trace_url: payload.trace_url ?? payload.traceUrl ?? stepInput?.trace_url ?? stepInput?.traceUrl,
+    experiment_id:
+      payload.experiment_id ??
+      payload.experimentId ??
+      stepInput?.experiment_id ??
+      stepInput?.experimentId,
+    tracking_uri:
+      payload.tracking_uri ??
+      payload.trackingUri ??
+      stepInput?.tracking_uri ??
+      stepInput?.trackingUri,
+    input: payload.input ?? payload.span_input ?? stepInput?.span_input ?? stepInput,
+    output: payload.output ?? payload.span_output ?? stepOutput?.span_output ?? stepOutput,
+    error: payload.error ?? stepOutput?.error,
+  };
+}
+
+function mlflowSpanEventKind(payload: Record<string, unknown>): "tool_call" | "tool_result" {
+  const status = asOptionalText(payload.status)?.toLowerCase();
+  return status === "completed" || status === "error" ? "tool_result" : "tool_call";
+}
+
 function routingStatusText(text: string, payload?: Record<string, unknown>): string {
   const selectedSkills = Array.isArray(payload?.selected_skills)
     ? payload.selected_skills.map((item) => String(item)).filter(Boolean)
@@ -85,6 +149,16 @@ export function routeExecutionStepBySourceType(
   const mergedPayload = payload ?? {};
 
   switch (sourceType) {
+    case "mlflow_span": {
+      const spanPayload = mlflowSpanPayload(mergedPayload, trimmed);
+      return appendToolLikePart(
+        messages,
+        mlflowSpanEventKind(spanPayload),
+        trimmed || asOptionalText(spanPayload.name) || "MLflow span",
+        spanPayload,
+        deps.appendTracePart,
+      );
+    }
     case "reasoning":
       return trimmed
         ? deps.appendOrExtendReasoningEvent(messages, trimmed, "live", mergedPayload)
@@ -168,12 +242,16 @@ export function applyCanonicalExecutionStepWithRouter(
   payload: Record<string, unknown> | undefined,
   deps: ExecutionStepRouterDeps,
 ): ChatMessage[] {
+  const sourceType = sourceTypeFromPayload(payload);
+  if (sourceType === "mlflow_span") {
+    return routeExecutionStepBySourceType(messages, text, payload, deps);
+  }
+
   const step = asRecord(payload?.step);
   if (!step) {
     return routeExecutionStepBySourceType(messages, text, payload, deps);
   }
 
-  const sourceType = sourceTypeFromPayload(payload);
   const stepType = asOptionalText(step.type)?.toLowerCase();
   const stepText = canonicalStepText(step, text);
 
