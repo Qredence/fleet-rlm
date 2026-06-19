@@ -165,7 +165,11 @@ jobs:
         run: |
           cd src/frontend
           pnpm install --frozen-lockfile
-          ./node_modules/.bin/vp build
+          ./node_modules/.bin/vp build > /tmp/fleet-rlm-frontend-build.log 2>&1 || {
+            tail -n 200 /tmp/fleet-rlm-frontend-build.log
+            exit 1
+          }
+          tail -n 40 /tmp/fleet-rlm-frontend-build.log
           cd ../..
           uv run python scripts/ensure_frontend_entrypoint.py
           rm -rf src/fleet_rlm/ui/dist
