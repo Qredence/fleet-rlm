@@ -44,6 +44,10 @@ ALLOWED_TRACKED_MJS_EXACT = {
 }
 WHEEL_UI_PREFIX = "fleet_rlm/ui/dist/"
 UI_ENTRYPOINT_CANDIDATES = ("index.html", "client/index.html")
+REQUIRED_WHEEL_PACKAGE_FILES = (
+    "fleet_rlm/integrations/llm_profiles/__init__.py",
+    "fleet_rlm/integrations/llm_profiles/resolver.py",
+)
 
 
 def _git_ls_files() -> list[str]:
@@ -209,6 +213,11 @@ def _collect_wheel_frontend(wheel_path: Path) -> tuple[dict[str, str], list[str]
         return ui_hashes, stray_frontend
 
 
+def _collect_wheel_files(wheel_path: Path) -> set[str]:
+    with zipfile.ZipFile(wheel_path) as wheel:
+        return {name for name in wheel.namelist() if not name.endswith("/")}
+
+
 def _has_ui_entrypoint(asset_paths: set[str]) -> bool:
     return any(path in asset_paths for path in UI_ENTRYPOINT_CANDIDATES)
 
@@ -300,12 +309,20 @@ def do_wheel(args: argparse.Namespace) -> int:
         return 1
 
     wheel_hashes, stray_frontend_paths = _collect_wheel_frontend(wheel_path)
+    wheel_files = _collect_wheel_files(wheel_path)
 
     if not wheel_hashes:
         print(
             "ERROR: Wheel does not contain packaged UI assets under fleet_rlm/ui/dist/",
             file=sys.stderr,
         )
+        return 1
+
+    missing_package_files = sorted(path for path in REQUIRED_WHEEL_PACKAGE_FILES if path not in wheel_files)
+    if missing_package_files:
+        print("ERROR: Wheel is missing required package module files:", file=sys.stderr)
+        for path in missing_package_files:
+            print(f"  - {path}", file=sys.stderr)
         return 1
 
     local_set = set(local_hashes)
