@@ -179,7 +179,7 @@ jobs:
       - name: Stage packaged frontend assets
         if: ${{ hashFiles('src/frontend/package.json') != '' }}
         run: |
-          uv run python scripts/ensure_frontend_entrypoint.py
+          python scripts/ensure_frontend_entrypoint.py
           rm -rf src/fleet_rlm/ui/dist
           mkdir -p src/fleet_rlm/ui
           cp -R src/frontend/dist src/fleet_rlm/ui/dist

@@ -72,6 +72,7 @@ process.exit(0);
         stdout=subprocess.PIPE,
         env=env,
         text=True,
+        timeout=30,
     )
     html_text = completed.stdout.strip()
     if not html_text:
@@ -111,7 +112,10 @@ def ensure_entrypoint(dist_dir: Path, *, render_url: str = "http://127.0.0.1:800
     if index_path.is_file():
         return index_path
 
-    rendered_html = _render_start_entrypoint(dist_dir, render_url)
+    try:
+        rendered_html = _render_start_entrypoint(dist_dir, render_url)
+    except subprocess.TimeoutExpired:
+        rendered_html = None
     if rendered_html is not None:
         index_path.write_text(rendered_html, encoding="utf-8")
         return index_path
