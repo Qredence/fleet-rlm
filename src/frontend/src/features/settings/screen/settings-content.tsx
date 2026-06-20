@@ -64,7 +64,7 @@ export function useGetSettingsSections() {
       { key: "telemetry" as const, label: "Telemetry", icon: Bell },
       { key: "litellm" as const, label: "LLM Providers", icon: Bot },
       { key: "runtime" as const, label: "Runtime", icon: Cpu },
-      { key: "about" as const, label: "About", icon: Info }
+      { key: "about" as const, label: "About", icon: Info },
     );
     return list;
   }, [isAuthenticated, neonConfigured]);
@@ -74,7 +74,14 @@ const SETTINGS_FIELD_CLASSNAME = "gap-5 border-b border-border-subtle py-5 last:
 const SETTINGS_SECTION_CLASSNAME = "max-w-content gap-4";
 
 export function resolveSettingsSection(section?: string): SettingsSection | undefined {
-  const allowedKeys: SettingsSection[] = ["account", "appearance", "telemetry", "litellm", "runtime", "about"];
+  const allowedKeys: SettingsSection[] = [
+    "account",
+    "appearance",
+    "telemetry",
+    "litellm",
+    "runtime",
+    "about",
+  ];
   return section && allowedKeys.includes(section as SettingsSection)
     ? (section as SettingsSection)
     : undefined;
@@ -426,9 +433,7 @@ function AccountSettingsPane() {
           <FieldLegend variant="label" className="mb-0 text-sm font-semibold">
             Profile settings
           </FieldLegend>
-          <FieldDescription>
-            Manage your public name and email configuration.
-          </FieldDescription>
+          <FieldDescription>Manage your public name and email configuration.</FieldDescription>
         </div>
 
         <FieldGroup className="gap-0">
@@ -536,7 +541,9 @@ function AccountSettingsPane() {
               </FieldContent>
               <Button
                 type="submit"
-                disabled={isChangingPassword || !currentPassword || !newPassword || !confirmPassword}
+                disabled={
+                  isChangingPassword || !currentPassword || !newPassword || !confirmPassword
+                }
                 className="self-end"
               >
                 {isChangingPassword ? "Updating..." : "Update Password"}

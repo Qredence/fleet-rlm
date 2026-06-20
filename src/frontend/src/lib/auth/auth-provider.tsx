@@ -9,11 +9,7 @@ import {
   loginWithEntra,
   logoutWithEntra,
 } from "@/lib/auth/entra";
-import {
-  initializeNeonSession,
-  isNeonAuthConfigured,
-  neonAuthClient,
-} from "@/lib/auth/neon";
+import { initializeNeonSession, isNeonAuthConfigured, neonAuthClient } from "@/lib/auth/neon";
 import { authEndpoints } from "@/lib/rlm-api/auth";
 import type { AuthContextValue, PlanTier, UserProfile } from "@/lib/auth/types";
 

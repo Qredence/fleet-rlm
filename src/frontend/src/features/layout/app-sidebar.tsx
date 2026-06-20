@@ -219,7 +219,7 @@ export function AppSidebar() {
           for (const item of response.items) {
             const externalId = item.external_session_id || item.id;
             const existingIndex = currentConversations.findIndex(
-              (c) => c.id === externalId || c.durableSessionId === item.id
+              (c) => c.id === externalId || c.durableSessionId === item.id,
             );
 
             if (existingIndex >= 0) {
@@ -406,8 +406,10 @@ export function AppSidebar() {
                       isCollapsed ? "justify-center" : "",
                     ),
                     user: {
-                      title: "text-sidebar-foreground font-medium text-sm truncate max-w-[120px] text-left",
-                      subtitle: "text-sidebar-foreground/58 text-xs truncate max-w-[120px] text-left",
+                      title:
+                        "text-sidebar-foreground font-medium text-sm truncate max-w-[120px] text-left",
+                      subtitle:
+                        "text-sidebar-foreground/58 text-xs truncate max-w-[120px] text-left",
                     },
                   },
                 }}
@@ -424,7 +426,7 @@ export function AppSidebar() {
                   >
                     <SidebarIcon icon={Settings01Icon} size={16} className="text-foreground/70" />
                     <span>Settings</span>
-                  </button>
+                  </button>,
                 ]}
               />
             ) : (

@@ -13,10 +13,7 @@ function AuthScreen() {
 
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-4 py-8">
-      <AuthView
-        pathname={pathname}
-        className="w-full max-w-100"
-      />
+      <AuthView pathname={pathname} className="w-full max-w-100" />
     </div>
   );
 }

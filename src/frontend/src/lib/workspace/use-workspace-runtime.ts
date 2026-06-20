@@ -465,9 +465,7 @@ export function useWorkspace(): ChatRuntime {
       let loadedMessages = conversation.messages;
       if (targetDurableId) {
         try {
-          loadedMessages = chatMessagesFromTurns(
-            await loadAllSessionTurns(targetDurableId),
-          );
+          loadedMessages = chatMessagesFromTurns(await loadAllSessionTurns(targetDurableId));
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unknown session load error";
           toast.error("Could not load saved session transcript", { description: message });
@@ -481,9 +479,7 @@ export function useWorkspace(): ChatRuntime {
       setMessages(loadedMessages);
       setInputValue("");
       const loadedPhase =
-        loadedMessages.length > 0 && targetDurableId
-          ? "complete"
-          : conversation.phase;
+        loadedMessages.length > 0 && targetDurableId ? "complete" : conversation.phase;
       setPhase(loadedPhase);
       setCreationPhase(loadedPhase);
       setIsTyping(false);
