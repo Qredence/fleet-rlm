@@ -19,7 +19,12 @@ from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from ...auth import AuthError
-from ...dependencies import AuthDeps, ConfigDeps, build_unauthenticated_identity
+from ...dependencies import (
+    AuthDeps,
+    ConfigDeps,
+    build_unauthenticated_identity,
+    get_ws_ticket_deps_from_websocket,
+)
 from ...runtime_services.run_lifecycle import ExecutionLifecycleManager
 from ...runtime_services.stream_failures import classify_stream_failure
 from ...schemas import WSMessage
@@ -84,6 +89,19 @@ async def _authenticate_websocket(
 ):
     cfg = config_deps.config
     provider = auth_deps.auth_provider
+    ticket = str(websocket.query_params.get("ticket", "")).strip()
+    if ticket:
+        identity = get_ws_ticket_deps_from_websocket(websocket).tickets.consume(ticket)
+        if identity is not None:
+            return identity
+        await websocket.accept()
+        if await _try_send_json(
+            websocket,
+            _error_envelope(code="auth_failed", message="WebSocket ticket is invalid or expired"),
+        ):
+            await _close_websocket_safely(websocket, code=1008)
+        return None
+
     if provider is None:
         if cfg.auth_required:
             await websocket.accept()

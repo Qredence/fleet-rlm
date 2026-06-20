@@ -15,6 +15,7 @@ import { applyWsFrameToMessages } from "@/lib/workspace/backend-chat-event-adapt
 import { asRecord } from "@/lib/workspace/backend-chat-event-payload";
 import type { WsRuntimeContext } from "@/lib/rlm-api/ws-types";
 import { useChatStore } from "@/lib/workspace/chat-store";
+import { useChatHistoryStore } from "@/lib/workspace/chat-history-store";
 import { useRunWorkbenchStore } from "@/lib/workspace/run-workbench-store";
 import { chatMessagesFromTurns } from "@/lib/workspace/session-turns";
 import { useWorkspaceUiStore } from "@/lib/workspace/workspace-ui-store";
@@ -210,6 +211,12 @@ export function useWorkspace(): ChatRuntime {
         useWorkspaceUiStore.getState().setRuntimeContext(null);
       } else if (frame.type === "event") {
         const payload = asRecord(frame.data.payload);
+        const summary = asRecord(payload?.summary);
+        const dbSessionId = summary?.db_session_id;
+        if (typeof dbSessionId === "string" && dbSessionId) {
+          setDurableSessionId(dbSessionId);
+        }
+
         const rawCtx = asRecord(payload?.runtime) ?? payload;
         if (
           rawCtx != null &&
@@ -238,7 +245,7 @@ export function useWorkspace(): ChatRuntime {
         }
       }
     },
-    [setCreationPhase, snapshotTurnArtifacts],
+    [setCreationPhase, snapshotTurnArtifacts, setDurableSessionId],
   );
 
   const handleSubmit = useCallback(
@@ -429,15 +436,36 @@ export function useWorkspace(): ChatRuntime {
       if (conversation.runtimeSessionId) {
         setRuntimeSessionId(conversation.runtimeSessionId);
       }
-      setDurableSessionId(conversation.durableSessionId ?? null);
       setTurnArtifactsByMessageId({});
 
-      let loadedMessages = conversation.messages;
-      if (conversation.durableSessionId) {
+      let targetDurableId = conversation.durableSessionId ?? null;
+
+      if (!targetDurableId && conversation.runtimeSessionId) {
         try {
-          loadedMessages = chatMessagesFromTurns(
-            await loadAllSessionTurns(conversation.durableSessionId),
+          const listResponse = await sessionsEndpoints.list({ limit: 100 });
+          const matchingSession = listResponse.items.find(
+            (item) => item.external_session_id === conversation.runtimeSessionId,
           );
+          if (matchingSession) {
+            targetDurableId = matchingSession.id;
+            // Auto-heal the conversation in local store
+            useChatHistoryStore.setState((state) => ({
+              conversations: state.conversations.map((c) =>
+                c.id === conversation.id ? { ...c, durableSessionId: targetDurableId } : c,
+              ),
+            }));
+          }
+        } catch (error) {
+          console.error("Failed to auto-heal session from backend list:", error);
+        }
+      }
+
+      setDurableSessionId(targetDurableId);
+
+      let loadedMessages = conversation.messages;
+      if (targetDurableId) {
+        try {
+          loadedMessages = chatMessagesFromTurns(await loadAllSessionTurns(targetDurableId));
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unknown session load error";
           toast.error("Could not load saved session transcript", { description: message });
@@ -451,9 +479,7 @@ export function useWorkspace(): ChatRuntime {
       setMessages(loadedMessages);
       setInputValue("");
       const loadedPhase =
-        loadedMessages.length > 0 && conversation.durableSessionId
-          ? "complete"
-          : conversation.phase;
+        loadedMessages.length > 0 && targetDurableId ? "complete" : conversation.phase;
       setPhase(loadedPhase);
       setCreationPhase(loadedPhase);
       setIsTyping(false);

@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 
 from fleet_rlm import __version__
+from fleet_rlm.utils import install_log_redaction_filters
 
 from .bootstrap import (
     attach_server_state,
@@ -67,6 +68,7 @@ def _register_api_routes(app: FastAPI) -> None:
 
 def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
     """Create the FastAPI application instance."""
+    install_log_redaction_filters()
     cfg = resolve_runtime_config(config)
 
     @asynccontextmanager

@@ -28,9 +28,9 @@ import {
   getSettingsSectionTitle,
   resolveSettingsSection,
   SettingsSectionContent,
-  settingsSections,
   SettingsSidebarNav,
   type SettingsSection,
+  useGetSettingsSections,
 } from "@/features/settings/screen/settings-content";
 import { useThemeStore } from "@/stores/theme-store";
 
@@ -51,6 +51,7 @@ function MobileSectionPicker({
   section?: SettingsSection;
   onSectionChange: (section?: SettingsSection) => void;
 }) {
+  const sections = useGetSettingsSections();
   return (
     <ToggleGroup
       value={section ?? "appearance"}
@@ -63,7 +64,7 @@ function MobileSectionPicker({
         onSectionChange(nextValue as SettingsSection);
       }}
     >
-      {settingsSections.map(({ key, label }) => (
+      {sections.map(({ key, label }) => (
         <ToggleGroupItem key={key} value={key} aria-label={label}>
           {label}
         </ToggleGroupItem>

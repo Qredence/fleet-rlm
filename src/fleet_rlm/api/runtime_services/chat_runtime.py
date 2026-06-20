@@ -194,7 +194,7 @@ async def _resolve_persisted_identity(
     repository: FleetRepository,
     identity: NormalizedIdentity,
 ) -> IdentityUpsertResult:
-    if cfg.auth_mode == "entra":
+    if cfg.auth_mode in {"entra", "neon"}:
         return await resolve_admitted_identity(repository, identity)
     return await repository.upsert_identity(
         entra_tenant_id=identity.tenant_claim,

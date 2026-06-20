@@ -30,6 +30,7 @@ from .dependencies import (
     PersistenceDeps,
     ServerState,
     SessionCacheDeps,
+    WebSocketTicketDeps,
 )
 from .events import ExecutionEventEmitter
 
@@ -137,8 +138,11 @@ def build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
             entra_audience=cfg.entra_audience,
             entra_allowed_user_ids=set(cfg.entra_allowed_user_ids_list),
             entra_allowed_group_ids=set(cfg.entra_allowed_group_ids_list),
+            neon_auth_url=cfg.neon_auth_url,
+            neon_tenant_claim=cfg.neon_tenant_claim,
         ),
     )
+    ws_ticket_deps = WebSocketTicketDeps()
     session_cache_deps = SessionCacheDeps()
     persistence_deps = PersistenceDeps()
     diagnostics_deps = DiagnosticsDeps(
@@ -154,6 +158,7 @@ def build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
     state.config_deps = config_deps
     state.lm_deps = lm_deps
     state.auth_deps = auth_deps
+    state.ws_ticket_deps = ws_ticket_deps
     state.session_cache_deps = session_cache_deps
     state.persistence_deps = persistence_deps
     state.diagnostics_deps = diagnostics_deps
@@ -167,6 +172,7 @@ def attach_server_state(app: FastAPI, state: ServerState) -> None:
     app.state.config_deps = state.config_deps
     app.state.lm_deps = state.lm_deps
     app.state.auth_deps = state.auth_deps
+    app.state.ws_ticket_deps = state.ws_ticket_deps
     app.state.session_cache_deps = state.session_cache_deps
     app.state.persistence_deps = state.persistence_deps
     app.state.diagnostics_deps = state.diagnostics_deps

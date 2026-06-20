@@ -97,6 +97,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
     vi.useRealTimers();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+    sessionStorage.clear();
   });
 
   it("attempts to reconnect on close until max retries", async () => {
@@ -359,6 +360,40 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
     expect(connectionUrl.searchParams.has("user_id")).toBe(false);
 
     unsubscribe();
+  });
+
+  it("exchanges bearer tokens for WebSocket tickets instead of appending raw tokens", async () => {
+    vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
+    vi.stubEnv("VITE_FLEET_WS_URL", "ws://localhost:8000/api/v1/ws/execution");
+    sessionStorage.setItem("fleet-rlm:access-token", "raw-neon-jwt");
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ticket: "ticket-abc", expires_at: "2026-06-20T03:30:00Z" }),
+      text: async () => JSON.stringify({ ticket: "ticket-abc" }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    const { streamChatOverWs } = await loadWsClientModule();
+    const { sockets } = installSocketFactory();
+
+    const streamPromise = streamChatOverWs(dummyMessage, {
+      onFrame: vi.fn(),
+      maxRetries: 0,
+      initialBackoff: 10,
+      maxBackoff: 100,
+    });
+
+    for (let attempt = 0; attempt < 10 && MockWebSocket.mock.calls.length === 0; attempt += 1) {
+      await Promise.resolve();
+    }
+
+    const connectionUrl = new URL(String(MockWebSocket.mock.calls[0]?.[0]));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8000/api/v1/auth/ws-ticket");
+    expect(connectionUrl.searchParams.get("ticket")).toBe("ticket-abc");
+    expect(connectionUrl.searchParams.has("access_token")).toBe(false);
+
+    sockets[0]?.trigger("close", { code: 1000, wasClean: true });
+    await expect(streamPromise).resolves.toBeUndefined();
   });
 
   it("keeps execution subscriptions open after execution_completed frames", async () => {

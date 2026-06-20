@@ -18,11 +18,13 @@ import { Route as R404RouteImport } from './routes/404'
 import { Route as SplatRouteImport } from './routes/$'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app/index'
+import { Route as AuthPathnameRouteImport } from './routes/auth.$pathname'
 import { Route as AppWorkspaceRouteImport } from './routes/app/workspace'
 import { Route as AppVolumesRouteImport } from './routes/app/volumes'
 import { Route as AppSettingsRouteImport } from './routes/app/settings'
 import { Route as AppOptimizationRouteImport } from './routes/app/optimization'
 import { Route as AppSplatRouteImport } from './routes/app/$'
+import { Route as AccountPathnameRouteImport } from './routes/account.$pathname'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -69,6 +71,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
+const AuthPathnameRoute = AuthPathnameRouteImport.update({
+  id: '/auth/$pathname',
+  path: '/auth/$pathname',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppWorkspaceRoute = AppWorkspaceRouteImport.update({
   id: '/workspace',
   path: '/workspace',
@@ -94,6 +101,11 @@ const AppSplatRoute = AppSplatRouteImport.update({
   path: '/$',
   getParentRoute: () => AppRoute,
 } as any)
+const AccountPathnameRoute = AccountPathnameRouteImport.update({
+  id: '/account/$pathname',
+  path: '/account/$pathname',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -104,11 +116,13 @@ export interface FileRoutesByFullPath {
   '/logout': typeof LogoutRoute
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
+  '/account/$pathname': typeof AccountPathnameRoute
   '/app/$': typeof AppSplatRoute
   '/app/optimization': typeof AppOptimizationRoute
   '/app/settings': typeof AppSettingsRoute
   '/app/volumes': typeof AppVolumesRoute
   '/app/workspace': typeof AppWorkspaceRoute
+  '/auth/$pathname': typeof AuthPathnameRoute
   '/app/': typeof AppIndexRoute
 }
 export interface FileRoutesByTo {
@@ -119,11 +133,13 @@ export interface FileRoutesByTo {
   '/logout': typeof LogoutRoute
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
+  '/account/$pathname': typeof AccountPathnameRoute
   '/app/$': typeof AppSplatRoute
   '/app/optimization': typeof AppOptimizationRoute
   '/app/settings': typeof AppSettingsRoute
   '/app/volumes': typeof AppVolumesRoute
   '/app/workspace': typeof AppWorkspaceRoute
+  '/auth/$pathname': typeof AuthPathnameRoute
   '/app': typeof AppIndexRoute
 }
 export interface FileRoutesById {
@@ -136,11 +152,13 @@ export interface FileRoutesById {
   '/logout': typeof LogoutRoute
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
+  '/account/$pathname': typeof AccountPathnameRoute
   '/app/$': typeof AppSplatRoute
   '/app/optimization': typeof AppOptimizationRoute
   '/app/settings': typeof AppSettingsRoute
   '/app/volumes': typeof AppVolumesRoute
   '/app/workspace': typeof AppWorkspaceRoute
+  '/auth/$pathname': typeof AuthPathnameRoute
   '/app/': typeof AppIndexRoute
 }
 export interface FileRouteTypes {
@@ -154,11 +172,13 @@ export interface FileRouteTypes {
     | '/logout'
     | '/settings'
     | '/signup'
+    | '/account/$pathname'
     | '/app/$'
     | '/app/optimization'
     | '/app/settings'
     | '/app/volumes'
     | '/app/workspace'
+    | '/auth/$pathname'
     | '/app/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -169,11 +189,13 @@ export interface FileRouteTypes {
     | '/logout'
     | '/settings'
     | '/signup'
+    | '/account/$pathname'
     | '/app/$'
     | '/app/optimization'
     | '/app/settings'
     | '/app/volumes'
     | '/app/workspace'
+    | '/auth/$pathname'
     | '/app'
   id:
     | '__root__'
@@ -185,11 +207,13 @@ export interface FileRouteTypes {
     | '/logout'
     | '/settings'
     | '/signup'
+    | '/account/$pathname'
     | '/app/$'
     | '/app/optimization'
     | '/app/settings'
     | '/app/volumes'
     | '/app/workspace'
+    | '/auth/$pathname'
     | '/app/'
   fileRoutesById: FileRoutesById
 }
@@ -202,6 +226,8 @@ export interface RootRouteChildren {
   LogoutRoute: typeof LogoutRoute
   SettingsRoute: typeof SettingsRoute
   SignupRoute: typeof SignupRoute
+  AccountPathnameRoute: typeof AccountPathnameRoute
+  AuthPathnameRoute: typeof AuthPathnameRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -269,6 +295,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/auth/$pathname': {
+      id: '/auth/$pathname'
+      path: '/auth/$pathname'
+      fullPath: '/auth/$pathname'
+      preLoaderRoute: typeof AuthPathnameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app/workspace': {
       id: '/app/workspace'
       path: '/workspace'
@@ -304,6 +337,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSplatRouteImport
       parentRoute: typeof AppRoute
     }
+    '/account/$pathname': {
+      id: '/account/$pathname'
+      path: '/account/$pathname'
+      fullPath: '/account/$pathname'
+      preLoaderRoute: typeof AccountPathnameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -336,6 +376,8 @@ const rootRouteChildren: RootRouteChildren = {
   LogoutRoute: LogoutRoute,
   SettingsRoute: SettingsRoute,
   SignupRoute: SignupRoute,
+  AccountPathnameRoute: AccountPathnameRoute,
+  AuthPathnameRoute: AuthPathnameRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -27,6 +27,7 @@ import { RouteSync } from "./route-sync";
 import { LayoutRouteOutlet } from "./route-outlet";
 import { SettingsDialog } from "./settings-dialog";
 import { LayoutSidepanel } from "./sidepanel";
+import { isNeonAuthConfigured } from "@/lib/auth/neon";
 
 const PANEL_TRANSITION = "flex-grow 350ms cubic-bezier(0.4, 0, 0.2, 1)";
 const OPEN_LAYOUT = { content: 68, canvas: 32 };
@@ -56,6 +57,9 @@ function AppLayout() {
 
   useEffect(() => {
     const handleOpenLogin = (event: Event) => {
+      if (isNeonAuthConfigured()) {
+        return;
+      }
       const customEvent = event as CustomEvent<OpenLoginEventDetail>;
       loginReturnFocusRef.current = customEvent.detail?.returnFocusTarget ?? null;
       setLoginOpen(true);

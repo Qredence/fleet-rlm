@@ -5,6 +5,7 @@ from __future__ import annotations
 from .base import AuthProvider
 from .dev import DevAuthProvider
 from .entra import EntraAuthProvider
+from .neon import NeonAuthProvider
 
 
 def build_auth_provider(
@@ -19,6 +20,8 @@ def build_auth_provider(
     entra_audience: str | None = None,
     entra_allowed_user_ids: set[str] | None = None,
     entra_allowed_group_ids: set[str] | None = None,
+    neon_auth_url: str | None = None,
+    neon_tenant_claim: str | None = None,
 ) -> AuthProvider:
     mode = auth_mode.strip().lower()
     if mode == "dev":
@@ -35,6 +38,12 @@ def build_auth_provider(
             audience=entra_audience,
             allowed_user_ids=entra_allowed_user_ids,
             allowed_group_ids=entra_allowed_group_ids,
+            allow_query_auth_tokens=allow_query_auth_tokens,
+        )
+    if mode == "neon":
+        return NeonAuthProvider(
+            neon_auth_url=neon_auth_url,
+            tenant_claim=neon_tenant_claim,
             allow_query_auth_tokens=allow_query_auth_tokens,
         )
     raise ValueError(f"Unsupported auth mode: {auth_mode}")

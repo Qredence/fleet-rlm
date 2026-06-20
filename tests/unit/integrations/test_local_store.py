@@ -31,6 +31,7 @@ def test_module_level_session_lifecycle_uses_tmp_sqlite_storage() -> None:
         get_local_session_stats,
         get_turns_paginated,
         list_sessions,
+        replace_turns_from_history,
         restore_session,
         update_chat_session,
     )
@@ -72,6 +73,23 @@ def test_module_level_session_lifecycle_uses_tmp_sqlite_storage() -> None:
         "total_latency_ms": 14,
         "model_breakdown": {},
     }
+
+    replaced = replace_turns_from_history(
+        session.id,
+        [
+            {"user_message": "persist me", "response": "persisted"},
+            {"user_message": "again", "response": "again done"},
+        ],
+        owner_tenant="tenant-a",
+        owner_user="user-a",
+    )
+    assert [turn.turn_index for turn in replaced] == [0, 1]
+    turns, turn_total = get_turns_paginated(session.id, limit=10)
+    assert turn_total == 2
+    assert [(turn.user_message, turn.assistant_message) for turn in turns] == [
+        ("persist me", "persisted"),
+        ("again", "again done"),
+    ]
 
     assert archive_session(session.id, owner_tenant="tenant-a", owner_user="user-a") is True
     archived = get_chat_session(session.id, owner_tenant="tenant-a", owner_user="user-a")

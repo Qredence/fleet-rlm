@@ -1,14 +1,26 @@
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Link, createFileRoute, useNavigate, redirect } from "@tanstack/react-router";
+import { useState, useEffect } from "react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 
 import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { isEntraAuthConfigured, loginWithEntra } from "@/lib/auth/entra";
+import { isNeonAuthConfigured } from "@/lib/auth/neon";
+import { SignInForm } from "@neondatabase/auth-ui";
+import { useAuth } from "@/lib/auth/auth-context";
 import { useTelemetry } from "@/lib/telemetry/use-telemetry";
 import { RouteErrorScreen } from "@/routes/-route-error-screen";
 
 export const Route = createFileRoute("/login")({
+  beforeLoad: () => {
+    if (isNeonAuthConfigured()) {
+      throw redirect({
+        to: "/auth/$pathname",
+        params: { pathname: "sign-in" },
+        replace: true,
+      });
+    }
+  },
   component: LoginScreen,
   errorComponent: RouteErrorScreen,
 });
@@ -16,9 +28,52 @@ export const Route = createFileRoute("/login")({
 function LoginScreen() {
   const navigate = useNavigate();
   const telemetry = useTelemetry();
+  const { isAuthenticated } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const authConfigured = isEntraAuthConfigured();
+  const neonConfigured = isNeonAuthConfigured();
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate({ to: "/app/workspace", replace: true });
+    }
+  }, [isAuthenticated, navigate]);
+
+  if (neonConfigured) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-background px-4 py-8">
+        <div className="surface-raised-card relative w-full max-w-100 border border-border-subtle p-8">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => navigate({ to: "/app/workspace" })}
+            className="absolute top-4 left-4 h-8 w-8 text-muted-foreground hover:text-foreground"
+            aria-label="Back to workbench"
+          >
+            <ArrowLeft className="size-4" />
+          </Button>
+          <div className="flex flex-col items-center gap-3 pb-6">
+            <BrandMark className="h-3.75 w-8 text-foreground" />
+            <div className="text-center">
+              <h1 className="text-sm font-medium text-foreground">Sign in to Fleet RLM</h1>
+              <p className="mt-1 text-muted-foreground typo-caption">
+                Sign in or sign up to access your RLM workspace
+              </p>
+            </div>
+          </div>
+          <SignInForm
+            className="w-full"
+            classNames={{
+              base: "border-0 bg-transparent p-0 shadow-none w-full !max-w-none",
+            }}
+            localization={{}}
+          />
+        </div>
+      </div>
+    );
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

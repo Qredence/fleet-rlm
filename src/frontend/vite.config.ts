@@ -8,6 +8,7 @@ import path from "node:path";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  envPrefix: ["VITE_", "NEON_AUTH_URL"],
   lint: {
     plugins: ["oxc", "typescript", "unicorn", "react"],
     categories: {

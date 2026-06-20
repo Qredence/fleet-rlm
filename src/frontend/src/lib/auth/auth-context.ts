@@ -11,6 +11,7 @@ const defaultAuthCtx: AuthContextValue = {
   login: noopAsync,
   logout: noopVoid,
   setPlan: noopVoid,
+  refresh: async () => {},
 };
 
 const AuthContext = createContext<AuthContextValue>(defaultAuthCtx);
