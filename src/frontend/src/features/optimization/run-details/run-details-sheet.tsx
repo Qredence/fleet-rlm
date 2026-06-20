@@ -14,12 +14,22 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
+import { KeyValueGrid } from "@/components/product/key-value-grid";
+import { ScoreBadge } from "@/components/product/score-badge";
 import type {
   OptimizationPromotionDraftResponse,
   OptimizationRunDetailResponse,
 } from "@/lib/rlm-api";
 
 import { errorMessage, formatScore, shortPath, targetLabel } from "../optimization-format";
+
+function scoreCell(value: number | null | undefined) {
+  return typeof value === "number" ? (
+    <ScoreBadge score={value} format="decimal" />
+  ) : (
+    <span className="font-mono text-sm">{formatScore(value)}</span>
+  );
+}
 
 function holdoutIsPromotionReady(
   detail: OptimizationRunDetailResponse | undefined,
@@ -31,15 +41,6 @@ function holdoutIsPromotionReady(
 function gepaEvidencePath(detail: OptimizationRunDetailResponse | undefined): string | null {
   const path = detail?.artifact_refs.find((ref) => ref.kind === "gepa_evidence")?.path;
   return path ?? null;
-}
-
-function RunDetailMetric({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="min-w-0 rounded-md border border-border-subtle bg-muted/20 px-3 py-2">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 truncate font-mono text-sm">{value}</div>
-    </div>
-  );
 }
 
 function PathRow({ label, path, exists }: { label: string; path: string; exists?: boolean }) {
@@ -146,33 +147,29 @@ export function RunDetailsSheet({
                       </AlertDescription>
                     </Alert>
                   ) : null}
-                  <div className="grid gap-3 md:grid-cols-4">
-                    <RunDetailMetric label="Outcome" value={detail.insights.selected_outcome} />
-                    <RunDetailMetric
-                      label="Baseline"
-                      value={formatScore(detail.score_summary.baseline_score)}
-                    />
-                    <RunDetailMetric
-                      label="Optimized"
-                      value={formatScore(detail.score_summary.optimized_score)}
-                    />
-                    <RunDetailMetric
-                      label="Delta"
-                      value={formatScore(detail.score_summary.score_delta)}
-                    />
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <RunDetailMetric
-                      label="Train examples"
-                      value={detail.score_summary.train_examples ?? "-"}
-                    />
-                    <RunDetailMetric
-                      label="Validation examples"
-                      value={detail.score_summary.validation_examples ?? "-"}
-                    />
-                    <RunDetailMetric
-                      label="Reflection"
-                      value={detail.run.reflection_model_id ?? "default"}
+                  <div className="rounded-md border border-border-subtle bg-muted/20 px-3 py-3">
+                    <KeyValueGrid
+                      items={[
+                        { label: "Outcome", value: detail.insights.selected_outcome },
+                        { label: "Baseline", value: scoreCell(detail.score_summary.baseline_score) },
+                        {
+                          label: "Optimized",
+                          value: scoreCell(detail.score_summary.optimized_score),
+                        },
+                        { label: "Delta", value: scoreCell(detail.score_summary.score_delta) },
+                        {
+                          label: "Train examples",
+                          value: detail.score_summary.train_examples ?? "-",
+                        },
+                        {
+                          label: "Validation examples",
+                          value: detail.score_summary.validation_examples ?? "-",
+                        },
+                        {
+                          label: "Reflection",
+                          value: detail.run.reflection_model_id ?? "default",
+                        },
+                      ]}
                     />
                   </div>
                   <div className="space-y-2">

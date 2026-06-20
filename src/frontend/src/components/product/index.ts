@@ -28,6 +28,8 @@ export { TimelineStep } from "./timeline";
 export type { TimelineStepProps, TimelineStepStatus } from "./timeline";
 export { DataTable } from "./data-table";
 export type { ColumnDef, SortState, SortDirection, DataTableProps } from "./data-table";
+export { TreeView } from "./tree-view";
+export type { TreeViewNode, TreeViewProps } from "./tree-view";
 export { DetailDrawer } from "./detail-drawer";
 export type { DetailDrawerProps } from "./detail-drawer";
 export { ScoreBadge } from "./score-badge";

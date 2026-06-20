@@ -52,13 +52,28 @@ describe("backend contract lock", () => {
   it("keeps runtime endpoint paths on /api/v1/runtime/*", async () => {
     vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
 
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({}),
-      text: async () => "{}",
-    } as Response);
-    vi.stubGlobal("fetch", fetchMock);
+    const calls: string[] = [];
+    vi.doMock("@/lib/rlm-api/typed-client", () => {
+      function makeMethod() {
+        return vi.fn(async (path: string) => {
+          calls.push(`http://localhost:8000${path}`);
+          return { data: {}, error: undefined, response: { ok: true, status: 200 } as Response };
+        });
+      }
+      return {
+        typedClient: {
+          GET: makeMethod(),
+          POST: makeMethod(),
+          PATCH: makeMethod(),
+          DELETE: makeMethod(),
+        },
+        unwrap: vi.fn(async (promise: Promise<{ data?: unknown; error?: unknown }>) => {
+          const result = await promise;
+          return result.data;
+        }),
+        withTimeout: vi.fn((signal?: AbortSignal) => signal),
+      };
+    });
 
     const { runtime } = await loadModules();
 
@@ -68,8 +83,9 @@ describe("backend contract lock", () => {
     await runtime.runtimeEndpoints.testLm();
     await runtime.runtimeEndpoints.status();
 
-    const calledUrls = fetchMock.mock.calls.map((call) => String(call[0]));
-    expect(calledUrls).toEqual([
+    vi.doUnmock("@/lib/rlm-api/typed-client");
+
+    expect(calls).toEqual([
       "http://localhost:8000/api/v1/runtime/settings",
       "http://localhost:8000/api/v1/runtime/settings",
       "http://localhost:8000/api/v1/runtime/tests/daytona",

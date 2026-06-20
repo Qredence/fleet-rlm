@@ -1,14 +1,17 @@
 import { clearAccessToken, setAccessToken } from "@/lib/auth/token-store";
-import { rlmApiClient } from "@/lib/rlm-api/client";
-import type { AuthMeResponse, WebSocketTicketResponse } from "@/lib/rlm-api/types";
+import { typedClient, unwrap, withTimeout } from "@/lib/rlm-api/typed-client";
 
 export const authEndpoints = {
   me(signal?: AbortSignal) {
-    return rlmApiClient.get<AuthMeResponse>("/api/v1/auth/me", signal);
+    return unwrap(
+      typedClient.GET("/api/v1/auth/me", { signal: withTimeout(signal) }),
+    );
   },
 
   createWsTicket(signal?: AbortSignal) {
-    return rlmApiClient.post<WebSocketTicketResponse>("/api/v1/auth/ws-ticket", undefined, signal);
+    return unwrap(
+      typedClient.POST("/api/v1/auth/ws-ticket", { signal: withTimeout(signal) }),
+    );
   },
 
   clearLocalAuth() {

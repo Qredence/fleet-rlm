@@ -604,6 +604,10 @@
   padding-left: calc(var(--tree-indent-base) + (var(--tree-depth, 0) * var(--tree-indent-step)));
 }
 
+@utility tree-row {
+  padding-left: calc(var(--tree-indent-base) + (var(--tree-depth, 0) * var(--tree-indent-step)));
+}
+
 @utility workspace-volume-split {
   display: grid;
   grid-template-columns: minmax(0, var(--volume-tree-width, 280px)) 1px minmax(0, 1fr);

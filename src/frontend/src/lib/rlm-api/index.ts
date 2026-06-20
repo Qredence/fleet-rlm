@@ -5,6 +5,7 @@ export {
   isSectionSupported,
 } from "@/lib/rlm-api/capabilities";
 export { rlmApiClient, RlmApiError } from "@/lib/rlm-api/client";
+export { typedClient, unwrap, withTimeout } from "@/lib/rlm-api/typed-client";
 export {
   streamChatOverWs,
   sendCommandOverWs,
@@ -16,7 +17,6 @@ export { infoEndpoints } from "@/lib/rlm-api/info";
 export { optimizationEndpoints } from "@/lib/rlm-api/optimization";
 export { sessionsEndpoints } from "@/lib/rlm-api/sessions";
 export { volumesEndpoints } from "@/lib/rlm-api/volumes";
-export { withQuery } from "@/lib/rlm-api/query";
 export type {
   SessionListItem,
   SessionListResponse,

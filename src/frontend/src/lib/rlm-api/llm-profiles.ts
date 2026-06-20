@@ -1,4 +1,4 @@
-import { rlmApiClient } from "@/lib/rlm-api/client";
+import { typedClient, unwrap, withTimeout } from "@/lib/rlm-api/typed-client";
 import type { components } from "@/lib/rlm-api/generated/openapi";
 
 export type LlmProviderProfileResponse = components["schemas"]["LlmProviderProfileResponse"];
@@ -14,14 +14,16 @@ export type LlmRoleBindingsUpdateRequest = components["schemas"]["LlmRoleBinding
 export type LlmImportEnvResponse = components["schemas"]["LlmImportEnvResponse"];
 export type LlmProviderType = LlmProviderProfileResponse["provider_type"];
 
-const BASE = "/api/v1/runtime";
-
 export function listLlmProfiles(signal?: AbortSignal) {
-  return rlmApiClient.get<LlmProviderProfileResponse[]>(`${BASE}/llm-profiles`, signal);
+  return unwrap(
+    typedClient.GET("/api/v1/runtime/llm-profiles", { signal: withTimeout(signal) }),
+  );
 }
 
 export function createLlmProfile(body: LlmProviderProfileCreateRequest, signal?: AbortSignal) {
-  return rlmApiClient.post<LlmProviderProfileResponse>(`${BASE}/llm-profiles`, body, signal);
+  return unwrap(
+    typedClient.POST("/api/v1/runtime/llm-profiles", { body, signal: withTimeout(signal) }),
+  );
 }
 
 export function updateLlmProfile(
@@ -29,41 +31,56 @@ export function updateLlmProfile(
   body: LlmProviderProfileUpdateRequest,
   signal?: AbortSignal,
 ) {
-  return rlmApiClient.patch<LlmProviderProfileResponse>(
-    `${BASE}/llm-profiles/${profileId}`,
-    body,
-    signal,
+  return unwrap(
+    typedClient.PATCH("/api/v1/runtime/llm-profiles/{profile_id}", {
+      params: { path: { profile_id: profileId } },
+      body,
+      signal: withTimeout(signal),
+    }),
   );
 }
 
 export function deleteLlmProfile(profileId: string, signal?: AbortSignal) {
-  return rlmApiClient.delete<void>(`${BASE}/llm-profiles/${profileId}`, signal);
+  return unwrap(
+    typedClient.DELETE("/api/v1/runtime/llm-profiles/{profile_id}", {
+      params: { path: { profile_id: profileId } },
+      signal: withTimeout(signal),
+    }),
+  );
 }
 
 export function fetchLlmProfileModels(profileId: string, refresh = false, signal?: AbortSignal) {
-  const suffix = refresh ? "?refresh=true" : "";
-  return rlmApiClient.get<LlmModelCatalogResponse>(
-    `${BASE}/llm-profiles/${profileId}/models${suffix}`,
-    signal,
+  return unwrap(
+    typedClient.GET("/api/v1/runtime/llm-profiles/{profile_id}/models", {
+      params: { path: { profile_id: profileId }, query: { refresh } },
+      signal: withTimeout(signal),
+    }),
   );
 }
 
 export function testLlmProfile(profileId: string, signal?: AbortSignal) {
-  return rlmApiClient.post(`${BASE}/llm-profiles/${profileId}/test`, undefined, signal);
+  return unwrap(
+    typedClient.POST("/api/v1/runtime/llm-profiles/{profile_id}/test", {
+      params: { path: { profile_id: profileId } },
+      signal: withTimeout(signal),
+    }),
+  );
 }
 
 export function fetchLlmRoleBindings(signal?: AbortSignal) {
-  return rlmApiClient.get<LlmRoleBindingsResponse>(`${BASE}/llm-roles`, signal);
+  return unwrap(
+    typedClient.GET("/api/v1/runtime/llm-roles", { signal: withTimeout(signal) }),
+  );
 }
 
 export function patchLlmRoleBindings(body: LlmRoleBindingsUpdateRequest, signal?: AbortSignal) {
-  return rlmApiClient.patch<LlmRoleBindingsResponse>(`${BASE}/llm-roles`, body, signal);
+  return unwrap(
+    typedClient.PATCH("/api/v1/runtime/llm-roles", { body, signal: withTimeout(signal) }),
+  );
 }
 
 export function importLlmProfilesFromEnv(signal?: AbortSignal) {
-  return rlmApiClient.post<LlmImportEnvResponse>(
-    `${BASE}/llm-profiles/import-env`,
-    undefined,
-    signal,
+  return unwrap(
+    typedClient.POST("/api/v1/runtime/llm-profiles/import-env", { signal: withTimeout(signal) }),
   );
 }

@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueryFunctionContext } from "@tanstack/react-query";
 
 import {
   optimizationEndpoints,
@@ -17,18 +18,44 @@ export const optimizationQueryKeys = {
     [...optimizationQueryKeys.all, "runs", runId ?? "none", "details"] as const,
 };
 
-export function useOptimizationStatus() {
-  return useQuery({
+export const optimizationQueryOptions = {
+  status: () => ({
     queryKey: optimizationQueryKeys.status(),
-    queryFn: ({ signal }) => optimizationEndpoints.status(signal),
-  });
+    queryFn: ({ signal }: QueryFunctionContext) => optimizationEndpoints.status(signal),
+  }),
+  modules: () => ({
+    queryKey: optimizationQueryKeys.modules(),
+    queryFn: ({ signal }: QueryFunctionContext) => optimizationEndpoints.modules(signal),
+  }),
+  datasets: (moduleSlug?: string | null) => ({
+    queryKey: optimizationQueryKeys.datasets(moduleSlug),
+    queryFn: ({ signal }: QueryFunctionContext) =>
+      optimizationEndpoints.datasets({ moduleSlug: moduleSlug || null, limit: 100 }, signal),
+  }),
+  runs: () => ({
+    queryKey: optimizationQueryKeys.runs(),
+    queryFn: ({ signal }: QueryFunctionContext) =>
+      optimizationEndpoints.runs({ limit: 50 }, signal),
+    refetchInterval: (query: { state: { data?: { status: string }[] } }) => {
+      const runs = query.state.data;
+      return runs?.some((run) => run.status === "running") ? 4000 : false;
+    },
+  }),
+  runDetails: (runId: string | null) => ({
+    queryKey: optimizationQueryKeys.runDetails(runId),
+    queryFn: ({ signal }: QueryFunctionContext) => {
+      if (!runId) return null as unknown as Awaited<ReturnType<typeof optimizationEndpoints.runDetails>>;
+      return optimizationEndpoints.runDetails(runId, signal);
+    },
+  }),
+};
+
+export function useOptimizationStatus() {
+  return useQuery(optimizationQueryOptions.status());
 }
 
 export function useOptimizationModules() {
-  return useQuery({
-    queryKey: optimizationQueryKeys.modules(),
-    queryFn: ({ signal }) => optimizationEndpoints.modules(signal),
-  });
+  return useQuery(optimizationQueryOptions.modules());
 }
 
 export function useOptimizationDatasets(
@@ -36,28 +63,18 @@ export function useOptimizationDatasets(
   options?: { enabled?: boolean },
 ) {
   return useQuery({
-    queryKey: optimizationQueryKeys.datasets(moduleSlug),
-    queryFn: ({ signal }) =>
-      optimizationEndpoints.datasets({ moduleSlug: moduleSlug || null, limit: 100 }, signal),
+    ...optimizationQueryOptions.datasets(moduleSlug),
     ...options,
   });
 }
 
 export function useOptimizationRuns() {
-  return useQuery({
-    queryKey: optimizationQueryKeys.runs(),
-    queryFn: ({ signal }) => optimizationEndpoints.runs({ limit: 50 }, signal),
-    refetchInterval: (query) => {
-      const runs = query.state.data;
-      return runs?.some((run) => run.status === "running") ? 4000 : false;
-    },
-  });
+  return useQuery(optimizationQueryOptions.runs());
 }
 
 export function useOptimizationRunDetails(runId: string | null) {
   return useQuery({
-    queryKey: optimizationQueryKeys.runDetails(runId),
-    queryFn: ({ signal }) => optimizationEndpoints.runDetails(runId ?? "", signal),
+    ...optimizationQueryOptions.runDetails(runId),
     enabled: Boolean(runId),
   });
 }

@@ -1,6 +1,5 @@
-import { rlmApiClient } from "@/lib/rlm-api/client";
-import { withQuery } from "@/lib/rlm-api/query";
 import { sessionsEndpoints } from "@/lib/rlm-api/sessions";
+import { typedClient, unwrap, withTimeout } from "@/lib/rlm-api/typed-client";
 import type { components } from "@/lib/rlm-api/generated/openapi";
 
 export type GEPAStatusResponse = components["schemas"]["GEPAStatusResponse"];
@@ -36,21 +35,23 @@ export interface ListOptimizationDatasetsInput {
 
 export const optimizationEndpoints = {
   status(signal?: AbortSignal) {
-    return rlmApiClient.get<GEPAStatusResponse>("/api/v1/optimization/status", signal);
+    return unwrap(
+      typedClient.GET("/api/v1/optimization/status", { signal: withTimeout(signal) }),
+    );
   },
 
   modules(signal?: AbortSignal) {
-    return rlmApiClient.get<GEPAModuleInfo[]>("/api/v1/optimization/modules", signal);
+    return unwrap(
+      typedClient.GET("/api/v1/optimization/modules", { signal: withTimeout(signal) }),
+    );
   },
 
   datasets(input: ListOptimizationDatasetsInput = {}, signal?: AbortSignal) {
-    return rlmApiClient.get<DatasetListResponse>(
-      withQuery("/api/v1/optimization/datasets", {
-        module_slug: input.moduleSlug,
-        limit: input.limit,
-        offset: input.offset,
+    return unwrap(
+      typedClient.GET("/api/v1/optimization/datasets", {
+        params: { query: { module_slug: input.moduleSlug, limit: input.limit, offset: input.offset } },
+        signal: withTimeout(signal),
       }),
-      signal,
     );
   },
 
@@ -60,53 +61,57 @@ export const optimizationEndpoints = {
     if (input.moduleSlug) {
       formData.append("module_slug", input.moduleSlug);
     }
-    return rlmApiClient.postForm<DatasetResponse>(
-      "/api/v1/optimization/datasets",
-      formData,
-      signal,
+    return unwrap(
+      typedClient.POST("/api/v1/optimization/datasets", {
+        body: formData as never,
+        signal: withTimeout(signal),
+        bodySerializer: () => formData,
+      }),
     );
   },
 
   createRun(body: GEPAOptimizationRequest, signal?: AbortSignal) {
-    return rlmApiClient.post<OptimizationRunCreatedResponse>(
-      "/api/v1/optimization/runs",
-      body,
-      signal,
-      120_000,
+    return unwrap(
+      typedClient.POST("/api/v1/optimization/runs", {
+        body,
+        signal: withTimeout(signal, 120_000),
+      }),
     );
   },
 
   runs(input: ListOptimizationRunsInput = {}, signal?: AbortSignal) {
-    return rlmApiClient.get<OptimizationRunResponse[]>(
-      withQuery("/api/v1/optimization/runs", {
-        status: input.status,
-        limit: input.limit,
-        offset: input.offset,
+    return unwrap(
+      typedClient.GET("/api/v1/optimization/runs", {
+        params: { query: { status: input.status, limit: input.limit, offset: input.offset } },
+        signal: withTimeout(signal),
       }),
-      signal,
     );
   },
 
   run(runId: string, signal?: AbortSignal) {
-    return rlmApiClient.get<OptimizationRunResponse>(
-      `/api/v1/optimization/runs/${encodeURIComponent(runId)}`,
-      signal,
+    return unwrap(
+      typedClient.GET("/api/v1/optimization/runs/{run_id}", {
+        params: { path: { run_id: runId } },
+        signal: withTimeout(signal),
+      }),
     );
   },
 
   runDetails(runId: string, signal?: AbortSignal) {
-    return rlmApiClient.get<OptimizationRunDetailResponse>(
-      `/api/v1/optimization/runs/${encodeURIComponent(runId)}/details`,
-      signal,
+    return unwrap(
+      typedClient.GET("/api/v1/optimization/runs/{run_id}/details", {
+        params: { path: { run_id: runId } },
+        signal: withTimeout(signal),
+      }),
     );
   },
 
   createPromotionDraft(runId: string, signal?: AbortSignal) {
-    return rlmApiClient.post<OptimizationPromotionDraftResponse>(
-      `/api/v1/optimization/runs/${encodeURIComponent(runId)}/promotion-drafts`,
-      {},
-      signal,
-      120_000,
+    return unwrap(
+      typedClient.POST("/api/v1/optimization/runs/{run_id}/promotion-drafts", {
+        params: { path: { run_id: runId } },
+        signal: withTimeout(signal, 120_000),
+      }),
     );
   },
 
