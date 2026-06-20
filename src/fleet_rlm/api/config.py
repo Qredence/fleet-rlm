@@ -129,7 +129,9 @@ class ServerRuntimeConfig(BaseSettings):
     cors_allowed_origins: list[str] | str = Field(default_factory=list)
     ws_execution_max_queue: int = 256
     ws_execution_drop_policy: Literal["drop_oldest", "drop_newest"] = "drop_oldest"
-    auth_mode: Literal["dev", "entra"] = "dev"
+    auth_mode: Literal["dev", "entra", "neon"] = "dev"
+    neon_auth_url: str | None = Field(default=None, alias="NEON_AUTH_URL")
+    neon_tenant_claim: str = Field(default="default", alias="NEON_TENANT_CLAIM")
     auth_required: bool = False
     dev_jwt_secret: str = "change-me"
     entra_jwks_url: str | None = None
@@ -167,6 +169,13 @@ class ServerRuntimeConfig(BaseSettings):
     @classmethod
     def from_app_config(cls, config: AppConfig) -> ServerRuntimeConfig:
         """Build server runtime settings from the shared application config."""
+        auth_mode = (os.getenv("AUTH_MODE") or "dev").strip().lower()
+        database_url = config.database.url or os.getenv("DATABASE_URL")
+        database_admin_url = config.database.admin_url or os.getenv("DATABASE_ADMIN_URL")
+        database_required = config.database.required
+        if "DATABASE_REQUIRED" not in os.environ and auth_mode in {"entra", "neon"}:
+            database_required = True
+
         kwargs: dict = {
             "secret_name": config.sandbox.secret_name,
             "volume_name": resolve_server_volume_name(config),
@@ -196,9 +205,9 @@ class ServerRuntimeConfig(BaseSettings):
             "agent_delegate_model": config.llm.delegate_model,
             "agent_delegate_small_model": config.llm.delegate_small_model,
             "agent_delegate_max_tokens": config.llm.delegate_max_tokens,
-            "database_url": config.database.url,
-            "database_admin_url": config.database.admin_url,
-            "database_required": config.database.required,
+            "database_url": database_url,
+            "database_admin_url": database_admin_url,
+            "database_required": database_required,
             "db_echo": config.database.echo,
             "db_validate_on_startup": config.database.validate_on_startup,
         }
@@ -262,9 +271,10 @@ class ServerRuntimeConfig(BaseSettings):
             str(values.get("auth_mode") or values.get("AUTH_MODE") or os.getenv("AUTH_MODE") or "dev").strip().lower()
         )
 
-        # database_required defaults to True in staging/production
+        # database_required defaults to True in staging/production and in
+        # repository-backed auth modes that need tenant admission.
         if "database_required" not in values and "DATABASE_REQUIRED" not in values:
-            values["database_required"] = app_env in {"staging", "production"}
+            values["database_required"] = app_env in {"staging", "production"} or auth_mode in {"entra", "neon"}
 
         # allow_debug_auth defaults to True only in local
         if "allow_debug_auth" not in values and "ALLOW_DEBUG_AUTH" not in values:
@@ -290,9 +300,9 @@ class ServerRuntimeConfig(BaseSettings):
         if "expose_root" not in values and "FLEET_RLM_EXPOSE_ROOT" not in values:
             values["expose_root"] = app_env == "local" or (app_env == "staging" and auth_mode != "entra")
 
-        # auth_required defaults to True when auth_mode is entra
+        # auth_required defaults to True when auth_mode is entra or neon
         if "auth_required" not in values and "AUTH_REQUIRED" not in values:
-            values["auth_required"] = auth_mode == "entra"
+            values["auth_required"] = auth_mode in {"entra", "neon"}
 
         explicit_issuer_template = values.get("entra_issuer_template") or values.get("ENTRA_ISSUER_TEMPLATE")
         explicit_issuer_url = values.get("entra_issuer_url") or values.get("ENTRA_ISSUER_URL")
@@ -365,3 +375,13 @@ class ServerRuntimeConfig(BaseSettings):
                         "Single-tenant Entra deployments in staging/production "
                         "must configure ENTRA_ALLOWED_USER_IDS or ENTRA_ALLOWED_GROUP_IDS"
                     )
+
+        if self.auth_mode == "neon":
+            if not self.auth_required:
+                raise ValueError("AUTH_REQUIRED must be true when AUTH_MODE=neon")
+            if not self.database_required:
+                raise ValueError("DATABASE_REQUIRED must be true when AUTH_MODE=neon")
+            if not self.neon_auth_url:
+                raise ValueError("NEON_AUTH_URL is required when AUTH_MODE=neon")
+            if not self.neon_tenant_claim.strip():
+                raise ValueError("NEON_TENANT_CLAIM is required when AUTH_MODE=neon")

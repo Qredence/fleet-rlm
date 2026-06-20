@@ -16,7 +16,29 @@ export class RlmApiError extends Error {
 function buildUrl(path: string): string {
   if (/^https?:\/\//.test(path)) return path;
   if (!rlmApiConfig.baseUrl) return path;
+  if (shouldUseSameOriginDevProxy(rlmApiConfig.baseUrl)) return path;
   return new URL(path, rlmApiConfig.baseUrl).toString();
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
+function shouldUseSameOriginDevProxy(apiUrl: string): boolean {
+  if (!import.meta.env.DEV || typeof window === "undefined") return false;
+
+  try {
+    const api = new URL(apiUrl);
+    const current = window.location;
+    return (
+      current.port === "5173" &&
+      api.port === "8000" &&
+      isLoopbackHost(current.hostname) &&
+      isLoopbackHost(api.hostname)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function anySignal(signals: AbortSignal[]): AbortSignal {

@@ -1,5 +1,6 @@
 import { parseWsServerFrame, createWsError } from "@/lib/rlm-api/ws-frame-parser";
 import { getAccessToken } from "@/lib/auth/token-store";
+import { authEndpoints } from "@/lib/rlm-api/auth";
 import type {
   WsClientMessage,
   StreamWsOptions,
@@ -86,6 +87,13 @@ export async function createReconnectingWs(
   };
 
   const attemptConnection = async (): Promise<void> => {
+    const wsUrlObj = new URL(options.url);
+    const token = getAccessToken();
+    if (token) {
+      const { ticket } = await authEndpoints.createWsTicket(signal);
+      wsUrlObj.searchParams.set("ticket", ticket);
+    }
+
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       let completed = false;
@@ -95,11 +103,6 @@ export async function createReconnectingWs(
 
       updateStatus(retryState.attempt > 0 ? "reconnecting" : "connecting");
 
-      const wsUrlObj = new URL(options.url);
-      const token = getAccessToken();
-      if (token) {
-        wsUrlObj.searchParams.set("access_token", token);
-      }
       const socket = new WebSocket(wsUrlObj.toString());
 
       const finish = (fn: () => void) => {

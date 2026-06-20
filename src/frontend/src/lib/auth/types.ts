@@ -17,4 +17,5 @@ export interface AuthContextValue {
   login: () => Promise<boolean>;
   logout: () => void;
   setPlan: (plan: PlanTier) => void;
+  refresh?: () => Promise<void>;
 }

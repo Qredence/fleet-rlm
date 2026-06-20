@@ -133,3 +133,68 @@ def test_validate_startup_or_raise_accepts_valid_entra_configuration(clean_runti
     )
 
     cfg.validate_startup_or_raise()
+
+
+def test_validate_startup_or_raise_requires_database_for_neon(clean_runtime_env):
+    config_module = importlib.import_module("fleet_rlm.api.config")
+
+    cfg = config_module.ServerRuntimeConfig(
+        auth_mode="neon",
+        auth_required=True,
+        database_required=False,
+        neon_auth_url="https://ep-xxx.neonauth.us-east-1.aws.neon.tech/neondb/auth",
+    )
+
+    with pytest.raises(ValueError, match="DATABASE_REQUIRED must be true when AUTH_MODE=neon"):
+        cfg.validate_startup_or_raise()
+
+
+def test_neon_auth_mode_defaults_database_required(clean_runtime_env):
+    config_module = importlib.import_module("fleet_rlm.api.config")
+
+    cfg = config_module.ServerRuntimeConfig(
+        auth_mode="neon",
+        auth_required=True,
+        database_url="postgresql://example.invalid/db",  # ty: ignore[unknown-argument]
+        neon_auth_url="https://ep-xxx.neonauth.us-east-1.aws.neon.tech/neondb/auth",
+    )
+
+    assert cfg.database_required is True
+
+
+def test_from_app_config_defaults_database_required_for_neon(clean_runtime_env, monkeypatch):
+    config_module = importlib.import_module("fleet_rlm.api.config")
+    env_module = importlib.import_module("fleet_rlm.integrations.config.env")
+
+    monkeypatch.setenv("AUTH_MODE", "neon")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://env.example.invalid/db")
+
+    cfg = config_module.ServerRuntimeConfig.from_app_config(
+        env_module.AppConfig(
+            database=env_module.DatabaseConfig(
+                required=False,
+            ),
+        ),
+    )
+
+    assert cfg.database_required is True
+    assert cfg.database_url == "postgresql://env.example.invalid/db"
+
+
+def test_validate_startup_or_raise_accepts_valid_neon_configuration(clean_runtime_env):
+    config_module = importlib.import_module("fleet_rlm.api.config")
+
+    cfg = config_module.ServerRuntimeConfig(
+        app_env="production",
+        auth_mode="neon",
+        auth_required=True,
+        database_required=True,
+        database_url="postgresql://example.invalid/db",  # ty: ignore[unknown-argument]
+        allow_debug_auth=False,
+        allow_query_auth_tokens=False,
+        neon_auth_url="https://ep-xxx.neonauth.us-east-1.aws.neon.tech/neondb/auth",
+        neon_tenant_claim="fleet-prod",
+        cors_allowed_origins=["https://app.example"],
+    )
+
+    cfg.validate_startup_or_raise()

@@ -24,6 +24,7 @@ All `/api/v1/*` endpoints require authentication when `AUTH_REQUIRED=true`. Auth
 |------|----------|
 | `dev` | Debug headers, local HS256 tokens, optional identity |
 | `entra` | JWKS-backed Entra ID tokens, Neon tenant admission required |
+| `neon` | Neon Auth EdDSA JWTs, Fleet repository admission required |
 
 See [Auth Modes](auth.md) for configuration details.
 
@@ -96,12 +97,27 @@ Returns the authenticated user's identity envelope.
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `tenant_claim` | yes | Entra tenant claim identifier |
-| `user_claim` | yes | Entra user claim identifier |
+| `tenant_claim` | yes | Auth tenant claim identifier |
+| `user_claim` | yes | Auth user claim identifier |
 | `email` | no | User email from token |
 | `name` | no | User display name |
-| `tenant_id` | no | Internal tenant ID (after admission in Entra mode) |
-| `user_id` | no | Internal user ID (after admission in Entra mode) |
+| `tenant_id` | no | Internal tenant ID (after admission in Entra or Neon mode) |
+| `user_id` | no | Internal user ID (after admission in Entra or Neon mode) |
+
+### `POST /api/v1/auth/ws-ticket`
+
+Exchanges a normal authenticated HTTP request for a short-lived, single-use
+WebSocket ticket. This is the browser-safe authentication path for Neon Auth
+because raw JWTs must not be placed in WebSocket URLs.
+
+**Response:**
+
+```json
+{
+  "ticket": "opaque-one-time-ticket",
+  "expires_at": "2026-06-20T03:30:00Z"
+}
+```
 
 ---
 
@@ -785,7 +801,7 @@ Primary bidirectional streaming interface for RLM conversations. Supports messag
 ws://localhost:8000/api/v1/ws/execution
 ```
 
-**Authentication:** Prefer `Authorization: Bearer ...` when available. WebSocket auth bootstrap may also use `access_token` query parameters where the server enables that compatibility path.
+**Authentication:** Browser clients should use `POST /api/v1/auth/ws-ticket` and connect with `ticket=<opaque-ticket>`. Legacy `access_token` query bootstrap is a compatibility path only for modes that explicitly enable it; Neon mode rejects raw JWT query parameters.
 
 ---
 
@@ -1058,7 +1074,7 @@ ws://localhost:8000/api/v1/ws/execution/events?session_id=session-uuid
 |-----------|------|----------|-------------|
 | `session_id` | string | yes | Authoritative client-controlled session selector |
 
-**Authentication:** Prefer `Authorization: Bearer ...` when available. WebSocket auth bootstrap may also use `access_token` query parameters where the server enables that compatibility path.
+**Authentication:** Browser clients should use `POST /api/v1/auth/ws-ticket` and connect with `ticket=<opaque-ticket>`. Legacy `access_token` query bootstrap is a compatibility path only for modes that explicitly enable it; Neon mode rejects raw JWT query parameters.
 
 The backend resolves workspace and user identity from auth claims or server defaults. Client-provided `workspace_id` and `user_id` are rejected; query `session_id` is the authoritative selector for passive execution stream binding. The conversational `/api/v1/ws/execution` route rejects query `session_id`.
 

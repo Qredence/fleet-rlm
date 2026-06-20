@@ -205,6 +205,129 @@ async def _restore_manifest_from_local_store(
         return {}
 
 
+def _history_turns_from_exported_state(exported_state: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_turns = exported_state.get("turns")
+    if not isinstance(raw_turns, list):
+        raw_turns = exported_state.get("history")
+    if not isinstance(raw_turns, list):
+        return []
+
+    turns: list[dict[str, Any]] = []
+    for raw_turn in raw_turns:
+        if not isinstance(raw_turn, dict):
+            continue
+        user_message = str(raw_turn.get("user_message") or "").strip()
+        if not user_message:
+            continue
+        turns.append(
+            {
+                "user_message": user_message,
+                "response": str(raw_turn.get("response") or raw_turn.get("assistant_message") or ""),
+            }
+        )
+    return turns
+
+
+async def _persist_local_turns_from_exported_state(
+    *,
+    persistence: Any,
+    session_record: dict[str, Any],
+    exported_state: dict[str, Any],
+    identity_rows: IdentityUpsertResult | None,
+) -> None:
+    """Populate LocalStore chat_turns from runtime history for no-Postgres dev."""
+    if persistence is None or identity_rows is None:
+        return
+    replace_turns = getattr(persistence, "replace_chat_turns_from_history", None)
+    if not callable(replace_turns):
+        return
+
+    db_session_id = str(session_record.get("db_session_id") or "").strip()
+    if not db_session_id:
+        manifest = session_record.get("manifest")
+        if isinstance(manifest, dict):
+            metadata = manifest.get("metadata")
+            if isinstance(metadata, dict):
+                db_session_id = str(metadata.get("db_session_id") or "").strip()
+    if not db_session_id:
+        return
+
+    try:
+        session_uuid = uuid.UUID(db_session_id)
+    except ValueError:
+        return
+
+    turns = _history_turns_from_exported_state(exported_state)
+    if not turns:
+        return
+
+    try:
+        result = replace_turns(
+            tenant_id=identity_rows.tenant_id,
+            session_id=session_uuid,
+            turns=turns,
+            user_id=identity_rows.user_id,
+            workspace_id=identity_rows.workspace_id,
+        )
+        if inspect.iscoroutine(result):
+            await result
+    except Exception:
+        logger.debug("Best-effort local chat turn persist failed", exc_info=True)
+
+
+async def _persist_repository_turns_from_exported_state(
+    *,
+    repository: FleetRepository | None,
+    session_record: dict[str, Any],
+    exported_state: dict[str, Any],
+    identity_rows: IdentityUpsertResult | None,
+    persistence_required: bool,
+) -> None:
+    """Populate repository chat_turns from runtime history for Postgres-backed auth."""
+    if repository is None or identity_rows is None:
+        return
+    replace_turns = getattr(repository, "replace_chat_turns_from_history", None)
+    if not callable(replace_turns):
+        return
+
+    db_session_id = str(session_record.get("db_session_id") or "").strip()
+    if not db_session_id:
+        manifest = session_record.get("manifest")
+        if isinstance(manifest, dict):
+            metadata = manifest.get("metadata")
+            if isinstance(metadata, dict):
+                db_session_id = str(metadata.get("db_session_id") or "").strip()
+    if not db_session_id:
+        return
+
+    try:
+        session_uuid = uuid.UUID(db_session_id)
+    except ValueError:
+        return
+
+    turns = _history_turns_from_exported_state(exported_state)
+    if not turns:
+        return
+
+    try:
+        result = replace_turns(
+            tenant_id=identity_rows.tenant_id,
+            session_id=session_uuid,
+            turns=turns,
+            user_id=identity_rows.user_id,
+            workspace_id=identity_rows.workspace_id,
+        )
+        if inspect.iscoroutine(result):
+            await result
+    except Exception as exc:
+        if persistence_required:
+            raise PersistenceRequiredError(
+                "chat_turn_persist_failed",
+                f"Failed to persist chat turns: {exc}",
+            ) from exc
+        logger.debug("Best-effort repository chat turn persist failed", exc_info=True)
+
+
 async def persist_session_state(
     *,
     session_cache: SessionCacheDeps,
@@ -344,6 +467,20 @@ async def _persist_session_state_impl(
                 sess_id=sess_id,
                 manifest=manifest,
             )
+            await _persist_local_turns_from_exported_state(
+                persistence=persistence,
+                session_record=session_record,
+                exported_state=exported_state,
+                identity_rows=identity_rows,
+            )
+
+    await _persist_repository_turns_from_exported_state(
+        repository=repository,
+        session_record=session_record,
+        exported_state=exported_state,
+        identity_rows=identity_rows,
+        persistence_required=persistence_required,
+    )
 
     await persist_memory_item_if_needed(
         repository=repository,

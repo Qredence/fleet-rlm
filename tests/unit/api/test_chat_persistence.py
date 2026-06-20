@@ -155,6 +155,137 @@ async def test_persist_session_state_skips_volume_without_creating_cleanup_sessi
 
 
 @pytest.mark.asyncio
+async def test_persist_session_state_writes_local_turns_from_exported_history() -> None:
+    from fleet_rlm.api.dependencies import SessionCacheDeps
+    from fleet_rlm.api.runtime_services.session_persistence import persist_session_state
+    from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+
+    class FakeLocalPersistence:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def update_chat_session(self, **kwargs: Any) -> None:
+            _ = kwargs
+
+        async def replace_chat_turns_from_history(self, **kwargs: Any) -> None:
+            self.calls.append(dict(kwargs))
+
+    persistence = FakeLocalPersistence()
+    agent = SimpleNamespace(
+        export_session_state=lambda: {
+            "history": [
+                {"user_message": "persist this turn", "response": "turn persisted"},
+            ],
+            "documents": {},
+        },
+    )
+    session_record = {
+        "session_id": "runtime-session-1",
+        "db_session_id": str(session_id),
+        "key": "workspace:user:runtime-session-1",
+        "session": {},
+        "manifest": {"rev": 0},
+    }
+
+    await persist_session_state(
+        session_cache=SessionCacheDeps(),
+        agent=agent,
+        session_record=session_record,
+        active_manifest_path=None,
+        active_run_db_id=None,
+        interpreter=None,
+        repository=None,
+        identity_rows=IdentityUpsertResult(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        ),
+        persistence_required=False,
+        include_volume_save=True,
+        persistence=persistence,
+    )
+
+    assert persistence.calls == [
+        {
+            "tenant_id": tenant_id,
+            "session_id": session_id,
+            "turns": [{"user_message": "persist this turn", "response": "turn persisted"}],
+            "user_id": user_id,
+            "workspace_id": workspace_id,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_persist_session_state_writes_repository_turns_from_exported_history() -> None:
+    from fleet_rlm.api.dependencies import SessionCacheDeps
+    from fleet_rlm.api.runtime_services.session_persistence import persist_session_state
+    from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+
+    class FakeRepository:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def replace_chat_turns_from_history(self, **kwargs: Any) -> None:
+            self.calls.append(dict(kwargs))
+
+    repository = FakeRepository()
+    agent = SimpleNamespace(
+        export_session_state=lambda: {
+            "history": [
+                {"user_message": "persist db turn", "response": "db turn persisted"},
+            ],
+            "documents": {},
+        },
+    )
+    session_record = {
+        "session_id": "runtime-session-1",
+        "db_session_id": str(session_id),
+        "key": "workspace:user:runtime-session-1",
+        "session": {},
+        "manifest": {"rev": 0},
+    }
+
+    await persist_session_state(
+        session_cache=SessionCacheDeps(),
+        agent=agent,
+        session_record=session_record,
+        active_manifest_path=None,
+        active_run_db_id=None,
+        interpreter=None,
+        repository=repository,  # ty: ignore[invalid-argument-type]
+        identity_rows=IdentityUpsertResult(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        ),
+        persistence_required=True,
+        include_volume_save=True,
+        persistence=None,
+    )
+
+    assert repository.calls == [
+        {
+            "tenant_id": tenant_id,
+            "session_id": session_id,
+            "turns": [{"user_message": "persist db turn", "response": "db turn persisted"}],
+            "user_id": user_id,
+            "workspace_id": workspace_id,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_manifest_volume_io_uses_existing_daytona_session_without_creating(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -554,8 +685,8 @@ async def test_link_database_session_uses_local_identity_ownership(monkeypatch: 
         ),
     )
 
-    assert linked_id == "42"
+    assert linked_id == str(uuid.UUID(int=42))
     assert created["owner_tenant"] == str(tenant_id)
     assert created["owner_user"] == str(user_id)
     assert created["workspace_id"] == str(workspace_id)
-    assert cached["manifest"]["metadata"]["db_session_id"] == "42"
+    assert cached["manifest"]["metadata"]["db_session_id"] == str(uuid.UUID(int=42))

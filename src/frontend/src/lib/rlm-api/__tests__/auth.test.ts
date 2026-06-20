@@ -40,6 +40,24 @@ describe("authEndpoints", () => {
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit)?.method).toBe("GET");
   });
 
+  it("creates a WebSocket ticket through the authenticated HTTP API", async () => {
+    vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockJsonResponse({
+        ticket: "ticket-123",
+        expires_at: "2026-06-20T03:30:00Z",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { authEndpoints } = await loadAuthModule();
+    await authEndpoints.createWsTicket();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8000/api/v1/auth/ws-ticket");
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit)?.method).toBe("POST");
+  });
+
   it("clears local auth without calling the backend", async () => {
     vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
     const fetchMock = vi.fn();

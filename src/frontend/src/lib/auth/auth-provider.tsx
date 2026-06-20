@@ -9,6 +9,11 @@ import {
   loginWithEntra,
   logoutWithEntra,
 } from "@/lib/auth/entra";
+import {
+  initializeNeonSession,
+  isNeonAuthConfigured,
+  neonAuthClient,
+} from "@/lib/auth/neon";
 import { authEndpoints } from "@/lib/rlm-api/auth";
 import type { AuthContextValue, PlanTier, UserProfile } from "@/lib/auth/types";
 
@@ -42,10 +47,14 @@ function AuthProvider({ children }: AuthProviderProps) {
     }
 
     let cancelled = false;
-    void (async () => {
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+
+    const syncSession = async () => {
       try {
         if (isEntraAuthConfigured()) {
           await initializeEntraSession();
+        } else if (isNeonAuthConfigured()) {
+          await initializeNeonSession();
         }
         if (!getAccessToken()) {
           if (!cancelled) setUser(null);
@@ -72,10 +81,38 @@ function AuthProvider({ children }: AuthProviderProps) {
         authEndpoints.clearLocalAuth();
         setUser(null);
       }
-    })();
+    };
+
+    void syncSession();
+
+    // Periodically sync session if Neon Auth is configured to support out-of-band login/logout redirect flows
+    if (isNeonAuthConfigured()) {
+      intervalId = setInterval(async () => {
+        const oldToken = getAccessToken();
+        const newToken = await initializeNeonSession();
+        if (newToken !== oldToken) {
+          if (newToken) {
+            try {
+              const me = await authEndpoints.me();
+              if (!cancelled) setUser(mapProfile(me));
+            } catch {
+              if (!cancelled) {
+                authEndpoints.clearLocalAuth();
+                setUser(null);
+              }
+            }
+          } else {
+            if (!cancelled) setUser(null);
+          }
+        }
+      }, 1500);
+    }
 
     return () => {
       cancelled = true;
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
     };
   }, []);
 
@@ -96,7 +133,11 @@ function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const logout = useCallback(() => {
-    void logoutWithEntra().catch(() => undefined);
+    if (isEntraAuthConfigured()) {
+      void logoutWithEntra().catch(() => undefined);
+    } else if (isNeonAuthConfigured() && neonAuthClient) {
+      void neonAuthClient.signOut().catch(() => undefined);
+    }
     authEndpoints.clearLocalAuth();
     setUser(null);
   }, []);
@@ -105,12 +146,23 @@ function AuthProvider({ children }: AuthProviderProps) {
     setUser((prev) => (prev ? { ...prev, plan } : null));
   }, []);
 
+  const refresh = useCallback(async () => {
+    try {
+      const me = await authEndpoints.me();
+      setUser(mapProfile(me));
+    } catch {
+      setUser(null);
+      authEndpoints.clearLocalAuth();
+    }
+  }, []);
+
   const value: AuthContextValue = {
     isAuthenticated: user !== null,
     user,
     login,
     logout,
     setPlan,
+    refresh,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

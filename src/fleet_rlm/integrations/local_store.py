@@ -412,6 +412,50 @@ def add_turn(
         return row
 
 
+def replace_turns_from_history(
+    session_id: int,
+    turns: list[dict[str, Any]],
+    *,
+    owner_tenant: str | None = None,
+    owner_user: str | None = None,
+) -> list[ChatTurn]:
+    """Replace local chat turns for a session from exported runtime history."""
+    with get_session() as db:
+        session_row = db.get(ChatSession, session_id)
+        if session_row is None:
+            raise ValueError(f"ChatSession with id {session_id} not found")
+        if owner_tenant is not None and session_row.owner_tenant != owner_tenant:
+            return []
+        if owner_user is not None and session_row.owner_user != owner_user:
+            return []
+
+        existing = list(db.exec(select(ChatTurn).where(ChatTurn.session_id == session_id)).all())
+        for row in existing:
+            db.delete(row)
+
+        rows: list[ChatTurn] = []
+        for index, turn in enumerate(turns):
+            user_message = str(turn.get("user_message") or "").strip()
+            if not user_message:
+                continue
+            row = ChatTurn(
+                session_id=session_id,
+                turn_index=index,
+                user_message=user_message,
+                assistant_message=str(turn.get("response") or turn.get("assistant_message") or "") or None,
+            )
+            db.add(row)
+            rows.append(row)
+
+        session_row.monotonic_turn_counter = len(rows)
+        session_row.updated_at = _utc_now()
+        db.add(session_row)
+        db.commit()
+        for row in rows:
+            db.refresh(row)
+        return rows
+
+
 def get_turns(session_id: int) -> list[ChatTurn]:
     with get_session() as db:
         stmt = select(ChatTurn).where(ChatTurn.session_id == session_id).order_by(text("turn_index"))
@@ -1190,6 +1234,28 @@ class LocalStore(PersistenceProtocol):
             offset=offset,
         )
         return cast(tuple[list[DbChatTurn], int], (items, total))
+
+    async def replace_chat_turns_from_history(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        turns: list[dict[str, Any]],
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> list[DbChatTurn]:
+        _ = workspace_id
+        session_id_int = _uuid_to_int(session_id)
+        if session_id_int is None:
+            return []
+        rows = await asyncio.to_thread(
+            replace_turns_from_history,
+            session_id_int,
+            turns,
+            owner_tenant=str(tenant_id),
+            owner_user=str(user_id) if user_id is not None else None,
+        )
+        return cast(list[DbChatTurn], rows)
 
     async def update_chat_session(
         self,

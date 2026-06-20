@@ -16,6 +16,7 @@ from fleet_rlm.integrations.persistence_protocol import PersistenceProtocol
 from fleet_rlm.utils.identity import owner_fingerprint
 
 from .auth import AuthError, AuthProvider, NormalizedIdentity, resolve_admitted_identity
+from .auth.ws_ticket import WebSocketTicketStore
 from .config import ServerRuntimeConfig
 from .events import ExecutionEventEmitter
 
@@ -64,6 +65,13 @@ class AuthDeps:
     """Authentication provider dependency slice."""
 
     auth_provider: AuthProvider | None = None
+
+
+@dataclass
+class WebSocketTicketDeps:
+    """Short-lived WebSocket authentication ticket dependency slice."""
+
+    tickets: WebSocketTicketStore = field(default_factory=WebSocketTicketStore)
 
 
 @dataclass
@@ -123,6 +131,7 @@ class ServerState:
         config_deps: ConfigDeps | None = None,
         lm_deps: LmDeps | None = None,
         auth_deps: AuthDeps | None = None,
+        ws_ticket_deps: WebSocketTicketDeps | None = None,
         session_cache_deps: SessionCacheDeps | None = None,
         persistence_deps: PersistenceDeps | None = None,
         diagnostics_deps: DiagnosticsDeps | None = None,
@@ -131,6 +140,7 @@ class ServerState:
         self.config_deps = config_deps or ConfigDeps(config=config or ServerRuntimeConfig())
         self.lm_deps = lm_deps or LmDeps()
         self.auth_deps = auth_deps or AuthDeps()
+        self.ws_ticket_deps = ws_ticket_deps or WebSocketTicketDeps()
         self.session_cache_deps = session_cache_deps or SessionCacheDeps()
         self.persistence_deps = persistence_deps or PersistenceDeps()
         self.diagnostics_deps = diagnostics_deps or DiagnosticsDeps(
@@ -210,6 +220,14 @@ def get_auth_deps(request: Request) -> AuthDeps:
 AuthDepsDep = Annotated[AuthDeps, Depends(get_auth_deps)]
 
 
+def get_ws_ticket_deps(request: Request) -> WebSocketTicketDeps:
+    """Resolve WebSocket ticket dependencies."""
+    return _require_dep(request.app, "ws_ticket_deps")
+
+
+WebSocketTicketDepsDep = Annotated[WebSocketTicketDeps, Depends(get_ws_ticket_deps)]
+
+
 def get_session_cache_deps(request: Request) -> SessionCacheDeps:
     """Resolve in-memory session cache dependencies."""
     return _require_dep(request.app, "session_cache_deps")
@@ -247,6 +265,10 @@ def get_lm_deps_from_websocket(websocket: WebSocket) -> LmDeps:
 
 def get_auth_deps_from_websocket(websocket: WebSocket) -> AuthDeps:
     return _require_dep(websocket.app, "auth_deps")
+
+
+def get_ws_ticket_deps_from_websocket(websocket: WebSocket) -> WebSocketTicketDeps:
+    return _require_dep(websocket.app, "ws_ticket_deps")
 
 
 def get_session_cache_deps_from_websocket(websocket: WebSocket) -> SessionCacheDeps:
@@ -356,7 +378,7 @@ async def resolve_persisted_identity(
 ) -> IdentityUpsertResult:
     """Resolve the caller's persisted identity via the unified persistence backend."""
     if isinstance(persistence, FleetRepository):
-        if config_deps.config.auth_mode == "entra":
+        if config_deps.config.auth_mode in {"entra", "neon"}:
             try:
                 return await resolve_admitted_identity(persistence, identity)
             except AuthError as exc:
@@ -394,12 +416,14 @@ def compose_server_state(
     persistence_deps: PersistenceDeps,
     diagnostics_deps: DiagnosticsDeps,
     interpreter_pool_deps: InterpreterPoolDeps | None = None,
+    ws_ticket_deps: WebSocketTicketDeps | None = None,
 ) -> ServerState:
     """Assemble a backward-compatible ServerState from focused dependency slices."""
     return ServerState(
         config_deps=config_deps,
         lm_deps=lm_deps,
         auth_deps=auth_deps,
+        ws_ticket_deps=ws_ticket_deps or WebSocketTicketDeps(),
         session_cache_deps=session_cache_deps,
         persistence_deps=persistence_deps,
         diagnostics_deps=diagnostics_deps,

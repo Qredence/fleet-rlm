@@ -158,18 +158,19 @@ async def _link_database_session(
         else workspace_id
     )
     try:
-        linked_id = str(
-            (
-                await asyncio.to_thread(
-                    _db_create,
-                    title=sess_id,
-                    external_session_id=sess_id,
-                    owner_tenant=local_owner_tenant,
-                    owner_user=local_owner_user,
-                    workspace_id=local_workspace_id,
-                )
-            ).id
-        )
+        local_session_id = (
+            await asyncio.to_thread(
+                _db_create,
+                title=sess_id,
+                external_session_id=sess_id,
+                owner_tenant=local_owner_tenant,
+                owner_user=local_owner_user,
+                workspace_id=local_workspace_id,
+            )
+        ).id
+        linked_id = str(uuid.UUID(int=int(local_session_id))) if local_session_id is not None else ""
+        if not linked_id:
+            return None
     except SQLAlchemyError:
         logger.warning("Best-effort DB session linkage failed", exc_info=True)
         return None

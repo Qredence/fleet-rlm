@@ -13,6 +13,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "@neondatabase/auth-ui/tailwind";
 @import "@fontsource-variable/inter";
 @import "../components/agent-elements/agent-ui.css";
 
@@ -1581,6 +1582,34 @@ li {
 
 [data-slot="sidebar-menu-sub-button"][data-size="md"] {
   font-size: var(--font-text-sm-size);
+}
+
+/* Ensure sidebar buttons have absolutely no visible borders or outline/focus rings in all states */
+[data-sidebar="sidebar"] button,
+[data-sidebar="sidebar"] [role="button"],
+[data-slot="sidebar"] button,
+[data-slot="sidebar"] [role="button"],
+[data-slot="sidebar-inner"] button,
+[data-slot="sidebar-inner"] [role="button"] {
+  border: none !important;
+  border-width: 0px !important;
+  border-color: transparent !important;
+  outline: none !important;
+  outline-width: 0px !important;
+  box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-width: 0px !important;
+  --tw-ring-color: transparent !important;
+}
+
+/* Hover-reveal custom scrollbar specifically for the session list */
+.scroll-area-hover-reveal [data-orientation="vertical"] {
+  opacity: 0;
+  transition: opacity 150ms ease-in-out !important;
+}
+
+.scroll-area-hover-reveal:hover [data-orientation="vertical"] {
+  opacity: 1;
 }
 
 /* ── Table ──────────────────────────────────────────────────────── */

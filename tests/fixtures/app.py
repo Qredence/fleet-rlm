@@ -22,6 +22,8 @@ def no_db_app(monkeypatch):
     app = create_app(
         config=ServerRuntimeConfig(
             app_env="local",
+            auth_mode="dev",
+            auth_required=False,
             database_required=False,
             database_url=None,  # ty: ignore[unknown-argument] — populate_by_name=True lets callers use the Python field name; ty doesn't model this
             db_validate_on_startup=False,

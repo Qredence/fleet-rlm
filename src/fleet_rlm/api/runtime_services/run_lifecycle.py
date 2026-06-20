@@ -114,6 +114,12 @@ class ExecutionLifecycleManager:
         summary: dict[str, Any] | None = None,
     ) -> Any:
         self._event_sequence += 1
+        if event_type == "execution_started" and self._session_record:
+            db_sess_id = self._session_record.get("db_session_id")
+            if db_sess_id:
+                summary = dict(summary or {})
+                summary["db_session_id"] = str(db_sess_id)
+
         return build_execution_event(
             event_type=event_type,
             run_id=self.run_id,
