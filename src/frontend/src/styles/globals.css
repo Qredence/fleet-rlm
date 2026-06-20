@@ -189,6 +189,11 @@
   letter-spacing: var(--font-text-13px-tracking);
 }
 
+@utility typo-composer {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
 /* ── Node color utilities (graph-step-node) ────────────────────────── */
 /* These reference the --node-color custom property set on the node.   */
 
@@ -313,6 +318,60 @@
 
 @utility w-select-xl {
   width: 132px;
+}
+
+/* ── Action / tool / composer geometry utilities ─────────────────── */
+
+@utility max-w-attachment {
+  max-width: 200px;
+}
+
+@utility max-w-sidebar-label {
+  max-width: 120px;
+}
+
+@utility min-w-optimization-table {
+  min-width: 1080px;
+}
+
+@utility w-sheet-optimization {
+  width: min(980px, 92vw);
+}
+
+@utility h-info-bar {
+  height: 34px;
+}
+
+@utility max-h-info-bar {
+  max-height: 34px;
+}
+
+@utility h-skeleton-row {
+  height: 28px;
+}
+
+@utility h-skeleton-row-lg {
+  height: 48px;
+}
+
+@utility min-h-touch {
+  min-height: 44px;
+}
+
+@utility max-h-tool-collapsed-sm {
+  max-height: 120px;
+}
+
+@utility max-h-tool-collapsed-md {
+  max-height: 175px;
+}
+
+@utility max-h-tool-collapsed-lg {
+  max-height: 260px;
+}
+
+@utility shadow-sidebar-ring {
+  box-shadow: 0 0 0 1px hsl(var(--sidebar-border));
 }
 
 @utility tracking-tight-custom {

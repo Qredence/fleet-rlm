@@ -88,7 +88,7 @@ export function RunDetailsSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-[min(980px,92vw)] gap-0 p-0 sm:max-w-none">
+      <SheetContent className="w-sheet-optimization gap-0 p-0 sm:max-w-none">
         <SheetHeader className="border-b border-border-subtle">
           <SheetTitle>GEPA Run Details</SheetTitle>
           <SheetDescription>

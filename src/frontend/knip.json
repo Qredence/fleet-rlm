@@ -1,33 +1,35 @@
 {
   "$schema": "https://unpkg.com/knip@latest/schema.json",
-  "entry": ["src/main.tsx", "src/router.tsx"],
-  "project": ["src/**/*.{ts,tsx}"],
-  "ignore": [
-    "**/*.test.ts",
-    "**/*.test.tsx",
-    "**/*.spec.ts",
-    "**/*.spec.tsx",
-    "**/__tests__/**",
-    "**/node_modules/**"
+  "entry": [
+    "src/router.tsx",
+    "src/client.tsx",
+    "src/server.ts",
+    "src/**/__tests__/**/*.test.{ts,tsx}",
+    "src/**/*.test.{ts,tsx}"
   ],
+  "project": ["src/**/*.{ts,tsx}"],
+  "ignoreBinaries": ["uv"],
+  "ignoreUnresolved": ["/src/.*"],
   "ignoreDependencies": [
-    "@types/bun",
-    "@types/node",
-    "@types/react",
-    "@types/react-dom",
     "globals",
-    "jsdom",
     "prettier",
-    "vite",
-    "vitest",
-    "vite-plus",
     "@eslint/js",
     "eslint-plugin-react-hooks",
     "eslint-plugin-react-refresh",
     "tailwindcss",
     "typescript-eslint",
-    "@xyflow/react",
-    "tw-animate-css"
+    "tw-animate-css",
+    "@fontsource-variable/inter",
+    "@streamdown/cjk",
+    "@streamdown/math",
+    "@streamdown/mermaid",
+    "@tanstack/router-plugin",
+    "embla-carousel-react",
+    "jscpd",
+    "nanoid",
+    "next-themes",
+    "shadcn",
+    "use-stick-to-bottom"
   ],
   "ignoreExportsUsedInFile": {
     "interface": true,
@@ -40,6 +42,6 @@
     "types": "warn",
     "nsTypes": "warn",
     "enumMembers": "warn",
-    "classMembers": "warn"
+    "duplicates": "warn"
   }
 }

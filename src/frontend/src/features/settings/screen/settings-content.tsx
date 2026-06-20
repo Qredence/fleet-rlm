@@ -234,6 +234,7 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
                   aria-label="Light mode"
                   className="group/theme-item min-w-34 flex-col items-start gap-3"
                 >
+                  {/* theme-swatch: literal illustration of light/dark UI — raw bg-zinc-* values are intentional */}
                   <span className="flex h-14 w-full min-w-34 items-start rounded-lg border border-border-subtle bg-white p-3 shadow-xs">
                     <span className="flex w-full gap-2">
                       <span className="w-4 rounded-md bg-zinc-100" />

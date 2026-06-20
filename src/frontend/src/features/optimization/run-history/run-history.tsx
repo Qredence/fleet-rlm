@@ -100,7 +100,7 @@ export function RunHistory({
 
         {runs.length > 0 ? (
           <div className="overflow-x-auto rounded-lg border border-border-subtle scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
-            <div className="min-w-[1080px] bg-background">
+            <div className="min-w-optimization-table bg-background">
               {/* Header row */}
               <div className="grid grid-cols-[112px_1.3fr_1fr_80px_80px_92px_1.4fr_92px] items-center border-b border-border-subtle bg-muted/20 px-4 py-2.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                 <span>Status</span>

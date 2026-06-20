@@ -2,6 +2,7 @@
 
 import { memo, useMemo, useState } from "react";
 import { Check, ChevronDown, Cpu, Settings2 } from "lucide-react";
+import { popoverSurfaceClass } from "./popover-surface";
 
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -67,11 +68,7 @@ export const ModelPicker = memo(function ModelPicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={trigger} />
-      <PopoverContent
-        align="end"
-        side="top"
-        className="w-64 rounded-[8px] border-border/80 bg-an-input-background p-1 text-an-foreground shadow-lg"
-      >
+      <PopoverContent align="end" side="top" className={cn("w-64", popoverSurfaceClass)}>
         <div className="max-h-64 overflow-y-auto">
           {models.map((model) => {
             const isActive = model.id === activeModel.id;
@@ -87,7 +84,7 @@ export const ModelPicker = memo(function ModelPicker({
                   setOpen(false);
                 }}
                 className={cn(
-                  "flex w-full items-start gap-2 rounded-[6px] px-2 py-1.5 text-left typo-caption transition-colors",
+                  "flex w-full items-start gap-2 rounded-an-action-md px-2 py-1.5 text-left typo-caption transition-colors",
                   canSelect && !model.disabled && "hover:bg-foreground/6",
                   isActive && "bg-foreground/6",
                   (model.disabled || !canSelect) && "cursor-default",
@@ -111,7 +108,7 @@ export const ModelPicker = memo(function ModelPicker({
               type="button"
               variant="ghost"
               size="sm"
-              className="h-8 w-full justify-start gap-2 rounded-[6px] px-2 typo-caption"
+              className="h-8 w-full justify-start gap-2 rounded-an-action-md px-2 typo-caption"
               onClick={() => {
                 setOpen(false);
                 onConfigure();

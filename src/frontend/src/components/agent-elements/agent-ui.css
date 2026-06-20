@@ -131,6 +131,9 @@
   );
   --radius-an-input-border-radius: var(--an-input-border-radius);
   --radius-an-tool-border-radius: var(--an-tool-border-radius);
+  --radius-an-action-sm: 4px;
+  --radius-an-action-md: 6px;
+  --radius-an-action-lg: 8px;
   --spacing-an-context-padding: var(--an-context-padding);
   --max-width-an: var(--an-max-width);
   --spacing-an-user-message-x: 14px;

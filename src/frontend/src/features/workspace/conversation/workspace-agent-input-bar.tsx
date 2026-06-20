@@ -189,8 +189,8 @@ export function WorkspaceAgentInputBar({
         onChange={handleDocumentInputChange}
       />
       {runtimeWarning ? (
-        <Alert className="border-amber-500/25 bg-amber-500/5 text-foreground rounded-lg">
-          <TriangleAlert className="text-amber-500 size-4" />
+        <Alert className="border-warning/25 bg-warning/5 text-foreground rounded-lg">
+          <TriangleAlert className="text-warning size-4" />
           <AlertTitle className="text-sm font-medium">{runtimeWarning.title}</AlertTitle>
           <AlertDescription>
             <div className="mt-1 flex flex-col gap-3">

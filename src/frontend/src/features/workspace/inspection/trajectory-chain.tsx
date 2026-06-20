@@ -1,14 +1,18 @@
 import type { ReactNode } from "react";
-import { Activity, Brain, CircleAlert, CircleDashed, Terminal } from "lucide-react";
-
+import { memo } from "react";
 import {
-  ChainOfThought,
-  ChainOfThoughtContent,
-  ChainOfThoughtItem,
-  ChainOfThoughtStep,
-  ChainOfThoughtTrigger,
-} from "@/components/ai-elements/chain-of-thought";
+  Activity,
+  Brain,
+  CheckIcon,
+  ChevronDownIcon,
+  CircleAlert,
+  CircleDashed,
+  Terminal,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Streamdown } from "@/components/ui/streamdown";
 import { cn } from "@/lib/utils";
 
@@ -32,7 +36,13 @@ function StepIcon({ kind, status }: { kind: ChainKind; status: ChainStatus }) {
   return Brain;
 }
 
-export function TrajectoryChain({
+const stepStatusStyles = {
+  active: "text-foreground",
+  complete: "text-muted-foreground",
+  pending: "text-muted-foreground/50",
+};
+
+export const TrajectoryChain = memo(function TrajectoryChain({
   children,
   className,
 }: {
@@ -40,16 +50,16 @@ export function TrajectoryChain({
   className?: string;
 }) {
   return (
-    <ChainOfThought
+    <div
       className={cn(
-        "rounded-lg border border-border-subtle/80 bg-card/70 px-3 pt-3 shadow-sm",
+        "not-prose w-full rounded-lg border border-border-subtle/80 bg-card/70 px-3 pt-3 shadow-sm",
         className,
       )}
     >
       {children}
-    </ChainOfThought>
+    </div>
   );
-}
+});
 
 export function TrajectoryChainStep({
   title,
@@ -77,62 +87,93 @@ export function TrajectoryChainStep({
   error?: boolean;
 }) {
   const tone = statusTone(status === "unknown" ? "completed" : status);
-  const Icon = StepIcon({ kind, status });
+  const Icon: LucideIcon = StepIcon({ kind, status });
   const hasBody = Boolean(body?.trim());
   const hasDetails = Boolean(details?.length);
   const hasChildren = Boolean(children);
 
   return (
-    <ChainOfThoughtStep
+    <Collapsible
       defaultOpen={defaultOpen}
-      icon={Icon}
-      isLast={isLast}
-      status={stepStatus(status)}
-      className={cn(error && "text-destructive")}
+      className={cn(
+        "group/chain-step relative grid grid-cols-[1rem_minmax(0,1fr)] gap-3 text-sm",
+        stepStatusStyles[stepStatus(status)],
+        "fade-in-0 slide-in-from-top-2 animate-in",
+        error && "text-destructive",
+      )}
     >
-      <ChainOfThoughtTrigger leftIcon={null}>
-        <span className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="min-w-0 truncate font-medium text-foreground">{title}</span>
-          <Badge variant={tone.variant} className={inspectorStyles.badge.status}>
-            {tone.label}
-          </Badge>
-        </span>
-      </ChainOfThoughtTrigger>
-      {description || badges.length > 0 ? (
-        <div className="space-y-2">
-          {description ? (
-            <div className="text-muted-foreground typo-caption wrap-break-word">{description}</div>
-          ) : null}
-          {renderBadges(badges, "secondary")}
-        </div>
-      ) : null}
-      {hasBody || hasDetails || hasChildren ? (
-        <ChainOfThoughtContent>
-          {hasBody ? (
-            <ChainOfThoughtItem
+      <div className="relative flex justify-center pt-1.5">
+        <Icon className="relative z-10 size-4 bg-background" />
+        {!isLast ? (
+          <div className="absolute top-7 bottom-0 left-1/2 -mx-px w-px bg-border" />
+        ) : null}
+      </div>
+      <div className="min-w-0 flex-1 space-y-2 overflow-hidden pb-4">
+        <CollapsibleTrigger className="group/chain-trigger flex w-full min-w-0 items-center gap-2 text-left text-sm text-foreground transition-colors hover:text-foreground">
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="min-w-0 truncate font-medium text-foreground">{title}</span>
+            <Badge variant={tone.variant} className={inspectorStyles.badge.status}>
+              {tone.label}
+            </Badge>
+          </span>
+          <span className="relative size-4 shrink-0 text-muted-foreground">
+            <ChevronDownIcon
               className={cn(
-                inspectorInsetClass(error ? "error" : "strong"),
-                "max-w-full overflow-hidden text-foreground",
+                "absolute inset-0 size-4 transition-all group-data-[state=open]/chain-trigger:rotate-180",
+                "group-hover/chain-trigger:scale-0 group-data-[state=open]/chain-trigger:scale-100",
               )}
-            >
-              <Streamdown content={body ?? ""} streaming={false} />
-            </ChainOfThoughtItem>
-          ) : null}
-          {!hasBody && hasDetails ? (
-            <div className={inspectorStyles.stack.compact}>
-              {details?.map((detail, index) => (
-                <ChainOfThoughtItem
-                  key={`${String(title)}-detail-${index}`}
-                  className={cn(inspectorInsetClass(), "text-foreground")}
-                >
-                  {detail}
-                </ChainOfThoughtItem>
-              ))}
-            </div>
-          ) : null}
-          {children}
-        </ChainOfThoughtContent>
-      ) : null}
-    </ChainOfThoughtStep>
+            />
+            <CheckIcon className="absolute inset-0 size-4 scale-0 transition-transform group-hover/chain-trigger:scale-100 group-data-[state=open]/chain-trigger:scale-0" />
+          </span>
+        </CollapsibleTrigger>
+        {description || badges.length > 0 ? (
+          <div className="space-y-2">
+            {description ? (
+              <div className="text-muted-foreground typo-caption wrap-break-word">
+                {description}
+              </div>
+            ) : null}
+            {renderBadges(badges, "secondary")}
+          </div>
+        ) : null}
+        {hasBody || hasDetails || hasChildren ? (
+          <CollapsibleContent
+            className={cn(
+              "mt-2 space-y-3",
+              "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+            )}
+          >
+            {hasBody ? (
+              <div
+                className={cn(
+                  "text-muted-foreground text-sm leading-6",
+                  inspectorInsetClass(error ? "error" : "strong"),
+                  "max-w-full overflow-hidden text-foreground",
+                )}
+              >
+                <Streamdown content={body ?? ""} streaming={false} />
+              </div>
+            ) : null}
+            {!hasBody && hasDetails ? (
+              <div className={inspectorStyles.stack.compact}>
+                {details?.map((detail, index) => (
+                  <div
+                    key={`${String(title)}-detail-${index}`}
+                    className={cn(
+                      "text-muted-foreground text-sm leading-6",
+                      inspectorInsetClass(),
+                      "text-foreground",
+                    )}
+                  >
+                    {detail}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {children}
+          </CollapsibleContent>
+        ) : null}
+      </div>
+    </Collapsible>
   );
 }

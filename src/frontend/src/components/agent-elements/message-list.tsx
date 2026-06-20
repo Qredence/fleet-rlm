@@ -500,7 +500,7 @@ export const MessageList = memo(function MessageList({
                           <MessageToolbar
                             text={showCopyToolbar ? text : ""}
                             timestamp={userTimestamp}
-                            heightClass="h-[28px]"
+                            heightClass="h-skeleton-row"
                             hoverClass="group-hover/user-message:opacity-100 group-hover/user-message:pointer-events-auto"
                             isVisible={userCopyVisible}
                             alignClass="justify-end"
@@ -549,7 +549,7 @@ export const MessageList = memo(function MessageList({
                         {showToolbar ? (
                           <MessageToolbar
                             text={toolbarText}
-                            heightClass="h-[48px] flex items-start w-full"
+                            heightClass="h-skeleton-row-lg flex items-start w-full"
                             hoverClass="group-hover/assistant-turn:opacity-100 group-hover/assistant-turn:pointer-events-auto"
                             isVisible={activeCopyId === copyKey}
                             alignClass="justify-start"
@@ -558,7 +558,7 @@ export const MessageList = memo(function MessageList({
                         ) : activeCopyId === copyKey ? (
                           <MessageToolbar
                             text={toolbarText}
-                            heightClass="h-[48px] flex items-start w-full"
+                            heightClass="h-skeleton-row-lg flex items-start w-full"
                             hoverClass="group-hover/assistant-turn:opacity-100 group-hover/assistant-turn:pointer-events-auto"
                             isVisible={true}
                             alignClass="justify-start"
@@ -649,7 +649,7 @@ function AssistantParts({
         const text = part.text;
         if (text) {
           elems.push(
-            <div key={`${msg.id}-text-${i}`} className="group/assistant-text text-[14px]">
+            <div key={`${msg.id}-text-${i}`} className="group/assistant-text typo-composer">
               <Markdown content={text} className="leading-relaxed [&_p]:leading-relaxed" />
             </div>,
           );

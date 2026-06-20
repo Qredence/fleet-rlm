@@ -16,7 +16,7 @@ function PageSkeleton({ isMobile, className }: { isMobile?: boolean; className?:
       </div>
 
       <div className="flex items-center gap-3">
-        <Skeleton className="h-9 max-w-[280px] flex-1 rounded-lg" />
+        <Skeleton className="h-9 max-w-skeleton flex-1 rounded-lg" />
         <Skeleton className="h-9 w-24 rounded-button" />
         <Skeleton className="h-9 w-24 rounded-button" />
       </div>

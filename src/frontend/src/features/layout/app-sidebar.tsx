@@ -407,9 +407,9 @@ export function AppSidebar() {
                     ),
                     user: {
                       title:
-                        "text-sidebar-foreground font-medium text-sm truncate max-w-[120px] text-left",
+                        "text-sidebar-foreground font-medium text-sm truncate max-w-sidebar-label text-left",
                       subtitle:
-                        "text-sidebar-foreground/58 text-xs truncate max-w-[120px] text-left",
+                        "text-sidebar-foreground/58 text-xs truncate max-w-sidebar-label text-left",
                     },
                   },
                 }}
@@ -450,7 +450,7 @@ export function AppSidebar() {
                             "hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
                           )}
                         >
-                          <div className="flex size-5 shrink-0 items-center justify-center rounded-full bg-sidebar-primary text-sidebar-primary-foreground font-semibold text-[10px] uppercase">
+                          <div className="flex size-5 shrink-0 items-center justify-center rounded-full bg-sidebar-primary text-sidebar-primary-foreground font-semibold typo-micro uppercase">
                             {user.initials || "U"}
                           </div>
                           <span className="typo-label-regular tracking-tight-custom ml-2 truncate">

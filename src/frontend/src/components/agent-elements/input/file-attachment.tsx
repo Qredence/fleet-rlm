@@ -110,7 +110,7 @@ export function FileAttachment({
         "relative bg-muted/50 rounded-[calc(var(--an-input-border-radius)-var(--an-context-padding))]",
         isImageOnly
           ? "size-10 flex items-center justify-center"
-          : "flex items-center gap-2 pl-1 pr-2 py-1 min-w-[120px] max-w-[200px]",
+          : "flex items-center gap-2 pl-1 pr-2 py-1 min-w-[120px] max-w-attachment",
         className,
       )}
       onMouseEnter={() => setIsHovered(true)}
@@ -149,7 +149,7 @@ export function FileAttachment({
               {filename}
             </span>
             {size !== undefined && (
-              <span className="text-[10px] text-muted-foreground">{formatFileSize(size)}</span>
+              <span className="typo-micro text-muted-foreground">{formatFileSize(size)}</span>
             )}
           </div>
         </>

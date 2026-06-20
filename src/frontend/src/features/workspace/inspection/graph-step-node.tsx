@@ -235,7 +235,7 @@ const GraphStepNode = memo(function GraphStepNode({
                 <p className="mt-1 typo-helper text-muted-foreground">Code: {errorDetails.code}</p>
               )}
               {errorDetails.trace && (
-                <pre className="mt-2 max-h-28 overflow-auto rounded border border-red-500/20 bg-card/60 p-2 typo-helper leading-relaxed whitespace-pre-wrap wrap-break-word font-mono">
+                <pre className="mt-2 max-h-28 overflow-auto rounded border border-danger/20 bg-card/60 p-2 typo-helper leading-relaxed whitespace-pre-wrap wrap-break-word font-mono">
                   {errorDetails.trace}
                 </pre>
               )}

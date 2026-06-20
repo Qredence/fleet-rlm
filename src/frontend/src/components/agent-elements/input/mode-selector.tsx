@@ -3,6 +3,7 @@
 import { memo, useCallback, useState } from "react";
 import type { ComponentType } from "react";
 import { Check, ChevronDown } from "lucide-react";
+import { popoverSurfaceClass } from "./popover-surface";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -70,11 +71,7 @@ export const ModeSelector = memo(function ModeSelector({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={trigger} />
-      <PopoverContent
-        align="start"
-        side="top"
-        className="w-52 rounded-[8px] border-border/80 bg-an-input-background p-1 text-an-foreground shadow-lg"
-      >
+      <PopoverContent align="start" side="top" className={cn("w-52", popoverSurfaceClass)}>
         {modes.map((mode) => {
           const isActive = mode.id === activeMode.id;
           const Icon = mode.icon;
@@ -84,7 +81,7 @@ export const ModeSelector = memo(function ModeSelector({
               type="button"
               onClick={() => handleSelect(mode.id)}
               className={cn(
-                "flex w-full items-start gap-2 rounded-[6px] px-2 py-1.5 text-left typo-caption transition-colors hover:bg-foreground/6",
+                "flex w-full items-start gap-2 rounded-an-action-md px-2 py-1.5 text-left typo-caption transition-colors hover:bg-foreground/6",
                 isActive && "bg-foreground/6",
               )}
             >

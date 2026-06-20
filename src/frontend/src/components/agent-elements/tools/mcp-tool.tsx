@@ -216,7 +216,7 @@ export const McpTool = memo(function McpTool({
         defaultOpen={defaultOpen}
       >
         {codeBlock && (
-          <div className="an-markdown text-[12px]">
+          <div className="an-markdown typo-caption">
             <Streamdown plugins={{ code }} controls={{ code: false }}>
               {codeBlock}
             </Streamdown>

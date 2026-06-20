@@ -96,27 +96,6 @@ vi.mock("@/features/workspace/conversation/transcript/workspace-message-list", (
   },
 }));
 
-vi.mock("@/features/workspace/composer/workspace-composer", () => ({
-  WorkspaceComposer: ({
-    value,
-    canSubmit,
-    onSend,
-  }: {
-    value: string;
-    canSubmit?: boolean;
-    onSend: (attachments: never[]) => void;
-  }) => {
-    return (
-      <div data-testid="chat-input">
-        <span>{value}</span>
-        <button type="button" disabled={!canSubmit} onClick={() => onSend([])}>
-          Send
-        </button>
-      </div>
-    );
-  },
-}));
-
 describe("WorkspaceScreen run workbench mode", () => {
   function renderScreen() {
     return renderToStaticMarkup(
