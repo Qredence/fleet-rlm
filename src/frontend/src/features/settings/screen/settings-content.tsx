@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { Bell, Bot, Cpu, Info, LogOut, Moon, Paintbrush, Sun, User } from "lucide-react";
 import { toast } from "sonner";
 
@@ -107,6 +108,7 @@ interface SettingsSidebarNavProps {
 export function SettingsSidebarNav({ section, onSectionChange }: SettingsSidebarNavProps) {
   const sections = useGetSettingsSections();
   const { isAuthenticated, logout } = useAuth();
+  const navigate = useNavigate();
   return (
     <SidebarContent className="bg-sidebar/20 justify-between">
       <SidebarGroup className="flex flex-col gap-2 p-4 shrink-0">
@@ -138,7 +140,11 @@ export function SettingsSidebarNav({ section, onSectionChange }: SettingsSidebar
                 <SidebarMenuButton
                   size="default"
                   tooltip="Logout"
-                  onClick={() => logout()}
+                  onClick={() => {
+                    logout();
+                    toast.success("Signed out");
+                    navigate({ to: "/login", replace: true });
+                  }}
                   className="h-10 gap-3 rounded-xl px-3 font-medium text-destructive hover:bg-destructive/10 hover:text-destructive shadow-none"
                 >
                   <LogOut className="size-4" />

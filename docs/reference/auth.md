@@ -426,10 +426,10 @@ Auth claims are the **canonical** source of tenant/user identity:
 - Internal `tenant_id` and `user_id` are resolved via database lookup during admission
 
 **Frontend SPA expectations:**
-- Default authority: `https://login.microsoftonline.com/organizations`
-- Redirect path: `/login`
-- Post-logout path: `/login`
-- Delegated scope format: `api://<api-app-client-id>/access_as_user`
+- Neon Auth URL configured via `VITE_NEON_AUTH_URL`
+- Sign-in and sign-up use `@neondatabase/auth-ui` redirect-based forms
+- Post-auth redirect: `/app/workspace`
+- Logout via `neonAuthClient.signOut()` (fire-and-forget)
 
 ---
 

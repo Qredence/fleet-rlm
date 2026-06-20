@@ -3,12 +3,6 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AuthContext } from "@/lib/auth/auth-context";
 import { MOCK_USER } from "@/lib/auth/auth-mock-user";
 import { getAccessToken } from "@/lib/auth/token-store";
-import {
-  initializeEntraSession,
-  isEntraAuthConfigured,
-  loginWithEntra,
-  logoutWithEntra,
-} from "@/lib/auth/entra";
 import { initializeNeonSession, isNeonAuthConfigured, neonAuthClient } from "@/lib/auth/neon";
 import { authEndpoints } from "@/lib/rlm-api/auth";
 import type { AuthContextValue, PlanTier, UserProfile } from "@/lib/auth/types";
@@ -47,9 +41,7 @@ function AuthProvider({ children }: AuthProviderProps) {
 
     const syncSession = async () => {
       try {
-        if (isEntraAuthConfigured()) {
-          await initializeEntraSession();
-        } else if (isNeonAuthConfigured()) {
+        if (isNeonAuthConfigured()) {
           await initializeNeonSession();
         }
         if (!getAccessToken()) {
@@ -112,26 +104,8 @@ function AuthProvider({ children }: AuthProviderProps) {
     };
   }, []);
 
-  const login = useCallback(async (): Promise<boolean> => {
-    try {
-      if (!isEntraAuthConfigured()) {
-        return false;
-      }
-      await loginWithEntra();
-      const me = await authEndpoints.me();
-      setUser(mapProfile(me));
-      return true;
-    } catch {
-      setUser(null);
-      authEndpoints.clearLocalAuth();
-      return false;
-    }
-  }, []);
-
   const logout = useCallback(() => {
-    if (isEntraAuthConfigured()) {
-      void logoutWithEntra().catch(() => undefined);
-    } else if (isNeonAuthConfigured() && neonAuthClient) {
+    if (isNeonAuthConfigured() && neonAuthClient) {
       void neonAuthClient.signOut().catch(() => undefined);
     }
     authEndpoints.clearLocalAuth();
@@ -155,7 +129,6 @@ function AuthProvider({ children }: AuthProviderProps) {
   const value: AuthContextValue = {
     isAuthenticated: user !== null,
     user,
-    login,
     logout,
     setPlan,
     refresh,

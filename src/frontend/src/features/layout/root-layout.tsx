@@ -21,30 +21,22 @@ import { useNavigationStore } from "@/stores/navigation-store";
 import { LayoutSidebar } from "./app-sidebar";
 import { CommandPalette } from "./command-palette";
 import { LayoutHeader } from "./header";
-import { LoginDialog } from "./login-dialog";
 import { MobileTabBar } from "./mobile-tab-bar";
 import { RouteSync } from "./route-sync";
 import { LayoutRouteOutlet } from "./route-outlet";
 import { SettingsDialog } from "./settings-dialog";
 import { LayoutSidepanel } from "./sidepanel";
-import { isNeonAuthConfigured } from "@/lib/auth/neon";
 
 const PANEL_TRANSITION = "flex-grow 350ms cubic-bezier(0.4, 0, 0.2, 1)";
 const OPEN_LAYOUT = { content: 68, canvas: 32 };
 const CLOSED_LAYOUT = { content: 100, canvas: 0 };
 
-type OpenLoginEventDetail = {
-  returnFocusTarget?: HTMLElement | null;
-};
-
 function AppLayout() {
   const isMobile = useIsMobile();
   const [cmdOpen, setCmdOpen] = useState(false);
   const { registerCommandPaletteHandlers } = useNavigationStore();
-  const [loginOpen, setLoginOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined);
-  const loginReturnFocusRef = useRef<HTMLElement | null>(null);
   const settingsReturnFocusRef = useRef<HTMLElement | null>(null);
   const panelGroupRef = useRef<GroupImperativeHandle>(null);
   const [isResizing, setIsResizing] = useState(false);
@@ -54,23 +46,6 @@ function AppLayout() {
   useEffect(() => {
     registerCommandPaletteHandlers({ open: () => setCmdOpen(true) });
   }, [registerCommandPaletteHandlers]);
-
-  useEffect(() => {
-    const handleOpenLogin = (event: Event) => {
-      if (isNeonAuthConfigured()) {
-        return;
-      }
-      const customEvent = event as CustomEvent<OpenLoginEventDetail>;
-      loginReturnFocusRef.current = customEvent.detail?.returnFocusTarget ?? null;
-      setLoginOpen(true);
-      customEvent.preventDefault();
-    };
-
-    document.addEventListener("open-login", handleOpenLogin);
-    return () => {
-      document.removeEventListener("open-login", handleOpenLogin);
-    };
-  }, []);
 
   useEffect(() => {
     const handleOpenSettings = (event: Event) => {
@@ -244,11 +219,6 @@ function AppLayout() {
       ) : null}
 
       <CommandPalette open={cmdOpen} onOpenChange={setCmdOpen} />
-      <LoginDialog
-        open={loginOpen}
-        onOpenChange={setLoginOpen}
-        returnFocusRef={loginReturnFocusRef}
-      />
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}

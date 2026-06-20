@@ -43,3 +43,5 @@ export type { ChartSparklineProps } from "./chart-sparkline";
 export { StateNotice } from "./state-notice";
 export { KeyValueGrid } from "./key-value-grid";
 export { TextShimmer } from "./text-shimmer";
+export { AuthLayout } from "./auth-layout";
+export type { AuthLayoutProps } from "./auth-layout";

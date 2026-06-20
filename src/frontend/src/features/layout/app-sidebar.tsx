@@ -285,19 +285,8 @@ export function AppSidebar() {
     deleteConversation(session.id);
   };
 
-  const handleOpenLogin = (event: MouseEvent<HTMLButtonElement>) => {
-    if (isNeonAuthConfigured()) {
-      navigate({ to: "/login" });
-      return;
-    }
-    const openLoginEvent = new CustomEvent("open-login", {
-      detail: { returnFocusTarget: event.currentTarget },
-      cancelable: true,
-    });
-    const wasHandledByDialog = document.dispatchEvent(openLoginEvent) === false;
-    if (!wasHandledByDialog) {
-      navigate({ to: "/login" });
-    }
+  const handleOpenLogin = () => {
+    navigate({ to: "/login" });
   };
 
   return (
