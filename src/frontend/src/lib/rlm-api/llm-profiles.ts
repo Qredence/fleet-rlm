@@ -15,9 +15,7 @@ export type LlmImportEnvResponse = components["schemas"]["LlmImportEnvResponse"]
 export type LlmProviderType = LlmProviderProfileResponse["provider_type"];
 
 export function listLlmProfiles(signal?: AbortSignal) {
-  return unwrap(
-    typedClient.GET("/api/v1/runtime/llm-profiles", { signal: withTimeout(signal) }),
-  );
+  return unwrap(typedClient.GET("/api/v1/runtime/llm-profiles", { signal: withTimeout(signal) }));
 }
 
 export function createLlmProfile(body: LlmProviderProfileCreateRequest, signal?: AbortSignal) {
@@ -68,9 +66,7 @@ export function testLlmProfile(profileId: string, signal?: AbortSignal) {
 }
 
 export function fetchLlmRoleBindings(signal?: AbortSignal) {
-  return unwrap(
-    typedClient.GET("/api/v1/runtime/llm-roles", { signal: withTimeout(signal) }),
-  );
+  return unwrap(typedClient.GET("/api/v1/runtime/llm-roles", { signal: withTimeout(signal) }));
 }
 
 export function patchLlmRoleBindings(body: LlmRoleBindingsUpdateRequest, signal?: AbortSignal) {

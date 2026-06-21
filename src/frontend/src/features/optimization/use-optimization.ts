@@ -44,7 +44,8 @@ export const optimizationQueryOptions = {
   runDetails: (runId: string | null) => ({
     queryKey: optimizationQueryKeys.runDetails(runId),
     queryFn: ({ signal }: QueryFunctionContext) => {
-      if (!runId) return null as unknown as Awaited<ReturnType<typeof optimizationEndpoints.runDetails>>;
+      if (!runId)
+        return null as unknown as Awaited<ReturnType<typeof optimizationEndpoints.runDetails>>;
       return optimizationEndpoints.runDetails(runId, signal);
     },
   }),

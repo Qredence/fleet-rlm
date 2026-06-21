@@ -34,13 +34,12 @@ describe("DataTable onRowClick", () => {
   });
 
   it("does not add cursor-pointer to rows when onRowClick is absent", () => {
-    const html = renderToStaticMarkup(
-      <DataTable columns={columns} data={rows} />,
-    );
+    const html = renderToStaticMarkup(<DataTable columns={columns} data={rows} />);
 
     // cursor-pointer on <th> is from sortable headers, not rows
     const rowMatch = html.match(/<tr[^>]*class="([^"]*)"/g);
-    const dataRows = rowMatch?.filter((tr) => !tr.includes("border-b border-border bg-muted")) ?? [];
+    const dataRows =
+      rowMatch?.filter((tr) => !tr.includes("border-b border-border bg-muted")) ?? [];
     for (const tr of dataRows) {
       expect(tr).not.toContain("cursor-pointer");
     }
@@ -50,11 +49,7 @@ describe("DataTable onRowClick", () => {
 describe("DataTable rowClassName", () => {
   it("applies custom rowClassName to data rows", () => {
     const html = renderToStaticMarkup(
-      <DataTable
-        columns={columns}
-        data={rows}
-        rowClassName="custom-row-class"
-      />,
+      <DataTable columns={columns} data={rows} rowClassName="custom-row-class" />,
     );
 
     expect(html).toContain("custom-row-class");
@@ -64,11 +59,7 @@ describe("DataTable rowClassName", () => {
 describe("DataTable rowKey", () => {
   it("uses rowKey function for key extraction", () => {
     const html = renderToStaticMarkup(
-      <DataTable
-        columns={columns}
-        data={rows}
-        rowKey={(row) => row.id}
-      />,
+      <DataTable columns={columns} data={rows} rowKey={(row) => row.id} />,
     );
 
     expect(html).toContain("Alpha");
@@ -79,9 +70,7 @@ describe("DataTable rowKey", () => {
 
 describe("DataTable render function accessor", () => {
   it("renders custom content via function accessor", () => {
-    const html = renderToStaticMarkup(
-      <DataTable columns={columns} data={rows} />,
-    );
+    const html = renderToStaticMarkup(<DataTable columns={columns} data={rows} />);
 
     expect(html).toContain("completed");
     expect(html).toContain("running");

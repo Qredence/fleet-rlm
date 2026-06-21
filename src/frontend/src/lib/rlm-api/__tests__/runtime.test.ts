@@ -36,9 +36,8 @@ async function loadRuntimeModule(configOverride?: Partial<RlmApiConfig>) {
 
 function setupTypedClientWithFetch(fetchMock: ReturnType<typeof vi.fn>) {
   vi.doMock("@/lib/rlm-api/typed-client", async () => {
-    const { RlmApiError: ActualRlmApiError } = await vi.importActual<
-      typeof import("@/lib/rlm-api/client")
-    >("@/lib/rlm-api/client");
+    const { RlmApiError: ActualRlmApiError } =
+      await vi.importActual<typeof import("@/lib/rlm-api/client")>("@/lib/rlm-api/client");
 
     function resolveBaseUrl(): string {
       const apiUrl = import.meta.env.VITE_FLEET_API_URL ?? "";
@@ -50,7 +49,9 @@ function setupTypedClientWithFetch(fetchMock: ReturnType<typeof vi.fn>) {
 
     async function coreFetch(method: string, path: string, init?: { body?: unknown }) {
       const url = baseUrl ? `${baseUrl}${path}` : path;
-      const response = await (fetchMock as unknown as (url: string, init?: RequestInit) => Promise<Response>)(url, { method, body: init?.body ? JSON.stringify(init.body) : undefined });
+      const response = await (
+        fetchMock as unknown as (url: string, init?: RequestInit) => Promise<Response>
+      )(url, { method, body: init?.body ? JSON.stringify(init.body) : undefined });
       const status = (response as unknown as { status: number }).status;
       const ok = status >= 200 && status < 300;
       const body = await (response as Response).json();
@@ -61,25 +62,31 @@ function setupTypedClientWithFetch(fetchMock: ReturnType<typeof vi.fn>) {
     return {
       typedClient: {
         GET: vi.fn((_path: string, _opts?: unknown) => coreFetch("GET", _path)),
-        POST: vi.fn((_path: string, _opts?: unknown) => coreFetch("POST", _path, _opts as { body?: unknown })),
-        PATCH: vi.fn((_path: string, _opts?: unknown) => coreFetch("PATCH", _path, _opts as { body?: unknown })),
+        POST: vi.fn((_path: string, _opts?: unknown) =>
+          coreFetch("POST", _path, _opts as { body?: unknown }),
+        ),
+        PATCH: vi.fn((_path: string, _opts?: unknown) =>
+          coreFetch("PATCH", _path, _opts as { body?: unknown }),
+        ),
         DELETE: vi.fn((_path: string, _opts?: unknown) => coreFetch("DELETE", _path)),
       },
-      unwrap: vi.fn(async (promise: Promise<{ data?: unknown; error?: unknown; response: Response }>) => {
-        const result = await promise;
-        if (result.error !== undefined) {
-          const errBody = result.error as Record<string, unknown> | undefined;
-          const detail =
-            (typeof errBody?.detail === "string" && errBody.detail) ||
-            (typeof errBody?.message === "string" && errBody.message) ||
-            `HTTP ${result.response.status}`;
-          throw new ActualRlmApiError(result.response.status, detail);
-        }
-        if (!result.response.ok) {
-          throw new ActualRlmApiError(result.response.status, `HTTP ${result.response.status}`);
-        }
-        return result.data;
-      }),
+      unwrap: vi.fn(
+        async (promise: Promise<{ data?: unknown; error?: unknown; response: Response }>) => {
+          const result = await promise;
+          if (result.error !== undefined) {
+            const errBody = result.error as Record<string, unknown> | undefined;
+            const detail =
+              (typeof errBody?.detail === "string" && errBody.detail) ||
+              (typeof errBody?.message === "string" && errBody.message) ||
+              `HTTP ${result.response.status}`;
+            throw new ActualRlmApiError(result.response.status, detail);
+          }
+          if (!result.response.ok) {
+            throw new ActualRlmApiError(result.response.status, `HTTP ${result.response.status}`);
+          }
+          return result.data;
+        },
+      ),
       withTimeout: vi.fn((signal?: AbortSignal) => signal),
     };
   });
@@ -173,8 +180,16 @@ describe("runtimeEndpoints", () => {
     await runtimeEndpoints.testLm();
     await runtimeEndpoints.testDaytona();
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "http://localhost:8000/api/v1/runtime/tests/lm", expect.any(Object));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "http://localhost:8000/api/v1/runtime/tests/daytona", expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:8000/api/v1/runtime/tests/lm",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8000/api/v1/runtime/tests/daytona",
+      expect.any(Object),
+    );
   });
 
   it("uses fallback data in explicit mock mode when runtime endpoints are unavailable", async () => {

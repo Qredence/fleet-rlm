@@ -151,7 +151,10 @@ export function RunDetailsSheet({
                     <KeyValueGrid
                       items={[
                         { label: "Outcome", value: detail.insights.selected_outcome },
-                        { label: "Baseline", value: scoreCell(detail.score_summary.baseline_score) },
+                        {
+                          label: "Baseline",
+                          value: scoreCell(detail.score_summary.baseline_score),
+                        },
                         {
                           label: "Optimized",
                           value: scoreCell(detail.score_summary.optimized_score),

@@ -18,7 +18,7 @@
  *   - settings-content.tsx: theme-swatch illustrations use raw bg-zinc-* values
  *   - components/ui/*: shadcn registry components may use token-bridge forms
  *
- * Usage: node scripts/check-style-tokens.mjs
+ * Usage: node scripts/check-style-tokens.js
  * Wired into package.json as: pnpm run lint:style-tokens
  */
 
@@ -50,22 +50,26 @@ const BANNED_PATTERNS = [
   {
     name: "raw palette bg color",
     regex: new RegExp(`bg-${STATUS_COLORS}-${SHADE}\\b`, "g"),
-    message: "Use bg-success, bg-warning, bg-danger, bg-destructive tokens instead of bg-{color}-{shade}",
+    message:
+      "Use bg-success, bg-warning, bg-danger, bg-destructive tokens instead of bg-{color}-{shade}",
   },
   {
     name: "raw palette text color",
     regex: new RegExp(`text-${STATUS_COLORS}-${SHADE}\\b`, "g"),
-    message: "Use text-success, text-warning, text-danger, text-destructive tokens instead of text-{color}-{shade}",
+    message:
+      "Use text-success, text-warning, text-danger, text-destructive tokens instead of text-{color}-{shade}",
   },
   {
     name: "raw palette border color",
     regex: new RegExp(`border-${STATUS_COLORS}-${SHADE}\\b`, "g"),
-    message: "Use border-success, border-warning, border-danger, border-destructive tokens instead of border-{color}-{shade}",
+    message:
+      "Use border-success, border-warning, border-danger, border-destructive tokens instead of border-{color}-{shade}",
   },
   {
     name: "arbitrary hex color",
     regex: /(?:bg|text|border|fill|stroke)-\[#[0-9a-fA-F]{3,8}\]/g,
-    message: "Use semantic color tokens (bg-success, text-danger, etc.) instead of arbitrary hex values",
+    message:
+      "Use semantic color tokens (bg-success, text-danger, etc.) instead of arbitrary hex values",
   },
   {
     name: "arbitrary rgb/hsl color",
@@ -79,17 +83,20 @@ const BANNED_DARK_PATTERNS = [
   {
     name: "raw palette dark text color",
     regex: new RegExp(`dark:text-${STATUS_COLORS}-${SHADE}\\b`, "g"),
-    message: "Use text-success, text-warning, text-danger tokens (auto dark-mode) instead of dark:text-{color}-{shade}",
+    message:
+      "Use text-success, text-warning, text-danger tokens (auto dark-mode) instead of dark:text-{color}-{shade}",
   },
   {
     name: "raw palette dark bg color",
     regex: new RegExp(`dark:bg-${STATUS_COLORS}-${SHADE}\\b`, "g"),
-    message: "Use bg-success, bg-warning, bg-danger tokens (auto dark-mode) instead of dark:bg-{color}-{shade}",
+    message:
+      "Use bg-success, bg-warning, bg-danger tokens (auto dark-mode) instead of dark:bg-{color}-{shade}",
   },
   {
     name: "raw palette dark border color",
     regex: new RegExp(`dark:border-${STATUS_COLORS}-${SHADE}\\b`, "g"),
-    message: "Use border-success, border-warning, border-danger tokens (auto dark-mode) instead of dark:border-{color}-{shade}",
+    message:
+      "Use border-success, border-warning, border-danger tokens (auto dark-mode) instead of dark:border-{color}-{shade}",
   },
 ];
 
@@ -98,8 +105,10 @@ const BANNED_DARK_PATTERNS = [
 const BANNED_INLINE_STYLE_PATTERNS = [
   {
     name: "inline style raw color value",
-    regex: /\b(color|backgroundColor|borderColor|fill|stroke)\s*:\s*["'`](?!var\()(#[0-9a-fA-F]{3,8}|rgb\(|hsl\|[a-z]+)/g,
-    message: 'Use CSS custom properties via style={{ "--var": … }} or semantic Tailwind tokens instead of inline raw color values',
+    regex:
+      /\b(color|backgroundColor|borderColor|fill|stroke)\s*:\s*["'`](?!var\()(#[0-9a-fA-F]{3,8}|rgb\(|hsl\|[a-z]+)/g,
+    message:
+      'Use CSS custom properties via style={{ "--var": … }} or semantic Tailwind tokens instead of inline raw color values',
   },
 ];
 
@@ -128,7 +137,11 @@ for (const file of files) {
 
   const content = readFileSync(file, "utf-8");
 
-  for (const pattern of [...BANNED_PATTERNS, ...BANNED_DARK_PATTERNS, ...BANNED_INLINE_STYLE_PATTERNS]) {
+  for (const pattern of [
+    ...BANNED_PATTERNS,
+    ...BANNED_DARK_PATTERNS,
+    ...BANNED_INLINE_STYLE_PATTERNS,
+  ]) {
     const matches = content.matchAll(pattern.regex);
     for (const match of matches) {
       const lineNum = content.slice(0, match.index).split("\n").length;

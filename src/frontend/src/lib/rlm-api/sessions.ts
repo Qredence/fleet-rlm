@@ -48,7 +48,12 @@ export const sessionsEndpoints = {
     return unwrap(
       typedClient.GET("/api/v1/sessions", {
         params: {
-          query: { search: input.search, status: input.status, limit: input.limit, offset: input.offset },
+          query: {
+            search: input.search,
+            status: input.status,
+            limit: input.limit,
+            offset: input.offset,
+          },
         },
         signal: withTimeout(signal),
       }),
@@ -132,7 +137,7 @@ export const sessionsEndpoints = {
           path: { session_id: sessionId },
           query: {
             trace_id: input.traceId ?? undefined,
-            client_request_id: input.traceId ? undefined : input.clientRequestId ?? undefined,
+            client_request_id: input.traceId ? undefined : (input.clientRequestId ?? undefined),
           },
         },
         signal: withTimeout(signal),

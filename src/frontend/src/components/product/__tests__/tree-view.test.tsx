@@ -41,11 +41,7 @@ describe("TreeView rendering", () => {
   it("renders expanded children when expandedIds is provided", () => {
     const expanded = new Set(["root", "child-a"]);
     const html = renderToStaticMarkup(
-      <TreeView
-        nodes={sampleNodes}
-        expandedIds={expanded}
-        renderLabel={(n) => n.label}
-      />,
+      <TreeView nodes={sampleNodes} expandedIds={expanded} renderLabel={(n) => n.label} />,
     );
 
     expect(html).toContain("Root");
@@ -58,11 +54,7 @@ describe("TreeView rendering", () => {
   it("renders only first-level children when only root is expanded", () => {
     const expanded = new Set(["root"]);
     const html = renderToStaticMarkup(
-      <TreeView
-        nodes={sampleNodes}
-        expandedIds={expanded}
-        renderLabel={(n) => n.label}
-      />,
+      <TreeView nodes={sampleNodes} expandedIds={expanded} renderLabel={(n) => n.label} />,
     );
 
     expect(html).toContain("Child A");
@@ -92,11 +84,7 @@ describe("TreeView ARIA", () => {
   it("sets aria-expanded=true for expanded nodes", () => {
     const expanded = new Set(["root"]);
     const html = renderToStaticMarkup(
-      <TreeView
-        nodes={sampleNodes}
-        expandedIds={expanded}
-        renderLabel={(n) => n.label}
-      />,
+      <TreeView nodes={sampleNodes} expandedIds={expanded} renderLabel={(n) => n.label} />,
     );
 
     expect(html).toContain('aria-expanded="true"');
@@ -105,11 +93,7 @@ describe("TreeView ARIA", () => {
   it("sets aria-level based on depth", () => {
     const expanded = new Set(["root", "child-a"]);
     const html = renderToStaticMarkup(
-      <TreeView
-        nodes={sampleNodes}
-        expandedIds={expanded}
-        renderLabel={(n) => n.label}
-      />,
+      <TreeView nodes={sampleNodes} expandedIds={expanded} renderLabel={(n) => n.label} />,
     );
 
     expect(html).toContain('aria-level="1"');
@@ -119,11 +103,7 @@ describe("TreeView ARIA", () => {
 
   it("sets aria-selected when selectedId is provided", () => {
     const html = renderToStaticMarkup(
-      <TreeView
-        nodes={sampleNodes}
-        selectedId="leaf"
-        renderLabel={(n) => n.label}
-      />,
+      <TreeView nodes={sampleNodes} selectedId="leaf" renderLabel={(n) => n.label} />,
     );
 
     expect(html).toContain('aria-selected="true"');

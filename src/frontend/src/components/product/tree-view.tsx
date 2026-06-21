@@ -17,14 +17,7 @@
  * />
  * ```
  */
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -234,11 +227,7 @@ export function TreeView<T extends TreeViewNode>({
   }, [flatList, focusedId]);
 
   return (
-    <div
-      role="tree"
-      aria-label="Tree view"
-      className={cn("flex flex-col", className)}
-    >
+    <div role="tree" aria-label="Tree view" className={cn("flex flex-col", className)}>
       {flatList.map((item) => {
         const isSelected = selectedId === item.node.id;
         return (
@@ -279,18 +268,14 @@ export function TreeView<T extends TreeViewNode>({
               <span className="inline-block size-3.5 shrink-0" />
             )}
 
-            {renderIcon ? (
-              renderIcon(item.node, item.isExpanded)
-            ) : null}
+            {renderIcon ? renderIcon(item.node, item.isExpanded) : null}
 
             <span className="min-w-0 flex-1 truncate text-left typo-caption text-foreground">
               {renderLabel(item.node)}
             </span>
 
             {renderTrailing ? (
-              <span className="shrink-0 text-muted-foreground">
-                {renderTrailing(item.node)}
-              </span>
+              <span className="shrink-0 text-muted-foreground">{renderTrailing(item.node)}</span>
             ) : null}
           </div>
         );

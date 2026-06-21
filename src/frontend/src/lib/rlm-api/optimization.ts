@@ -35,21 +35,19 @@ export interface ListOptimizationDatasetsInput {
 
 export const optimizationEndpoints = {
   status(signal?: AbortSignal) {
-    return unwrap(
-      typedClient.GET("/api/v1/optimization/status", { signal: withTimeout(signal) }),
-    );
+    return unwrap(typedClient.GET("/api/v1/optimization/status", { signal: withTimeout(signal) }));
   },
 
   modules(signal?: AbortSignal) {
-    return unwrap(
-      typedClient.GET("/api/v1/optimization/modules", { signal: withTimeout(signal) }),
-    );
+    return unwrap(typedClient.GET("/api/v1/optimization/modules", { signal: withTimeout(signal) }));
   },
 
   datasets(input: ListOptimizationDatasetsInput = {}, signal?: AbortSignal) {
     return unwrap(
       typedClient.GET("/api/v1/optimization/datasets", {
-        params: { query: { module_slug: input.moduleSlug, limit: input.limit, offset: input.offset } },
+        params: {
+          query: { module_slug: input.moduleSlug, limit: input.limit, offset: input.offset },
+        },
         signal: withTimeout(signal),
       }),
     );

@@ -6,8 +6,6 @@ export const infoEndpoints = {
    * for the running server instance (`GET /api/v1/info`).
    */
   get(signal?: AbortSignal) {
-    return unwrap(
-      typedClient.GET("/api/v1/info", { signal: withTimeout(signal) }),
-    );
+    return unwrap(typedClient.GET("/api/v1/info", { signal: withTimeout(signal) }));
   },
 };

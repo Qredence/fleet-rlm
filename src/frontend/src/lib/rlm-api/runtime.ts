@@ -78,10 +78,7 @@ async function runRuntimeConnectionTest(
 export const runtimeEndpoints = {
   settings(signal?: AbortSignal) {
     return withRuntimeFallback(
-      () =>
-        unwrap(
-          typedClient.GET("/api/v1/runtime/settings", { signal: withTimeout(signal) }),
-        ),
+      () => unwrap(typedClient.GET("/api/v1/runtime/settings", { signal: withTimeout(signal) })),
       () => getMockRuntimeSettings(),
     );
   },
@@ -120,10 +117,7 @@ export const runtimeEndpoints = {
 
   status(signal?: AbortSignal) {
     return withRuntimeFallback(
-      () =>
-        unwrap(
-          typedClient.GET("/api/v1/runtime/status", { signal: withTimeout(signal) }),
-        ),
+      () => unwrap(typedClient.GET("/api/v1/runtime/status", { signal: withTimeout(signal) })),
       () => getMockRuntimeStatus(),
     );
   },

@@ -17,11 +17,7 @@ export const sessionTraceQueryKeys = {
   all: ["workspace", "sidepanel"] as const,
   traces: (sessionId: string | null) =>
     [...sessionTraceQueryKeys.all, "session-traces", sessionId ?? "none"] as const,
-  traceDebug: (
-    sessionId: string | null,
-    traceId: string | null,
-    clientRequestId: string | null,
-  ) =>
+  traceDebug: (sessionId: string | null, traceId: string | null, clientRequestId: string | null) =>
     [
       ...sessionTraceQueryKeys.all,
       "trace-debug",
@@ -35,7 +31,8 @@ export const sessionTraceQueryOptions = {
   traces: (sessionId: string | null) => ({
     queryKey: sessionTraceQueryKeys.traces(sessionId),
     queryFn: ({ signal }: QueryFunctionContext) => {
-      if (!sessionId) return { items: [] } as unknown as Awaited<ReturnType<typeof sessionsEndpoints.traces>>;
+      if (!sessionId)
+        return { items: [] } as unknown as Awaited<ReturnType<typeof sessionsEndpoints.traces>>;
       return sessionsEndpoints.traces(sessionId, { limit: 12, offset: 0 }, signal);
     },
     retry: false,
@@ -47,7 +44,8 @@ export const sessionTraceQueryOptions = {
   ) => ({
     queryKey: sessionTraceQueryKeys.traceDebug(sessionId, traceId, clientRequestId),
     queryFn: ({ signal }: QueryFunctionContext) => {
-      if (!sessionId) return null as unknown as Awaited<ReturnType<typeof sessionsEndpoints.traceDebug>>;
+      if (!sessionId)
+        return null as unknown as Awaited<ReturnType<typeof sessionsEndpoints.traceDebug>>;
       return sessionsEndpoints.traceDebug(
         sessionId,
         { traceId: traceId ?? undefined, clientRequestId: clientRequestId ?? undefined },
@@ -128,11 +126,7 @@ export function useSessionTraceState() {
   );
 
   const traceDebugQuery = useQuery({
-    ...sessionTraceQueryOptions.traceDebug(
-      traceSessionId,
-      target.traceId,
-      target.clientRequestId,
-    ),
+    ...sessionTraceQueryOptions.traceDebug(traceSessionId, target.traceId, target.clientRequestId),
     enabled: Boolean(
       traceSessionId && hasSessionContent && (target.traceId || target.clientRequestId),
     ),

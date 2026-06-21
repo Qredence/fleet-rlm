@@ -294,12 +294,11 @@ export const filesystemKeys = {
 };
 
 export const filesystemQueryOptions = {
-  tree: (
-    provider: VolumeProvider,
-    options?: { maxDepth?: number; maxEntries?: number },
-  ) => ({
+  tree: (provider: VolumeProvider, options?: { maxDepth?: number; maxEntries?: number }) => ({
     queryKey: filesystemKeys.tree(provider, options),
-    queryFn: async ({ signal }: QueryFunctionContext): Promise<{
+    queryFn: async ({
+      signal,
+    }: QueryFunctionContext): Promise<{
       volumes: FsNode[];
       dataSource: DataSource;
       degradedReason?: string;

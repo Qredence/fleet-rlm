@@ -400,10 +400,7 @@ describe("streamChatOverWs - Reconnection & Backoff", () => {
     }
 
     const connectionUrl = new URL(String(MockWebSocket.mock.calls[0]?.[0]));
-    expect(typedClient.POST).toHaveBeenCalledWith(
-      "/api/v1/auth/ws-ticket",
-      expect.any(Object),
-    );
+    expect(typedClient.POST).toHaveBeenCalledWith("/api/v1/auth/ws-ticket", expect.any(Object));
     expect(connectionUrl.searchParams.get("ticket")).toBe("ticket-abc");
     expect(connectionUrl.searchParams.has("access_token")).toBe(false);
 

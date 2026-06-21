@@ -76,7 +76,9 @@ export function TargetSection({
             disabled={isSubmitting || modulesLoading || modules.length === 0}
           >
             <SelectTrigger className="w-full">
-              <SelectValue>{selectedModule?.label ?? (form.moduleSlug || "Select module")}</SelectValue>
+              <SelectValue>
+                {selectedModule?.label ?? (form.moduleSlug || "Select module")}
+              </SelectValue>
             </SelectTrigger>
             <SelectPositioner align="start">
               <SelectContent className="border-border">

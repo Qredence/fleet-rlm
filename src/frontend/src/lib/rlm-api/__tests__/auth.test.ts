@@ -40,9 +40,9 @@ afterEach(() => {
 
 describe("authEndpoints", () => {
   it("calls /api/v1/auth/me", async () => {
-    const GET = vi.fn().mockResolvedValue(
-      mockResponse({ tenant_claim: "default", user_claim: "fleetwebapp-user" }),
-    );
+    const GET = vi
+      .fn()
+      .mockResolvedValue(mockResponse({ tenant_claim: "default", user_claim: "fleetwebapp-user" }));
     mockTypedClient({ GET });
 
     const { authEndpoints } = await loadAuthModule();
@@ -53,9 +53,11 @@ describe("authEndpoints", () => {
   });
 
   it("creates a WebSocket ticket through the authenticated HTTP API", async () => {
-    const POST = vi.fn().mockResolvedValue(
-      mockResponse({ ticket: "ticket-123", expires_at: "2026-06-20T03:30:00Z" }),
-    );
+    const POST = vi
+      .fn()
+      .mockResolvedValue(
+        mockResponse({ ticket: "ticket-123", expires_at: "2026-06-20T03:30:00Z" }),
+      );
     mockTypedClient({ POST });
 
     const { authEndpoints } = await loadAuthModule();

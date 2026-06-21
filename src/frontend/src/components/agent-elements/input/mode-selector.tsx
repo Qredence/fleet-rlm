@@ -5,11 +5,7 @@ import type { ComponentType } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { popoverSurfaceClass } from "./popover-surface";
 
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 import { cn } from "../utils/cn";
 
@@ -66,9 +62,7 @@ export const ModeSelector = memo(function ModeSelector({
     >
       {ActiveIcon && <ActiveIcon className="size-3.5 shrink-0" />}
       <span className="font-medium">{activeMode.label}</span>
-      {hasMultiple && (
-        <ChevronDown className="size-3 text-an-input-placeholder-color" />
-      )}
+      {hasMultiple && <ChevronDown className="size-3 text-an-input-placeholder-color" />}
     </button>
   );
 
@@ -77,11 +71,7 @@ export const ModeSelector = memo(function ModeSelector({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={trigger} />
-      <PopoverContent
-        align="start"
-        side="top"
-        className={cn("w-44", popoverSurfaceClass)}
-      >
+      <PopoverContent align="start" side="top" className={cn("w-44", popoverSurfaceClass)}>
         {modes.map((mode) => {
           const isActive = mode.id === activeMode.id;
           return (
@@ -97,14 +87,10 @@ export const ModeSelector = memo(function ModeSelector({
               <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
                 <span className="truncate">{mode.label}</span>
                 {mode.description ? (
-                  <span className="truncate text-an-foreground-muted">
-                    {mode.description}
-                  </span>
+                  <span className="truncate text-an-foreground-muted">{mode.description}</span>
                 ) : null}
               </span>
-              {isActive && (
-                <Check className="size-3.5 shrink-0 text-an-foreground-muted" />
-              )}
+              {isActive && <Check className="size-3.5 shrink-0 text-an-foreground-muted" />}
             </button>
           );
         })}

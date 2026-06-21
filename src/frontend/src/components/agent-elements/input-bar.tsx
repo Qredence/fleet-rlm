@@ -25,21 +25,14 @@ import {
   IconPlugConnected,
   IconX,
 } from "@tabler/icons-react";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SendButton } from "./input/send-button";
 import { AttachmentButton } from "./input/attachment-button";
 import { FileAttachment } from "./input/file-attachment";
 import { useInputTyping } from "./input/input-typing";
 import { QuestionPrompt } from "./question/question-prompt";
 import { Suggestions, type SuggestionItem } from "./input/suggestions";
-import type {
-  QuestionAnswer,
-  QuestionConfig,
-} from "./question/question-prompt";
+import type { QuestionAnswer, QuestionConfig } from "./question/question-prompt";
 
 export type AttachedImage = {
   id: string;
@@ -157,9 +150,7 @@ export const InputBar = memo(function InputBar({
 }: InputBarProps) {
   const [internalInput, setInternalInput] = useState("");
   const [isInfoBarOpen, setIsInfoBarOpen] = useState(true);
-  const [dismissedQuestionId, setDismissedQuestionId] = useState<string | null>(
-    null,
-  );
+  const [dismissedQuestionId, setDismissedQuestionId] = useState<string | null>(null);
   const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false);
   const [questionBarIndex, setQuestionBarIndex] = useState(1);
   const isControlled = controlledValue !== undefined;
@@ -221,9 +212,7 @@ export const InputBar = memo(function InputBar({
   }, [infoBar]);
 
   const infoBarPosition = infoBar?.position ?? "top";
-  const shouldShowInfoBar = Boolean(
-    infoBar && (infoBar.title || infoBar.description),
-  );
+  const shouldShowInfoBar = Boolean(infoBar && (infoBar.title || infoBar.description));
   const infoBarData = infoBar ?? {};
 
   const infoBarNode = shouldShowInfoBar ? (
@@ -238,14 +227,10 @@ export const InputBar = memo(function InputBar({
       )}
     >
       <div className="min-w-0 truncate text-xs text-an-foreground">
-        {infoBarData.title && (
-          <span className="font-medium">{infoBarData.title}</span>
-        )}
+        {infoBarData.title && <span className="font-medium">{infoBarData.title}</span>}
         {infoBarData.description && (
           <span className="text-an-foreground-muted/80">
-            {infoBarData.title
-              ? ` ${infoBarData.description}`
-              : infoBarData.description}
+            {infoBarData.title ? ` ${infoBarData.description}` : infoBarData.description}
           </span>
         )}
       </div>
@@ -273,9 +258,7 @@ export const InputBar = memo(function InputBar({
     </div>
   ) : null;
 
-  const shouldShowQuestionBar = Boolean(
-    questionBar && questionBar.id !== dismissedQuestionId,
-  );
+  const shouldShowQuestionBar = Boolean(questionBar && questionBar.id !== dismissedQuestionId);
   const questionBarData = questionBar;
   const questionSet = questionBarData?.questions ?? [];
   const hasQuestions = questionSet.length > 0;
@@ -287,13 +270,8 @@ export const InputBar = memo(function InputBar({
   const questionIndex = hasExternalQuestionNavigation
     ? (questionBarData?.questionIndex ?? 1)
     : questionBarIndex;
-  const clampedQuestionIndex = Math.max(
-    1,
-    Math.min(questionIndex, totalQuestions),
-  );
-  const activeQuestion = hasQuestions
-    ? questionSet[clampedQuestionIndex - 1]
-    : undefined;
+  const clampedQuestionIndex = Math.max(1, Math.min(questionIndex, totalQuestions));
+  const activeQuestion = hasQuestions ? questionSet[clampedQuestionIndex - 1] : undefined;
   const showQuestionNavigation = totalQuestions > 1;
   const canGoPrev = clampedQuestionIndex > 1;
   const canGoNext = clampedQuestionIndex < totalQuestions;
@@ -388,16 +366,11 @@ export const InputBar = memo(function InputBar({
 
   const hasInput = input.trim().length > 0;
   const hasContextItems = attachedImages.length > 0 || attachedFiles.length > 0;
-  const showContextItems =
-    hasContextItems && config.attachmentPreviewStyle !== "hidden";
-  const imageDisplayMode =
-    config.attachmentPreviewStyle === "thumbnail" ? "image-only" : "chip";
+  const showContextItems = hasContextItems && config.attachmentPreviewStyle !== "hidden";
+  const imageDisplayMode = config.attachmentPreviewStyle === "thumbnail" ? "image-only" : "chip";
 
   const handleContainerClick = useCallback((e: React.MouseEvent) => {
-    if (
-      e.target === e.currentTarget ||
-      !(e.target as HTMLElement).closest("button, textarea")
-    ) {
+    if (e.target === e.currentTarget || !(e.target as HTMLElement).closest("button, textarea")) {
       textareaRef.current?.focus();
     }
   }, []);
@@ -417,12 +390,8 @@ export const InputBar = memo(function InputBar({
     [disabled, isStreaming, setInput],
   );
 
-  const suggestionItems = Array.isArray(suggestions)
-    ? suggestions
-    : (suggestions?.items ?? []);
-  const suggestionsClassName = Array.isArray(suggestions)
-    ? undefined
-    : suggestions?.className;
+  const suggestionItems = Array.isArray(suggestions) ? suggestions : (suggestions?.items ?? []);
+  const suggestionsClassName = Array.isArray(suggestions) ? undefined : suggestions?.className;
   const suggestionItemClassName = Array.isArray(suggestions)
     ? undefined
     : suggestions?.itemClassName;
@@ -431,11 +400,7 @@ export const InputBar = memo(function InputBar({
     showAttach && onAttach ? (
       <Popover open={isAttachMenuOpen} onOpenChange={setIsAttachMenuOpen}>
         <PopoverTrigger render={<AttachmentButton />} />
-        <PopoverContent
-          align="start"
-          side="top"
-          className={cn("w-46", popoverSurfaceClass)}
-        >
+        <PopoverContent align="start" side="top" className={cn("w-46", popoverSurfaceClass)}>
           <button
             type="button"
             onClick={() => {
@@ -465,9 +430,7 @@ export const InputBar = memo(function InputBar({
         <div
           className={cn(
             "flex flex-col gap-0",
-            shouldShowInfoBar
-              ? "bg-an-background-tertiary rounded-an-input-border-radius"
-              : null,
+            shouldShowInfoBar ? "bg-an-background-tertiary rounded-an-input-border-radius" : null,
           )}
         >
           {infoBarPosition === "top" && infoBarNode}
@@ -500,11 +463,7 @@ export const InputBar = memo(function InputBar({
                         url={img.url}
                         display={imageDisplayMode}
                         enableImagePreview={enableImagePreview}
-                        onRemove={
-                          onRemoveImage
-                            ? () => onRemoveImage(img.id)
-                            : undefined
-                        }
+                        onRemove={onRemoveImage ? () => onRemoveImage(img.id) : undefined}
                       />
                     ))}
                     {attachedFiles.map((file) => (
@@ -513,9 +472,7 @@ export const InputBar = memo(function InputBar({
                         id={file.id}
                         filename={file.filename}
                         size={file.size}
-                        onRemove={
-                          onRemoveFile ? () => onRemoveFile(file.id) : undefined
-                        }
+                        onRemove={onRemoveFile ? () => onRemoveFile(file.id) : undefined}
                       />
                     ))}
                   </div>
@@ -527,11 +484,7 @@ export const InputBar = memo(function InputBar({
             {isTyping && typingAnimation?.image && showImage && (
               <div className="flex gap-2 flex-wrap px-3 pt-3">
                 <div className="relative overflow-hidden shrink-0 w-16 h-16 rounded-md">
-                  <img
-                    src={typingAnimation.image}
-                    alt=""
-                    className="w-full h-full object-cover"
-                  />
+                  <img src={typingAnimation.image} alt="" className="w-full h-full object-cover" />
                 </div>
               </div>
             )}
@@ -589,13 +542,7 @@ export const InputBar = memo(function InputBar({
                   className="rounded-full outline-none transition-transform focus-visible:ring-2 focus-visible:ring-an-primary-color/60 disabled:cursor-default active:not-disabled:scale-95"
                 >
                   <SendButton
-                    state={
-                      isStreaming
-                        ? "streaming"
-                        : hasInput && !disabled
-                          ? "typing"
-                          : "idle"
-                    }
+                    state={isStreaming ? "streaming" : hasInput && !disabled ? "typing" : "idle"}
                   />
                 </button>
               </div>

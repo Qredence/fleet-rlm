@@ -16,7 +16,7 @@
     "type-check:relaxed": "tsc -p tsconfig.app.json --noEmit --strict false --noUnusedLocals false --noUnusedParameters false --noUncheckedIndexedAccess false",
     "lint": "vp lint src/",
     "lint:robustness": "pnpm run lint",
-    "lint:style-tokens": "node scripts/check-style-tokens.mjs",
+    "lint:style-tokens": "node scripts/check-style-tokens.js",
     "lint:dead-code": "knip",
     "format": "vp fmt src/",
     "format:check": "vp fmt --check src/",

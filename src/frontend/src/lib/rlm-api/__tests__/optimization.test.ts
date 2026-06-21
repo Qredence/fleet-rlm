@@ -99,9 +99,9 @@ describe("optimizationEndpoints", () => {
   });
 
   it("exports session traces as raw and distilled artifacts", async () => {
-    const POST = vi.fn().mockResolvedValue(
-      mockResponse({ session_id: "session-1", trace_count: 2 }),
-    );
+    const POST = vi
+      .fn()
+      .mockResolvedValue(mockResponse({ session_id: "session-1", trace_count: 2 }));
     mockTypedClient({ POST });
 
     const { optimizationEndpoints } = await loadOptimizationModule();
@@ -114,9 +114,7 @@ describe("optimizationEndpoints", () => {
 
   it("fetches detailed GEPA run reports and creates promotion drafts", async () => {
     const GET = vi.fn().mockResolvedValue(mockResponse({ run: { id: "277" } }));
-    const POST = vi.fn().mockResolvedValue(
-      mockResponse({ draft_id: "promotion-draft-277" }),
-    );
+    const POST = vi.fn().mockResolvedValue(mockResponse({ draft_id: "promotion-draft-277" }));
     mockTypedClient({ GET, POST });
 
     const { optimizationEndpoints } = await loadOptimizationModule();

@@ -20,23 +20,23 @@ Before editing:
 
 ## Source-of-Truth Files
 
-| Concern                 | File(s)                                                           |
-| ----------------------- | ----------------------------------------------------------------- |
-| Scripts & validation    | `package.json`                                                    |
-| Lint/build/import rules | `vite.config.ts`                                                  |
-| Style token guard       | `scripts/check-style-tokens.mjs`                                  |
-| Routes & surfaces       | `src/routes/*`                                                    |
-| App chrome / layout     | `src/features/layout/*`                                           |
-| Product surfaces        | `src/features/{workspace,optimization,volumes,settings}/index.ts` |
-| UI primitives           | `src/components/ui/*` (shadcn/Base UI)                            |
-| Agent Elements (chat)   | `src/components/agent-elements/*`                                 |
-| Product compositions    | `src/components/product/*`                                        |
-| API clients & types     | `src/lib/rlm-api/*`                                               |
-| Workspace adapters      | `src/lib/workspace/*`                                             |
+| Concern                 | File(s)                                                                |
+| ----------------------- | ---------------------------------------------------------------------- |
+| Scripts & validation    | `package.json`                                                         |
+| Lint/build/import rules | `vite.config.ts`                                                       |
+| Style token guard       | `scripts/check-style-tokens.mjs`                                       |
+| Routes & surfaces       | `src/routes/*`                                                         |
+| App chrome / layout     | `src/features/layout/*`                                                |
+| Product surfaces        | `src/features/{workspace,optimization,volumes,settings}/index.ts`      |
+| UI primitives           | `src/components/ui/*` (shadcn/Base UI)                                 |
+| Agent Elements (chat)   | `src/components/agent-elements/*`                                      |
+| Product compositions    | `src/components/product/*`                                             |
+| API clients & types     | `src/lib/rlm-api/*`                                                    |
+| Workspace adapters      | `src/lib/workspace/*`                                                  |
 | Theme / tokens          | `src/styles/globals.css`, `src/components/agent-elements/agent-ui.css` |
-| shadcn config           | `components.json`                                                 |
-| API contract            | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts`            |
-| Dead-code analysis      | `knip.json`                                                       |
+| shadcn config           | `components.json`                                                      |
+| API contract            | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts`                 |
+| Dead-code analysis      | `knip.json`                                                            |
 
 ### Generated / Synced — Do Not Hand-Edit
 
@@ -291,6 +291,7 @@ A CI guard (`pnpm run lint:style-tokens`) automatically fails when banned patter
 ### Runtime-driven styles
 
 Dynamic colors (e.g. from `STEP_TYPE_META`) must use CSS custom properties set via the `style` prop, consumed by `@utility` classes in `globals.css`. Do not use inline `style={{ color: ..., backgroundColor: ... }}` for repeated patterns. Example:
+
 ```tsx
 <div style={{ "--node-color": meta.color } as React.CSSProperties} className="node-color-text node-tint">
 ```
@@ -382,10 +383,10 @@ Keep sync artifacts in the same change; never hand-edit generated output.
 
 Registries are configured in [components.json](components.json):
 
-| Namespace         | URL                                                    | Use                                |
-| ----------------- | ------------------------------------------------------ | ---------------------------------- |
-| `@agent-elements` | `https://agent-elements.21st.dev/r/{name}.json`        | Chat shell, tool cards, input bar  |
-| `@prompt-kit`     | `https://www.prompt-kit.com/c/{name}.json`             | Avoid unless net-new capability    |
+| Namespace         | URL                                             | Use                               |
+| ----------------- | ----------------------------------------------- | --------------------------------- |
+| `@agent-elements` | `https://agent-elements.21st.dev/r/{name}.json` | Chat shell, tool cards, input bar |
+| `@prompt-kit`     | `https://www.prompt-kit.com/c/{name}.json`      | Avoid unless net-new capability   |
 
 > The `@ai-elements` registry is no longer configured. Do not install or import from `@ai-elements`.
 
@@ -408,19 +409,19 @@ import { BashTool } from "@/components/agent-elements/tools/bash-tool";
 
 ### Canonical Agent Elements (actively used)
 
-| Component           | Location                                    | Consumers                                               | Purpose                                              |
-| ------------------- | ------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------- |
-| `AgentChat`         | `agent-elements/agent-chat.tsx`             | `workspace-message-list.tsx`                            | Full chat shell (messages + input)                   |
-| `InputBar`          | `agent-elements/input-bar.tsx`              | `workspace-agent-input-bar.tsx`                         | Composer with mode/model pickers                     |
-| `Suggestions`       | `agent-elements/input/suggestions.tsx`      | `AgentChat` via `workspace-message-list.tsx`            | Quick-prompt chips (empty state + input)             |
-| `PopoverSurface`    | `agent-elements/input/popover-surface.tsx`  | `input-bar`, `model-picker`, `mode-selector`            | Shared popover surface recipe                        |
-| Tool mapping        | `lib/workspace/agent-tool-parts.ts`         | `agent-chat-adapter.ts`, `execution-inspector-rows.tsx` | Shared tool part normalization                       |
-| Static tool helpers | `agent-elements/utils/static-tool-parts.ts` | workbench, inspector                                    | `ThinkingTool` steps outside chat transcripts        |
-| Tool cards          | `agent-elements/tools/*`                    | `agent-chat-adapter.ts` via `toolRenderers`             | Bash, Edit, Search, MCP, Subagent, Thinking, Generic |
-| `TextShimmer`       | `agent-elements/text-shimmer.tsx`           | tool rows, loading states                               | Streaming label shimmer                              |
-| `Streamdown`        | `ui/streamdown.tsx`                         | agent-elements markdown                                 | Canonical markdown renderer                          |
-| `CodeBlockViewer`   | `ui/code-block.tsx`                         | `bash-tool.tsx`                                         | Rich code block with header, filename, copy button   |
-| `TrajectoryChain`   | `features/workspace/inspection/trajectory-chain.tsx` | `trajectory-tab`, `trajectory-inspector-tab`   | Collapsible step chain (uses agent-elements primitives, not chain-of-thought) |
+| Component           | Location                                             | Consumers                                               | Purpose                                                                       |
+| ------------------- | ---------------------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `AgentChat`         | `agent-elements/agent-chat.tsx`                      | `workspace-message-list.tsx`                            | Full chat shell (messages + input)                                            |
+| `InputBar`          | `agent-elements/input-bar.tsx`                       | `workspace-agent-input-bar.tsx`                         | Composer with mode/model pickers                                              |
+| `Suggestions`       | `agent-elements/input/suggestions.tsx`               | `AgentChat` via `workspace-message-list.tsx`            | Quick-prompt chips (empty state + input)                                      |
+| `PopoverSurface`    | `agent-elements/input/popover-surface.tsx`           | `input-bar`, `model-picker`, `mode-selector`            | Shared popover surface recipe                                                 |
+| Tool mapping        | `lib/workspace/agent-tool-parts.ts`                  | `agent-chat-adapter.ts`, `execution-inspector-rows.tsx` | Shared tool part normalization                                                |
+| Static tool helpers | `agent-elements/utils/static-tool-parts.ts`          | workbench, inspector                                    | `ThinkingTool` steps outside chat transcripts                                 |
+| Tool cards          | `agent-elements/tools/*`                             | `agent-chat-adapter.ts` via `toolRenderers`             | Bash, Edit, Search, MCP, Subagent, Thinking, Generic                          |
+| `TextShimmer`       | `agent-elements/text-shimmer.tsx`                    | tool rows, loading states                               | Streaming label shimmer                                                       |
+| `Streamdown`        | `ui/streamdown.tsx`                                  | agent-elements markdown                                 | Canonical markdown renderer                                                   |
+| `CodeBlockViewer`   | `ui/code-block.tsx`                                  | `bash-tool.tsx`                                         | Rich code block with header, filename, copy button                            |
+| `TrajectoryChain`   | `features/workspace/inspection/trajectory-chain.tsx` | `trajectory-tab`, `trajectory-inspector-tab`            | Collapsible step chain (uses agent-elements primitives, not chain-of-thought) |
 
 Wire backend tools through `agent-chat-adapter.ts` → `ToolRenderer`. Shared normalization lives in `lib/workspace/agent-tool-parts.ts`. Unknown kinds should fall back to `GenericTool`.
 
