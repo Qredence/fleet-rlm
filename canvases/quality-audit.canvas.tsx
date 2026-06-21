@@ -14,15 +14,12 @@ import {
   Stat,
   Table,
   Callout,
-  CollapsibleSection,
   Button,
-  useHostTheme,
   useCanvasAction,
   useCanvasState,
 } from "cursor/canvas";
 
 export default function QualityAuditCanvas() {
-  const theme = useHostTheme();
   const dispatch = useCanvasAction();
   const [activeTab, setActiveTab] = useCanvasState("activeTab", "overview");
 

@@ -32,10 +32,15 @@ function mapProfile(me: Awaited<ReturnType<typeof authEndpoints.me>>): UserProfi
 function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<UserProfile | null>(null);
 
-  // Invalidate and refetch all queries when the authenticated user changes
+  // Invalidate and refetch all queries when the authenticated user changes,
+  // and clear the cache when transitioning to an unauthenticated state.
   useEffect(() => {
-    if (user?.id && typeof window !== "undefined") {
-      void queryClient.invalidateQueries();
+    if (typeof window !== "undefined") {
+      if (user?.id) {
+        void queryClient.invalidateQueries();
+      } else {
+        queryClient.clear();
+      }
     }
   }, [user?.id]);
 

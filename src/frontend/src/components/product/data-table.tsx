@@ -218,8 +218,20 @@ export function DataTable<T extends Record<string, unknown>>({
                 <tr
                   key={rowKey ? rowKey(row, ri) : ri}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onKeyDown={
+                    onRowClick
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onRowClick(row);
+                          }
+                        }
+                      : undefined
+                  }
+                  role={onRowClick ? "button" : undefined}
+                  tabIndex={onRowClick ? 0 : undefined}
                   className={cn(
-                    "border-b border-border/50 last:border-0 hover:bg-muted/20 transition-colors",
+                    "border-b border-border/50 last:border-0 hover:bg-muted/20 transition-colors focus-visible:bg-muted/30 focus-visible:outline-none",
                     onRowClick && "cursor-pointer",
                     rowClassName,
                   )}
