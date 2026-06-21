@@ -77,9 +77,7 @@ function nodeTrailing(node: FsNode) {
     return (
       <span className="flex items-center gap-2">
         {node.size ? (
-          <span className="typo-micro tabular-nums font-sans">
-            {formatFileSize(node.size)}
-          </span>
+          <span className="typo-micro tabular-nums font-sans">{formatFileSize(node.size)}</span>
         ) : null}
         {node.modifiedAt ? (
           <span className="hidden typo-micro md:inline">{formatDate(node.modifiedAt)}</span>

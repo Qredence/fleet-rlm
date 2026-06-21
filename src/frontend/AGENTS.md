@@ -63,10 +63,10 @@ Before editing:
 
 The following layers were removed and must not be reintroduced:
 
-- **`src/components/ai-elements/`** — **deleted**. All primitives have been either merged into `ui/` (code-block), rewritten on `agent-elements/` (trajectory-chain), or removed as dead code (prompt-input, chain-of-thought, reasoning). Do not install `@ai-elements` registry components.
-- **`src/features/workspace/composer/`** — **deleted**. The orphaned `workspace-composer.tsx` and its legacy `PromptInput` dependency have been removed. The canonical composer is `InputBar` from `agent-elements/input-bar.tsx`.
-- **`src/screens/`** — never existed. The stale `@/screens/*` lint rule has been removed from `vite.config.ts`.
-- **`components/tool-ui/`** — retired. Tool transcript UI belongs under `components/agent-elements/tools/*`.
+- **`src/components/ai-elements`** — **deleted**. All primitives have been either merged into `ui/` (code-block), rewritten on `agent-elements/` (trajectory-chain), or removed as dead code (prompt-input, chain-of-thought, reasoning). Do not install `@ai-elements` registry components.
+- **`src/features/workspace/composer`** — **deleted**. The orphaned `workspace-composer.tsx` and its legacy `PromptInput` dependency have been removed. The canonical composer is `InputBar` from `agent-elements/input-bar.tsx`.
+- **`src/screens`** — never existed. The stale `@/screens/*` lint rule has been removed from `vite.config.ts`.
+- **`components/tool-ui`** — retired. Tool transcript UI belongs under `components/agent-elements/tools/*`.
 
 ### Chat data flow (not Vercel `useChat`)
 
