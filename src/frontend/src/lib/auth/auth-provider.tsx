@@ -127,6 +127,9 @@ function AuthProvider({ children }: AuthProviderProps) {
 
   const refresh = useCallback(async () => {
     try {
+      if (isNeonAuthConfigured()) {
+        await initializeNeonSession();
+      }
       const me = await authEndpoints.me();
       setUser(mapProfile(me));
     } catch {

@@ -40,15 +40,6 @@ export function VolumesScreen() {
   return <VolumesBrowser />;
 }
 
-const FILE_SIZE_STYLE = {
-  fontSize: "var(--font-text-3xs-size)",
-  fontWeight: "var(--font-text-3xs-weight)",
-  fontFamily: "var(--font-sans)",
-  lineHeight: "var(--font-text-3xs-line-height)",
-  letterSpacing: "var(--font-text-3xs-tracking)",
-  fontVariantNumeric: "tabular-nums",
-} as const;
-
 function fileIcon(name: string) {
   if (name.endsWith(".md")) return <FileText className="size-3.5 text-chart-2" />;
   if (name.endsWith(".py")) return <FileCode className="size-3.5 text-chart-1" />;
@@ -85,7 +76,11 @@ function nodeTrailing(node: FsNode) {
   if (node.type === "file") {
     return (
       <span className="flex items-center gap-2">
-        {node.size ? <span style={FILE_SIZE_STYLE}>{formatFileSize(node.size)}</span> : null}
+        {node.size ? (
+          <span className="typo-micro tabular-nums font-sans">
+            {formatFileSize(node.size)}
+          </span>
+        ) : null}
         {node.modifiedAt ? (
           <span className="hidden typo-micro md:inline">{formatDate(node.modifiedAt)}</span>
         ) : null}

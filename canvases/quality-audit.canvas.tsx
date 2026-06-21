@@ -102,7 +102,7 @@ export default function QualityAuditCanvas() {
               <CardBody>
                 <Stack gap={8}>
                   <Text size="small">
-                    <strong>Non-Blocking Route Loaders:</strong> Rewrote route loaders in <Code>optimization.tsx</Code> and <Code>volumes.tsx</Code> to utilize <Code>prefetchQuery</Code> rather than blocking transitions with <Code>ensureQueryData</Code>.
+                    <strong>Robust Route Loaders:</strong> Enforced blocking data prefetching inside route loaders in <Code>optimization.tsx</Code> and <Code>volumes.tsx</Code> using <Code>ensureQueryData</Code> to guarantee smooth, hydration-mismatch-free transitions.
                   </Text>
                   <Text size="small">
                     <strong>Security Cache Clearing:</strong> In <Code>auth-provider.tsx</Code>, added immediate react-query invalidation and cache purging on user logout or ID change to prevent cross-user/tenant state leaks.
@@ -140,14 +140,14 @@ export default function QualityAuditCanvas() {
 
           <Card>
             <CardHeader trailing={<Pill size="sm">Performance & UX</Pill>}>
-              Async Route Loader Transition (Blocking vs Prefetch)
+              Blocking Route Loader Transitions (ensureQueryData)
             </CardHeader>
             <CardBody style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <Text>
-                Route definitions in <Code>optimization.tsx</Code> and <Code>volumes.tsx</Code> migrated from <Code>await Promise.allSettled([...ensureQueryData])</Code> to non-blocking <Code>prefetchQuery</Code> calls.
+                Route definitions in <Code>optimization.tsx</Code> and <Code>volumes.tsx</Code> strictly await prefetching via <Code>await Promise.allSettled([...ensureQueryData])</Code>.
               </Text>
               <Text size="small" tone="secondary">
-                <strong>Why it matters:</strong> Blocking route loaders halt page routing animations, creating a sluggish, frozen feel during network latency. Switching to prefetching lets TanStack Router load screens instantly, showing client-side skeletons/loaders immediately, which substantially improves perceived speed.
+                <strong>Why it matters:</strong> TanStack Router/Start loaders should await blocking query prefetching. Non-blocking routing with empty caches can trigger layout shifts, hydration mismatches, and severe screen flickers on transition. Keeping these loaders blocking preserves robust UI state.
               </Text>
               <Row gap={8}>
                 <Button variant="ghost" onClick={() => openFile("src/frontend/src/routes/app/optimization.tsx")}>
