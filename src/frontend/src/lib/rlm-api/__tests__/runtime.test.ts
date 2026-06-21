@@ -162,6 +162,7 @@ describe("runtimeEndpoints", () => {
   });
 
   it("uses a focused timeout for runtime connectivity smoke tests", async () => {
+    vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
     const fetchMock = vi.fn().mockResolvedValue(
       mockJsonResponse({
         kind: "lm",
