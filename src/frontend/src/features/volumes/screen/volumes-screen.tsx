@@ -114,7 +114,6 @@ export function VolumesBrowser() {
 
   const {
     volumes: filesystem,
-    dataSource: filesystemDataSource,
     degradedReason: filesystemDegradedReason,
     isLoading,
     refetch,
@@ -135,13 +134,6 @@ export function VolumesBrowser() {
   }, []);
 
   const filteredFs = useMemo(() => filterFs(filesystem, fsSearch), [filesystem, fsSearch]);
-  const fsStats = useMemo(
-    () => ({
-      volumes: filesystem.length,
-      totalFiles: filesystem.reduce((a, v) => a + countFiles(v), 0),
-    }),
-    [filesystem],
-  );
 
   const isDegraded = Boolean(filesystemDegradedReason);
 
@@ -278,13 +270,6 @@ export function VolumesBrowser() {
             </ResizablePanel>
           </ResizablePanelGroup>
         )}
-      </div>
-
-      <div className="shrink-0 border-t border-border-subtle px-4 py-3 md:px-6">
-        <span className="text-muted-foreground typo-helper">
-          {providerLabel} · {fsStats.volumes} volumes · {fsStats.totalFiles} files
-          {filesystemDataSource !== "mock" ? " · Live" : ""}
-        </span>
       </div>
     </div>
   );

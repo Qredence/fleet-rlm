@@ -240,7 +240,6 @@ describe("VolumesBrowser", () => {
     expect(container.textContent).toContain("Daytona durable volume unavailable");
     expect(container.textContent).toContain("Daytona volume API returned 503: unavailable");
     expect(container.textContent).toContain("No daytona durable volume data available.");
-    expect(container.textContent).toContain("Daytona · 0 volumes · 0 files · Live");
 
     act(() => {
       root.unmount();
