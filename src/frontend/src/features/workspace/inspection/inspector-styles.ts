@@ -45,7 +45,7 @@ export const inspectorStyles = {
   /** Card chrome. */
   card: {
     /** Outer card shell. */
-    root: "min-w-0 gap-3 overflow-hidden rounded-2xl border-border-subtle/80 shadow-none",
+    root: "min-w-0 gap-3 overflow-hidden rounded-2xl border-border-subtle/80 shadow-none bg-transparent",
     /** Card header padding. */
     header: "px-4 pt-4",
     /** Card content padding (no internal stack). */

@@ -3,11 +3,8 @@ import { toast } from "sonner";
 import { FlaskConical } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { PageHeader } from "@/components/product/page-header";
-import { useIsMobile } from "@/hooks/ui/use-is-mobile";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import type { OptimizationPromotionDraftResponse, OptimizationRunResponse } from "@/lib/rlm-api";
 
 import { errorMessage } from "../optimization-format";
@@ -26,7 +23,6 @@ type OptimizationTab = "new-run" | "history";
 const EMPTY_RUNS: OptimizationRunResponse[] = [];
 
 export function OptimizationScreen() {
-  const isMobile = useIsMobile();
   const statusQuery = useOptimizationStatus();
   const runsQuery = useOptimizationRuns();
   const { createPromotionDraft } = useOptimizationMutations();
@@ -72,24 +68,7 @@ export function OptimizationScreen() {
         onCreateDraft={() => void handleCreatePromotionDraft()}
       />
 
-      {!isMobile ? (
-        <PageHeader
-          isMobile={false}
-          title="Optimization"
-          description="Run offline RLM-GEPA prompt optimization from datasets and distilled traces."
-          maxWidth="max-w-page"
-        />
-      ) : null}
-
       <ScrollArea className="min-h-0 flex-1">
-        {isMobile ? (
-          <PageHeader
-            isMobile
-            title="Optimization"
-            description="Run offline RLM-GEPA prompt optimization from datasets and distilled traces."
-          />
-        ) : null}
-
         <div className="mx-auto flex w-full max-w-page flex-col gap-4 px-4 py-4 md:px-6">
           {statusQuery.data && !statusQuery.data.available ? (
             <Alert className="border-border-subtle bg-muted/10 rounded-lg">
@@ -108,34 +87,16 @@ export function OptimizationScreen() {
             onValueChange={(value) => setActiveTab(value as OptimizationTab)}
             className="min-h-0"
           >
-            <div className="flex items-center justify-between gap-3 border-b border-border-subtle pb-3">
-              <TabsList className="bg-muted/40 p-1">
-                <TabsTrigger
-                  value="new-run"
-                  className="font-medium text-xs py-1.5 px-3 transition-colors"
-                >
-                  New Run
-                </TabsTrigger>
-                <TabsTrigger
-                  value="history"
-                  className="font-medium text-xs py-1.5 px-3 transition-colors"
-                >
-                  Run History
-                </TabsTrigger>
-              </TabsList>
-              <Badge
-                variant="outline"
-                className="border-border-subtle bg-muted/20 text-muted-foreground font-medium typo-helper"
-              >
-                RLM-GEPA
-              </Badge>
-            </div>
+            <TabsList>
+              <TabsTab value="new-run">New Run</TabsTab>
+              <TabsTab value="history">Run History</TabsTab>
+            </TabsList>
 
-            <TabsContent value="new-run" className="mt-4 focus-visible:outline-none">
+            <TabsPanel value="new-run" className="mt-4 focus-visible:outline-none">
               <OptimizationForm onSuccess={() => setActiveTab("history")} />
-            </TabsContent>
+            </TabsPanel>
 
-            <TabsContent value="history" className="mt-4 focus-visible:outline-none">
+            <TabsPanel value="history" className="mt-4 focus-visible:outline-none">
               <RunHistory
                 runs={runs}
                 isLoading={runsQuery.isLoading}
@@ -143,7 +104,7 @@ export function OptimizationScreen() {
                 refetch={() => void runsQuery.refetch()}
                 onSelectRun={openRunDetails}
               />
-            </TabsContent>
+            </TabsPanel>
           </Tabs>
         </div>
       </ScrollArea>

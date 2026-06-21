@@ -19,7 +19,7 @@ import { useNavigationStore } from "@/stores/navigation-store";
 function RouteSync() {
   const routerState = useRouterState();
   const location = routerState.location;
-  const { setActiveNav, openCanvasPanel, setCanvasPanel, activeNav } = useNavigationStore();
+  const { setActiveNav, openCanvasPanel, setCanvasPanel, activeNav, closeCanvas } = useNavigationStore();
   const { clearSelectedFile } = useVolumesLayoutSelection();
 
   const prevSectionRef = useRef("");
@@ -39,6 +39,8 @@ function RouteSync() {
       openCanvasPanel("volumes");
     } else if (section === "workspace") {
       setCanvasPanel("workspace");
+    } else {
+      closeCanvas();
     }
 
     if (prevSection === "volumes" && section !== "volumes") {

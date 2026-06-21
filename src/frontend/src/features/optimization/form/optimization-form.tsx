@@ -221,10 +221,7 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
   };
 
   return (
-    <SectionCard
-      variant="subtle"
-      className="border-border bg-card shadow-sm transition-all duration-200"
-    >
+    <SectionCard variant="elevated">
       <SectionCardHeader className="border-b border-border-subtle bg-muted/10 px-6 py-5">
         <div className="flex items-center gap-2">
           <Settings2 className="size-5 text-primary" />
@@ -238,7 +235,7 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
       </SectionCardHeader>
       <SectionCardContent className="p-6">
         <form className="flex flex-col gap-6" onSubmit={handleSubmit}>
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="flex flex-col gap-6">
             {/* Left Column: Target Metadata & Config */}
             <FieldGroup className="gap-5">
               <TargetSection
@@ -298,7 +295,7 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="font-medium h-10 px-5 shadow-xs transition-colors"
+              className="font-medium px-5 shadow-xs"
             >
               {isSubmitting ? "Starting..." : "Start GEPA run"}
             </Button>

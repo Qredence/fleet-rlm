@@ -209,7 +209,7 @@ describe("VolumesBrowser", () => {
 
     expect(useFilesystemMock).toHaveBeenCalled();
     expect(useFilesystemMock.mock.calls.at(-1)?.[0]).toBe("daytona");
-    expect(container.textContent).toContain("Browse the daytona mounted durable volume");
+    expect(container.textContent).toContain("daytona");
     expect(container.textContent).toContain("/daytona");
     expect(clearSelectedFile).not.toHaveBeenCalled();
 

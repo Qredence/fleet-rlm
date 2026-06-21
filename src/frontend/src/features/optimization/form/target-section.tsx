@@ -75,7 +75,7 @@ export function TargetSection({
             onValueChange={(value) => value && updateForm("moduleSlug", value)}
             disabled={isSubmitting || modulesLoading || modules.length === 0}
           >
-            <SelectTrigger className="h-10 w-full">
+            <SelectTrigger className="w-full">
               <SelectValue>{selectedModule?.label ?? (form.moduleSlug || "Select module")}</SelectValue>
             </SelectTrigger>
             <SelectPositioner align="start">
@@ -148,7 +148,6 @@ export function TargetSection({
                 onChange={(event) => updateForm("skillName", event.target.value)}
                 placeholder="optimization"
                 disabled={isSubmitting}
-                className="h-10 border-input bg-background shadow-none transition-colors hover:border-border-subtle focus-visible:ring-ring focus-visible:border-primary"
               />
             </CompactField>
           ) : (
@@ -158,7 +157,6 @@ export function TargetSection({
                 onChange={(event) => updateForm("skillPath", event.target.value)}
                 placeholder="skills/custom/SKILL.md"
                 disabled={isSubmitting}
-                className="h-10 border-input bg-background shadow-none transition-colors hover:border-border-subtle focus-visible:ring-ring focus-visible:border-primary"
               />
             </CompactField>
           )}

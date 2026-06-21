@@ -196,7 +196,7 @@ export function WorkspaceMessageList({
         emptyState={<WorkspaceChatEmptyStateHero isMobile={isMobile} />}
         suggestions={emptyChatSuggestions}
         className={cn("h-full min-h-0 bg-background", className)}
-        classNames={{ inputBar: "px-4 pb-6 md:px-6" }}
+        classNames={{ inputBar: "px-4 pb-5 md:px-6" }}
       />
     );
   }
@@ -208,8 +208,8 @@ export function WorkspaceMessageList({
       className={cn("bg-background", className)}
       classNames={{
         root: "bg-background",
-        inputBar: "px-4 pb-6 pt-4 md:px-6",
-        userMessage: "mx-auto max-w-175",
+        inputBar: "px-4 pb-5 pt-3 md:px-6",
+        userMessage: "mx-auto max-w-an",
       }}
     />
   );

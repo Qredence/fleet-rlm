@@ -6,6 +6,7 @@ import { getAccessToken } from "@/lib/auth/token-store";
 import { initializeNeonSession, isNeonAuthConfigured, neonAuthClient } from "@/lib/auth/neon";
 import { authEndpoints } from "@/lib/rlm-api/auth";
 import type { AuthContextValue, PlanTier, UserProfile } from "@/lib/auth/types";
+import { queryClient } from "@/lib/query-client";
 
 interface AuthProviderProps {
   children: ReactNode;
@@ -30,6 +31,13 @@ function mapProfile(me: Awaited<ReturnType<typeof authEndpoints.me>>): UserProfi
 
 function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<UserProfile | null>(null);
+
+  // Invalidate and refetch all queries when the authenticated user changes
+  useEffect(() => {
+    if (user?.id && typeof window !== "undefined") {
+      void queryClient.invalidateQueries();
+    }
+  }, [user?.id]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -110,6 +118,7 @@ function AuthProvider({ children }: AuthProviderProps) {
     }
     authEndpoints.clearLocalAuth();
     setUser(null);
+    queryClient.clear();
   }, []);
 
   const setPlan = useCallback((plan: PlanTier) => {

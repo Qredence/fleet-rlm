@@ -1,11 +1,14 @@
 "use client";
 
 import { memo, useMemo, useState } from "react";
-import { Check, ChevronDown, Cpu, Settings2 } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { popoverSurfaceClass } from "./popover-surface";
 
-import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 import { cn } from "../utils/cn";
 
@@ -41,9 +44,15 @@ export const ModelPicker = memo(function ModelPicker({
   const [internalValue, setInternalValue] = useState(defaultValue);
   const [open, setOpen] = useState(false);
   const activeId = isControlled ? value : internalValue;
-  const enabledModels = useMemo(() => models.filter((model) => !model.disabled), [models]);
+  const enabledModels = useMemo(
+    () => models.filter((model) => !model.disabled),
+    [models],
+  );
   const activeModel =
-    models.find((model) => model.id === activeId) ?? enabledModels[0] ?? models[0] ?? null;
+    models.find((model) => model.id === activeId) ??
+    enabledModels[0] ??
+    models[0] ??
+    null;
 
   if (!activeModel) return null;
 
@@ -53,22 +62,26 @@ export const ModelPicker = memo(function ModelPicker({
       type="button"
       aria-label={`Active model: ${activeModel.label}`}
       className={cn(
-        "inline-flex h-7 min-w-0 max-w-45 items-center gap-1.5 rounded-full px-2.5 typo-caption text-foreground/60 transition-colors hover:bg-foreground/6 hover:text-foreground",
-        disabled && "cursor-not-allowed opacity-60 hover:bg-transparent hover:text-foreground/60",
+        "an-popover-text-medium inline-flex h-an-input-toolbar-height min-w-0 max-w-44 items-center gap-1 rounded-full bg-card px-2 text-an-foreground-muted transition-colors hover:text-an-foreground",
+        disabled &&
+          "cursor-not-allowed opacity-60 hover:bg-transparent hover:text-foreground/60",
         className,
       )}
       disabled={disabled}
     >
-      <Cpu className="size-3.5 shrink-0" />
       <span className="truncate font-medium">{activeModel.label}</span>
-      <ChevronDown className="size-3 shrink-0 text-foreground/40" />
+      <ChevronDown className="size-3 shrink-0 text-an-input-placeholder-color" />
     </button>
   );
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={trigger} />
-      <PopoverContent align="end" side="top" className={cn("w-64", popoverSurfaceClass)}>
+      <PopoverContent
+        align="end"
+        side="top"
+        className={cn("w-44", popoverSurfaceClass)}
+      >
         <div className="max-h-64 overflow-y-auto">
           {models.map((model) => {
             const isActive = model.id === activeModel.id;
@@ -84,39 +97,40 @@ export const ModelPicker = memo(function ModelPicker({
                   setOpen(false);
                 }}
                 className={cn(
-                  "flex w-full items-start gap-2 rounded-an-action-md px-2 py-1.5 text-left typo-caption transition-colors",
-                  canSelect && !model.disabled && "hover:bg-foreground/6",
-                  isActive && "bg-foreground/6",
+                  "an-popover-option-compact an-popover-text flex w-full text-left transition-colors",
+                  isActive && "an-popover-option-active",
                   (model.disabled || !canSelect) && "cursor-default",
                 )}
               >
-                <Cpu className="mt-0.5 size-3.5 shrink-0 text-foreground/50" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{model.label}</span>
+                <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+                  <span className="truncate">{model.label}</span>
                   {model.description ? (
-                    <span className="block truncate text-foreground/40">{model.description}</span>
+                    <span className="truncate text-an-foreground-muted">
+                      {model.description}
+                    </span>
                   ) : null}
                 </span>
-                {isActive && <Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" />}
+                {isActive && (
+                  <Check className="size-3.5 shrink-0 text-an-foreground-muted" />
+                )}
               </button>
             );
           })}
         </div>
         {onConfigure ? (
-          <div className="mt-1 border-t border-border/70 pt-1">
-            <Button
+          <div>
+            <button
               type="button"
-              variant="ghost"
-              size="sm"
-              className="h-8 w-full justify-start gap-2 rounded-an-action-md px-2 typo-caption"
+              className="an-popover-option-compact an-popover-text flex w-full text-left transition-colors"
               onClick={() => {
                 setOpen(false);
                 onConfigure();
               }}
             >
-              <Settings2 className="size-3.5" />
-              {configureLabel}
-            </Button>
+              <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+                <span className="truncate">{configureLabel}</span>
+              </span>
+            </button>
           </div>
         ) : null}
       </PopoverContent>

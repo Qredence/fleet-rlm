@@ -25,14 +25,21 @@ import {
   IconPlugConnected,
   IconX,
 } from "@tabler/icons-react";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { SendButton } from "./input/send-button";
 import { AttachmentButton } from "./input/attachment-button";
 import { FileAttachment } from "./input/file-attachment";
 import { useInputTyping } from "./input/input-typing";
 import { QuestionPrompt } from "./question/question-prompt";
 import { Suggestions, type SuggestionItem } from "./input/suggestions";
-import type { QuestionAnswer, QuestionConfig } from "./question/question-prompt";
+import type {
+  QuestionAnswer,
+  QuestionConfig,
+} from "./question/question-prompt";
 
 export type AttachedImage = {
   id: string;
@@ -150,7 +157,9 @@ export const InputBar = memo(function InputBar({
 }: InputBarProps) {
   const [internalInput, setInternalInput] = useState("");
   const [isInfoBarOpen, setIsInfoBarOpen] = useState(true);
-  const [dismissedQuestionId, setDismissedQuestionId] = useState<string | null>(null);
+  const [dismissedQuestionId, setDismissedQuestionId] = useState<string | null>(
+    null,
+  );
   const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false);
   const [questionBarIndex, setQuestionBarIndex] = useState(1);
   const isControlled = controlledValue !== undefined;
@@ -212,7 +221,9 @@ export const InputBar = memo(function InputBar({
   }, [infoBar]);
 
   const infoBarPosition = infoBar?.position ?? "top";
-  const shouldShowInfoBar = Boolean(infoBar && (infoBar.title || infoBar.description));
+  const shouldShowInfoBar = Boolean(
+    infoBar && (infoBar.title || infoBar.description),
+  );
   const infoBarData = infoBar ?? {};
 
   const infoBarNode = shouldShowInfoBar ? (
@@ -227,10 +238,14 @@ export const InputBar = memo(function InputBar({
       )}
     >
       <div className="min-w-0 truncate text-xs text-an-foreground">
-        {infoBarData.title && <span className="font-medium">{infoBarData.title}</span>}
+        {infoBarData.title && (
+          <span className="font-medium">{infoBarData.title}</span>
+        )}
         {infoBarData.description && (
           <span className="text-an-foreground-muted/80">
-            {infoBarData.title ? ` ${infoBarData.description}` : infoBarData.description}
+            {infoBarData.title
+              ? ` ${infoBarData.description}`
+              : infoBarData.description}
           </span>
         )}
       </div>
@@ -258,7 +273,9 @@ export const InputBar = memo(function InputBar({
     </div>
   ) : null;
 
-  const shouldShowQuestionBar = Boolean(questionBar && questionBar.id !== dismissedQuestionId);
+  const shouldShowQuestionBar = Boolean(
+    questionBar && questionBar.id !== dismissedQuestionId,
+  );
   const questionBarData = questionBar;
   const questionSet = questionBarData?.questions ?? [];
   const hasQuestions = questionSet.length > 0;
@@ -270,8 +287,13 @@ export const InputBar = memo(function InputBar({
   const questionIndex = hasExternalQuestionNavigation
     ? (questionBarData?.questionIndex ?? 1)
     : questionBarIndex;
-  const clampedQuestionIndex = Math.max(1, Math.min(questionIndex, totalQuestions));
-  const activeQuestion = hasQuestions ? questionSet[clampedQuestionIndex - 1] : undefined;
+  const clampedQuestionIndex = Math.max(
+    1,
+    Math.min(questionIndex, totalQuestions),
+  );
+  const activeQuestion = hasQuestions
+    ? questionSet[clampedQuestionIndex - 1]
+    : undefined;
   const showQuestionNavigation = totalQuestions > 1;
   const canGoPrev = clampedQuestionIndex > 1;
   const canGoNext = clampedQuestionIndex < totalQuestions;
@@ -366,11 +388,16 @@ export const InputBar = memo(function InputBar({
 
   const hasInput = input.trim().length > 0;
   const hasContextItems = attachedImages.length > 0 || attachedFiles.length > 0;
-  const showContextItems = hasContextItems && config.attachmentPreviewStyle !== "hidden";
-  const imageDisplayMode = config.attachmentPreviewStyle === "thumbnail" ? "image-only" : "chip";
+  const showContextItems =
+    hasContextItems && config.attachmentPreviewStyle !== "hidden";
+  const imageDisplayMode =
+    config.attachmentPreviewStyle === "thumbnail" ? "image-only" : "chip";
 
   const handleContainerClick = useCallback((e: React.MouseEvent) => {
-    if (e.target === e.currentTarget || !(e.target as HTMLElement).closest("button, textarea")) {
+    if (
+      e.target === e.currentTarget ||
+      !(e.target as HTMLElement).closest("button, textarea")
+    ) {
       textareaRef.current?.focus();
     }
   }, []);
@@ -390,8 +417,12 @@ export const InputBar = memo(function InputBar({
     [disabled, isStreaming, setInput],
   );
 
-  const suggestionItems = Array.isArray(suggestions) ? suggestions : (suggestions?.items ?? []);
-  const suggestionsClassName = Array.isArray(suggestions) ? undefined : suggestions?.className;
+  const suggestionItems = Array.isArray(suggestions)
+    ? suggestions
+    : (suggestions?.items ?? []);
+  const suggestionsClassName = Array.isArray(suggestions)
+    ? undefined
+    : suggestions?.className;
   const suggestionItemClassName = Array.isArray(suggestions)
     ? undefined
     : suggestions?.itemClassName;
@@ -400,22 +431,26 @@ export const InputBar = memo(function InputBar({
     showAttach && onAttach ? (
       <Popover open={isAttachMenuOpen} onOpenChange={setIsAttachMenuOpen}>
         <PopoverTrigger render={<AttachmentButton />} />
-        <PopoverContent align="start" side="top" className={cn("w-46", popoverSurfaceClass)}>
+        <PopoverContent
+          align="start"
+          side="top"
+          className={cn("w-46", popoverSurfaceClass)}
+        >
           <button
             type="button"
             onClick={() => {
               setIsAttachMenuOpen(false);
               onAttach();
             }}
-            className="flex w-full items-center gap-2 rounded-an-action-md px-2 py-1.5 text-left typo-caption transition-colors hover:bg-foreground/6"
+            className="an-popover-option an-popover-text flex w-full items-center text-left transition-colors"
           >
-            <IconFileText className="size-3.5 shrink-0" />
+            <IconFileText className="size-3.5 shrink-0 text-an-foreground-muted" />
             <span className="font-medium">Add document</span>
           </button>
           <button
             type="button"
             disabled
-            className="flex w-full cursor-not-allowed items-center gap-2 rounded-an-action-md px-2 py-1.5 text-left typo-caption text-foreground/35"
+            className="an-popover-option an-popover-text flex w-full cursor-not-allowed items-center text-left text-an-foreground-muted opacity-50"
           >
             <IconPlugConnected className="size-3.5 shrink-0" />
             <span className="font-medium">Connectors</span>
@@ -430,15 +465,17 @@ export const InputBar = memo(function InputBar({
         <div
           className={cn(
             "flex flex-col gap-0",
-            shouldShowInfoBar ? "bg-an-background-tertiary rounded-an-input-border-radius" : null,
+            shouldShowInfoBar
+              ? "bg-an-background-tertiary rounded-an-input-border-radius"
+              : null,
           )}
         >
           {infoBarPosition === "top" && infoBarNode}
           {questionBarNode}
           <div
             className={cn(
-              "relative cursor-text rounded-an-input-border-radius bg-an-input-background shadow-2xs ring-1 ring-foreground/10 transition-[box-shadow] duration-75 ease-in-out",
-              "focus-within:ring-2 focus-within:ring-an-primary-color/60",
+              "an-input-shell relative cursor-text rounded-an-input-border-radius border bg-an-input-background transition-all duration-100 ease-in-out",
+              "focus-within:border-an-primary-color focus-within:ring-1 focus-within:ring-an-primary-color",
               isDragOver && "ring-2 ring-an-primary-color",
             )}
             onClick={handleContainerClick}
@@ -463,7 +500,11 @@ export const InputBar = memo(function InputBar({
                         url={img.url}
                         display={imageDisplayMode}
                         enableImagePreview={enableImagePreview}
-                        onRemove={onRemoveImage ? () => onRemoveImage(img.id) : undefined}
+                        onRemove={
+                          onRemoveImage
+                            ? () => onRemoveImage(img.id)
+                            : undefined
+                        }
                       />
                     ))}
                     {attachedFiles.map((file) => (
@@ -472,7 +513,9 @@ export const InputBar = memo(function InputBar({
                         id={file.id}
                         filename={file.filename}
                         size={file.size}
-                        onRemove={onRemoveFile ? () => onRemoveFile(file.id) : undefined}
+                        onRemove={
+                          onRemoveFile ? () => onRemoveFile(file.id) : undefined
+                        }
                       />
                     ))}
                   </div>
@@ -484,13 +527,17 @@ export const InputBar = memo(function InputBar({
             {isTyping && typingAnimation?.image && showImage && (
               <div className="flex gap-2 flex-wrap px-3 pt-3">
                 <div className="relative overflow-hidden shrink-0 w-16 h-16 rounded-md">
-                  <img src={typingAnimation.image} alt="" className="w-full h-full object-cover" />
+                  <img
+                    src={typingAnimation.image}
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
                 </div>
               </div>
             )}
 
             {/* Text input or typing animation text */}
-            <div className="pt-3 pb-0 pr-3 pl-3.5 min-h-touch">
+            <div className="pb-0 pl-3.5 pr-3 pt-3">
               {isTyping ? (
                 <div className="w-full typo-composer text-an-foreground-muted">
                   <span>{displayedText}</span>
@@ -519,8 +566,8 @@ export const InputBar = memo(function InputBar({
             </div>
 
             {/* Toolbar */}
-            <div className="flex items-center justify-between gap-3 px-2 pt-1 pb-2">
-              <div className="flex items-center gap-1 min-w-0">
+            <div className="flex min-h-an-input-toolbar-height items-center justify-between gap-3 px-3 pb-2 pt-1">
+              <div className="flex min-w-0 items-center gap-1">
                 {!attachRight && attachButtonNode}
                 {leftActions}
               </div>
@@ -542,7 +589,13 @@ export const InputBar = memo(function InputBar({
                   className="rounded-full outline-none transition-transform focus-visible:ring-2 focus-visible:ring-an-primary-color/60 disabled:cursor-default active:not-disabled:scale-95"
                 >
                   <SendButton
-                    state={isStreaming ? "streaming" : hasInput && !disabled ? "typing" : "idle"}
+                    state={
+                      isStreaming
+                        ? "streaming"
+                        : hasInput && !disabled
+                          ? "typing"
+                          : "idle"
+                    }
                   />
                 </button>
               </div>

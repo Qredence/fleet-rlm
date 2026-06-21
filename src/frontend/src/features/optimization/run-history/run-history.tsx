@@ -152,10 +152,7 @@ export function RunHistory({
   const rows = runs as RunRow[];
 
   return (
-    <SectionCard
-      variant="subtle"
-      className="border-border bg-card shadow-sm transition-all duration-200"
-    >
+    <SectionCard variant="elevated">
       <SectionCardHeader className="flex-row items-center justify-between gap-4 border-b border-border-subtle bg-muted/10 px-6 py-4">
         <div className="min-w-0">
           <SectionCardTitle className="text-sm font-semibold tracking-tight">

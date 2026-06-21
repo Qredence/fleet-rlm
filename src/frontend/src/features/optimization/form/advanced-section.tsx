@@ -32,7 +32,7 @@ export function AdvancedSection({
           onValueChange={(value) => updateForm("auto", value as OptimizationRunFormState["auto"])}
           disabled={isSubmitting}
         >
-          <SelectTrigger className="h-10 w-full">
+          <SelectTrigger className="w-full">
             <SelectValue>{form.auto}</SelectValue>
           </SelectTrigger>
           <SelectPositioner align="start">
@@ -52,7 +52,7 @@ export function AdvancedSection({
           onChange={(event) => updateForm("trainRatio", event.target.value)}
           inputMode="decimal"
           disabled={isSubmitting}
-          className="h-10 border-input bg-background shadow-none transition-colors hover:border-border-subtle focus-visible:ring-ring focus-visible:border-primary text-center font-mono"
+          className="text-center font-mono"
         />
       </CompactField>
       <CompactField label="Max Calls">
@@ -62,7 +62,7 @@ export function AdvancedSection({
           inputMode="numeric"
           placeholder="auto"
           disabled={isSubmitting}
-          className="h-10 border-input bg-background shadow-none transition-colors hover:border-border-subtle focus-visible:ring-ring focus-visible:border-primary text-center font-mono"
+          className="text-center font-mono"
         />
       </CompactField>
       <CompactField label="Output Path">
@@ -71,7 +71,7 @@ export function AdvancedSection({
           onChange={(event) => updateForm("outputPath", event.target.value)}
           placeholder="optional"
           disabled={isSubmitting}
-          className="h-10 border-input bg-background shadow-none transition-colors hover:border-border-subtle focus-visible:ring-ring focus-visible:border-primary font-mono"
+          className="font-mono"
         />
       </CompactField>
     </div>

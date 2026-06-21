@@ -52,7 +52,7 @@ export const TrajectoryChain = memo(function TrajectoryChain({
   return (
     <div
       className={cn(
-        "not-prose w-full rounded-lg border border-border-subtle/80 bg-card/70 px-3 pt-3 shadow-sm",
+        "not-prose w-full rounded-lg border border-border-subtle/80 px-3 pt-3 shadow-sm",
         className,
       )}
     >

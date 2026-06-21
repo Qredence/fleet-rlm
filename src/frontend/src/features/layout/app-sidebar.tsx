@@ -42,7 +42,7 @@ import { SettingsDialog } from "./settings-dialog";
 import { type SettingsSection } from "@/features/settings/screen/settings-content";
 
 const sidebarActionButtonClassName =
-  "group h-8 w-full justify-start rounded-lg px-1.5 text-sidebar-foreground/78 shadow-none transition-colors duration-0 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:[&>span]:hidden [&>span]:truncate";
+  "group h-9 w-full justify-start rounded-md px-2 text-sidebar-foreground/78 shadow-none transition-colors duration-0 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:[&>span]:hidden [&>span]:truncate";
 
 function sortConversations(conversations: Conversation[]) {
   return [...conversations].sort((left, right) => {
@@ -124,7 +124,7 @@ function SessionItem({
         type="button"
         onClick={() => onSelect(session.id)}
         className={cn(
-          "inline-flex h-8 w-full min-w-0 max-w-full items-center justify-between overflow-hidden rounded-lg pl-1.5 pr-0.5 text-left text-sidebar-foreground transition-colors duration-0",
+          "inline-flex h-9 w-full min-w-0 max-w-full items-center justify-between overflow-hidden rounded-md pl-2 pr-0.5 text-left text-sidebar-foreground transition-colors duration-0",
           "hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
         )}
       >
@@ -294,9 +294,9 @@ export function AppSidebar() {
       <Sidebar
         variant="sidebar"
         collapsible="icon"
-        className="border-r border-transparent bg-sidebar text-sidebar-foreground"
+        className="border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
       >
-        <SidebarHeader className="flex h-12 shrink-0 justify-center gap-0 px-2 py-0">
+        <SidebarHeader className="flex h-14 shrink-0 justify-center gap-0 px-2 py-0">
           <div className="flex w-full items-center justify-between">
             {!isCollapsed ? (
               <Button
@@ -304,7 +304,7 @@ export function AppSidebar() {
                 variant="ghost"
                 size="sm"
                 onClick={handleNewSession}
-                className="min-w-0 flex-initial justify-start rounded-lg pl-1.5 text-sidebar-foreground hover:bg-sidebar-accent/80"
+                className="min-w-0 flex-initial justify-start rounded-md pl-2 text-sidebar-foreground hover:bg-sidebar-accent/80"
               >
                 <QredenceLogo className="size-5 shrink-0 text-sidebar-foreground" />
                 <span className="ml-2 truncate font-medium tracking-tight-custom">
@@ -322,7 +322,7 @@ export function AppSidebar() {
                     onClick={toggleSidebar}
                     aria-label={isCollapsed ? "Open sidebar" : "Close sidebar"}
                     className={cn(
-                      "size-8 rounded-lg text-sidebar-foreground/75 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
+                      "size-8 rounded-md text-sidebar-foreground/75 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
                       isCollapsed && "mx-auto",
                     )}
                   >
@@ -378,7 +378,7 @@ export function AppSidebar() {
           </div>
         </SidebarContent>
 
-        <SidebarFooter className="border-t border-transparent px-2 py-3">
+        <SidebarFooter className="border-t border-sidebar-border px-2 py-2">
           <div className="flex flex-col gap-1">
             {isAuthenticated && user && isNeonAuthConfigured() ? (
               <UserButton

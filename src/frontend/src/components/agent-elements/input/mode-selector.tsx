@@ -5,7 +5,11 @@ import type { ComponentType } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { popoverSurfaceClass } from "./popover-surface";
 
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 import { cn } from "../utils/cn";
 
@@ -54,7 +58,7 @@ export const ModeSelector = memo(function ModeSelector({
     <button
       type="button"
       className={cn(
-        "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 typo-caption text-foreground/60 transition-colors hover:bg-foreground/6",
+        "an-popover-text-medium inline-flex h-an-input-toolbar-height items-center gap-1.5 rounded-full px-2 text-an-foreground-muted transition-colors hover:bg-foreground/6 hover:text-an-foreground",
         !hasMultiple && "pointer-events-none",
         className,
       )}
@@ -62,7 +66,9 @@ export const ModeSelector = memo(function ModeSelector({
     >
       {ActiveIcon && <ActiveIcon className="size-3.5 shrink-0" />}
       <span className="font-medium">{activeMode.label}</span>
-      {hasMultiple && <ChevronDown className="size-3 text-foreground/40" />}
+      {hasMultiple && (
+        <ChevronDown className="size-3 text-an-input-placeholder-color" />
+      )}
     </button>
   );
 
@@ -71,28 +77,34 @@ export const ModeSelector = memo(function ModeSelector({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={trigger} />
-      <PopoverContent align="start" side="top" className={cn("w-52", popoverSurfaceClass)}>
+      <PopoverContent
+        align="start"
+        side="top"
+        className={cn("w-44", popoverSurfaceClass)}
+      >
         {modes.map((mode) => {
           const isActive = mode.id === activeMode.id;
-          const Icon = mode.icon;
           return (
             <button
               key={mode.id}
               type="button"
               onClick={() => handleSelect(mode.id)}
               className={cn(
-                "flex w-full items-start gap-2 rounded-an-action-md px-2 py-1.5 text-left typo-caption transition-colors hover:bg-foreground/6",
-                isActive && "bg-foreground/6",
+                "an-popover-option-compact an-popover-text flex w-full text-left transition-colors",
+                isActive && "an-popover-option-active",
               )}
             >
-              {Icon && <Icon className="mt-0.5 size-3.5 shrink-0" />}
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">{mode.label}</span>
+              <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+                <span className="truncate">{mode.label}</span>
                 {mode.description ? (
-                  <span className="block truncate text-foreground/40">{mode.description}</span>
+                  <span className="truncate text-an-foreground-muted">
+                    {mode.description}
+                  </span>
                 ) : null}
               </span>
-              {isActive && <Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" />}
+              {isActive && (
+                <Check className="size-3.5 shrink-0 text-an-foreground-muted" />
+              )}
             </button>
           );
         })}

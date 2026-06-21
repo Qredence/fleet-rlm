@@ -179,7 +179,7 @@ export function WorkspaceAgentInputBar({
     writeEnabled && Boolean(plannerProfileId) && pickerModels.some((model) => !model.disabled);
 
   return (
-    <div className={cn("mx-auto flex w-full max-w-175 flex-col gap-3", className)}>
+    <div className={cn("mx-auto flex w-full max-w-workbench-composer flex-col gap-2", className)}>
       <input
         ref={fileInputRef}
         type="file"
@@ -189,7 +189,7 @@ export function WorkspaceAgentInputBar({
         onChange={handleDocumentInputChange}
       />
       {runtimeWarning ? (
-        <Alert className="border-warning/25 bg-warning/5 text-foreground rounded-lg">
+        <Alert className="rounded-md border-warning/25 bg-warning/5 text-foreground">
           <TriangleAlert className="text-warning size-4" />
           <AlertTitle className="text-sm font-medium">{runtimeWarning.title}</AlertTitle>
           <AlertDescription>
@@ -201,7 +201,7 @@ export function WorkspaceAgentInputBar({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 shrink-0 gap-1.5 rounded-lg text-xs"
+                  className="h-7 shrink-0 gap-1.5 rounded-md text-xs"
                   onClick={runtimeWarning.onOpenSettings}
                 >
                   <Settings2 className="size-3" />

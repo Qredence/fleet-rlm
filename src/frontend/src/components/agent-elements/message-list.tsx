@@ -462,8 +462,8 @@ export const MessageList = memo(function MessageList({
       onScroll={handleScroll}
       className={cn("an-message-list flex-1 min-h-0 overflow-y-auto", className)}
     >
-      <div ref={contentWrapperRef} className="mx-auto px-4 py-6 max-w-an">
-        <div className="space-y-2">
+      <div ref={contentWrapperRef} className="mx-auto max-w-an px-4 pb-5 pt-6">
+        <div className="space-y-3">
           {turns.map((turn, turnIndex) => {
             const isLastTurn = turnIndex === turns.length - 1;
             const turnKey = turn.userMsg?.id ?? `turn-${turnIndex}`;
@@ -530,7 +530,7 @@ export const MessageList = memo(function MessageList({
 
                     return (
                       <div className="group/assistant-turn">
-                        <div className="flex flex-col gap-3">
+                        <div className="flex flex-col gap-2.5">
                           {turn.assistantMsgs.map((msg, i) => {
                             const isLastMsg = isLastTurn && i === turn.assistantMsgs.length - 1;
                             return (

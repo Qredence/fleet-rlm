@@ -129,7 +129,7 @@ function AppLayout() {
         defaultOpen
         style={
           {
-            "--sidebar-width": "14rem",
+            "--sidebar-width": "15.5rem",
             "--sidebar-width-icon": "3.5rem",
           } as CSSProperties
         }

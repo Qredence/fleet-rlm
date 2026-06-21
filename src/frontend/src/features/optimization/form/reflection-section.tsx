@@ -45,7 +45,7 @@ export function ReflectionSection({
           }
           disabled={isSubmitting || profilesLoading}
         >
-          <SelectTrigger className="h-10 w-full">
+          <SelectTrigger className="w-full">
             <SelectValue>
               {profiles.find((profile) => profile.id === form.reflectionProfileId)?.name ??
                 "Default reflection model"}
@@ -67,14 +67,14 @@ export function ReflectionSection({
       </CompactField>
       <CompactField label="Reflection Model">
         {modelsPending && form.reflectionProfileId ? (
-          <Skeleton className="h-10 w-full rounded-md" />
+          <Skeleton className="h-9 w-full rounded-md" />
         ) : (
           <Select
             value={form.reflectionModelId}
             onValueChange={(value) => value && updateForm("reflectionModelId", value)}
             disabled={isSubmitting || !form.reflectionProfileId || modelOptions.length === 0}
           >
-            <SelectTrigger className="h-10 w-full">
+            <SelectTrigger className="w-full">
               <SelectValue>
                 {modelOptions.find((model) => model.id === form.reflectionModelId)?.label ??
                   "Select model"}

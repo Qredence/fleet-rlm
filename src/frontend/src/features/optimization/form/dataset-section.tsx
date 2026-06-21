@@ -107,7 +107,7 @@ export function DatasetSection({
             onValueChange={(value) => value && updateForm("datasetId", value)}
             disabled={isSubmitting || datasetsLoading || datasets.length === 0}
           >
-            <SelectTrigger className="h-10 w-full">
+            <SelectTrigger className="w-full">
               <SelectValue>
                 {selectedDataset?.name ?? (datasetsLoading ? "Loading datasets" : "Select dataset")}
               </SelectValue>
@@ -159,7 +159,7 @@ export function DatasetSection({
             onChange={(event) => updateForm("datasetPath", event.target.value)}
             placeholder="artifacts/optimization/dataset.jsonl"
             disabled={isSubmitting}
-            className="h-10 border-input bg-background shadow-none transition-colors hover:border-border-subtle focus-visible:ring-ring focus-visible:border-primary font-mono text-xs"
+            className="font-mono text-xs"
           />
         </CompactField>
       ) : null}
@@ -180,14 +180,14 @@ export function DatasetSection({
             }}
             placeholder="session id"
             disabled={isSubmitting || exportPending}
-            className="h-10 border-input bg-background shadow-none transition-colors hover:border-border-subtle focus-visible:ring-ring focus-visible:border-primary font-mono text-sm"
+            className="font-mono text-sm"
           />
           <Button
             type="button"
             variant="outline"
             disabled={isSubmitting || exportPending}
             onClick={onTraceExport}
-            className="h-10 px-4 font-medium transition-colors hover:bg-muted/40 shadow-none border-input"
+            className="h-9 px-4 font-medium shadow-none"
           >
             <FileJson className="size-4 shrink-0" data-icon="inline-start" />
             Export
@@ -212,7 +212,7 @@ export function DatasetSection({
           value={form.traceBundlePaths}
           onChange={(event) => updateForm("traceBundlePaths", event.target.value)}
           disabled={isSubmitting}
-          className="min-h-24 resize-y border-input bg-background shadow-none transition-colors hover:border-border-subtle focus-visible:ring-ring focus-visible:border-primary font-mono text-xs leading-normal p-3 rounded-lg"
+          className="min-h-24 resize-y font-mono text-xs p-3"
           placeholder="artifacts/traces/sessions/.../mlflow-traces.distilled.jsonl"
         />
       </CompactField>

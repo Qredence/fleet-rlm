@@ -34,19 +34,19 @@ function WorkspaceSidepanelBody({ onClose, isMobile }: { onClose: () => void; is
   const setTab = useWorkspaceUiStore((state) => state.setSidepanelTab);
 
   return (
-    <div className="flex h-full min-h-0 flex-col border-l border-border-subtle/80 bg-card/95">
+    <div className="flex h-full min-h-0 flex-col border-l border-border-subtle/80 bg-background">
       <Tabs
         value={activeTab}
         onValueChange={(value) => setTab(value as WorkspaceSidepanelTab)}
         className="flex h-full min-h-0 flex-col gap-0 overflow-hidden"
       >
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border-subtle/70 px-3 py-2">
-          <TabsList variant="line" className="gap-1 rounded-full bg-transparent p-0">
+        <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border-subtle/70 px-3">
+          <TabsList variant="line" className="gap-1 rounded-md bg-transparent p-0">
             {TABS.map((tab) => (
               <TabsTrigger
                 key={tab.id}
                 value={tab.id}
-                className="h-7 flex-none rounded-full px-3 text-xs data-[active]:bg-muted data-[active]:after:opacity-0"
+                className="h-7 flex-none rounded-md px-3 typo-caption data-[active]:bg-sidebar-accent data-[active]:after:opacity-0"
               >
                 {tab.label}
               </TabsTrigger>
@@ -59,7 +59,7 @@ function WorkspaceSidepanelBody({ onClose, isMobile }: { onClose: () => void; is
                   type="button"
                   variant="secondary"
                   size="icon"
-                  className="size-8 shrink-0 rounded-full"
+                  className="size-8 shrink-0 rounded-md"
                   aria-label="Close workspace sidepanel"
                   onClick={onClose}
                 >
@@ -127,7 +127,7 @@ export function WorkspaceSidepanel({ isMobile }: { isMobile: boolean }) {
         <SheetContent
           side="bottom"
           showCloseButton={false}
-          className="h-sheet-md gap-0 rounded-t-3xl border-x-0 border-b-0 p-0 sm:max-w-none"
+          className="h-sheet-md gap-0 rounded-t-2xl border-x-0 border-b-0 p-0 sm:max-w-none"
         >
           <SheetHeader className="sr-only">
             <SheetTitle>Workspace sidepanel</SheetTitle>

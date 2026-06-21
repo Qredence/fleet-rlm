@@ -21,7 +21,6 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { EmptyPanel } from "@/components/product/empty-panel";
-import { PageHeader } from "@/components/product/page-header";
 import { TreeView } from "@/components/product/tree-view";
 import { useIsMobile } from "@/hooks/ui/use-is-mobile";
 import { cn } from "@/lib/utils";
@@ -256,12 +255,6 @@ export function VolumesBrowser() {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-background">
-      <PageHeader
-        isMobile={isMobile}
-        title="Volume Browser"
-        description={`Browse the ${providerLabel.toLowerCase()} mounted durable volume for this workspace.`}
-      />
-
       <div className="min-h-0 flex-1">
         {isMobile ? (
           <div className="flex h-full min-h-0 flex-col">

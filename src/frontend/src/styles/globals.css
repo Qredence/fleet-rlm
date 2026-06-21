@@ -316,6 +316,10 @@
   max-width: 180px;
 }
 
+@utility max-w-workbench-composer {
+  max-width: 664px;
+}
+
 @utility w-select-xl {
   width: 132px;
 }
@@ -1069,19 +1073,19 @@
  */
 [data-theme="dark"],
 .dark {
-  --background: #212121;
+  --background: #0d0d0d;
   --foreground: #fff;
-  --card: #303030;
+  --card: #181818;
   --card-foreground: #fff;
-  --popover: #303030;
+  --popover: #181818;
   --popover-foreground: #fff;
   --primary: #f3f3f3;
   --primary-foreground: #0d0d0d;
-  --secondary: #303030;
+  --secondary: #242424;
   --secondary-foreground: #fff;
-  --muted: #303030;
+  --muted: #242424;
   --muted-foreground: #afafaf;
-  --accent: #303030;
+  --accent: #242424;
   --accent-foreground: #fff;
   --destructive: #e02e2a;
   --destructive-foreground: #fff;
@@ -1089,13 +1093,13 @@
   --border-subtle: color-mix(in oklab, #fff 6%, transparent);
   --border-strong: color-mix(in oklab, #fff 20%, transparent);
   --input: color-mix(in oklab, #fff 15%, transparent);
-  --input-background: #212121;
+  --input-background: #0d0d0d;
   --ring: #8c8c8c;
   --sidebar: #181818;
   --sidebar-foreground: #fff;
   --sidebar-primary: #f3f3f3;
   --sidebar-primary-foreground: #0d0d0d;
-  --sidebar-accent: #303030;
+  --sidebar-accent: #262626;
   --sidebar-accent-foreground: #fff;
   --sidebar-border: color-mix(in oklab, #fff 12%, transparent);
   --sidebar-ring: #8c8c8c;
@@ -2035,3 +2039,12 @@ li {
 .artifact-graph-flow .artifact-graph-edge-chrono .react-flow__edge-text {
   display: none;
 }
+
+/* ── Visual JSON Tree View Wrapping ──────────────────────────────── */
+.visual-json-tree,
+.visual-json-tree * {
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+}
+
