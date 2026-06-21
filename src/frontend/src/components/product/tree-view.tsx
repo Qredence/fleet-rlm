@@ -249,6 +249,7 @@ export function TreeView<T extends TreeViewNode>({
             )}
             style={{ "--tree-depth": item.depth } as React.CSSProperties}
             onClick={() => {
+            onClick={() => {
               setFocusedId(item.node.id);
               if (item.isExpandable && !item.isLeaf) {
                 toggleExpand(item.node.id);
