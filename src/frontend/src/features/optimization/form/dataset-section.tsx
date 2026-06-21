@@ -18,7 +18,11 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { DatasetResponse, SessionTraceExportResponse } from "@/lib/rlm-api";
 
 import { CompactField } from "./form-field";
-import { isRunnableDataset, type DatasetSourceMode, type OptimizationRunFormState } from "../optimization-model";
+import {
+  isRunnableDataset,
+  type DatasetSourceMode,
+  type OptimizationRunFormState,
+} from "../optimization-model";
 
 export function datasetLabel(dataset: DatasetResponse): string {
   const suffix = dataset.module_slug ? ` · ${dataset.module_slug}` : "";
@@ -73,23 +77,26 @@ export function DatasetSection({
         >
           <ToggleGroupItem
             value="existing"
-            className="flex-1 font-medium transition-colors"
+            className="flex-1 gap-1.5 font-medium transition-colors"
             disabled={isSubmitting}
           >
+            <Database className="size-3.5 text-muted-foreground" data-icon="inline-start" />
             Existing
           </ToggleGroupItem>
           <ToggleGroupItem
             value="upload"
-            className="flex-1 font-medium transition-colors"
+            className="flex-1 gap-1.5 font-medium transition-colors"
             disabled={isSubmitting}
           >
+            <Upload className="size-3.5 text-muted-foreground" data-icon="inline-start" />
             Upload file
           </ToggleGroupItem>
           <ToggleGroupItem
             value="path"
-            className="flex-1 font-medium transition-colors"
+            className="flex-1 gap-1.5 font-medium transition-colors"
             disabled={isSubmitting}
           >
+            <FileJson className="size-3.5 text-muted-foreground" data-icon="inline-start" />
             Server path
           </ToggleGroupItem>
         </ToggleGroup>
@@ -116,7 +123,11 @@ export function DatasetSection({
               <SelectContent className="border-border">
                 <SelectGroup>
                   {datasets.map((dataset) => (
-                    <SelectItem key={dataset.id} value={dataset.id} disabled={!isRunnableDataset(dataset)}>
+                    <SelectItem
+                      key={dataset.id}
+                      value={dataset.id}
+                      disabled={!isRunnableDataset(dataset)}
+                    >
                       <div className="flex items-center gap-2">
                         <Database
                           className="size-4 shrink-0 text-muted-foreground"
@@ -184,10 +195,10 @@ export function DatasetSection({
           />
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             disabled={isSubmitting || exportPending}
             onClick={onTraceExport}
-            className="h-9 px-4 font-medium shadow-none"
+            className="text-muted-foreground hover:text-foreground"
           >
             <FileJson className="size-4 shrink-0" data-icon="inline-start" />
             Export
@@ -213,7 +224,9 @@ export function DatasetSection({
           onChange={(event) => updateForm("traceBundlePaths", event.target.value)}
           disabled={isSubmitting}
           className="min-h-24 resize-y font-mono text-xs p-3"
-          placeholder="artifacts/traces/sessions/.../mlflow-traces.distilled.jsonl"
+          placeholder={
+            "artifacts/traces/sessions/.../mlflow-traces.distilled.jsonl\n# one trace bundle path per line"
+          }
         />
       </CompactField>
     </>

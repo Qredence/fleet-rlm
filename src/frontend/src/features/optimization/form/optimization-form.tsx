@@ -225,7 +225,7 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
       <SectionCardHeader className="border-b border-border-subtle bg-muted/10 px-6 py-5">
         <div className="flex items-center gap-2">
           <Settings2 className="size-5 text-primary" />
-          <SectionCardTitle className="text-base font-semibold tracking-tight">
+          <SectionCardTitle className="text-lg font-semibold tracking-tighter-custom">
             New GEPA Run
           </SectionCardTitle>
         </div>
@@ -292,11 +292,7 @@ export function OptimizationForm({ onSuccess }: OptimizationFormProps) {
                 <span>Optimizer: GEPA &middot; proposer: Daytona RLM</span>
               )}
             </div>
-            <Button
-              type="submit"
-              disabled={isSubmitting}
-              className="font-medium px-5 shadow-xs"
-            >
+            <Button type="submit" disabled={isSubmitting} className="font-medium px-5 shadow-xs">
               {isSubmitting ? "Starting..." : "Start GEPA run"}
             </Button>
           </div>

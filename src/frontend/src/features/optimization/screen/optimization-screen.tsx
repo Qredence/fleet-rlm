@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { FlaskConical } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import type { OptimizationPromotionDraftResponse, OptimizationRunResponse } from "@/lib/rlm-api";
@@ -89,7 +90,14 @@ export function OptimizationScreen() {
           >
             <TabsList>
               <TabsTab value="new-run">New Run</TabsTab>
-              <TabsTab value="history">Run History</TabsTab>
+              <TabsTab value="history" className="gap-1.5">
+                Run History
+                {runs.length > 0 ? (
+                  <Badge variant="secondary" className="h-5 px-1.5 text-xs tabular-nums">
+                    {runs.length}
+                  </Badge>
+                ) : null}
+              </TabsTab>
             </TabsList>
 
             <TabsPanel value="new-run" className="mt-4 focus-visible:outline-none">

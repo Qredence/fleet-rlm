@@ -1,4 +1,4 @@
-import { PanelRightClose, PanelRightOpen, X } from "lucide-react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -27,7 +27,7 @@ const TABS = [
   { id: "volume", label: "Volume" },
 ] as const;
 
-function WorkspaceSidepanelBody({ onClose, isMobile }: { onClose: () => void; isMobile: boolean }) {
+function WorkspaceSidepanelBody({ isMobile }: { isMobile: boolean }) {
   const selectedTurn = useSelectedWorkspaceTurn();
   const traceState = useSessionTraceState();
   const activeTab = useWorkspaceUiStore((state) => state.activeSidepanelTab);
@@ -46,31 +46,12 @@ function WorkspaceSidepanelBody({ onClose, isMobile }: { onClose: () => void; is
               <TabsTrigger
                 key={tab.id}
                 value={tab.id}
-                className="h-7 flex-none rounded-md px-3 typo-caption data-[active]:bg-sidebar-accent data-[active]:after:opacity-0"
+                className="h-7 flex-none rounded-md px-3 typo-caption data-[active]:bg-sidebar-accent data-[active]:after:opacity-0 shadow-none"
               >
                 {tab.label}
               </TabsTrigger>
             ))}
           </TabsList>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="icon"
-                  className="size-8 shrink-0 rounded-md"
-                  aria-label="Close workspace sidepanel"
-                  onClick={onClose}
-                >
-                  <X className="size-3.5" />
-                </Button>
-              }
-            />
-            <TooltipContent side="bottom" className="text-xs">
-              Close panel
-            </TooltipContent>
-          </Tooltip>
         </div>
 
         <TabsContent value="trajectories" className="min-h-0 flex-1 overflow-hidden">
@@ -119,7 +100,6 @@ export function WorkspaceSidepanelToggle() {
 export function WorkspaceSidepanel({ isMobile }: { isMobile: boolean }) {
   const open = useWorkspaceUiStore((state) => state.sidebarOpen);
   const setOpen = useWorkspaceUiStore((state) => state.setSidepanelOpen);
-  const close = useWorkspaceUiStore((state) => state.closeSidepanel);
 
   if (isMobile) {
     return (
@@ -140,7 +120,7 @@ export function WorkspaceSidepanel({ isMobile }: { isMobile: boolean }) {
               <div className="h-1.5 w-10 rounded-full bg-border" aria-hidden="true" />
             </div>
             <div className="min-h-0 flex-1 overflow-hidden">
-              <WorkspaceSidepanelBody onClose={close} isMobile />
+              <WorkspaceSidepanelBody isMobile />
             </div>
           </div>
         </SheetContent>
@@ -157,7 +137,7 @@ export function WorkspaceSidepanel({ isMobile }: { isMobile: boolean }) {
       )}
       aria-hidden={!open}
     >
-      {open ? <WorkspaceSidepanelBody onClose={close} isMobile={false} /> : null}
+      {open ? <WorkspaceSidepanelBody isMobile={false} /> : null}
     </div>
   );
 }

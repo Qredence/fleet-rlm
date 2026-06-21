@@ -124,7 +124,7 @@ function SessionItem({
         type="button"
         onClick={() => onSelect(session.id)}
         className={cn(
-          "inline-flex h-9 w-full min-w-0 max-w-full items-center justify-between overflow-hidden rounded-md pl-2 pr-0.5 text-left text-sidebar-foreground transition-colors duration-0",
+          "inline-flex h-9 w-full min-w-0 max-w-full items-center justify-between overflow-hidden rounded-md pl-2 pr-7 text-left text-sidebar-foreground transition-colors duration-0",
           "hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
         )}
       >
@@ -286,7 +286,7 @@ export function AppSidebar() {
   };
 
   const handleOpenLogin = () => {
-    navigate({ to: "/login" });
+    navigate({ to: "/auth/$pathname", params: { pathname: "login" } });
   };
 
   return (
