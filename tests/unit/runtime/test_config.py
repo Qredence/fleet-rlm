@@ -59,7 +59,6 @@ def _patch_runtime_config(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, _FakeDS
     fake_dspy = _FakeDSPy()
     monkeypatch.setattr(runtime_config, "_prepare_env", lambda **_: None)
     monkeypatch.setattr(runtime_config, "_import_dspy", lambda: fake_dspy)
-    monkeypatch.setattr(runtime_config, "_DSPY_CACHE_SECURITY_SIGNATURE", None)
     return runtime_config, fake_dspy
 
 

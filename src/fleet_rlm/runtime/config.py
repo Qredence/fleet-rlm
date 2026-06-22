@@ -53,7 +53,6 @@ STRUCTURE_SENSITIVE_RUNTIME_MODULES: frozenset[str] = frozenset(
 )
 
 _DISABLED_ADAPTER_NAMES: frozenset[str] = frozenset({"", "auto", "none", "off"})
-_DSPY_CACHE_SECURITY_SIGNATURE: tuple[bool, bool] | None = None
 
 
 def load_posthog_settings_from_env() -> dict[str, object]:
@@ -119,18 +118,12 @@ def _import_dspy() -> Any:
 
 def configure_dspy_cache_security(dspy_module: Any | None = None) -> None:
     """Keep DSPy's disk-backed pickle cache disabled unless explicitly enabled."""
-    global _DSPY_CACHE_SECURITY_SIGNATURE
-
     module = dspy_module or _import_dspy()
     configure_cache = getattr(module, "configure_cache", None)
     if configure_cache is None:
         return
 
     enable_disk_cache = _env_bool(os.getenv("FLEET_RLM_ENABLE_DSPY_DISK_CACHE"), default=False)
-    signature = (enable_disk_cache, True)
-    if _DSPY_CACHE_SECURITY_SIGNATURE == signature:
-        return
-
     cache_kwargs: dict[str, Any] = {
         "enable_disk_cache": enable_disk_cache,
         "enable_memory_cache": True,
@@ -141,7 +134,6 @@ def configure_dspy_cache_security(dspy_module: Any | None = None) -> None:
     except TypeError:
         cache_kwargs.pop("restrict_pickle")
         configure_cache(**cache_kwargs)
-    _DSPY_CACHE_SECURITY_SIGNATURE = signature
 
 
 def _normalize_adapter_name(value: str | None) -> str | None:
