@@ -43,7 +43,7 @@ Basic liveness check.
 ```json
 {
   "ok": true,
-  "version": "0.5.40"
+  "version": "0.6.0"
 }
 ```
 
@@ -1209,7 +1209,7 @@ The following endpoints have been removed from the API:
 |----------|--------|-------|
 | `/api/v1/chat` | Removed | Use `WS /api/v1/ws/execution` instead |
 | `/api/v1/auth/login` | Removed | Authentication via bearer tokens only |
-| `/api/v1/auth/logout` | Removed | Not applicable for token-based auth |
+| Legacy auth logout route | Removed | Not applicable for token-based auth |
 | `/api/v1/tasks*` | Removed | Task management discontinued |
 | `/api/v1/taxonomy*` | Removed | Taxonomy feature discontinued |
 | `/api/v1/skills*` | Removed | Skills feature discontinued |

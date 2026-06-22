@@ -24,6 +24,7 @@ retired screen shell.
 | Route | Surface | Owning feature module | Purpose |
 | --- | --- | --- | --- |
 | `/app/workspace` | Workbench | `features/workspace/screen/*` | Primary chat execution surface with workspace-local sidepanel |
+| `/app/optimization` | Optimization | `features/optimization/*` | GEPA optimization form, run history, and run inspection |
 | `/app/volumes` | Volumes | `features/volumes/*` | Full-page mounted Daytona volume browser |
 | `/app/settings` | Settings | `features/settings/settings-screen.tsx` | Runtime and app settings |
 
@@ -50,7 +51,7 @@ a chat box.
 | --- | --- | --- |
 | Header | Page identity, sidebar toggle, workspace sidepanel toggle | `features/layout/header.tsx` |
 | Transcript | Live user/assistant/trace rendering | `features/workspace/conversation/*` |
-| Composer | Submit, stop, execution mode, attachments | `features/workspace/composer/*` |
+| Composer | Submit, stop, execution mode, attachments | `features/workspace/conversation/*`, `components/agent-elements/input-bar.tsx` |
 | Sidepanel | Trajectories, graph, and inline volume browsing | `features/workspace/screen/*`, `features/workspace/workbench/*`, `lib/workspace/*` |
 | HITL | Human review / approval | `features/workspace/conversation/*` and `features/workspace/inspection/*` |
 | Session sidebar | Local conversation history and session actions | `features/workspace/session/*` |
@@ -105,6 +106,21 @@ they fall back to live transcript rows and artifact summary data.
 
 `Volume` uses Daytona volume APIs, includes inline preview, and supports a
 resizable tree/preview split.
+
+## Optimization Spec
+
+The Optimization surface configures GEPA optimization runs and inspects their
+results. It is a routed product surface, not a settings-only form.
+
+Rules:
+
+- `features/optimization/screen/optimization-screen.tsx` owns the page shell.
+- `features/optimization/form/*` owns target, dataset, reflection, and advanced
+  run configuration.
+- `features/optimization/run-history/*` and `run-details/*` own run browsing
+  and detailed inspection.
+- `lib/rlm-api/optimization.ts` is the typed client boundary for
+  `/api/v1/optimization/*`.
 
 ## Volumes Spec
 

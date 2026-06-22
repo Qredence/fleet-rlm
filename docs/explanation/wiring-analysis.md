@@ -43,12 +43,16 @@ routes (`/health`, `/api/v1/*`) take precedence over the SPA catch-all.
 app
 ├── health.router          →  /health, /ready
 └── APIRouter(prefix="/api/v1")
-    ├── auth.router        →  /api/v1/auth/me          (GET)
-    ├── ws.router          →  /api/v1/ws/execution          (WebSocket)
-    │                         /api/v1/ws/execution      (WebSocket)
-    ├── sessions.router    →  /api/v1/sessions/state    (GET)
-    ├── runtime.router     →  /api/v1/runtime/*         (GET/POST)
-    └── traces.router      →  /api/v1/traces/feedback   (POST)
+    ├── auth.router         →  /api/v1/auth/me, /api/v1/auth/ws-ticket
+    ├── info.router         →  /api/v1/info
+    ├── ws.router           →  /api/v1/ws/execution, /api/v1/ws/execution/events
+    ├── sessions.router     →  /api/v1/sessions/*
+    ├── runtime.router      →  /api/v1/runtime/*
+    ├── llm_profiles.router →  /api/v1/runtime/llm-profiles, /api/v1/runtime/llm-roles
+    ├── sandboxes.router    →  /api/v1/sandboxes/*
+    ├── runs.router         →  /api/v1/runs/{run_id}/steps
+    ├── optimization.router →  /api/v1/optimization/*
+    └── traces.router       →  /api/v1/traces/feedback
 ```
 
 ### Frontend OpenAPI client
@@ -62,7 +66,11 @@ canonical `openapi.yaml` (see §6). The hand-written adapter layer lives in
 |-----------------|---------------------|
 | `auth.ts` | `GET /api/v1/auth/me` |
 | `runtime.ts` | `GET/POST /api/v1/runtime/*` |
-| `wsClient.ts` | `WS /api/v1/ws/execution`, `WS /api/v1/ws/execution` |
+| `llm-profiles.ts` | `GET/POST/PATCH/DELETE /api/v1/runtime/llm-profiles`, `GET/PATCH /api/v1/runtime/llm-roles` |
+| `optimization.ts` | `GET/POST /api/v1/optimization/*` |
+| `sessions.ts` | `GET/PATCH/POST/DELETE /api/v1/sessions/*` |
+| `volumes.ts` | `GET /api/v1/runtime/volume/*` |
+| `ws-client.ts` | `WS /api/v1/ws/execution`, `WS /api/v1/ws/execution/events` |
 | `config.ts` | URL derivation for all of the above |
 
 REST calls use the standard `fetch` API with the base URL from
@@ -77,7 +85,7 @@ REST calls use the standard `fetch` API with the base URL from
 | Path | Backend handler | Purpose |
 |------|-----------------|---------|
 | `/api/v1/ws/execution` | `chat_streaming()` in `routers/ws/endpoint.py` | Bidirectional chat streaming |
-| `/api/v1/ws/execution` | `execution_stream()` in `routers/ws/endpoint.py` | Read-only artifact/execution event stream |
+| `/api/v1/ws/execution/events` | `execution_stream()` in `routers/ws/endpoint.py` | Read-only execution-event subscription stream |
 
 ### Backend flow (`/ws/execution`, chat mode)
 
@@ -88,7 +96,7 @@ REST calls use the standard `fetch` API with the base URL from
 4. Build the canonical Daytona-backed agent context
    (`runtime_services/chat_runtime.py`).
 
-### Backend flow (`/ws/execution`)
+### Backend flow (`/ws/execution/events`)
 
 1. Authenticate, accept, and subscribe to the `ExecutionEventEmitter`.
 2. Hold the socket open; the emitter pushes artifact frames as they arrive
@@ -96,15 +104,15 @@ REST calls use the standard `fetch` API with the base URL from
 
 ### Frontend consumers
 
-- **`stores/chatStore.ts`** — Zustand store that owns `streamMessage()`. It
-  calls `streamChatOverWs()` from `wsClient.ts`, which opens a reconnecting
+- **`lib/workspace/stores/chat-store.ts`** — Zustand store that owns
+  `streamMessage()`. It calls `streamChatOverWs()` from `ws-client.ts`, which opens a reconnecting
   WebSocket to `rlmApiConfig.wsUrl` (`/api/v1/ws/execution`).
-- **`features/rlm-workspace/useBackendChatRuntime.ts`** — React hook that
+- **`features/workspace/use-workspace-runtime.ts`** — React hook that
   orchestrates submit → `streamMessage` → frame callbacks → UI state
   transitions (phase, typing indicator, artifact steps).
-- **`wsClient.ts: subscribeToExecutionStream()`** — opens a separate
+- **`ws-client.ts: subscribeToExecutionStream()`** — opens a separate
   reconnecting WebSocket to `rlmApiConfig.wsExecutionUrl`
-  (`/api/v1/ws/execution`) with the `session_id` as a query parameter.
+  (`/api/v1/ws/execution/events`) with the `session_id` as a query parameter.
 
 ### Message protocol
 
@@ -158,37 +166,33 @@ provider via `build_auth_provider()` in `api/auth/factory.py`:
 |------|----------|-----------|
 | `dev` | `DevAuthProvider` | Debug headers (`X-Fleet-User`, etc.) or HS256 JWT bearer tokens |
 | `entra` | `EntraAuthProvider` | Microsoft Entra ID (Azure AD) RS256 JWT validation via JWKS |
+| `neon` | `NeonAuthProvider` | Neon Auth EdDSA JWT validation and repository-backed tenant admission |
 
-Both providers implement `AuthProvider` and are used for HTTP requests
-(via `HTTPIdentityDep`) and WebSocket upgrades (via
-`_authenticate_websocket`).
+All providers implement `AuthProvider` and are used for HTTP requests (via
+`HTTPIdentityDep`) and WebSocket upgrades (via `_authenticate_websocket`).
 
 ### Frontend auth flow
 
-1. **Entra configuration** — `src/frontend/src/lib/auth/entra.ts` reads:
-   - `VITE_ENTRA_CLIENT_ID` — SPA client registration in Entra.
-   - `VITE_ENTRA_AUTHORITY` — defaults to
-     `https://login.microsoftonline.com/organizations`.
-   - `VITE_ENTRA_SCOPES` — e.g. `api://backend-client-id/access_as_user`.
-   - `VITE_ENTRA_REDIRECT_PATH` — defaults to `/login`.
-2. **MSAL bootstrap** — `getMsalClient()` lazily creates a
-   `PublicClientApplication` (from `@azure/msal-browser`), calls
-   `initialize()` and `handleRedirectPromise()`.
-3. **Token acquisition** — `initializeEntraSession()` attempts silent token
-   acquisition for the active account. `loginWithEntra()` triggers a popup
-   flow.
-4. **Token storage** — Acquired access tokens are stored via
-   `setAccessToken()` (in `lib/auth/tokenStore`).
-5. **API calls** — The stored token is attached as a `Bearer` header on
-   `GET /api/v1/auth/me`, which the backend validates through
-   `EntraAuthProvider` and returns `AuthMeResponse` with tenant/user claims.
+1. **Neon Auth UI routes** — `src/frontend/src/routes/login.tsx` and
+   `signup.tsx` render `SignInForm` and `SignUpForm` from
+   `@neondatabase/auth-ui`; `auth.$pathname.tsx` and
+   `account.$pathname.tsx` handle Neon-managed auth/account paths.
+2. **Session bootstrap** — `src/frontend/src/lib/auth/neon.ts` reads
+   `VITE_NEON_AUTH_URL`, refreshes the Neon session, and writes the current
+   bearer token through `lib/auth/token-store.ts`.
+3. **Provider state** — `lib/auth/auth-provider.tsx` calls
+   `GET /api/v1/auth/me`, exposes the normalized `AuthState`, and clears the
+   TanStack Query cache on logout or token expiration to avoid cross-tenant
+   state reuse.
+4. **API calls** — `lib/rlm-api/typed-client.ts` and the websocket clients
+   read `getAccessToken()` and attach the bearer token to HTTP requests or
+   exchange it for websocket tickets when required.
 
 ### Dev mode
 
-When Entra env vars are absent (`isEntraAuthConfigured()` returns `false`),
-the frontend skips MSAL entirely. The backend's `DevAuthProvider` accepts
-debug headers or a simple HS256 token, enabling local development without
-Azure infrastructure.
+When Neon Auth is not configured locally, the frontend can still run against
+the backend's `DevAuthProvider`, which accepts debug headers or a simple HS256
+token for development without external identity infrastructure.
 
 ---
 
@@ -262,23 +266,21 @@ priority:
 This produces two resolved URLs exported as `rlmApiConfig.wsUrl` and
 `rlmApiConfig.wsExecutionUrl`.
 
-### Entra auth variables
+### Neon auth variables
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `VITE_ENTRA_CLIENT_ID` | *(none)* | Entra SPA app registration client ID |
-| `VITE_ENTRA_AUTHORITY` | `https://login.microsoftonline.com/organizations` | Entra authority URL |
-| `VITE_ENTRA_SCOPES` | *(none)* | Comma-separated OAuth scopes |
-| `VITE_ENTRA_REDIRECT_PATH` | `/login` | Post-auth redirect path |
+| `VITE_NEON_AUTH_URL` | *(none)* | Neon Auth project URL used by the frontend auth UI |
+| `VITE_NEON_AUTH_SOCIAL_PROVIDERS` | `google` | Comma-separated social providers passed to Neon Auth UI |
 
-When `VITE_ENTRA_CLIENT_ID` and `VITE_ENTRA_SCOPES` are both set,
-`isEntraAuthConfigured()` returns `true` and the MSAL flow activates.
+When `VITE_NEON_AUTH_URL` is set, the frontend Neon Auth helpers can refresh
+browser sessions and provide access tokens for the API client.
 
 ### Backend-side counterparts
 
-The backend reads its own env vars (`AUTH_MODE`, `ENTRA_JWKS_URL`,
-`ENTRA_ISSUER_TEMPLATE`, `ENTRA_AUDIENCE`, etc.) via `ServerRuntimeConfig`.
-The frontend `VITE_ENTRA_*` vars configure the SPA-side MSAL client, while
-the backend `ENTRA_*` vars configure server-side JWT validation. Both sides
-must reference the same Entra app registration for tokens to validate
-correctly.
+The backend reads its own env vars (`AUTH_MODE`, `NEON_AUTH_URL`,
+`NEON_TENANT_CLAIM`, `ENTRA_JWKS_URL`, `ENTRA_ISSUER_TEMPLATE`,
+`ENTRA_AUDIENCE`, etc.) via `ServerRuntimeConfig`. Use `AUTH_MODE=neon` for
+the current Neon Auth product path. Use `AUTH_MODE=entra` only when an
+external client supplies Entra access tokens that match the backend
+`ENTRA_*` validation settings.

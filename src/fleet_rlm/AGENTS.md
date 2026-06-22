@@ -73,6 +73,8 @@ Preserve these command surfaces:
 Important CLI/runtime nuances:
 
 - `fleet web` is a thin entrypoint that delegates into `fleet-rlm serve-api --host 0.0.0.0 --port 8000`
+- `fleet-rlm chat` owns the interactive terminal TUI; preserve the prompt_toolkit boxed input,
+  scrollable transcript, and visible thinking/connection states when editing `chat.py`
 - Daytona websocket requests do not accept request-side `max_depth`; schema enforcement happens server-side
 - `/ready` reports critical server readiness only; optional LM and observability warmup status belongs in runtime diagnostics/status
 
@@ -132,8 +134,13 @@ Auth, persistence, and observability constraints:
 
 - Supported auth modes are `dev`, `entra`, and `neon`
 - `AUTH_MODE=entra` and `AUTH_MODE=neon` require repository-backed tenant admission in addition to token validation
+- Neon Auth tokens are EdDSA-signed; backend JWT decoding must explicitly allow `EdDSA`
+  and continue validating issuer, audience, timestamps, and repository admission.
 - Neon Auth browser WebSockets must use the short-lived `/api/v1/auth/ws-ticket` exchange; do not put raw Neon JWTs in WebSocket query strings
 - `DATABASE_URL` is the pooled runtime connection; `DATABASE_ADMIN_URL` is the direct connection for Alembic and admin/debug tasks
+- Postgres Row-Level Security depends on transaction-local `app.tenant_id`,
+  `app.user_id`, and `app.workspace_id` context set through the repository boundary.
+  Do not bypass `FleetRepository` or route browser product data directly through Neon Data API.
 - `PATCH /api/v1/runtime/settings` is blocked unless `APP_ENV=local`
 - PostHog and MLflow are live codepaths when configured and should not be treated as no-ops
 - In local development, MLflow may auto-start when configured for localhost unless `MLFLOW_AUTO_START=false`

@@ -41,7 +41,7 @@ This starts both the API server and serves frontend static assets.
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `APP_ENV` | Runtime environment (`local`, `staging`, `production`) | `production` |
-| `AUTH_MODE` | Authentication mode (`dev` or `entra`) | `entra` |
+| `AUTH_MODE` | Authentication mode (`neon`, `entra`, or `dev`) | `neon` |
 | `AUTH_REQUIRED` | Enforce authentication on protected routes | `true` |
 | `DATABASE_URL` | Neon PostgreSQL connection string | `postgresql://...` |
 | `DSPY_LM_MODEL` | LLM model identifier for the planner | `openai/gpt-4o` |
@@ -72,14 +72,13 @@ DSPY_LLM_API_KEY=sk-your-api-key
 DATABASE_URL=postgresql://user:password@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require
 DATABASE_REQUIRED=true
 
-# Authentication (Entra ID)
-AUTH_MODE=entra
+# Authentication (Neon Auth)
+AUTH_MODE=neon
 AUTH_REQUIRED=true
 
-# Entra Configuration
-ENTRA_JWKS_URL=https://login.microsoftonline.com/common/discovery/v2.0/keys
-ENTRA_AUDIENCE=api://your-api-app-client-id
-ENTRA_ISSUER_TEMPLATE=https://login.microsoftonline.com/{tenantid}/v2.0
+# Neon Auth Configuration
+NEON_AUTH_URL=https://<your-neon-auth-project>.neon.tech
+NEON_TENANT_CLAIM=tenant_id
 
 # CORS (explicit origins only)
 CORS_ALLOWED_ORIGINS=https://app.yourdomain.com,https://admin.yourdomain.com
@@ -90,7 +89,10 @@ DSPY_DELEGATE_LM_MODEL=openai/gpt-4o-mini
 
 ## AUTH_MODE=entra Configuration
 
-Microsoft Entra ID (formerly Azure AD) provides production-grade multitenant authentication.
+Microsoft Entra ID (formerly Azure AD) remains a supported backend auth mode
+for deployments that already issue Entra access tokens. The current frontend
+product path uses Neon Auth UI; do not assume a handwritten Entra SPA
+implementation is present in `src/frontend`.
 
 ### Prerequisites
 
@@ -99,7 +101,7 @@ Microsoft Entra ID (formerly Azure AD) provides production-grade multitenant aut
    - Note the Application (client) ID for `ENTRA_AUDIENCE`
    - Expose an API scope (e.g., `api://<client-id>/access_as_user`)
 
-2. **Frontend App Registration** (SPA):
+2. **Client App Registration**:
    - Create a separate app registration for the frontend
    - Add the API scope as a delegated permission
    - Configure redirect URIs
@@ -122,7 +124,7 @@ ENTRA_ISSUER_TEMPLATE=https://login.microsoftonline.com/{tenantid}/v2.0
 
 ### Token Validation Flow
 
-1. Client obtains token from Entra (via frontend MSAL)
+1. Client obtains a valid Entra access token from the configured identity client
 2. Token includes `tid` (tenant ID) and `oid` (user object ID)
 3. Server validates:
    - Signature against JWKS
@@ -243,7 +245,7 @@ Response:
 ```json
 {
   "ok": true,
-  "version": "0.5.40"
+  "version": "0.6.0"
 }
 ```
 
@@ -351,6 +353,14 @@ If `AUTH_MODE=entra`, also set:
 - `ENTRA_AUDIENCE`
 - `ENTRA_ISSUER_TEMPLATE` (must contain `{tenantid}`)
 
+When changing a locked FastAPI Cloud environment variable from the CLI, delete the old value before
+setting the replacement:
+
+```bash
+# from repo root
+uv run fastapi cloud env delete <VAR> -y
+```
+
 ### 4. Pre-flight locally
 
 Run the included preflight target to catch problems before the cloud build:
@@ -368,12 +378,13 @@ fastapi deploy
 ```
 
 FastAPI Cloud reads `[tool.fastapi].entrypoint`, installs from `pyproject.toml` + `uv.lock`, and serves the app at a generated URL.
+Use `--no-wait` for operational deploys where a separate watcher will follow status.
 
 ### 6. Verify the deployment
 
 ```bash
 curl https://<assigned-host>/health
-# => {"ok": true, "version": "0.5.40"}
+# => {"ok": true, "version": "0.6.0"}
 
 curl https://<assigned-host>/ready
 # => {"ready": true, "planner": "ready", "database": "ready", ...}
@@ -388,7 +399,7 @@ Scaling note: FastAPI Cloud scales to zero. The first request after idling will 
 
 Because `FLEET_RLM_SERVE_UI=false`, the cloud box serves JSON at `/` and does not ship the React SPA. Deploy the frontend separately (Vercel / Netlify / Cloudflare Pages) and:
 
-1. Set `VITE_API_BASE_URL=https://<assigned-host>` in the frontend's build environment.
+1. Set `VITE_FLEET_API_URL=https://<assigned-host>` in the frontend's build environment.
 2. Add the frontend's public origin(s) to `CORS_ALLOWED_ORIGINS` on the API (this triggers a redeploy).
 
 ### Troubleshooting
@@ -436,13 +447,13 @@ services:
       - "8000:8000"
     environment:
       - APP_ENV=production
-      - AUTH_MODE=entra
+      - AUTH_MODE=neon
       - AUTH_REQUIRED=true
       - DATABASE_URL=${DATABASE_URL}
+      - NEON_AUTH_URL=${NEON_AUTH_URL}
+      - NEON_TENANT_CLAIM=${NEON_TENANT_CLAIM}
       - DSPY_LM_MODEL=${DSPY_LM_MODEL}
       - DSPY_LLM_API_KEY=${DSPY_LLM_API_KEY}
-      - ENTRA_JWKS_URL=${ENTRA_JWKS_URL}
-      - ENTRA_AUDIENCE=${ENTRA_AUDIENCE}
     env_file:
       - .env
     healthcheck:
@@ -465,14 +476,14 @@ az containerapp create \
   --ingress external \
   --env-vars \
     APP_ENV=production \
-    AUTH_MODE=entra \
+    AUTH_MODE=neon \
     AUTH_REQUIRED=true \
     DATABASE_URL=secretref:database-url \
     DATABASE_ADMIN_URL=secretref:database-admin-url \
+    NEON_AUTH_URL=secretref:neon-auth-url \
+    NEON_TENANT_CLAIM=tenant_id \
     DSPY_LM_MODEL=secretref:dspy-model \
-    DSPY_LLM_API_KEY=secretref:dspy-api-key \
-    ENTRA_JWKS_URL=secretref:entra-jwks \
-    ENTRA_AUDIENCE=secretref:entra-audience
+    DSPY_LLM_API_KEY=secretref:dspy-api-key
 ```
 
 ### Kubernetes Deployment
@@ -501,7 +512,7 @@ spec:
             - name: APP_ENV
               value: "production"
             - name: AUTH_MODE
-              value: "entra"
+              value: "neon"
             - name: AUTH_REQUIRED
               value: "true"
             - name: DATABASE_URL
@@ -509,6 +520,13 @@ spec:
                 secretKeyRef:
                   name: fleet-secrets
                   key: database-url
+            - name: NEON_AUTH_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fleet-secrets
+                  key: neon-auth-url
+            - name: NEON_TENANT_CLAIM
+              value: "tenant_id"
             - name: DSPY_LM_MODEL
               valueFrom:
                 secretKeyRef:
@@ -519,16 +537,6 @@ spec:
                 secretKeyRef:
                   name: fleet-secrets
                   key: dspy-api-key
-            - name: ENTRA_JWKS_URL
-              valueFrom:
-                secretKeyRef:
-                  name: fleet-secrets
-                  key: entra-jwks
-            - name: ENTRA_AUDIENCE
-              valueFrom:
-                secretKeyRef:
-                  name: fleet-secrets
-                  key: entra-audience
           livenessProbe:
             httpGet:
               path: /health
@@ -595,15 +603,15 @@ The server will **fail to start** if:
 3. `CORS_ALLOWED_ORIGINS` contains `*` in staging/production
 4. `DEV_JWT_SECRET=change-me` with `AUTH_MODE=dev` in staging/production
 
-### Entra Mode Validation
+### Auth Mode Validation
 
 The server will **fail to start** if:
 
-1. `AUTH_REQUIRED=false` with `AUTH_MODE=entra`
-2. `DATABASE_REQUIRED=false` with `AUTH_MODE=entra`
-3. `ENTRA_JWKS_URL` not configured
-4. `ENTRA_AUDIENCE` not configured
-5. `ENTRA_ISSUER_TEMPLATE` missing `{tenantid}` placeholder
+1. `AUTH_REQUIRED=false` with `AUTH_MODE=neon` or `AUTH_MODE=entra`
+2. `DATABASE_REQUIRED=false` with `AUTH_MODE=neon` or `AUTH_MODE=entra`
+3. `NEON_AUTH_URL` not configured with `AUTH_MODE=neon`
+4. `ENTRA_JWKS_URL` or `ENTRA_AUDIENCE` not configured with `AUTH_MODE=entra`
+5. `ENTRA_ISSUER_TEMPLATE` missing `{tenantid}` placeholder with `AUTH_MODE=entra`
 
 ### Debug Mode
 
@@ -624,7 +632,8 @@ CORS_ALLOWED_ORIGINS=*
 ValueError: AUTH_REQUIRED must be true when APP_ENV is staging/production
 ```
 
-Set `AUTH_REQUIRED=true` or verify `AUTH_MODE=entra` (auto-enables auth).
+Set `AUTH_REQUIRED=true` or verify `AUTH_MODE=neon`/`AUTH_MODE=entra`
+(production auth modes auto-enable auth).
 
 ### Server Won't Start: Database Configuration
 

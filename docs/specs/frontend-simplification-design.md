@@ -9,10 +9,10 @@ This is a structural cleanup, not a visual redesign and not a frontend/backend c
 ## Target Shape
 
 - Keep `src/frontend/src/components/ui/*` as the only `ui` namespace. It remains the canonical shadcn/Base UI primitive layer.
-- Keep `src/frontend/src/components/ai-elements/*` as the canonical registry-owned AI layer.
-- Keep `src/frontend/src/components/product/*` small and curated. It should contain only proven reusable Fleet compositions built from `ui/*` and `ai-elements/*`.
+- Keep `src/frontend/src/components/agent-elements/*` as the canonical Agent Elements layer.
+- Keep `src/frontend/src/components/product/*` small and curated. It should contain only proven reusable Fleet compositions built from `ui/*` and `agent-elements/*`.
 - Remove `src/frontend/src/features/workspace/ui/`.
-- Replace it with responsibility-named workspace modules such as `screen`, `conversation`, `composer`, `inspection`, `workbench`, and `session`.
+- Replace it with responsibility-named workspace modules such as `screen`, `conversation`, `inspection`, `workbench`, and `session`; the chat input is composed through Agent Elements input primitives rather than a resurrected composer folder.
 - Keep `src/frontend/src/lib/workspace/*` as the owner of non-visual runtime/store/event shaping.
 - Keep route files thin and continue pointing directly at feature entrypoints.
 

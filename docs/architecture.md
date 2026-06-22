@@ -12,7 +12,7 @@ Three choices drive the shape of this codebase. They are intentional, not accide
 
 3. **Two agent layers, both `dspy.*`, both real.**
    - **Chat surface:** `dspy.ReAct` at `src/fleet_rlm/runtime/agent/agent.py` handles turn-taking, tool dispatch, and the user-visible conversation loop.
-   - **Recursive engine:** `dspy.RLM` at `src/fleet_rlm/runtime/models/builders.py` (with delegation at `src/fleet_rlm/runtime/tools/rlm_delegate.py`) implements Algorithm 1 from [arXiv 2512.24601v2](https://arxiv.org/abs/2512.24601). Inputs are stored as REPL variables inside a child Daytona sandbox; sub-queries are dispatched recursively, bounded by `max_iterations` and `max_llm_calls`; sandboxes are isolated per delegation.
+   - **Recursive engine:** `dspy.RLM` is assembled through `src/fleet_rlm/runtime/modules/factory.py` and the module registry in `src/fleet_rlm/runtime/modules/registry.py` (with delegation at `src/fleet_rlm/runtime/tools/rlm_delegate.py`). Inputs cross into Daytona as sandbox-serializable payloads; sub-queries are dispatched recursively, bounded by `max_iterations` and `max_llm_calls`; sandboxes are isolated per delegation.
 
    The chat agent is the entry point; the recursive engine runs when a task exceeds what a single ReAct context can handle. Both use DSPy's module abstractions and share a single LLM-call budget across a recursive tree (see the `Recursive RLM isolation` section below).
 
@@ -20,16 +20,16 @@ Three choices drive the shape of this codebase. They are intentional, not accide
 
 1. **Thin FastAPI/WebSocket transport** in `src/fleet_rlm/api/`
 2. **Runtime core** in `src/fleet_rlm/runtime/` and `src/fleet_rlm/integrations/daytona/`
-3. **Offline evaluation and optimization** in `src/fleet_rlm/runtime/quality/`
+3. **Offline evaluation and optimization** in `src/fleet_rlm/quality/`
 
 ```mermaid
 graph TB
     CLIENTS["CLI / Web UI"] --> API["FastAPI transport\napi/main.py\napi/routers/*\napi/runtime_services/*"]
-    API --> RUNTIME["runtime/\nchat agent + execution helpers + models"]
+    API --> RUNTIME["runtime/\nchat agent + execution helpers + modules"]
     RUNTIME --> DAYTONA["integrations/daytona/\ninterpreter + runtime + filesystem"]
     API --> EVENTS["api/events/\nexecution event shaping"]
     API --> PERSISTENCE["integrations/local_store.py\nintegrations/database/"]
-    RUNTIME --> QUALITY["runtime/quality/\noffline GEPA + DSPy optimization"]
+    RUNTIME --> QUALITY["quality/\noffline GEPA + DSPy optimization"]
 ```
 
 ## What Each Layer Owns
@@ -58,19 +58,21 @@ Responsibilities:
 
 Primary files:
 
-- `src/fleet_rlm/api/routers/ws/stream.py`
+- `src/fleet_rlm/api/routers/ws/connection_loop.py`
+- `src/fleet_rlm/api/routers/ws/turn_runner.py`
+- `src/fleet_rlm/api/routers/ws/stream_loop.py`
 - `src/fleet_rlm/runtime/factory.py`
 - `src/fleet_rlm/runtime/agent/agent.py`
 - `src/fleet_rlm/runtime/agent/runtime.py`
 - `src/fleet_rlm/runtime/execution/*`
-- `src/fleet_rlm/runtime/models/*`
+- `src/fleet_rlm/runtime/modules/*`
 
 Responsibilities:
 
 - Shared chat/runtime execution
 - Recursive delegation and tool execution
 - Execution-event assembly and workbench hydration inputs
-- Runtime model assembly and registry management
+- Runtime module assembly, registry management, escalation, and RLM routing
 
 ### 3. Daytona substrate
 
@@ -128,7 +130,7 @@ Importing a session replaces session-local memory and document state instead of 
 
 Primary files:
 
-- `src/fleet_rlm/runtime/quality/*`
+- `src/fleet_rlm/quality/*`
 
 Responsibilities:
 
@@ -141,32 +143,35 @@ Responsibilities:
 - `/health`
 - `/ready`
 - `GET /api/v1/auth/me`
-- `GET /api/v1/sessions/state`
-- `GET /api/v1/sessions`
-- `GET /api/v1/sessions/{id}`
-- `GET /api/v1/sessions/{id}/turns`
-- `DELETE /api/v1/sessions/{id}`
-- `POST /api/v1/sessions/{id}/export`
-- `GET /api/v1/runtime/settings`
-- `PATCH /api/v1/runtime/settings`
+- `POST /api/v1/auth/ws-ticket`
+- `GET /api/v1/info`
+- `GET/PATCH /api/v1/runtime/settings`
 - `POST /api/v1/runtime/tests/daytona`
 - `POST /api/v1/runtime/tests/lm`
 - `GET /api/v1/runtime/status`
-- `GET /api/v1/runtime/volume/tree`
-- `GET /api/v1/runtime/volume/file`
+- `GET /api/v1/runtime/volume/*`
+- `GET/POST/PATCH/DELETE /api/v1/runtime/llm-profiles*`
+- `GET/PATCH /api/v1/runtime/llm-roles`
+- `GET/PATCH/DELETE /api/v1/sessions/{id}`
+- `GET /api/v1/sessions`, `/state`, `/{id}/turns`, `/{id}/stats`, `/{id}/traces`, and `/{id}/trace-debug`
+- `POST /api/v1/sessions/{id}/restore`, `/export`, and `/trace-export`
+- `GET /api/v1/sandboxes`
+- `GET/DELETE /api/v1/sandboxes/{id}`
+- `POST /api/v1/sandboxes/{id}/archive`
+- `GET /api/v1/runs/{run_id}/steps`
 - `GET /api/v1/optimization/status`
-- `POST /api/v1/optimization/run`
 - `GET /api/v1/optimization/modules`
-- `POST /api/v1/optimization/runs`
-- `GET /api/v1/optimization/runs`
-- `GET /api/v1/optimization/runs/{run_id}`
-- `GET /api/v1/optimization/runs/{run_id}/results`
+- `POST /api/v1/optimization/run`
+- `GET/POST /api/v1/optimization/runs`
 - `GET /api/v1/optimization/runs/compare`
-- `POST /api/v1/optimization/datasets`
-- `GET /api/v1/optimization/datasets`
+- `GET /api/v1/optimization/runs/{run_id}`, `/details`, and `/results`
+- `POST /api/v1/optimization/runs/{run_id}/promotion-drafts`
+- `GET/POST /api/v1/optimization/datasets`
 - `GET /api/v1/optimization/datasets/{dataset_id}`
-- `/api/v1/ws/execution`
-- `/api/v1/ws/execution/events`
+- `POST /api/v1/optimization/transcript-datasets`
+- `POST /api/v1/traces/feedback`
+- `WS /api/v1/ws/execution`
+- `WS /api/v1/ws/execution/events`
 
 ## Reading Order
 
@@ -174,7 +179,7 @@ When you need the current backend story, start here:
 
 1. `src/fleet_rlm/api/main.py`
 2. `src/fleet_rlm/api/routers/ws/endpoint.py`
-3. `src/fleet_rlm/api/routers/ws/stream.py`
+3. `src/fleet_rlm/api/routers/ws/connection_loop.py`
 4. `src/fleet_rlm/runtime/factory.py`
 5. `src/fleet_rlm/runtime/agent/agent.py`
 6. `src/fleet_rlm/integrations/daytona/interpreter.py`

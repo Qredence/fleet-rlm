@@ -241,7 +241,8 @@ JWTs to Fleet HTTP routes with `Authorization: Bearer ...`.
 
 1. Extract bearer token from the HTTP `Authorization` header.
 2. Fetch public keys from `<NEON_AUTH_URL>/.well-known/jwks.json`.
-3. Verify EdDSA signature and standard claims:
+3. Verify EdDSA signature and standard claims. Python decoding must explicitly allow
+   `algorithms=["EdDSA"]` so Neon Auth tokens are not rejected before claim validation:
    - `iss` equals the origin of `NEON_AUTH_URL`
    - `aud` equals the origin of `NEON_AUTH_URL`
    - `exp` and `iat` are present and valid
@@ -294,6 +295,10 @@ wss://your-api.com/api/v1/ws/execution?ticket=<opaque-one-time-ticket>
 
 Raw Neon JWTs are rejected in WebSocket query parameters so they are not exposed
 through browser URLs, proxies, or access logs.
+
+Browser clients must also clear TanStack Query/session caches on logout or token expiration before
+showing unauthenticated or next-user state. Cached session lists are tenant-scoped product data, not
+anonymous browser state.
 
 ### Neon Data API Boundary
 
