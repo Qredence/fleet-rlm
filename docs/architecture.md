@@ -173,6 +173,15 @@ Responsibilities:
 - `WS /api/v1/ws/execution`
 - `WS /api/v1/ws/execution/events`
 
+## Deep Dives
+
+For execution-level detail on the runtime paths sketched above, see:
+
+- [Agent Runtime Execution Flow](explanation/agent-runtime-execution-flow.md) — traces a single chat turn from the WebSocket layer through `AgentRuntime` and `EscalatingFleetModule` routing (CoT → ReAct → RLM), streaming, and post-turn operations.
+- [Sandbox Execution Pipeline](reference/sandbox-execution-pipeline.md) — details the host ↔ Daytona sandbox interaction during code execution: tool binding, session acquisition, setup injection, the Tool Bridge, the `SUBMIT()` marker protocol, recursive delegation, and the nine synchronization points between host and sandbox.
+- [DSPy Daytona Interpreter Boundary](reference/dspy-daytona-interpreter-boundary.md) — async execution model, `asyncio.to_thread` rationale, and RLM budget knobs.
+- [Daytona Architecture](reference/daytona-architecture.md) — sandbox lifecycle, volumes, session continuity, and the persistent memory model.
+
 ## Reading Order
 
 When you need the current backend story, start here:
