@@ -3,7 +3,7 @@ version: 2.1
 executors:
   python:
     docker:
-      - image: cimg/python:3.13.11
+      - image: cimg/python:3.13.11-node
     working_directory: ~/project
     environment:
       UV_CACHE_DIR: ~/.cache/uv
