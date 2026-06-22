@@ -43,7 +43,7 @@ dependencies = [
     "markitdown[all]>=0.1.0,<1",
     "psycopg>=3.3.4,<4",
     "pydantic>=2.13.4,<3",
-    "pydantic-settings>=2.13.1,<3",
+    "pydantic-settings>=2.14.2,<3",
     "pypdf==6.13.3",
     "python-dotenv>=1.2.2",
     "pyyaml>=6.0.3,<7",
@@ -117,7 +117,7 @@ evaluation = [
     "pure-eval==0.2.3",
     "pyzmq==27.1.0",
     "stack-data==0.6.3",
-    "tornado==6.5.6",
+    "tornado==6.5.7",
     "traitlets==5.14.3",
 ]
 
@@ -152,6 +152,8 @@ override-dependencies = [
     "python-dotenv>=1.2.2",
     # GitPython <=3.1.49 allows config_writer() newline injection.
     "gitpython>=3.1.50",
+    # Starlette <1.3.1 has form-limit DoS and request URL hostname parsing advisories.
+    "starlette>=1.3.1",
     # DSPy 3.2.x pins litellm<=1.82.6 but >=1.83.7 is required to resolve 7 CVEs.
     # scorers.py no longer calls litellm directly (uses dspy.settings.lm instead),
     # so the only litellm consumer is DSPy itself — its stable completion() path
