@@ -7,7 +7,6 @@ executors:
     working_directory: ~/project
     environment:
       UV_CACHE_DIR: ~/.cache/uv
-      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
       MLFLOW_TRACKING_URI: "file:///tmp/mlruns"
   node:
     docker:
@@ -119,8 +118,6 @@ jobs:
               } | circleci tests split --split-by=timings
             )"
             uv run --no-sync pytest -q -n 0 $TEST_FILES \
-              -p pytest_asyncio.plugin \
-              -p pytest_timeout \
               --timeout=120 \
               --timeout-method=thread \
               -m "not live_llm and not live_daytona and not benchmark and not db" \
@@ -142,7 +139,6 @@ jobs:
             mkdir -p test-results
             uv run --no-sync pytest -q tests/integration tests/e2e \
               -m "not live_llm and not live_daytona and not benchmark and not db" \
-              -n 0 \
               --junitxml=test-results/pytest-integration.xml
       - store_test_results:
           path: test-results
