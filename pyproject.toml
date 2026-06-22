@@ -118,7 +118,7 @@ evaluation = [
     "pyzmq==27.1.0",
     "stack-data==0.6.3",
     "tornado==6.5.7",
-    "traitlets==5.14.3",
+    "traitlets==5.15.1",
 ]
 
 [build-system]
