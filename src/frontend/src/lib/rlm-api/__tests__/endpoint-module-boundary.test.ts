@@ -4,13 +4,13 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 
 /**
- * The low-level `rlmApiClient` transport must only be consumed by endpoint
- * modules under `lib/rlm-api/`. Feature code, hooks, and components must call a
- * typed endpoint module (e.g. `sessionsEndpoints`, `volumesEndpoints`) so the
- * FastAPI backend contract stays the single source of truth and URLs/types are
- * not hand-rolled at call sites.
+ * The low-level `rlmApiClient` transport and `typedClient` (openapi-fetch) must
+ * only be consumed by endpoint modules under `lib/rlm-api/`. Feature code,
+ * hooks, and components must call a typed endpoint module (e.g.
+ * `sessionsEndpoints`, `volumesEndpoints`) so the FastAPI backend contract stays
+ * the single source of truth and URLs/types are not hand-rolled at call sites.
  */
-const CLIENT_IMPORT = "@/lib/rlm-api/client";
+const CLIENT_IMPORTS = ["@/lib/rlm-api/client", "@/lib/rlm-api/typed-client"];
 
 async function collectSourceFiles(dir: string): Promise<string[]> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -43,7 +43,7 @@ describe("rlm-api endpoint module boundary", () => {
     for (const file of files) {
       if (file.startsWith(apiRoot)) continue;
       const content = await fs.readFile(file, "utf8");
-      if (content.includes(CLIENT_IMPORT)) {
+      if (CLIENT_IMPORTS.some((imp) => content.includes(imp))) {
         offenders.push(path.relative(srcRoot, file));
       }
     }

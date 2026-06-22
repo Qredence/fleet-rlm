@@ -16,6 +16,8 @@
     "type-check:relaxed": "tsc -p tsconfig.app.json --noEmit --strict false --noUnusedLocals false --noUnusedParameters false --noUncheckedIndexedAccess false",
     "lint": "vp lint src/",
     "lint:robustness": "pnpm run lint",
+    "lint:style-tokens": "node scripts/check-style-tokens.js",
+    "lint:dead-code": "knip",
     "format": "vp fmt src/",
     "format:check": "vp fmt --check src/",
     "test:e2e": "playwright test",
@@ -26,10 +28,9 @@
     "api:types": "openapi-typescript openapi/fleet-rlm.openapi.yaml -o src/lib/rlm-api/generated/openapi.ts",
     "api:sync": "pnpm run api:sync-spec && pnpm run api:types && pnpm exec vp check --fix openapi/fleet-rlm.openapi.yaml src/lib/rlm-api/generated/openapi.ts",
     "api:check": "node scripts/check-api-sync.mjs",
-    "check": "pnpm run type-check && pnpm run lint && pnpm run test:unit && pnpm run build && pnpm run test:e2e"
+    "check": "pnpm run type-check && pnpm run lint && pnpm run lint:style-tokens && pnpm run lint:dead-code && pnpm run test:unit && pnpm run build && pnpm run test:e2e"
   },
   "dependencies": {
-    "@azure/msal-browser": "^5.14.0",
     "@base-ui/react": "^1.6.0",
     "@fontsource-variable/inter": "^5.2.8",
     "@hugeicons/core-free-icons": "4.2.1",
@@ -60,6 +61,7 @@
     "motion": "^12.40.0",
     "nanoid": "^5.1.14",
     "next-themes": "^0.4.6",
+    "openapi-fetch": "^0.17.0",
     "posthog-js": "1.390.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -89,6 +91,7 @@
     "globals": "17.6.0",
     "jscpd": "^4.2.5",
     "jsdom": "^26.1.0",
+    "knip": "^6.17.1",
     "openapi-typescript": "^6.7.6",
     "prettier": "^3.8.4",
     "shadcn": "^4.11.0",
@@ -99,42 +102,5 @@
     "vite-plus": "^0.1.24",
     "vitest": "npm:@voidzero-dev/vite-plus-test@^0.1.24"
   },
-  "packageManager": "pnpm@10.33.0",
-  "pnpm": {
-    "overrides": {
-      "brace-expansion@<1.1.13": "1.1.13",
-      "brace-expansion@>=4.0.0 <5.0.6": "5.0.6",
-      "fast-uri@<=3.1.1": "3.1.2",
-      "flatted": "3.4.2",
-      "ip-address@<=10.1.0": "10.1.1",
-      "lodash-es@<=4.17.23": "4.18.1",
-      "mermaid@>=11.0.0-alpha.1 <=11.14.0": "11.15.0",
-      "path-to-regexp@>=8.0.0 <8.4.0": "8.4.0",
-      "postcss@<8.5.10": "8.5.10",
-      "@opentelemetry/core@<2.8.0": "2.8.0",
-      "@protobufjs/utf8@<=1.1.0": "1.1.1",
-      "@babel/core@<=7.29.0": "7.29.6",
-      "dompurify@>=3.0.0 <=3.4.7": "3.4.11",
-      "esbuild@>=0.27.3 <0.28.1": "0.28.1",
-      "hono@<4.12.21": "4.12.25",
-      "js-yaml@<=4.1.1": "4.2.0",
-      "protobufjs@<=7.6.2": "7.6.3",
-      "qs@>=6.11.1 <=6.15.1": "6.15.2",
-      "uuid@<14.0.0": "14.0.0",
-      "undici": "6.24.0",
-      "ws@>=8.0.0 <8.21.0": "8.21.0"
-    },
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "core-js",
-      "esbuild",
-      "msw",
-      "protobufjs"
-    ]
-  },
-  "trustedDependencies": [
-    "@tailwindcss/oxide",
-    "core-js",
-    "protobufjs"
-  ]
+  "packageManager": "pnpm@11.8.0"
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ToolActionButton } from "@/components/product/tool-action-button";
 import { cn } from "../utils/cn";
 
 export type QuestionOption = {
@@ -188,7 +189,7 @@ export function QuestionPrompt({
 
   const handleSkip = () => {
     onSkip?.();
-    onSubmit({ kind: "skip" });
+    if (!onSkip) onSubmit({ kind: "skip" });
   };
 
   if (!activeQuestion) return null;
@@ -200,7 +201,7 @@ export function QuestionPrompt({
         data-total-questions={resolvedTotal}
       >
         <div className="flex items-center gap-2 text-sm text-an-tool-color">
-          <span className="h-5 min-w-5 px-1 rounded-[4px] inline-flex items-center justify-center text-sm font-medium text-an-tool-color-muted">
+          <span className="h-5 min-w-5 px-1 rounded-an-action-sm inline-flex items-center justify-center text-sm font-medium text-an-tool-color-muted">
             {clampedIndex}
           </span>
           <span>{activeQuestion.title}</span>
@@ -227,7 +228,7 @@ export function QuestionPrompt({
               >
                 <span
                   className={cn(
-                    "h-5 min-w-5 px-1 rounded-[4px] inline-flex items-center justify-center text-sm font-medium border",
+                    "h-5 min-w-5 px-1 rounded-an-action-sm inline-flex items-center justify-center text-sm font-medium border",
                     checked
                       ? "bg-an-primary-color text-an-send-button-color border-an-primary-color"
                       : "bg-transparent text-an-tool-color-muted border-border",
@@ -249,7 +250,7 @@ export function QuestionPrompt({
             <div className="pt-1 flex items-center gap-2">
               <span
                 className={cn(
-                  "h-5 min-w-5 px-1 rounded-[4px] inline-flex items-center justify-center text-sm font-medium border",
+                  "h-5 min-w-5 px-1 rounded-an-action-sm inline-flex items-center justify-center text-sm font-medium border",
                   selectedIds.includes(QUESTION_CUSTOM_ID)
                     ? "bg-an-primary-color text-an-send-button-color border-an-primary-color"
                     : "bg-transparent text-an-tool-color-muted border-border",
@@ -282,45 +283,41 @@ export function QuestionPrompt({
         {showNav && (
           <div className="flex items-center gap-1.5">
             {onPreviousQuestion && (
-              <button
-                type="button"
+              <ToolActionButton
+                variant="ghost"
+                size="md"
                 onClick={onPreviousQuestion}
                 disabled={!canGoPrev}
-                className="h-6 px-2 rounded-[4px] text-sm text-muted-foreground hover:text-an-tool-color disabled:opacity-60"
               >
                 Previous
-              </button>
+              </ToolActionButton>
             )}
             {onNextQuestion && (
-              <button
-                type="button"
+              <ToolActionButton
+                variant="ghost"
+                size="md"
                 onClick={onNextQuestion}
                 disabled={!canGoNext}
-                className="h-6 px-2 rounded-[4px] text-sm text-muted-foreground hover:text-an-tool-color disabled:opacity-60"
               >
                 Next
-              </button>
+              </ToolActionButton>
             )}
           </div>
         )}
         <div className="flex items-center justify-end gap-1.5">
           {allowSkip && (
-            <button
-              type="button"
-              onClick={handleSkip}
-              className="h-6 px-2 rounded-[4px] text-sm text-muted-foreground hover:text-an-tool-color hover:bg-muted/50 active:scale-[0.98] transition-[background-color,color,transform] duration-150"
-            >
+            <ToolActionButton variant="ghostSoft" size="md" onClick={handleSkip}>
               {skipLabel}
-            </button>
+            </ToolActionButton>
           )}
-          <button
-            type="button"
+          <ToolActionButton
+            variant="primary"
+            size="mdWide"
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="h-6 px-2.5 rounded-[4px] text-sm font-medium bg-an-primary-color text-an-send-button-color hover:bg-an-primary-color/90 active:scale-[0.98] transition-[background-color,transform] duration-150 disabled:opacity-60 disabled:hover:bg-an-primary-color disabled:active:scale-100"
           >
             {primaryLabel}
-          </button>
+          </ToolActionButton>
         </div>
       </div>
     </div>

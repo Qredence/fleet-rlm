@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueryFunctionContext } from "@tanstack/react-query";
 
 import {
   createLlmProfile,
@@ -22,26 +23,34 @@ export function profileModelsQueryKey(profileId: string | null | undefined) {
   return ["runtime", "llm-profiles", profileId, "models"] as const;
 }
 
-export function useLlmProfiles() {
-  return useQuery({
+export const llmProfilesQueryOptions = {
+  profiles: () => ({
     queryKey: llmProfilesQueryKey,
-    queryFn: ({ signal }) => listLlmProfiles(signal),
-  });
+    queryFn: ({ signal }: QueryFunctionContext) => listLlmProfiles(signal),
+  }),
+  roleBindings: () => ({
+    queryKey: llmRolesQueryKey,
+    queryFn: ({ signal }: QueryFunctionContext) => fetchLlmRoleBindings(signal),
+  }),
+  profileModels: (profileId: string) => ({
+    queryKey: profileModelsQueryKey(profileId),
+    queryFn: ({ signal }: QueryFunctionContext) => fetchLlmProfileModels(profileId, false, signal),
+    staleTime: 5 * 60 * 1000,
+  }),
+};
+
+export function useLlmProfiles() {
+  return useQuery(llmProfilesQueryOptions.profiles());
 }
 
 export function useLlmRoleBindings() {
-  return useQuery({
-    queryKey: llmRolesQueryKey,
-    queryFn: ({ signal }) => fetchLlmRoleBindings(signal),
-  });
+  return useQuery(llmProfilesQueryOptions.roleBindings());
 }
 
 export function useLlmProfileModels(profileId: string | null | undefined) {
   return useQuery({
-    queryKey: profileModelsQueryKey(profileId),
-    queryFn: ({ signal }) => fetchLlmProfileModels(profileId!, false, signal),
+    ...llmProfilesQueryOptions.profileModels(profileId!),
     enabled: Boolean(profileId),
-    staleTime: 5 * 60 * 1000,
   });
 }
 

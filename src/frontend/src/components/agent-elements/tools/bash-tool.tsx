@@ -1,12 +1,12 @@
 import { memo } from "react";
 import {
-  CodeBlock,
+  CodeBlockViewer as CodeBlock,
   CodeBlockActions,
   CodeBlockCopyButton,
   CodeBlockFilename,
   CodeBlockHeader,
   CodeBlockTitle,
-} from "@/components/ai-elements/code-block";
+} from "@/components/ui/code-block";
 import type { TimelineStep, StepState } from "../types/timeline";
 import { useToolComplete } from "../hooks/use-tool-complete";
 import { mapToolInvocationToStep, mapToolStateToStepState } from "../utils/tool-adapters";

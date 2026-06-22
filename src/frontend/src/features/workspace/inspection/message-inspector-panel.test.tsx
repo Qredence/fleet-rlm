@@ -18,49 +18,63 @@ vi.mock("@/hooks/runtime/use-runtime-status", () => ({
   useRuntimeStatus: () => ({ data: { mlflow: { enabled: false } } }),
 }));
 
-vi.mock("@/lib/rlm-api/client", () => ({
-  rlmApiClient: {
-    get: vi.fn(async (path: string) => {
+vi.mock("@/lib/rlm-api/typed-client", () => ({
+  typedClient: {
+    GET: vi.fn(async (path: string) => {
       if (path.includes("/trace-debug")) {
         return {
-          trace_id: "tr-test",
-          resolved_from: "trace_id",
-          span_count: 0,
-          renderable_span_count: 0,
-          non_rendered_span_count: 0,
-          performance_summary: {
-            total_duration_ms: null,
-            llm_duration_ms: 0,
-            repl_duration_ms: 0,
-            tool_duration_ms: 0,
-            root_overhead_ms: null,
-            input_tokens: 0,
-            output_tokens: 0,
-            total_tokens: 0,
-            token_total_mismatch: false,
-            adapter_fallback_count: 0,
-            parse_error_count: 0,
-            selected_skills: [],
-            rlm_action_max_tokens: null,
-            rlm_max_output_chars: null,
-            slowest_llm_span: null,
-            largest_output_span: null,
+          data: {
+            trace_id: "tr-test",
+            resolved_from: "trace_id",
+            span_count: 0,
+            renderable_span_count: 0,
+            non_rendered_span_count: 0,
+            performance_summary: {
+              total_duration_ms: null,
+              llm_duration_ms: 0,
+              repl_duration_ms: 0,
+              tool_duration_ms: 0,
+              root_overhead_ms: null,
+              input_tokens: 0,
+              output_tokens: 0,
+              total_tokens: 0,
+              token_total_mismatch: false,
+              adapter_fallback_count: 0,
+              parse_error_count: 0,
+              selected_skills: [],
+              rlm_action_max_tokens: null,
+              rlm_max_output_chars: null,
+              slowest_llm_span: null,
+              largest_output_span: null,
+            },
+            spans: [],
           },
-          spans: [],
+          error: undefined,
         };
       }
       if (path.includes("/traces")) {
         return {
-          items: [],
-          total: 0,
-          offset: 0,
-          limit: 50,
-          has_more: false,
+          data: {
+            items: [],
+            total: 0,
+            offset: 0,
+            limit: 50,
+            has_more: false,
+          },
+          error: undefined,
         };
       }
-      return {};
+      return { data: {}, error: undefined };
     }),
+    POST: vi.fn(),
+    PATCH: vi.fn(),
+    DELETE: vi.fn(),
   },
+  unwrap: vi.fn(async (promise: Promise<{ data?: unknown; error?: unknown }>) => {
+    const result = await promise;
+    return result.data;
+  }),
+  withTimeout: vi.fn((signal?: AbortSignal) => signal),
 }));
 
 function mountInspector() {

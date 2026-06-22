@@ -121,7 +121,7 @@ export function QuestionTool({ part }: QuestionToolProps) {
               type="button"
               onClick={goPrev}
               disabled={!canGoPrev}
-              className="size-5 inline-flex items-center justify-center rounded-[4px] hover:bg-an-background-secondary disabled:opacity-40"
+              className="size-5 inline-flex items-center justify-center rounded-an-action-sm hover:bg-an-background-secondary disabled:opacity-40"
               aria-label="Previous question"
             >
               <IconChevronUp className="w-3.5 h-3.5" />
@@ -133,7 +133,7 @@ export function QuestionTool({ part }: QuestionToolProps) {
               type="button"
               onClick={goNext}
               disabled={!canGoNext}
-              className="size-5 inline-flex items-center justify-center rounded-[4px] hover:bg-an-background-secondary disabled:opacity-40"
+              className="size-5 inline-flex items-center justify-center rounded-an-action-sm hover:bg-an-background-secondary disabled:opacity-40"
               aria-label="Next question"
             >
               <IconChevronDown className="w-3.5 h-3.5" />

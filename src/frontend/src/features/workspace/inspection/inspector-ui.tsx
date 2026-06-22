@@ -189,7 +189,7 @@ export function DetailBlock({
       {parsed !== null ? (
         <div className={cn(inspectorInsetClass(insetTone), "overflow-x-auto")}>
           <VisualJson value={parsed} onChange={() => {}}>
-            <TreeView className="text-xs" />
+            <TreeView className="text-xs visual-json-tree" />
           </VisualJson>
         </div>
       ) : (

@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueryFunctionContext } from "@tanstack/react-query";
 
 import { runtimeStatusQueryKey, useRuntimeStatus } from "@/hooks/runtime/use-runtime-status";
 import { runtimeEndpoints } from "@/lib/rlm-api/runtime";
@@ -9,6 +10,14 @@ export const runtimeKeys = {
   all: ["runtime"] as const,
   settings: () => [...runtimeKeys.all, "settings"] as const,
   status: () => runtimeStatusQueryKey,
+};
+
+export const runtimeSettingsQueryOptions = {
+  settings: () => ({
+    queryKey: runtimeKeys.settings(),
+    queryFn: ({ signal }: QueryFunctionContext) => runtimeEndpoints.settings(signal),
+    staleTime: 5_000,
+  }),
 };
 
 export const RUNTIME_EDITABLE_KEYS = [
@@ -225,10 +234,8 @@ export function useRuntimeSettings() {
   const canQueryRuntime = typeof window !== "undefined";
 
   const settingsQuery = useQuery({
-    queryKey: runtimeKeys.settings(),
-    queryFn: ({ signal }) => runtimeEndpoints.settings(signal),
+    ...runtimeSettingsQueryOptions.settings(),
     enabled: canQueryRuntime,
-    staleTime: 5_000,
   });
 
   const statusQuery = useRuntimeStatus();

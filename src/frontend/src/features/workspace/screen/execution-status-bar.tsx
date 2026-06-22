@@ -9,17 +9,17 @@ import type { WsRuntimeContext } from "@/lib/rlm-api/ws-types";
 function depthColor(depth: number, maxDepth: number): string {
   if (maxDepth <= 0) return "text-muted-foreground";
   const ratio = depth / maxDepth;
-  if (ratio < 0.5) return "text-emerald-500";
-  if (ratio < 0.8) return "text-amber-500";
-  return "text-red-500";
+  if (ratio < 0.5) return "text-success";
+  if (ratio < 0.8) return "text-warning";
+  return "text-danger";
 }
 
 function depthRingColor(depth: number, maxDepth: number): string {
   if (maxDepth <= 0) return "border-muted-foreground/30";
   const ratio = depth / maxDepth;
-  if (ratio < 0.5) return "border-emerald-500/60";
-  if (ratio < 0.8) return "border-amber-500/60";
-  return "border-red-500/60";
+  if (ratio < 0.5) return "border-success/60";
+  if (ratio < 0.8) return "border-warning/60";
+  return "border-danger/60";
 }
 
 interface DepthPillProps {
@@ -70,9 +70,9 @@ function SandboxPill({ active, transition }: SandboxPillProps) {
 
   const indicator = active ? "●" : isStarting ? "○" : "◌";
   const indicatorColor = active
-    ? "text-emerald-500"
+    ? "text-success"
     : isStarting
-      ? "text-amber-500"
+      ? "text-warning"
       : "text-muted-foreground/40";
   const label = active ? "active" : isStarting ? "starting" : "idle";
 
@@ -141,11 +141,10 @@ export function ExecutionStatusBar() {
       {runtimeContext != null ? (
         <motion.div
           key="execution-status-bar"
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          exit={{ opacity: 0, height: 0 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
           transition={springs.default}
-          className="overflow-hidden"
         >
           <ExecutionStatusBarInner ctx={runtimeContext} />
         </motion.div>

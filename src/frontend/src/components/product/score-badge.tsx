@@ -42,8 +42,8 @@ const scoreBadgeVariants = cva(
   {
     variants: {
       tone: {
-        success: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-        warning: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+        success: "bg-success/10 text-success",
+        warning: "bg-warning/10 text-warning",
         danger: "bg-destructive/10 text-destructive",
       },
     },

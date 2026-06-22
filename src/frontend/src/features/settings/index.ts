@@ -15,3 +15,5 @@ export {
   requestSettingsDialogOpen,
   type OpenSettingsEventDetail,
 } from "./settings-events";
+export { runtimeSettingsQueryOptions } from "./use-runtime-settings";
+export { llmProfilesQueryOptions } from "./use-llm-profiles";

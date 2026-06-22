@@ -1,5 +1,4 @@
-import { rlmApiClient } from "@/lib/rlm-api/client";
-import type { ServiceInfoResponse } from "@/lib/rlm-api/types";
+import { typedClient, unwrap, withTimeout } from "@/lib/rlm-api/typed-client";
 
 export const infoEndpoints = {
   /**
@@ -7,6 +6,6 @@ export const infoEndpoints = {
    * for the running server instance (`GET /api/v1/info`).
    */
   get(signal?: AbortSignal) {
-    return rlmApiClient.get<ServiceInfoResponse>("/api/v1/info", signal);
+    return unwrap(typedClient.GET("/api/v1/info", { signal: withTimeout(signal) }));
   },
 };

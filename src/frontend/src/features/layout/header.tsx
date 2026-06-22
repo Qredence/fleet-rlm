@@ -21,6 +21,7 @@ export function LayoutHeader() {
     workspace: "Workbench",
     volumes: "Volumes",
     settings: "Settings",
+    optimization: "Optimization",
   };
   const title = titleMap[activeNav] || "Dashboard";
 
@@ -34,8 +35,8 @@ export function LayoutHeader() {
   return (
     <header
       className={cn(
-        "flex shrink-0 items-center justify-between gap-3 border-b border-border-subtle bg-background/95 backdrop-blur-sm",
-        isMobile ? "px-3 py-2 pt-[max(env(safe-area-inset-top,0px),0.5rem)]" : "px-5 py-2",
+        "flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border-subtle bg-background/95 backdrop-blur-sm",
+        isMobile ? "px-3 pt-[max(env(safe-area-inset-top,0px),0.5rem)]" : "px-3",
       )}
     >
       <div className="flex min-w-0 items-center gap-2">

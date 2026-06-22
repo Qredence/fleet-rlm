@@ -119,8 +119,8 @@ function computeDiff(before: string, after: string): DiffLine[] {
 /* -------------------------------------------------------------------------- */
 
 const lineStyles: Record<DiffLine["type"], string> = {
-  added: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-  removed: "bg-destructive/10 text-destructive dark:text-red-300",
+  added: "bg-success/10 text-success",
+  removed: "bg-destructive/10 text-destructive",
   unchanged: "text-foreground",
 };
 

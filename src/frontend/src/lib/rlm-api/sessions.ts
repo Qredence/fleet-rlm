@@ -1,5 +1,4 @@
-import { rlmApiClient } from "@/lib/rlm-api/client";
-import { withQuery } from "@/lib/rlm-api/query";
+import { typedClient, unwrap, withTimeout } from "@/lib/rlm-api/typed-client";
 import type { components } from "@/lib/rlm-api/generated/openapi";
 
 export type SessionListItem = components["schemas"]["SessionListItem"];
@@ -20,7 +19,6 @@ export type SessionTraceExportResponse = components["schemas"]["SessionTraceExpo
 export type SessionExportRequest = components["schemas"]["SessionExportRequest"];
 export type DatasetResponse = components["schemas"]["DatasetResponse"];
 
-const BASE = "/api/v1/sessions";
 const SESSION_TRACE_EXPORT_TIMEOUT_MS = 120_000;
 
 export interface ListSessionsInput {
@@ -45,74 +43,105 @@ export interface SessionTraceDebugInput {
   clientRequestId?: string | null;
 }
 
-function sessionPath(sessionId: string, suffix = ""): string {
-  return `${BASE}/${encodeURIComponent(sessionId)}${suffix}`;
-}
-
 export const sessionsEndpoints = {
   list(input: ListSessionsInput = {}, signal?: AbortSignal) {
-    return rlmApiClient.get<SessionListResponse>(
-      withQuery(BASE, {
-        search: input.search,
-        status: input.status,
-        limit: input.limit,
-        offset: input.offset,
+    return unwrap(
+      typedClient.GET("/api/v1/sessions", {
+        params: {
+          query: {
+            search: input.search,
+            status: input.status,
+            limit: input.limit,
+            offset: input.offset,
+          },
+        },
+        signal: withTimeout(signal),
       }),
-      signal,
     );
   },
 
   get(sessionId: string, signal?: AbortSignal) {
-    return rlmApiClient.get<SessionDetailResponse>(sessionPath(sessionId), signal);
+    return unwrap(
+      typedClient.GET("/api/v1/sessions/{session_id}", {
+        params: { path: { session_id: sessionId } },
+        signal: withTimeout(signal),
+      }),
+    );
   },
 
   patch(sessionId: string, body: SessionPatchRequest, signal?: AbortSignal) {
-    return rlmApiClient.patch<SessionDetailResponse>(sessionPath(sessionId), body, signal);
+    return unwrap(
+      typedClient.PATCH("/api/v1/sessions/{session_id}", {
+        params: { path: { session_id: sessionId } },
+        body,
+        signal: withTimeout(signal),
+      }),
+    );
   },
 
   delete(sessionId: string, signal?: AbortSignal) {
-    return rlmApiClient.delete<SessionDeleteResponse>(sessionPath(sessionId), signal);
+    return unwrap(
+      typedClient.DELETE("/api/v1/sessions/{session_id}", {
+        params: { path: { session_id: sessionId } },
+        signal: withTimeout(signal),
+      }),
+    );
   },
 
   restore(sessionId: string, signal?: AbortSignal) {
-    return rlmApiClient.post<SessionRestoreResponse>(
-      sessionPath(sessionId, "/restore"),
-      undefined,
-      signal,
+    return unwrap(
+      typedClient.POST("/api/v1/sessions/{session_id}/restore", {
+        params: { path: { session_id: sessionId } },
+        signal: withTimeout(signal),
+      }),
     );
   },
 
   turns(sessionId: string, input: ListTurnsInput = {}, signal?: AbortSignal) {
-    return rlmApiClient.get<TurnListResponse>(
-      withQuery(sessionPath(sessionId, "/turns"), {
-        limit: input.limit,
-        offset: input.offset,
+    return unwrap(
+      typedClient.GET("/api/v1/sessions/{session_id}/turns", {
+        params: {
+          path: { session_id: sessionId },
+          query: { limit: input.limit, offset: input.offset },
+        },
+        signal: withTimeout(signal),
       }),
-      signal,
     );
   },
 
   stats(sessionId: string, signal?: AbortSignal) {
-    return rlmApiClient.get<SessionStatsResponse>(sessionPath(sessionId, "/stats"), signal);
+    return unwrap(
+      typedClient.GET("/api/v1/sessions/{session_id}/stats", {
+        params: { path: { session_id: sessionId } },
+        signal: withTimeout(signal),
+      }),
+    );
   },
 
   traces(sessionId: string, input: ListSessionTracesInput = {}, signal?: AbortSignal) {
-    return rlmApiClient.get<SessionTraceListResponse>(
-      withQuery(sessionPath(sessionId, "/traces"), {
-        limit: input.limit,
-        offset: input.offset,
+    return unwrap(
+      typedClient.GET("/api/v1/sessions/{session_id}/traces", {
+        params: {
+          path: { session_id: sessionId },
+          query: { limit: input.limit, offset: input.offset },
+        },
+        signal: withTimeout(signal),
       }),
-      signal,
     );
   },
 
   traceDebug(sessionId: string, input: SessionTraceDebugInput = {}, signal?: AbortSignal) {
-    return rlmApiClient.get<SessionTraceDebugResponse>(
-      withQuery(sessionPath(sessionId, "/trace-debug"), {
-        trace_id: input.traceId,
-        client_request_id: input.traceId ? undefined : input.clientRequestId,
+    return unwrap(
+      typedClient.GET("/api/v1/sessions/{session_id}/trace-debug", {
+        params: {
+          path: { session_id: sessionId },
+          query: {
+            trace_id: input.traceId ?? undefined,
+            client_request_id: input.traceId ? undefined : (input.clientRequestId ?? undefined),
+          },
+        },
+        signal: withTimeout(signal),
       }),
-      signal,
     );
   },
 
@@ -121,15 +150,22 @@ export const sessionsEndpoints = {
     body: SessionTraceExportRequest = { format: "both" },
     signal?: AbortSignal,
   ) {
-    return rlmApiClient.post<SessionTraceExportResponse>(
-      sessionPath(sessionId, "/trace-export"),
-      body,
-      signal,
-      SESSION_TRACE_EXPORT_TIMEOUT_MS,
+    return unwrap(
+      typedClient.POST("/api/v1/sessions/{session_id}/trace-export", {
+        params: { path: { session_id: sessionId } },
+        body,
+        signal: withTimeout(signal, SESSION_TRACE_EXPORT_TIMEOUT_MS),
+      }),
     );
   },
 
   exportDataset(sessionId: string, body: SessionExportRequest, signal?: AbortSignal) {
-    return rlmApiClient.post<DatasetResponse>(sessionPath(sessionId, "/export"), body, signal);
+    return unwrap(
+      typedClient.POST("/api/v1/sessions/{session_id}/export", {
+        params: { path: { session_id: sessionId } },
+        body,
+        signal: withTimeout(signal),
+      }),
+    );
   },
 };

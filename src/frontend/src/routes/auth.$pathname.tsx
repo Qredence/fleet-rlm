@@ -1,9 +1,15 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { AuthView } from "@neondatabase/auth-ui";
 
+import { isNeonAuthConfigured } from "@/lib/auth/neon";
 import { RouteErrorScreen } from "@/routes/-route-error-screen";
 
 export const Route = createFileRoute("/auth/$pathname")({
+  beforeLoad: () => {
+    if (!isNeonAuthConfigured()) {
+      throw redirect({ to: "/app/workspace", replace: true });
+    }
+  },
   component: AuthScreen,
   errorComponent: RouteErrorScreen,
 });

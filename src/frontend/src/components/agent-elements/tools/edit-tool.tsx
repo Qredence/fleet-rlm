@@ -158,7 +158,7 @@ export function EditToolDiffCard({
           )}
         </div>
         {step.diffStats && !isPending && (
-          <span className="text-[11px] font-mono text-an-tool-color-muted inline-flex gap-2">
+          <span className="typo-body-xs font-mono text-an-tool-color-muted inline-flex gap-2">
             {step.diffStats.split(" ").map((token) => (
               <span
                 key={token}
@@ -177,7 +177,7 @@ export function EditToolDiffCard({
         )}
       </div>
       {diffFiles ? (
-        <div className={`${diffClassName} text-[12px]`} style={diffCssVars}>
+        <div className={`${diffClassName} typo-caption`} style={diffCssVars}>
           <div className={isCollapsible ? "group/edit-diff relative" : "relative"}>
             <div
               className={isCollapsible && !isExpanded ? "max-h-[260px] overflow-hidden" : undefined}

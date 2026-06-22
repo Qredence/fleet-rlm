@@ -212,22 +212,20 @@ function CheckpointTabContent() {
       <div
         className={cn(
           "rounded-lg border p-3 flex flex-col gap-1",
-          pendingHitlMessageId
-            ? "border-amber-500/30 bg-amber-500/5"
-            : "border-border/50 bg-muted/30",
+          pendingHitlMessageId ? "border-warning/30 bg-warning/5" : "border-border/50 bg-muted/30",
         )}
       >
         <div className="flex items-center gap-2">
           <div
             className={cn(
               "size-2 rounded-full",
-              pendingHitlMessageId ? "bg-amber-500 animate-pulse" : "bg-muted-foreground/30",
+              pendingHitlMessageId ? "bg-warning animate-pulse" : "bg-muted-foreground/30",
             )}
           />
           <span
             className={cn(
               "text-xs font-medium",
-              pendingHitlMessageId ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
+              pendingHitlMessageId ? "text-warning" : "text-muted-foreground",
             )}
           >
             {pendingHitlMessageId ? "Pending HITL approval" : "No pending approvals"}

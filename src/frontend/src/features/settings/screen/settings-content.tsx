@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { Bell, Bot, Cpu, Info, LogOut, Moon, Paintbrush, Sun, User } from "lucide-react";
 import { toast } from "sonner";
 
@@ -107,6 +108,7 @@ interface SettingsSidebarNavProps {
 export function SettingsSidebarNav({ section, onSectionChange }: SettingsSidebarNavProps) {
   const sections = useGetSettingsSections();
   const { isAuthenticated, logout } = useAuth();
+  const navigate = useNavigate();
   return (
     <SidebarContent className="bg-sidebar/20 justify-between">
       <SidebarGroup className="flex flex-col gap-2 p-4 shrink-0">
@@ -138,7 +140,11 @@ export function SettingsSidebarNav({ section, onSectionChange }: SettingsSidebar
                 <SidebarMenuButton
                   size="default"
                   tooltip="Logout"
-                  onClick={() => logout()}
+                  onClick={() => {
+                    logout();
+                    toast.success("Signed out");
+                    navigate({ to: "/login", replace: true });
+                  }}
                   className="h-10 gap-3 rounded-xl px-3 font-medium text-destructive hover:bg-destructive/10 hover:text-destructive shadow-none"
                 >
                   <LogOut className="size-4" />
@@ -234,6 +240,7 @@ export function GroupedSettingsPane({ isDark, onToggleTheme, section }: GroupedS
                   aria-label="Light mode"
                   className="group/theme-item min-w-34 flex-col items-start gap-3"
                 >
+                  {/* theme-swatch: literal illustration of light/dark UI — raw bg-zinc-* values are intentional */}
                   <span className="flex h-14 w-full min-w-34 items-start rounded-lg border border-border-subtle bg-white p-3 shadow-xs">
                     <span className="flex w-full gap-2">
                       <span className="w-4 rounded-md bg-zinc-100" />

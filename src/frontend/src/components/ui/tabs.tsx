@@ -98,4 +98,7 @@ function TabsContent({
   );
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent, tabsListVariants };
+const TabsTab = TabsTrigger;
+const TabsPanel = TabsContent;
+
+export { Tabs, TabsList, TabsTrigger, TabsContent, TabsTab, TabsPanel, tabsListVariants };

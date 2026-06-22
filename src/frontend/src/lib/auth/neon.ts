@@ -20,6 +20,20 @@ export const neonAuthClient = isNeonAuthConfigured()
   ? createAuthClient(neonAuthConfig.neonAuthUrl, { adapter: BetterAuthReactAdapter() })
   : null;
 
+type NeonTokenResponse = {
+  data?: {
+    token?: string;
+    session?: {
+      token?: string;
+    };
+  } | null;
+  error?: unknown;
+};
+
+type NeonTokenClient = {
+  token: () => Promise<NeonTokenResponse>;
+};
+
 export async function initializeNeonSession(): Promise<string | null> {
   if (!isNeonAuthConfigured() || !neonAuthClient) {
     return null;
@@ -32,9 +46,8 @@ export async function initializeNeonSession(): Promise<string | null> {
       return null;
     }
 
-    const { data, error } = await neonAuthClient.token();
-    const token =
-      data?.token ?? (data as unknown as { session?: { token?: string } })?.session?.token;
+    const { data, error } = await (neonAuthClient as unknown as NeonTokenClient).token();
+    const token = data?.token ?? data?.session?.token;
     if (error || !token) {
       clearAccessToken();
       return null;

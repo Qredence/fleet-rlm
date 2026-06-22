@@ -1,4 +1,5 @@
 import { memo, useMemo, useState } from "react";
+import { ToolActionButton } from "@/components/product/tool-action-button";
 
 export type ToolApproval = {
   approveLabel?: string;
@@ -68,22 +69,22 @@ export const ToolApprovalFooter = memo(function ToolApprovalFooter({
         <span aria-hidden="true" />
       )}
       <div className="flex gap-1">
-        <button
-          type="button"
+        <ToolActionButton
+          variant="ghostSoft"
+          size="sm"
           onClick={handleReject}
           disabled={Boolean(decision)}
-          className="h-5 px-1.5 rounded-[4px] text-xs text-muted-foreground hover:text-an-tool-color hover:bg-muted/50 active:scale-[0.98] transition-[background-color,color,transform] duration-150 disabled:opacity-60 disabled:hover:bg-transparent disabled:active:scale-100"
         >
           {rejectText}
-        </button>
-        <button
-          type="button"
+        </ToolActionButton>
+        <ToolActionButton
+          variant="primary"
+          size="sm"
           onClick={handleApprove}
           disabled={Boolean(decision)}
-          className="h-5 px-1.5 rounded-[4px] text-xs font-medium bg-an-primary-color text-an-send-button-color hover:bg-an-primary-color/90 active:scale-[0.98] transition-[background-color,transform] duration-150 disabled:opacity-60 disabled:hover:bg-an-primary-color disabled:active:scale-100"
         >
           {approveText}
-        </button>
+        </ToolActionButton>
       </div>
     </div>
   );

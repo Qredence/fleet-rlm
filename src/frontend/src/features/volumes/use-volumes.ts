@@ -6,6 +6,7 @@
  * non-live data path; production backend failures surface as query errors.
  */
 import { useQuery } from "@tanstack/react-query";
+import type { QueryFunctionContext } from "@tanstack/react-query";
 
 import { rlmApiConfig } from "@/lib/rlm-api/config";
 import { volumesEndpoints } from "@/lib/rlm-api/volumes";
@@ -292,6 +293,55 @@ export const filesystemKeys = {
     [...filesystemKeys.all, "file", provider, path] as const,
 };
 
+export const filesystemQueryOptions = {
+  tree: (provider: VolumeProvider, options?: { maxDepth?: number; maxEntries?: number }) => ({
+    queryKey: filesystemKeys.tree(provider, options),
+    queryFn: async ({
+      signal,
+    }: QueryFunctionContext): Promise<{
+      volumes: FsNode[];
+      dataSource: DataSource;
+      degradedReason?: string;
+    }> => {
+      if (rlmApiConfig.mockMode) {
+        return {
+          volumes: getMockFilesystem(provider),
+          dataSource: "mock",
+          degradedReason: undefined,
+        };
+      }
+      const resp = await volumesEndpoints.tree(
+        {
+          provider,
+          maxDepth: options?.maxDepth ?? 4,
+          maxEntries: options?.maxEntries,
+        },
+        signal,
+      );
+      return {
+        volumes: resp.nodes.map((node) => toFsNode(node, resp.provider)),
+        dataSource: "api",
+      };
+    },
+    staleTime: rlmApiConfig.mockMode ? Infinity : 30_000,
+    retry: false,
+  }),
+  fileContent: (provider: VolumeProvider, path: string) => ({
+    queryKey: filesystemKeys.fileContent(provider, path),
+    queryFn: async ({ signal }: QueryFunctionContext) => {
+      if (!path) return { content: "", mime: "", size: 0 };
+      const resp = await volumesEndpoints.file({ provider, path, maxBytes: 200000 }, signal);
+      return {
+        content: resp.content,
+        mime: resp.mime,
+        size: resp.size,
+      };
+    },
+    staleTime: rlmApiConfig.mockMode ? Infinity : undefined,
+    retry: false,
+  }),
+};
+
 // ── useFilesystem (tree) ────────────────────────────────────────────
 
 interface UseFilesystemReturn {
@@ -321,39 +371,9 @@ export function useFilesystem(
   const mock = rlmApiConfig.mockMode;
   const canQueryFilesystem = typeof window !== "undefined";
 
-  type FilesystemPayload = {
-    volumes: FsNode[];
-    dataSource: DataSource;
-    degradedReason?: string;
-  };
-
   const query = useQuery({
-    queryKey: filesystemKeys.tree(provider, options),
-    queryFn: async ({ signal }): Promise<FilesystemPayload> => {
-      if (mock) {
-        return {
-          volumes: getMockFilesystem(provider),
-          dataSource: "mock",
-          degradedReason: undefined,
-        };
-      }
-
-      const resp = await volumesEndpoints.tree(
-        {
-          provider,
-          maxDepth: options?.maxDepth ?? 4,
-          maxEntries: options?.maxEntries,
-        },
-        signal,
-      );
-      return {
-        volumes: resp.nodes.map((node) => toFsNode(node, resp.provider)),
-        dataSource: "api",
-      };
-    },
+    ...filesystemQueryOptions.tree(provider, options),
     enabled: canQueryFilesystem,
-    staleTime: mock ? Infinity : 30_000,
-    retry: false,
   });
 
   return {
@@ -394,25 +414,11 @@ export function useFileContent(
   path: string | null,
   provider: VolumeProvider,
 ): UseFileContentReturn {
-  const mock = rlmApiConfig.mockMode;
   const canQueryFilesystem = typeof window !== "undefined";
 
   const query = useQuery({
-    queryKey: filesystemKeys.fileContent(provider, path ?? ""),
-    queryFn: async ({ signal }) => {
-      if (!path) return { content: "", mime: "", size: 0 };
-
-      const resp = await volumesEndpoints.file({ provider, path, maxBytes: 200000 }, signal);
-
-      return {
-        content: resp.content,
-        mime: resp.mime,
-        size: resp.size,
-      };
-    },
+    ...filesystemQueryOptions.fileContent(provider, path ?? ""),
     enabled: canQueryFilesystem && !!path,
-    staleTime: mock ? Infinity : undefined,
-    retry: false,
   });
 
   return {

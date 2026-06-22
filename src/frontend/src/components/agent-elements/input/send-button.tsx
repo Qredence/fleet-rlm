@@ -11,8 +11,8 @@ export function SendButton({ state }: SendButtonProps) {
 
   if (isStreaming) {
     return (
-      <div className="size-7 rounded-full bg-foreground flex items-center justify-center cursor-pointer">
-        <IconPlayerStopFilled className="size-4 text-background" />
+      <div className="flex size-6 cursor-pointer items-center justify-center rounded-full bg-foreground">
+        <IconPlayerStopFilled className="size-3 text-background" />
       </div>
     );
   }
@@ -20,14 +20,14 @@ export function SendButton({ state }: SendButtonProps) {
   return (
     <div
       className={cn(
-        "size-7 rounded-full flex items-center justify-center",
-        isTyping ? "bg-an-send-button-bg cursor-pointer" : "bg-muted cursor-default",
+        "flex size-6 items-center justify-center rounded-full",
+        isTyping ? "cursor-pointer bg-an-send-button-bg" : "cursor-default bg-muted",
       )}
     >
       <IconArrowUp
         className={cn(
-          "size-4",
-          isTyping ? "text-an-send-button-color" : "text-neutral-400 dark:text-neutral-600",
+          "size-3",
+          isTyping ? "text-an-send-button-color" : "text-an-input-placeholder-color",
         )}
       />
     </div>

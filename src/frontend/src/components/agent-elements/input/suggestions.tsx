@@ -39,7 +39,7 @@ export function Suggestions({
           disabled={disabled}
           onClick={() => onSelect(item)}
           className={cn(
-            "inline-flex h-7 items-center gap-1 rounded-[6px] border border-border bg-transparent px-2 text-sm text-an-foreground-muted transition-colors hover:bg-an-background-secondary/40 hover:text-an-foreground disabled:opacity-50 disabled:pointer-events-none",
+            "inline-flex h-7 items-center gap-1 rounded-an-action-md border border-border bg-transparent px-2 text-sm text-an-foreground-muted transition-colors hover:bg-an-background-secondary/40 hover:text-an-foreground disabled:opacity-50 disabled:pointer-events-none",
             itemClassName,
             item.className,
           )}

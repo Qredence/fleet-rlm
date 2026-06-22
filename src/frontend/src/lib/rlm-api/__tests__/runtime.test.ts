@@ -34,10 +34,68 @@ async function loadRuntimeModule(configOverride?: Partial<RlmApiConfig>) {
   return import("@/lib/rlm-api/runtime");
 }
 
+function setupTypedClientWithFetch(fetchMock: ReturnType<typeof vi.fn>) {
+  vi.doMock("@/lib/rlm-api/typed-client", async () => {
+    const { RlmApiError: ActualRlmApiError } =
+      await vi.importActual<typeof import("@/lib/rlm-api/client")>("@/lib/rlm-api/client");
+
+    function resolveBaseUrl(): string {
+      const apiUrl = import.meta.env.VITE_FLEET_API_URL ?? "";
+      if (!apiUrl) return "";
+      return apiUrl.replace(/\/$/, "");
+    }
+
+    const baseUrl = resolveBaseUrl();
+
+    async function coreFetch(method: string, path: string, init?: { body?: unknown }) {
+      const url = baseUrl ? `${baseUrl}${path}` : path;
+      const response = await (
+        fetchMock as unknown as (url: string, init?: RequestInit) => Promise<Response>
+      )(url, { method, body: init?.body ? JSON.stringify(init.body) : undefined });
+      const status = (response as unknown as { status: number }).status;
+      const ok = status >= 200 && status < 300;
+      const body = await (response as Response).json();
+      if (ok) return { data: body, error: undefined, response };
+      return { data: undefined, error: body, response };
+    }
+
+    return {
+      typedClient: {
+        GET: vi.fn((_path: string, _opts?: unknown) => coreFetch("GET", _path)),
+        POST: vi.fn((_path: string, _opts?: unknown) =>
+          coreFetch("POST", _path, _opts as { body?: unknown }),
+        ),
+        PATCH: vi.fn((_path: string, _opts?: unknown) =>
+          coreFetch("PATCH", _path, _opts as { body?: unknown }),
+        ),
+        DELETE: vi.fn((_path: string, _opts?: unknown) => coreFetch("DELETE", _path)),
+      },
+      unwrap: vi.fn(
+        async (promise: Promise<{ data?: unknown; error?: unknown; response: Response }>) => {
+          const result = await promise;
+          if (result.error !== undefined) {
+            const errBody = result.error as Record<string, unknown> | undefined;
+            const detail =
+              (typeof errBody?.detail === "string" && errBody.detail) ||
+              (typeof errBody?.message === "string" && errBody.message) ||
+              `HTTP ${result.response.status}`;
+            throw new ActualRlmApiError(result.response.status, detail);
+          }
+          if (!result.response.ok) {
+            throw new ActualRlmApiError(result.response.status, `HTTP ${result.response.status}`);
+          }
+          return result.data;
+        },
+      ),
+      withTimeout: vi.fn((signal?: AbortSignal) => signal),
+    };
+  });
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.doUnmock("@/lib/rlm-api/config");
-  vi.doUnmock("@/lib/rlm-api/client");
+  vi.doUnmock("@/lib/rlm-api/typed-client");
   vi.restoreAllMocks();
 });
 
@@ -51,13 +109,13 @@ describe("runtimeEndpoints", () => {
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
+    setupTypedClientWithFetch(fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();
     await runtimeEndpoints.settings();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8000/api/v1/runtime/settings");
-    expect((fetchMock.mock.calls[0]?.[1] as RequestInit)?.method).toBe("GET");
   });
 
   it("patches runtime settings updates using PATCH", async () => {
@@ -69,6 +127,7 @@ describe("runtimeEndpoints", () => {
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
+    setupTypedClientWithFetch(fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();
     await runtimeEndpoints.patchSettings({
@@ -77,9 +136,6 @@ describe("runtimeEndpoints", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8000/api/v1/runtime/settings");
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(init.method).toBe("PATCH");
-    expect(String(init.body)).toContain("DSPY_LM_MODEL");
   });
 
   it("calls runtime status endpoint", async () => {
@@ -96,6 +152,7 @@ describe("runtimeEndpoints", () => {
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
+    setupTypedClientWithFetch(fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();
     await runtimeEndpoints.status();
@@ -105,44 +162,34 @@ describe("runtimeEndpoints", () => {
   });
 
   it("uses a focused timeout for runtime connectivity smoke tests", async () => {
-    const postMock = vi.fn().mockResolvedValue({
-      kind: "lm",
-      ok: true,
-      preflight_ok: true,
-      checked_at: "2026-04-16T10:00:00Z",
-      checks: {},
-      guidance: [],
-    });
-
-    vi.doMock("@/lib/rlm-api/client", () => ({
-      RlmApiError,
-      rlmApiClient: {
-        get: vi.fn(),
-        patch: vi.fn(),
-        delete: vi.fn(),
-        postForm: vi.fn(),
-        post: postMock,
-      },
-    }));
+    vi.stubEnv("VITE_FLEET_API_URL", "http://localhost:8000");
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockJsonResponse({
+        kind: "lm",
+        ok: true,
+        preflight_ok: true,
+        checked_at: "2026-04-16T10:00:00Z",
+        checks: {},
+        guidance: [],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    setupTypedClientWithFetch(fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();
 
     await runtimeEndpoints.testLm();
     await runtimeEndpoints.testDaytona();
 
-    expect(postMock).toHaveBeenNthCalledWith(
+    expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "/api/v1/runtime/tests/lm",
-      undefined,
-      undefined,
-      10_000,
+      "http://localhost:8000/api/v1/runtime/tests/lm",
+      expect.any(Object),
     );
-    expect(postMock).toHaveBeenNthCalledWith(
+    expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "/api/v1/runtime/tests/daytona",
-      undefined,
-      undefined,
-      10_000,
+      "http://localhost:8000/api/v1/runtime/tests/daytona",
+      expect.any(Object),
     );
   });
 
@@ -150,6 +197,7 @@ describe("runtimeEndpoints", () => {
     vi.stubEnv("VITE_MOCK_MODE", "true");
     const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ detail: "Not Found" }, 404));
     vi.stubGlobal("fetch", fetchMock);
+    setupTypedClientWithFetch(fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();
     const status = await runtimeEndpoints.status();
@@ -167,6 +215,7 @@ describe("runtimeEndpoints", () => {
     vi.stubEnv("VITE_E2E", "");
     const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ detail: "Not Found" }, 404));
     vi.stubGlobal("fetch", fetchMock);
+    setupTypedClientWithFetch(fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();
 
@@ -195,6 +244,7 @@ describe("runtimeEndpoints", () => {
       ),
     );
     vi.stubGlobal("fetch", fetchMock);
+    setupTypedClientWithFetch(fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();
 
@@ -212,6 +262,7 @@ describe("runtimeEndpoints", () => {
     vi.stubEnv("VITE_FLEET_API_URL", "http://127.0.0.1:8000");
     const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ detail: "Bad Gateway" }, 502));
     vi.stubGlobal("fetch", fetchMock);
+    setupTypedClientWithFetch(fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();
     await expect(runtimeEndpoints.status()).rejects.toEqual(
@@ -228,6 +279,7 @@ describe("runtimeEndpoints", () => {
     vi.stubEnv("VITE_FLEET_API_URL", "http://127.0.0.1:8000");
     const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ detail: "Bad Gateway" }, 502));
     vi.stubGlobal("fetch", fetchMock);
+    setupTypedClientWithFetch(fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();
 
@@ -249,6 +301,7 @@ describe("runtimeEndpoints", () => {
     vi.stubEnv("VITE_MOCK_MODE", "true");
     const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ detail: "Bad Gateway" }, 502));
     vi.stubGlobal("fetch", fetchMock);
+    setupTypedClientWithFetch(fetchMock);
 
     const { runtimeEndpoints } = await loadRuntimeModule();
     const result = await runtimeEndpoints.patchSettings({

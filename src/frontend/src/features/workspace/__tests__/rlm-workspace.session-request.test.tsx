@@ -78,10 +78,6 @@ vi.mock("@/features/workspace/conversation/transcript/workspace-message-list", (
   WorkspaceMessageList: () => <div>WorkspaceMessageList</div>,
 }));
 
-vi.mock("@/features/workspace/composer/workspace-composer", () => ({
-  WorkspaceComposer: () => <div>WorkspaceComposer</div>,
-}));
-
 describe("WorkspaceScreen requested conversation loading", () => {
   beforeEach(() => {
     backendRuntimeState.messages = [];
