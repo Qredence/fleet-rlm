@@ -284,7 +284,7 @@ The repository includes `.circleci/config.yml` for the default CI lane. It runs 
 
 - release, docs, security, and dependency checks
 - Ruff formatting/linting and `ty` type checks
-- unit and contract tests with CircleCI timing-based splitting
+- unit and contract tests with JUnit result upload
 - integration and e2e tests
 - frontend API, type, lint, unit, duplicate-code, and build checks
 

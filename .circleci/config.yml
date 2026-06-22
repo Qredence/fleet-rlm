@@ -103,7 +103,6 @@ jobs:
 
   test-unit:
     executor: python
-    parallelism: 2
     steps:
       - checkout
       - install_python_dependencies
@@ -111,13 +110,7 @@ jobs:
           name: Unit and contract tests
           command: |
             mkdir -p test-results
-            TEST_FILES="$(
-              {
-                circleci tests glob "tests/unit/**/*.py"
-                circleci tests glob "tests/contracts/**/*.py"
-              } | circleci tests split --split-by=timings
-            )"
-            uv run --no-sync pytest -q -n 0 $TEST_FILES \
+            uv run --no-sync pytest -q -n 0 tests/unit tests/contracts \
               --timeout=120 \
               --timeout-method=thread \
               -m "not live_llm and not live_daytona and not benchmark and not db" \
