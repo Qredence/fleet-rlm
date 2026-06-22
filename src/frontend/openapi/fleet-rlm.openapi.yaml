@@ -67,6 +67,29 @@ paths:
           description: Authentication or repository services are not configured yet.
       security:
         - HTTPBearer: []
+  /api/v1/auth/ws-ticket:
+    post:
+      tags:
+        - auth
+      summary: Create Ws Ticket
+      description: Exchange an authenticated HTTP identity for a one-time WebSocket
+        ticket.
+      operationId: create_ws_ticket_api_v1_auth_ws_ticket_post
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebSocketTicketResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "403":
+          description: The authenticated tenant or user is not admitted to Fleet RLM.
+        "503":
+          description: Authentication or repository services are not configured yet.
+      security:
+        - HTTPBearer: []
   /api/v1/info:
     get:
       tags:
@@ -2153,7 +2176,7 @@ components:
             - type: "null"
           title: User Id
           description: Persisted control-plane user identifier for admitted Entra
-            users.
+            or Neon users.
       type: object
       required:
         - tenant_claim
@@ -4372,6 +4395,7 @@ components:
           enum:
             - dev
             - entra
+            - neon
           title: Auth Mode
           description: Authentication mode the server is running under.
         auth_required:
@@ -5645,6 +5669,23 @@ components:
         - entries_returned
       title: VolumeTreeResponse
       description: Response for the volume tree listing endpoint.
+    WebSocketTicketResponse:
+      properties:
+        ticket:
+          type: string
+          title: Ticket
+          description: Opaque one-time WebSocket authentication ticket.
+        expires_at:
+          type: string
+          format: date-time
+          title: Expires At
+          description: UTC timestamp when the ticket expires.
+      type: object
+      required:
+        - ticket
+        - expires_at
+      title: WebSocketTicketResponse
+      description: Short-lived one-time ticket used to authenticate browser WebSockets.
     ApiErrorResponse:
       description: Canonical HTTP error envelope returned by Fleet RLM API routes.
       properties:

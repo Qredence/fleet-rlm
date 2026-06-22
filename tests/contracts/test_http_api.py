@@ -8,6 +8,7 @@ CANONICAL_PATHS = {
     "/health",
     "/ready",
     "/api/v1/auth/me",
+    "/api/v1/auth/ws-ticket",
     "/api/v1/sessions/state",
     "/api/v1/traces/feedback",
     "/api/v1/ws/execution",
@@ -62,6 +63,11 @@ def test_canonical_http_routes_return_stable_status_codes(no_db_client, auth_hea
 
     auth_me = no_db_client.get("/api/v1/auth/me", headers=auth_headers)
     assert auth_me.status_code in {200, 401}
+
+    ws_ticket = no_db_client.post("/api/v1/auth/ws-ticket", headers=auth_headers)
+    assert ws_ticket.status_code in {200, 401}
+    if ws_ticket.status_code == 200:
+        assert ws_ticket.json()["ticket"]
 
     session_state = no_db_client.get("/api/v1/sessions/state", headers=auth_headers)
     assert session_state.status_code in {200, 500}

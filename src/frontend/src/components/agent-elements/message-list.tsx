@@ -462,8 +462,8 @@ export const MessageList = memo(function MessageList({
       onScroll={handleScroll}
       className={cn("an-message-list flex-1 min-h-0 overflow-y-auto", className)}
     >
-      <div ref={contentWrapperRef} className="mx-auto px-4 py-6 max-w-an">
-        <div className="space-y-2">
+      <div ref={contentWrapperRef} className="mx-auto max-w-an px-4 pb-5 pt-6">
+        <div className="space-y-3">
           {turns.map((turn, turnIndex) => {
             const isLastTurn = turnIndex === turns.length - 1;
             const turnKey = turn.userMsg?.id ?? `turn-${turnIndex}`;
@@ -500,7 +500,7 @@ export const MessageList = memo(function MessageList({
                           <MessageToolbar
                             text={showCopyToolbar ? text : ""}
                             timestamp={userTimestamp}
-                            heightClass="h-[28px]"
+                            heightClass="h-skeleton-row"
                             hoverClass="group-hover/user-message:opacity-100 group-hover/user-message:pointer-events-auto"
                             isVisible={userCopyVisible}
                             alignClass="justify-end"
@@ -530,7 +530,7 @@ export const MessageList = memo(function MessageList({
 
                     return (
                       <div className="group/assistant-turn">
-                        <div className="flex flex-col gap-3">
+                        <div className="flex flex-col gap-2.5">
                           {turn.assistantMsgs.map((msg, i) => {
                             const isLastMsg = isLastTurn && i === turn.assistantMsgs.length - 1;
                             return (
@@ -549,7 +549,7 @@ export const MessageList = memo(function MessageList({
                         {showToolbar ? (
                           <MessageToolbar
                             text={toolbarText}
-                            heightClass="h-[48px] flex items-start w-full"
+                            heightClass="h-skeleton-row-lg flex items-start w-full"
                             hoverClass="group-hover/assistant-turn:opacity-100 group-hover/assistant-turn:pointer-events-auto"
                             isVisible={activeCopyId === copyKey}
                             alignClass="justify-start"
@@ -558,7 +558,7 @@ export const MessageList = memo(function MessageList({
                         ) : activeCopyId === copyKey ? (
                           <MessageToolbar
                             text={toolbarText}
-                            heightClass="h-[48px] flex items-start w-full"
+                            heightClass="h-skeleton-row-lg flex items-start w-full"
                             hoverClass="group-hover/assistant-turn:opacity-100 group-hover/assistant-turn:pointer-events-auto"
                             isVisible={true}
                             alignClass="justify-start"
@@ -649,7 +649,7 @@ function AssistantParts({
         const text = part.text;
         if (text) {
           elems.push(
-            <div key={`${msg.id}-text-${i}`} className="group/assistant-text text-[14px]">
+            <div key={`${msg.id}-text-${i}`} className="group/assistant-text typo-composer">
               <Markdown content={text} className="leading-relaxed [&_p]:leading-relaxed" />
             </div>,
           );

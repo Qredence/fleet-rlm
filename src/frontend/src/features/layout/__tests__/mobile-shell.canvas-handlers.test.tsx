@@ -37,10 +37,6 @@ vi.mock("@/features/layout/command-palette", () => ({
   CommandPalette: () => null,
 }));
 
-vi.mock("@/features/layout/login-dialog", () => ({
-  LoginDialog: () => null,
-}));
-
 describe("MobileShell canvas handlers", () => {
   beforeEach(() => {
     useNavigationStore.setState({

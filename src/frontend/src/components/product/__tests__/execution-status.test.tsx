@@ -96,7 +96,7 @@ describe("StatusMessage", () => {
     );
     const errorHtml = renderToStaticMarkup(<StatusMessage variant="error">Error</StatusMessage>);
 
-    expect(successHtml).toContain("border-emerald-500");
+    expect(successHtml).toContain("border-success");
     expect(errorHtml).toContain("border-destructive");
   });
 
@@ -128,7 +128,7 @@ describe("ExecutionProgress", () => {
   it("renders full bar for completed state", () => {
     const html = renderToStaticMarkup(<ExecutionProgress status="completed" />);
     expect(html).toContain("w-full");
-    expect(html).toContain("bg-emerald-500");
+    expect(html).toContain("bg-success");
   });
 
   it("renders error styling for error state", () => {

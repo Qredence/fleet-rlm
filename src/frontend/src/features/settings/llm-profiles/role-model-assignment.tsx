@@ -197,7 +197,7 @@ export function RoleModelAssignment({
             </FieldDescription>
           ) : null}
           {isStaleModel ? (
-            <FieldDescription className="text-amber-600 dark:text-amber-400">
+            <FieldDescription className="text-warning">
               Saved model <span className="font-mono">{modelId}</span> is not in the current
               catalog. Pick a model and save to refresh the binding.
             </FieldDescription>

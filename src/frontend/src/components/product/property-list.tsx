@@ -55,7 +55,7 @@ const toneClasses: Record<NonNullable<PropertyItemProps["tone"]>, string> = {
   default: "text-foreground",
   muted: "text-muted-foreground",
   error: "text-destructive",
-  success: "text-emerald-600 dark:text-emerald-400",
+  success: "text-success",
 };
 
 export function PropertyItem({ label, value, className, tone = "default" }: PropertyItemProps) {

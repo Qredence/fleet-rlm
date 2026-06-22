@@ -2,8 +2,10 @@ import {
   Asset,
   createRootRoute,
   HeadContent,
+  Link,
   Outlet,
   Scripts,
+  useNavigate,
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
@@ -11,6 +13,14 @@ import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { PostHogProvider } from "@posthog/react";
 import posthog from "posthog-js";
+
+import { NeonAuthUIProvider } from "@neondatabase/auth-ui";
+import { isNeonAuthConfigured, neonAuthClient } from "@/lib/auth/neon";
+
+const neonSocialProviders = (import.meta.env.VITE_NEON_AUTH_SOCIAL_PROVIDERS ?? "google")
+  .split(",")
+  .map((provider) => provider.trim())
+  .filter(Boolean);
 
 const Agentation = import.meta.env.DEV
   ? lazy(() => import("agentation").then((m) => ({ default: m.Agentation })))
@@ -77,17 +87,40 @@ function RootComponent() {
     };
   }, []);
 
-  return (
-    <RootDocument>
-      <PHProvider>
-        <Outlet />
-      </PHProvider>
+  const navigate = useNavigate();
+  const neonConfigured = isNeonAuthConfigured();
+
+  const content = (
+    <>
+      <Outlet />
       {import.meta.env.DEV && import.meta.env.VITE_E2E !== "1" && <TanStackRouterDevtools />}
       {import.meta.env.DEV && import.meta.env.VITE_E2E !== "1" ? (
         <Suspense fallback={null}>
           <Agentation endpoint={agentationEndpoint} />
         </Suspense>
       ) : null}
+    </>
+  );
+
+  return (
+    <RootDocument>
+      <PHProvider>
+        {neonConfigured && neonAuthClient ? (
+          <NeonAuthUIProvider
+            authClient={neonAuthClient}
+            navigate={(href) => navigate({ to: href })}
+            replace={(href) => navigate({ to: href, replace: true })}
+            Link={({ href, ...props }) => <Link to={href} {...props} />}
+            baseURL={typeof window !== "undefined" ? window.location.origin : undefined}
+            redirectTo="/app/workspace"
+            social={neonSocialProviders.length > 0 ? { providers: neonSocialProviders } : undefined}
+          >
+            {content}
+          </NeonAuthUIProvider>
+        ) : (
+          content
+        )}
+      </PHProvider>
     </RootDocument>
   );
 }

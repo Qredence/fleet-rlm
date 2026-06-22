@@ -118,7 +118,7 @@ export const UserMessage = memo(function UserMessage({
           <div
             key={i}
             className={cn(
-              "max-w-[200px] p-1.5 bg-an-foreground/4 rounded-an-message",
+              "max-w-attachment p-1.5 bg-an-foreground/4 rounded-an-message",
               enableImagePreview && "cursor-pointer",
             )}
             onClick={enableImagePreview ? () => setLightboxIndex(i) : undefined}

@@ -20,22 +20,23 @@ Before editing:
 
 ## Source-of-Truth Files
 
-| Concern                 | File(s)                                                           |
-| ----------------------- | ----------------------------------------------------------------- |
-| Scripts & validation    | `package.json`                                                    |
-| Lint/build/import rules | `vite.config.ts`                                                  |
-| Routes & surfaces       | `src/routes/*`                                                    |
-| App chrome / layout     | `src/features/layout/*`                                           |
-| Product surfaces        | `src/features/{workspace,optimization,volumes,settings}/index.ts` |
-| UI primitives           | `src/components/ui/*` (shadcn/Base UI)                            |
-| Agent Elements (chat)   | `src/components/agent-elements/*`                                 |
-| Legacy inspection UI    | `src/components/ai-elements/*` (composer/inspection only)         |
-| Product compositions    | `src/components/product/*`                                        |
-| API clients & types     | `src/lib/rlm-api/*`                                               |
-| Workspace adapters      | `src/lib/workspace/*`                                             |
-| Theme / tokens          | `src/styles/globals.css`                                          |
-| shadcn config           | `components.json`                                                 |
-| API contract            | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts`            |
+| Concern                 | File(s)                                                                |
+| ----------------------- | ---------------------------------------------------------------------- |
+| Scripts & validation    | `package.json`                                                         |
+| Lint/build/import rules | `vite.config.ts`                                                       |
+| Style token guard       | `scripts/check-style-tokens.mjs`                                       |
+| Routes & surfaces       | `src/routes/*`                                                         |
+| App chrome / layout     | `src/features/layout/*`                                                |
+| Product surfaces        | `src/features/{workspace,optimization,volumes,settings}/index.ts`      |
+| UI primitives           | `src/components/ui/*` (shadcn/Base UI)                                 |
+| Agent Elements (chat)   | `src/components/agent-elements/*`                                      |
+| Product compositions    | `src/components/product/*`                                             |
+| API clients & types     | `src/lib/rlm-api/*`                                                    |
+| Workspace adapters      | `src/lib/workspace/*`                                                  |
+| Theme / tokens          | `src/styles/globals.css`, `src/components/agent-elements/agent-ui.css` |
+| shadcn config           | `components.json`                                                      |
+| API contract            | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts`                 |
+| Dead-code analysis      | `knip.json`                                                            |
 
 ### Generated / Synced — Do Not Hand-Edit
 
@@ -50,14 +51,22 @@ Before editing:
 
 ### Component Layers (outer → inner)
 
-1. **`src/components/ui/*`** — shadcn/Base UI primitives. Thin, semantic, no feature imports.
+1. **`src/components/ui/*`** — shadcn/Base UI primitives. Thin, semantic, no feature imports. Includes `code-block.tsx` (both simple `CodeBlock`/`CodeBlockCode` and rich `CodeBlockViewer`/`CodeBlockHeader`/`CodeBlockFilename`/`CodeBlockCopyButton`/`CodeBlockActions`/`CodeBlockContent`).
 2. **`src/components/agent-elements/*`** — **Canonical agent/chat UI** ([Agent Elements](https://agent-elements.21st.dev/docs) shadcn registry). `AgentChat`, `InputBar`, tool cards, `UIMessage`-shaped transcripts.
-3. **`src/components/product/*`** — Reusable product compositions (empty states, skeletons, panels). Do not add chat, reasoning, or tool transcript UI here; use Agent Elements.
-4. **`src/components/ai-elements/*`** — **Legacy inspection/composer primitives only** (`prompt-input`, `chain-of-thought`). Do not add new chat/message/tool components here.
-5. **`src/features/layout/*`** — App chrome. Consumes workspace/volumes/settings through feature entrypoints only.
-6. **`src/features/{workspace,optimization,volumes,settings}/*`** — Canonical surface ownership with `index.ts` as the public contract.
-7. **`src/lib/{rlm-api,workspace}/*`** — API clients, adapters, stores, frame shaping.
-8. **`src/stores/*`** — Cross-app shell/layout and navigation state.
+3. **`src/components/product/*`** — Reusable product compositions (empty states, skeletons, panels, shared recipes). Do not add chat, reasoning, or tool transcript UI here; use Agent Elements.
+4. **`src/features/layout/*`** — App chrome. Consumes workspace/volumes/settings through feature entrypoints only.
+5. **`src/features/{workspace,optimization,volumes,settings}/*`** — Canonical surface ownership with `index.ts` as the public contract.
+6. **`src/lib/{rlm-api,workspace}/*`** — API clients, adapters, stores, frame shaping.
+7. **`src/stores/*`** — Cross-app shell/layout and navigation state.
+
+### Restructuring Invariants
+
+The following layers were removed and must not be reintroduced:
+
+- **`src/components/ai-elements`** — **deleted**. All primitives have been either merged into `ui/` (code-block), rewritten on `agent-elements/` (trajectory-chain), or removed as dead code (prompt-input, chain-of-thought, reasoning). Do not install `@ai-elements` registry components.
+- **`src/features/workspace/composer`** — **deleted**. The orphaned `workspace-composer.tsx` and its legacy `PromptInput` dependency have been removed. The canonical composer is `InputBar` from `agent-elements/input-bar.tsx`.
+- **`src/screens`** — never existed. The stale `@/screens/*` lint rule has been removed from `vite.config.ts`.
+- **`components/tool-ui`** — retired. Tool transcript UI belongs under `components/agent-elements/tools/*`.
 
 ### Chat data flow (not Vercel `useChat`)
 
@@ -73,7 +82,7 @@ backend WS frames
 
 ### Import Boundaries (enforced in `vite.config.ts`)
 
-- `src/components/{ui,ai-elements,agent-elements,product}/*` **must not** import from `src/features/*` or `src/screens/*`.
+- `src/components/{ui,agent-elements,product}/*` **must not** import from `src/features/*`.
 - `src/lib/workspace/*` **must not** depend on workspace UI modules.
 - `src/routes/*` **must** import feature entrypoints, not deep feature modules.
 - `src/features/layout/*` **must** consume workspace/volumes/settings through their feature entrypoints or explicit public contracts.
@@ -91,9 +100,8 @@ Responsibility folders under `src/features/workspace/`:
 
 - `screen/` — route entry
 - `conversation/` — chat rendering
-- `composer/` — input / prompt UI
 - `sidepanel/` — workspace-local sidepanel, trace fallback, graph, and volume tabs
-- `inspection/` — detail panels
+- `inspection/` — detail panels (trajectory-chain uses agent-elements primitives, not chain-of-thought)
 - `workbench/` — execution trace / workbench
 - `session/` — session management
 
@@ -136,6 +144,7 @@ sidepanel.
 - **State:** Zustand + TanStack Query
 - **Styling:** Tailwind CSS v4 + `tw-animate-css` + `@theme inline`
 - **Testing:** Vitest (unit), Playwright (e2e)
+- **Dead-code analysis:** knip (`pnpm run lint:dead-code`)
 
 ---
 
@@ -155,6 +164,8 @@ pnpm run build
 pnpm run type-check
 pnpm run lint                # vp lint
 pnpm run lint:robustness     # alias for lint
+pnpm run lint:style-tokens   # style token guard (arbitrary values + raw palette colors)
+pnpm run lint:dead-code      # knip — unused files, exports, dependencies
 pnpm run format              # vp fmt
 pnpm run format:check        # vp fmt --check
 
@@ -168,8 +179,11 @@ pnpm run test:e2e
 pnpm run api:sync            # copy spec + regenerate types
 pnpm run api:check           # fail if drift
 
+# Dead-code analysis
+pnpm run lint:dead-code      # knip — find unused files, exports, dependencies
+
 # Full validation
-pnpm run check               # type-check + lint + test:unit + build + test:e2e
+pnpm run check               # type-check + lint + lint:style-tokens + lint:dead-code + test:unit + build + test:e2e
 ```
 
 ### Targeted Execution
@@ -191,6 +205,7 @@ pnpm run api:check
 pnpm run format
 pnpm run type-check
 pnpm run lint:robustness
+pnpm run lint:style-tokens
 pnpm run test:unit
 pnpm run build
 ```
@@ -207,37 +222,92 @@ pnpm run check
 
 ## Design & Styling Rules
 
-- Theme primitives live in `src/styles/globals.css`. Keep the Tailwind v4 baseline canonical.
+- Theme primitives live in `src/styles/globals.css` and `src/components/agent-elements/agent-ui.css`. Keep the Tailwind v4 baseline canonical.
 - Use **semantic tokens and shared variants** — avoid arbitrary colors or local token layers.
-- **Eliminate arbitrary Tailwind values**. The project maintains token-backed `@utility` classes for all font sizes. Do not introduce new `text-[Npx]`, `w-[Npx]`, `h-[Npx]`, `rounded-[Npx]`, `leading-[...]`, or `tracking-[...]` values. If a size is missing, add a design token and `@utility` in `globals.css` rather than using an arbitrary value.
-- **Typography utilities** (use these instead of arbitrary font sizes):
-  - `typo-micro` — 8px (`text-3xs`)
-  - `typo-helper` — 10px (`text-2xs`)
-  - `typo-body-xs` — 11px
-  - `typo-caption` — 12px (`text-xs`)
-  - `typo-body-sm` — 13px
-  - `typo-label` / `typo-label-regular` — 14px (`text-sm`)
-  - `typo-base` — 14px (base body)
-  - `typo-display` — 32px (`text-[2rem]`)
-  - `tracking-tight-custom` — `-0.18px` (sidebar, composer)
-  - `tracking-tighter-custom` — `-0.05em` (display headings)
-  - `tracking-wide-custom` — `0.12em` (uppercase labels)
-  - `tracking-wider-custom` — `0.08em` (uppercase mono labels)
-  - `leading-loose-custom` — `1.7142857` (file preview line numbers)
-- **Layout width utilities**:
-  - `max-w-4/5` — `80%`
-  - `max-w-message` — `95%`
-  - `max-w-skeleton` — `280px`
-  - `max-w-drawer-sm` — `200px`
-  - `max-w-drawer-xs` — `180px`
-  - `w-select-xl` — `132px`
-- **Runtime-driven styles** (e.g. dynamic colors from `STEP_TYPE_META`) must use CSS custom properties set via the `style` prop, consumed by `@utility` classes in `globals.css`. Do not use inline `style={{ color: ..., backgroundColor: ... }}` for repeated patterns. Example:
-  ```tsx
-  <div style={{ "--node-color": meta.color } as React.CSSProperties} className="node-color-text node-tint">
-  ```
-- **Shared visual recipes** belong in `src/components/product/*`, not duplicated locally. Current product components:
-  - `NodeBadge` — small badge/pill for graph nodes and execution metadata
-- Preserve shell/layout root stacking context for portaled overlays.
+- **Eliminate arbitrary Tailwind values**. The project maintains token-backed `@utility` classes for all font sizes, radii, and common dimensions. Do not introduce new `text-[Npx]`, `w-[Npx]`, `h-[Npx]`, `rounded-[Npx]`, `leading-[...]`, or `tracking-[...]` values. If a size is missing, add a design token and `@utility` in `globals.css` or `agent-ui.css` rather than using an arbitrary value.
+
+### Style Token Enforcement
+
+A CI guard (`pnpm run lint:style-tokens`) automatically fails when banned patterns are detected:
+
+- **Banned**: `text-[Npx]`, `rounded-[Npx]`, `bg-(red|emerald|amber|blue|green|yellow)-500`, `text-(red|emerald|amber|blue|green|yellow)-N`, `border-(red|emerald|amber|blue|green|yellow)-500`, `dark:text-(red|emerald|amber|blue|green|yellow)-N`
+- **Allowed**: token-bridge forms like `text-[length:var(--…)]`, `rounded-[calc(var(--…))]`, `rounded-[inherit]`
+- **Exception**: `src/features/settings/screen/settings-content.tsx` — theme-swatch illustrations use raw `bg-zinc-*` values (documented with a `theme-swatch:` comment)
+
+### Typography utilities (use these instead of arbitrary font sizes)
+
+- `typo-micro` — 8px (`text-3xs`)
+- `typo-helper` — 10px (`text-2xs`)
+- `typo-body-xs` — 11px
+- `typo-caption` — 12px (`text-xs`)
+- `typo-body-sm` — 13px
+- `typo-label` / `typo-label-regular` — 14px (`text-sm`)
+- `typo-base` — 14px (base body)
+- `typo-composer` — 14px / 1.6 line-height (chat composer textarea)
+- `typo-display` — 32px (`text-[2rem]`)
+- `tracking-tight-custom` — `-0.18px` (sidebar, composer)
+- `tracking-tighter-custom` — `-0.05em` (display headings)
+- `tracking-wide-custom` — `0.12em` (uppercase labels)
+- `tracking-wider-custom` — `0.08em` (uppercase mono labels)
+- `leading-loose-custom` — `1.7142857` (file preview line numbers)
+
+### Layout dimension utilities
+
+- `max-w-4/5` — `80%`
+- `max-w-message` — `95%`
+- `max-w-skeleton` — `280px`
+- `max-w-drawer-sm` — `200px`
+- `max-w-drawer-xs` — `180px`
+- `max-w-attachment` — `200px` (file attachment chips)
+- `max-w-sidebar-label` — `120px` (sidebar nav item labels)
+- `min-w-optimization-table` — `1080px` (optimization run history table)
+- `w-select-xl` — `132px`
+- `w-sheet-optimization` — `min(980px, 92vw)` (optimization run details sheet)
+
+### Height utilities
+
+- `h-info-bar` / `max-h-info-bar` — `34px` (input bar info strip)
+- `h-skeleton-row` — `28px` (skeleton loading rows)
+- `h-skeleton-row-lg` — `48px` (large skeleton loading rows)
+- `min-h-touch` — `44px` (touch-target minimum height)
+
+### Radius utilities (agent-ui.css)
+
+- `rounded-an-action-sm` — `4px` (small action buttons)
+- `rounded-an-action-md` — `6px` (medium action buttons, menu items)
+- `rounded-an-action-lg` — `8px` (popover surfaces, error message cards)
+
+### Status color tokens (auto dark-mode via `@theme inline`)
+
+- `bg-success` / `text-success` / `border-success` — green (completed, success)
+- `bg-warning` / `text-warning` / `border-warning` — amber (needs review, warning)
+- `bg-danger` / `text-danger` / `border-danger` — red (error, failed)
+- All support opacity modifiers: `bg-success/10`, `border-warning/30`, etc.
+
+### Shadow utilities
+
+- `shadow-sidebar-ring` — `0 0 0 1px hsl(var(--sidebar-border))` (sidebar outline variant)
+
+### Runtime-driven styles
+
+Dynamic colors (e.g. from `STEP_TYPE_META`) must use CSS custom properties set via the `style` prop, consumed by `@utility` classes in `globals.css`. Do not use inline `style={{ color: ..., backgroundColor: ... }}` for repeated patterns. Example:
+
+```tsx
+<div style={{ "--node-color": meta.color } as React.CSSProperties} className="node-color-text node-tint">
+```
+
+### Shared visual recipes
+
+Shared visual recipes belong in `src/components/product/*` or `src/components/agent-elements/input/*`, not duplicated locally. Current recipe components:
+
+- `NodeBadge` — small badge/pill for graph nodes and execution metadata
+- `ToolActionButton` — CVA primary/ghost/ghostSoft × sm/md/mdWide button for tool cards, approval footers, and question prompts
+- `CenteredErrorShell` — card-wrapped full-height centered error/empty-state shell (404, route-error-screen)
+- `PopoverSurface` / `popoverSurfaceClass` — shared popover surface recipe for input-bar, model-picker, mode-selector
+
+Preserve shell/layout root stacking context for portaled overlays.
+
+---
 
 ## React & Runtime Rules
 
@@ -258,7 +328,7 @@ pnpm run check
 ## Testing Conventions
 
 - Colocate tests under `__tests__/` when practical.
-- Tests for `src/lib/workspace/*` and `src/features/workspace/{conversation,composer,inspection,screen,sidepanel,session,workbench}/*` should import owners directly, not via route wrappers or compatibility barrels.
+- Tests for `src/lib/workspace/*` and `src/features/workspace/{conversation,inspection,screen,sidepanel,session,workbench}/*` should import owners directly, not via route wrappers or compatibility barrels.
 
 ---
 
@@ -309,15 +379,16 @@ Keep sync artifacts in the same change; never hand-edit generated output.
 
 ## Agent Elements and shadcn Registries
 
-[Agent Elements](https://agent-elements.21st.dev/docs) is the **canonical chat/agent UI kit**. Official guidance: **do not mix** Agent Elements with `ai-elements`, CopilotKit, or other chat kits for message/tool surfaces.
+[Agent Elements](https://agent-elements.21st.dev/docs) is the **canonical chat/agent UI kit**. Official guidance: **do not mix** Agent Elements with CopilotKit, `@ai-elements`, `@prompt-kit`, or other chat kits for message/tool surfaces.
 
 Registries are configured in [components.json](components.json):
 
-| Namespace         | URL                                                    | Use                                |
-| ----------------- | ------------------------------------------------------ | ---------------------------------- |
-| `@agent-elements` | `https://agent-elements.21st.dev/r/{name}.json`        | Chat shell, tool cards, input bar  |
-| `@ai-elements`    | `https://ai-sdk.dev/elements/api/registry/{name}.json` | Do not install new chat components |
-| `@prompt-kit`     | `https://www.prompt-kit.com/c/{name}.json`             | Avoid unless net-new capability    |
+| Namespace         | URL                                             | Use                               |
+| ----------------- | ----------------------------------------------- | --------------------------------- |
+| `@agent-elements` | `https://agent-elements.21st.dev/r/{name}.json` | Chat shell, tool cards, input bar |
+| `@prompt-kit`     | `https://www.prompt-kit.com/c/{name}.json`      | Avoid unless net-new capability   |
+
+> The `@ai-elements` registry is no longer configured. Do not install or import from `@ai-elements`.
 
 ### Install Agent Elements
 
@@ -338,28 +409,21 @@ import { BashTool } from "@/components/agent-elements/tools/bash-tool";
 
 ### Canonical Agent Elements (actively used)
 
-| Component           | Location                                    | Consumers                                               | Purpose                                              |
-| ------------------- | ------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------- |
-| `AgentChat`         | `agent-elements/agent-chat.tsx`             | `workspace-message-list.tsx`                            | Full chat shell (messages + input)                   |
-| `InputBar`          | `agent-elements/input-bar.tsx`              | `workspace-agent-input-bar.tsx`                         | Composer with mode/model pickers                     |
-| `Suggestions`       | `agent-elements/input/suggestions.tsx`      | `AgentChat` via `workspace-message-list.tsx`            | Quick-prompt chips (empty state + input)             |
-| Tool mapping        | `lib/workspace/agent-tool-parts.ts`         | `agent-chat-adapter.ts`, `execution-inspector-rows.tsx` | Shared tool part normalization                       |
-| Static tool helpers | `agent-elements/utils/static-tool-parts.ts` | workbench, inspector                                    | `ThinkingTool` steps outside chat transcripts        |
-| Tool cards          | `agent-elements/tools/*`                    | `agent-chat-adapter.ts` via `toolRenderers`             | Bash, Edit, Search, MCP, Subagent, Thinking, Generic |
-| `TextShimmer`       | `agent-elements/text-shimmer.tsx`           | tool rows, loading states                               | Streaming label shimmer                              |
-| `Streamdown`        | `ui/streamdown.tsx`                         | agent-elements markdown                                 | Canonical markdown renderer                          |
+| Component           | Location                                             | Consumers                                               | Purpose                                                                       |
+| ------------------- | ---------------------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `AgentChat`         | `agent-elements/agent-chat.tsx`                      | `workspace-message-list.tsx`                            | Full chat shell (messages + input)                                            |
+| `InputBar`          | `agent-elements/input-bar.tsx`                       | `workspace-agent-input-bar.tsx`                         | Composer with mode/model pickers                                              |
+| `Suggestions`       | `agent-elements/input/suggestions.tsx`               | `AgentChat` via `workspace-message-list.tsx`            | Quick-prompt chips (empty state + input)                                      |
+| `PopoverSurface`    | `agent-elements/input/popover-surface.tsx`           | `input-bar`, `model-picker`, `mode-selector`            | Shared popover surface recipe                                                 |
+| Tool mapping        | `lib/workspace/agent-tool-parts.ts`                  | `agent-chat-adapter.ts`, `execution-inspector-rows.tsx` | Shared tool part normalization                                                |
+| Static tool helpers | `agent-elements/utils/static-tool-parts.ts`          | workbench, inspector                                    | `ThinkingTool` steps outside chat transcripts                                 |
+| Tool cards          | `agent-elements/tools/*`                             | `agent-chat-adapter.ts` via `toolRenderers`             | Bash, Edit, Search, MCP, Subagent, Thinking, Generic                          |
+| `TextShimmer`       | `agent-elements/text-shimmer.tsx`                    | tool rows, loading states                               | Streaming label shimmer                                                       |
+| `Streamdown`        | `ui/streamdown.tsx`                                  | agent-elements markdown                                 | Canonical markdown renderer                                                   |
+| `CodeBlockViewer`   | `ui/code-block.tsx`                                  | `bash-tool.tsx`                                         | Rich code block with header, filename, copy button                            |
+| `TrajectoryChain`   | `features/workspace/inspection/trajectory-chain.tsx` | `trajectory-tab`, `trajectory-inspector-tab`            | Collapsible step chain (uses agent-elements primitives, not chain-of-thought) |
 
 Wire backend tools through `agent-chat-adapter.ts` → `ToolRenderer`. Shared normalization lives in `lib/workspace/agent-tool-parts.ts`. Unknown kinds should fall back to `GenericTool`.
-
-### Legacy `ai-elements/` (composer only)
-
-| Component        | Location                           | Consumers                | Notes                                                |
-| ---------------- | ---------------------------------- | ------------------------ | ---------------------------------------------------- |
-| `PromptInput`    | `ai-elements/prompt-input/`        | `workspace-composer.tsx` | Legacy composer; prefer `InputBar` for new work      |
-| `ChainOfThought` | `ai-elements/chain-of-thought.tsx` | —                        | Removed from execution inspector; do not reintroduce |
-| `Reasoning`      | `ai-elements/reasoning.tsx`        | tests only               | Prefer `ThinkingTool` via `static-tool-parts.ts`     |
-
-Do **not** install `Message`, `Conversation`, `Tool`, or other chat primitives from `@ai-elements` or `@prompt-kit`.
 
 ### Markdown
 
@@ -387,8 +451,11 @@ Do **not** install `Message`, `Conversation`, `Tool`, or other chat primitives f
 
 - `components.json` defines the `@/*` alias and the shadcn/Base UI style baseline.
 - Keep runtime labels, route behavior, and endpoint expectations aligned with the backend contract.
-- `src/screens/*` no longer exists. All feature logic lives in `src/features/*`, `src/lib/*`, or `src/components/product/*`.
-- `components/tool-ui/*` is retired; tool transcript UI belongs under `components/agent-elements/tools/*`.
+- All feature logic lives in `src/features/*`, `src/lib/*`, or `src/components/product/*`.
+- Tool transcript UI belongs under `components/agent-elements/tools/*`.
 - Optimization is a supported product surface at `/app/optimization`; History remains API-only until v1.1.
 - Do not recreate a screen-layer `workspace-adapter.ts`; adapter logic belongs in `src/lib/workspace/`.
 - The Volumes provider switcher is **page-scoped** and must not become a global runtime setting.
+- `code-block` lives in `ui/code-block.tsx` — both the simple (`CodeBlock`/`CodeBlockCode`/`CodeBlockGroup`) and rich (`CodeBlockViewer`/`CodeBlockHeader`/`CodeBlockFilename`/`CodeBlockCopyButton`/`CodeBlockActions`/`CodeBlockContent`) APIs.
+- `trajectory-chain.tsx` uses `agent-elements` `Collapsible` primitives directly — do not reintroduce `chain-of-thought` from `@ai-elements`.
+- The orphaned `workspace-composer.tsx` and its legacy `PromptInput` dependency have been deleted; do not recreate them.

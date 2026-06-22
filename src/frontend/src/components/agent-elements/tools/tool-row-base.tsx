@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useRef } from "react";
 import { Collapsible } from "@base-ui/react/collapsible";
 import { TextShimmer } from "../text-shimmer";
 import { SpiralLoader } from "../spiral-loader";
@@ -36,6 +37,7 @@ export function ToolRowBase({
 }: ToolRowBaseProps) {
   const isComplete = !isAnimating;
   const isExpanded = expanded ?? false;
+  const initialDefaultOpenRef = useRef(defaultOpen);
   const canToggle = expandable && (isComplete || isExpanded || isAnimating);
   const effectiveIcon = icon ?? (isAnimating ? <SpiralLoader size={12} /> : undefined);
 
@@ -102,7 +104,9 @@ export function ToolRowBase({
   }
 
   const rootProps =
-    expanded === undefined ? { defaultOpen } : { open: expanded, onOpenChange: onToggleExpand };
+    expanded === undefined
+      ? { defaultOpen: initialDefaultOpenRef.current }
+      : { open: expanded, onOpenChange: onToggleExpand };
 
   return (
     <Collapsible.Root className="flex flex-col gap-2 w-full" {...rootProps}>

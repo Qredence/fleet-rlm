@@ -15,7 +15,7 @@
  * />
  * ```
  */
-import { useMemo, useState, useCallback, type ReactNode } from "react";
+import { useMemo, useState, useCallback, useEffect, type ReactNode } from "react";
 import { ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,10 @@ export interface DataTableProps<T> {
   className?: string;
   /** Unique key extractor for rows. Falls back to index. */
   rowKey?: (row: T, index: number) => string | number;
+  /** Called when a data row is clicked. Makes rows interactive (cursor-pointer). */
+  onRowClick?: (row: T) => void;
+  /** Optional className applied to every data row `<tr>`. */
+  rowClassName?: string;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -74,6 +78,8 @@ export function DataTable<T extends Record<string, unknown>>({
   emptyMessage = "No data available.",
   className,
   rowKey,
+  onRowClick,
+  rowClassName,
 }: DataTableProps<T>) {
   /* ----- internal sort state (uncontrolled fallback) ----- */
   const [internalSort, setInternalSort] = useState<SortState<T> | null>(null);
@@ -100,6 +106,13 @@ export function DataTable<T extends Record<string, unknown>>({
   const paginationEnabled = pageSize > 0;
   const totalPages = paginationEnabled ? Math.max(1, Math.ceil(data.length / pageSize)) : 1;
   const safePage = Math.min(currentPage, totalPages - 1);
+
+  // Sync internalPage when data shrinks so it doesn't become stale
+  useEffect(() => {
+    if (controlledPage == null && safePage < internalPage) {
+      setInternalPage(safePage);
+    }
+  }, [safePage, internalPage, controlledPage]);
 
   const sortedRows = useMemo(() => {
     if (internalSort == null) return data;
@@ -204,7 +217,24 @@ export function DataTable<T extends Record<string, unknown>>({
               visibleRows.map((row, ri) => (
                 <tr
                   key={rowKey ? rowKey(row, ri) : ri}
-                  className="border-b border-border/50 last:border-0 hover:bg-muted/20 transition-colors"
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onKeyDown={
+                    onRowClick
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onRowClick(row);
+                          }
+                        }
+                      : undefined
+                  }
+                  role={onRowClick ? "button" : undefined}
+                  tabIndex={onRowClick ? 0 : undefined}
+                  className={cn(
+                    "border-b border-border/50 last:border-0 hover:bg-muted/20 transition-colors focus-visible:bg-muted/30 focus-visible:outline-none",
+                    onRowClick && "cursor-pointer",
+                    rowClassName,
+                  )}
                 >
                   {columns.map((col, ci) => (
                     <td key={ci} className={cn("px-3 py-2 text-foreground", col.className)}>

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import Select, and_, func, or_, select, update
+from sqlalchemy import Select, and_, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from fleet_rlm.utils.session_titles import derive_session_title, is_placeholder_session_title
@@ -291,6 +291,87 @@ class ChatRepository(RepositoryContextMixin):
             )
             result = await session.execute(stmt)
             return result.scalar_one()
+
+    async def replace_chat_turns_from_history(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        turns: Sequence[dict[str, Any]],
+        user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> None:
+        """Replace persisted chat turns for a session from exported runtime history."""
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
+            session_stmt = (
+                select(ChatSession)
+                .where(
+                    and_(
+                        ChatSession.tenant_id == tenant_id,
+                        ChatSession.workspace_id == resolved_workspace_id,
+                        ChatSession.id == session_id,
+                    )
+                )
+                .with_for_update()
+            )
+            session_row = (await session.execute(session_stmt)).scalar_one_or_none()
+            if session_row is None:
+                raise ValueError(
+                    f"Chat session not found for tenant={tenant_id} "
+                    f"workspace={resolved_workspace_id} session={session_id}"
+                )
+
+            await session.execute(
+                delete(ChatTurn).where(
+                    and_(
+                        ChatTurn.tenant_id == tenant_id,
+                        ChatTurn.workspace_id == resolved_workspace_id,
+                        ChatTurn.session_id == session_id,
+                    )
+                )
+            )
+
+            normalized_turns = [
+                (
+                    str(turn.get("user_message") or "").strip(),
+                    str(turn.get("response") or turn.get("assistant_message") or ""),
+                )
+                for turn in turns
+                if str(turn.get("user_message") or "").strip()
+            ]
+            session_row.monotonic_turn_counter = len(normalized_turns)
+            session_row.last_activity_at = _utc_now()
+            session_row.updated_at = _utc_now()
+            if normalized_turns and is_placeholder_session_title(
+                session_row.title,
+                external_session_id=_session_external_id(session_row.metadata_json),
+            ):
+                session_row.title = derive_session_title(normalized_turns[0][0])
+
+            if not normalized_turns:
+                return
+
+            await session.execute(
+                insert(ChatTurn),
+                [
+                    {
+                        "tenant_id": tenant_id,
+                        "workspace_id": resolved_workspace_id,
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "turn_index": index,
+                        "user_message": user_message,
+                        "assistant_message": assistant_message,
+                        "status": ChatTurnStatus.COMPLETED,
+                        "degraded": False,
+                    }
+                    for index, (user_message, assistant_message) in enumerate(normalized_turns)
+                ],
+            )
 
     async def list_chat_sessions(
         self,

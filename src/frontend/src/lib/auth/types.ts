@@ -14,7 +14,7 @@ export interface UserProfile {
 export interface AuthContextValue {
   isAuthenticated: boolean;
   user: UserProfile | null;
-  login: () => Promise<boolean>;
   logout: () => void;
   setPlan: (plan: PlanTier) => void;
+  refresh?: () => Promise<void>;
 }

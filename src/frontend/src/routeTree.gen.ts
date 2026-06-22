@@ -11,18 +11,19 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as LogoutRouteImport } from './routes/logout'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as R404RouteImport } from './routes/404'
 import { Route as SplatRouteImport } from './routes/$'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app/index'
+import { Route as AuthPathnameRouteImport } from './routes/auth.$pathname'
 import { Route as AppWorkspaceRouteImport } from './routes/app/workspace'
 import { Route as AppVolumesRouteImport } from './routes/app/volumes'
 import { Route as AppSettingsRouteImport } from './routes/app/settings'
 import { Route as AppOptimizationRouteImport } from './routes/app/optimization'
 import { Route as AppSplatRouteImport } from './routes/app/$'
+import { Route as AccountPathnameRouteImport } from './routes/account.$pathname'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -32,11 +33,6 @@ const SignupRoute = SignupRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LogoutRoute = LogoutRouteImport.update({
-  id: '/logout',
-  path: '/logout',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -69,6 +65,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
+const AuthPathnameRoute = AuthPathnameRouteImport.update({
+  id: '/auth/$pathname',
+  path: '/auth/$pathname',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppWorkspaceRoute = AppWorkspaceRouteImport.update({
   id: '/workspace',
   path: '/workspace',
@@ -94,6 +95,11 @@ const AppSplatRoute = AppSplatRouteImport.update({
   path: '/$',
   getParentRoute: () => AppRoute,
 } as any)
+const AccountPathnameRoute = AccountPathnameRouteImport.update({
+  id: '/account/$pathname',
+  path: '/account/$pathname',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -101,14 +107,15 @@ export interface FileRoutesByFullPath {
   '/404': typeof R404Route
   '/app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
-  '/logout': typeof LogoutRoute
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
+  '/account/$pathname': typeof AccountPathnameRoute
   '/app/$': typeof AppSplatRoute
   '/app/optimization': typeof AppOptimizationRoute
   '/app/settings': typeof AppSettingsRoute
   '/app/volumes': typeof AppVolumesRoute
   '/app/workspace': typeof AppWorkspaceRoute
+  '/auth/$pathname': typeof AuthPathnameRoute
   '/app/': typeof AppIndexRoute
 }
 export interface FileRoutesByTo {
@@ -116,14 +123,15 @@ export interface FileRoutesByTo {
   '/$': typeof SplatRoute
   '/404': typeof R404Route
   '/login': typeof LoginRoute
-  '/logout': typeof LogoutRoute
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
+  '/account/$pathname': typeof AccountPathnameRoute
   '/app/$': typeof AppSplatRoute
   '/app/optimization': typeof AppOptimizationRoute
   '/app/settings': typeof AppSettingsRoute
   '/app/volumes': typeof AppVolumesRoute
   '/app/workspace': typeof AppWorkspaceRoute
+  '/auth/$pathname': typeof AuthPathnameRoute
   '/app': typeof AppIndexRoute
 }
 export interface FileRoutesById {
@@ -133,14 +141,15 @@ export interface FileRoutesById {
   '/404': typeof R404Route
   '/app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
-  '/logout': typeof LogoutRoute
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRoute
+  '/account/$pathname': typeof AccountPathnameRoute
   '/app/$': typeof AppSplatRoute
   '/app/optimization': typeof AppOptimizationRoute
   '/app/settings': typeof AppSettingsRoute
   '/app/volumes': typeof AppVolumesRoute
   '/app/workspace': typeof AppWorkspaceRoute
+  '/auth/$pathname': typeof AuthPathnameRoute
   '/app/': typeof AppIndexRoute
 }
 export interface FileRouteTypes {
@@ -151,14 +160,15 @@ export interface FileRouteTypes {
     | '/404'
     | '/app'
     | '/login'
-    | '/logout'
     | '/settings'
     | '/signup'
+    | '/account/$pathname'
     | '/app/$'
     | '/app/optimization'
     | '/app/settings'
     | '/app/volumes'
     | '/app/workspace'
+    | '/auth/$pathname'
     | '/app/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -166,14 +176,15 @@ export interface FileRouteTypes {
     | '/$'
     | '/404'
     | '/login'
-    | '/logout'
     | '/settings'
     | '/signup'
+    | '/account/$pathname'
     | '/app/$'
     | '/app/optimization'
     | '/app/settings'
     | '/app/volumes'
     | '/app/workspace'
+    | '/auth/$pathname'
     | '/app'
   id:
     | '__root__'
@@ -182,14 +193,15 @@ export interface FileRouteTypes {
     | '/404'
     | '/app'
     | '/login'
-    | '/logout'
     | '/settings'
     | '/signup'
+    | '/account/$pathname'
     | '/app/$'
     | '/app/optimization'
     | '/app/settings'
     | '/app/volumes'
     | '/app/workspace'
+    | '/auth/$pathname'
     | '/app/'
   fileRoutesById: FileRoutesById
 }
@@ -199,9 +211,10 @@ export interface RootRouteChildren {
   R404Route: typeof R404Route
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
-  LogoutRoute: typeof LogoutRoute
   SettingsRoute: typeof SettingsRoute
   SignupRoute: typeof SignupRoute
+  AccountPathnameRoute: typeof AccountPathnameRoute
+  AuthPathnameRoute: typeof AuthPathnameRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -218,13 +231,6 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/logout': {
-      id: '/logout'
-      path: '/logout'
-      fullPath: '/logout'
-      preLoaderRoute: typeof LogoutRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -269,6 +275,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/auth/$pathname': {
+      id: '/auth/$pathname'
+      path: '/auth/$pathname'
+      fullPath: '/auth/$pathname'
+      preLoaderRoute: typeof AuthPathnameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app/workspace': {
       id: '/app/workspace'
       path: '/workspace'
@@ -304,6 +317,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSplatRouteImport
       parentRoute: typeof AppRoute
     }
+    '/account/$pathname': {
+      id: '/account/$pathname'
+      path: '/account/$pathname'
+      fullPath: '/account/$pathname'
+      preLoaderRoute: typeof AccountPathnameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -333,9 +353,10 @@ const rootRouteChildren: RootRouteChildren = {
   R404Route: R404Route,
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
-  LogoutRoute: LogoutRoute,
   SettingsRoute: SettingsRoute,
   SignupRoute: SignupRoute,
+  AccountPathnameRoute: AccountPathnameRoute,
+  AuthPathnameRoute: AuthPathnameRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -32,10 +32,10 @@ const statusBadgeVariants = cva(
         idle: "bg-muted/50 text-muted-foreground",
         bootstrapping: "bg-accent/10 text-accent-foreground",
         running: "bg-primary/10 text-primary",
-        completed: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+        completed: "bg-success/10 text-success",
         error: "bg-destructive/10 text-destructive",
         cancelled: "bg-muted/50 text-muted-foreground",
-        needs_human_review: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+        needs_human_review: "bg-warning/10 text-warning",
         cancelling: "bg-muted/50 text-muted-foreground",
       },
       size: {
@@ -111,10 +111,10 @@ const statusIndicatorVariants = cva("inline-flex size-2 shrink-0 rounded-full", 
       idle: "bg-muted-foreground/50",
       bootstrapping: "bg-accent animate-pulse",
       running: "bg-primary animate-pulse",
-      completed: "bg-emerald-500",
+      completed: "bg-success",
       error: "bg-destructive",
       cancelled: "bg-muted-foreground/50",
-      needs_human_review: "bg-amber-500 animate-pulse",
+      needs_human_review: "bg-warning animate-pulse",
       cancelling: "bg-muted-foreground/50 animate-pulse",
     },
   },
@@ -146,8 +146,8 @@ const statusMessageVariants = cva("flex items-start gap-3 rounded-lg border p-4 
   variants: {
     variant: {
       info: "border-border bg-muted/30 text-foreground",
-      success: "border-emerald-500/30 bg-emerald-500/5 text-foreground",
-      warning: "border-amber-500/30 bg-amber-500/5 text-foreground",
+      success: "border-success/30 bg-success/5 text-foreground",
+      warning: "border-warning/30 bg-warning/5 text-foreground",
       error: "border-destructive/30 bg-destructive/5 text-foreground",
       action: "border-primary/30 bg-primary/5 text-foreground",
     },
@@ -186,8 +186,8 @@ export function StatusMessage({
       <Icon
         className={cn(
           "mt-0.5 size-4 shrink-0",
-          variant === "success" && "text-emerald-600 dark:text-emerald-400",
-          variant === "warning" && "text-amber-600 dark:text-amber-400",
+          variant === "success" && "text-success",
+          variant === "warning" && "text-warning",
           variant === "error" && "text-destructive",
           variant === "action" && "text-primary",
           variant === "info" && "text-muted-foreground",
@@ -212,7 +212,7 @@ interface ExecutionProgressProps {
 }
 
 export function ExecutionProgress({ status, className }: ExecutionProgressProps) {
-  const isActive = status === "running" || status === "bootstrapping";
+  const isActive = status === "running" || status === "bootstrapping" || status === "cancelling";
   const isComplete = status === "completed";
   const isError = status === "error";
 
@@ -233,9 +233,9 @@ export function ExecutionProgress({ status, className }: ExecutionProgressProps)
         className={cn(
           "h-full rounded-full transition-all duration-500",
           isActive && "animate-progress-indeterminate bg-primary",
-          isComplete && "w-full bg-emerald-500",
+          isComplete && "w-full bg-success",
           isError && "w-full bg-destructive",
-          status === "needs_human_review" && "w-3/4 bg-amber-500",
+          status === "needs_human_review" && "w-3/4 bg-warning",
         )}
       />
     </div>

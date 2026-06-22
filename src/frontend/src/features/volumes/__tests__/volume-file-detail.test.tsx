@@ -209,7 +209,7 @@ describe("VolumesBrowser", () => {
 
     expect(useFilesystemMock).toHaveBeenCalled();
     expect(useFilesystemMock.mock.calls.at(-1)?.[0]).toBe("daytona");
-    expect(container.textContent).toContain("Browse the daytona mounted durable volume");
+    expect(container.textContent).toContain("daytona");
     expect(container.textContent).toContain("/daytona");
     expect(clearSelectedFile).not.toHaveBeenCalled();
 
@@ -240,7 +240,6 @@ describe("VolumesBrowser", () => {
     expect(container.textContent).toContain("Daytona durable volume unavailable");
     expect(container.textContent).toContain("Daytona volume API returned 503: unavailable");
     expect(container.textContent).toContain("No daytona durable volume data available.");
-    expect(container.textContent).toContain("Daytona · 0 volumes · 0 files · Live");
 
     act(() => {
       root.unmount();

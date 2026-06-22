@@ -2,6 +2,7 @@
 
 import { memo, useState, useCallback, useRef, useEffect } from "react";
 import type { ChatStatus } from "ai";
+import { popoverSurfaceClass } from "./input/popover-surface";
 import { cn } from "./utils/cn";
 
 type InputConfig = {
@@ -217,9 +218,9 @@ export const InputBar = memo(function InputBar({
   const infoBarNode = shouldShowInfoBar ? (
     <div
       className={cn(
-        "flex items-center justify-between gap-3 px-3 h-[34px]",
+        "flex items-center justify-between gap-3 px-3 h-info-bar",
         "transition-all duration-150 ease-out overflow-hidden",
-        isInfoBarOpen ? "opacity-100 max-h-[34px]" : "opacity-0 max-h-0",
+        isInfoBarOpen ? "opacity-100 max-h-info-bar" : "opacity-0 max-h-0",
         infoBarPosition === "top"
           ? "rounded-t-an-input-border-radius"
           : "rounded-b-an-input-border-radius",
@@ -238,7 +239,7 @@ export const InputBar = memo(function InputBar({
           <button
             type="button"
             onClick={infoBarData.action.onClick}
-            className="h-6 px-2 rounded-[4px] text-xs font-medium bg-an-primary-color text-an-send-button-color hover:bg-an-primary-color/90 active:scale-[0.98] transition-[background-color,transform] duration-150"
+            className="h-6 px-2 rounded-an-action-sm text-xs font-medium bg-an-primary-color text-an-send-button-color hover:bg-an-primary-color/90 active:scale-[0.98] transition-[background-color,transform] duration-150"
           >
             {infoBarData.action.label}
           </button>
@@ -314,7 +315,7 @@ export const InputBar = memo(function InputBar({
                 type="button"
                 onClick={handleQuestionPrevious}
                 disabled={!canGoPrev}
-                className="size-5 inline-flex items-center justify-center rounded-[4px] hover:bg-an-background-secondary disabled:opacity-40"
+                className="size-5 inline-flex items-center justify-center rounded-an-action-sm hover:bg-an-background-secondary disabled:opacity-40"
                 aria-label="Previous question"
               >
                 <IconChevronUp className="w-3.5 h-3.5" />
@@ -326,7 +327,7 @@ export const InputBar = memo(function InputBar({
                 type="button"
                 onClick={handleQuestionNext}
                 disabled={!canGoNext}
-                className="size-5 inline-flex items-center justify-center rounded-[4px] hover:bg-an-background-secondary disabled:opacity-40"
+                className="size-5 inline-flex items-center justify-center rounded-an-action-sm hover:bg-an-background-secondary disabled:opacity-40"
                 aria-label="Next question"
               >
                 <IconChevronDown className="w-3.5 h-3.5" />
@@ -399,26 +400,22 @@ export const InputBar = memo(function InputBar({
     showAttach && onAttach ? (
       <Popover open={isAttachMenuOpen} onOpenChange={setIsAttachMenuOpen}>
         <PopoverTrigger render={<AttachmentButton />} />
-        <PopoverContent
-          align="start"
-          side="top"
-          className="w-46 rounded-[8px] border-border/80 bg-an-input-background p-1 text-an-foreground shadow-lg"
-        >
+        <PopoverContent align="start" side="top" className={cn("w-46", popoverSurfaceClass)}>
           <button
             type="button"
             onClick={() => {
               setIsAttachMenuOpen(false);
               onAttach();
             }}
-            className="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12px] leading-4 transition-colors hover:bg-foreground/6"
+            className="an-popover-option an-popover-text flex w-full items-center text-left transition-colors"
           >
-            <IconFileText className="size-3.5 shrink-0" />
+            <IconFileText className="size-3.5 shrink-0 text-an-foreground-muted" />
             <span className="font-medium">Add document</span>
           </button>
           <button
             type="button"
             disabled
-            className="flex w-full cursor-not-allowed items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12px] leading-4 text-foreground/35"
+            className="an-popover-option an-popover-text flex w-full cursor-not-allowed items-center text-left text-an-foreground-muted opacity-50"
           >
             <IconPlugConnected className="size-3.5 shrink-0" />
             <span className="font-medium">Connectors</span>
@@ -440,8 +437,8 @@ export const InputBar = memo(function InputBar({
           {questionBarNode}
           <div
             className={cn(
-              "relative cursor-text rounded-an-input-border-radius bg-an-input-background shadow-2xs ring-1 ring-foreground/10 transition-[box-shadow] duration-75 ease-in-out",
-              "focus-within:ring-2 focus-within:ring-an-primary-color/60",
+              "an-input-shell relative cursor-text rounded-an-input-border-radius border bg-an-input-background transition-all duration-100 ease-in-out",
+              "focus-within:border-an-primary-color focus-within:ring-1 focus-within:ring-an-primary-color",
               isDragOver && "ring-2 ring-an-primary-color",
             )}
             onClick={handleContainerClick}
@@ -493,9 +490,9 @@ export const InputBar = memo(function InputBar({
             )}
 
             {/* Text input or typing animation text */}
-            <div className="pt-3 pb-0 pr-3 pl-3.5 min-h-[44px]">
+            <div className="pb-0 pl-3.5 pr-3 pt-3">
               {isTyping ? (
-                <div className="w-full text-[14px] leading-[1.6] text-an-foreground-muted">
+                <div className="w-full typo-composer text-an-foreground-muted">
                   <span>{displayedText}</span>
                   <span className="inline-block w-[2px] h-[1em] ml-px align-text-bottom bg-an-foreground animate-an-blink" />
                 </div>
@@ -511,7 +508,7 @@ export const InputBar = memo(function InputBar({
                     disabled={disabled}
                     rows={1}
                     className={cn(
-                      "peer w-full resize-none bg-transparent border-0 outline-none text-[14px] leading-[1.6] text-an-foreground placeholder:text-an-input-placeholder-color",
+                      "peer w-full resize-none bg-transparent border-0 outline-none typo-composer text-an-foreground placeholder:text-an-input-placeholder-color",
                       "overflow-hidden",
                       disabled && "opacity-50 cursor-not-allowed",
                     )}
@@ -522,8 +519,8 @@ export const InputBar = memo(function InputBar({
             </div>
 
             {/* Toolbar */}
-            <div className="flex items-center justify-between gap-3 px-2 pt-1 pb-2">
-              <div className="flex items-center gap-1 min-w-0">
+            <div className="flex min-h-an-input-toolbar-height items-center justify-between gap-3 px-3 pb-2 pt-1">
+              <div className="flex min-w-0 items-center gap-1">
                 {!attachRight && attachButtonNode}
                 {leftActions}
               </div>

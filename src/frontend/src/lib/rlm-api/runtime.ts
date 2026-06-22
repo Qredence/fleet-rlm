@@ -1,5 +1,6 @@
-import { RlmApiError, rlmApiClient } from "@/lib/rlm-api/client";
+import { RlmApiError } from "@/lib/rlm-api/client";
 import { rlmApiConfig } from "@/lib/rlm-api/config";
+import { typedClient, unwrap, withTimeout } from "@/lib/rlm-api/typed-client";
 import {
   applyMockRuntimeUpdates,
   getMockLmTest,
@@ -7,12 +8,7 @@ import {
   getMockRuntimeSettings,
   getMockRuntimeStatus,
 } from "@/lib/data/mock/runtime";
-import type {
-  RuntimeConnectivityTestResponse,
-  RuntimeSettingsSnapshot,
-  RuntimeSettingsUpdateResponse,
-  RuntimeStatusResponse,
-} from "@/lib/rlm-api/types";
+import type { RuntimeConnectivityTestResponse } from "@/lib/rlm-api/types";
 
 export interface RuntimeSettingsPatchInput {
   updates: Record<string, string>;
@@ -65,11 +61,8 @@ async function runRuntimeConnectionTest(
 ) {
   return withRuntimeFallback(async () => {
     try {
-      return await rlmApiClient.post<RuntimeConnectivityTestResponse>(
-        path,
-        undefined,
-        signal,
-        RUNTIME_CONNECTION_TEST_TIMEOUT_MS,
+      return await unwrap(
+        typedClient.POST(path, { signal: withTimeout(signal, RUNTIME_CONNECTION_TEST_TIMEOUT_MS) }),
       );
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
@@ -85,7 +78,7 @@ async function runRuntimeConnectionTest(
 export const runtimeEndpoints = {
   settings(signal?: AbortSignal) {
     return withRuntimeFallback(
-      () => rlmApiClient.get<RuntimeSettingsSnapshot>("/api/v1/runtime/settings", signal),
+      () => unwrap(typedClient.GET("/api/v1/runtime/settings", { signal: withTimeout(signal) })),
       () => getMockRuntimeSettings(),
     );
   },
@@ -93,10 +86,11 @@ export const runtimeEndpoints = {
   patchSettings(input: RuntimeSettingsPatchInput, signal?: AbortSignal) {
     return withRuntimeFallback(
       () =>
-        rlmApiClient.patch<RuntimeSettingsUpdateResponse>(
-          "/api/v1/runtime/settings",
-          input,
-          signal,
+        unwrap(
+          typedClient.PATCH("/api/v1/runtime/settings", {
+            body: { updates: input.updates },
+            signal: withTimeout(signal),
+          }),
         ),
       () => applyMockRuntimeUpdates(input.updates),
       shouldUseRuntimeWriteFallback,
@@ -123,7 +117,7 @@ export const runtimeEndpoints = {
 
   status(signal?: AbortSignal) {
     return withRuntimeFallback(
-      () => rlmApiClient.get<RuntimeStatusResponse>("/api/v1/runtime/status", signal),
+      () => unwrap(typedClient.GET("/api/v1/runtime/status", { signal: withTimeout(signal) })),
       () => getMockRuntimeStatus(),
     );
   },

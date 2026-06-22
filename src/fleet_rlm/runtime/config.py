@@ -116,6 +116,26 @@ def _import_dspy() -> Any:
     return dspy
 
 
+def configure_dspy_cache_security(dspy_module: Any | None = None) -> None:
+    """Keep DSPy's disk-backed pickle cache disabled unless explicitly enabled."""
+    module = dspy_module or _import_dspy()
+    configure_cache = getattr(module, "configure_cache", None)
+    if configure_cache is None:
+        return
+
+    enable_disk_cache = _env_bool(os.getenv("FLEET_RLM_ENABLE_DSPY_DISK_CACHE"), default=False)
+    cache_kwargs: dict[str, Any] = {
+        "enable_disk_cache": enable_disk_cache,
+        "enable_memory_cache": True,
+        "restrict_pickle": True,
+    }
+    try:
+        configure_cache(**cache_kwargs)
+    except TypeError:
+        cache_kwargs.pop("restrict_pickle")
+        configure_cache(**cache_kwargs)
+
+
 def _normalize_adapter_name(value: str | None) -> str | None:
     if value is None:
         return None
@@ -287,6 +307,7 @@ def build_dspy_context(
         return nullcontext()
 
     dspy = _import_dspy()
+    configure_dspy_cache_security(dspy)
     return dspy.context(**kwargs)
 
 
@@ -327,6 +348,7 @@ def configure_planner_from_env(*, env_file: Path | None = None) -> bool:
         return False
 
     dspy = _import_dspy()
+    configure_dspy_cache_security(dspy)
     planner_lm = _build_lm(**planner_lm_kwargs)
     configure_kwargs: dict[str, Any] = {"lm": planner_lm}
     adapter = get_default_dspy_adapter_from_env(env_file=env_file)
@@ -354,6 +376,7 @@ def get_planner_lm_from_env(*, env_file: Path | None = None, model_name: str | N
     planner_lm_kwargs = _planner_lm_kwargs(model_name=model_name)
     if planner_lm_kwargs is None:
         return None
+    configure_dspy_cache_security()
     return _build_lm(**planner_lm_kwargs)
 
 
@@ -395,7 +418,9 @@ def resolve_lm(
     if role == "judge":
         if not model_name:
             return None
-        return _import_dspy().LM(model_name, temperature=0.0)
+        dspy = _import_dspy()
+        configure_dspy_cache_security(dspy)
+        return dspy.LM(model_name, temperature=0.0)
     raise ValueError(f"Unknown LM role: {role!r}")
 
 
@@ -462,6 +487,7 @@ def get_delegate_lm_from_env(
     if delegate_lm_kwargs is None:
         return None
     try:
+        configure_dspy_cache_security()
         return _build_lm(**delegate_lm_kwargs)
     except Exception as exc:
         logger.warning(
@@ -492,6 +518,7 @@ def get_delegate_small_lm_from_env(
     if delegate_small_lm_kwargs is None:
         return None
     try:
+        configure_dspy_cache_security()
         return _build_lm(**delegate_small_lm_kwargs)
     except Exception as exc:
         logger.warning(

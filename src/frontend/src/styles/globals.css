@@ -13,6 +13,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "@neondatabase/auth-ui/tailwind";
 @import "@fontsource-variable/inter";
 @import "../components/agent-elements/agent-ui.css";
 
@@ -188,6 +189,11 @@
   letter-spacing: var(--font-text-13px-tracking);
 }
 
+@utility typo-composer {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
 /* ── Node color utilities (graph-step-node) ────────────────────────── */
 /* These reference the --node-color custom property set on the node.   */
 
@@ -310,8 +316,66 @@
   max-width: 180px;
 }
 
+@utility max-w-workbench-composer {
+  max-width: 664px;
+}
+
 @utility w-select-xl {
   width: 132px;
+}
+
+/* ── Action / tool / composer geometry utilities ─────────────────── */
+
+@utility max-w-attachment {
+  max-width: 200px;
+}
+
+@utility max-w-sidebar-label {
+  max-width: 120px;
+}
+
+@utility min-w-optimization-table {
+  min-width: 1080px;
+}
+
+@utility w-sheet-optimization {
+  width: min(980px, 92vw);
+}
+
+@utility h-info-bar {
+  height: 34px;
+}
+
+@utility max-h-info-bar {
+  max-height: 34px;
+}
+
+@utility h-skeleton-row {
+  height: 28px;
+}
+
+@utility h-skeleton-row-lg {
+  height: 48px;
+}
+
+@utility min-h-touch {
+  min-height: 44px;
+}
+
+@utility max-h-tool-collapsed-sm {
+  max-height: 120px;
+}
+
+@utility max-h-tool-collapsed-md {
+  max-height: 175px;
+}
+
+@utility max-h-tool-collapsed-lg {
+  max-height: 260px;
+}
+
+@utility shadow-sidebar-ring {
+  box-shadow: 0 0 0 1px hsl(var(--sidebar-border));
 }
 
 @utility tracking-tight-custom {
@@ -541,6 +605,10 @@
 }
 
 @utility volume-tree-row {
+  padding-left: calc(var(--tree-indent-base) + (var(--tree-depth, 0) * var(--tree-indent-step)));
+}
+
+@utility tree-row {
   padding-left: calc(var(--tree-indent-base) + (var(--tree-depth, 0) * var(--tree-indent-step)));
 }
 
@@ -1005,19 +1073,19 @@
  */
 [data-theme="dark"],
 .dark {
-  --background: #212121;
+  --background: #0d0d0d;
   --foreground: #fff;
-  --card: #303030;
+  --card: #181818;
   --card-foreground: #fff;
-  --popover: #303030;
+  --popover: #181818;
   --popover-foreground: #fff;
   --primary: #f3f3f3;
   --primary-foreground: #0d0d0d;
-  --secondary: #303030;
+  --secondary: #242424;
   --secondary-foreground: #fff;
-  --muted: #303030;
+  --muted: #242424;
   --muted-foreground: #afafaf;
-  --accent: #303030;
+  --accent: #242424;
   --accent-foreground: #fff;
   --destructive: #e02e2a;
   --destructive-foreground: #fff;
@@ -1025,13 +1093,13 @@
   --border-subtle: color-mix(in oklab, #fff 6%, transparent);
   --border-strong: color-mix(in oklab, #fff 20%, transparent);
   --input: color-mix(in oklab, #fff 15%, transparent);
-  --input-background: #212121;
+  --input-background: #0d0d0d;
   --ring: #8c8c8c;
   --sidebar: #181818;
   --sidebar-foreground: #fff;
   --sidebar-primary: #f3f3f3;
   --sidebar-primary-foreground: #0d0d0d;
-  --sidebar-accent: #303030;
+  --sidebar-accent: #262626;
   --sidebar-accent-foreground: #fff;
   --sidebar-border: color-mix(in oklab, #fff 12%, transparent);
   --sidebar-ring: #8c8c8c;
@@ -1583,6 +1651,34 @@ li {
   font-size: var(--font-text-sm-size);
 }
 
+/* Ensure sidebar buttons have absolutely no visible borders or outline/focus rings in all states */
+[data-sidebar="sidebar"] button,
+[data-sidebar="sidebar"] [role="button"],
+[data-slot="sidebar"] button,
+[data-slot="sidebar"] [role="button"],
+[data-slot="sidebar-inner"] button,
+[data-slot="sidebar-inner"] [role="button"] {
+  border: none !important;
+  border-width: 0px !important;
+  border-color: transparent !important;
+  outline: none !important;
+  outline-width: 0px !important;
+  box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-width: 0px !important;
+  --tw-ring-color: transparent !important;
+}
+
+/* Hover-reveal custom scrollbar specifically for the session list */
+.scroll-area-hover-reveal [data-orientation="vertical"] {
+  opacity: 0;
+  transition: opacity 150ms ease-in-out !important;
+}
+
+.scroll-area-hover-reveal:hover [data-orientation="vertical"] {
+  opacity: 1;
+}
+
 /* ── Table ──────────────────────────────────────────────────────── */
 [data-slot="table"] {
   font-size: var(--font-text-sm-size);
@@ -1942,4 +2038,12 @@ li {
 .artifact-graph-flow .artifact-graph-edge-chrono + .react-flow__edge-textwrapper,
 .artifact-graph-flow .artifact-graph-edge-chrono .react-flow__edge-text {
   display: none;
+}
+
+/* ── Visual JSON Tree View Wrapping ──────────────────────────────── */
+.visual-json-tree,
+.visual-json-tree * {
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
 }

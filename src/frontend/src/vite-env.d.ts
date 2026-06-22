@@ -11,14 +11,12 @@ interface ImportMetaEnv {
   readonly VITE_MOCK_MODE?: string;
   /** Marks Playwright-driven dev servers so test-only overlays can be disabled. */
   readonly VITE_E2E?: string;
-  /** Microsoft Entra (Azure AD) application client ID. */
-  readonly VITE_ENTRA_CLIENT_ID?: string;
-  /** Microsoft Entra authority URL. */
-  readonly VITE_ENTRA_AUTHORITY?: string;
-  /** Comma-separated OAuth scopes for Entra token requests. */
-  readonly VITE_ENTRA_SCOPES?: string;
-  /** Redirect path after Entra login/logout. */
-  readonly VITE_ENTRA_REDIRECT_PATH?: string;
+  /** Neon Auth public branch URL. */
+  readonly VITE_NEON_AUTH_URL?: string;
+  /** Server-side Neon Auth URL exposed by Vite for local development. */
+  readonly NEON_AUTH_URL?: string;
+  /** Comma-separated Neon Auth social providers enabled in this deployment. */
+  readonly VITE_NEON_AUTH_SOCIAL_PROVIDERS?: string;
   /** PostHog analytics write key. */
   readonly VITE_PUBLIC_POSTHOG_API_KEY?: string;
   /** PostHog ingest host URL. */

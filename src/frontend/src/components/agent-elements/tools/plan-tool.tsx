@@ -1,5 +1,6 @@
 import { memo, useState } from "react";
 import { IconChevronsDown, IconChevronsUp, IconFileDescription } from "@tabler/icons-react";
+import { ToolActionButton } from "@/components/product/tool-action-button";
 import { Markdown } from "../markdown";
 import { IconSpinner } from "../icons";
 import { areToolPropsEqual, getToolStatus } from "../utils/format-tool";
@@ -102,21 +103,18 @@ export const PlanTool = memo(function PlanTool({ part, chatStatus }: PlanToolPro
                 <div className="absolute inset-x-0 bottom-0 h-16 pb-2 pl-3.5 pr-2">
                   <div className="absolute inset-x-0 bottom-0 h-full w-full bg-linear-to-b from-transparent from-0% to-background to-50%" />
                   <div className="h-full flex items-end justify-between relative">
-                    <button
-                      type="button"
+                    <ToolActionButton
+                      variant="ghost"
+                      size="sm"
                       onClick={() => setIsExpanded(true)}
-                      className="-mx-2 h-5 px-1.5 rounded-[4px] text-xs text-muted-foreground hover:text-an-tool-color"
+                      className="-mx-2"
                     >
                       Read detailed plan
-                    </button>
+                    </ToolActionButton>
                     {!isAlreadyApproved && (
-                      <button
-                        type="button"
-                        onClick={handleApprove}
-                        className="h-5 px-1.5 rounded-[4px] text-xs font-medium bg-an-primary-color text-an-send-button-color hover:bg-an-primary-color/90 active:scale-[0.98] transition-[background-color,transform] duration-150"
-                      >
+                      <ToolActionButton variant="primary" size="sm" onClick={handleApprove}>
                         {approveText}
-                      </button>
+                      </ToolActionButton>
                     )}
                   </div>
                 </div>
@@ -129,21 +127,18 @@ export const PlanTool = memo(function PlanTool({ part, chatStatus }: PlanToolPro
 
         {(isExpanded || !hasSummary) && (
           <div className="mt-2 flex items-center justify-between pt-1.5 pb-2 pl-3.5 pr-2 border-t border-border bg-an-tool-background">
-            <button
-              type="button"
+            <ToolActionButton
+              variant="ghost"
+              size="sm"
               onClick={() => setIsExpanded((prev) => !prev)}
-              className="-mx-2 h-5 px-1.5 rounded-[4px] text-xs text-muted-foreground hover:text-an-tool-color"
+              className="-mx-2"
             >
               {isExpanded ? "Hide detailed plan" : "Read detailed plan"}
-            </button>
+            </ToolActionButton>
             {!isAlreadyApproved && (
-              <button
-                type="button"
-                onClick={handleApprove}
-                className="h-5 px-1.5 rounded-[4px] text-xs font-medium bg-an-primary-color text-an-send-button-color hover:bg-an-primary-color/90 active:scale-[0.98] transition-[background-color,transform] duration-150"
-              >
+              <ToolActionButton variant="primary" size="sm" onClick={handleApprove}>
                 {approveText}
-              </button>
+              </ToolActionButton>
             )}
           </div>
         )}

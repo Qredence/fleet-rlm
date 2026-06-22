@@ -310,12 +310,20 @@ def _create_target_schema() -> None:
 
 def _apply_rls(table_name: str, *, include_workspace_scope: bool) -> None:
     policy_name = f"tenant_scope_{table_name}"
-    tenant_condition = "tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid"
-    workspace_condition = (
-        "(nullif(current_setting('app.workspace_id', true), '') IS NULL "
-        "OR workspace_id = nullif(current_setting('app.workspace_id', true), '')::uuid)"
-    )
+    tenant_setting = "nullif((select current_setting('app.tenant_id', true)), '')::uuid"
+    workspace_setting = "nullif((select current_setting('app.workspace_id', true)), '')::uuid"
+    tenant_condition = f"tenant_id = {tenant_setting}"
+    workspace_condition = f"({workspace_setting} IS NULL OR workspace_id = {workspace_setting})"
     condition = f"{tenant_condition} AND {workspace_condition}" if include_workspace_scope else tenant_condition
+    using_condition = condition
+    check_condition = condition
+
+    if table_name == "optimization_runs":
+        maintenance_condition = (
+            "coalesce((select current_setting('app.maintenance_task', true)), '') = 'recover_stale_optimization_runs'"
+        )
+        using_condition = f"({condition}) OR ({maintenance_condition} AND status = 'running')"
+        check_condition = f"({condition}) OR {maintenance_condition}"
 
     op.execute(f"ALTER TABLE public.{table_name} ENABLE ROW LEVEL SECURITY")
     op.execute(f"ALTER TABLE public.{table_name} FORCE ROW LEVEL SECURITY")
@@ -324,31 +332,15 @@ def _apply_rls(table_name: str, *, include_workspace_scope: bool) -> None:
         f"""
         CREATE POLICY {policy_name}
         ON public.{table_name}
-        USING ({condition})
-        WITH CHECK ({condition})
+        USING ({using_condition})
+        WITH CHECK ({check_condition})
         """
     )
 
 
-def _apply_optimization_run_recovery_policy() -> None:
+def _drop_optimization_run_recovery_policy() -> None:
     policy_name = "maintenance_recover_stale_optimization_runs"
     op.execute(f"DROP POLICY IF EXISTS {policy_name} ON public.optimization_runs")
-    op.execute(
-        f"""
-        CREATE POLICY {policy_name}
-        ON public.optimization_runs
-        FOR UPDATE
-        USING (
-          coalesce(current_setting('app.maintenance_task', true), '') =
-            'recover_stale_optimization_runs'
-          AND status = 'running'
-        )
-        WITH CHECK (
-          coalesce(current_setting('app.maintenance_task', true), '') =
-            'recover_stale_optimization_runs'
-        )
-        """
-    )
 
 
 def _apply_target_rls() -> None:
@@ -356,7 +348,7 @@ def _apply_target_rls() -> None:
         _apply_rls(table_name, include_workspace_scope=False)
     for table_name in _WORKSPACE_RLS_TABLES:
         _apply_rls(table_name, include_workspace_scope=True)
-    _apply_optimization_run_recovery_policy()
+    _drop_optimization_run_recovery_policy()
 
 
 def upgrade() -> None:

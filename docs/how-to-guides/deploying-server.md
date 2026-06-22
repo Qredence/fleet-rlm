@@ -142,19 +142,23 @@ Tenant onboarding is an administrative action (not automatic on first login).
 
 ### WebSocket Authentication
 
-WebSocket connections support two authentication methods:
+Native browser WebSockets cannot attach arbitrary `Authorization` headers. Use
+the HTTP ticket exchange before opening runtime streams:
 
-1. **Header-based** (preferred):
-   ```
-   Authorization: Bearer <entra-token>
-   ```
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <auth-token>" \
+  https://your-server/api/v1/auth/ws-ticket
+```
 
-2. **Query parameter** (for browsers with limited header support):
-   ```
-   wss://your-server/api/v1/ws/execution?access_token=<entra-token>
-   ```
+Then connect with the opaque one-time ticket:
 
-Query parameter auth requires `ALLOW_QUERY_AUTH_TOKENS=true` (automatic in Entra mode).
+```text
+wss://your-server/api/v1/ws/execution?ticket=<opaque-ticket>
+```
+
+Legacy `access_token` query authentication remains a compatibility path only
+where explicitly enabled. `AUTH_MODE=neon` rejects raw JWT query parameters.
 
 ## Database Connection Setup
 
@@ -325,9 +329,9 @@ Configure these in the FastAPI Cloud dashboard before deploying. This is the min
 | Variable | Value | Notes |
 |---|---|---|
 | `APP_ENV` | `production` | Enables production guardrails in `validate_startup_or_raise` |
-| `AUTH_MODE` | `entra` (recommended) or `dev` | `entra` requires the Entra variables below |
+| `AUTH_MODE` | `neon`, `entra`, or `dev` | `neon` requires `NEON_AUTH_URL` and repository admission; `entra` requires the Entra variables below |
 | `AUTH_REQUIRED` | `true` | Required in staging/production |
-| `DATABASE_REQUIRED` | `true` | Fail fast if Neon isn't reachable at startup |
+| `DATABASE_REQUIRED` | `true` | Fail fast if Neon isn't reachable at startup; required for `AUTH_MODE=neon` admission |
 | `DATABASE_URL` | (injected by Neon add-on) | Pooled endpoint |
 | `DSPY_LM_MODEL` | e.g. `openai/gpt-4o` | LiteLLM model identifier with provider prefix |
 | `DSPY_DELEGATE_LM_MODEL` | e.g. `openai/gpt-4o-mini` | Optional but recommended |

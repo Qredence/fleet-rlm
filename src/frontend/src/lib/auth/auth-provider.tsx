@@ -3,14 +3,10 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AuthContext } from "@/lib/auth/auth-context";
 import { MOCK_USER } from "@/lib/auth/auth-mock-user";
 import { getAccessToken } from "@/lib/auth/token-store";
-import {
-  initializeEntraSession,
-  isEntraAuthConfigured,
-  loginWithEntra,
-  logoutWithEntra,
-} from "@/lib/auth/entra";
+import { initializeNeonSession, isNeonAuthConfigured, neonAuthClient } from "@/lib/auth/neon";
 import { authEndpoints } from "@/lib/rlm-api/auth";
 import type { AuthContextValue, PlanTier, UserProfile } from "@/lib/auth/types";
+import { queryClient } from "@/lib/query-client";
 
 interface AuthProviderProps {
   children: ReactNode;
@@ -36,16 +32,30 @@ function mapProfile(me: Awaited<ReturnType<typeof authEndpoints.me>>): UserProfi
 function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<UserProfile | null>(null);
 
+  // Invalidate and refetch all queries when the authenticated user changes,
+  // and clear the cache when transitioning to an unauthenticated state.
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      if (user?.id) {
+        void queryClient.invalidateQueries();
+      } else {
+        queryClient.clear();
+      }
+    }
+  }, [user?.id]);
+
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
 
     let cancelled = false;
-    void (async () => {
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+
+    const syncSession = async () => {
       try {
-        if (isEntraAuthConfigured()) {
-          await initializeEntraSession();
+        if (isNeonAuthConfigured()) {
+          await initializeNeonSession();
         }
         if (!getAccessToken()) {
           if (!cancelled) setUser(null);
@@ -72,45 +82,73 @@ function AuthProvider({ children }: AuthProviderProps) {
         authEndpoints.clearLocalAuth();
         setUser(null);
       }
-    })();
+    };
+
+    void syncSession();
+
+    // Periodically sync session if Neon Auth is configured to support out-of-band login/logout redirect flows
+    if (isNeonAuthConfigured()) {
+      intervalId = setInterval(async () => {
+        const oldToken = getAccessToken();
+        const newToken = await initializeNeonSession();
+        if (newToken !== oldToken) {
+          if (newToken) {
+            try {
+              const me = await authEndpoints.me();
+              if (!cancelled) setUser(mapProfile(me));
+            } catch {
+              if (!cancelled) {
+                authEndpoints.clearLocalAuth();
+                setUser(null);
+              }
+            }
+          } else {
+            if (!cancelled) setUser(null);
+          }
+        }
+      }, 1500);
+    }
 
     return () => {
       cancelled = true;
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
     };
   }, []);
 
-  const login = useCallback(async (): Promise<boolean> => {
-    try {
-      if (!isEntraAuthConfigured()) {
-        return false;
-      }
-      await loginWithEntra();
-      const me = await authEndpoints.me();
-      setUser(mapProfile(me));
-      return true;
-    } catch {
-      setUser(null);
-      authEndpoints.clearLocalAuth();
-      return false;
-    }
-  }, []);
-
   const logout = useCallback(() => {
-    void logoutWithEntra().catch(() => undefined);
+    if (isNeonAuthConfigured() && neonAuthClient) {
+      void neonAuthClient.signOut().catch(() => undefined);
+    }
     authEndpoints.clearLocalAuth();
     setUser(null);
+    queryClient.clear();
   }, []);
 
   const setPlan = useCallback((plan: PlanTier) => {
     setUser((prev) => (prev ? { ...prev, plan } : null));
   }, []);
 
+  const refresh = useCallback(async () => {
+    try {
+      if (isNeonAuthConfigured()) {
+        await initializeNeonSession();
+      }
+      const me = await authEndpoints.me();
+      setUser(mapProfile(me));
+    } catch {
+      setUser(null);
+      authEndpoints.clearLocalAuth();
+    }
+  }, []);
+
   const value: AuthContextValue = {
     isAuthenticated: user !== null,
     user,
-    login,
     logout,
     setPlan,
+    refresh,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -63,8 +64,15 @@ class AuthMeResponse(BaseModel):
     )
     user_id: str | None = Field(
         default=None,
-        description="Persisted control-plane user identifier for admitted Entra users.",
+        description="Persisted control-plane user identifier for admitted Entra or Neon users.",
     )
+
+
+class WebSocketTicketResponse(BaseModel):
+    """Short-lived one-time ticket used to authenticate browser WebSockets."""
+
+    ticket: str = Field(description="Opaque one-time WebSocket authentication ticket.")
+    expires_at: datetime = Field(description="UTC timestamp when the ticket expires.")
 
 
 class ServiceInfoResponse(BaseModel):
@@ -80,7 +88,7 @@ class ServiceInfoResponse(BaseModel):
         description="Package version currently serving the API.",
     )
     app_env: Literal["local", "staging", "production"] = Field(description="Active deployment environment.")
-    auth_mode: Literal["dev", "entra"] = Field(description="Authentication mode the server is running under.")
+    auth_mode: Literal["dev", "entra", "neon"] = Field(description="Authentication mode the server is running under.")
     auth_required: bool = Field(description="Whether authentication is enforced for all API requests.")
     sandbox_provider: str = Field(description="Active sandbox backend selected for runtime execution.")
     database_enabled: bool = Field(description="Whether a durable database backend is configured.")

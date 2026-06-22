@@ -1,15 +1,16 @@
-# Auth Modes (Dev vs Entra)
+# Auth Modes (Dev, Entra, and Neon)
 
-`fleet-rlm` supports two authentication modes via `AUTH_MODE`:
+`fleet-rlm` supports three authentication modes via `AUTH_MODE`:
 
 - **`dev`** — Development mode with debug headers and HS256 JWT tokens
 - **`entra`** — Production mode with Microsoft Entra ID and RS256 JWT validation
+- **`neon`** — Neon Auth with EdDSA JWT validation and repository-backed admission
 
 All routes consume normalized identity fields from auth providers:
 
 | Field | Description | Source |
 |-------|-------------|--------|
-| `tenant_claim` | Tenant identifier | `tid` claim |
+| `tenant_claim` | Tenant identifier | `tid` claim in Entra, configured `NEON_TENANT_CLAIM` in Neon |
 | `user_claim` | User identifier | `oid` or `sub` claim |
 | `email` | User email (optional) | `email`, `preferred_username`, or `upn` claim |
 | `name` | User display name (optional) | `name` claim |
@@ -22,14 +23,16 @@ All routes consume normalized identity fields from auth providers:
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `AUTH_MODE` | Auth provider mode (`dev` or `entra`) | `dev` | No |
-| `AUTH_REQUIRED` | Enforce authentication on all routes | `true` when `AUTH_MODE=entra` | No |
+| `AUTH_MODE` | Auth provider mode (`dev`, `entra`, or `neon`) | `dev` | No |
+| `AUTH_REQUIRED` | Enforce authentication on all routes | `true` when `AUTH_MODE=entra` or `AUTH_MODE=neon` | No |
 | `ALLOW_DEBUG_AUTH` | Enable debug header authentication | `true` in local env | No |
-| `ALLOW_QUERY_AUTH_TOKENS` | Allow tokens in WebSocket query params | `true` in local env or `AUTH_MODE=entra` | No |
+| `ALLOW_QUERY_AUTH_TOKENS` | Allow legacy non-Neon tokens in WebSocket query params | `true` in local env or `AUTH_MODE=entra` | No |
 | `DEV_JWT_SECRET` | Secret for HS256 token signing/verification | `change-me` | In staging/prod |
 | `ENTRA_JWKS_URL` | Entra JWKS endpoint URL | — | When `AUTH_MODE=entra` |
 | `ENTRA_AUDIENCE` | Expected token audience (API client ID) | — | When `AUTH_MODE=entra` |
 | `ENTRA_ISSUER_TEMPLATE` | Issuer URL template with `{tenantid}` placeholder | `https://login.microsoftonline.com/{tenantid}/v2.0` | No |
+| `NEON_AUTH_URL` | Neon Auth branch URL | — | When `AUTH_MODE=neon` |
+| `NEON_TENANT_CLAIM` | Internal tenant admission claim for this Neon deployment | `default` | When `AUTH_MODE=neon` |
 
 ### Guardrails
 
@@ -38,7 +41,7 @@ The server enforces these guardrails at startup:
 **When `APP_ENV=staging` or `APP_ENV=production`:**
 - `AUTH_REQUIRED` must be `true`
 - `ALLOW_DEBUG_AUTH` must be `false`
-- `ALLOW_QUERY_AUTH_TOKENS` must be `false` (unless `AUTH_MODE=entra`)
+- `ALLOW_QUERY_AUTH_TOKENS` must be `false` unless a supported compatibility mode requires it
 - `CORS_ALLOWED_ORIGINS` cannot contain `*`
 - `DEV_JWT_SECRET` must be customized from default value
 
@@ -48,6 +51,12 @@ The server enforces these guardrails at startup:
 - `ENTRA_JWKS_URL` must be configured
 - `ENTRA_AUDIENCE` must be configured
 - `ENTRA_ISSUER_TEMPLATE` must contain `{tenantid}` placeholder
+
+**When `AUTH_MODE=neon`:**
+- `AUTH_REQUIRED` must be `true`
+- `DATABASE_REQUIRED` must be `true` because tenant/user admission is repository-backed
+- `NEON_AUTH_URL` must be configured
+- `NEON_TENANT_CLAIM` must match an admitted tenant row
 
 ---
 
@@ -147,7 +156,7 @@ Entra mode provides production-grade multitenant authentication using Microsoft 
 
 ### Token Validation Process
 
-1. **Extract Bearer Token** — From `Authorization: Bearer <token>` header or WebSocket `access_token` query parameter
+1. **Extract Bearer Token** — From `Authorization: Bearer <token>` header or WebSocket `access_token` query parameter when enabled
 
 2. **Decode Unverified Claims** — Extract `tid` claim to determine the tenant
 
@@ -221,6 +230,81 @@ For WebSocket connections, include the access token in the query string:
 
 ---
 
+## AUTH_MODE=neon
+
+Neon mode uses Neon Auth for browser sign-in and Fleet's FastAPI backend as the
+product/runtime boundary. The frontend uses `@neondatabase/auth-ui` and
+`@neondatabase/neon-js` to obtain Neon Auth sessions and JWTs, then sends those
+JWTs to Fleet HTTP routes with `Authorization: Bearer ...`.
+
+### Token Validation Process
+
+1. Extract bearer token from the HTTP `Authorization` header.
+2. Fetch public keys from `<NEON_AUTH_URL>/.well-known/jwks.json`.
+3. Verify EdDSA signature and standard claims:
+   - `iss` equals the origin of `NEON_AUTH_URL`
+   - `aud` equals the origin of `NEON_AUTH_URL`
+   - `exp` and `iat` are present and valid
+4. Map Neon `sub`/`id` to `user_claim`.
+5. Map `tenant_claim` from configured `NEON_TENANT_CLAIM`; do not infer tenant identity from optional Neon org claims.
+6. Resolve the identity through the repository admission flow before exposing product state.
+
+### Required Configuration
+
+```bash
+AUTH_MODE=neon
+AUTH_REQUIRED=true
+DATABASE_REQUIRED=true
+DATABASE_URL=postgresql://...         # pooled runtime connection
+DATABASE_ADMIN_URL=postgresql://...   # direct admin/migration connection
+NEON_AUTH_URL=https://ep-xxx.neonauth.../neondb/auth
+NEON_TENANT_CLAIM=default
+```
+
+Tenant onboarding is administrative. A valid Neon Auth token is not enough by
+itself: the configured tenant and external Neon user id must resolve through
+Fleet's repository-backed admission path.
+
+### WebSocket Tickets
+
+Browsers cannot set arbitrary `Authorization` headers on native WebSocket
+connections. For Neon mode, clients exchange their bearer token for a
+short-lived, single-use ticket:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <neon-jwt>" \
+  http://localhost:8000/api/v1/auth/ws-ticket
+```
+
+Response:
+
+```json
+{
+  "ticket": "opaque-one-time-ticket",
+  "expires_at": "2026-06-20T03:30:00Z"
+}
+```
+
+Then connect with:
+
+```text
+wss://your-api.com/api/v1/ws/execution?ticket=<opaque-one-time-ticket>
+```
+
+Raw Neon JWTs are rejected in WebSocket query parameters so they are not exposed
+through browser URLs, proxies, or access logs.
+
+### Neon Data API Boundary
+
+Neon Data API remains out of Fleet's product/runtime path. It can query Neon
+Postgres directly with JWT validation and Postgres RLS, but it does not
+authenticate Fleet's FastAPI routes, Daytona runtime, or WebSocket transport.
+Using Data API for product data would require a separate schema exposure,
+GRANT/RLS, and frontend data-flow review.
+
+---
+
 ## AUTH_REQUIRED Setting
 
 Controls whether authentication is enforced on non-health routes.
@@ -231,7 +315,7 @@ Controls whether authentication is enforced on non-health routes.
 | `false` | Failed authentication falls back to default identity (`default`/`anonymous`) |
 
 **Default:**
-- `true` when `AUTH_MODE=entra`
+- `true` when `AUTH_MODE=entra` or `AUTH_MODE=neon`
 - `false` when `AUTH_MODE=dev` and `APP_ENV=local`
 - `true` when `APP_ENV=staging` or `APP_ENV=production` (enforced)
 
@@ -256,7 +340,7 @@ Controls whether debug headers (`X-Debug-*`) are accepted for authentication.
 
 ## Neon Tenant Admission Flow
 
-When `AUTH_MODE=entra`, the system performs tenant admission against the Neon database after token validation.
+When `AUTH_MODE=entra` or `AUTH_MODE=neon`, the system performs tenant admission against the Neon database after token validation.
 
 ### Admission Process
 
@@ -342,10 +426,10 @@ Auth claims are the **canonical** source of tenant/user identity:
 - Internal `tenant_id` and `user_id` are resolved via database lookup during admission
 
 **Frontend SPA expectations:**
-- Default authority: `https://login.microsoftonline.com/organizations`
-- Redirect path: `/login`
-- Post-logout path: `/login`
-- Delegated scope format: `api://<api-app-client-id>/access_as_user`
+- Neon Auth URL configured via `VITE_NEON_AUTH_URL`
+- Sign-in and sign-up use `@neondatabase/auth-ui` redirect-based forms
+- Post-auth redirect: `/app/workspace`
+- Logout via `neonAuthClient.signOut()` (fire-and-forget)
 
 ---
 

@@ -28,6 +28,13 @@ export interface paths {
      */
     get: operations["get_me_api_v1_auth_me_get"];
   };
+  "/api/v1/auth/ws-ticket": {
+    /**
+     * Create Ws Ticket
+     * @description Exchange an authenticated HTTP identity for a one-time WebSocket ticket.
+     */
+    post: operations["create_ws_ticket_api_v1_auth_ws_ticket_post"];
+  };
   "/api/v1/info": {
     /**
      * Service information
@@ -374,7 +381,7 @@ export interface components {
       tenant_id?: string | null;
       /**
        * User Id
-       * @description Persisted control-plane user identifier for admitted Entra users.
+       * @description Persisted control-plane user identifier for admitted Entra or Neon users.
        */
       user_id?: string | null;
     };
@@ -2395,7 +2402,7 @@ export interface components {
        * @description Authentication mode the server is running under.
        * @enum {string}
        */
-      auth_mode: "dev" | "entra";
+      auth_mode: "dev" | "entra" | "neon";
       /**
        * Auth Required
        * @description Whether authentication is enforced for all API requests.
@@ -3573,6 +3580,23 @@ export interface components {
       entries_returned: number;
     };
     /**
+     * WebSocketTicketResponse
+     * @description Short-lived one-time ticket used to authenticate browser WebSockets.
+     */
+    WebSocketTicketResponse: {
+      /**
+       * Ticket
+       * @description Opaque one-time WebSocket authentication ticket.
+       */
+      ticket: string;
+      /**
+       * Expires At
+       * Format: date-time
+       * @description UTC timestamp when the ticket expires.
+       */
+      expires_at: string;
+    };
+    /**
      * ApiErrorResponse
      * @description Canonical HTTP error envelope returned by Fleet RLM API routes.
      */
@@ -3658,6 +3682,32 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["AuthMeResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The authenticated tenant or user is not admitted to Fleet RLM. */
+      403: {
+        content: never;
+      };
+      /** @description Authentication or repository services are not configured yet. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Create Ws Ticket
+   * @description Exchange an authenticated HTTP identity for a one-time WebSocket ticket.
+   */
+  create_ws_ticket_api_v1_auth_ws_ticket_post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WebSocketTicketResponse"];
         };
       };
       /** @description Authentication is required or the provided token is invalid. */

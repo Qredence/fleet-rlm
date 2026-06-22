@@ -30,6 +30,7 @@ class _FakeContext(AbstractContextManager[dict[str, Any]]):
 class _FakeDSPy:
     def __init__(self) -> None:
         self.configure_calls: list[dict[str, Any]] = []
+        self.configure_cache_calls: list[dict[str, Any]] = []
         self.context_calls: list[dict[str, Any]] = []
 
     def JSONAdapter(self, *, use_native_function_calling: bool = False) -> _FakeAdapter:
@@ -47,6 +48,9 @@ class _FakeDSPy:
 
     def configure(self, **kwargs: Any) -> None:
         self.configure_calls.append(kwargs)
+
+    def configure_cache(self, **kwargs: Any) -> None:
+        self.configure_cache_calls.append(kwargs)
 
 
 def _patch_runtime_config(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, _FakeDSPy]:
@@ -119,6 +123,11 @@ def test_build_dspy_context_uses_resolved_adapter_and_supports_empty_context(
     assert fake_dspy.context_calls[0]["lm"] is lm
     assert fake_dspy.context_calls[0]["allow_tool_async_sync_conversion"] is True
     assert fake_dspy.context_calls[0]["adapter"].kind == "chat"
+    assert fake_dspy.configure_cache_calls[0] == {
+        "enable_disk_cache": False,
+        "enable_memory_cache": True,
+        "restrict_pickle": True,
+    }
     assert isinstance(ctx, _FakeContext)
 
     clean_runtime_env.delenv("DSPY_ADAPTER", raising=False)
@@ -140,6 +149,7 @@ def test_configure_planner_from_env_builds_lm_and_configures_dspy(
     configured = runtime_config.configure_planner_from_env()
 
     assert configured is True
+    assert fake_dspy.configure_cache_calls[0]["enable_disk_cache"] is False
     lm = fake_dspy.configure_calls[0]["lm"]
     assert lm.model == "openai/gpt-4.1"
     assert lm.kwargs == {
@@ -147,6 +157,24 @@ def test_configure_planner_from_env_builds_lm_and_configures_dspy(
         "api_key": "planner-key",
         "max_tokens": 777,
     }
+
+
+def test_configure_dspy_cache_security_allows_explicit_restricted_disk_cache(
+    clean_runtime_env: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_config, fake_dspy = _patch_runtime_config(monkeypatch)
+    clean_runtime_env.setenv("FLEET_RLM_ENABLE_DSPY_DISK_CACHE", "true")
+
+    runtime_config.configure_dspy_cache_security()
+
+    assert fake_dspy.configure_cache_calls == [
+        {
+            "enable_disk_cache": True,
+            "enable_memory_cache": True,
+            "restrict_pickle": True,
+        }
+    ]
 
 
 def test_get_planner_and_delegate_lm_from_env_use_expected_fallbacks(
@@ -177,14 +205,13 @@ def test_get_delegate_lm_from_env_returns_none_on_init_failure(
     clean_runtime_env: pytest.MonkeyPatch,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.runtime import config as runtime_config
-
-    monkeypatch.setattr(runtime_config, "_prepare_env", lambda **_: None)
+    runtime_config, fake_dspy = _patch_runtime_config(monkeypatch)
     clean_runtime_env.setenv("DSPY_DELEGATE_LM_MODEL", "delegate-model")
     clean_runtime_env.setenv("DSPY_DELEGATE_LM_API_KEY", "delegate-key")
     monkeypatch.setattr(runtime_config, "_build_lm", lambda **_: (_ for _ in ()).throw(RuntimeError("boom")))
 
     assert runtime_config.get_delegate_lm_from_env() is None
+    assert fake_dspy.configure_cache_calls[0]["enable_disk_cache"] is False
 
 
 def test_load_posthog_settings_from_env_respects_defaults_and_bounds(

@@ -3,9 +3,10 @@
   --an-border-radius: 16px;
   --an-message-border-radius: var(--an-border-radius);
   --an-input-border-radius: var(--an-border-radius);
-  --an-tool-border-radius: 10px;
+  --an-input-toolbar-height: 28px;
+  --an-tool-border-radius: 8px;
   --an-message-radius-inner-offset: 4px;
-  --an-max-width: 768px;
+  --an-max-width: 664px;
 
   /* Colors - Light mode defaults */
   --an-background: #ffffff;
@@ -16,6 +17,7 @@
   --an-foreground-subtle: #a3a3a3;
   --an-border-color: #e4e4e7;
   --an-primary-color: #3b82f6;
+  --an-popover-background: var(--an-background);
 
   /* User Messages */
   --an-user-message-bg: #f5f5f5;
@@ -23,10 +25,11 @@
 
   /* Input */
   --an-input-background: #ffffff;
-  --an-input-border-color: #e4e4e7;
+  --an-input-border-color: #e3e3e8;
   --an-input-color: #1a1a1a;
   --an-input-placeholder-color: #a3a3a3;
   --an-input-focus-outline: transparent;
+  --an-popover-shadow: 0 8px 18px rgb(0 0 0 / 14%);
   --an-context-padding: 10px;
 
   /* Send/Stop Buttons */
@@ -54,23 +57,25 @@
 
 /* Dark mode defaults */
 .dark {
-  --an-background: #0a0a0a;
+  --an-background: #0d0d0d;
   --an-background-secondary: #242424;
   --an-background-tertiary: #141414;
   --an-foreground: #fafafa;
   --an-foreground-muted: #8c8c8c;
-  --an-foreground-subtle: #71717a;
-  --an-border-color: #2a2a2a;
+  --an-foreground-subtle: #70707a;
+  --an-border-color: #292929;
   --an-primary-color: #60a5fa;
+  --an-popover-background: #0a0a0a;
 
-  --an-user-message-bg: #1a1a1a;
+  --an-user-message-bg: #242424;
   --an-user-message-text: #fafafa;
 
-  --an-input-background: oklab(0.2 0 0);
-  --an-input-border-color: #2a2a2a;
+  --an-input-background: #171717;
+  --an-input-border-color: #262626;
   --an-input-color: #fafafa;
-  --an-input-placeholder-color: #71717a;
+  --an-input-placeholder-color: #70707a;
   --an-input-focus-outline: transparent;
+  --an-popover-shadow: 0 8px 18px rgb(0 0 0 / 32%);
   --an-context-padding: 12px;
 
   --an-send-button-bg: #60a5fa;
@@ -80,7 +85,7 @@
   --an-send-button-color: #0a0a0a;
 
   --an-tool-background: #141414;
-  --an-tool-border-color: #2a2a2a;
+  --an-tool-border-color: #303030;
   --an-tool-color: #fafafa;
   --an-tool-color-muted: #8c8c8c;
 
@@ -131,10 +136,64 @@
   );
   --radius-an-input-border-radius: var(--an-input-border-radius);
   --radius-an-tool-border-radius: var(--an-tool-border-radius);
+  --radius-an-action-sm: 4px;
+  --radius-an-action-md: 6px;
+  --radius-an-action-lg: 8px;
+  --spacing-an-input-toolbar-height: var(--an-input-toolbar-height);
   --spacing-an-context-padding: var(--an-context-padding);
   --max-width-an: var(--an-max-width);
   --spacing-an-user-message-x: 14px;
   --spacing-an-user-message-y: 10px;
+}
+
+.an-input-shell {
+  background-color: var(--an-input-background);
+  border-color: var(--an-input-border-color);
+}
+
+.an-popover-surface {
+  background-color: var(--an-popover-background);
+  border-color: var(--an-border-color);
+  border-radius: 10px;
+  box-shadow: var(--an-popover-shadow);
+  padding: 4px;
+}
+
+.an-popover-option {
+  min-height: 40px;
+  border-radius: 6px;
+  gap: 8px;
+  padding: 6px 8px;
+}
+
+.an-popover-option-compact {
+  box-sizing: border-box;
+  height: 28px;
+  min-height: 28px;
+  align-items: center;
+  border-radius: 6px;
+  gap: 8px;
+  padding: 6px 8px;
+}
+
+.an-popover-option-active,
+.an-popover-option:hover,
+.an-popover-option-compact:hover {
+  background-color: var(--an-background-secondary);
+}
+
+.an-popover-text {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+  letter-spacing: 0;
+}
+
+.an-popover-text-medium {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  letter-spacing: 0;
 }
 
 /* TextShimmer animation */

@@ -130,8 +130,9 @@ Runtime-mode boundaries:
 
 Auth, persistence, and observability constraints:
 
-- Supported auth modes are `dev` and `entra`
-- `AUTH_MODE=entra` requires repository-backed tenant admission in addition to token validation
+- Supported auth modes are `dev`, `entra`, and `neon`
+- `AUTH_MODE=entra` and `AUTH_MODE=neon` require repository-backed tenant admission in addition to token validation
+- Neon Auth browser WebSockets must use the short-lived `/api/v1/auth/ws-ticket` exchange; do not put raw Neon JWTs in WebSocket query strings
 - `DATABASE_URL` is the pooled runtime connection; `DATABASE_ADMIN_URL` is the direct connection for Alembic and admin/debug tasks
 - `PATCH /api/v1/runtime/settings` is blocked unless `APP_ENV=local`
 - PostHog and MLflow are live codepaths when configured and should not be treated as no-ops

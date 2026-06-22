@@ -2,15 +2,14 @@ import { createContext, useContext } from "react";
 
 import type { AuthContextValue } from "@/lib/auth/types";
 
-const noopAsync = async () => false as boolean;
 const noopVoid = () => {};
 
 const defaultAuthCtx: AuthContextValue = {
   isAuthenticated: false,
   user: null,
-  login: noopAsync,
   logout: noopVoid,
   setPlan: noopVoid,
+  refresh: async () => {},
 };
 
 const AuthContext = createContext<AuthContextValue>(defaultAuthCtx);

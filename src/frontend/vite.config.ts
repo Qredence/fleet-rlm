@@ -8,6 +8,7 @@ import path from "node:path";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  envPrefix: ["VITE_", "NEON_AUTH_URL"],
   lint: {
     plugins: ["oxc", "typescript", "unicorn", "react"],
     categories: {
@@ -121,7 +122,6 @@ export default defineConfig({
       {
         files: [
           "src/components/ui/**/*.{ts,tsx}",
-          "src/components/ai-elements/**/*.{ts,tsx}",
           "src/components/agent-elements/**/*.{ts,tsx}",
           "src/components/product/**/*.{ts,tsx}",
         ],
@@ -132,7 +132,7 @@ export default defineConfig({
             {
               patterns: [
                 {
-                  group: ["@/features/*", "@/features/*/**", "@/screens/*"],
+                  group: ["@/features/*", "@/features/*/**"],
                   message: "Shared components must not depend on feature-owned modules.",
                 },
               ],
@@ -254,7 +254,6 @@ export default defineConfig({
         "src/features/layout/root-layout.tsx",
         "src/features/workspace/screen/workspace-screen.tsx",
         "src/features/workspace/conversation/transcript/workspace-message-list.tsx",
-        "src/features/workspace/composer/workspace-composer.tsx",
         "src/features/settings/screen/settings-screen.tsx",
         "src/features/settings/runtime-form.tsx",
         "src/features/volumes/screen/volumes-screen.tsx",

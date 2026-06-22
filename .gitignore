@@ -24,7 +24,7 @@ venv/
 !.env.example
 !.env.sample
 .fleet/
-
+plan/*
 # Jupyter
 .ipynb_checkpoints/
 mlartifacts/

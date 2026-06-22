@@ -10,7 +10,7 @@ import {
   SidebarLeft01Icon,
   SparklesIcon,
 } from "@hugeicons/core-free-icons";
-import { type MouseEvent, useMemo, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { QredenceLogo } from "@/components/brand-mark";
@@ -32,11 +32,17 @@ import {
   useWorkspaceLayoutActions,
   useWorkspaceLayoutHistory,
 } from "@/features/workspace";
+import { useAuth } from "@/lib/auth/auth-context";
+import { isNeonAuthConfigured } from "@/lib/auth/neon";
+import { UserButton } from "@neondatabase/auth-ui";
+import { sessionsEndpoints } from "@/lib/rlm-api";
+import { useChatHistoryStore } from "@/lib/workspace/chat-history-store";
 
 import { SettingsDialog } from "./settings-dialog";
+import { type SettingsSection } from "@/features/settings/screen/settings-content";
 
 const sidebarActionButtonClassName =
-  "group h-8 w-full justify-start rounded-lg px-1.5 text-sidebar-foreground/78 shadow-none transition-colors duration-0 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:[&>span]:hidden [&>span]:truncate";
+  "group h-9 w-full justify-start rounded-md px-2 text-sidebar-foreground/78 shadow-none transition-colors duration-0 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:[&>span]:hidden [&>span]:truncate";
 
 function sortConversations(conversations: Conversation[]) {
   return [...conversations].sort((left, right) => {
@@ -118,7 +124,7 @@ function SessionItem({
         type="button"
         onClick={() => onSelect(session.id)}
         className={cn(
-          "inline-flex h-8 w-full min-w-0 max-w-full items-center justify-between overflow-hidden rounded-lg pl-1.5 pr-0.5 text-left text-sidebar-foreground transition-colors duration-0",
+          "inline-flex h-9 w-full min-w-0 max-w-full items-center justify-between overflow-hidden rounded-md pl-2 pr-7 text-left text-sidebar-foreground transition-colors duration-0",
           "hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
         )}
       >
@@ -155,7 +161,7 @@ function SidebarSessions({
         Sessions
       </div>
       <div className="min-h-0 w-full min-w-0 max-w-full flex-1 overflow-hidden">
-        <ScrollArea className="h-full w-full min-w-0 max-w-full [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:!w-full [&_[data-slot=scroll-area-viewport]>div]:!min-w-0">
+        <ScrollArea className="h-full w-full min-w-0 max-w-full scroll-area-hover-reveal [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:!w-full [&_[data-slot=scroll-area-viewport]>div]:!min-w-0">
           <div className="flex w-full min-w-0 max-w-full flex-col gap-px overflow-hidden px-2 pb-2">
             {sessions.length === 0 ? (
               <div className="w-full min-w-0 max-w-full px-1.5 py-2 leading-6 text-sidebar-foreground/45 typo-caption">
@@ -179,6 +185,7 @@ function SidebarSessions({
 }
 
 export function AppSidebar() {
+  const { isAuthenticated, user } = useAuth();
   const conversations = useWorkspaceLayoutHistory();
   const sortedConversations = useMemo(() => sortConversations(conversations), [conversations]);
   const { toggleSidebar, state: sidebarState } = useSidebar();
@@ -192,7 +199,72 @@ export function AppSidebar() {
   const isVolumes = location.pathname.startsWith("/app/volumes");
   const isOptimization = location.pathname.startsWith("/app/optimization");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined);
   const settingsReturnFocusRef = useRef<HTMLElement | null>(null);
+
+  // Synchronize past sessions from Neon if logged in
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    let active = true;
+    const syncNeonSessions = async () => {
+      try {
+        const response = await sessionsEndpoints.list({ limit: 100 });
+        if (!active) return;
+
+        useChatHistoryStore.setState((state) => {
+          const currentConversations = [...state.conversations];
+          let updated = false;
+
+          for (const item of response.items) {
+            const externalId = item.external_session_id || item.id;
+            const existingIndex = currentConversations.findIndex(
+              (c) => c.id === externalId || c.durableSessionId === item.id,
+            );
+
+            if (existingIndex >= 0) {
+              const existing = currentConversations[existingIndex];
+              if (existing && existing.durableSessionId !== item.id) {
+                currentConversations[existingIndex] = {
+                  ...existing,
+                  durableSessionId: item.id,
+                  title: existing.title || item.title,
+                };
+                updated = true;
+              }
+            } else {
+              // Add compact record
+              const newConv: Conversation = {
+                id: externalId,
+                title: item.title,
+                messages: [],
+                runtimeSessionId: externalId,
+                durableSessionId: item.id,
+                isCompactHistoryRecord: true,
+                phase: "complete",
+                createdAt: item.created_at,
+                updatedAt: item.updated_at,
+              };
+              currentConversations.push(newConv);
+              updated = true;
+            }
+          }
+
+          if (updated) {
+            return { conversations: currentConversations };
+          }
+          return {};
+        });
+      } catch (err) {
+        console.error("Failed to sync Neon sessions on login:", err);
+      }
+    };
+
+    syncNeonSessions();
+    return () => {
+      active = false;
+    };
+  }, [isAuthenticated]);
 
   const handleNewSession = () => {
     newSession();
@@ -213,15 +285,8 @@ export function AppSidebar() {
     deleteConversation(session.id);
   };
 
-  const handleOpenLogin = (event: MouseEvent<HTMLButtonElement>) => {
-    const openLoginEvent = new CustomEvent("open-login", {
-      detail: { returnFocusTarget: event.currentTarget },
-      cancelable: true,
-    });
-    const wasHandledByDialog = document.dispatchEvent(openLoginEvent) === false;
-    if (!wasHandledByDialog) {
-      navigate({ to: "/login" });
-    }
+  const handleOpenLogin = () => {
+    navigate({ to: "/auth/$pathname", params: { pathname: "login" } });
   };
 
   return (
@@ -229,9 +294,9 @@ export function AppSidebar() {
       <Sidebar
         variant="sidebar"
         collapsible="icon"
-        className="border-r border-transparent bg-sidebar text-sidebar-foreground"
+        className="border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
       >
-        <SidebarHeader className="flex h-12 shrink-0 justify-center gap-0 px-2 py-0">
+        <SidebarHeader className="flex h-14 shrink-0 justify-center gap-0 px-2 py-0">
           <div className="flex w-full items-center justify-between">
             {!isCollapsed ? (
               <Button
@@ -239,7 +304,7 @@ export function AppSidebar() {
                 variant="ghost"
                 size="sm"
                 onClick={handleNewSession}
-                className="min-w-0 flex-initial justify-start rounded-lg pl-1.5 text-sidebar-foreground hover:bg-sidebar-accent/80"
+                className="min-w-0 flex-initial justify-start rounded-md pl-2 text-sidebar-foreground hover:bg-sidebar-accent/80"
               >
                 <QredenceLogo className="size-5 shrink-0 text-sidebar-foreground" />
                 <span className="ml-2 truncate font-medium tracking-tight-custom">
@@ -257,7 +322,7 @@ export function AppSidebar() {
                     onClick={toggleSidebar}
                     aria-label={isCollapsed ? "Open sidebar" : "Close sidebar"}
                     className={cn(
-                      "size-8 rounded-lg text-sidebar-foreground/75 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
+                      "size-8 rounded-md text-sidebar-foreground/75 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
                       isCollapsed && "mx-auto",
                     )}
                   >
@@ -313,54 +378,134 @@ export function AppSidebar() {
           </div>
         </SidebarContent>
 
-        <SidebarFooter className="border-t border-transparent px-2 py-3">
+        <SidebarFooter className="border-t border-sidebar-border px-2 py-2">
           <div className="flex flex-col gap-1">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
+            {isAuthenticated && user && isNeonAuthConfigured() ? (
+              <UserButton
+                variant="ghost"
+                size={isCollapsed ? "icon" : "default"}
+                disableDefaultLinks={true}
+                align="start"
+                side="right"
+                classNames={{
+                  trigger: {
+                    base: cn(
+                      sidebarActionButtonClassName,
+                      "h-10 px-1.5 py-1 text-sidebar-foreground hover:bg-sidebar-accent/80",
+                      isCollapsed ? "justify-center" : "",
+                    ),
+                    user: {
+                      title:
+                        "text-sidebar-foreground font-medium text-sm truncate max-w-sidebar-label text-left",
+                      subtitle:
+                        "text-sidebar-foreground/58 text-xs truncate max-w-sidebar-label text-left",
+                    },
+                  },
+                }}
+                additionalLinks={[
+                  <button
+                    key="custom-settings"
                     type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleOpenLogin}
-                    title={isCollapsed ? "Sign in" : undefined}
-                    className={sidebarActionButtonClassName}
-                  >
-                    <SidebarIcon icon={Login01Icon} />
-                    <span className="typo-label-regular tracking-tight-custom">Sign in</span>
-                  </Button>
-                }
-              />
-              <TooltipContent side="right">Sign in</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
+                    className="flex w-full items-center gap-2 cursor-pointer text-left text-sm text-foreground"
                     onClick={(event) => {
                       settingsReturnFocusRef.current = event.currentTarget;
+                      setSettingsSection("appearance");
                       setSettingsOpen(true);
                     }}
-                    title={isCollapsed ? "Settings" : undefined}
-                    className={sidebarActionButtonClassName}
                   >
-                    <SidebarIcon icon={Settings01Icon} />
-                    <span className="typo-label-regular tracking-tight-custom">Settings</span>
-                  </Button>
-                }
+                    <SidebarIcon icon={Settings01Icon} size={16} className="text-foreground/70" />
+                    <span>Settings</span>
+                  </button>,
+                ]}
               />
-              <TooltipContent side="right">Settings</TooltipContent>
-            </Tooltip>
+            ) : (
+              <>
+                {isAuthenticated && user ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={(event) => {
+                            settingsReturnFocusRef.current = event.currentTarget;
+                            setSettingsSection("account");
+                            setSettingsOpen(true);
+                          }}
+                          title={isCollapsed ? user.name || user.email : undefined}
+                          className={cn(
+                            sidebarActionButtonClassName,
+                            "hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
+                          )}
+                        >
+                          <div className="flex size-5 shrink-0 items-center justify-center rounded-full bg-sidebar-primary text-sidebar-primary-foreground font-semibold typo-micro uppercase">
+                            {user.initials || "U"}
+                          </div>
+                          <span className="typo-label-regular tracking-tight-custom ml-2 truncate">
+                            {user.name || user.email}
+                          </span>
+                        </Button>
+                      }
+                    />
+                    <TooltipContent side="right">{user.name || user.email}</TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleOpenLogin}
+                          title={isCollapsed ? "Sign in" : undefined}
+                          className={sidebarActionButtonClassName}
+                        >
+                          <SidebarIcon icon={Login01Icon} />
+                          <span className="typo-label-regular tracking-tight-custom">Sign in</span>
+                        </Button>
+                      }
+                    />
+                    <TooltipContent side="right">Sign in</TooltipContent>
+                  </Tooltip>
+                )}
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={(event) => {
+                          settingsReturnFocusRef.current = event.currentTarget;
+                          setSettingsSection("appearance");
+                          setSettingsOpen(true);
+                        }}
+                        title={isCollapsed ? "Settings" : undefined}
+                        className={sidebarActionButtonClassName}
+                      >
+                        <SidebarIcon icon={Settings01Icon} />
+                        <span className="typo-label-regular tracking-tight-custom">Settings</span>
+                      </Button>
+                    }
+                  />
+                  <TooltipContent side="right">Settings</TooltipContent>
+                </Tooltip>
+              </>
+            )}
           </div>
         </SidebarFooter>
       </Sidebar>
 
       <SettingsDialog
         open={settingsOpen}
-        onOpenChange={setSettingsOpen}
+        onOpenChange={(open) => {
+          setSettingsOpen(open);
+          if (!open) setSettingsSection(undefined);
+        }}
+        section={settingsSection}
+        onSectionChange={setSettingsSection}
         returnFocusRef={settingsReturnFocusRef}
       />
     </>
