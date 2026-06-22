@@ -164,7 +164,7 @@ sidepanel.
   are embedded in Fleet layouts.
 - `auth-provider.tsx` owns token refresh and query-cache clearing. Keep proactive refresh before
   profile/session sync so display names and admission state update without a manual reload.
-- `typed-client.ts` must normalize API base URLs without trailing slashes to avoid duplicated slash,
+- `typed-client.ts` must normalize API base URLs without trailing slashes to avoid duplicate slashes,
   routing, or CORS mismatches.
 
 **Do not** create feature-local `ui/` folders; `src/components/ui/*` is the only primitive `ui` namespace.
