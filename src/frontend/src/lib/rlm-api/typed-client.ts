@@ -55,22 +55,8 @@ typedClient.use({
 /** Combine an external AbortSignal with a timeout. */
 export function withTimeout(signal?: AbortSignal, timeoutMs?: number): AbortSignal | undefined {
   const timeout = timeoutMs ?? rlmApiConfig.timeoutMs;
-  if (!signal) return AbortSignal.timeout(timeout);
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-
-  // Clean up timer when the external signal aborts (e.g. React Query cancellation)
-  signal.addEventListener(
-    "abort",
-    () => {
-      clearTimeout(timer);
-      controller.abort(signal.reason);
-    },
-    { once: true },
-  );
-
-  return controller.signal;
+  const timeoutSignal = AbortSignal.timeout(timeout);
+  return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 }
 
 type DataOf<R> = R extends { data?: infer D } ? D : never;
