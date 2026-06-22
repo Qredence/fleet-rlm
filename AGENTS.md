@@ -74,6 +74,9 @@ make check-docs
 make quality-gate
 ```
 
+CircleCI is configured in `.circleci/config.yml`. Its workflow mirrors the repo validation lanes with
+separate quality, lint/typecheck, backend test, integration test, and frontend jobs.
+
 Frontend-only lane:
 
 ```bash

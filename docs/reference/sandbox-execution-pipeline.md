@@ -244,7 +244,8 @@ def invoke_tool(owner, name, args, kwargs):
     tools = owner._tools
     if name not in tools:
         raise RuntimeError(f"Tool {name!r} is not registered")
-    return tools[name](*args, **kwargs)
+    tool = tools[name]
+    return tool(*args, **kwargs)
 ```
 
 The interpreter's `_tools` dict contains all bound tools. Bridge callbacks are dispatched through this dict.

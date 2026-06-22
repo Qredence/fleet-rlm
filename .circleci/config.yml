@@ -1,0 +1,184 @@
+version: 2.1
+
+executors:
+  python:
+    docker:
+      - image: cimg/python:3.12.13
+    working_directory: ~/project
+    environment:
+      UV_CACHE_DIR: ~/.cache/uv
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      MLFLOW_TRACKING_URI: "file:///tmp/mlruns"
+  node:
+    docker:
+      - image: cimg/node:24.16.0
+    working_directory: ~/project
+    environment:
+      PNPM_HOME: /home/circleci/.local/share/pnpm
+      PNPM_STORE_PATH: /home/circleci/.pnpm-store
+
+commands:
+  install_uv:
+    steps:
+      - run:
+          name: Install uv
+          command: |
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+
+  restore_uv_cache:
+    steps:
+      - restore_cache:
+          keys:
+            - v1-uv-py312-{{ arch }}-{{ checksum "uv.lock" }}
+            - v1-uv-py312-{{ arch }}-
+
+  save_uv_cache:
+    steps:
+      - save_cache:
+          key: v1-uv-py312-{{ arch }}-{{ checksum "uv.lock" }}
+          paths:
+            - ~/.cache/uv
+
+  install_python_dependencies:
+    steps:
+      - install_uv
+      - restore_uv_cache
+      - run:
+          name: Install Python dependencies
+          command: uv sync --all-extras --dev --python 3.12
+
+  setup_pnpm:
+    steps:
+      - run:
+          name: Enable pnpm
+          command: |
+            corepack enable
+            corepack prepare pnpm@11.8.0 --activate
+            pnpm config set store-dir "$PNPM_STORE_PATH"
+
+  restore_pnpm_cache:
+    steps:
+      - restore_cache:
+          keys:
+            - v1-pnpm-node24-{{ arch }}-{{ checksum "src/frontend/pnpm-lock.yaml" }}
+            - v1-pnpm-node24-{{ arch }}-
+
+  save_pnpm_cache:
+    steps:
+      - save_cache:
+          key: v1-pnpm-node24-{{ arch }}-{{ checksum "src/frontend/pnpm-lock.yaml" }}
+          paths:
+            - ~/.pnpm-store
+
+jobs:
+  quality:
+    executor: python
+    steps:
+      - checkout
+      - install_python_dependencies
+      - save_uv_cache
+      - run:
+          name: Release and docs checks
+          command: |
+            make check-release
+            make check-docs
+      - run:
+          name: Security checks
+          command: make check-security
+      - run:
+          name: Python dependency check
+          command: uvx deptry . --config pyproject.toml
+
+  lint-typecheck:
+    executor: python
+    steps:
+      - checkout
+      - install_python_dependencies
+      - run:
+          name: Ruff and ty
+          command: |
+            make lint
+            make format-check
+            make typecheck
+
+  test-unit:
+    executor: python
+    parallelism: 2
+    steps:
+      - checkout
+      - install_python_dependencies
+      - run:
+          name: Unit and contract tests
+          command: |
+            mkdir -p test-results
+            TEST_FILES="$(
+              {
+                circleci tests glob "tests/unit/**/*.py"
+                circleci tests glob "tests/contracts/**/*.py"
+              } | circleci tests split --split-by=timings
+            )"
+            uv run --no-sync pytest -q -n 0 $TEST_FILES \
+              -p pytest_asyncio.plugin \
+              -p pytest_timeout \
+              --timeout=120 \
+              --timeout-method=thread \
+              -m "not live_llm and not live_daytona and not benchmark and not db" \
+              --junitxml=test-results/pytest-unit.xml
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results
+          destination: test-results/unit
+
+  test-integration:
+    executor: python
+    steps:
+      - checkout
+      - install_python_dependencies
+      - run:
+          name: Integration and e2e tests
+          command: |
+            mkdir -p test-results
+            uv run --no-sync pytest -q tests/integration tests/e2e \
+              -m "not live_llm and not live_daytona and not benchmark and not db" \
+              -n 0 \
+              --junitxml=test-results/pytest-integration.xml
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results
+          destination: test-results/integration
+
+  frontend-check:
+    executor: node
+    steps:
+      - checkout
+      - install_uv
+      - setup_pnpm
+      - restore_pnpm_cache
+      - run:
+          name: Install frontend dependencies
+          command: cd src/frontend && pnpm install --frozen-lockfile
+      - save_pnpm_cache
+      - run:
+          name: Frontend API, type, lint, unit, duplicate, and build checks
+          command: |
+            cd src/frontend
+            pnpm run api:check
+            pnpm run type-check
+            pnpm run lint:robustness
+            pnpm run test:unit
+            cd ../..
+            ./scripts/run_duplicate_check.zsh
+            cd src/frontend
+            CI=true pnpm run build
+
+workflows:
+  ci:
+    jobs:
+      - quality
+      - lint-typecheck
+      - test-unit
+      - test-integration
+      - frontend-check

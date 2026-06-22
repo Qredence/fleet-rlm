@@ -278,12 +278,35 @@ Avoid these common anti-patterns when writing tests:
 
 ## CI/CD Integration
 
-### Default CI Pipeline
+### CircleCI Pipeline
 
-```yaml
-# Example GitHub Actions workflow
-- name: Run tests
-  run: uv run pytest -q -m "not live_llm and not benchmark"
+The repository includes `.circleci/config.yml` for the default CI lane. It runs separate jobs for:
+
+- release, docs, security, and dependency checks
+- Ruff formatting/linting and `ty` type checks
+- unit and contract tests with CircleCI timing-based splitting
+- integration and e2e tests
+- frontend API, type, lint, unit, duplicate-code, and build checks
+
+The CircleCI backend test jobs write JUnit XML into `test-results/` and upload it with
+`store_test_results` so CircleCI can track timing data, flaky tests, and reruns. Dependency caches are
+keyed by `uv.lock` for Python and `src/frontend/pnpm-lock.yaml` for frontend dependencies; do not
+replace those with broad source-tree or virtualenv caches unless measured CI timing shows a clear
+benefit.
+
+Validate config-only changes before opening a PR:
+
+```bash
+# from repo root
+circleci config validate .circleci/config.yml
+```
+
+If the CircleCI CLI is unavailable locally, at minimum parse the YAML and run the docs lane:
+
+```bash
+# from repo root
+yq e '.' .circleci/config.yml >/dev/null
+make check-docs
 ```
 
 ### Live LLM Tests in CI
