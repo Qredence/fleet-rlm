@@ -8,7 +8,7 @@
 
 ![fleet-rlm thumbnail](src/frontend/public/branding/thumbnail.png)
 
-`fleet-rlm` is a persistent Daytona-backed recursive DSPy workbench. Give it a task and optional context - files, URLs, pasted text, repository refs, or prior session state - and it adapts between direct reasoning, tool use, sandboxed execution, and recursive sub-task delegation.
+`fleet-rlm` is a persistent Daytona-backed recursive DSPy workbench. Give it a task and optional context - files, URLs, pasted text, repository refs, datasets, or prior session state - and it adapts between direct reasoning, tool use, sandboxed execution, recursive sub-task delegation, and offline prompt optimization.
 
 It is built for developers and AI engineers who want an inspectable Web UI and CLI around long-context task execution without hand-rolling WebSocket transport, session persistence, Daytona lifecycle management, execution traces, and recursive DSPy orchestration.
 
@@ -31,14 +31,16 @@ Published installs include built frontend assets, so normal users do not need a 
 
 ## What You Can Do
 
-- Run adaptive task sessions in the `Workbench`.
+- Run adaptive task sessions in `Workspace`.
 - Attach context from local files, staged documents, pasted text, URLs, repository URLs, and existing session history.
 - Watch reasoning, tool calls, sandbox activity, warnings, final answers, summaries, and generated evidence.
+- Optimize registered DSPy modules or Fleet skills with dataset upload, run history, result inspection, and comparisons.
 - Browse persisted runtime files and artifacts in `Volumes`.
 - Inspect runtime health, model connectivity, Daytona connectivity, and local runtime settings in `Settings`.
-- Use terminal chat, HTTP, WebSocket, Daytona smoke checks, and offline DSPy optimization from the CLI.
+- Manage LLM profiles, role bindings, auth state, sessions, sandboxes, traces, and runtime diagnostics over the FastAPI API.
+- Use terminal chat, HTTP, WebSocket, Daytona smoke checks, snapshot bootstrap, and offline DSPy optimization from the CLI.
 
-The maintained routed product surfaces are `Workbench`, `Volumes`, and `Settings`. Offline optimization remains a backend quality and CLI capability; it is not a primary routed Web UI surface.
+The maintained routed product surfaces are `/app/workspace`, `/app/optimization`, `/app/volumes`, and `/app/settings`. The root route and `/app` redirect to `/app/workspace`.
 
 ## Primary Commands
 
@@ -67,6 +69,12 @@ Validate Daytona connectivity without invoking an LM:
 uv run fleet-rlm daytona-smoke --repo https://github.com/qredence/fleet-rlm.git --ref main
 ```
 
+Create or refresh the reusable Daytona base snapshot:
+
+```bash
+uv run fleet-rlm daytona-snapshot
+```
+
 Run offline DSPy optimization for a registered module:
 
 ```bash
@@ -78,11 +86,12 @@ See the [CLI reference](docs/reference/cli.md) for the full command surface.
 
 ## How It Works
 
-`fleet-rlm` has three main layers:
+`fleet-rlm` has four main layers:
 
 - **Product and transport shell**: the React Web UI talks to FastAPI HTTP and WebSocket routes.
 - **Runtime core**: a DSPy ReAct agent coordinates task execution, tool use, streaming events, and recursive delegation.
 - **Daytona substrate**: sandbox interpreters, durable mounted roots, child-sandbox isolation, and execution artifacts keep work inspectable and persistent.
+- **Persistence and optimization services**: SQLModel-backed sessions, Neon/Postgres or SQLite storage, LLM profile management, trace feedback, and GEPA/DSPy optimization keep runs recoverable and improvable.
 
 The runtime is goal-first rather than repo-first. A repository is one possible context source, alongside documents, URLs, pasted text, durable files, and previous session state.
 
@@ -101,14 +110,34 @@ The current backend runtime is Daytona-backed and exposes these stable public su
 
 - `/health`
 - `/ready`
-- `GET /api/v1/auth/me`
-- `GET /api/v1/sessions/state`
+- `/api/v1/info`
+- `/api/v1/auth/*`
+- `/api/v1/sessions/*`
 - `/api/v1/runtime/*`
-- `POST /api/v1/traces/feedback`
+- `/api/v1/llm-profiles/*`
+- `/api/v1/sandboxes/*`
+- `/api/v1/runs/*`
+- `/api/v1/optimization/*`
+- `/api/v1/traces/feedback`
 - `/api/v1/ws/execution`
 - `/api/v1/ws/execution/events`
 
-Requests may include `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`, and an `execution_mode` hint. Durable mounted roots are `memory/`, `artifacts/`, `buffers/`, and `meta/`.
+The most commonly integrated endpoints are:
+
+- `/ready`
+- `GET /api/v1/auth/me`
+- `GET /api/v1/sessions/state`
+- `GET/PATCH /api/v1/runtime/settings`
+- `GET /api/v1/runtime/status`
+- `GET /api/v1/runtime/volume/tree`
+- `GET /api/v1/runtime/volume/file`
+- `GET /api/v1/optimization/status`
+- `POST /api/v1/optimization/run`
+- `GET /api/v1/optimization/modules`
+- `/api/v1/ws/execution`
+- `/api/v1/ws/execution/events`
+
+WebSocket execution frames may include `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`, and an `execution_mode` hint. Durable mounted roots are `memory/`, `artifacts/`, `buffers/`, and `meta/`. Auth identity comes from the configured auth provider; browser WebSocket auth uses short-lived tickets instead of raw JWT query strings.
 
 The canonical OpenAPI schema is [`openapi.yaml`](openapi.yaml). When backend request or response shapes change, regenerate and verify API artifacts with `make api-sync` and `make api-check`.
 
@@ -172,8 +201,17 @@ cd src/frontend
 pnpm run api:check
 pnpm run type-check
 pnpm run lint:robustness
+pnpm run lint:style-tokens
+pnpm run lint:dead-code
 pnpm run test:unit
 pnpm run build
+```
+
+Or run the full frontend lane:
+
+```bash
+cd src/frontend
+pnpm run check
 ```
 
 See [developer setup](docs/how-to-guides/developer-setup.md), [testing strategy](docs/how-to-guides/testing-strategy.md), and [scripts inventory](scripts/README.md) for the maintained contributor workflow.
@@ -228,9 +266,11 @@ See `.env.example` and [installation](docs/how-to-guides/installation.md) for th
 src/fleet_rlm/api/                  FastAPI app, auth, routers, WebSocket transport
 src/fleet_rlm/runtime/              DSPy agent runtime, execution helpers, tools
 src/fleet_rlm/integrations/daytona/ Daytona interpreter, sandbox lifecycle, durable volumes
+src/fleet_rlm/integrations/database/ Postgres repository, schema, migrations-facing models
+src/fleet_rlm/integrations/local_store.py SQLite fallback store and local session helpers
 src/fleet_rlm/quality/              Offline DSPy evaluation and optimization
 src/fleet_rlm/cli/                  `fleet` and `fleet-rlm` entrypoints
-src/frontend/                       React Web UI and generated API client
+src/frontend/                       React/TanStack Web UI, routed product surfaces, generated API client
 docs/                               User, contributor, architecture, and reference docs
 scripts/                            Maintained helper scripts and validation tooling
 ```
