@@ -15,6 +15,7 @@ executors:
     environment:
       PNPM_HOME: /home/circleci/.local/share/pnpm
       PNPM_STORE_PATH: /home/circleci/.pnpm-store
+      CI: "true"
 
 commands:
   install_uv:
@@ -148,20 +149,33 @@ jobs:
       - restore_pnpm_cache
       - run:
           name: Install frontend dependencies
+          no_output_timeout: 10m
           command: cd src/frontend && pnpm install --frozen-lockfile
       - save_pnpm_cache
       - run:
-          name: Frontend API, type, lint, unit, duplicate, and build checks
-          command: |
-            cd src/frontend
-            pnpm run api:check
-            pnpm run type-check
-            pnpm run lint:robustness
-            pnpm run test:unit
-            cd ../..
-            ./scripts/run_duplicate_check.zsh
-            cd src/frontend
-            CI=true pnpm run build
+          name: Frontend API check
+          no_output_timeout: 5m
+          command: cd src/frontend && pnpm run api:check
+      - run:
+          name: Frontend type check
+          no_output_timeout: 10m
+          command: cd src/frontend && pnpm run type-check
+      - run:
+          name: Frontend lint
+          no_output_timeout: 10m
+          command: cd src/frontend && pnpm run lint:robustness
+      - run:
+          name: Frontend unit tests
+          no_output_timeout: 10m
+          command: cd src/frontend && pnpm run test:unit
+      - run:
+          name: Duplicate code detection
+          no_output_timeout: 10m
+          command: ./scripts/run_duplicate_check.zsh
+      - run:
+          name: Frontend build
+          no_output_timeout: 15m
+          command: cd src/frontend && pnpm run build
 
 workflows:
   ci:
