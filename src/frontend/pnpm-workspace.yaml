@@ -18,7 +18,7 @@ overrides:
   "protobufjs@<=7.6.2": "7.6.3"
   "qs@>=6.11.1 <=6.15.1": "6.15.2"
   "uuid@<14.0.0": "14.0.0"
-  "better-auth": "1.6.11"
+  "better-auth": "1.6.20"
   "undici": "6.27.0"
   "ws@>=8.0.0 <8.21.0": "8.21.0"
 
@@ -29,3 +29,6 @@ allowBuilds:
   "msw": true
   "protobufjs": true
   "@tailwindcss/oxide": true
+
+patchedDependencies:
+  '@neondatabase/auth-ui@0.2.1-beta': patches/@neondatabase__auth-ui@0.2.1-beta.patch
