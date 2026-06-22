@@ -15,13 +15,15 @@ The supported product flow is a chat-first execution workbench:
 5. The workspace sidepanel hydrates trajectories, graph, and volume state from
    execution summary, final artifacts, live transcript data, and Daytona volume
    APIs.
-6. The user can also open full-page volumes or settings from the same shell.
+6. The user can also open optimization, full-page volumes, or settings from the
+   same shell.
 
 ## Surface Map
 
 | Surface | Route | Owns | Notes |
 | --- | --- | --- | --- |
 | Workbench | `/app/workspace` | `features/workspace/*` | Primary chat execution surface with workspace-local sidepanel |
+| Optimization | `/app/optimization` | `features/optimization/*` | GEPA optimization setup, run history, and run inspection |
 | Volumes | `/app/volumes` | `features/volumes/*` | Full-page mounted Daytona volume browser |
 | Settings | `/app/settings` | `features/settings/*` | Dialog-first settings surface |
 
@@ -33,6 +35,7 @@ src/frontend/src/
 ├── features/
 │   ├── layout/            # Shell chrome, route sync, dialogs, sidebar, header
 │   ├── workspace/         # Workbench chat, sidepanel, transcript, session controls
+│   ├── optimization/      # GEPA optimization form, run history, and details
 │   ├── volumes/           # Full-page volume browser and file preview
 │   └── settings/          # Settings dialog and runtime forms
 ├── lib/
@@ -40,7 +43,7 @@ src/frontend/src/
 │   └── rlm-api/           # REST and websocket clients
 ├── stores/                # Shell/navigation state
 ├── components/ui/         # Shared UI primitives
-├── components/ai-elements/ # AI Elements rendering primitives
+├── components/agent-elements/ # Agent Elements rendering primitives
 └── components/product/    # Reusable product composition
 ```
 
@@ -89,6 +92,5 @@ The current frontend does not treat these as product surfaces:
 - `memory`
 - `analytics`
 - `history`
-- `optimization`
 
 New work should target `features/*`, `lib/*`, and the thin route wrappers.

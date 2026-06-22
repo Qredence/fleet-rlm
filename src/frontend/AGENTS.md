@@ -20,23 +20,25 @@ Before editing:
 
 ## Source-of-Truth Files
 
-| Concern                 | File(s)                                                                |
-| ----------------------- | ---------------------------------------------------------------------- |
-| Scripts & validation    | `package.json`                                                         |
-| Lint/build/import rules | `vite.config.ts`                                                       |
-| Style token guard       | `scripts/check-style-tokens.mjs`                                       |
-| Routes & surfaces       | `src/routes/*`                                                         |
-| App chrome / layout     | `src/features/layout/*`                                                |
-| Product surfaces        | `src/features/{workspace,optimization,volumes,settings}/index.ts`      |
-| UI primitives           | `src/components/ui/*` (shadcn/Base UI)                                 |
-| Agent Elements (chat)   | `src/components/agent-elements/*`                                      |
-| Product compositions    | `src/components/product/*`                                             |
-| API clients & types     | `src/lib/rlm-api/*`                                                    |
-| Workspace adapters      | `src/lib/workspace/*`                                                  |
-| Theme / tokens          | `src/styles/globals.css`, `src/components/agent-elements/agent-ui.css` |
-| shadcn config           | `components.json`                                                      |
-| API contract            | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts`                 |
-| Dead-code analysis      | `knip.json`                                                            |
+| Concern                 | File(s)                                                                 |
+| ----------------------- | ----------------------------------------------------------------------- |
+| Scripts & validation    | `package.json`                                                          |
+| Lint/build/import rules | `vite.config.ts`                                                        |
+| Style token guard       | `scripts/check-style-tokens.mjs`                                        |
+| Routes & surfaces       | `src/routes/*`                                                          |
+| Client entry/hydration  | `src/client.tsx`                                                        |
+| App chrome / layout     | `src/features/layout/*`                                                 |
+| Product surfaces        | `src/features/{workspace,optimization,volumes,settings}/index.ts`       |
+| UI primitives           | `src/components/ui/*` (shadcn/Base UI)                                  |
+| Agent Elements (chat)   | `src/components/agent-elements/*`                                       |
+| Product compositions    | `src/components/product/*`                                              |
+| Auth/session restore    | `src/lib/auth/auth-provider.tsx`, `src/features/layout/app-sidebar.tsx` |
+| API clients & types     | `src/lib/rlm-api/*`                                                     |
+| Workspace adapters      | `src/lib/workspace/*`                                                   |
+| Theme / tokens          | `src/styles/globals.css`, `src/components/agent-elements/agent-ui.css`  |
+| shadcn config           | `components.json`                                                       |
+| API contract            | `openapi.yaml`, `src/lib/rlm-api/generated/openapi.ts`                  |
+| Dead-code analysis      | `knip.json`                                                             |
 
 ### Generated / Synced — Do Not Hand-Edit
 
@@ -63,8 +65,8 @@ Before editing:
 
 The following layers were removed and must not be reintroduced:
 
-- **`src/components/ai-elements`** — **deleted**. All primitives have been either merged into `ui/` (code-block), rewritten on `agent-elements/` (trajectory-chain), or removed as dead code (prompt-input, chain-of-thought, reasoning). Do not install `@ai-elements` registry components.
-- **`src/features/workspace/composer`** — **deleted**. The orphaned `workspace-composer.tsx` and its legacy `PromptInput` dependency have been removed. The canonical composer is `InputBar` from `agent-elements/input-bar.tsx`.
+- **Legacy AI Elements layer** — **deleted**. All primitives have been either merged into `ui/` (code-block), rewritten on `agent-elements/` (trajectory-chain), or removed as dead code (prompt-input, chain-of-thought, reasoning). Do not install legacy AI registry components.
+- **Legacy workspace composer layer** — **deleted**. The orphaned composer wrapper and its legacy prompt input dependency have been removed. The canonical composer is `InputBar` from `agent-elements/input-bar.tsx`.
 - **`src/screens`** — never existed. The stale `@/screens/*` lint rule has been removed from `vite.config.ts`.
 - **`components/tool-ui`** — retired. Tool transcript UI belongs under `components/agent-elements/tools/*`.
 
@@ -93,6 +95,17 @@ backend WS frames
 - `src/router.tsx` owns the router instance.
 - `src/routes/` defines file-based routes. Keep route wrappers thin; compose feature entry modules through `src/features/*/index.ts`.
 - `src/routeTree.gen.ts` is generated.
+
+### Route Data and Hydration
+
+- Client entry `src/client.tsx` owns the static/SSR hydration split. Keep the static path on
+  `createRoot`, keep SSR hydration on `hydrateRoot`, preserve the `window.__hydrated` test signal,
+  and leave `PostHogProvider` mounted unconditionally.
+- Route loaders for backend-backed surfaces should await TanStack Query work before returning.
+  Prefer shared `queryOptions(...)` factories with `queryClient.ensureQueryData(...)` or
+  `queryClient.prefetchQuery(...)` so loaders and hooks share keys, functions, and type inference.
+- Do not leave route-loader prefetches floating. Empty-cache transitions should not flicker or
+  reflow because a route rendered before its blocking data was scheduled.
 
 ### Workspace Structure
 
@@ -131,13 +144,36 @@ tree/preview split. The routed `/app/volumes` page remains the full-page
 durable volume browser and should not be collapsed into the workspace
 sidepanel.
 
+### Session Persistence and Restore
+
+- `workspace-screen.tsx` owns first-message chat session creation and uses `lastSavedStateRef` to
+  avoid redundant state writes.
+- `use-workspace-runtime.ts` captures `db_session_id` from `execution_started.summary` and binds
+  local workspace state to the durable backend session id.
+- `app-sidebar.tsx` starts authenticated background session sync. On logout or token expiration,
+  clear TanStack Query state before showing another tenant/user's cached session data.
+- Keep FastAPI plus `FleetRepository` as the runtime authorization boundary; do not move product
+  session reads or writes to direct Neon Data API calls from the browser.
+
+### Neon Auth UI
+
+- Branded login/signup pages render granular Neon Auth forms (`SignInForm`, `SignUpForm`) directly.
+  Keep catch-all routes `auth.$pathname.tsx` and `account.$pathname.tsx` for Neon internal flows.
+- Strip default Neon form chrome with
+  `classNames={{ base: "border-0 bg-transparent p-0 shadow-none w-full !max-w-none" }}` when forms
+  are embedded in Fleet layouts.
+- `auth-provider.tsx` owns token refresh and query-cache clearing. Keep proactive refresh before
+  profile/session sync so display names and admission state update without a manual reload.
+- `typed-client.ts` must normalize API base URLs without trailing slashes to avoid duplicated slash,
+  routing, or CORS mismatches.
+
 **Do not** create feature-local `ui/` folders; `src/components/ui/*` is the only primitive `ui` namespace.
 
 ---
 
 ## Tech Stack
 
-- **Package manager:** `pnpm` 10.33.0 (always `pnpm install --frozen-lockfile`)
+- **Package manager:** `pnpm` 11.8.0 from `package.json` (always `pnpm install --frozen-lockfile`)
 - **Build / lint / format:** Vite+ (`vp`) via `pnpm run ...`
 - **Framework:** React 19 + TypeScript 5.9+
 - **Router:** TanStack Router (file-based)
@@ -145,6 +181,10 @@ sidepanel.
 - **Styling:** Tailwind CSS v4 + `tw-animate-css` + `@theme inline`
 - **Testing:** Vitest (unit), Playwright (e2e)
 - **Dead-code analysis:** knip (`pnpm run lint:dead-code`)
+
+Do not add legacy pnpm build-trust fields such as `onlyBuiltDependencies` or
+`trustedDependencies` to `package.json`; keep package-manager security settings in the current
+pnpm-supported config surface when one is introduced.
 
 ---
 
@@ -225,6 +265,17 @@ pnpm run check
 - Theme primitives live in `src/styles/globals.css` and `src/components/agent-elements/agent-ui.css`. Keep the Tailwind v4 baseline canonical.
 - Use **semantic tokens and shared variants** — avoid arbitrary colors or local token layers.
 - **Eliminate arbitrary Tailwind values**. The project maintains token-backed `@utility` classes for all font sizes, radii, and common dimensions. Do not introduce new `text-[Npx]`, `w-[Npx]`, `h-[Npx]`, `rounded-[Npx]`, `leading-[...]`, or `tracking-[...]` values. If a size is missing, add a design token and `@utility` in `globals.css` or `agent-ui.css` rather than using an arbitrary value.
+- For analytical canvases, use direct absolute markdown links to `.canvas.tsx` files in chat/reporting
+  output so the IDE Canvas opens reliably.
+- Align complex dashboards with base UI/shadcn primitives: standard `text-sm` tabs, `variant="elevated"`
+  cards for major containers, and standard `h-9` form controls unless a shared token utility exists.
+- Preserve focus indicators on core forms such as `input-bar.tsx`; sidebar-specific focus suppression
+  belongs only under targeted sidebar selectors.
+- Generic tree primitives such as `TreeView` must implement keyboard tree behavior (`role="tree"`,
+  focus management, arrow keys, Enter/Space, Home/End) and keep mouse clicks synchronized with
+  `focusedId`.
+- Target visual JSON wrapping with scoped selectors such as `.visual-json-tree`; never add global
+  `[role="tree"]` CSS that could affect filesystem trees or other ARIA tree widgets.
 
 ### Style Token Enforcement
 
@@ -301,6 +352,7 @@ Dynamic colors (e.g. from `STEP_TYPE_META`) must use CSS custom properties set v
 Shared visual recipes belong in `src/components/product/*` or `src/components/agent-elements/input/*`, not duplicated locally. Current recipe components:
 
 - `NodeBadge` — small badge/pill for graph nodes and execution metadata
+- `TreeView` — keyboard-accessible product tree primitive for volume/filesystem-style trees
 - `ToolActionButton` — CVA primary/ghost/ghostSoft × sm/md/mdWide button for tool cards, approval footers, and question prompts
 - `CenteredErrorShell` — card-wrapped full-height centered error/empty-state shell (404, route-error-screen)
 - `PopoverSurface` / `popoverSurfaceClass` — shared popover surface recipe for input-bar, model-picker, mode-selector
@@ -348,8 +400,6 @@ VITE_FLEET_WS_URL
 VITE_FLEET_WORKSPACE_ID
 VITE_FLEET_USER_ID
 VITE_AGENTATION_ENDPOINT
-VITE_ENTRA_CLIENT_ID
-VITE_ENTRA_SCOPES
 VITE_PUBLIC_POSTHOG_API_KEY
 VITE_PUBLIC_POSTHOG_HOST
 ```
@@ -459,3 +509,6 @@ Wire backend tools through `agent-chat-adapter.ts` → `ToolRenderer`. Shared no
 - `code-block` lives in `ui/code-block.tsx` — both the simple (`CodeBlock`/`CodeBlockCode`/`CodeBlockGroup`) and rich (`CodeBlockViewer`/`CodeBlockHeader`/`CodeBlockFilename`/`CodeBlockCopyButton`/`CodeBlockActions`/`CodeBlockContent`) APIs.
 - `trajectory-chain.tsx` uses `agent-elements` `Collapsible` primitives directly — do not reintroduce `chain-of-thought` from `@ai-elements`.
 - The orphaned `workspace-composer.tsx` and its legacy `PromptInput` dependency have been deleted; do not recreate them.
+- Empty-state suggestions in `workspace-message-list.tsx` use the Agent Elements `Suggestion` chip
+  component with neutral icon fills and the larger "Qredence Fleet" title; avoid card-like empty
+  states or colored icon accents.

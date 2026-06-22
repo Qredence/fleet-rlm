@@ -15,7 +15,7 @@ graph TB
     API --> UI["ui/"]
 
     RUNTIME --> DAYTONA["integrations/daytona/"]
-    RUNTIME --> QUALITY["runtime/quality/"]
+    RUNTIME --> QUALITY["quality/"]
 ```
 
 ## Runtime Surfaces
@@ -31,27 +31,27 @@ graph TB
 
 ```mermaid
 graph LR
-    REQUEST["Workspace task request"] --> STREAM["api/routers/ws/stream.py"]
-    STREAM --> AGENT["runtime/factory.py"]
-    AGENT --> CHAT["runtime/agent/agent.py"]
+    REQUEST["Workspace task request"] --> WS["api/routers/ws/endpoint.py + connection_loop.py"]
+    WS --> RUNTIME_FACTORY["runtime/factory.py"]
+    RUNTIME_FACTORY --> CHAT["runtime/agent/agent.py"]
     CHAT --> EXEC["runtime/execution/*"]
     EXEC --> DAYTONA_INTERPRETER["integrations/daytona/interpreter.py"]
     EXEC --> DAYTONA_RUNTIME["integrations/daytona/runtime.py"]
-    CHAT --> MODELS["runtime/models/*"]
-    CHAT --> QUALITY["runtime/quality/*"]
+    CHAT --> MODULES["runtime/modules/*"]
+    CHAT --> QUALITY["quality/*"]
 ```
 
 ### Key dependencies
 
 | From | To | Purpose |
 | --- | --- | --- |
-| `api/routers/ws/stream.py` | `runtime/agent/*` | Stream prepared workspace work through the shared runtime agent |
+| `api/routers/ws/endpoint.py`, `connection_loop.py`, `turn_setup.py`, `turn_runner.py`, `stream_loop.py` | `runtime/agent/*` | Authenticate, prepare, run, and stream workspace turns through the shared runtime agent |
 | `runtime/agent/agent.py` | `runtime/tools/*` | Tool list assembly and tool dispatch |
 | `runtime/agent/agent.py` | `runtime/execution/*` | Streaming turn execution and interpreter support |
 | `runtime/agent/runtime.py` | `integrations/daytona/*` | Recursive child execution over the Daytona substrate |
 | `runtime/execution/*` | `integrations/daytona/interpreter.py`, `integrations/daytona/sandbox_executor.py`, `integrations/daytona/runtime.py` | Stateful interpreter/session backend integration |
-| `runtime/models/*` | `runtime/agent/*` | Builder, registry, and runtime-model exports |
-| `runtime/quality/*` | `runtime/agent/*`, `runtime/models/*` | Offline evaluation and optimization against the live runtime graph |
+| `runtime/modules/*` | `runtime/agent/*` | DSPy module builders, registry, escalation, workspace phases, and RLM routing |
+| `quality/*` | `runtime/agent/*`, `runtime/modules/*` | Offline evaluation and optimization against the live runtime graph |
 
 ## API and Host Map
 
@@ -60,10 +60,12 @@ graph LR
     APP["api/main.py"]
     ROUTERS["api/routers/"]
     WS_ENDPOINT["api/routers/ws/endpoint.py"]
-    WS_STREAM["api/routers/ws/stream.py"]
+    WS_CONNECTION["api/routers/ws/connection_loop.py"]
     WS_SESSION["api/routers/ws/session.py"]
     WS_TURN_SETUP["api/routers/ws/turn_setup.py"]
-    WS_COMPLETION["api/routers/ws/completion.py"]
+    WS_TURN_RUNNER["api/routers/ws/turn_runner.py"]
+    WS_STREAM_LOOP["api/routers/ws/stream_loop.py"]
+    WS_SUMMARY["api/routers/ws/stream_summary.py"]
     RUNTIME_SERVICES["api/runtime_services/*"]
     EVENTS["api/events/*"]
     RUNTIME["runtime/*"]
@@ -72,11 +74,13 @@ graph LR
     ROUTERS --> WS_ENDPOINT
     ROUTERS --> RUNTIME_SERVICES
     ROUTERS --> EVENTS
-    WS_ENDPOINT --> WS_STREAM
+    WS_ENDPOINT --> WS_CONNECTION
     WS_ENDPOINT --> WS_SESSION
     WS_ENDPOINT --> WS_TURN_SETUP
-    WS_ENDPOINT --> WS_COMPLETION
-    WS_STREAM --> RUNTIME
+    WS_CONNECTION --> WS_TURN_RUNNER
+    WS_TURN_RUNNER --> WS_STREAM_LOOP
+    WS_TURN_RUNNER --> WS_SUMMARY
+    WS_STREAM_LOOP --> RUNTIME
 ```
 
 ### Key dependencies
@@ -87,7 +91,7 @@ graph LR
 | `api/routers/ws/*` | `api/runtime_services/*` | Runtime orchestration, execution events, and startup/repl bridging |
 | `api/runtime_services/settings.py` | `integrations/config/*` | Runtime settings mutation and env/config synchronization |
 | `api/runtime_services/diagnostics.py` | `integrations/config/*`, `integrations/daytona/*` | Runtime diagnostics, status, and provider connectivity tests |
-| `api/runtime_services/volumes.py` | `integrations/daytona/filesystem.py` | Volume browsing |
+| `api/runtime_services/volumes.py` | `integrations/daytona/file_browser.py`, `integrations/daytona/sdk_ops.py` | Volume browsing |
 | `api/events/*` | `runtime/execution/streaming_events.py`, frontend workspace stores | Event shaping for passive execution subscriptions and workbench hydration |
 
 ## Integration Packages
@@ -95,7 +99,7 @@ graph LR
 | Package | Role | Notable files |
 | --- | --- | --- |
 | `integrations/config/` | App/env/runtime settings | `env.py`, `runtime_settings.py`, `_env_utils.py`, `config.yaml` |
-| `integrations/database/` | Persistence boundary | `engine.py`, `fleet_repository.py`, `models_base.py`, `models_enums.py`, `models_identity.py`, `models_jobs.py`, `models_memory.py`, `models_optimization.py`, `models_runs.py`, `models_sandbox.py`, `repository_chat.py`, `repository_identity.py`, `repository_jobs.py`, `repository_memory.py`, `repository_optimization.py`, `repository_shared.py`, `types.py` |
+| `integrations/database/` | Persistence boundary | `engine.py`, `fleet_repository.py`, `models_base.py`, `models_enums.py`, `models_identity.py`, `models_jobs.py`, `models_llm_profiles.py`, `models_memory.py`, `models_optimization.py`, `models_runs.py`, `models_sandbox.py`, `repository_chat.py`, `repository_identity.py`, `repository_jobs.py`, `repository_memory.py`, `repository_optimization.py`, `repository_shared.py` |
 | `integrations/local_store.py` | Local sidecar persistence | session history, turn transcripts, optimization-run tracking |
 
 | `integrations/observability/` | Telemetry and tracing | `posthog_callback.py`, `mlflow_runtime.py`, `mlflow_traces.py`, `trace_context.py` |

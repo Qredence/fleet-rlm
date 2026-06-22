@@ -37,7 +37,7 @@ Implementation-facing contracts, interfaces, and current-state facts.
 - [ADR-003: Neon/Postgres with RLS](adr/003-neon-postgres-rls-persistence.md)
   Serverless PostgreSQL with Row-Level Security for multi-tenant persistence.
 - [ADR-004: Dual Auth Modes](adr/004-dual-auth-modes.md)
-  Development and Entra authentication modes.
+  Development, Entra, and Neon authentication lineage.
 
 ## Historical Reference Material
 

@@ -12,7 +12,7 @@ tenant + workspace scoped, and all new primary keys are generated with `app.uuid
 | Repository boundary | `src/fleet_rlm/integrations/database/fleet_repository.py` |
 | Shared repository context helpers | `src/fleet_rlm/integrations/database/repository_shared.py` |
 | SQLAlchemy models | `src/fleet_rlm/integrations/database/models_*.py` |
-| Typed request DTOs | `src/fleet_rlm/integrations/database/types.py` |
+| Typed request DTOs | Domain-specific dataclasses in `repository_*.py` modules |
 | Alembic migrations | `migrations/versions/` |
 
 ## Schema Baseline
@@ -92,6 +92,21 @@ Repository operations set transaction-local request context before tenant/worksp
 RLS policies are enabled and forced on tenant/workspace scoped tables and evaluate
 the context above. `app.workspace_id` is optional at query time; repository helpers
 auto-resolve a default workspace when callers provide only `tenant_id`.
+
+`FleetRepository` and shared repository helpers own this context setup through
+`set_config(...)`. Do not bypass that boundary from routers, runtime services, or browser-facing
+code when reading or writing tenant/workspace-scoped product data.
+
+## Neon Security Hardening
+
+The Neon hardening migration moves extension ownership and function lookup out of unsafe defaults:
+
+- `pgcrypto` and `uuid-ossp` are relocated to the `app` schema when needed.
+- `app.uuid_v7()` and `app.set_updated_at()` get explicit `search_path` settings.
+- Managed Neon helper `public.show_db_tree()` is hardened when present.
+
+Keep future database functions schema-qualified or explicitly pinned to a safe `search_path`; do
+not rely on role-mutable lookup paths for security-sensitive helpers.
 
 ## Environment
 

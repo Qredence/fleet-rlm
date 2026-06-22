@@ -13,10 +13,11 @@ contract.
 The live shell supports:
 
 - `/app/workspace`
+- `/app/optimization`
 - `/app/volumes`
 - `/app/settings`
 
-Legacy `taxonomy`, `skills`, `memory`, `analytics`, `history`, and `optimization` routes are not supported
+Legacy `taxonomy`, `skills`, `memory`, `analytics`, and `history` routes are not supported
 entrypoints.
 
 ## REST Surfaces Used By The Frontend
@@ -33,6 +34,11 @@ The frontend consumes the following backend surfaces:
 - `GET /api/v1/runtime/status`
 - `GET /api/v1/runtime/volume/tree`
 - `GET /api/v1/runtime/volume/file`
+- `GET /api/v1/optimization/status`
+- `GET /api/v1/optimization/modules`
+- `GET /api/v1/optimization/runs`
+- `GET /api/v1/optimization/runs/{run_id}`
+- `POST /api/v1/optimization/run`
 - `GET /api/v1/sessions/state`
 - `GET /api/v1/sessions`
 - `GET /api/v1/sessions/{id}`
@@ -44,7 +50,8 @@ The history surface uses the sessions endpoints. The settings surface uses the
 runtime settings and runtime status endpoints. The workspace surface uses
 `/api/v1/auth/me` and runtime status to gate the composer and warnings. The
 workspace sidepanel `Volume` tab and the `/app/volumes` route both use the
-Daytona-backed runtime volume APIs.
+Daytona-backed runtime volume APIs. The optimization surface uses the
+GEPA-backed optimization endpoints for status, modules, datasets, runs, and run details.
 
 ## Websocket Split
 

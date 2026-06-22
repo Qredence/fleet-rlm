@@ -11,7 +11,8 @@ This document reflects the current backend package structure in `src/fleet_rlm/`
 | `api/` | FastAPI transport, auth, schemas, routers, websocket lifecycle, runtime services, and event shaping. |
 | `cli/` | `fleet` / `fleet-rlm` entrypoints, command registration, runtime helpers, and terminal UX. |
 | `integrations/` | Config, database, observability, Daytona, and local-store integrations. |
-| `runtime/` | Shared agent loop, execution helpers, content processing, tools, runtime models, and offline quality. |
+| `runtime/` | Shared agent loop, execution helpers, content processing, tools, runtime modules, and runtime models. |
+| `quality/` | Offline DSPy evaluation and GEPA optimization. |
 | `ui/` | Packaged frontend build assets used by installed distributions. |
 | `utils/` | Small shared helpers. |
 
@@ -37,7 +38,11 @@ This document reflects the current backend package structure in `src/fleet_rlm/`
 | `routers/auth.py` | Auth identity endpoint. |
 | `routers/health.py` | Health and readiness endpoints. |
 | `routers/runtime.py` | Runtime settings, diagnostics, and Daytona volume browsing routes. |
-| `routers/optimization.py` | GEPA/optimization routes. |
+| `routers/info.py` | API metadata endpoints. |
+| `routers/llm_profiles.py` | Local LLM profile and role management routes. |
+| `routers/optimization/` | GEPA optimization status, run, and dataset routes. |
+| `routers/runs.py` | Execution run-step lookup routes. |
+| `routers/sandboxes.py` | Daytona sandbox listing, detail, delete, and archive routes. |
 | `routers/sessions.py` | Session state, history, transcript, archive, and export routes. |
 | `routers/traces.py` | Feedback and trace-reporting routes. |
 | `routers/ws/` | Websocket transport for execution and execution-event subscriptions. |
@@ -47,16 +52,17 @@ This document reflects the current backend package structure in `src/fleet_rlm/`
 | Path | Description |
 | --- | --- |
 | `endpoint.py` | `/api/v1/ws/execution` and `/api/v1/ws/execution/events` entrypoints. |
-| `stream.py` | Execution turn streaming and message loop coordination. |
-| `session.py` | Runtime preparation and session restore/switch helpers. |
-| `turn_setup.py` | Converts a websocket payload into a prepared runtime turn. |
+| `connection_loop.py` | Connection-scoped conversational websocket loop and in-flight task control. |
+| `turn_setup.py` | Converts a websocket payload into a prepared runtime turn and session context. |
+| `turn_runner.py` | Runs one prepared turn, emits terminal events, and persists completion/failure. |
+| `stream_loop.py` | Runtime event iteration and websocket delivery. |
+| `stream_events.py` | Runtime-event serialization and terminal semantics. |
+| `stream_summary.py` | Completion summary and workbench hydration payload assembly. |
 | `commands.py` | Command-frame dispatch and run lifecycle initialization. |
-| `messages.py` | Websocket message parsing and validation. |
-| `terminal.py` | Terminal event shaping and ordering. |
-| `completion.py` | Completion summary and workbench hydration payload assembly. |
-| `manifest.py` | Session manifest handling. |
+| `transport.py` | Authentication, ticket handling, message parsing, close/send helpers, and startup errors. |
+| `session.py` | Session id normalization and cache helpers. |
+| `repl_bridge.py` | Interpreter callback forwarding into execution-event flow. |
 | `artifacts.py` | Artifact event helpers. |
-| `errors.py`, `helpers.py`, `lifecycle.py`, `types.py` | Focused helpers for errors, shutdown, request normalization, and websocket utility code. |
 
 ## `runtime/`
 
@@ -66,8 +72,7 @@ This document reflects the current backend package structure in `src/fleet_rlm/`
 | `agent/` | Shared DSPy orchestration, chat/session state, delegation policy, memory, and command helpers. |
 | `execution/` | Interpreter support, streaming helpers, runtime factory glue, and execution profiles. |
 | `content/` | Chunking, ingestion, and execution-log processing helpers. |
-| `models/` | Shared runtime/streaming models plus runtime-module assembly. |
-| `quality/` | DSPy evaluation and optimization. |
+| `modules/` | DSPy module assembly, escalation, workspace phases, module registry, and prompt/routing helpers. |
 | `tools/` | Typed tool adapters exposed to the shared runtime. |
 
 ### Runtime warmup policy
@@ -83,7 +88,6 @@ This document reflects the current backend package structure in `src/fleet_rlm/`
 | `config/` | App/env/runtime settings helpers and defaults. |
 | `database/` | Database manager, SQLModel models, repository, and DB-facing types. |
 | `local_store.py` | Local session/history/optimization persistence. |
-
 | `observability/` | PostHog and MLflow integrations plus trace/request-context helpers. |
 | `daytona/` | Daytona interpreter facade, workspace/session manager, sandbox executor, child delegation, bridge/runtime helpers, diagnostics, and volume access. |
 

@@ -92,7 +92,8 @@ Key files:
 - `cli/main.py` is the lightweight `fleet` launcher
 - `cli/fleet_cli.py` defines the `fleet-rlm` surface
 - `cli/runners.py` assembles shared runtime helpers
-- `cli/runtime_factory.py` remains a compatibility re-export only
+- Runtime construction is shared through `cli/runners.py` and `runtime/factory.py`; there is no
+  separate CLI runtime-factory module in the current tree
 
 ## Read First by Task
 
@@ -109,6 +110,6 @@ Key files:
 
 ## Historical Note
 
-Older docs may still refer to `api/routers/ws/stream.py` or `runtime/quality/` as ownership paths. The websocket loop is split across `connection_loop.py`, `turn_setup.py`, `turn_runner.py`, and `stream_loop.py`; offline optimization lives under top-level `quality/`.
+Older transition notes may still refer to retired websocket or runtime-quality ownership paths. The websocket loop is split across `connection_loop.py`, `turn_setup.py`, `turn_runner.py`, and `stream_loop.py`; offline optimization lives under top-level `quality/`.
 
 Older docs may still refer to bridge packages that are no longer present in the tree. Treat those references as historical context only; do not use them as current ownership labels.

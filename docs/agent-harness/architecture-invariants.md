@@ -59,7 +59,7 @@ plus the current MCP attachment when servers are reattached.
 
 Keep shared UI primitives reusable:
 
-- `src/frontend/src/components/ui/*`, `components/ai-elements/*`, and `components/product/*` must
+- `src/frontend/src/components/ui/*`, `components/agent-elements/*`, and `components/product/*` must
   not import from route files or feature implementation modules.
 - `src/frontend/src/lib/workspace/*` must stay UI-independent.
 - `src/frontend/src/features/layout/*` should import product surfaces through feature contracts

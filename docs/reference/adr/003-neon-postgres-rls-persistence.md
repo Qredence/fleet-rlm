@@ -177,13 +177,14 @@ class DatabaseManager:
 
 - `DATABASE_URL` must use `postgresql+asyncpg://` scheme for async
 - `DATABASE_URL` is the pooled runtime connection; `DATABASE_ADMIN_URL` should use the direct non-pooler endpoint for Alembic and admin/debug tasks
-- `DATABASE_REQUIRED=true` enforced when `AUTH_MODE=entra`
+- `DATABASE_REQUIRED=true` enforced when `AUTH_MODE=entra` or `AUTH_MODE=neon`
 - Migrations managed via Alembic in `migrations/`
 
 ## References
 
-- `src/fleet_rlm/integrations/database/models.py` — SQLAlchemy model definitions
-- `src/fleet_rlm/integrations/database/repository.py` — Data access repository
+- `src/fleet_rlm/integrations/database/models_*.py` — SQLModel/SQLAlchemy model definitions
+- `src/fleet_rlm/integrations/database/fleet_repository.py` — Data access repository boundary
+- `src/fleet_rlm/integrations/database/repository_*.py` — Domain-specific repository helpers
 - `src/fleet_rlm/integrations/database/engine.py` — Connection management
 - `src/fleet_rlm/api/auth/admission.py` — Tenant admission flow
 - `migrations/` — Alembic migration scripts

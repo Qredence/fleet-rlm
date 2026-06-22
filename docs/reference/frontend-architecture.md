@@ -29,7 +29,7 @@ flowchart TB
 
 ```text
 src/frontend/src/
-├── routes/              # TanStack Router file tree and not-found/login/logout/signup routes
+├── routes/              # TanStack Router file tree, auth pages, and not-found routes
 ├── features/
 │   ├── layout/          # Shell chrome, route sync, sidebar, header, dialogs
 │   ├── workspace/       # Chat-first workbench plus workspace-local sidepanel
@@ -42,7 +42,6 @@ src/frontend/src/
 ├── stores/              # Shell/navigation state shared across the app
 ├── components/ui/       # shadcn/Base UI primitives and thin local extensions
 ├── components/agent-elements/ # Canonical chat and tool transcript UI
-├── components/ai-elements/  # Legacy composer-only helpers
 ├── components/product/  # App-owned reusable composition built from registry layers
 └── app/                 # App bootstrap/providers
 ```
@@ -56,9 +55,10 @@ The live route tree is intentionally small and explicit:
 - `/` redirects to `/app/workspace`
 - `/app` mounts the shell layout
 - `/app/workspace` is the main workbench
+- `/app/optimization` is the GEPA prompt optimization surface
 - `/app/volumes` is the mounted storage browser
 - `/app/settings` is the settings dialog/page fallback
-- `/login`, `/logout`, `/signup`, and `/404` remain standalone routes
+- `/login`, `/signup`, `/auth/$pathname`, `/account/$pathname`, and `/404` remain standalone routes
 - `src/routes/$.tsx` is the catchall for unsupported paths
 
 The shell route files are thin wrappers only:

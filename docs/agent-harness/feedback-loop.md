@@ -34,6 +34,8 @@ Start the local app in a separate terminal:
 uv run fleet web
 ```
 
+The integrated FastAPI app serves on `:8000` by default.
+
 Or run the API directly:
 
 ```bash
@@ -48,6 +50,9 @@ For frontend-only iteration:
 pnpm run dev
 ```
 
+The frontend dev server uses Vite on `:5173` and proxies `/api/v1`, `/health`, and `/ready` to
+`localhost:8000`. MLflow uses `:5001` when started through `make mlflow`.
+
 ## Browser Smoke
 
 With the app running, smoke-test:
@@ -60,8 +65,9 @@ With the app running, smoke-test:
 5. `GET /api/v1/runtime/status` returns structured runtime status, even when live Daytona or LLM
    credentials are not configured.
 
-Use the Codex browser, Playwright, or the local browser tool already available in the session. Do
-not invent a second UI test framework for this smoke path.
+Use the local browser tool already available in the session. Prefer the built-in Cursor Browser
+(`cursor-ide-browser`) when it is available or explicitly requested; otherwise use the Codex browser
+or Playwright. Do not invent a second UI test framework for this smoke path.
 
 ## Runtime And MLflow Evidence
 

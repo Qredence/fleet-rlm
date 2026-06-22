@@ -31,15 +31,16 @@ Frontend source lives under `src/frontend/src/`.
 | `lib/rlm-api/` | REST and websocket clients plus generated API types |
 | `stores/` | Shell/navigation state |
 | `components/ui/` | Shared shadcn/Base UI primitives |
-| `components/ai-elements/` | AI Elements rendering primitives |
+| `components/agent-elements/` | Agent Elements rendering primitives |
 | `components/product/` | Reusable product composition built from the shared layers |
 | `app/` | App bootstrap and providers |
 
 ## Product Surface Rules
 
-- Supported surfaces are `/app/workspace`, `/app/volumes`, and `/app/settings`.
+- Supported surfaces are `/app/workspace`, `/app/optimization`,
+  `/app/volumes`, and `/app/settings`.
 - Retired `taxonomy`, `skills`, `memory`, `analytics`, `history`, and
-  `optimization` paths should fall through to `/404`.
+  other non-routed product paths should fall through to `/404`.
 - Route wrappers must stay thin and should not own page logic.
 - New work should target `features/*`, `lib/*`, or `components/product/*`, not
   a resurrected screen layer.

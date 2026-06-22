@@ -94,3 +94,9 @@ codex features list | grep -E '^(hooks|multi_agent)[[:space:]]'
 ```
 
 Run `zsh .codex/workspace-bootstrap.zsh` when dependency refresh is acceptable.
+
+## Shell and Browser Tooling
+
+Use `zsh` for repo shell examples and project-local scripts. When browser automation is needed,
+prefer the built-in Cursor Browser (`cursor-ide-browser`) if it is available or explicitly
+requested; otherwise use the Codex browser or Playwright lane named by the task.
