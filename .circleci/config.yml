@@ -3,7 +3,7 @@ version: 2.1
 executors:
   python:
     docker:
-      - image: cimg/python:3.12.13
+      - image: cimg/python:3.13.11
     working_directory: ~/project
     environment:
       UV_CACHE_DIR: ~/.cache/uv
@@ -29,13 +29,13 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - v1-uv-py312-{{ arch }}-{{ checksum "uv.lock" }}
-            - v1-uv-py312-{{ arch }}-
+            - v1-uv-py313-{{ arch }}-{{ checksum "uv.lock" }}
+            - v1-uv-py313-{{ arch }}-
 
   save_uv_cache:
     steps:
       - save_cache:
-          key: v1-uv-py312-{{ arch }}-{{ checksum "uv.lock" }}
+          key: v1-uv-py313-{{ arch }}-{{ checksum "uv.lock" }}
           paths:
             - ~/.cache/uv
 
@@ -45,7 +45,7 @@ commands:
       - restore_uv_cache
       - run:
           name: Install Python dependencies
-          command: uv sync --all-extras --dev --python 3.12
+          command: uv sync --all-extras --dev --python 3.13
 
   setup_pnpm:
     steps:
