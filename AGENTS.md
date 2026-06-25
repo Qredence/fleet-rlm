@@ -85,3 +85,5 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Authentication is locked specifically to Neon Project ID `old-bird-44339002` using `@neondatabase/auth-ui` on catch-all paths with JWT EdDSA token verification.
 - `https://fleet-rlm.fastapicloud.dev` (and the variant without trailing slash) is a configured trusted origin in Neon project `old-bird-44339002` to prevent INVALID_ORIGIN rejection.
 - Postgres Row-Level Security (RLS) on `llm_provider_profiles` secures user BYOK data via context-derived tenant/user/workspace scope.
+- `FLEET_SECRET_ENCRYPTION_KEY` (Fernet key) is required in `neon` auth mode to encrypt/decrypt per-workspace BYOK provider credentials stored in `llm_provider_profiles`; generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+- BYOK settings round-trips skip empty values and masked values (reported as `skipped`, not `updated`) to prevent wiping existing encrypted keys.
