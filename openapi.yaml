@@ -1092,6 +1092,8 @@ paths:
         '503':
           description: Runtime services are unavailable because server startup is
             incomplete.
+      security:
+      - HTTPBearer: []
     post:
       tags:
       - runtime
@@ -1116,7 +1118,7 @@ paths:
           description: Runtime services are unavailable because server startup is
             incomplete.
         '403':
-          description: LLM profile writes are allowed only when APP_ENV=local.
+          description: LLM profile writes require local mode or admitted Neon authentication.
         '404':
           description: Requested profile was not found.
         '422':
@@ -1125,12 +1127,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/runtime/llm-profiles/{profile_id}:
     patch:
       tags:
       - runtime
       summary: Update Llm Profile
       operationId: update_llm_profile_api_v1_runtime_llm_profiles__profile_id__patch
+      security:
+      - HTTPBearer: []
       parameters:
       - name: profile_id
         in: path
@@ -1160,7 +1166,7 @@ paths:
           description: Runtime services are unavailable because server startup is
             incomplete.
         '403':
-          description: LLM profile writes are allowed only when APP_ENV=local.
+          description: LLM profile writes require local mode or admitted Neon authentication.
         '404':
           description: Requested profile was not found.
         '422':
@@ -1174,6 +1180,8 @@ paths:
       - runtime
       summary: Delete Llm Profile
       operationId: delete_llm_profile_api_v1_runtime_llm_profiles__profile_id__delete
+      security:
+      - HTTPBearer: []
       parameters:
       - name: profile_id
         in: path
@@ -1193,7 +1201,7 @@ paths:
           description: Runtime services are unavailable because server startup is
             incomplete.
         '403':
-          description: LLM profile writes are allowed only when APP_ENV=local.
+          description: LLM profile writes require local mode or admitted Neon authentication.
         '404':
           description: Requested profile was not found.
         '422':
@@ -1208,6 +1216,8 @@ paths:
       - runtime
       summary: Get Llm Profile Models
       operationId: get_llm_profile_models_api_v1_runtime_llm_profiles__profile_id__models_get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: profile_id
         in: path
@@ -1253,6 +1263,8 @@ paths:
       - runtime
       summary: Test Llm Profile
       operationId: test_llm_profile_api_v1_runtime_llm_profiles__profile_id__test_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: profile_id
         in: path
@@ -1276,7 +1288,7 @@ paths:
           description: Runtime services are unavailable because server startup is
             incomplete.
         '403':
-          description: LLM profile writes are allowed only when APP_ENV=local.
+          description: LLM profile writes require local mode or admitted Neon authentication.
         '404':
           description: Requested profile was not found.
         '422':
@@ -1303,6 +1315,8 @@ paths:
         '503':
           description: Runtime services are unavailable because server startup is
             incomplete.
+      security:
+      - HTTPBearer: []
     patch:
       tags:
       - runtime
@@ -1327,7 +1341,7 @@ paths:
           description: Runtime services are unavailable because server startup is
             incomplete.
         '403':
-          description: LLM profile writes are allowed only when APP_ENV=local.
+          description: LLM profile writes require local mode or admitted Neon authentication.
         '404':
           description: Requested profile was not found.
         '422':
@@ -1336,6 +1350,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/runtime/llm-profiles/import-env:
     post:
       tags:
@@ -1355,9 +1371,11 @@ paths:
           description: Runtime services are unavailable because server startup is
             incomplete.
         '403':
-          description: LLM profile writes are allowed only when APP_ENV=local.
+          description: LLM profile writes require local mode or admitted Neon authentication.
         '404':
           description: Requested profile was not found.
+      security:
+      - HTTPBearer: []
   /api/v1/sandboxes:
     get:
       tags:
@@ -2812,6 +2830,8 @@ components:
           - anthropic
           - google
           - openai_compatible
+          - litellm_proxy
+          - anthropic_compatible
           title: Provider Type
           description: Provider integration type.
         api_base:
@@ -2853,6 +2873,8 @@ components:
           - anthropic
           - google
           - openai_compatible
+          - litellm_proxy
+          - anthropic_compatible
           title: Provider Type
           description: Provider integration type.
         api_base:
@@ -2897,6 +2919,8 @@ components:
             - anthropic
             - google
             - openai_compatible
+            - litellm_proxy
+            - anthropic_compatible
           - type: 'null'
           title: Provider Type
           description: Updated provider type.
@@ -4074,6 +4098,12 @@ components:
           type: array
           title: Updated
           description: Runtime setting keys that were successfully updated.
+        skipped:
+          items:
+            type: string
+          type: array
+          title: Skipped
+          description: Runtime setting keys that were accepted in the request but not persisted (e.g. masked secret round-trips).
         env_path:
           type: string
           title: Env Path
@@ -4093,6 +4123,14 @@ components:
           type: boolean
           title: Write Enabled
           description: Whether runtime settings writes are currently allowed.
+        settings_write_enabled:
+          type: boolean
+          title: Settings Write Enabled
+          description: Whether process/env runtime settings writes are allowed.
+        profile_write_enabled:
+          type: boolean
+          title: Profile Write Enabled
+          description: Whether authenticated LLM provider profile writes are allowed.
         ready:
           type: boolean
           title: Ready
@@ -4134,6 +4172,8 @@ components:
       required:
       - app_env
       - write_enabled
+      - settings_write_enabled
+      - profile_write_enabled
       - ready
       - active_models
       - tests

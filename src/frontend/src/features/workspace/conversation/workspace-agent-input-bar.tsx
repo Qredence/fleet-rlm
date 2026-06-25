@@ -110,7 +110,7 @@ export function WorkspaceAgentInputBar({
   const plannerProfileId = plannerBinding?.profile_id ?? null;
   const plannerModelId = plannerBinding?.model_id ?? "";
   const modelsQuery = useLlmProfileModels(plannerProfileId);
-  const writeEnabled = statusQuery.data?.write_enabled !== false;
+  const writeEnabled = statusQuery.data?.profile_write_enabled !== false;
 
   const pickerModels = useMemo(
     () => plannerModelOptions(modelsQuery.data?.models, activeModels?.planner ?? plannerModelId),
@@ -120,7 +120,7 @@ export function WorkspaceAgentInputBar({
   const handlePlannerModelChange = useCallback(
     (modelId: string) => {
       if (!writeEnabled || !plannerProfileId) {
-        toast.error("Planner model switching is only available in local write mode.");
+        toast.error("Planner model switching is unavailable for this runtime.");
         return;
       }
       saveRoleBindings.mutate(

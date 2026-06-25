@@ -49,7 +49,8 @@ export function ProviderProfilesPanel({ showAllSections, section }: ProviderProf
   const rolesQuery = useLlmRoleBindings();
   const mutations = useLlmProfilesMutations();
 
-  const writeEnabled = statusQuery.data?.write_enabled !== false;
+  const writeEnabled = statusQuery.data?.profile_write_enabled !== false;
+  const importEnvEnabled = statusQuery.data?.settings_write_enabled === true;
   const showSection = (key: SettingsSection) => showAllSections || section === key;
 
   const profiles = profilesQuery.data ?? [];
@@ -79,7 +80,7 @@ export function ProviderProfilesPanel({ showAllSections, section }: ProviderProf
             <FieldContent>
               <FieldTitle>Write Protection</FieldTitle>
               <FieldDescription>
-                Provider profile updates are disabled because APP_ENV is not local.
+                Provider profile updates are disabled for this runtime.
               </FieldDescription>
             </FieldContent>
             <Badge className="self-start" variant="destructive">
@@ -127,7 +128,7 @@ export function ProviderProfilesPanel({ showAllSections, section }: ProviderProf
               />
             ))}
 
-            <ImportEnvButton writeEnabled={writeEnabled} mutations={mutations} />
+            <ImportEnvButton writeEnabled={importEnvEnabled} mutations={mutations} />
 
             <ProviderProfileList
               profiles={profiles}

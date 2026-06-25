@@ -11,10 +11,6 @@ interface ImportMetaEnv {
   readonly VITE_MOCK_MODE?: string;
   /** Marks Playwright-driven dev servers so test-only overlays can be disabled. */
   readonly VITE_E2E?: string;
-  /** Neon Auth public branch URL. */
-  readonly VITE_NEON_AUTH_URL?: string;
-  /** Server-side Neon Auth URL exposed by Vite for local development. */
-  readonly NEON_AUTH_URL?: string;
   /** Comma-separated Neon Auth social providers enabled in this deployment. */
   readonly VITE_NEON_AUTH_SOCIAL_PROVIDERS?: string;
   /** PostHog analytics write key. */
