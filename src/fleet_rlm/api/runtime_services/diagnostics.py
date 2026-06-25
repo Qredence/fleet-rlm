@@ -9,7 +9,10 @@ import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from functools import partial
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 
 from pydantic import ValidationError
 
@@ -23,7 +26,11 @@ from fleet_rlm.integrations.llm_profiles.model_catalog import (
     MODELS_ENDPOINT_PROVIDER_TYPES,
     validate_profile_via_models_catalog,
 )
-from fleet_rlm.integrations.llm_profiles.types import LlmRoleName
+from fleet_rlm.integrations.llm_profiles.types import (
+    LlmProviderProfileRecord,
+    LlmRoleName,
+    ResolvedRoleLmConfig,
+)
 from fleet_rlm.integrations.observability.config import MlflowConfig
 
 from ..bootstrap_observability import resolve_mlflow_auto_start_enabled
@@ -275,8 +282,8 @@ async def run_connectivity_test(
 async def _resolve_byok_planner(
     config_deps: ConfigDeps,
     persistence_deps: PersistenceDeps | None,
-    persisted_identity: object | None,
-) -> tuple[object | None, object | None, str | None]:
+    persisted_identity: IdentityUpsertResult | None,
+) -> tuple[LlmProviderProfileRecord | None, ResolvedRoleLmConfig | None, str | None]:
     """Resolve the caller's BYOK planner profile + config (the one chat uses).
 
     Returns ``(profile, config, error)``:
@@ -337,7 +344,7 @@ async def run_lm_connection_test(
     planner_loader=None,
     delegate_loader=None,
     persistence_deps: PersistenceDeps | None = None,
-    persisted_identity: object | None = None,
+    persisted_identity: IdentityUpsertResult | None = None,
 ) -> RuntimeConnectivityTestResponse:
     byok_profile, byok_config, byok_error = await _resolve_byok_planner(
         config_deps, persistence_deps, persisted_identity
@@ -372,6 +379,8 @@ async def run_lm_connection_test(
         if byok_profile is not None:
             # BYOK non-/models provider (e.g. real Anthropic): chat-completion smoke test
             # against the profile's resolved config.
+            if byok_config is None:
+                raise RuntimeError("BYOK planner profile resolved without a config.")
             import dspy
 
             from fleet_rlm.integrations.llm_profiles.resolver import build_lm_kwargs_from_resolved
@@ -382,11 +391,10 @@ async def run_lm_connection_test(
                 ),
                 timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
             )
-            delegate_lm = None
         elif byok_error:
             raise RuntimeError(byok_error)
         elif planner_loader is None and delegate_loader is None:
-            planner_lm, delegate_lm = await _ensure_runtime_models(lm_deps, config_deps, diagnostics_deps)
+            planner_lm, _delegate_lm = await _ensure_runtime_models(lm_deps, config_deps, diagnostics_deps)
             if planner_lm is None:
                 raise RuntimeError("Failed to construct planner LM from environment settings.")
         else:
@@ -405,17 +413,10 @@ async def run_lm_connection_test(
             )
             if planner_lm is None:
                 raise RuntimeError("Failed to construct planner LM from environment settings.")
-            delegate_lm = None
-            if delegate_loader is not None:
-                delegate_lm = await run_blocking(
-                    partial(
-                        delegate_loader,
-                        env_file=config_deps.config.env_path,
-                        model_name=config_deps.config.agent_delegate_model,
-                        default_max_tokens=config_deps.config.agent_delegate_max_tokens,
-                    ),
-                    timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
-                )
+            # `delegate_loader` is intentionally not invoked here: this smoke
+            # test only validates the planner LM. Constructing a delegate LM just
+            # to swap it into the `lm_deps` singleton was the old (removed)
+            # behavior — see the singleton-mutation note below.
 
         def _invoke() -> str:
             response = planner_lm("Reply with exactly OK")
@@ -426,11 +427,11 @@ async def run_lm_connection_test(
             timeout=LM_SMOKE_TEST_TIMEOUT_SECONDS,
         )
 
-        # NOTE: do NOT write `planner_lm`/`delegate_lm` back to the process-wide
-        # `lm_deps` singleton. In BYOK mode these are per-user LMs carrying the
-        # caller's API key; mutating the singleton would leak User A's BYOK
-        # credentials into any concurrent chat reading `lm_deps.planner_lm`.
-        # The smoke test above already uses the local `planner_lm` directly.
+        # NOTE: do NOT write `planner_lm` back to the process-wide `lm_deps`
+        # singleton. In BYOK mode it is a per-user LM carrying the caller's API
+        # key; mutating the singleton would leak User A's BYOK credentials into
+        # any concurrent chat reading `lm_deps.planner_lm`. The smoke test above
+        # uses the local `planner_lm` directly.
         return bool(output_preview), output_preview, None
 
     return await run_connectivity_test(

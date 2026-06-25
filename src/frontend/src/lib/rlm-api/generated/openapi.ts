@@ -960,7 +960,13 @@ export interface components {
        * @description Provider integration type.
        * @enum {string}
        */
-      provider_type: "openai" | "anthropic" | "google" | "openai_compatible" | "litellm_proxy" | "anthropic_compatible";
+      provider_type:
+        | "openai"
+        | "anthropic"
+        | "google"
+        | "openai_compatible"
+        | "litellm_proxy"
+        | "anthropic_compatible";
       /**
        * Api Base
        * @description Optional API base URL override.
@@ -998,7 +1004,13 @@ export interface components {
        * @description Provider integration type.
        * @enum {string}
        */
-      provider_type: "openai" | "anthropic" | "google" | "openai_compatible" | "litellm_proxy" | "anthropic_compatible";
+      provider_type:
+        | "openai"
+        | "anthropic"
+        | "google"
+        | "openai_compatible"
+        | "litellm_proxy"
+        | "anthropic_compatible";
       /**
        * Api Base
        * @description Configured API base URL for the provider.
@@ -1036,7 +1048,16 @@ export interface components {
        * Provider Type
        * @description Updated provider type.
        */
-      provider_type?: ("openai" | "anthropic" | "google" | "openai_compatible" | "litellm_proxy" | "anthropic_compatible") | null;
+      provider_type?:
+        | (
+            | "openai"
+            | "anthropic"
+            | "google"
+            | "openai_compatible"
+            | "litellm_proxy"
+            | "anthropic_compatible"
+          )
+        | null;
       /**
        * Api Base
        * @description Updated API base URL.
