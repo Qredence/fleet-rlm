@@ -26,7 +26,13 @@ def resolve_encryption_secret() -> str:
 
 def _fernet_from_secret(secret: str | None = None) -> Fernet:
     material = (secret or resolve_encryption_secret()).strip()
-    if os.getenv("FLEET_SECRET_ENCRYPTION_KEY") and secret is None:
+    raw_key = os.getenv("FLEET_SECRET_ENCRYPTION_KEY")
+    # Use the configured Fernet key directly whenever the resolved material IS
+    # FLEET_SECRET_ENCRYPTION_KEY — regardless of whether it was passed
+    # explicitly as ``secret`` or resolved internally (secret=None). Otherwise
+    # derive via PBKDF2 (DEV_JWT_SECRET / the local-dev default). This keeps
+    # encrypt/decrypt consistent across call styles for the same key.
+    if raw_key and material == raw_key.strip():
         return Fernet(material.encode("ascii"))
     return Fernet(_derive_key(material))
 

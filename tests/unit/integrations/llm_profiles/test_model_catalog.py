@@ -10,6 +10,7 @@ import pytest
 from fleet_rlm.integrations.llm_profiles.model_catalog import (
     ModelCatalogEntry,
     ModelCatalogResult,
+    _fetch_anthropic_compatible_models,
     _litellm_model_id,
     fetch_profile_model_catalog,
     invalidate_profile_catalog,
@@ -118,8 +119,6 @@ def test_build_lm_kwargs_anthropic_compatible_adds_custom_provider() -> None:
 @pytest.mark.asyncio
 async def test_fetch_anthropic_compatible_models_uses_x_api_key(monkeypatch) -> None:
     """GET {api_base}/v1/models with x-api-key + anthropic-version headers."""
-    import fleet_rlm.integrations.llm_profiles.model_catalog as mod
-
     captured: dict[str, object] = {}
 
     class _FakeResponse:
@@ -144,9 +143,9 @@ async def test_fetch_anthropic_compatible_models_uses_x_api_key(monkeypatch) -> 
             captured["headers"] = headers
             return _FakeResponse()
 
-    monkeypatch.setattr(mod.httpx, "AsyncClient", _FakeClient)
+    monkeypatch.setattr(_fetch_anthropic_compatible_models.__globals__["httpx"], "AsyncClient", _FakeClient)
 
-    entries = await mod._fetch_anthropic_compatible_models(api_base="https://my-gateway/anthropic", api_key="sk-x")
+    entries = await _fetch_anthropic_compatible_models(api_base="https://my-gateway/anthropic", api_key="sk-x")
 
     assert captured["url"] == "https://my-gateway/anthropic/v1/models"
     assert captured["headers"] == {"x-api-key": "sk-x", "anthropic-version": "2023-06-01"}

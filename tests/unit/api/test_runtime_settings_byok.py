@@ -26,6 +26,9 @@ class _FakeFleetRepository(FleetRepository):
     """In-memory FleetRepository stand-in for the BYOK Daytona path."""
 
     def __init__(self) -> None:  # noqa: D401 - skip db_manager wiring
+        # Satisfy RepositoryContextMixin.__init__ with a stub; the fake
+        # overrides every method that would touch a real DatabaseManager.
+        super().__init__(database=SimpleNamespace())
         self._settings: dict[str, str] = {}
 
     async def get_workspace_runtime_setting(self, *, tenant_id, workspace_id) -> dict:  # type: ignore[override]

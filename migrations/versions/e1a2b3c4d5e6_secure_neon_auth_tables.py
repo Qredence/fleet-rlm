@@ -29,12 +29,23 @@ Create Date: 2026-06-25 00:00:00.000000
 
 from __future__ import annotations
 
+import sqlalchemy as sa
 from alembic import op
 
 revision = "e1a2b3c4d5e6"
 down_revision = "d31f6d7a8c21"
 branch_labels = None
 depends_on = None
+
+
+def _neon_auth_schema_exists() -> bool:
+    """Local-dev Postgres instances do not provision the ``neon_auth`` schema.
+
+    Guard RLS operations so ``alembic upgrade head`` does not fail there.
+    """
+    bind = op.get_bind()
+    return bool(bind.execute(sa.text("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = 'neon_auth')")).scalar())
+
 
 # Tables with a "userId" column — scope to the authenticated user.
 _USER_SCOPED_TABLES = ("account", "member", "session")
@@ -54,6 +65,10 @@ _ALL_AUTH_TABLES = (
 
 
 def upgrade() -> None:
+    if not _neon_auth_schema_exists():
+        # Local-dev Postgres does not provision the neon_auth schema; skip.
+        return
+
     # ── Step 1: Enable RLS on all neon_auth tables (no FORCE) ──────────
     # The neon_auth role owns these tables and bypasses RLS automatically.
     for table in _ALL_AUTH_TABLES:
@@ -161,6 +176,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if not _neon_auth_schema_exists():
+        # Local-dev Postgres does not provision the neon_auth schema; skip.
+        return
+
     # Drop all policies we created
     policy_table_pairs = [
         ("neon_auth_user_self_read", "user"),
