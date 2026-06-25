@@ -7,9 +7,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-LlmProviderType = Literal[
-    "openai", "anthropic", "google", "openai_compatible", "litellm_proxy", "anthropic_compatible"
-]
+LlmProviderType = Literal["openai", "anthropic", "google", "openai_compatible", "litellm_proxy", "anthropic_compatible"]
 LlmRoleName = Literal["planner", "delegate", "delegate_small"]
 
 PROVIDER_DEFAULT_API_BASES: dict[LlmProviderType, str] = {
