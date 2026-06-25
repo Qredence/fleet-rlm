@@ -1,27 +1,35 @@
 # Runtime Settings
 
-This guide covers the local runtime settings surfaces exposed under
+This guide covers the runtime settings surfaces exposed under
 `/api/v1/runtime/*`.
 
 ## Scope
 
 - `GET /api/v1/runtime/settings` returns the current editable settings snapshot.
-- `PATCH /api/v1/runtime/settings` updates local `.env` values when
-  `APP_ENV=local`.
+- `PATCH /api/v1/runtime/settings` updates local `.env` values only when
+  `APP_ENV=local`. In hosted `AUTH_MODE=neon` (BYOK routing), `DAYTONA_*` keys
+  are persisted per-workspace as encrypted ciphertext (`FLEET_SECRET_ENCRYPTION_KEY`)
+  and masked round-trip values are skipped; non-Daytona keys still return `403`.
+  The response reports persisted keys in `updated` and skipped (masked/empty
+  round-trip) keys in `skipped`.
 - `GET /api/v1/runtime/status` returns current readiness, active models, and
   cached connectivity test results.
 - `POST /api/v1/runtime/tests/daytona` and `POST /api/v1/runtime/tests/lm`
   run live connectivity checks.
-- `GET/POST/PATCH/DELETE /api/v1/runtime/llm-profiles` manage local provider
-  profiles (OpenAI, Anthropic, Gemini, OpenAI-compatible proxies).
+- `GET/POST/PATCH/DELETE /api/v1/runtime/llm-profiles` manage provider profiles
+  (OpenAI, Anthropic, Gemini, OpenAI-compatible proxies).
 - `GET/PATCH /api/v1/runtime/llm-roles` read and update per-role profile/model
   bindings for planner, delegate, and delegate_small.
 - `POST /api/v1/runtime/llm-profiles/import-env` creates a profile from the
-  current `DSPY_*` environment variables.
+  current `DSPY_*` environment variables in local mode only.
 
 Provider profiles persist in Postgres when `DATABASE_URL` is configured, or in
-`.fleet/llm-profiles.json` for SQLite-only local development. Profile writes are
-allowed only when `APP_ENV=local`.
+`.fleet/llm-profiles.json` for SQLite-only local development. In hosted
+`AUTH_MODE=neon`, profile reads and writes require repository-admitted identity,
+are scoped to the authenticated tenant/user, and do not mutate process
+environment or `.env` values. Hosted profile ciphertext uses
+`FLEET_SECRET_ENCRYPTION_KEY`; API responses expose only `has_api_key` and a
+masked preview.
 
 Gemini uses the OpenAI-compatible endpoint at
 `https://generativelanguage.googleapis.com/v1beta/openai/`. Anthropic model lists
@@ -181,5 +189,8 @@ Check:
 
 ### Settings write rejected
 
-`PATCH /api/v1/runtime/settings` is local-only. Non-local environments return
-`403 Forbidden`.
+Non-Daytona `PATCH /api/v1/runtime/settings` updates are local-only. Non-local
+environments return `403 Forbidden` for those keys. In hosted `AUTH_MODE=neon`,
+`DAYTONA_*` keys bypass the `403` and are persisted as encrypted per-workspace
+ciphertext; masked round-trip values are skipped (reported in `skipped`, not
+`updated`) and empty values do not wipe an existing stored credential.

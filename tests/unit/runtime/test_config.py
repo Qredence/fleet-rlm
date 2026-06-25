@@ -214,6 +214,57 @@ def test_get_delegate_lm_from_env_returns_none_on_init_failure(
     assert fake_dspy.configure_cache_calls[0]["enable_disk_cache"] is False
 
 
+def test_build_lm_does_not_force_openai_provider_without_opt_in(
+    clean_runtime_env: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: bare model + api_base must NOT auto-inject openai provider."""
+    runtime_config, fake_dspy = _patch_runtime_config(monkeypatch)
+    clean_runtime_env.setenv("DSPY_LM_MODEL", "claude-sonnet-4")
+    clean_runtime_env.setenv("DSPY_LLM_API_KEY", "anthropic-key")
+    clean_runtime_env.setenv("DSPY_LM_API_BASE", "https://api.anthropic.com")
+
+    lm = runtime_config.get_planner_lm_from_env()
+
+    assert lm is not None
+    assert lm.model == "claude-sonnet-4"
+    assert "custom_llm_provider" not in lm.kwargs
+
+
+def test_build_lm_uses_explicit_custom_provider_hint(
+    clean_runtime_env: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Setting DSPY_LM_CUSTOM_PROVIDER=openai should forward the hint."""
+    runtime_config, fake_dspy = _patch_runtime_config(monkeypatch)
+    clean_runtime_env.setenv("DSPY_LM_MODEL", "gemini-3-flash")
+    clean_runtime_env.setenv("DSPY_LLM_API_KEY", "key")
+    clean_runtime_env.setenv("DSPY_LM_API_BASE", "https://proxy.example.test/v1")
+    clean_runtime_env.setenv("DSPY_LM_CUSTOM_PROVIDER", "openai")
+
+    lm = runtime_config.get_planner_lm_from_env()
+
+    assert lm is not None
+    assert lm.kwargs.get("custom_llm_provider") == "openai"
+
+
+def test_delegate_build_lm_uses_delegate_custom_provider(
+    clean_runtime_env: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Delegate LM should use its own DSPY_DELEGATE_LM_CUSTOM_PROVIDER."""
+    runtime_config, fake_dspy = _patch_runtime_config(monkeypatch)
+    clean_runtime_env.setenv("DSPY_DELEGATE_LM_MODEL", "claude-haiku")
+    clean_runtime_env.setenv("DSPY_DELEGATE_LM_API_KEY", "key")
+    clean_runtime_env.setenv("DSPY_DELEGATE_LM_API_BASE", "https://api.anthropic.com")
+    clean_runtime_env.setenv("DSPY_DELEGATE_LM_CUSTOM_PROVIDER", "anthropic")
+
+    lm = runtime_config.get_delegate_lm_from_env()
+
+    assert lm is not None
+    assert lm.kwargs.get("custom_llm_provider") == "anthropic"
+
+
 def test_load_posthog_settings_from_env_respects_defaults_and_bounds(
     clean_runtime_env: pytest.MonkeyPatch,
 ) -> None:

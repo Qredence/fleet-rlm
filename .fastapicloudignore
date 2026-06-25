@@ -1,4 +1,22 @@
-# Exclude heavy development/tooling directories not needed at runtime
+# Exclude local caches, secrets, and development artifacts from FastAPI Cloud uploads.
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.data/
+*.sqlite
+*.db
+*.log
+.env
+.env.*
+node_modules/
+src/frontend/node_modules/
+
+# Exclude repository workflow/development content that is not needed at runtime.
 output/
 tests/
 oolong_rlm/
@@ -12,8 +30,7 @@ blogs/
 .matter/
 migrations/
 
-# Exclude frontend source (built assets are in src/fleet_rlm/ui/dist)
-src/frontend/
-
-# Re-include the packaged UI dist so the server can serve it
-!src/fleet_rlm/ui/dist/
+# Exclude frontend source while keeping the compiled SPA for source-checkout deploys.
+src/frontend/*
+!src/frontend/dist/
+!src/frontend/dist/**

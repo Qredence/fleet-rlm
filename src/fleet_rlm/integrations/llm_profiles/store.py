@@ -13,10 +13,12 @@ from uuid import UUID
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.sql import and_, text
 
 from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
 from fleet_rlm.integrations.database.engine import DatabaseManager
 from fleet_rlm.integrations.database.models_llm_profiles import LlmProviderProfile, LlmRoleBinding
+from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 
 from .crypto import decrypt_api_key, encrypt_api_key
 from .types import (
@@ -270,18 +272,52 @@ class JsonLlmProfileStore(LlmProfileStore):
 
 
 class PostgresLlmProfileStore(LlmProfileStore):
-    def __init__(self, db_manager: DatabaseManager) -> None:
+    def __init__(self, db_manager: DatabaseManager, *, identity: IdentityUpsertResult | None = None) -> None:
         self._db_manager = db_manager
+        self._identity = identity
 
     async def _ensure_default_bindings(self, session) -> None:
+        identity = self._require_identity()
         for role in ROLE_NAMES:
             stmt = (
                 insert(LlmRoleBinding)
-                .values(role=role, profile_id=None, model_id="")
-                .on_conflict_do_nothing(index_elements=[LlmRoleBinding.role])
+                .values(
+                    tenant_id=identity.tenant_id,
+                    user_id=identity.user_id,
+                    workspace_id=identity.workspace_id,
+                    role=role,
+                    profile_id=None,
+                    model_id="",
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[LlmRoleBinding.tenant_id, LlmRoleBinding.user_id, LlmRoleBinding.role]
+                )
             )
             await session.execute(stmt)
         await session.flush()
+
+    def _require_identity(self) -> IdentityUpsertResult:
+        if self._identity is None or self._identity.user_id is None:
+            raise RuntimeError("Postgres LLM profile access requires a persisted authenticated identity.")
+        return self._identity
+
+    async def _set_request_context(self, session) -> IdentityUpsertResult:
+        identity = self._require_identity()
+        await session.execute(
+            text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": str(identity.tenant_id)}
+        )
+        await session.execute(
+            text("SELECT set_config('app.user_id', :user_id, true)"), {"user_id": str(identity.user_id)}
+        )
+        await session.execute(
+            text("SELECT set_config('app.workspace_id', :workspace_id, true)"),
+            {"workspace_id": "" if identity.workspace_id is None else str(identity.workspace_id)},
+        )
+        return identity
+
+    def _owner_filter(self, model):
+        identity = self._require_identity()
+        return and_(model.tenant_id == identity.tenant_id, model.user_id == identity.user_id)
 
     async def load_bundle(self) -> LlmProfileBundle:
         profiles = await self.list_profiles()
@@ -290,12 +326,30 @@ class PostgresLlmProfileStore(LlmProfileStore):
 
     async def list_profiles(self) -> list[LlmProviderProfileRecord]:
         async with self._db_manager.session() as session:
-            rows = (await session.execute(select(LlmProviderProfile).order_by(LlmProviderProfile.name))).scalars().all()
+            await self._set_request_context(session)
+            rows = (
+                (
+                    await session.execute(
+                        select(LlmProviderProfile)
+                        .where(self._owner_filter(LlmProviderProfile))
+                        .order_by(LlmProviderProfile.name)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             return [_profile_record_from_row(row) for row in rows]
 
     async def get_profile(self, profile_id: UUID) -> LlmProviderProfileRecord | None:
         async with self._db_manager.session() as session:
-            row = await session.get(LlmProviderProfile, profile_id)
+            await self._set_request_context(session)
+            row = (
+                await session.execute(
+                    select(LlmProviderProfile).where(
+                        and_(LlmProviderProfile.id == profile_id, self._owner_filter(LlmProviderProfile))
+                    )
+                )
+            ).scalar_one_or_none()
             return _profile_record_from_row(row) if row is not None else None
 
     async def create_profile(
@@ -307,7 +361,11 @@ class PostgresLlmProfileStore(LlmProfileStore):
         api_key: str,
         metadata_json: dict[str, Any] | None = None,
     ) -> LlmProviderProfileRecord:
+        identity = self._require_identity()
         row = LlmProviderProfile(
+            tenant_id=identity.tenant_id,
+            user_id=identity.user_id,
+            workspace_id=identity.workspace_id,
             name=name.strip(),
             provider_type=provider_type,
             api_base=(api_base or PROVIDER_DEFAULT_API_BASES[provider_type]).strip(),
@@ -315,6 +373,7 @@ class PostgresLlmProfileStore(LlmProfileStore):
             metadata_json=dict(metadata_json or {}),
         )
         async with self._db_manager.session() as session, session.begin():
+            await self._set_request_context(session)
             session.add(row)
             await session.flush()
             await self._ensure_default_bindings(session)
@@ -333,7 +392,14 @@ class PostgresLlmProfileStore(LlmProfileStore):
         metadata_json: dict[str, Any] | None = None,
     ) -> LlmProviderProfileRecord:
         async with self._db_manager.session() as session, session.begin():
-            row = await session.get(LlmProviderProfile, profile_id)
+            await self._set_request_context(session)
+            row = (
+                await session.execute(
+                    select(LlmProviderProfile).where(
+                        and_(LlmProviderProfile.id == profile_id, self._owner_filter(LlmProviderProfile))
+                    )
+                )
+            ).scalar_one_or_none()
             if row is None:
                 raise KeyError(f"Profile not found: {profile_id}")
             if name is not None:
@@ -354,9 +420,18 @@ class PostgresLlmProfileStore(LlmProfileStore):
 
     async def delete_profile(self, profile_id: UUID) -> None:
         async with self._db_manager.session() as session, session.begin():
-            await session.execute(delete(LlmProviderProfile).where(LlmProviderProfile.id == profile_id))
+            await self._set_request_context(session)
+            await session.execute(
+                delete(LlmProviderProfile).where(
+                    and_(LlmProviderProfile.id == profile_id, self._owner_filter(LlmProviderProfile))
+                )
+            )
             bindings = (
-                await session.execute(select(LlmRoleBinding).where(LlmRoleBinding.profile_id == profile_id))
+                await session.execute(
+                    select(LlmRoleBinding).where(
+                        and_(LlmRoleBinding.profile_id == profile_id, self._owner_filter(LlmRoleBinding))
+                    )
+                )
             ).scalars()
             for binding in bindings:
                 binding.profile_id = None
@@ -364,8 +439,17 @@ class PostgresLlmProfileStore(LlmProfileStore):
 
     async def list_role_bindings(self) -> list[LlmRoleBindingRecord]:
         async with self._db_manager.session() as session:
+            await self._set_request_context(session)
             await self._ensure_default_bindings(session)
-            rows = (await session.execute(select(LlmRoleBinding).order_by(LlmRoleBinding.role))).scalars().all()
+            rows = (
+                (
+                    await session.execute(
+                        select(LlmRoleBinding).where(self._owner_filter(LlmRoleBinding)).order_by(LlmRoleBinding.role)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             return [_binding_record_from_row(row) for row in rows]
 
     async def upsert_role_bindings(
@@ -373,25 +457,45 @@ class PostgresLlmProfileStore(LlmProfileStore):
         bindings: dict[LlmRoleName, tuple[UUID | None, str]],
     ) -> list[LlmRoleBindingRecord]:
         async with self._db_manager.session() as session, session.begin():
+            identity = await self._set_request_context(session)
             await self._ensure_default_bindings(session)
             for role, (profile_id, model_id) in bindings.items():
                 stmt = (
                     insert(LlmRoleBinding)
-                    .values(role=role, profile_id=profile_id, model_id=model_id)
+                    .values(
+                        tenant_id=identity.tenant_id,
+                        user_id=identity.user_id,
+                        workspace_id=identity.workspace_id,
+                        role=role,
+                        profile_id=profile_id,
+                        model_id=model_id,
+                    )
                     .on_conflict_do_update(
-                        index_elements=[LlmRoleBinding.role],
-                        set_={"profile_id": profile_id, "model_id": model_id},
+                        index_elements=[LlmRoleBinding.tenant_id, LlmRoleBinding.user_id, LlmRoleBinding.role],
+                        set_={"profile_id": profile_id, "model_id": model_id, "workspace_id": identity.workspace_id},
                     )
                 )
                 await session.execute(stmt)
             await session.flush()
-            rows = (await session.execute(select(LlmRoleBinding).order_by(LlmRoleBinding.role))).scalars().all()
+            rows = (
+                (
+                    await session.execute(
+                        select(LlmRoleBinding).where(self._owner_filter(LlmRoleBinding)).order_by(LlmRoleBinding.role)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             return [_binding_record_from_row(row) for row in rows]
 
 
-def resolve_profile_store(db_manager: DatabaseManager | None) -> LlmProfileStore:
+def resolve_profile_store(
+    db_manager: DatabaseManager | None,
+    *,
+    identity: IdentityUpsertResult | None = None,
+) -> LlmProfileStore:
     if db_manager is not None and db_manager.database_url:
-        return PostgresLlmProfileStore(db_manager)
+        return PostgresLlmProfileStore(db_manager, identity=identity)
     return JsonLlmProfileStore()
 
 

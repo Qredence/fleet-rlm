@@ -1,29 +1,22 @@
 # Repository Agent Map
 
-`fleet-rlm` is a Web UI-first adaptive recursive language model workspace built around a
-Daytona-backed DSPy ReAct agent runtime. The root guide is intentionally short: it tells agents
-where the durable rules live and which commands prove a change.
+`fleet-rlm` is a Web UI-first adaptive recursive language model workspace built around a Daytona-backed DSPy ReAct agent runtime.
 
 ## Operating Model
 
-- Treat `docs/agent-harness/README.md` as the agent-first hub for this repository.
-- Use the closest applicable `AGENTS.md` before editing files; deeper guides override this map.
+- Use closest applicable `AGENTS.md` before editing files; deeper guides override this map.
 - Keep repo docs, generated contracts, and `.codex/` actions aligned with implementation changes.
-- Prefer the smallest validation lane that covers the change, then escalate when contracts move.
-- Do not hand-edit generated or synced artifacts; use the commands listed below.
-- Do not mutate user-level Codex config. Repo-local automation belongs under `.codex/`.
-- Ask before deploy, push, commit, migrations, or deletion unless explicitly requested.
+- Prefer smallest validation lane that covers the change, then escalate when contracts move.
+- Do not hand-edit generated/synced artifacts; use the commands listed below.
+- Do not mutate user-level Codex config. Ask before deploy, push, migrations, or deletion.
 
 ## Reading Path
 
 1. `docs/agent-harness/README.md` - harness model, reading order, and quality bar.
 2. `docs/agent-harness/feedback-loop.md` - local Codex loop and report expectations.
 3. `docs/agent-harness/architecture-invariants.md` - backend, frontend, generated-file rules.
-4. `docs/agent-harness/drift-control.md` - checks that keep docs and contracts honest.
-5. `docs/agent-harness/quality-score.md` - current quality grade and cleanup targets.
-6. `docs/reference/codebase-map.md` - source layout and ownership map.
-7. `docs/how-to-guides/testing-strategy.md` - validation lanes by change type.
-8. `docs/how-to-guides/codex-environment.md` - `.codex` actions, hooks, and subagent roles.
+4. `docs/reference/codebase-map.md` - source layout and ownership map.
+5. `docs/how-to-guides/testing-strategy.md` - validation lanes by change type.
 
 ## Deeper Agent Guides
 
@@ -32,17 +25,13 @@ where the durable rules live and which commands prove a change.
 
 ## Durable Detail Locations
 
-- Auth, database, websocket, runtime, and deployment details live in `src/fleet_rlm/AGENTS.md`
-  and the matching `docs/reference/*` or `docs/how-to-guides/*` page.
-- Frontend routing, Agent Elements, styling, session restore, and package rules live in
-  `src/frontend/AGENTS.md`.
-- Local Codex actions, ports, browser smoke expectations, and tool preferences live in
-  `docs/agent-harness/feedback-loop.md` and `docs/how-to-guides/codex-environment.md`.
+- Auth, DB, websocket, runtime, and deploy details live in `src/fleet_rlm/AGENTS.md` or matching docs.
+- Frontend routing, Agent Elements, styling, session restore, and package rules live in `src/frontend/AGENTS.md`.
+- Local Codex actions, ports, browser smoke expectations, and tool preferences live in `.codex/` and loop docs.
 
 ## Setup
 
 ```bash
-# from repo root
 uv sync --all-extras --dev
 cd src/frontend && pnpm install --frozen-lockfile
 zsh .codex/workspace-bootstrap.zsh
@@ -51,81 +40,50 @@ zsh .codex/workspace-bootstrap.zsh
 ## Run
 
 ```bash
-# from repo root
 uv run fleet web
 uv run fleet-rlm serve-api --port 8000
-uv run fleet-rlm chat --trace-mode compact
-```
-
-```bash
-# from src/frontend
-pnpm run dev
+pnpm --filter frontend dev
 ```
 
 ## Validation
 
 ```bash
-# from repo root
-make format-check
-make lint
-make typecheck
-make test
-make check-docs
-make quality-gate
-```
-
-CircleCI is configured in `.circleci/config.yml`. Its workflow mirrors the repo validation lanes with
-separate quality, lint/typecheck, backend test, integration test, and frontend jobs.
-
-Frontend-only lane:
-
-```bash
-# from src/frontend
-pnpm run api:check
-pnpm run type-check
-pnpm run lint:robustness
-pnpm run test:unit
-pnpm run build
+make format-check && make lint && make typecheck && make test
 ```
 
 ## Generated Artifacts
 
-Do not hand-edit these files:
+Do not hand-edit: `openapi.yaml`, `src/frontend/src/lib/rlm-api/generated/openapi.ts`, `src/frontend/openapi/fleet-rlm.openapi.yaml`, `src/frontend/src/routeTree.gen.ts`, `src/frontend/dist`, `src/fleet_rlm/ui/dist`.
 
-- `openapi.yaml`
-- `src/frontend/src/lib/rlm-api/generated/openapi.ts`
-- `src/frontend/openapi/fleet-rlm.openapi.yaml`
-- `src/frontend/src/routeTree.gen.ts`
-- `src/frontend/dist`
-- `src/fleet_rlm/ui/dist`
-
-Use these commands instead:
-
-```bash
-# from repo root
-make api-sync
-make api-check
-make build-ui
-```
+Use: `make api-sync`, `make api-check`, `make build-ui`.
 
 ## Drift Checks
 
-Run the harness lane when docs, commands, Codex config, generated contracts, or script inventory change:
+Run `make check-docs` when docs, commands, Codex config, generated contracts, or scripts change.
 
-```bash
-# from repo root
-uv run python scripts/check_harness_engineering.py
-uv run python scripts/check_agents_md_freshness.py
-uv run python scripts/check_docs_quality.py
-```
+## Learned User Preferences
 
-`make check-docs` runs the docs and harness checks together.
+- Always use the `zsh` terminal profile for CLI commands.
+- Secure production deployments strictly on Bring-Your-Own-Key (BYOK) model; never leak server-level secrets (like Gemini API keys or Daytona keys) to authenticated users.
+- Do not edit `.plan.md` or any attached implementation plans while executing a task, prioritizing marked-in-progress to-dos sequentially.
+- Support public clones and local development by enabling local instances to connect to the FastAPI Cloud hosted Neon Auth.
+- Always include direct absolute markdown links to `.canvas.tsx` files when creating or mentioning an IDE Canvas.
+- Prefer preserving Agent Elements design tokens (`--an-max-width`) rather than introducing arbitrary Tailwind classes for chat width adjustments.
+- Use `pnpm run check` in `src/frontend` to verify formats, types, lints, and unit tests in a single pass.
 
-## Maintenance Checklist
+## Learned Workspace Facts
 
-When changing workflow, contracts, or architecture, update the durable docs before finishing:
-
-- `AGENTS.md` and subsystem files under `docs/agent-harness/*`.
-- `docs/README.md`, `docs/index.md`, and `docs/SUMMARY.md`.
-- `scripts/README.md`, `Makefile`, `pyproject.toml`, and `src/frontend/package.json` when commands move.
-- `openapi.yaml` and frontend API artifacts when backend request or response shapes move.
+- Local development runs API on `:8000`, Vite dev server on `:5173`, and MLflow on `:5001` (Python 3.13+).
+- The Daytona-backed recursive chat runtime runs via `dspy.RLM` with support for major LLM providers and OpenAI-compatible models.
+- Database schema drift checking (`alembic check`) requires importing all active SQLAlchemy models inside `migrations/env.py`.
+- Custom IDE Canvases (.canvas.tsx) are designed for standalone analytical outputs, supporting category colors: `gray`, `purple`, `green`, `yellow`, `pink`, `blue`, and `orange`.
+- Streaming responses in the runtime are standardized on `RuntimeEvent` (`runtime/events.py`) and projected using `project_chat`.
+- The Agent Elements conversation column width can be adjusted by changing the design token `--an-max-width` in `src/frontend/src/components/agent-elements/agent-ui.css`.
+- FastAPI Cloud's packaging engine relies on a `.fastapicloudignore` file in the repository root, which takes absolute precedence over `.gitignore` during deployment.
+- Serving compiled Web UI on FastAPI Cloud requires `.fastapicloudignore` explicitly allowing the frontend build output directory (`!src/frontend/dist/` or `!src/frontend/dist/client`).
+- The production Neon Auth instance URL for the deployed FastAPI Cloud app is `https://ep-broad-water-al4k5bh7.neonauth.c-3.eu-central-1.aws.neon.tech/neondb/auth`.
+- Authentication is locked specifically to Neon Project ID `old-bird-44339002` using `@neondatabase/auth-ui` on catch-all paths with JWT EdDSA token verification.
+- `https://fleet-rlm.fastapicloud.dev` (and the variant without trailing slash) is a configured trusted origin in Neon project `old-bird-44339002` to prevent INVALID_ORIGIN rejection.
+- Postgres Row-Level Security (RLS) on `llm_provider_profiles` secures user BYOK data via context-derived tenant/user/workspace scope.
+- `FLEET_SECRET_ENCRYPTION_KEY` (Fernet key) is required in `neon` auth mode to encrypt/decrypt per-workspace BYOK provider credentials stored in `llm_provider_profiles`; generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+- BYOK settings round-trips skip empty values and masked values (reported as `skipped`, not `updated`) to prevent wiping existing encrypted keys.

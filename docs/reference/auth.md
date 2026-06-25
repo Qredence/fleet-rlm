@@ -260,11 +260,21 @@ DATABASE_URL=postgresql://...         # pooled runtime connection
 DATABASE_ADMIN_URL=postgresql://...   # direct admin/migration connection
 NEON_AUTH_URL=https://ep-xxx.neonauth.../neondb/auth
 NEON_TENANT_CLAIM=default
+FLEET_SECRET_ENCRYPTION_KEY=...       # Fernet key for hosted BYOK profile ciphertext
 ```
 
 Tenant onboarding is administrative. A valid Neon Auth token is not enough by
 itself: the configured tenant and external Neon user id must resolve through
 Fleet's repository-backed admission path.
+
+Neon Auth is deployment-owned configuration. Hosted users do not import,
+choose, or override the Neon project used for authentication; the app validates
+tokens only against the configured `NEON_AUTH_URL` for the current deployment.
+
+LLM provider profiles in Neon mode are per-user BYOK records. The backend sets
+Postgres request context before profile queries, RLS limits rows to the admitted
+tenant/user, and API responses never include plaintext provider keys. Importing
+server `DSPY_*` environment values into profiles is local-only.
 
 ### WebSocket Tickets
 

@@ -130,8 +130,12 @@ class ServerRuntimeConfig(BaseSettings):
     ws_execution_max_queue: int = 256
     ws_execution_drop_policy: Literal["drop_oldest", "drop_newest"] = "drop_oldest"
     auth_mode: Literal["dev", "entra", "neon"] = "dev"
-    neon_auth_url: str | None = Field(default=None, alias="NEON_AUTH_URL")
+    neon_auth_url: str | None = Field(
+        default="https://ep-broad-water-al4k5bh7.neonauth.c-3.eu-central-1.aws.neon.tech/neondb/auth",
+        alias="NEON_AUTH_URL",
+    )
     neon_tenant_claim: str = Field(default="default", alias="NEON_TENANT_CLAIM")
+    secret_encryption_key: str | None = Field(default=None, alias="FLEET_SECRET_ENCRYPTION_KEY")
     auth_required: bool = False
     dev_jwt_secret: str = "change-me"
     entra_jwks_url: str | None = None
@@ -385,3 +389,5 @@ class ServerRuntimeConfig(BaseSettings):
                 raise ValueError("NEON_AUTH_URL is required when AUTH_MODE=neon")
             if not self.neon_tenant_claim.strip():
                 raise ValueError("NEON_TENANT_CLAIM is required when AUTH_MODE=neon")
+            if self.app_env in {"staging", "production"} and not (self.secret_encryption_key or "").strip():
+                raise ValueError("FLEET_SECRET_ENCRYPTION_KEY is required for hosted AUTH_MODE=neon BYOK profiles")

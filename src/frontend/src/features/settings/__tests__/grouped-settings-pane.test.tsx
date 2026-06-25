@@ -85,7 +85,7 @@ vi.mock("@/features/settings/use-runtime-settings", () => ({
               {
                 key: "DSPY_LM_MODEL",
                 label: "Planner LM model",
-                description: "LiteLLM model identifier for the planner runtime.",
+                description: "Model identifier for the planner runtime.",
                 value: "openai/gpt-4o-mini",
                 masked_value: "openai/gpt-4o-mini",
                 secret: false,
@@ -143,6 +143,8 @@ vi.mock("@/features/settings/use-runtime-settings", () => ({
       data: {
         app_env: "local",
         write_enabled: true,
+        settings_write_enabled: true,
+        profile_write_enabled: true,
         ready: false,
         llm: {
           model_set: true,

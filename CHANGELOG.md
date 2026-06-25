@@ -4,6 +4,72 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Added
+
+- **Change:** Added bring-your-own-key (BYOK) LLM provider profiles scoped per
+  tenant/user in hosted `AUTH_MODE=neon`, with Fernet-at-rest encryption of API
+  keys via `FLEET_SECRET_ENCRYPTION_KEY` and `has_api_key` / masked-preview-only
+  responses.
+  **Outcome:** Hosted users can bind their own planner/delegate LLM credentials
+  without leaking plaintext to the API surface or mutating process environment.
+- **Change:** Added per-workspace encrypted `DAYTONA_*` credential persistence
+  (`workspace_runtime_settings`) so each workspace can run Daytona sandboxes
+  under its own API key in hosted mode.
+  **Outcome:** Chat and runtime paths resolve a per-user Daytona config before
+  falling back to the server-level env default.
+- **Change:** Added `DSPY_LM_CUSTOM_PROVIDER` / `DSPY_DELEGATE_LM_CUSTOM_PROVIDER`
+  opt-in env vars that pass an explicit `custom_llm_provider` hint to litellm.
+  **Outcome:** OpenAI-compatible bare-model endpoints can opt into the `openai`
+  hint without forcing it on non-OpenAI providers like Anthropic.
+- **Change:** Added a `skipped` field to `PATCH /api/v1/runtime/settings`
+  responses listing masked-round-trip keys that were intentionally not persisted.
+  **Outcome:** Clients can distinguish persisted keys (`updated`) from skipped
+  masked/empty round-trips instead of being told a no-op save landed.
+- **Change:** Added Alembic migrations scoping `llm_role_bindings` to users
+  (PK `id` UUID + `tenant_id`/`user_id`/`workspace_id`), hardening Neon auth
+  tables, identity constraints, execution-step indexes, and tightening the
+  `workspace_runtime_settings` unique constraint to `(tenant_id, workspace_id)`.
+  **Outcome:** Profile/role-binding tables are tenant/user-isolated and the
+  workspace-settings upsert target is tenant-aware.
+
+### Changed
+
+- **Change:** Reworked `PATCH /api/v1/runtime/settings` so hosted
+  `AUTH_MODE=neon` (BYOK routing) persists `DAYTONA_*` keys per-workspace as
+  encrypted ciphertext instead of returning `403`; non-Daytona keys remain
+  local-only.
+  **Outcome:** Hosted workspaces can save their own Daytona credentials while
+  the rest of the runtime settings surface stays locked down.
+- **Change:** `GET /api/v1/runtime/settings` now logs (without leaking values)
+  when a stored `DAYTONA_API_KEY` fails to decrypt, and the PATCH path treats an
+  empty incoming value for a key with an existing stored credential as a no-op.
+  **Outcome:** Decrypt failures are observable instead of silent, and a failed
+  GET no longer enables an empty save that wipes the stored key.
+
+### Fixed
+
+- **Change:** Made legacy XOR-encrypted profile ciphertext backward-compatible
+  with `FLEET_SECRET_ENCRYPTION_KEY` rotation by trying candidate secrets
+  (`FLEET_SECRET_ENCRYPTION_KEY`, `DEV_JWT_SECRET`, `change-me`) on decrypt.
+  **Outcome:** Setting `FLEET_SECRET_ENCRYPTION_KEY` no longer renders pre-existing
+  BYOK profile keys undecryptable; old rows continue to decrypt until re-encrypted
+  to the `fernet:` format.
+- **Change:** Removed the in-place mutation of the shared `LmDeps.planner_lm`
+  singleton from the `/runtime/tests/lm` BYOK smoke test; the per-user planner
+  is now invoked directly.
+  **Outcome:** A connectivity test can no longer swap another user's in-flight
+  chat onto a foreign BYOK LM (cross-tenant credential leak) — shared state is
+  never touched.
+- **Change:** Stopped forcing `custom_llm_provider="openai"` for every bare model
+  with an `api_base` on the env-based LM path; the hint is now opt-in via
+  `DSPY_LM_CUSTOM_PROVIDER`.
+  **Outcome:** Env configs pointing at non-OpenAI-compatible providers (e.g.
+  Anthropic) no longer send OpenAI-format requests and 400.
+- **Change:** Tightened `upsert_workspace_runtime_setting` to conflict on
+  `(tenant_id, workspace_id)` with a matching unique constraint.
+  **Outcome:** The workspace-settings upsert is tenant-aware (defense-in-depth
+  alongside the existing composite FK and UUID-v7 defaults).
+
 ## [0.6.0] - 2026-06-17
 
 ### Added

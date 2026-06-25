@@ -63,6 +63,10 @@ class RuntimeSettingsUpdateResponse(BaseModel):
         default_factory=list,
         description="Runtime setting keys that were successfully updated.",
     )
+    skipped: list[str] = Field(
+        default_factory=list,
+        description="Runtime setting keys that were accepted in the request but not persisted (e.g. masked secret round-trips).",
+    )
     env_path: str = Field(description="Filesystem path to the environment file that was updated.")
 
 
@@ -187,6 +191,8 @@ class RuntimeStatusResponse(BaseModel):
 
     app_env: str = Field(description="Current application environment, such as `local` or `prod`.")
     write_enabled: bool = Field(description="Whether runtime settings writes are currently allowed.")
+    settings_write_enabled: bool = Field(description="Whether process/env runtime settings writes are allowed.")
+    profile_write_enabled: bool = Field(description="Whether authenticated LLM provider profile writes are allowed.")
     ready: bool = Field(description="Whether critical runtime services are ready to serve requests.")
     active_models: RuntimeActiveModels = Field(description="Resolved planner and delegate model identities.")
     sandbox_provider: VolumeProvider = Field(

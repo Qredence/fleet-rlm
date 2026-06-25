@@ -144,6 +144,8 @@ describe("runtimeEndpoints", () => {
       mockJsonResponse({
         app_env: "local",
         write_enabled: true,
+        settings_write_enabled: true,
+        profile_write_enabled: true,
         ready: false,
         llm: {},
         daytona: {},

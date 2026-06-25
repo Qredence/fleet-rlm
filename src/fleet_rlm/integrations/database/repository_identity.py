@@ -9,7 +9,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from .models_enums import MembershipRole, TenantStatus
-from .models_identity import Tenant, User
+from .models_identity import Tenant, User, WorkspaceRuntimeSetting
 from .repository_shared import RepositoryContextMixin, _utc_now
 
 
@@ -239,6 +239,51 @@ class IdentityRepository(RepositoryContextMixin):
             )
             result = await session.execute(stmt)
             return result.scalar_one_or_none()
+
+    async def get_workspace_runtime_setting(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+    ) -> dict:
+        """Fetch the WorkspaceRuntimeSetting settings_json dictionary for a given workspace."""
+        async with self._db.session() as session:
+            stmt = select(WorkspaceRuntimeSetting.settings_json).where(
+                WorkspaceRuntimeSetting.tenant_id == tenant_id,
+                WorkspaceRuntimeSetting.workspace_id == workspace_id,
+            )
+            res = await session.execute(stmt)
+            val = res.scalar_one_or_none()
+            return val if val is not None else {}
+
+    async def upsert_workspace_runtime_setting(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID | None,
+        settings_json: dict,
+    ) -> None:
+        """Upsert the WorkspaceRuntimeSetting settings_json dictionary for a given workspace."""
+        async with self._db.session() as session, session.begin():
+            insert_stmt = insert(WorkspaceRuntimeSetting).values(
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                updated_by_user_id=user_id,
+                settings_json=settings_json,
+            )
+            stmt = insert_stmt.on_conflict_do_update(
+                index_elements=[
+                    WorkspaceRuntimeSetting.tenant_id,
+                    WorkspaceRuntimeSetting.workspace_id,
+                ],
+                set_={
+                    "settings_json": insert_stmt.excluded.settings_json,
+                    "updated_by_user_id": user_id,
+                    "updated_at": _utc_now(),
+                },
+            )
+            await session.execute(stmt)
 
 
 __all__ = [

@@ -2,14 +2,17 @@ import { createAuthClient } from "@neondatabase/neon-js/auth";
 import { BetterAuthReactAdapter } from "@neondatabase/neon-js/auth/react";
 
 import { clearAccessToken, setAccessToken } from "@/lib/auth/token-store";
-import { trimOrEmpty } from "@/lib/utils/env";
 
-const neonAuthUrl = trimOrEmpty(
-  import.meta.env.VITE_NEON_AUTH_URL ?? import.meta.env.NEON_AUTH_URL,
-);
+/**
+ * Neon Auth URL for the fleet-rlm project (eu-central-1).
+ * Hardcoded so anyone cloning the repo can authenticate without .env setup.
+ * Project: old-bird-44339002 / branch: br-flat-boat-al3qj3hh (main)
+ */
+const NEON_AUTH_URL =
+  "https://ep-broad-water-al4k5bh7.neonauth.c-3.eu-central-1.aws.neon.tech/neondb/auth";
 
 export const neonAuthConfig = {
-  neonAuthUrl,
+  neonAuthUrl: NEON_AUTH_URL,
 } as const;
 
 export function isNeonAuthConfigured(): boolean {

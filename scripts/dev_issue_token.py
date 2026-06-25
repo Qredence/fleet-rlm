@@ -8,9 +8,9 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from dotenv import load_dotenv
 from joserfc import jwt
 from joserfc.jwk import OctKey
-from dotenv import load_dotenv
 
 
 def build_parser() -> argparse.ArgumentParser:

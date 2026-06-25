@@ -9,6 +9,8 @@ describe("RuntimeStatusPanel", () => {
     const status = {
       app_env: "local",
       write_enabled: true,
+      settings_write_enabled: true,
+      profile_write_enabled: true,
       ready: false,
       active_models: {
         planner: "openai/gpt-4.1",

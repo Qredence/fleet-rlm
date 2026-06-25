@@ -155,7 +155,17 @@ Returns current runtime settings snapshot.
 
 ### `PATCH /api/v1/runtime/settings`
 
-Updates runtime settings. **Local environment only** (`APP_ENV=local`).
+Updates runtime settings. Non-Daytona keys are **local environment only**
+(`APP_ENV=local`); non-local environments return `403 Forbidden` for those keys.
+
+In hosted `AUTH_MODE=neon` (BYOK routing), `DAYTONA_API_KEY` (and other
+`DAYTONA_*` keys) are persisted per-workspace as encrypted ciphertext via
+`FLEET_SECRET_ENCRYPTION_KEY` instead of being written to `.env`. A masked
+round-trip value (the `sk-…yz` preview returned by `GET /api/v1/runtime/settings`)
+is detected and skipped — the stored credential is left untouched and the key
+name is reported in `skipped`, not `updated`. Sending an empty value for a key
+that already has a stored encrypted value is also a no-op (it does not wipe the
+stored credential).
 
 **Request:**
 
@@ -173,6 +183,7 @@ Updates runtime settings. **Local environment only** (`APP_ENV=local`).
 ```json
 {
   "updated": ["DSPY_LM_MODEL", "DSPY_DELEGATE_LM_MODEL"],
+  "skipped": [],
   "env_path": "/path/to/.env"
 }
 ```
@@ -182,6 +193,16 @@ Updates runtime settings. **Local environment only** (`APP_ENV=local`).
 ### `GET /api/v1/runtime/status`
 
 Returns runtime status with active models and connectivity test cache.
+
+The status payload includes:
+
+- `write_enabled` / `settings_write_enabled` — true only when `.env` runtime
+  settings can be patched (`APP_ENV=local`).
+- `profile_write_enabled` — true when provider profile writes are allowed
+  (`APP_ENV=local` or admitted `AUTH_MODE=neon`).
+
+Hosted Neon profile writes are tenant/user scoped and encrypted; runtime
+settings PATCH remains local-only.
 
 **Response:**
 

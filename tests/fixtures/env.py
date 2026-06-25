@@ -12,6 +12,8 @@ import pytest
 
 RUNTIME_ENV_KEYS = (
     "APP_ENV",
+    "AUTH_MODE",
+    "AUTH_REQUIRED",
     "DSPY_LM_MODEL",
     "DSPY_LLM_API_KEY",
     "DSPY_LM_API_KEY",

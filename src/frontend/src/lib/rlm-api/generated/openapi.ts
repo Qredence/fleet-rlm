@@ -960,7 +960,13 @@ export interface components {
        * @description Provider integration type.
        * @enum {string}
        */
-      provider_type: "openai" | "anthropic" | "google" | "openai_compatible";
+      provider_type:
+        | "openai"
+        | "anthropic"
+        | "google"
+        | "openai_compatible"
+        | "litellm_proxy"
+        | "anthropic_compatible";
       /**
        * Api Base
        * @description Optional API base URL override.
@@ -998,7 +1004,13 @@ export interface components {
        * @description Provider integration type.
        * @enum {string}
        */
-      provider_type: "openai" | "anthropic" | "google" | "openai_compatible";
+      provider_type:
+        | "openai"
+        | "anthropic"
+        | "google"
+        | "openai_compatible"
+        | "litellm_proxy"
+        | "anthropic_compatible";
       /**
        * Api Base
        * @description Configured API base URL for the provider.
@@ -1036,7 +1048,16 @@ export interface components {
        * Provider Type
        * @description Updated provider type.
        */
-      provider_type?: ("openai" | "anthropic" | "google" | "openai_compatible") | null;
+      provider_type?:
+        | (
+            | "openai"
+            | "anthropic"
+            | "google"
+            | "openai_compatible"
+            | "litellm_proxy"
+            | "anthropic_compatible"
+          )
+        | null;
       /**
        * Api Base
        * @description Updated API base URL.
@@ -2103,6 +2124,11 @@ export interface components {
        */
       updated?: string[];
       /**
+       * Skipped
+       * @description Runtime setting keys that were accepted in the request but not persisted (e.g. masked secret round-trips).
+       */
+      skipped?: string[];
+      /**
        * Env Path
        * @description Filesystem path to the environment file that was updated.
        */
@@ -2123,6 +2149,16 @@ export interface components {
        * @description Whether runtime settings writes are currently allowed.
        */
       write_enabled: boolean;
+      /**
+       * Settings Write Enabled
+       * @description Whether process/env runtime settings writes are allowed.
+       */
+      settings_write_enabled: boolean;
+      /**
+       * Profile Write Enabled
+       * @description Whether authenticated LLM provider profile writes are allowed.
+       */
+      profile_write_enabled: boolean;
       /**
        * Ready
        * @description Whether critical runtime services are ready to serve requests.
@@ -4607,7 +4643,7 @@ export interface operations {
       401: {
         content: never;
       };
-      /** @description LLM profile writes are allowed only when APP_ENV=local. */
+      /** @description LLM profile writes require local mode or admitted Neon authentication. */
       403: {
         content: never;
       };
@@ -4644,7 +4680,7 @@ export interface operations {
       401: {
         content: never;
       };
-      /** @description LLM profile writes are allowed only when APP_ENV=local. */
+      /** @description LLM profile writes require local mode or admitted Neon authentication. */
       403: {
         content: never;
       };
@@ -4688,7 +4724,7 @@ export interface operations {
       401: {
         content: never;
       };
-      /** @description LLM profile writes are allowed only when APP_ENV=local. */
+      /** @description LLM profile writes require local mode or admitted Neon authentication. */
       403: {
         content: never;
       };
@@ -4766,7 +4802,7 @@ export interface operations {
       401: {
         content: never;
       };
-      /** @description LLM profile writes are allowed only when APP_ENV=local. */
+      /** @description LLM profile writes require local mode or admitted Neon authentication. */
       403: {
         content: never;
       };
@@ -4823,7 +4859,7 @@ export interface operations {
       401: {
         content: never;
       };
-      /** @description LLM profile writes are allowed only when APP_ENV=local. */
+      /** @description LLM profile writes require local mode or admitted Neon authentication. */
       403: {
         content: never;
       };
@@ -4856,7 +4892,7 @@ export interface operations {
       401: {
         content: never;
       };
-      /** @description LLM profile writes are allowed only when APP_ENV=local. */
+      /** @description LLM profile writes require local mode or admitted Neon authentication. */
       403: {
         content: never;
       };

@@ -43,7 +43,7 @@ const runtimeSettingCategories = [
     label: "LLM provider and models",
     description: "Planner, delegate, adapter, and provider routing settings used by DSPy.",
     fields: [
-      ["DSPY_LM_MODEL", "Planner LM model", "LiteLLM model identifier for the planner runtime."],
+      ["DSPY_LM_MODEL", "Planner LM model", "Model identifier for the planner runtime."],
       [
         "DSPY_DELEGATE_LM_MODEL",
         "Delegate LM model",
@@ -208,6 +208,8 @@ export function getMockRuntimeStatus(): RuntimeStatusResponse {
   return {
     app_env: "local",
     write_enabled: true,
+    settings_write_enabled: true,
+    profile_write_enabled: true,
     ready: true,
     active_models: {
       planner: fallbackValues.DSPY_LM_MODEL,

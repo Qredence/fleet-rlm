@@ -5,17 +5,21 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from uuid import UUID
 
 import dspy
 from fastapi import HTTPException
 
 from fleet_rlm.integrations.config.runtime_settings import apply_env_updates
+from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.integrations.llm_profiles.crypto import mask_api_key
 from fleet_rlm.integrations.llm_profiles.model_catalog import (
+    MODELS_ENDPOINT_PROVIDER_TYPES,
     catalog_to_payload,
     fetch_profile_model_catalog,
     invalidate_profile_catalog,
+    validate_profile_via_models_catalog,
 )
 from fleet_rlm.integrations.llm_profiles.resolver import (
     build_lm_kwargs_from_resolved,
@@ -42,7 +46,16 @@ from fleet_rlm.integrations.llm_profiles.types import (
 from ..bootstrap import get_delegate_lm_from_env, get_delegate_small_lm_from_env, get_planner_lm_from_env
 from ..config import ServerRuntimeConfig
 from ..dependencies import ConfigDeps, DiagnosticsDeps, LmDeps, PersistenceDeps
-from ..runtime_services.diagnostics import run_lm_connection_test
+from ..runtime_services.common import (
+    LM_SMOKE_TEST_TIMEOUT_SECONDS,
+    RUNTIME_TEST_TIMEOUT_SECONDS,
+    extract_lm_text,
+    redact_secret,
+    run_blocking,
+    sanitize_error,
+    utc_now_iso,
+)
+from ..runtime_services.diagnostics import build_runtime_test_result
 from ..runtime_services.settings import (
     RUNTIME_MODEL_RELOAD_KEYS,
     _capture_runtime_config_snapshot,
@@ -67,11 +80,23 @@ IMPORT_PROFILE_NAME = "Imported from .env"
 logger = logging.getLogger(__name__)
 
 
-def _ensure_local_writes(config: ServerRuntimeConfig) -> None:
+def profile_writes_enabled(config: ServerRuntimeConfig) -> bool:
+    return config.app_env == "local" or config.auth_mode == "neon"
+
+
+def _ensure_profile_writes(config: ServerRuntimeConfig) -> None:
+    if not profile_writes_enabled(config):
+        raise HTTPException(
+            status_code=403,
+            detail="LLM profile updates are allowed only when APP_ENV=local or AUTH_MODE=neon with admission.",
+        )
+
+
+def _ensure_local_env_import(config: ServerRuntimeConfig) -> None:
     if config.app_env != "local":
         raise HTTPException(
             status_code=403,
-            detail="LLM profile updates are allowed only when APP_ENV=local.",
+            detail="Importing server environment secrets is allowed only when APP_ENV=local.",
         )
 
 
@@ -105,12 +130,20 @@ def _bindings_response(
     return responses
 
 
-def get_store(persistence_deps: PersistenceDeps) -> LlmProfileStore:
-    return resolve_profile_store(persistence_deps.db_manager)
+def get_store(
+    persistence_deps: PersistenceDeps,
+    *,
+    persisted_identity: IdentityUpsertResult | None = None,
+) -> LlmProfileStore:
+    return resolve_profile_store(persistence_deps.db_manager, identity=persisted_identity)
 
 
-async def list_profiles(*, persistence_deps: PersistenceDeps) -> list[LlmProviderProfileResponse]:
-    store = get_store(persistence_deps)
+async def list_profiles(
+    *,
+    persistence_deps: PersistenceDeps,
+    persisted_identity: IdentityUpsertResult,
+) -> list[LlmProviderProfileResponse]:
+    store = get_store(persistence_deps, persisted_identity=persisted_identity)
     profiles = await store.list_profiles()
     return [_profile_response(profile) for profile in profiles]
 
@@ -119,10 +152,11 @@ async def create_profile(
     *,
     persistence_deps: PersistenceDeps,
     config_deps: ConfigDeps,
+    persisted_identity: IdentityUpsertResult,
     request: LlmProviderProfileCreateRequest,
 ) -> LlmProviderProfileResponse:
-    _ensure_local_writes(config_deps.config)
-    store = get_store(persistence_deps)
+    _ensure_profile_writes(config_deps.config)
+    store = get_store(persistence_deps, persisted_identity=persisted_identity)
     profile = await store.create_profile(
         name=request.name,
         provider_type=request.provider_type,
@@ -137,11 +171,12 @@ async def update_profile(
     *,
     persistence_deps: PersistenceDeps,
     config_deps: ConfigDeps,
+    persisted_identity: IdentityUpsertResult,
     profile_id: UUID,
     request: LlmProviderProfileUpdateRequest,
 ) -> LlmProviderProfileResponse:
-    _ensure_local_writes(config_deps.config)
-    store = get_store(persistence_deps)
+    _ensure_profile_writes(config_deps.config)
+    store = get_store(persistence_deps, persisted_identity=persisted_identity)
     if request.api_key == MASKED_SECRET_SENTINEL:
         request = request.model_copy(update={"api_key": None})
     try:
@@ -164,10 +199,11 @@ async def delete_profile(
     *,
     persistence_deps: PersistenceDeps,
     config_deps: ConfigDeps,
+    persisted_identity: IdentityUpsertResult,
     profile_id: UUID,
 ) -> None:
-    _ensure_local_writes(config_deps.config)
-    store = get_store(persistence_deps)
+    _ensure_profile_writes(config_deps.config)
+    store = get_store(persistence_deps, persisted_identity=persisted_identity)
     profile = await store.get_profile(profile_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="Profile not found.")
@@ -178,10 +214,11 @@ async def delete_profile(
 async def get_model_catalog(
     *,
     persistence_deps: PersistenceDeps,
+    persisted_identity: IdentityUpsertResult,
     profile_id: UUID,
     force_refresh: bool = False,
 ) -> LlmModelCatalogResponse:
-    store = get_store(persistence_deps)
+    store = get_store(persistence_deps, persisted_identity=persisted_identity)
     profile = await store.get_profile(profile_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="Profile not found.")
@@ -194,6 +231,18 @@ async def get_model_catalog(
     )
 
 
+def _bound_model_id_for_profile(
+    profile_id: UUID,
+    role_bindings: list[LlmRoleBindingRecord],
+) -> str | None:
+    """Return the first model id bound to this profile across known roles."""
+    for role in ("planner", "delegate", "delegate_small"):
+        for binding in role_bindings:
+            if binding.profile_id == profile_id and binding.role == role and binding.model_id.strip():
+                return binding.model_id.strip()
+    return None
+
+
 def _pick_profile_test_model_id(
     *,
     profile_id: UUID,
@@ -201,10 +250,9 @@ def _pick_profile_test_model_id(
     catalog_model_ids: list[str],
 ) -> str:
     """Prefer an existing role binding, then a gemini chat model, then catalog order."""
-    for role in ("planner", "delegate", "delegate_small"):
-        for binding in role_bindings:
-            if binding.profile_id == profile_id and binding.role == role and binding.model_id.strip():
-                return binding.model_id.strip()
+    bound = _bound_model_id_for_profile(profile_id, role_bindings)
+    if bound:
+        return bound
     for model_id in catalog_model_ids:
         if model_id.startswith("gemini-"):
             return model_id
@@ -218,17 +266,25 @@ async def _resolve_profile_test_config(
     *,
     role_bindings: list[LlmRoleBindingRecord],
 ) -> ResolvedRoleLmConfig:
-    catalog = await fetch_profile_model_catalog(profile)
-    if catalog.error and not catalog.models:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot load models for connection test: {catalog.error}",
+    # Prefer a model already bound to this profile so the connectivity test works
+    # even when the provider's /models endpoint is unavailable (common for
+    # OpenAI-compatible, vLLM, Ollama, and custom gateway providers). The catalog
+    # is only fetched as a fallback when no model is bound.
+    bound_model_id = _bound_model_id_for_profile(profile.id, role_bindings)
+    if bound_model_id is not None:
+        test_model_id = bound_model_id
+    else:
+        catalog = await fetch_profile_model_catalog(profile)
+        if catalog.error and not catalog.models:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot load models for connection test: {catalog.error}",
+            )
+        test_model_id = _pick_profile_test_model_id(
+            profile_id=profile.id,
+            role_bindings=role_bindings,
+            catalog_model_ids=[entry.id for entry in catalog.models],
         )
-    test_model_id = _pick_profile_test_model_id(
-        profile_id=profile.id,
-        role_bindings=role_bindings,
-        catalog_model_ids=[entry.id for entry in catalog.models],
-    )
 
     resolved = resolve_role_config(
         role="planner",
@@ -246,35 +302,85 @@ async def test_profile_connection(
     config_deps: ConfigDeps,
     diagnostics_deps: DiagnosticsDeps,
     lm_deps: LmDeps,
+    persisted_identity: IdentityUpsertResult,
     profile_id: UUID,
 ) -> RuntimeConnectivityTestResponse:
-    _ensure_local_writes(config_deps.config)
-    store = get_store(persistence_deps)
+    _ensure_profile_writes(config_deps.config)
+    store = get_store(persistence_deps, persisted_identity=persisted_identity)
     profile = await store.get_profile(profile_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="Profile not found.")
 
-    bundle = await store.load_bundle()
-    resolved = await _resolve_profile_test_config(profile, role_bindings=bundle.role_bindings)
+    del diagnostics_deps, lm_deps
 
-    def _build_profile_planner(**_kwargs: object) -> dspy.LM:
-        return dspy.LM(**build_lm_kwargs_from_resolved(resolved))
+    checked_at = utc_now_iso()
+    api_key = decrypt_profile_api_key(profile)
+    checks: dict[str, bool] = {
+        "api_key_set": bool(api_key),
+        "api_base_set": bool(profile.api_base),
+    }
+    started = time.perf_counter()
+    output_preview: str | None = None
+    error: str | None = None
+    ok = False
+    preflight_ok = checks["api_key_set"] and checks["api_base_set"]
 
-    async with lm_deps.runtime_model_lock:
-        saved_planner = lm_deps.planner_lm
+    if profile.provider_type in MODELS_ENDPOINT_PROVIDER_TYPES:
+        # Validate via GET /models (or /v1/models for anthropic_compatible).
+        checks["models_found"] = False
         try:
-            return await run_lm_connection_test(
-                config_deps=config_deps,
-                diagnostics_deps=diagnostics_deps,
-                lm_deps=lm_deps,
-                planner_loader=_build_profile_planner,
+            ok, output_preview, error = await validate_profile_via_models_catalog(profile)
+            checks["models_found"] = ok
+        except asyncio.TimeoutError:
+            error = "Model catalog test timed out. Check API connectivity and credentials."
+        except Exception as exc:  # pragma: no cover - provider/network path
+            error = sanitize_error(exc)
+    else:
+        # Providers without a /models endpoint (e.g. real Anthropic): chat-completion smoke test.
+        bundle = await store.load_bundle()
+        resolved = await _resolve_profile_test_config(profile, role_bindings=bundle.role_bindings)
+        checks["model_set"] = bool(resolved.litellm_model)
+        preflight_ok = checks["api_key_set"] and checks["model_set"]
+        try:
+            profile_lm = await run_blocking(
+                lambda: dspy.LM(**build_lm_kwargs_from_resolved(resolved, timeout=LM_SMOKE_TEST_TIMEOUT_SECONDS - 2)),
+                timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
             )
-        finally:
-            lm_deps.planner_lm = saved_planner
+
+            def _invoke() -> str:
+                response = profile_lm("Reply with exactly OK")
+                return extract_lm_text(response)
+
+            output_preview = await run_blocking(_invoke, timeout=LM_SMOKE_TEST_TIMEOUT_SECONDS)
+            ok = bool(output_preview)
+        except asyncio.TimeoutError:
+            error = f"LM test timed out after {LM_SMOKE_TEST_TIMEOUT_SECONDS}s. Check API connectivity and credentials."
+        except Exception as exc:  # pragma: no cover - provider/network path
+            error = sanitize_error(exc)
+
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    if not ok and not error:
+        error = "LM connectivity test failed."
+
+    return build_runtime_test_result(
+        kind="lm",
+        ok=ok,
+        preflight_ok=preflight_ok,
+        checked_at=checked_at,
+        checks=checks,
+        guidance=[],
+        latency_ms=latency_ms,
+        output_preview=output_preview,
+        error=redact_secret(error, api_key),
+    )
 
 
-async def get_role_bindings(*, persistence_deps: PersistenceDeps) -> LlmRoleBindingsResponse:
-    store = get_store(persistence_deps)
+async def get_role_bindings(
+    *,
+    persistence_deps: PersistenceDeps,
+    persisted_identity: IdentityUpsertResult,
+) -> LlmRoleBindingsResponse:
+    store = get_store(persistence_deps, persisted_identity=persisted_identity)
     bundle = await store.load_bundle()
     profiles = {profile.id: profile for profile in bundle.profiles}
     return LlmRoleBindingsResponse(bindings=_bindings_response(profiles, bundle.role_bindings))
@@ -286,10 +392,11 @@ async def apply_role_bindings_patch(
     config_deps: ConfigDeps,
     lm_deps: LmDeps,
     diagnostics_deps: DiagnosticsDeps,
+    persisted_identity: IdentityUpsertResult,
     request: LlmRoleBindingsUpdateRequest,
 ) -> LlmRoleBindingsResponse:
-    _ensure_local_writes(config_deps.config)
-    store = get_store(persistence_deps)
+    _ensure_profile_writes(config_deps.config)
+    store = get_store(persistence_deps, persisted_identity=persisted_identity)
     current = {binding.role: binding for binding in await store.list_role_bindings()}
     updates: dict[LlmRoleName, tuple[UUID | None, str]] = {}
     for role_name in ("planner", "delegate", "delegate_small"):
@@ -304,9 +411,16 @@ async def apply_role_bindings_patch(
                     profile_id = patch.profile_id
                 if patch.model_id is not None:
                     model_id = patch.model_id
+        if profile_id is not None and await store.get_profile(profile_id) is None:
+            raise HTTPException(status_code=404, detail=f"Profile not found for role {role}.")
         updates[role] = (profile_id, model_id or "")
 
     bindings = await store.upsert_role_bindings(updates)
+    if config_deps.config.app_env != "local":
+        bundle = await store.load_bundle()
+        profiles = {profile.id: profile for profile in bundle.profiles}
+        return LlmRoleBindingsResponse(bindings=_bindings_response(profiles, bindings))
+
     role_configs = await resolve_active_role_configs(store)
     env_updates = mirror_role_configs_to_env(role_configs)
     if not env_updates:
@@ -385,13 +499,15 @@ async def import_profile_from_env(
     config_deps: ConfigDeps,
     lm_deps: LmDeps,
     diagnostics_deps: DiagnosticsDeps,
+    persisted_identity: IdentityUpsertResult,
 ) -> LlmImportEnvResponse:
-    _ensure_local_writes(config_deps.config)
+    _ensure_profile_writes(config_deps.config)
+    _ensure_local_env_import(config_deps.config)
     payload = import_env_profile_payload()
     if not payload["api_key"]:
         raise HTTPException(status_code=400, detail="DSPY_LLM_API_KEY or DSPY_LM_API_KEY is not set.")
     provider_type = infer_provider_type_from_model(payload["planner_model"] or "openai/gpt-4o")
-    store = get_store(persistence_deps)
+    store = get_store(persistence_deps, persisted_identity=persisted_identity)
     profile = await _find_or_create_import_profile(
         store,
         provider_type=provider_type,
@@ -411,6 +527,7 @@ async def import_profile_from_env(
         config_deps=config_deps,
         lm_deps=lm_deps,
         diagnostics_deps=diagnostics_deps,
+        persisted_identity=persisted_identity,
         request=LlmRoleBindingsUpdateRequest(),
     )
     return LlmImportEnvResponse(
