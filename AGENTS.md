@@ -67,7 +67,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Secure production deployments strictly on Bring-Your-Own-Key (BYOK) model; never leak server-level secrets (like Gemini API keys or Daytona keys) to authenticated users.
 - Do not edit `.plan.md` or any attached implementation plans while executing a task, prioritizing marked-in-progress to-dos sequentially.
 - Support public clones and local development by enabling local instances to connect to the FastAPI Cloud hosted Neon Auth.
-- Always include direct absolute markdown links to `.canvas.tsx` files when creating or mentioning an IDE Canvas (e.g., `[Label](/path/to/canvas.canvas.tsx)`).
+- Always include direct absolute markdown links to `.canvas.tsx` files when creating or mentioning an IDE Canvas.
 - Prefer preserving Agent Elements design tokens (`--an-max-width`) rather than introducing arbitrary Tailwind classes for chat width adjustments.
 - Use `pnpm run check` in `src/frontend` to verify formats, types, lints, and unit tests in a single pass.
 

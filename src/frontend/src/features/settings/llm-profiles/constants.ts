@@ -14,7 +14,11 @@ export const PROVIDER_OPTIONS: Array<{ id: LlmProviderType; label: string; defau
     },
     { id: "openai_compatible", label: "OpenAI-compatible (vLLM, Ollama, …)", defaultBase: "" },
     { id: "litellm_proxy", label: "LiteLLM proxy", defaultBase: "" },
-    { id: "anthropic_compatible", label: "Anthropic-compatible (POST /v1/messages)", defaultBase: "" },
+    {
+      id: "anthropic_compatible",
+      label: "Anthropic-compatible (POST /v1/messages)",
+      defaultBase: "",
+    },
   ];
 
 export const ROLE_ROWS = [
