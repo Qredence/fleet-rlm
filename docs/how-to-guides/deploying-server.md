@@ -193,6 +193,37 @@ DATABASE_ADMIN_URL=postgresql://neondb_owner:password@ep-cool-darkness-123456.us
 - **Migrations/admin**: Use the direct non-pooler endpoint in `DATABASE_ADMIN_URL`
 - **Migrations**: Run with Alembic (see [Database Architecture](../reference/database.md))
 
+### Upgrading: BYOK profiles and Row-Level Security
+
+Migration `d31f6d7a8c21_scope_llm_profiles_to_users` scopes `llm_provider_profiles` and
+`llm_role_bindings` to `(tenant_id, user_id)` and enables + forces Row-Level Security on both
+tables. The RLS policies require `tenant_id`/`user_id` to match the per-transaction session
+values set by the server (`app.tenant_id`, `app.user_id`, `app.workspace_id`).
+
+- **Hosted first-deploys** have no prior rows and are unaffected.
+- **Upgrading a populated database** (e.g. a local-dev DB with existing profiles): rows created
+  before this migration have `NULL` `tenant_id`/`user_id`. Under forced RLS they never match the
+  policy, so they become **invisible to every role** — including the table owner. They are not
+  deleted, only hidden. Re-create profiles via the Settings UI, or re-claim existing rows by
+  assigning them to a specific tenant+user (run as a `BYPASSRLS` role such as a superuser):
+
+  ```sql
+  UPDATE llm_provider_profiles
+     SET tenant_id = '<tenant-uuid>', user_id = '<user-uuid>'
+   WHERE tenant_id IS NULL AND user_id IS NULL;
+  UPDATE llm_role_bindings
+     SET tenant_id = '<tenant-uuid>', user_id = '<user-uuid>'
+   WHERE tenant_id IS NULL AND user_id IS NULL;
+  ```
+
+> **Do not remove the GUC-setting code.** RLS policies key on
+> `current_setting('app.user_id')` (set per transaction via `set_config(..., true)` in
+> `PostgresLlmProfileStore._set_request_context`), not on Neon's gateway-set
+> `auth.user_id()`. This is deliberate so the same policies work across `dev`, `entra`, and
+> `neon` auth modes. The transaction-local `set_config(..., true)` argument is what makes this
+> safe across pooled connections. Removing the GUC-setting step would break isolation in
+> non-Neon auth modes.
+
 ### Connection Pooling
 
 The server uses SQLAlchemy async with connection pooling:
@@ -335,6 +366,7 @@ Configure these in the FastAPI Cloud dashboard before deploying. This is the min
 | `AUTH_REQUIRED` | `true` | Required in staging/production |
 | `DATABASE_REQUIRED` | `true` | Fail fast if Neon isn't reachable at startup; required for `AUTH_MODE=neon` admission |
 | `DATABASE_URL` | (injected by Neon add-on) | Pooled endpoint |
+| `FLEET_SECRET_ENCRYPTION_KEY` | (secret) | Fernet key used to encrypt hosted per-user BYOK provider credentials |
 | `DSPY_LM_MODEL` | e.g. `openai/gpt-4o` | LiteLLM model identifier with provider prefix |
 | `DSPY_DELEGATE_LM_MODEL` | e.g. `openai/gpt-4o-mini` | Optional but recommended |
 | `DSPY_LLM_API_KEY` | (secret) | LLM provider key |
@@ -346,6 +378,24 @@ Configure these in the FastAPI Cloud dashboard before deploying. This is the min
 | `POSTHOG_API_KEY` | (secret) | Required when `POSTHOG_ENABLED=true` |
 | `DAYTONA_API_KEY` | (secret) | Required if sandbox execution is used |
 | `DAYTONA_API_URL` | (optional override) | Defaults to Daytona's managed endpoint |
+
+Generate `FLEET_SECRET_ENCRYPTION_KEY` with:
+
+```bash
+uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+```
+
+In hosted Neon mode, browser-managed LLM provider profiles are per-user BYOK
+records stored in Neon with tenant/user RLS and encrypted at rest with this key.
+The hosted app never imports server `DSPY_*` secrets into a user profile and
+never writes user profile secrets back into `.env`.
+
+Set `FLEET_SECRET_ENCRYPTION_KEY`, `DATABASE_URL`, `NEON_AUTH_URL`, provider
+fallback keys, and Daytona credentials as FastAPI Cloud environment variables;
+use `fastapi cloud env set --secret <KEY> <VALUE>` for sensitive values so they
+are encrypted by the platform and not committed to this public repository. Neon
+Auth itself remains deployment-owned: users bring LLM provider keys, not their
+own Neon project or auth endpoint.
 
 If `AUTH_MODE=entra`, also set:
 

@@ -142,6 +142,10 @@ Auth, persistence, and observability constraints:
   `app.user_id`, and `app.workspace_id` context set through the repository boundary.
   Do not bypass `FleetRepository` or route browser product data directly through Neon Data API.
 - `PATCH /api/v1/runtime/settings` is blocked unless `APP_ENV=local`
+- Hosted `AUTH_MODE=neon` LLM provider profiles are per-user BYOK data. Profile routes must require
+  repository-admitted identity, use tenant/user-scoped Postgres access, and never mirror user secrets into `.env`.
+- `POST /api/v1/runtime/llm-profiles/import-env` is local-only; do not import server environment secrets into hosted user profiles.
+- Hosted BYOK profile encryption requires `FLEET_SECRET_ENCRYPTION_KEY`.
 - PostHog and MLflow are live codepaths when configured and should not be treated as no-ops
 - In local development, MLflow may auto-start when configured for localhost unless `MLFLOW_AUTO_START=false`
 
