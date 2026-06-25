@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from fleet_rlm.integrations.llm_profiles.resolver import profile_labels_from_bundle
 from fleet_rlm.integrations.llm_profiles.store import resolve_profile_store
@@ -16,6 +17,7 @@ from ..dependencies import (
     DiagnosticsDepsDep,
     HTTPIdentityDep,
     LmDepsDep,
+    PersistedIdentityDep,
     PersistenceDepsDep,
 )
 from ..runtime_services.diagnostics import (
@@ -46,6 +48,8 @@ from ..schemas.volumes import (
     VolumeTreeResponse,
 )
 from ._types import OpenAPIResponses
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/runtime",
@@ -96,11 +100,51 @@ VOLUME_LIST_RESPONSES: OpenAPIResponses = {
 )
 async def get_runtime_settings(
     config_deps: ConfigDepsDep,
-    identity: HTTPIdentityDep,
+    persistence_deps: PersistenceDepsDep,
+    persisted_identity: PersistedIdentityDep,
 ) -> RuntimeSettingsSnapshot:
     """Return the effective runtime settings snapshot used by the local server."""
-    _ = identity
-    return await asyncio.to_thread(build_runtime_settings_snapshot, config_deps=config_deps)
+    extra_values = {}
+    from fleet_rlm.integrations.database import FleetRepository
+
+    if (
+        persistence_deps.repository is not None
+        and isinstance(persistence_deps.repository, FleetRepository)
+        and persisted_identity.workspace_id is not None
+    ):
+        try:
+            db_settings = await persistence_deps.repository.get_workspace_runtime_setting(
+                tenant_id=persisted_identity.tenant_id,
+                workspace_id=persisted_identity.workspace_id,
+            )
+            daytona_api_key = db_settings.get("DAYTONA_API_KEY", "")
+            if daytona_api_key:
+                from fleet_rlm.integrations.llm_profiles.crypto import decrypt_api_key
+
+                secret_key = config_deps.config.secret_encryption_key
+                try:
+                    decrypted_key = decrypt_api_key(daytona_api_key, secret=secret_key)
+                    extra_values["DAYTONA_API_KEY"] = decrypted_key
+                except Exception:
+                    logger.warning(
+                        "Failed to decrypt stored DAYTONA_API_KEY for workspace %s; returning empty snapshot value.",
+                        persisted_identity.workspace_id,
+                        exc_info=True,
+                    )
+                    extra_values["DAYTONA_API_KEY"] = ""
+
+            if "DAYTONA_API_URL" in db_settings:
+                extra_values["DAYTONA_API_URL"] = db_settings["DAYTONA_API_URL"]
+            if "DAYTONA_TARGET" in db_settings:
+                extra_values["DAYTONA_TARGET"] = db_settings["DAYTONA_TARGET"]
+        except Exception as exc:
+            logger.warning("Could not load user workspace runtime settings: %s", exc)
+
+    return await asyncio.to_thread(
+        build_runtime_settings_snapshot,
+        config_deps=config_deps,
+        extra_values=extra_values,
+    )
 
 
 @router.patch(
@@ -111,12 +155,100 @@ async def get_runtime_settings(
 async def patch_runtime_settings(
     config_deps: ConfigDepsDep,
     lm_deps: LmDepsDep,
+    persistence_deps: PersistenceDepsDep,
+    persisted_identity: PersistedIdentityDep,
     diagnostics_deps: DiagnosticsDepsDep,
-    identity: HTTPIdentityDep,
     request: RuntimeSettingsUpdateRequest,
 ) -> RuntimeSettingsUpdateResponse:
     """Persist allowed runtime setting changes and hot-apply them in-process."""
-    _ = identity
+    from fleet_rlm.integrations.database import FleetRepository
+
+    daytona_keys = {"DAYTONA_API_KEY", "DAYTONA_API_URL", "DAYTONA_TARGET"}
+    daytona_updates = {k: v for k, v in request.updates.items() if k in daytona_keys}
+    other_updates = {k: v for k, v in request.updates.items() if k not in daytona_keys}
+
+    use_byok_routing = (
+        persistence_deps.repository is not None
+        and isinstance(persistence_deps.repository, FleetRepository)
+        and persisted_identity.workspace_id is not None
+        and (config_deps.config.app_env != "local" or config_deps.config.auth_mode == "neon")
+    )
+
+    if other_updates and config_deps.config.app_env != "local":
+        raise HTTPException(
+            status_code=403,
+            detail="Runtime settings updates are allowed only when APP_ENV=local.",
+        )
+
+    if use_byok_routing and daytona_updates:
+        try:
+            db_settings = await persistence_deps.repository.get_workspace_runtime_setting(
+                tenant_id=persisted_identity.tenant_id,
+                workspace_id=persisted_identity.workspace_id,
+            )
+            skipped: list[str] = []
+            actually_updated: list[str] = []
+            for k, v in daytona_updates.items():
+                if k == "DAYTONA_API_KEY":
+                    val_strip = v.strip()
+                    if not val_strip:
+                        # Treat empty incoming value as a no-op when a non-empty
+                        # value already exists in the DB. This prevents a failed
+                        # decrypt on GET (which surfaces as "") from wiping the
+                        # stored key on the next PATCH.
+                        if db_settings.get("DAYTONA_API_KEY", ""):
+                            skipped.append(k)
+                            continue
+                        db_settings[k] = ""  # explicit clear
+                        actually_updated.append(k)
+                    else:
+                        from fleet_rlm.integrations.config.runtime_settings import _is_masked_secret_round_trip
+                        from fleet_rlm.integrations.llm_profiles.crypto import decrypt_api_key, encrypt_api_key
+
+                        secret_key = config_deps.config.secret_encryption_key
+                        current_encrypted = db_settings.get("DAYTONA_API_KEY", "")
+                        current_raw: str | None = None
+                        if current_encrypted:
+                            try:
+                                current_raw = decrypt_api_key(current_encrypted, secret=secret_key)
+                            except Exception:
+                                current_raw = None
+                        # Skip masked display values (e.g. "sk-...yz" or "***") sent back
+                        # from the settings snapshot — persisting them would overwrite
+                        # the real credential with the masked string.
+                        if _is_masked_secret_round_trip(
+                            key="DAYTONA_API_KEY",
+                            candidate_value=val_strip,
+                            current_raw_value=current_raw,
+                        ):
+                            skipped.append(k)
+                            continue
+                        db_settings[k] = encrypt_api_key(val_strip, secret=secret_key)
+                        actually_updated.append(k)
+                else:
+                    db_settings[k] = v.strip()
+                    actually_updated.append(k)
+
+            await persistence_deps.repository.upsert_workspace_runtime_setting(
+                tenant_id=persisted_identity.tenant_id,
+                workspace_id=persisted_identity.workspace_id,
+                user_id=persisted_identity.user_id,
+                settings_json=db_settings,
+            )
+        except Exception as exc:
+            logger.exception("Failed to save Daytona BYOK settings: %s", exc)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to save per-user Daytona settings: {exc}",
+            )
+
+        if not other_updates:
+            return RuntimeSettingsUpdateResponse(
+                updated=actually_updated,
+                skipped=skipped,
+                env_path=str(config_deps.config.env_path or "database"),
+            )
+
     return await apply_runtime_settings_patch(
         config_deps=config_deps,
         lm_deps=lm_deps,
@@ -136,6 +268,8 @@ async def test_lm_connection(
     config_deps: ConfigDepsDep,
     lm_deps: LmDepsDep,
     diagnostics_deps: DiagnosticsDepsDep,
+    persistence_deps: PersistenceDepsDep,
+    persisted_identity: PersistedIdentityDep,
     identity: HTTPIdentityDep,
 ) -> RuntimeConnectivityTestResponse:
     """Verify that the planner and delegate language-model configuration can load."""
@@ -146,6 +280,8 @@ async def test_lm_connection(
         diagnostics_deps=diagnostics_deps,
         planner_loader=get_planner_lm_from_env,
         delegate_loader=get_delegate_lm_from_env,
+        persistence_deps=persistence_deps,
+        persisted_identity=persisted_identity,
     )
 
 
@@ -178,10 +314,11 @@ async def get_runtime_status(
     diagnostics_deps: DiagnosticsDepsDep,
     persistence_deps: PersistenceDepsDep,
     identity: HTTPIdentityDep,
+    persisted_identity: PersistedIdentityDep,
 ) -> RuntimeStatusResponse:
     """Return the combined runtime readiness, model, and provider diagnostics snapshot."""
     _ = identity
-    store = resolve_profile_store(persistence_deps.db_manager)
+    store = resolve_profile_store(persistence_deps.db_manager, identity=persisted_identity)
     bundle = await store.load_bundle()
     profile_labels = profile_labels_from_bundle(bundle)
     return await asyncio.to_thread(

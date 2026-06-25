@@ -7,7 +7,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-LlmProviderTypeSchema = Literal["openai", "anthropic", "google", "openai_compatible"]
+LlmProviderTypeSchema = Literal[
+    "openai", "anthropic", "google", "openai_compatible", "litellm_proxy", "anthropic_compatible"
+]
 LlmRoleNameSchema = Literal["planner", "delegate", "delegate_small"]
 
 

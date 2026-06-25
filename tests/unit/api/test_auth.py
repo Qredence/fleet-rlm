@@ -167,3 +167,58 @@ def test_build_auth_provider_rejects_unknown_mode():
 
     with pytest.raises(ValueError, match="Unsupported auth mode"):
         auth_module.build_auth_provider(auth_mode="mystery", dev_jwt_secret="dev-secret")
+
+
+@pytest.mark.asyncio
+async def test_neon_auth_decode_suppresses_eddsa_deprecation_warning(monkeypatch) -> None:
+    """Neon Auth issues EdDSA JWTs; the joserfc RFC 9864 warning must not surface."""
+    import time as time_mod
+    import warnings
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from joserfc import jwk, jwt
+    from joserfc.errors import SecurityWarning
+
+    from fleet_rlm.api.auth.neon import NeonAuthProvider
+
+    issuer = "https://x.example"
+    priv = Ed25519PrivateKey.generate()
+    priv_pem = priv.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    pub_pem = priv.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    private_key = jwk.OKPKey.import_key(priv_pem)
+    public_keyset = jwk.KeySet(keys=[jwk.OKPKey.import_key(pub_pem)])
+
+    claims = {
+        "sub": "u1",
+        "iss": issuer,
+        "aud": issuer,
+        "iat": 1,
+        "exp": int(time_mod.time()) + 3600,
+    }
+    # jwt.encode also triggers the EdDSA warning (test setup only); suppress it so
+    # the only warnings we record below come from the production decode path.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="EdDSA is deprecated.*", category=SecurityWarning)
+        token = jwt.encode({"alg": "EdDSA"}, claims, private_key, algorithms=["EdDSA"])
+
+    provider = NeonAuthProvider(neon_auth_url=issuer)
+    monkeypatch.setattr(provider, "_fetch_jwks", lambda: public_keyset)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        identity = await provider._decode_token(token)
+
+    assert identity.user_claim == "u1"
+    assert not [
+        str(w.message)
+        for w in caught
+        if issubclass(w.category, SecurityWarning) and "EdDSA is deprecated" in str(w.message)
+    ]

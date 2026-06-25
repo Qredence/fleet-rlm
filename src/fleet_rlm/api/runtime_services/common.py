@@ -13,6 +13,10 @@ from fleet_rlm.utils.time import (
 )
 
 RUNTIME_TEST_TIMEOUT_SECONDS = 20
+# LM smoke-test invoke deadline. Provider workspaces (e.g. Aliyun MAAS, vLLM) can
+# take ~30s to cold-start, which exceeds the 20s generic test timeout. Bumped to
+# accommodate a cold first request; subsequent (warm) requests return quickly.
+LM_SMOKE_TEST_TIMEOUT_SECONDS = 60
 VOLUME_OPERATION_TIMEOUT_SECONDS = 30
 
 _BlockingResultT = TypeVar("_BlockingResultT")
@@ -31,6 +35,17 @@ def sanitize_error(exc: BaseException) -> str:
             message = message.replace(value, "***")
 
     return message
+
+
+def redact_secret(text: str | None, secret: str | None) -> str | None:
+    """Replace any occurrence of ``secret`` in ``text`` with ``[REDACTED]``.
+
+    Used to scrub a profile's decrypted api_key from provider error strings before
+    they are returned to the client.
+    """
+    if text is None or not secret:
+        return text
+    return text.replace(secret, "[REDACTED]")
 
 
 def extract_lm_text(response: Any) -> str:

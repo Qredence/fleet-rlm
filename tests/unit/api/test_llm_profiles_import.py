@@ -5,9 +5,14 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+
+from fleet_rlm.integrations.llm_profiles.crypto import encrypt_api_key
+from fleet_rlm.integrations.llm_profiles.types import LlmProviderProfileRecord, LlmRoleBindingRecord
 
 
 @pytest.fixture
@@ -91,3 +96,257 @@ def test_import_env_applies_delegate_api_base(llm_profiles_env, llm_profiles_cli
     profiles_path = llm_profiles_env.parent / "llm-profiles.json"
     document = json.loads(profiles_path.read_text(encoding="utf-8"))
     assert decrypt_api_key(document["profiles"][0]["api_key_ciphertext"]) == "sk-rotated-import"
+
+
+def test_import_env_is_local_only(llm_profiles_env, llm_profiles_client) -> None:
+    from fleet_rlm.api.config import ServerRuntimeConfig
+    from fleet_rlm.api.dependencies import get_config_deps
+
+    config = ServerRuntimeConfig(
+        app_env="production",
+        auth_mode="neon",
+        auth_required=False,
+        database_required=False,
+        database_url=None,  # ty: ignore[unknown-argument]
+        db_validate_on_startup=False,
+        env_path=llm_profiles_env,
+    )
+
+    def _override_config_deps() -> object:
+        return type("ConfigDeps", (), {"config": config})()
+
+    llm_profiles_client.app.dependency_overrides[get_config_deps] = _override_config_deps
+
+    response = llm_profiles_client.post("/api/v1/runtime/llm-profiles/import-env")
+
+    assert response.status_code == 403
+    assert "APP_ENV=local" in response.text
+
+
+@pytest.mark.asyncio
+async def test_role_binding_rejects_profile_outside_scoped_store(monkeypatch) -> None:
+    from fastapi import HTTPException
+
+    from fleet_rlm.api.runtime_services import llm_profiles as service
+
+    foreign_profile_id = uuid4()
+
+    class ScopedStore:
+        async def list_role_bindings(self):
+            return [LlmRoleBindingRecord(role="planner", profile_id=None, model_id="")]
+
+        async def get_profile(self, profile_id):
+            assert profile_id == foreign_profile_id
+            return None
+
+    monkeypatch.setattr(service, "get_store", lambda *_args, **_kwargs: ScopedStore())
+
+    request = SimpleNamespace(
+        planner=SimpleNamespace(profile_id=foreign_profile_id, model_id="gpt-4o"),
+        delegate=None,
+        delegate_small=None,
+    )
+    config_deps = SimpleNamespace(config=SimpleNamespace(app_env="production", auth_mode="neon"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.apply_role_bindings_patch(
+            persistence_deps=SimpleNamespace(),
+            config_deps=config_deps,
+            lm_deps=SimpleNamespace(),
+            diagnostics_deps=SimpleNamespace(),
+            persisted_identity=SimpleNamespace(),
+            request=request,
+        )
+
+    assert exc_info.value.status_code == 404
+    assert "Profile not found" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_profile_connection_chat_path_redacts_profile_key(monkeypatch) -> None:
+    """Non-/models providers (e.g. Anthropic) use the chat-completion path; the
+    profile api_key is redacted from any provider error."""
+    from fleet_rlm.api.runtime_services import llm_profiles as service
+
+    profile_id = uuid4()
+    profile = LlmProviderProfileRecord(
+        id=profile_id,
+        name="Hosted BYOK",
+        provider_type="anthropic",
+        api_base="https://api.anthropic.com",
+        api_key_ciphertext=encrypt_api_key("sk-user-private"),
+    )
+
+    class ScopedStore:
+        async def get_profile(self, requested_profile_id):
+            return profile if requested_profile_id == profile_id else None
+
+        async def load_bundle(self):
+            return SimpleNamespace(
+                profiles=[profile],
+                role_bindings=[
+                    LlmRoleBindingRecord(role="planner", profile_id=profile_id, model_id="claude-sonnet-4"),
+                ],
+            )
+
+    async def fake_run_blocking(func, *, timeout):
+        del timeout
+        return func()
+
+    class FailingLm:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __call__(self, _prompt):
+            raise RuntimeError("provider rejected sk-user-private")
+
+    monkeypatch.setattr(service, "get_store", lambda *_args, **_kwargs: ScopedStore())
+    monkeypatch.setattr(service, "run_blocking", fake_run_blocking)
+    monkeypatch.setattr(service.dspy, "LM", FailingLm)
+
+    result = await service.test_profile_connection(
+        persistence_deps=SimpleNamespace(),
+        config_deps=SimpleNamespace(config=SimpleNamespace(app_env="production", auth_mode="neon")),
+        diagnostics_deps=SimpleNamespace(runtime_test_results={}),
+        lm_deps=SimpleNamespace(planner_lm=object(), delegate_lm=object()),
+        persisted_identity=SimpleNamespace(),
+        profile_id=profile_id,
+    )
+
+    assert result.ok is False
+    assert "sk-user-private" not in (result.error or "")
+    assert "[REDACTED]" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_profile_connection_openai_compatible_validates_via_models(monkeypatch) -> None:
+    """OpenAI-compatible profiles validate via GET /models (Bearer), not a chat completion."""
+    from fleet_rlm.api.runtime_services import llm_profiles as service
+
+    profile_id = uuid4()
+    profile = LlmProviderProfileRecord(
+        id=profile_id,
+        name="My provider2",
+        provider_type="openai_compatible",
+        api_base="https://maas.aliyuncs.com/compatible-mode/v1",
+        api_key_ciphertext=encrypt_api_key("sk-local"),
+    )
+
+    class ScopedStore:
+        async def get_profile(self, requested_profile_id):
+            return profile if requested_profile_id == profile_id else None
+
+        async def load_bundle(self):
+            return SimpleNamespace(profiles=[profile], role_bindings=[])
+
+    async def fake_validate(_profile):
+        return (
+            True,
+            "GET https://maas.aliyuncs.com/compatible-mode/v1/models OK — 2 models: glm-5.2, qwen-max",
+            None,
+        )
+
+    monkeypatch.setattr(service, "get_store", lambda *_args, **_kwargs: ScopedStore())
+    monkeypatch.setattr(service, "validate_profile_via_models_catalog", fake_validate)
+
+    result = await service.test_profile_connection(
+        persistence_deps=SimpleNamespace(),
+        config_deps=SimpleNamespace(config=SimpleNamespace(app_env="production", auth_mode="neon")),
+        diagnostics_deps=SimpleNamespace(runtime_test_results={}),
+        lm_deps=SimpleNamespace(planner_lm=object(), delegate_lm=object()),
+        persisted_identity=SimpleNamespace(),
+        profile_id=profile_id,
+    )
+
+    assert result.ok is True
+    assert result.error is None
+    assert "GET" in result.output_preview and "/models" in result.output_preview
+    assert "glm-5.2" in result.output_preview
+    assert result.checks["models_found"] is True
+
+
+@pytest.mark.asyncio
+async def test_profile_connection_openai_compatible_reports_catalog_error(monkeypatch) -> None:
+    """A failing /models GET yields ok=false with the catalog error (not a 400)."""
+    from fleet_rlm.api.runtime_services import llm_profiles as service
+
+    profile_id = uuid4()
+    profile = LlmProviderProfileRecord(
+        id=profile_id,
+        name="Bad key",
+        provider_type="openai_compatible",
+        api_base="https://maas.aliyuncs.com/compatible-mode/v1",
+        api_key_ciphertext=encrypt_api_key("sk-local"),
+    )
+
+    class ScopedStore:
+        async def get_profile(self, requested_profile_id):
+            return profile if requested_profile_id == profile_id else None
+
+        async def load_bundle(self):
+            return SimpleNamespace(profiles=[profile], role_bindings=[])
+
+    async def fake_validate(_profile):
+        return False, None, "401 Unauthorized"
+
+    monkeypatch.setattr(service, "get_store", lambda *_args, **_kwargs: ScopedStore())
+    monkeypatch.setattr(service, "validate_profile_via_models_catalog", fake_validate)
+
+    result = await service.test_profile_connection(
+        persistence_deps=SimpleNamespace(),
+        config_deps=SimpleNamespace(config=SimpleNamespace(app_env="production", auth_mode="neon")),
+        diagnostics_deps=SimpleNamespace(runtime_test_results={}),
+        lm_deps=SimpleNamespace(planner_lm=object(), delegate_lm=object()),
+        persisted_identity=SimpleNamespace(),
+        profile_id=profile_id,
+    )
+
+    assert result.ok is False
+    assert "401 Unauthorized" in (result.error or "")
+    assert result.checks["models_found"] is False
+
+
+@pytest.mark.asyncio
+async def test_profile_connection_anthropic_compatible_validates_via_v1_models(monkeypatch) -> None:
+    """Anthropic-compatible profiles validate via GET /v1/models (x-api-key)."""
+    from fleet_rlm.api.runtime_services import llm_profiles as service
+
+    profile_id = uuid4()
+    profile = LlmProviderProfileRecord(
+        id=profile_id,
+        name="My anthropic gateway",
+        provider_type="anthropic_compatible",
+        api_base="https://my-gateway/anthropic",
+        api_key_ciphertext=encrypt_api_key("sk-anthropic"),
+    )
+
+    class ScopedStore:
+        async def get_profile(self, requested_profile_id):
+            return profile if requested_profile_id == profile_id else None
+
+        async def load_bundle(self):
+            return SimpleNamespace(profiles=[profile], role_bindings=[])
+
+    async def fake_validate(_profile):
+        return (
+            True,
+            "GET https://my-gateway/anthropic/v1/models OK — 1 models: claude-sonnet-4",
+            None,
+        )
+
+    monkeypatch.setattr(service, "get_store", lambda *_args, **_kwargs: ScopedStore())
+    monkeypatch.setattr(service, "validate_profile_via_models_catalog", fake_validate)
+
+    result = await service.test_profile_connection(
+        persistence_deps=SimpleNamespace(),
+        config_deps=SimpleNamespace(config=SimpleNamespace(app_env="production", auth_mode="neon")),
+        diagnostics_deps=SimpleNamespace(runtime_test_results={}),
+        lm_deps=SimpleNamespace(planner_lm=object(), delegate_lm=object()),
+        persisted_identity=SimpleNamespace(),
+        profile_id=profile_id,
+    )
+
+    assert result.ok is True
+    assert result.error is None
+    assert "/v1/models" in result.output_preview
+    assert "claude-sonnet-4" in result.output_preview

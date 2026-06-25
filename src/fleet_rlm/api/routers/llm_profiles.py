@@ -7,7 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Path, Query
 
-from ..dependencies import ConfigDepsDep, DiagnosticsDepsDep, LmDepsDep, PersistenceDepsDep
+from ..dependencies import ConfigDepsDep, DiagnosticsDepsDep, LmDepsDep, PersistedIdentityDep, PersistenceDepsDep
 from ..runtime_services import llm_profiles as llm_profile_service
 from ..schemas.llm_profiles import (
     LlmImportEnvResponse,
@@ -33,7 +33,7 @@ AUTH_ERROR_RESPONSES: OpenAPIResponses = {
 
 WRITE_RESPONSES: OpenAPIResponses = {
     **AUTH_ERROR_RESPONSES,
-    403: {"description": "LLM profile writes are allowed only when APP_ENV=local."},
+    403: {"description": "LLM profile writes require local mode or admitted Neon authentication."},
     404: {"description": "Requested profile was not found."},
 }
 
@@ -43,8 +43,14 @@ WRITE_RESPONSES: OpenAPIResponses = {
     response_model=list[LlmProviderProfileResponse],
     responses=AUTH_ERROR_RESPONSES,
 )
-async def list_llm_profiles(persistence_deps: PersistenceDepsDep) -> list[LlmProviderProfileResponse]:
-    return await llm_profile_service.list_profiles(persistence_deps=persistence_deps)
+async def list_llm_profiles(
+    persistence_deps: PersistenceDepsDep,
+    persisted_identity: PersistedIdentityDep,
+) -> list[LlmProviderProfileResponse]:
+    return await llm_profile_service.list_profiles(
+        persistence_deps=persistence_deps,
+        persisted_identity=persisted_identity,
+    )
 
 
 @router.post(
@@ -56,10 +62,12 @@ async def create_llm_profile(
     request: LlmProviderProfileCreateRequest,
     persistence_deps: PersistenceDepsDep,
     config_deps: ConfigDepsDep,
+    persisted_identity: PersistedIdentityDep,
 ) -> LlmProviderProfileResponse:
     return await llm_profile_service.create_profile(
         persistence_deps=persistence_deps,
         config_deps=config_deps,
+        persisted_identity=persisted_identity,
         request=request,
     )
 
@@ -74,10 +82,12 @@ async def update_llm_profile(
     request: LlmProviderProfileUpdateRequest,
     persistence_deps: PersistenceDepsDep,
     config_deps: ConfigDepsDep,
+    persisted_identity: PersistedIdentityDep,
 ) -> LlmProviderProfileResponse:
     return await llm_profile_service.update_profile(
         persistence_deps=persistence_deps,
         config_deps=config_deps,
+        persisted_identity=persisted_identity,
         profile_id=profile_id,
         request=request,
     )
@@ -92,10 +102,12 @@ async def delete_llm_profile(
     profile_id: Annotated[UUID, Path(description="Provider profile identifier.")],
     persistence_deps: PersistenceDepsDep,
     config_deps: ConfigDepsDep,
+    persisted_identity: PersistedIdentityDep,
 ) -> None:
     await llm_profile_service.delete_profile(
         persistence_deps=persistence_deps,
         config_deps=config_deps,
+        persisted_identity=persisted_identity,
         profile_id=profile_id,
     )
 
@@ -108,10 +120,12 @@ async def delete_llm_profile(
 async def get_llm_profile_models(
     profile_id: Annotated[UUID, Path(description="Provider profile identifier.")],
     persistence_deps: PersistenceDepsDep,
+    persisted_identity: PersistedIdentityDep,
     refresh: Annotated[bool, Query(description="Bypass cached model catalog results.")] = False,
 ) -> LlmModelCatalogResponse:
     return await llm_profile_service.get_model_catalog(
         persistence_deps=persistence_deps,
+        persisted_identity=persisted_identity,
         profile_id=profile_id,
         force_refresh=refresh,
     )
@@ -128,12 +142,14 @@ async def test_llm_profile(
     config_deps: ConfigDepsDep,
     diagnostics_deps: DiagnosticsDepsDep,
     lm_deps: LmDepsDep,
+    persisted_identity: PersistedIdentityDep,
 ) -> RuntimeConnectivityTestResponse:
     return await llm_profile_service.test_profile_connection(
         persistence_deps=persistence_deps,
         config_deps=config_deps,
         diagnostics_deps=diagnostics_deps,
         lm_deps=lm_deps,
+        persisted_identity=persisted_identity,
         profile_id=profile_id,
     )
 
@@ -143,8 +159,14 @@ async def test_llm_profile(
     response_model=LlmRoleBindingsResponse,
     responses=AUTH_ERROR_RESPONSES,
 )
-async def get_llm_roles(persistence_deps: PersistenceDepsDep) -> LlmRoleBindingsResponse:
-    return await llm_profile_service.get_role_bindings(persistence_deps=persistence_deps)
+async def get_llm_roles(
+    persistence_deps: PersistenceDepsDep,
+    persisted_identity: PersistedIdentityDep,
+) -> LlmRoleBindingsResponse:
+    return await llm_profile_service.get_role_bindings(
+        persistence_deps=persistence_deps,
+        persisted_identity=persisted_identity,
+    )
 
 
 @router.patch(
@@ -158,12 +180,14 @@ async def patch_llm_roles(
     config_deps: ConfigDepsDep,
     lm_deps: LmDepsDep,
     diagnostics_deps: DiagnosticsDepsDep,
+    persisted_identity: PersistedIdentityDep,
 ) -> LlmRoleBindingsResponse:
     return await llm_profile_service.apply_role_bindings_patch(
         persistence_deps=persistence_deps,
         config_deps=config_deps,
         lm_deps=lm_deps,
         diagnostics_deps=diagnostics_deps,
+        persisted_identity=persisted_identity,
         request=request,
     )
 
@@ -178,10 +202,12 @@ async def import_llm_profiles_from_env(
     config_deps: ConfigDepsDep,
     lm_deps: LmDepsDep,
     diagnostics_deps: DiagnosticsDepsDep,
+    persisted_identity: PersistedIdentityDep,
 ) -> LlmImportEnvResponse:
     return await llm_profile_service.import_profile_from_env(
         persistence_deps=persistence_deps,
         config_deps=config_deps,
         lm_deps=lm_deps,
         diagnostics_deps=diagnostics_deps,
+        persisted_identity=persisted_identity,
     )

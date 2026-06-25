@@ -162,6 +162,25 @@ def test_neon_auth_mode_defaults_database_required(clean_runtime_env):
     assert cfg.database_required is True
 
 
+def test_validate_startup_requires_secret_encryption_key_for_hosted_neon(clean_runtime_env):
+    config_module = importlib.import_module("fleet_rlm.api.config")
+
+    cfg = config_module.ServerRuntimeConfig(
+        app_env="production",
+        auth_mode="neon",
+        auth_required=True,
+        database_required=True,
+        database_url="postgresql://example.invalid/db",  # ty: ignore[unknown-argument]
+        neon_auth_url="https://ep-xxx.neonauth.us-east-1.aws.neon.tech/neondb/auth",
+        allow_debug_auth=False,
+        allow_query_auth_tokens=False,
+        cors_allowed_origins=["https://preview.qredence.ai"],
+    )
+
+    with pytest.raises(ValueError, match="FLEET_SECRET_ENCRYPTION_KEY is required"):
+        cfg.validate_startup_or_raise()
+
+
 def test_from_app_config_defaults_database_required_for_neon(clean_runtime_env, monkeypatch):
     config_module = importlib.import_module("fleet_rlm.api.config")
     env_module = importlib.import_module("fleet_rlm.integrations.config.env")
@@ -182,6 +201,8 @@ def test_from_app_config_defaults_database_required_for_neon(clean_runtime_env, 
 
 
 def test_validate_startup_or_raise_accepts_valid_neon_configuration(clean_runtime_env):
+    from cryptography.fernet import Fernet
+
     config_module = importlib.import_module("fleet_rlm.api.config")
 
     cfg = config_module.ServerRuntimeConfig(
@@ -194,6 +215,7 @@ def test_validate_startup_or_raise_accepts_valid_neon_configuration(clean_runtim
         allow_query_auth_tokens=False,
         neon_auth_url="https://ep-xxx.neonauth.us-east-1.aws.neon.tech/neondb/auth",
         neon_tenant_claim="fleet-prod",
+        secret_encryption_key=Fernet.generate_key().decode("ascii"),
         cors_allowed_origins=["https://app.example"],
     )
 

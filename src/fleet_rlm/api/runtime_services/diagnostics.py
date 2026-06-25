@@ -19,6 +19,10 @@ from fleet_rlm.integrations.daytona.concurrency import (
     get_current_sandbox_usage,
     reconcile_sandbox_slots,
 )
+from fleet_rlm.integrations.llm_profiles.model_catalog import (
+    MODELS_ENDPOINT_PROVIDER_TYPES,
+    validate_profile_via_models_catalog,
+)
 from fleet_rlm.integrations.llm_profiles.types import LlmRoleName
 from fleet_rlm.integrations.observability.config import MlflowConfig
 
@@ -40,8 +44,10 @@ from ..schemas.runtime import (
     RuntimeTestCache,
 )
 from .common import (
+    LM_SMOKE_TEST_TIMEOUT_SECONDS,
     RUNTIME_TEST_TIMEOUT_SECONDS,
     extract_lm_text,
+    redact_secret,
     run_blocking,
     sanitize_error,
     utc_now_iso,
@@ -266,6 +272,63 @@ async def run_connectivity_test(
     return result
 
 
+async def _resolve_byok_planner(
+    config_deps: ConfigDeps,
+    persistence_deps: PersistenceDeps | None,
+    persisted_identity: object | None,
+) -> tuple[object | None, object | None, str | None]:
+    """Resolve the caller's BYOK planner profile + config (the one chat uses).
+
+    Returns ``(profile, config, error)``:
+    - ``(None, None, None)`` — BYOK does not apply (non-neon mode, no persistence,
+      no identity); the caller falls back to env-based loading.
+    - ``(None, None, message)`` — neon mode is engaged but no planner BYOK profile
+      is bound (or resolution failed); the caller surfaces the error instead of
+      testing an irrelevant server-env LM.
+    - ``(profile, config, None)`` — resolved; ``profile`` is the
+      ``LlmProviderProfileRecord`` (for /models validation), ``config`` is the
+      ``ResolvedRoleLmConfig`` (for the chat-completion path).
+    """
+    cfg = config_deps.config
+    if (
+        cfg.auth_mode != "neon"
+        or persistence_deps is None
+        or persistence_deps.db_manager is None
+        or persistence_deps.repository is None
+        or persisted_identity is None
+        or getattr(persisted_identity, "user_id", None) is None
+    ):
+        return None, None, None
+
+    from fleet_rlm.integrations.llm_profiles.resolver import resolve_role_config
+    from fleet_rlm.integrations.llm_profiles.store import resolve_profile_store
+
+    try:
+        store = resolve_profile_store(persistence_deps.db_manager, identity=persisted_identity)
+        bundle = await store.load_bundle()
+        profiles = {p.id: p for p in bundle.profiles}
+        planner_binding = next(
+            (b for b in bundle.role_bindings if b.role == "planner" and b.profile_id),
+            None,
+        )
+        if planner_binding is None or planner_binding.profile_id not in profiles:
+            return (
+                None,
+                None,
+                (
+                    "No planner BYOK profile is configured for this user. "
+                    "Bind a provider profile to the planner role in Settings."
+                ),
+            )
+        profile = profiles[planner_binding.profile_id]
+        config = resolve_role_config(role="planner", binding=planner_binding, profile=profile)
+        if config is None or not config.litellm_model or not config.api_key:
+            return None, None, "Planner BYOK profile is missing credentials."
+        return profile, config, None
+    except Exception as exc:
+        return None, None, sanitize_error(exc)
+
+
 async def run_lm_connection_test(
     *,
     config_deps: ConfigDeps,
@@ -273,11 +336,56 @@ async def run_lm_connection_test(
     diagnostics_deps: DiagnosticsDeps,
     planner_loader=None,
     delegate_loader=None,
+    persistence_deps: PersistenceDeps | None = None,
+    persisted_identity: object | None = None,
 ) -> RuntimeConnectivityTestResponse:
-    checks, guidance = lm_preflight()
+    byok_profile, byok_config, byok_error = await _resolve_byok_planner(
+        config_deps, persistence_deps, persisted_identity
+    )
+    byok_engaged = byok_profile is not None or byok_error is not None
+
+    if byok_engaged:
+        # In BYOK mode the caller's profile (not server env vars) is the source of
+        # truth; satisfy preflight and let the smoke test surface the BYOK profile
+        # (via /models) or a clear "not configured" error instead of a hang on the
+        # server-env LM.
+        has_byok = byok_profile is not None
+        checks: dict[str, bool] = {
+            "api_key_set": bool(getattr(byok_config, "api_key", None)),
+            "api_base_set": bool(getattr(byok_profile, "api_base", None)),
+        }
+        guidance: list[str] = [] if has_byok else [byok_error or "No planner BYOK profile is configured for this user."]
+        preflight_ok = True
+    else:
+        checks, guidance = lm_preflight()
+        preflight_ok = checks["model_set"] and checks["api_key_set"]
 
     async def _run_smoke() -> tuple[bool, str | None, str | None]:
-        if planner_loader is None and delegate_loader is None:
+        # BYOK /models-compatible profiles validate via GET /models (no chat completion,
+        # no cold start, no token spend) — same probe as the per-profile Test.
+        if byok_profile is not None and byok_profile.provider_type in MODELS_ENDPOINT_PROVIDER_TYPES:
+            checks["models_found"] = False
+            ok, preview, err = await validate_profile_via_models_catalog(byok_profile)
+            checks["models_found"] = ok
+            return ok, preview, redact_secret(err, getattr(byok_config, "api_key", None))
+
+        if byok_profile is not None:
+            # BYOK non-/models provider (e.g. real Anthropic): chat-completion smoke test
+            # against the profile's resolved config.
+            import dspy
+
+            from fleet_rlm.integrations.llm_profiles.resolver import build_lm_kwargs_from_resolved
+
+            planner_lm = await run_blocking(
+                lambda: dspy.LM(
+                    **build_lm_kwargs_from_resolved(byok_config, timeout=LM_SMOKE_TEST_TIMEOUT_SECONDS - 2)
+                ),
+                timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
+            )
+            delegate_lm = None
+        elif byok_error:
+            raise RuntimeError(byok_error)
+        elif planner_loader is None and delegate_loader is None:
             planner_lm, delegate_lm = await _ensure_runtime_models(lm_deps, config_deps, diagnostics_deps)
             if planner_lm is None:
                 raise RuntimeError("Failed to construct planner LM from environment settings.")
@@ -315,23 +423,26 @@ async def run_lm_connection_test(
 
         output_preview = await run_blocking(
             _invoke,
-            timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
+            timeout=LM_SMOKE_TEST_TIMEOUT_SECONDS,
         )
 
-        lm_deps.planner_lm = planner_lm
-        lm_deps.delegate_lm = delegate_lm
+        # NOTE: do NOT write `planner_lm`/`delegate_lm` back to the process-wide
+        # `lm_deps` singleton. In BYOK mode these are per-user LMs carrying the
+        # caller's API key; mutating the singleton would leak User A's BYOK
+        # credentials into any concurrent chat reading `lm_deps.planner_lm`.
+        # The smoke test above already uses the local `planner_lm` directly.
         return bool(output_preview), output_preview, None
 
     return await run_connectivity_test(
         diagnostics=diagnostics_deps,
         kind="lm",
-        preflight_ok=checks["model_set"] and checks["api_key_set"],
+        preflight_ok=preflight_ok,
         checks=checks,
         guidance=guidance,
         preflight_error="LM preflight checks failed.",
         default_error="LM connectivity test failed.",
         timeout_error=(
-            f"LM test timed out after {RUNTIME_TEST_TIMEOUT_SECONDS}s. Check API connectivity and credentials."
+            f"LM test timed out after {LM_SMOKE_TEST_TIMEOUT_SECONDS}s. Check API connectivity and credentials."
         ),
         run_smoke=_run_smoke,
     )
@@ -475,9 +586,12 @@ def build_runtime_status_response(
     delegate_profile = resolved_profile_labels.get("delegate", (None, None))
     delegate_small_profile = resolved_profile_labels.get("delegate_small", (None, None))
 
+    settings_write_enabled = config_deps.config.app_env == "local"
     return RuntimeStatusResponse(
         app_env=config_deps.config.app_env,
-        write_enabled=config_deps.config.app_env == "local",
+        write_enabled=settings_write_enabled,
+        settings_write_enabled=settings_write_enabled,
+        profile_write_enabled=settings_write_enabled or config_deps.config.auth_mode == "neon",
         ready=ready,
         sandbox_provider="daytona",
         active_models=RuntimeActiveModels(

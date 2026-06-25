@@ -60,6 +60,7 @@ def resolve_role_config(
         litellm_model=litellm_model,
         api_key=api_key,
         api_base=profile.api_base or None,
+        provider_type=profile.provider_type,
     )
 
 
@@ -96,15 +97,33 @@ def mirror_role_configs_to_env(role_configs: dict[LlmRoleName, ResolvedRoleLmCon
     return updates
 
 
-def build_lm_kwargs_from_resolved(config: ResolvedRoleLmConfig, *, max_tokens: int | None = None) -> dict[str, Any]:
+def build_lm_kwargs_from_resolved(
+    config: ResolvedRoleLmConfig,
+    *,
+    max_tokens: int | None = None,
+    timeout: int | float | None = None,
+) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
         "model": config.litellm_model,
         "api_key": config.api_key,
     }
     if config.api_base:
         kwargs["api_base"] = config.api_base
+    # OpenAI-/Anthropic-compatible endpoints that are not LiteLLM proxies use a raw
+    # model id (no provider prefix); pass an explicit provider hint so litellm
+    # routes the bare model name against the custom api_base. For Anthropic,
+    # litellm then appends "/v1/messages" to the api_base and sends x-api-key +
+    # anthropic-version. LiteLLM-proxy and real-OpenAI/Anthropic profiles keep
+    # their prefixed model id and need no hint.
+    if config.api_base and "/" not in config.litellm_model:
+        if config.provider_type == "openai_compatible":
+            kwargs["custom_llm_provider"] = "openai"
+        elif config.provider_type == "anthropic_compatible":
+            kwargs["custom_llm_provider"] = "anthropic"
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
+    if timeout is not None:
+        kwargs["timeout"] = timeout
     return kwargs
 
 

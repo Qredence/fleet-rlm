@@ -14,6 +14,5 @@ if str(SRC_ROOT) not in sys.path:
 
 from fleet_rlm.ui.build import main
 
-
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from pathlib import Path
-from typing import TypedDict
+from typing import Mapping, TypedDict
 
 from fastapi import HTTPException
 
@@ -39,6 +40,8 @@ from ..schemas.runtime import (
     RuntimeSettingsUpdateRequest,
     RuntimeSettingsUpdateResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 RUNTIME_MODEL_RELOAD_KEYS = frozenset(
     {
@@ -168,11 +171,14 @@ def _restore_runtime_settings_env(
     env_text: str | None,
     env_snapshot: dict[str, str | None],
 ) -> None:
-    if env_text is None:
-        if env_path.exists():
-            env_path.unlink()
-    else:
-        env_path.write_text(env_text, encoding="utf-8")
+    try:
+        if env_text is None:
+            if env_path.exists():
+                env_path.unlink()
+        else:
+            env_path.write_text(env_text, encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Could not restore env file %s: %s", env_path, exc)
 
     for key, value in env_snapshot.items():
         if value is None:
@@ -181,9 +187,14 @@ def _restore_runtime_settings_env(
             os.environ[key] = value
 
 
-def build_runtime_settings_snapshot(*, config_deps: ConfigDeps) -> RuntimeSettingsSnapshot:
+def build_runtime_settings_snapshot(
+    *,
+    config_deps: ConfigDeps,
+    extra_values: Mapping[str, str | None] | None = None,
+) -> RuntimeSettingsSnapshot:
     snapshot = get_settings_snapshot(
         keys=list(RUNTIME_SETTINGS_KEYS),
+        extra_values=extra_values,
         env_path=config_deps.config.env_path,
     )
     return RuntimeSettingsSnapshot(**snapshot)

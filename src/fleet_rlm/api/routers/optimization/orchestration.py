@@ -154,6 +154,7 @@ def resolve_trace_bundle_paths(paths: list[str] | None) -> list[str]:
 async def resolve_reflection_lm_config(
     request: GEPAOptimizationRequest,
     persistence_deps: Any,
+    persisted_identity: IdentityUpsertResult,
 ) -> dict[str, Any] | None:
     """Resolve an optional saved provider/model selection into DSPy LM kwargs."""
     if not request.reflection_profile_id and not request.reflection_model_id:
@@ -168,7 +169,7 @@ async def resolve_reflection_lm_config(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid reflection_profile_id.") from exc
 
-    store = resolve_profile_store(persistence_deps.db_manager)
+    store = resolve_profile_store(persistence_deps.db_manager, identity=persisted_identity)
     profile = await store.get_profile(profile_uuid)
     if profile is None:
         raise HTTPException(status_code=404, detail=f"Reflection profile {request.reflection_profile_id} not found.")
@@ -246,7 +247,7 @@ async def prepare_optimization_request(
         output_path=resolve_output_path(request.output_path),
         skill_path=resolve_skill_path(request.skill_path),
         trace_bundle_paths=resolve_trace_bundle_paths(list(request.trace_bundle_paths)),
-        reflection_lm_config=await resolve_reflection_lm_config(request, persistence_deps),
+        reflection_lm_config=await resolve_reflection_lm_config(request, persistence_deps, persisted_identity),
     )
 
 

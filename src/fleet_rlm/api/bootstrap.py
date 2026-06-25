@@ -206,6 +206,31 @@ async def initialize_persistence(persistence_deps: PersistenceDeps, cfg: ServerR
                 return
         persistence_deps.db_manager = db_manager
         persistence_deps.repository = FleetRepository(db_manager)
+
+        # Auto-seed the NEON_TENANT_CLAIM on startup in neon/entra auth modes
+        if cfg.auth_mode in {"entra", "neon"} and cfg.neon_tenant_claim:
+            try:
+                tenant = await persistence_deps.repository.resolve_tenant_by_entra_claim(
+                    entra_tenant_id=cfg.neon_tenant_claim
+                )
+                if tenant is None:
+                    logger.info(
+                        "Auto-seeding tenant '%s' for %s auth mode...",
+                        cfg.neon_tenant_claim,
+                        cfg.auth_mode,
+                    )
+                    await persistence_deps.repository.upsert_tenant(
+                        entra_tenant_id=cfg.neon_tenant_claim,
+                        slug=cfg.neon_tenant_claim.lower(),
+                        display_name=f"{cfg.neon_tenant_claim.title()} Tenant",
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Could not auto-seed tenant '%s' on startup: %s",
+                    cfg.neon_tenant_claim,
+                    exc,
+                )
+
         persistence_deps.local_store = LocalStore()
         return
 

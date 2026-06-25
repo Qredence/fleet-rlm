@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractContextManager
@@ -13,6 +15,8 @@ from fastapi import WebSocket
 
 from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.integrations.llm_profiles.resolver import build_lm_kwargs_from_resolved, resolve_active_role_configs
+from fleet_rlm.integrations.llm_profiles.store import resolve_profile_store
 from fleet_rlm.runtime.events import RuntimeEvent
 from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.runtime.factory import build_chat_agent
@@ -21,6 +25,8 @@ from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 from ..auth import AuthError, NormalizedIdentity, resolve_admitted_identity
 from ..config import ServerRuntimeConfig
 from ..dependencies import ConfigDeps, DiagnosticsDeps, LmDeps, PersistenceDeps
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -188,6 +194,35 @@ async def _ensure_runtime_models(
     return await ensure_runtime_models(lm_deps, config_deps, diagnostics_deps)
 
 
+async def _resolve_identity_scoped_lms(
+    *,
+    cfg: ServerRuntimeConfig,
+    persistence_deps: PersistenceDeps,
+    identity_rows: IdentityUpsertResult | None,
+) -> tuple[Any | None, Any | None]:
+    if cfg.auth_mode != "neon" or persistence_deps.db_manager is None or identity_rows is None:
+        return None, None
+
+    role_configs = await resolve_active_role_configs(
+        resolve_profile_store(persistence_deps.db_manager, identity=identity_rows)
+    )
+    planner_config = role_configs.get("planner")
+    if planner_config is None:
+        return None, None
+
+    import dspy
+
+    planner_lm = await asyncio.to_thread(dspy.LM, **build_lm_kwargs_from_resolved(planner_config))
+    delegate_config = role_configs.get("delegate") or role_configs.get("delegate_small")
+    delegate_lm = None
+    if delegate_config is not None:
+        delegate_lm = await asyncio.to_thread(
+            dspy.LM,
+            **build_lm_kwargs_from_resolved(delegate_config, max_tokens=cfg.agent_delegate_max_tokens),
+        )
+    return planner_lm, delegate_lm
+
+
 async def _resolve_persisted_identity(
     *,
     cfg: ServerRuntimeConfig,
@@ -270,6 +305,14 @@ async def prepare_chat_runtime(
             full_name=identity.name,
         )
 
+    scoped_planner_lm, scoped_delegate_lm = await _resolve_identity_scoped_lms(
+        cfg=cfg,
+        persistence_deps=persistence_deps,
+        identity_rows=identity_rows,
+    )
+    planner_lm = scoped_planner_lm or planner_lm
+    delegate_lm = scoped_delegate_lm or delegate_lm
+
     if planner_lm is None:
         if await send_error(
             websocket,
@@ -304,17 +347,19 @@ def _chat_agent_builder_kwargs(runtime: PreparedChatRuntime) -> dict[str, Any]:
 
 
 class _ManagedAgentContext:
-    """Wraps an agent so interpreter lifecycle is owned by InterpreterPool."""
+    """Wraps an agent so interpreter lifecycle is owned by InterpreterPool or self."""
 
     def __init__(
         self,
         agent: Any,
         interpreter: Any | None,
         pool: Any,
+        custom_interpreter: bool = False,
     ) -> None:
         self._agent = agent
         self._interpreter = interpreter
         self._pool = pool
+        self._custom_interpreter = custom_interpreter
 
     async def __aenter__(self) -> Any:
         return self._agent
@@ -327,12 +372,92 @@ class _ManagedAgentContext:
     ) -> bool:
         if self._interpreter is not None:
             self._agent.interpreter = None
-            await self._pool.release(self._interpreter)
+            if self._custom_interpreter:
+                try:
+                    await self._interpreter.__aexit__(exc_type, exc_val, exc_tb)
+                except Exception as exc:
+                    logger.warning("Error exiting custom Daytona interpreter: %s", exc)
+            else:
+                await self._pool.release(self._interpreter)
         return False
 
 
 async def build_chat_agent_context(runtime: PreparedChatRuntime, *, pool: Any | None = None) -> Any:
     kwargs = _chat_agent_builder_kwargs(runtime)
+
+    # Check for per-user custom Daytona config
+    custom_config = None
+    if (
+        runtime.repository is not None
+        and runtime.identity_rows is not None
+        and runtime.identity_rows.workspace_id is not None
+    ):
+        try:
+            db_settings = await runtime.repository.get_workspace_runtime_setting(
+                tenant_id=runtime.identity_rows.tenant_id,
+                workspace_id=runtime.identity_rows.workspace_id,
+            )
+            api_key_encrypted = db_settings.get("DAYTONA_API_KEY", "").strip()
+            api_url = db_settings.get("DAYTONA_API_URL", "").strip()
+            target = db_settings.get("DAYTONA_TARGET", "").strip() or None
+
+            if api_key_encrypted and api_url:
+                from fleet_rlm.integrations.daytona.config import ResolvedDaytonaConfig
+                from fleet_rlm.integrations.llm_profiles.crypto import decrypt_api_key
+
+                secret_key = runtime.cfg.secret_encryption_key
+                api_key = decrypt_api_key(api_key_encrypted, secret=secret_key)
+                if api_key:
+                    custom_config = ResolvedDaytonaConfig(
+                        api_key=api_key,
+                        api_url=api_url,
+                        target=target,
+                    )
+        except Exception as exc:
+            logger.warning("Could not load per-user Daytona configuration: %s", exc)
+
+    if custom_config is not None:
+        logger.info("Initializing custom per-user Daytona interpreter sandbox...")
+        from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
+        from fleet_rlm.integrations.daytona.models import build_sandbox_spec
+        from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxRuntime
+
+        sandbox_runtime = DaytonaSandboxRuntime(config=custom_config)
+        sandbox_spec = build_sandbox_spec(
+            volume_name=runtime.cfg.volume_name,
+            recoverable=True,
+            runner_tags=runtime.cfg.daytona_runner_tags,
+        )
+        interpreter = DaytonaInterpreter(
+            runtime=sandbox_runtime,
+            owns_runtime=True,
+            volume_name=runtime.cfg.volume_name,
+            timeout=runtime.cfg.timeout,
+            max_llm_calls=runtime.cfg.rlm_max_llm_calls,
+            max_recursion_depth=runtime.cfg.rlm_max_depth,
+            rlm_max_iterations=runtime.cfg.rlm_max_iterations,
+            child_isolation_mode=runtime.cfg.rlm_child_isolation_mode,
+            child_fork_fallback=runtime.cfg.rlm_child_fork_fallback,
+            delegate_max_calls_per_turn=runtime.cfg.delegate_max_calls_per_turn,
+            delegate_result_truncation_chars=runtime.cfg.delegate_result_truncation_chars,
+            delegate_execution_timeout=runtime.cfg.delegate_execution_timeout,
+            delegate_max_iterations=runtime.cfg.delegate_max_iterations,
+            delegate_adapter=runtime.cfg.delegate_adapter,
+            broker_health_timeout=runtime.cfg.daytona_broker_health_timeout,
+            broker_tool_call_timeout=runtime.cfg.daytona_broker_tool_call_timeout,
+            broker_start_retries=runtime.cfg.daytona_broker_start_retries,
+            async_execute=runtime.cfg.interpreter_async_execute,
+            sandbox_spec=sandbox_spec,
+        )
+        await interpreter.__aenter__()
+        kwargs["interpreter"] = interpreter
+        try:
+            agent = build_chat_agent(**kwargs)
+        except Exception:
+            await interpreter.__aexit__(None, None, None)
+            raise
+        return _ManagedAgentContext(agent, interpreter, pool=None, custom_interpreter=True)
+
     if pool is None:
         from .interpreter_pool import InterpreterPool
 

@@ -148,6 +148,8 @@ ROUNDTRIP_CASES = [
         {
             "app_env": "local",
             "write_enabled": True,
+            "settings_write_enabled": True,
+            "profile_write_enabled": True,
             "ready": True,
             "active_models": {
                 "planner": "openai/gpt-4o",

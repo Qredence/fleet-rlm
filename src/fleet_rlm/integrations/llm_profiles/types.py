@@ -7,7 +7,9 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-LlmProviderType = Literal["openai", "anthropic", "google", "openai_compatible"]
+LlmProviderType = Literal[
+    "openai", "anthropic", "google", "openai_compatible", "litellm_proxy", "anthropic_compatible"
+]
 LlmRoleName = Literal["planner", "delegate", "delegate_small"]
 
 PROVIDER_DEFAULT_API_BASES: dict[LlmProviderType, str] = {
@@ -15,6 +17,8 @@ PROVIDER_DEFAULT_API_BASES: dict[LlmProviderType, str] = {
     "anthropic": "https://api.anthropic.com",
     "google": "https://generativelanguage.googleapis.com/v1beta/openai/",
     "openai_compatible": "",
+    "litellm_proxy": "",
+    "anthropic_compatible": "",
 }
 
 LITELLM_PROVIDER_PREFIX: dict[LlmProviderType, str] = {
@@ -22,6 +26,8 @@ LITELLM_PROVIDER_PREFIX: dict[LlmProviderType, str] = {
     "anthropic": "anthropic",
     "google": "openai",
     "openai_compatible": "openai",
+    "litellm_proxy": "openai",
+    "anthropic_compatible": "anthropic",
 }
 
 
@@ -59,3 +65,4 @@ class ResolvedRoleLmConfig:
     litellm_model: str
     api_key: str
     api_base: str | None
+    provider_type: LlmProviderType = "openai_compatible"

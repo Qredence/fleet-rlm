@@ -226,8 +226,9 @@ class WorkspaceRuntimeSetting(Base):
             name="fk_workspace_runtime_settings_updated_by_user_id__users_id",
         ),
         UniqueConstraint(
+            "tenant_id",
             "workspace_id",
-            name="uq_workspace_runtime_settings_workspace_id",
+            name="uq_workspace_runtime_settings_tenant_workspace",
         ),
         Index(
             "ix_workspace_runtime_settings_tenant_workspace",

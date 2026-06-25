@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from fleet_rlm.integrations.llm_profiles.crypto import decrypt_api_key, encrypt_api_key
+from fleet_rlm.integrations.llm_profiles.crypto import FERNET_PREFIX, decrypt_api_key, encrypt_api_key
 from fleet_rlm.integrations.llm_profiles.store import JsonLlmProfileStore
 
 
@@ -37,4 +37,18 @@ async def test_json_store_create_and_bind_profile(tmp_path: Path) -> None:
 def test_encrypt_roundtrip() -> None:
     secret = "unit-test-secret"
     ciphertext = encrypt_api_key("abc123", secret=secret)
+    assert ciphertext.startswith(FERNET_PREFIX)
     assert decrypt_api_key(ciphertext, secret=secret) == "abc123"
+
+
+def test_encrypt_uses_hosted_fernet_key(monkeypatch) -> None:
+    from cryptography.fernet import Fernet
+
+    key = Fernet.generate_key().decode("ascii")
+    monkeypatch.setenv("FLEET_SECRET_ENCRYPTION_KEY", key)
+
+    ciphertext = encrypt_api_key("sk-hosted")
+
+    assert ciphertext.startswith(FERNET_PREFIX)
+    assert "sk-hosted" not in ciphertext
+    assert decrypt_api_key(ciphertext) == "sk-hosted"

@@ -8,13 +8,14 @@ import json
 import logging
 import time
 import urllib.request
+import warnings
 from collections.abc import Mapping
 from urllib.error import URLError
 from urllib.parse import urlparse
 
 from fastapi import Request, WebSocket
 from joserfc import jwt
-from joserfc.errors import JoseError
+from joserfc.errors import JoseError, SecurityWarning
 from joserfc.jwk import KeySet
 from joserfc.jwt import JWTClaimsRegistry
 
@@ -149,7 +150,18 @@ class NeonAuthProvider:
                 iat={"essential": True},
             )
 
-            obj = jwt.decode(token, key_set, algorithms=["EdDSA"])
+            # Neon Auth (Better Auth) issues EdDSA-signed JWTs. joserfc warns that
+            # EdDSA is deprecated by RFC 9864; we intentionally accept Neon-issued
+            # EdDSA tokens, so suppress that specific warning during signature
+            # verification only (scoped, not module-level, so real security
+            # warnings still surface elsewhere).
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="EdDSA is deprecated.*",
+                    category=SecurityWarning,
+                )
+                obj = jwt.decode(token, key_set, algorithms=["EdDSA"])
             registry.validate(obj.claims)
             claims = obj.claims
         except AuthError:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from dotenv import set_key
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +94,7 @@ _RUNTIME_SETTING_DEFINITIONS: tuple[RuntimeSettingDefinition, ...] = (
         "DSPY_LM_MODEL",
         category="llm",
         label="Planner LM model",
-        description="LiteLLM model identifier for the planner runtime.",
+        description="Model identifier for the planner runtime.",
         reload_required=True,
         placeholder="openai/gpt-4o",
         default="openai/gemini-3-flash-preview",
@@ -552,9 +555,14 @@ def apply_env_updates(*, updates: Mapping[str, Any], env_path: Path | None = Non
     if not effective_updates:
         return {"updated": [], "env_path": str(target)}
 
-    target.touch(exist_ok=True)
+    try:
+        target.touch(exist_ok=True)
+        for key, value in effective_updates.items():
+            set_key(str(target), key, value)
+    except Exception as exc:
+        logger.warning("Could not persist environment updates to %s: %s", target, exc)
+
     for key, value in effective_updates.items():
-        set_key(str(target), key, value)
         os.environ[key] = value
 
     return {"updated": sorted(effective_updates.keys()), "env_path": str(target)}

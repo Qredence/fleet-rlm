@@ -182,12 +182,22 @@ def _build_lm(
     api_key: str,
     api_base: str | None = None,
     max_tokens: int,
+    custom_provider: str | None = None,
 ) -> Any:
+    extra: dict[str, Any] = {}
+    # Opt-in provider hint. When callers set ``DSPY_LM_CUSTOM_PROVIDER`` (or the
+    # delegate equivalent) we forward it so litellm routes bare model names
+    # against the custom api_base with the right wire format. Without an
+    # explicit hint we leave provider detection to litellm so non-OpenAI
+    # compatible endpoints (e.g. Anthropic) keep working.
+    if custom_provider:
+        extra["custom_llm_provider"] = custom_provider
     return _import_dspy().LM(
         model,
         api_base=api_base,
         api_key=api_key,
         max_tokens=max_tokens,
+        **extra,
     )
 
 
@@ -200,11 +210,13 @@ def _planner_lm_kwargs(
     if not model or not api_key:
         return None
 
+    custom_provider = (os.environ.get("DSPY_LM_CUSTOM_PROVIDER") or "").strip() or None
     return {
         "model": model,
         "api_key": api_key,
         "api_base": os.environ.get("DSPY_LM_API_BASE"),
         "max_tokens": _resolve_max_tokens(os.environ.get("DSPY_LM_MAX_TOKENS")),
+        "custom_provider": custom_provider,
     }
 
 
@@ -229,6 +241,7 @@ def _delegate_lm_kwargs(
         logger.warning("Delegate LM model is configured but no API key is available; using planner fallback.")
         return None
 
+    custom_provider = (os.environ.get("DSPY_DELEGATE_LM_CUSTOM_PROVIDER") or "").strip() or None
     return {
         "model": model,
         "api_key": api_key,
@@ -236,6 +249,7 @@ def _delegate_lm_kwargs(
             os.environ.get("DSPY_DELEGATE_LM_API_BASE") or default_api_base or os.environ.get("DSPY_LM_API_BASE")
         ),
         "max_tokens": _resolve_max_tokens(default_max_tokens),
+        "custom_provider": custom_provider,
     }
 
 
@@ -445,6 +459,7 @@ def _delegate_small_lm_kwargs(
         logger.warning("Small delegate LM model is configured but no API key is available; using delegate fallback.")
         return None
 
+    custom_provider = (os.environ.get("DSPY_DELEGATE_LM_CUSTOM_PROVIDER") or "").strip() or None
     return {
         "model": model,
         "api_key": api_key,
@@ -454,6 +469,7 @@ def _delegate_small_lm_kwargs(
         "max_tokens": _resolve_max_tokens(
             default_max_tokens if default_max_tokens is not None else os.environ.get("DSPY_DELEGATE_LM_MAX_TOKENS")
         ),
+        "custom_provider": custom_provider,
     }
 
 
