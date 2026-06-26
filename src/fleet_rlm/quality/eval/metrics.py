@@ -247,30 +247,45 @@ def routing_correctness(trace_record: TraceRecord) -> float:
 def _calculate_similarity(text1: str, text2: str) -> float:
     """Calculate Levenshtein similarity ratio between two strings.
 
+    Uses dynamic-programming Levenshtein distance and converts to a
+    similarity ratio in [0.0, 1.0].
+
     Args:
         text1: First string.
         text2: Second string.
 
     Returns:
-        Similarity ratio in [0.0, 1.0].
+        Similarity ratio in [0.0, 1.0]. 1.0 means identical.
     """
-    if not text1 and not text2:
+    if text1 == text2:
         return 1.0
     if not text1 or not text2:
         return 0.0
 
-    # Simple character-based similarity (approximation of Levenshtein)
-    # For better accuracy, consider using python-Levenshtein library
-    set1 = set(text1)
-    set2 = set(text2)
+    len1, len2 = len(text1), len(text2)
 
-    if not set1 and not set2:
-        return 1.0
+    # Optimized Levenshtein distance using two rows (O(min(m,n)) space)
+    if len1 < len2:
+        text1, text2 = text2, text1
+        len1, len2 = len2, len1
 
-    intersection = set1 & set2
-    union = set1 | set2
+    prev = list(range(len2 + 1))
+    curr = [0] * (len2 + 1)
 
-    return len(intersection) / len(union) if union else 0.0
+    for i in range(1, len1 + 1):
+        curr[0] = i
+        for j in range(1, len2 + 1):
+            cost = 0 if text1[i - 1] == text2[j - 1] else 1
+            curr[j] = min(
+                prev[j] + 1,  # deletion
+                curr[j - 1] + 1,  # insertion
+                prev[j - 1] + cost,  # substitution
+            )
+        prev, curr = curr, prev
+
+    distance = prev[len2]
+    max_len = max(len1, len2)
+    return 1.0 - (distance / max_len)
 
 
 def trajectory_redundancy(trace_record: TraceRecord) -> float:
