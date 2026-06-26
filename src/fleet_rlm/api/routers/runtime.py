@@ -171,7 +171,6 @@ async def patch_runtime_settings(
         persistence_deps.repository is not None
         and isinstance(persistence_deps.repository, FleetRepository)
         and persisted_identity.workspace_id is not None
-        and (config_deps.config.app_env != "local" or config_deps.config.auth_mode == "neon")
     )
 
     if other_updates and config_deps.config.app_env != "local":

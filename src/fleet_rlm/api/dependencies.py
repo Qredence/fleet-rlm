@@ -378,17 +378,10 @@ async def resolve_persisted_identity(
 ) -> IdentityUpsertResult:
     """Resolve the caller's persisted identity via the unified persistence backend."""
     if isinstance(persistence, FleetRepository):
-        if config_deps.config.auth_mode in {"entra", "neon"}:
-            try:
-                return await resolve_admitted_identity(persistence, identity)
-            except AuthError as exc:
-                raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
-        return await persistence.upsert_identity(
-            entra_tenant_id=identity.tenant_claim,
-            entra_user_id=identity.user_claim,
-            email=identity.email,
-            full_name=identity.name,
-        )
+        try:
+            return await resolve_admitted_identity(persistence, identity)
+        except AuthError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     return await persistence.upsert_identity(
         entra_tenant_id=identity.tenant_claim,
         entra_user_id=identity.user_claim,

@@ -81,14 +81,14 @@ logger = logging.getLogger(__name__)
 
 
 def profile_writes_enabled(config: ServerRuntimeConfig) -> bool:
-    return config.app_env == "local" or config.auth_mode == "neon"
+    return config.app_env == "local"
 
 
 def _ensure_profile_writes(config: ServerRuntimeConfig) -> None:
     if not profile_writes_enabled(config):
         raise HTTPException(
             status_code=403,
-            detail="LLM profile updates are allowed only when APP_ENV=local or AUTH_MODE=neon with admission.",
+            detail="LLM profile updates are allowed only when APP_ENV=local.",
         )
 
 
@@ -342,10 +342,21 @@ async def test_profile_connection(
         checks["model_set"] = bool(resolved.litellm_model)
         preflight_ok = checks["api_key_set"] and checks["model_set"]
         try:
-            profile_lm = await run_blocking(
-                lambda: dspy.LM(**build_lm_kwargs_from_resolved(resolved, timeout=LM_SMOKE_TEST_TIMEOUT_SECONDS - 2)),
-                timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
-            )
+            lm_kwargs = build_lm_kwargs_from_resolved(resolved, timeout=LM_SMOKE_TEST_TIMEOUT_SECONDS - 2)
+            # Use ResponseAPILM for OpenAI providers
+            model = lm_kwargs.get("model", "")
+            if model.startswith("openai/"):
+                from fleet_rlm.runtime.lm import ResponseAPILM
+
+                profile_lm = await run_blocking(
+                    lambda: ResponseAPILM(**lm_kwargs),
+                    timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
+                )
+            else:
+                profile_lm = await run_blocking(
+                    lambda: dspy.LM(**lm_kwargs),
+                    timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
+                )
 
             def _invoke() -> str:
                 response = profile_lm("Reply with exactly OK")

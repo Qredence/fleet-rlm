@@ -33,7 +33,6 @@ def get_service_info(
     cfg = config_deps.config
     return ServiceInfoResponse(
         app_env=cfg.app_env,
-        auth_mode=cfg.auth_mode,
         auth_required=cfg.auth_required,
         sandbox_provider=cfg.sandbox_provider,
         database_enabled=cfg.database_url is not None,

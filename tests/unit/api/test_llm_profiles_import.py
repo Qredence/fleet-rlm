@@ -104,7 +104,6 @@ def test_import_env_is_local_only(llm_profiles_env, llm_profiles_client) -> None
 
     config = ServerRuntimeConfig(
         app_env="production",
-        auth_mode="neon",
         auth_required=False,
         database_required=False,
         database_url=None,  # ty: ignore[unknown-argument]
@@ -146,7 +145,7 @@ async def test_role_binding_rejects_profile_outside_scoped_store(monkeypatch) ->
         delegate=None,
         delegate_small=None,
     )
-    config_deps = SimpleNamespace(config=SimpleNamespace(app_env="production", auth_mode="neon"))
+    config_deps = SimpleNamespace(config=SimpleNamespace(app_env="local"))
 
     with pytest.raises(HTTPException) as exc_info:
         await service.apply_role_bindings_patch(
@@ -206,7 +205,7 @@ async def test_profile_connection_chat_path_redacts_profile_key(monkeypatch) -> 
 
     result = await service.test_profile_connection(
         persistence_deps=SimpleNamespace(),
-        config_deps=SimpleNamespace(config=SimpleNamespace(app_env="production", auth_mode="neon")),
+        config_deps=SimpleNamespace(config=SimpleNamespace(app_env="local")),
         diagnostics_deps=SimpleNamespace(runtime_test_results={}),
         lm_deps=SimpleNamespace(planner_lm=object(), delegate_lm=object()),
         persisted_identity=SimpleNamespace(),
@@ -251,7 +250,7 @@ async def test_profile_connection_openai_compatible_validates_via_models(monkeyp
 
     result = await service.test_profile_connection(
         persistence_deps=SimpleNamespace(),
-        config_deps=SimpleNamespace(config=SimpleNamespace(app_env="production", auth_mode="neon")),
+        config_deps=SimpleNamespace(config=SimpleNamespace(app_env="local")),
         diagnostics_deps=SimpleNamespace(runtime_test_results={}),
         lm_deps=SimpleNamespace(planner_lm=object(), delegate_lm=object()),
         persisted_identity=SimpleNamespace(),
@@ -294,7 +293,7 @@ async def test_profile_connection_openai_compatible_reports_catalog_error(monkey
 
     result = await service.test_profile_connection(
         persistence_deps=SimpleNamespace(),
-        config_deps=SimpleNamespace(config=SimpleNamespace(app_env="production", auth_mode="neon")),
+        config_deps=SimpleNamespace(config=SimpleNamespace(app_env="local")),
         diagnostics_deps=SimpleNamespace(runtime_test_results={}),
         lm_deps=SimpleNamespace(planner_lm=object(), delegate_lm=object()),
         persisted_identity=SimpleNamespace(),
@@ -339,7 +338,7 @@ async def test_profile_connection_anthropic_compatible_validates_via_v1_models(m
 
     result = await service.test_profile_connection(
         persistence_deps=SimpleNamespace(),
-        config_deps=SimpleNamespace(config=SimpleNamespace(app_env="production", auth_mode="neon")),
+        config_deps=SimpleNamespace(config=SimpleNamespace(app_env="local")),
         diagnostics_deps=SimpleNamespace(runtime_test_results={}),
         lm_deps=SimpleNamespace(planner_lm=object(), delegate_lm=object()),
         persisted_identity=SimpleNamespace(),

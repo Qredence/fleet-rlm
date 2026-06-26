@@ -343,6 +343,25 @@ export interface paths {
      */
     post: operations["create_trace_feedback_api_v1_traces_feedback_post"];
   };
+  "/api/v1/evaluations": {
+    /**
+     * List evaluation runs
+     * @description Return a list of all evaluation runs, most recent first. Use the run_id to fetch the full report via GET /evaluations/{run_id}.
+     */
+    get: operations["list_evaluations_api_v1_evaluations_get"];
+    /**
+     * Start evaluation run
+     * @description Kick off a GenAI evaluation run on MLflow traces. Returns a run_id that can be used to retrieve the full report via GET /evaluations/{run_id}.
+     */
+    post: operations["start_evaluation_api_v1_evaluations_post"];
+  };
+  "/api/v1/evaluations/{run_id}": {
+    /**
+     * Get evaluation report
+     * @description Retrieve the full evaluation report for a given run_id. The report includes per-trace scores (4 judges + 6 metrics) and aggregate statistics.
+     */
+    get: operations["get_evaluation_api_v1_evaluations__run_id__get"];
+  };
 }
 
 export type webhooks = Record<string, never>;
@@ -514,6 +533,67 @@ export interface components {
       created_at: string;
     };
     /**
+     * EvaluationReportResponse
+     * @description Response body for GET /api/v1/evaluations/{run_id}.
+     */
+    EvaluationReportResponse: {
+      /**
+       * Run Id
+       * @description Unique identifier for this evaluation run.
+       */
+      run_id: string;
+      /**
+       * Created At
+       * @description ISO8601 timestamp when the report was created.
+       */
+      created_at: string;
+      /**
+       * Filters
+       * @description Dictionary echoing the trace_ids/limit/from_last_days used.
+       */
+      filters: {
+        [key: string]: unknown;
+      };
+      /**
+       * Per Trace
+       * @description List of per-trace score dictionaries with all 10 metrics.
+       */
+      per_trace: {
+        [key: string]: unknown;
+      }[];
+      /**
+       * Aggregates
+       * @description Dictionary with mean and median for each score.
+       */
+      aggregates: {
+        [key: string]: {
+          [key: string]: number;
+        };
+      };
+    };
+    /**
+     * EvaluationRequest
+     * @description Request body for POST /api/v1/evaluations.
+     */
+    EvaluationRequest: {
+      /**
+       * Trace Ids
+       * @description Optional list of specific trace IDs to evaluate.
+       */
+      trace_ids?: string[] | null;
+      /**
+       * Limit
+       * @description Optional maximum number of traces to evaluate.
+       */
+      limit?: number | null;
+      /**
+       * From Last Days
+       * @description Number of days to look back for traces (default: 1).
+       * @default 1
+       */
+      from_last_days?: number;
+    };
+    /**
      * EvaluationResultItem
      * @description A single per-example evaluation result.
      */
@@ -579,6 +659,49 @@ export interface components {
        * @description Whether more results exist beyond this page.
        */
       has_more: boolean;
+    };
+    /**
+     * EvaluationRunListItem
+     * @description Summary entry for a single evaluation run in a listing.
+     */
+    EvaluationRunListItem: {
+      /**
+       * Run Id
+       * @description Unique identifier for this evaluation run.
+       */
+      run_id: string;
+      /**
+       * Created At
+       * @description ISO8601 timestamp when the report was created.
+       */
+      created_at: string;
+      /**
+       * Trace Count
+       * @description Number of traces evaluated in this run.
+       */
+      trace_count: number;
+    };
+    /**
+     * EvaluationRunListResponse
+     * @description Response body for GET /api/v1/evaluations.
+     */
+    EvaluationRunListResponse: {
+      /**
+       * Runs
+       * @description List of evaluation runs, most recent first.
+       */
+      runs: components["schemas"]["EvaluationRunListItem"][];
+    };
+    /**
+     * EvaluationRunResponse
+     * @description Response body for POST /api/v1/evaluations.
+     */
+    EvaluationRunResponse: {
+      /**
+       * Run Id
+       * @description Unique identifier for this evaluation run.
+       */
+      run_id: string;
     };
     /**
      * GEPAModuleInfo
@@ -2433,12 +2556,6 @@ export interface components {
        * @enum {string}
        */
       app_env: "local" | "staging" | "production";
-      /**
-       * Auth Mode
-       * @description Authentication mode the server is running under.
-       * @enum {string}
-       */
-      auth_mode: "dev" | "entra" | "neon";
       /**
        * Auth Required
        * @description Whether authentication is enforced for all API requests.
@@ -5601,6 +5718,91 @@ export interface operations {
       /** @description MLflow feedback services are unavailable or misconfigured. */
       503: {
         content: never;
+      };
+    };
+  };
+  /**
+   * List evaluation runs
+   * @description Return a list of all evaluation runs, most recent first. Use the run_id to fetch the full report via GET /evaluations/{run_id}.
+   */
+  list_evaluations_api_v1_evaluations_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EvaluationRunListResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Start evaluation run
+   * @description Kick off a GenAI evaluation run on MLflow traces. Returns a run_id that can be used to retrieve the full report via GET /evaluations/{run_id}.
+   */
+  start_evaluation_api_v1_evaluations_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EvaluationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EvaluationRunResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description MLflow or evaluation services are unavailable. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Get evaluation report
+   * @description Retrieve the full evaluation report for a given run_id. The report includes per-trace scores (4 judges + 6 metrics) and aggregate statistics.
+   */
+  get_evaluation_api_v1_evaluations__run_id__get: {
+    parameters: {
+      path: {
+        /** @description Unique identifier for the evaluation run. */
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["EvaluationReportResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Evaluation run not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
       };
     };
   };

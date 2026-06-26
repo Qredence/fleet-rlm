@@ -12,7 +12,6 @@ def test_build_server_state_creates_ready_compatible_state(clean_runtime_env):
     cfg = config_module.ServerRuntimeConfig(
         app_env="local",
         database_required=False,
-        auth_mode="dev",
         ws_execution_max_queue=8,
         ws_execution_drop_policy="drop_newest",
     )
@@ -20,7 +19,7 @@ def test_build_server_state_creates_ready_compatible_state(clean_runtime_env):
     state = bootstrap_module.build_server_state(cfg)
 
     assert state.config_deps.config is cfg
-    assert isinstance(state.auth_deps.auth_provider, auth_module.DevAuthProvider)
+    assert isinstance(state.auth_deps.auth_provider, auth_module.NeonAuthProvider)
     assert state.session_cache_deps.sessions == {}
     assert state.diagnostics_deps.optional_service_status["planner_lm"] == "pending"
     assert state.is_ready is False

@@ -200,7 +200,7 @@ async def _resolve_identity_scoped_lms(
     persistence_deps: PersistenceDeps,
     identity_rows: IdentityUpsertResult | None,
 ) -> tuple[Any | None, Any | None]:
-    if cfg.auth_mode != "neon" or persistence_deps.db_manager is None or identity_rows is None:
+    if persistence_deps.db_manager is None or identity_rows is None:
         return None, None
 
     role_configs = await resolve_active_role_configs(
@@ -212,13 +212,25 @@ async def _resolve_identity_scoped_lms(
 
     import dspy
 
-    planner_lm = await asyncio.to_thread(dspy.LM, **build_lm_kwargs_from_resolved(planner_config))
+    planner_lm = await asyncio.to_thread(
+        dspy.LM,
+        **build_lm_kwargs_from_resolved(
+            planner_config,
+            max_tokens=cfg.planner_max_tokens,
+            timeout=cfg.planner_lm_timeout_s,
+            temperature=cfg.planner_temperature,
+        ),
+    )
     delegate_config = role_configs.get("delegate") or role_configs.get("delegate_small")
     delegate_lm = None
     if delegate_config is not None:
         delegate_lm = await asyncio.to_thread(
             dspy.LM,
-            **build_lm_kwargs_from_resolved(delegate_config, max_tokens=cfg.agent_delegate_max_tokens),
+            **build_lm_kwargs_from_resolved(
+                delegate_config,
+                max_tokens=cfg.agent_delegate_max_tokens,
+                timeout=cfg.delegate_lm_timeout_s,
+            ),
         )
     return planner_lm, delegate_lm
 
@@ -229,14 +241,7 @@ async def _resolve_persisted_identity(
     repository: FleetRepository,
     identity: NormalizedIdentity,
 ) -> IdentityUpsertResult:
-    if cfg.auth_mode in {"entra", "neon"}:
-        return await resolve_admitted_identity(repository, identity)
-    return await repository.upsert_identity(
-        entra_tenant_id=identity.tenant_claim,
-        entra_user_id=identity.user_claim,
-        email=identity.email,
-        full_name=identity.name,
-    )
+    return await resolve_admitted_identity(repository, identity)
 
 
 async def prepare_chat_runtime(

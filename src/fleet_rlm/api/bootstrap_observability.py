@@ -337,7 +337,7 @@ async def start_mlflow_server(
         return None
 
 
-def emit_posthog_startup_event(*, app_env: str, auth_mode: str, database_required: bool) -> bool:
+def emit_posthog_startup_event(*, app_env: str, database_required: bool) -> bool:
     """Emit a startup event when PostHog runtime analytics is configured."""
     posthog_cfg = PostHogConfig.from_env()
     from fleet_rlm.integrations.observability.client import get_posthog_client
@@ -353,7 +353,6 @@ def emit_posthog_startup_event(*, app_env: str, auth_mode: str, database_require
             properties={
                 "component": "server",
                 "app_env": app_env,
-                "auth_mode": auth_mode,
                 "database_required": database_required,
                 "version": __version__,
             },
@@ -418,7 +417,6 @@ async def initialize_posthog_runtime_service(
     diagnostics: DiagnosticsDeps,
     *,
     app_env: str,
-    auth_mode: str,
     database_required: bool,
 ) -> None:
     """Initialize PostHog runtime analytics startup state."""
@@ -430,7 +428,6 @@ async def initialize_posthog_runtime_service(
     emitted = await asyncio.to_thread(
         emit_posthog_startup_event,
         app_env=app_env,
-        auth_mode=auth_mode,
         database_required=database_required,
     )
     set_optional_service_status(

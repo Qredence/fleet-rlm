@@ -40,7 +40,6 @@ ROUNDTRIP_CASES = [
         "ServiceInfoResponse",
         {
             "app_env": "local",
-            "auth_mode": "dev",
             "auth_required": False,
             "sandbox_provider": "daytona",
             "database_enabled": False,
