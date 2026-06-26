@@ -3,6 +3,17 @@
 This module provides 4 judges that use LLMs to score different aspects of
 agent behavior. Each judge loads its prompt from disk and returns a float
 in [0.0, 1.0].
+
+BYOK (Bring-Your-Own-Key) compliance (VAL-C-025):
+    Judges use the configured chat LM from the BYOK environment, not hardcoded
+    API keys. The LM is resolved via get_delegate_lm_from_env or
+    build_bounded_chat_lm from runtime.config/runtime.lm, which respect the
+    per-user BYOK credentials stored in llm_provider_profiles with RLS.
+
+Score clamping (VAL-C-026):
+    Each judge returns a single float clamped to [0.0, 1.0], even when the
+    underlying LM emits extraneous prose or out-of-range numerics. The
+    _extract_score helper handles various response formats and clamps.
 """
 
 from __future__ import annotations
@@ -51,6 +62,7 @@ def _extract_score(response: str) -> float:
     - Pure numeric: "0.85"
     - JSON: {"score": 0.85}
     - With explanation: "Score: 0.85" or "0.85 - good answer"
+    - Out-of-range values are clamped to [0.0, 1.0] (VAL-C-026)
 
     Args:
         response: Raw LLM response text.
@@ -60,6 +72,11 @@ def _extract_score(response: str) -> float:
     """
     import re
 
+    if not response or not isinstance(response, str):
+        return 0.0
+
+    response = response.strip()
+
     # Try to extract from JSON
     if "{" in response and "}" in response:
         try:
@@ -68,9 +85,18 @@ def _extract_score(response: str) -> float:
             data = json.loads(response)
             if isinstance(data, dict) and "score" in data:
                 score = float(data["score"])
+                # Clamp to [0.0, 1.0] (VAL-C-026)
                 return max(0.0, min(1.0, score))
         except (json.JSONDecodeError, ValueError, TypeError):
             pass
+
+    # Try to parse as a pure float first
+    try:
+        score = float(response)
+        # Clamp to [0.0, 1.0] (VAL-C-026)
+        return max(0.0, min(1.0, score))
+    except ValueError:
+        pass
 
     # Try to parse any number and clamp to [0.0, 1.0]
     number_pattern = r"[-+]?\d*\.?\d+"
@@ -78,6 +104,7 @@ def _extract_score(response: str) -> float:
     for match in matches:
         try:
             score = float(match)
+            # Clamp to [0.0, 1.0] (VAL-C-026)
             return max(0.0, min(1.0, score))
         except ValueError:
             continue

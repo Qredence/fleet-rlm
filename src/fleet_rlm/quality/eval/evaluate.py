@@ -241,6 +241,61 @@ def _log_to_mlflow(report: EvaluationReport) -> str | None:
         return None
 
 
+def _resolve_judge_lm(lm: Any = None) -> Any:
+    """Resolve the language model to use for judges.
+
+    If an LM is explicitly provided, use it. Otherwise, resolve from
+    the configured BYOK (Bring-Your-Own-Key) environment using the same
+    resolver as the chat runtime (VAL-C-025).
+
+    Args:
+        lm: Optional pre-configured language model.
+
+    Returns:
+        A language model instance, or None if resolution fails.
+    """
+    if lm is not None:
+        return lm
+
+    # Try to resolve from BYOK environment using the same resolver as chat runtime
+    try:
+        from fleet_rlm.runtime.config import get_delegate_lm_from_env
+
+        resolved_lm = get_delegate_lm_from_env()
+        if resolved_lm is not None:
+            logger.info("Resolved judge LM from BYOK environment configuration")
+            return resolved_lm
+    except ImportError:
+        logger.debug("runtime.config not available for LM resolution")
+    except Exception as e:
+        logger.warning("Failed to resolve judge LM from environment: %s", e)
+
+    # Fallback: try build_bounded_chat_lm from the runtime
+    try:
+        from fleet_rlm.runtime.lm import build_bounded_chat_lm
+
+        # Attempt to construct a bounded LM from any available credentials
+        bounded_lm = build_bounded_chat_lm(
+            base=None,
+            max_tokens=4096,
+            temperature=0.0,
+            timeout=60.0,
+        )
+        if bounded_lm is not None:
+            logger.info("Resolved judge LM via build_bounded_chat_lm fallback")
+            return bounded_lm
+    except ImportError:
+        logger.debug("runtime.lm not available for LM resolution")
+    except Exception as e:
+        logger.warning("Failed to resolve judge LM via fallback: %s", e)
+
+    logger.warning(
+        "No judge LM available. Judges will return 0.0 for all traces. "
+        "Ensure BYOK LM configuration is available (VAL-C-025)."
+    )
+    return None
+
+
 def run_evaluation(
     trace_ids: list[str] | None = None,
     limit: int | None = None,
@@ -261,7 +316,8 @@ def run_evaluation(
         trace_ids: Optional list of specific trace IDs to evaluate.
         limit: Optional maximum number of traces to evaluate.
         from_last_days: Number of days to look back (default: 1).
-        lm: Language model to use for judges. If None, uses a default.
+        lm: Language model to use for judges. If None, resolves from BYOK
+            environment using get_delegate_lm_from_env (VAL-C-025).
         output_dir: Directory to write report.json. Defaults to mlartifacts/eval/<run_id>/.
 
     Returns:
@@ -270,6 +326,9 @@ def run_evaluation(
     Raises:
         RuntimeError: If MLflow is unreachable or no traces found.
     """
+    # Resolve the judge LM from BYOK if not explicitly provided (VAL-C-025)
+    resolved_lm = _resolve_judge_lm(lm)
+
     # Generate unique run_id
     run_id = str(uuid.uuid4())
 
@@ -312,8 +371,8 @@ def run_evaluation(
             # Normalize trace
             trace_record = TraceRecord.from_mlflow_trace(trace_dict)
 
-            # Score trace
-            scores = _score_trace(trace_record, lm)
+            # Score trace using the resolved LM (VAL-C-025)
+            scores = _score_trace(trace_record, resolved_lm)
             per_trace_scores.append(scores)
 
         except Exception as e:
