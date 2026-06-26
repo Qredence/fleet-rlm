@@ -130,8 +130,6 @@ def _call_judge_lm(
         Score in [0.0, 1.0], or 0.0 on error.
     """
     try:
-        import dspy
-
         # Build evaluation context
         context_parts = [
             f"User Request: {trace_record.user_request}",
