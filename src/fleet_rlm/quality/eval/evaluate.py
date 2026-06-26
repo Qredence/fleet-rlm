@@ -270,6 +270,19 @@ def _resolve_judge_lm(lm: Any = None) -> Any:
     except Exception as e:
         logger.warning("Failed to resolve judge LM from environment: %s", e)
 
+    # Fallback: try get_planner_lm_from_env which uses DSPY_LM_MODEL
+    try:
+        from fleet_rlm.runtime.config import get_planner_lm_from_env
+
+        planner_lm = get_planner_lm_from_env()
+        if planner_lm is not None:
+            logger.info("Resolved judge LM from planner LM configuration (DSPY_LM_MODEL)")
+            return planner_lm
+    except ImportError:
+        logger.debug("runtime.config not available for planner LM resolution")
+    except Exception as e:
+        logger.warning("Failed to resolve judge LM from planner configuration: %s", e)
+
     # Fallback: try build_bounded_chat_lm from the runtime
     try:
         from fleet_rlm.runtime.lm import build_bounded_chat_lm

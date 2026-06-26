@@ -116,12 +116,15 @@ class TraceRecord:
             except json.JSONDecodeError:
                 trace_metadata = {}
 
-        # Extract inputs from trace_metadata (stored as JSON strings)
-        inputs_str = trace_metadata.get("mlflow.traceInputs", "{}")
-        try:
-            inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
-        except json.JSONDecodeError:
-            inputs = {}
+        # Extract inputs - check flat structure first, then trace_metadata
+        inputs = trace_dict.get("inputs", {})
+        if not inputs:
+            # Try to get from trace_metadata (nested MLflow structure)
+            inputs_str = trace_metadata.get("mlflow.traceInputs", "{}")
+            try:
+                inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
+            except json.JSONDecodeError:
+                inputs = {}
 
         if not isinstance(inputs, dict):
             inputs = {"message": str(inputs)} if inputs else {}
@@ -140,12 +143,15 @@ class TraceRecord:
                 active_skills = []
         context = str(inputs.get("context", ""))
 
-        # Extract outputs from trace_metadata
-        outputs_str = trace_metadata.get("mlflow.traceOutputs", "{}")
-        try:
-            outputs = json.loads(outputs_str) if isinstance(outputs_str, str) else outputs_str
-        except json.JSONDecodeError:
-            outputs = {}
+        # Extract outputs - check flat structure first, then trace_metadata
+        outputs = trace_dict.get("outputs", {})
+        if not outputs:
+            # Try to get from trace_metadata (nested MLflow structure)
+            outputs_str = trace_metadata.get("mlflow.traceOutputs", "{}")
+            try:
+                outputs = json.loads(outputs_str) if isinstance(outputs_str, str) else outputs_str
+            except json.JSONDecodeError:
+                outputs = {}
 
         if isinstance(outputs, dict):
             final_answer = str(outputs.get("final_answer", outputs.get("answer", outputs.get("response", ""))))
