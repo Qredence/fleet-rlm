@@ -90,9 +90,15 @@ def _fetch_traces_from_mlflow(
             return traces
 
         # Search for traces in time window
+        # Resolve the correct experiment - prefer "fleet-rlm", fall back to default "0"
+        experiment_ids = ["0"]
+        fleet_exp = mlflow.get_experiment_by_name("fleet-rlm")
+        if fleet_exp:
+            experiment_ids = [fleet_exp.experiment_id]
+
         # Note: MLflow search_traces returns Trace objects, we need to convert to dict
         traces = client.search_traces(
-            experiment_ids=["0"],  # Default experiment
+            experiment_ids=experiment_ids,
             filter_string=f"trace.timestamp >= {start_time_ms} AND trace.timestamp <= {end_time_ms}",
             max_results=limit or 100,
         )
