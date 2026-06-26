@@ -53,11 +53,24 @@ def _fetch_traces_from_mlflow(
     if not tracking_uri:
         tracking_uri = "http://127.0.0.1:5001"
 
+    # Quick connectivity check to fail fast when MLflow is unreachable (VAL-C-058)
+    try:
+        from urllib.request import urlopen
+
+        urlopen(tracking_uri, timeout=5)
+    except Exception as conn_err:
+        msg = f"MLflow tracking server unreachable at {tracking_uri}: {conn_err}"
+        raise RuntimeError(msg) from conn_err
+
     client = MlflowClient(tracking_uri)
 
     # Calculate time window
     end_time = datetime.now(UTC)
-    start_time = end_time - timedelta(days=from_last_days)
+    if from_last_days == 0:
+        # VAL-C-052: from_last_days=0 means "today only" (current calendar day UTC)
+        start_time = end_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        start_time = end_time - timedelta(days=from_last_days)
 
     # Convert to milliseconds for MLflow API
     start_time_ms = int(start_time.timestamp() * 1000)

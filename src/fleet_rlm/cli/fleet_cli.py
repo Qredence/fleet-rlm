@@ -29,6 +29,7 @@ from fleet_rlm.integrations.daytona.sdk_ops import (
     DEFAULT_SNAPSHOT_NAME,
 )
 
+from .commands.eval_cmd import eval_command
 from .commands.serve_cmds import serve_api_command
 from .config import (
     initialize_app_config,
@@ -69,6 +70,7 @@ def _require_config(*, error_message: str | None = None) -> Any:
 
 
 _register_command("serve-api", serve_api_command)
+_register_command("eval", eval_command)
 
 
 @app.command("optimize")
