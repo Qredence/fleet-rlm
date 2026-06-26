@@ -392,7 +392,9 @@ export const toolRegistry: Record<string, ToolMeta> = {
     subtitle: (part) => {
       const turnCount = part.input?.turnCount;
       if (typeof turnCount === "number") {
-        return turnCount === 0 ? "No prior history" : `${turnCount} ${turnCount === 1 ? "turn" : "turns"}`;
+        return turnCount === 0
+          ? "No prior history"
+          : `${turnCount} ${turnCount === 1 ? "turn" : "turns"}`;
       }
       const preview = part.input?.preview;
       if (typeof preview === "string" && preview.trim()) return preview;
