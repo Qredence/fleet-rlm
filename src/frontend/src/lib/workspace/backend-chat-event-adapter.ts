@@ -168,7 +168,8 @@ function preferredFinalArtifactText(value: unknown): string | undefined {
   const record = asRecord(value);
   if (!record) return undefined;
 
-  for (const key of ["final_markdown", "summary", "text", "content", "message"]) {
+  // Prefer full-content keys before the 320-char collapsed summary
+  for (const key of ["content", "final_markdown", "text", "message", "summary"]) {
     const candidate = asOptionalText(record[key]);
     if (candidate) return candidate;
   }
@@ -183,10 +184,26 @@ function preferredFinalArtifactText(value: unknown): string | undefined {
 
 function resolveFinalAssistantText(text: string, payload?: Record<string, unknown>): string {
   const artifact = asRecord(payload?.final_artifact ?? payload?.finalArtifact);
-  if (artifact?.kind === "code_file") {
+  if (artifact) {
     const value = asRecord(artifact.value);
-    const summary = asOptionalText(value?.summary ?? value?.text);
-    if (summary) return summary;
+    if (value) {
+      const kind = asOptionalText(artifact.kind);
+      // code_file: prefer full value.content over the 320-char value.summary
+      if (kind === "code_file") {
+        const full = asOptionalText(value.content ?? value.text);
+        if (full) return full;
+      }
+      // markdown: prefer full value.final_markdown over the 320-char value.summary
+      if (kind === "markdown") {
+        const full = asOptionalText(value.final_markdown ?? value.content ?? value.text);
+        if (full) return full;
+      }
+      // assistant_response: prefer full value.text over the 320-char value.summary
+      if (kind === "assistant_response") {
+        const full = asOptionalText(value.text ?? value.final_markdown ?? value.content);
+        if (full) return full;
+      }
+    }
   }
   const preferred = preferredFinalArtifactText(
     artifact ?? payload?.final_artifact ?? payload?.finalArtifact,
@@ -511,6 +528,9 @@ function appendStatusTrace(
   const toolName = asOptionalText(payload?.tool_name ?? payload?.toolName);
   const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
   const runtimeContext = parseRuntimeContext(payload);
+  const sandboxCategory = asOptionalText(payload?.category);
+  const isSandboxEvent = asOptionalText(payload?.source_type) === "sandbox_activity";
+  const sandboxDetails = asRecord(payload?.details);
   return appendTracePart(
     messages,
     {
@@ -520,6 +540,8 @@ function appendStatusTrace(
       ...(toolName ? { toolName } : {}),
       ...(stepIndex != null ? { stepIndex } : {}),
       ...(runtimeContext ? { runtimeContext } : {}),
+      ...(isSandboxEvent && sandboxCategory ? { sandboxCategory } : {}),
+      ...(isSandboxEvent && sandboxDetails ? { sandboxDetails } : {}),
     },
     trimmed,
     traceSource,
