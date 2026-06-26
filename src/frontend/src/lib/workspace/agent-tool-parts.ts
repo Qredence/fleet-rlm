@@ -255,7 +255,7 @@ export function enrichDelegateToolInput(
 function commandInput(part: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>) {
   if (part.kind === "sandbox") {
     return {
-      command: part.code || part.title,
+      command: part.code || "",
       description: part.title,
       language: part.language,
     };

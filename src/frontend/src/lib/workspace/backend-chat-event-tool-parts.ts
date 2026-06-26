@@ -299,6 +299,8 @@ function sandboxFromPayload(
   const stepOutput = asRecord(step?.output);
   const argsRecord = asRecord(payload?.tool_args);
   const code =
+    asOptionalText(payload?.code_preview) ||
+    asOptionalText(payload?.code) ||
     (typeof step?.input === "string" && step.input) ||
     asOptionalText(stepInput?.code) ||
     asOptionalText(stepInput?.code_preview) ||
