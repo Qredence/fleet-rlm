@@ -139,6 +139,95 @@ def _score_trace(
     return scores
 
 
+def _create_mlflow_run() -> str | None:
+    """Create an MLflow run under 'fleet-rlm-eval' experiment and return its run_id.
+
+    Returns:
+        The MLflow run_id, or None if MLflow is unavailable.
+    """
+    try:
+        import mlflow
+    except ImportError:
+        logger.warning("MLflow not installed, skipping MLflow run creation")
+        return None
+
+    try:
+        # Set experiment (VAL-C-009)
+        mlflow.set_experiment("fleet-rlm-eval")
+
+        # Create a run and capture its run_id
+        run = mlflow.start_run(run_name="eval-run")
+        run_id = run.info.run_id
+        # End the run temporarily; we'll log metrics and reopen it later
+        mlflow.end_run()
+        return run_id
+
+    except Exception as e:
+        logger.warning("Failed to create MLflow run: %s", e)
+        return None
+
+
+def _log_to_mlflow(report: EvaluationReport) -> str | None:
+    """Log evaluation results to MLflow (VAL-C-009, VAL-C-010, VAL-C-011).
+
+    Creates or resumes an MLflow run under the 'fleet-rlm-eval' experiment and logs:
+    - Aggregate metrics (mean/median) via mlflow.log_metric (VAL-C-010)
+    - Per-trace scores via mlflow.log_table (VAL-C-011)
+
+    Args:
+        report: The evaluation report to log.
+
+    Returns:
+        The MLflow run_id if logging succeeded, None otherwise.
+    """
+    try:
+        import mlflow
+    except ImportError:
+        logger.warning("MLflow not installed, skipping MLflow logging")
+        return None
+
+    try:
+        # Set experiment (VAL-C-009)
+        mlflow.set_experiment("fleet-rlm-eval")
+
+        # Create a run with the report's run_id embedded in the name for traceability
+        with mlflow.start_run(run_name=f"eval-{report.run_id[:8]}") as run:
+            mlflow_run_id = run.info.run_id
+
+            # Tag the run with the report's run_id for cross-referencing
+            mlflow.set_tag("fleet_rlm.eval_run_id", report.run_id)
+
+            # Log aggregate metrics (VAL-C-010)
+            if report.aggregates:
+                for metric_name, stats in report.aggregates.items():
+                    if isinstance(stats, dict):
+                        for stat_type, value in stats.items():
+                            if isinstance(value, (int, float)):
+                                mlflow.log_metric(f"{metric_name}_{stat_type}", value)
+
+            # Log per-trace scores as a table (VAL-C-011)
+            if report.per_trace:
+                # Convert list[dict] to dict[str, list] for mlflow.log_table
+                table_data: dict[str, Any] = {}
+                for trace_scores in report.per_trace:
+                    for key, value in trace_scores.items():
+                        if key not in table_data:
+                            table_data[key] = []
+                        table_data[key].append(value)
+
+                mlflow.log_table(
+                    data=table_data,
+                    artifact_file="per_trace_scores.json",
+                )
+
+            logger.info("Logged evaluation results to MLflow run: %s", mlflow_run_id)
+            return mlflow_run_id
+
+    except Exception as e:
+        logger.warning("Failed to log evaluation results to MLflow: %s", e)
+        return None
+
+
 def run_evaluation(
     trace_ids: list[str] | None = None,
     limit: int | None = None,
@@ -153,6 +242,7 @@ def run_evaluation(
     2. Normalize traces into TraceRecords
     3. Score each trace with judges and metrics
     4. Build and write the evaluation report
+    5. Log results to MLflow (VAL-C-009, VAL-C-010, VAL-C-011)
 
     Args:
         trace_ids: Optional list of specific trace IDs to evaluate.
@@ -196,6 +286,8 @@ def run_evaluation(
         # Write empty report to disk
         out_dir = Path(output_dir) if output_dir else _DEFAULT_OUTPUT_DIR / run_id
         report.write_to_disk(out_dir)
+        # Log empty report to MLflow (VAL-C-009)
+        _log_to_mlflow(report)
         return report
 
     logger.info("Found %d traces. Normalizing and scoring...", len(traces))
@@ -226,5 +318,8 @@ def run_evaluation(
     out_dir = Path(output_dir) if output_dir else _DEFAULT_OUTPUT_DIR / run_id
     report_path = report.write_to_disk(out_dir)
     logger.info("Report written to %s", report_path)
+
+    # Log results to MLflow (VAL-C-009, VAL-C-010, VAL-C-011)
+    _log_to_mlflow(report)
 
     return report
