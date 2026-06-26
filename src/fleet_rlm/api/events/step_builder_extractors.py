@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-ExecutionStepType = Literal["llm", "tool", "repl", "memory", "output"]
+ExecutionStepType = Literal["llm", "tool", "repl", "memory", "output", "turn_inputs"]
 ExecutionActorKind = Literal["root_rlm", "sub_agent", "delegate", "unknown"]
 
 

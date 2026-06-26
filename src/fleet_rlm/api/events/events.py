@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from .step_builder import ExecutionStepBuilder
 
-ExecutionStepType = Literal["llm", "tool", "repl", "memory", "output"]
+ExecutionStepType = Literal["llm", "tool", "repl", "memory", "output", "turn_inputs"]
 ExecutionActorKind = Literal["root_rlm", "sub_agent", "delegate", "unknown"]
 BackendEventKind = Literal[
     "turn_started",
