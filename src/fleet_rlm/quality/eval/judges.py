@@ -157,38 +157,25 @@ def _call_judge_lm(
         # Combine prompt and context
         full_prompt = f"{prompt}\n\nEvaluation Context:\n{evaluation_context}"
 
-        # Check if LM uses typed_lm forward contract (e.g., ResponseAPILM)
-        is_typed_lm = getattr(lm, "forward_contract", None) == "typed_lm"
-
-        if is_typed_lm:
-            # For ResponseAPILM and other typed_lm LMs, construct LMRequest directly
-            messages = [{"role": "user", "content": full_prompt}]
-            request = dspy.LMRequest.from_prompt_or_messages(model=lm.model, messages=messages)
-            response = lm.forward(request)
-
-            # Extract text from LMResponse
-            if hasattr(response, "outputs") and response.outputs:
+        # Use callable interface for all LM types (ResponseAPILM, BoundedChatLM, dspy.LM)
+        messages: list[dict[str, str]] = [{"role": "user", "content": full_prompt}]
+        if callable(lm):
+            response = lm(messages=messages)
+            if isinstance(response, list):
+                text = response[0] if response else ""
+            elif hasattr(response, "choices") and response.choices:
+                text = response.choices[0].message.content
+            elif hasattr(response, "content"):
+                text = response.content
+            elif hasattr(response, "outputs") and response.outputs:
                 # LMResponse.outputs is a list of LMOutput objects
                 text = response.outputs[0].text if hasattr(response.outputs[0], "text") else str(response.outputs[0])
             else:
                 text = str(response)
         else:
-            # For legacy LMs (BoundedChatLM, standard dspy.LM), use message-based approach
-            messages = [{"role": "user", "content": full_prompt}]
-            if callable(lm):
-                response = lm(messages=messages)
-                if isinstance(response, list):
-                    text = response[0] if response else ""
-                elif hasattr(response, "choices") and response.choices:
-                    text = response.choices[0].message.content
-                elif hasattr(response, "content"):
-                    text = response.content
-                else:
-                    text = str(response)
-            else:
-                # Fallback for unknown LM interface
-                logger.warning("Unknown LM interface for judge %s", judge_name)
-                return 0.0
+            # Fallback for unknown LM interface
+            logger.warning("Unknown LM interface for judge %s", judge_name)
+            return 0.0
 
         # Extract score from response
         return _extract_score(str(text))
