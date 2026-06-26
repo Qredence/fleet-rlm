@@ -48,7 +48,7 @@ class TestActionTimeout:
     def test_action_timeout_defaults_to_90(self) -> None:
         """_StreamingRLM should default action_timeout to 90s."""
         # The default is set on the class even without an explicit interpreter.
-        with patch.object(_StreamingRLM, "__init__", return_value=None) as mock_init:
+        with patch.object(_StreamingRLM, "__init__", return_value=None):
             _StreamingRLM.__new__(_StreamingRLM)
             # __init__ is patched; verify the default via create_runtime_rlm kwargs path
         # Directly verify the default constant via the field on RlmSettings.
@@ -145,10 +145,10 @@ class TestExtractionPhaseRetry:
             @contextlib.contextmanager
             def _noop_span(*args: Any, **kwargs: Any):
                 class _Span:
-                    def __enter__(self_inner: Any) -> Any:
-                        return self_inner
+                    def __enter__(self) -> Any:  # noqa: N805
+                        return self
 
-                    def __exit__(self_inner: Any, *a: Any) -> bool:
+                    def __exit__(self, *a: Any) -> bool:  # noqa: N805
                         return False
 
                 yield _Span()
@@ -186,10 +186,10 @@ class TestExtractionPhaseRetry:
         @contextlib.contextmanager
         def _noop_span(*args: Any, **kwargs: Any):
             class _Span:
-                def __enter__(self_inner: Any) -> Any:
-                    return self_inner
+                def __enter__(self) -> Any:  # noqa: N805
+                    return self
 
-                def __exit__(self_inner: Any, *a: Any) -> bool:
+                def __exit__(self, *a: Any) -> bool:  # noqa: N805
                     return False
 
             yield _Span()

@@ -1189,18 +1189,18 @@ class EscalatingFleetModule(dspy.Module):
                     lowered_chars = isinstance(saved_max_chars, int)
                     try:
                         if lowered_iter:
-                            rlm.max_iterations = max(1, min(int(saved_max_iter), 6))
+                            setattr(rlm, "max_iterations", max(1, min(int(saved_max_iter), 6)))
                         if lowered_chars:
-                            rlm.max_output_chars = min(int(saved_max_chars), 5000)
+                            setattr(rlm, "max_output_chars", min(int(saved_max_chars), 5000))
                         result = _run_with_timeout(
                             lambda: rlm(**call_kwargs),
                             timeout=self._fallback_timeout,
                         )
                     finally:
                         if lowered_iter:
-                            rlm.max_iterations = saved_max_iter
+                            setattr(rlm, "max_iterations", saved_max_iter)
                         if lowered_chars:
-                            rlm.max_output_chars = saved_max_chars
+                            setattr(rlm, "max_output_chars", saved_max_chars)
                     _prediction_set(result, "selected_skills", selected_skills or [])
                     _prediction_set(result, "routing_decision", routing_decision)
                     _prediction_set(result, "runtime_degraded", True)

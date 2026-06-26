@@ -185,18 +185,20 @@ class BoundedChatLM(dspy.BaseLM):
             kwargs.setdefault("temperature", self._temperature)
 
         # Only forward OpenAI-valid params; everything else is dropped.
-        call_kwargs = {k: v for k, v in kwargs.items() if k in _OPENAI_CHAT_PARAMS}
+        call_kwargs: dict[str, Any] = {k: v for k, v in kwargs.items() if k in _OPENAI_CHAT_PARAMS}
         extra_body = dict(kwargs.pop("extra_body", None) or {})
         if self._disable_thinking:
             extra_body.setdefault("enable_thinking", False)
 
         def _call() -> Any:
-            return self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                extra_body=extra_body or None,
-                **call_kwargs,
-            )
+            # Build kwargs explicitly to satisfy type checker
+            create_kwargs: dict[str, Any] = {
+                "model": self.model,
+                "messages": messages,
+                "extra_body": extra_body or None,
+            }
+            create_kwargs.update(call_kwargs)
+            return self._client.chat.completions.create(**create_kwargs)
 
         if self._timeout is not None:
             logger.info(
@@ -317,7 +319,7 @@ class ResponseAPILM(dspy.BaseLM):
             kwargs["custom_llm_provider"] = custom_llm_provider
 
         # Only pass temperature to parent if explicitly set (to match dspy.LM behavior)
-        init_kwargs = {"model": model, "model_type": "responses"}
+        init_kwargs: dict[str, Any] = {"model": model, "model_type": "responses"}
         if max_tokens is not None:
             init_kwargs["max_tokens"] = max_tokens
         if temperature is not None:
@@ -325,7 +327,7 @@ class ResponseAPILM(dspy.BaseLM):
         init_kwargs.update(kwargs)
 
         # Initialize BaseLM with core params
-        super().__init__(**init_kwargs)
+        super().__init__(**init_kwargs)  # type: ignore[arg-type]
 
         # Store config for OpenAI client
         self._api_key = api_key
