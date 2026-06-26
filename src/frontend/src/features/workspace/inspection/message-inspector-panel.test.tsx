@@ -64,6 +64,14 @@ vi.mock("@/lib/rlm-api/typed-client", () => ({
           error: undefined,
         };
       }
+      if (path.includes("/evaluations")) {
+        return {
+          data: {
+            runs: [],
+          },
+          error: undefined,
+        };
+      }
       return { data: {}, error: undefined };
     }),
     POST: vi.fn(),
@@ -236,7 +244,7 @@ describe("MessageInspectorPanel", () => {
       tab.textContent?.trim(),
     );
 
-    expect(tabs).toEqual(["Message", "Trace"]);
+    expect(tabs).toEqual(["Message", "Trace", "Eval"]);
     expect(container.textContent).not.toContain("Graph");
     expect(useWorkspaceUiStore.getState().activeInspectorTab).toBe("message");
 
@@ -362,7 +370,7 @@ describe("MessageInspectorPanel", () => {
     const tabList = container.querySelector('[role="tablist"]');
     const tabsRoot = tabList?.parentElement?.parentElement as HTMLElement | null;
 
-    expect(tabs).toEqual(["Message", "Execution", "Graph", "Trace"]);
+    expect(tabs).toEqual(["Message", "Execution", "Graph", "Trace", "Eval"]);
     expect(tabsRoot?.classList.contains("flex")).toBe(true);
     expect(tabsRoot?.classList.contains("flex-col")).toBe(true);
     expect(container.textContent).toContain("Relationships");
