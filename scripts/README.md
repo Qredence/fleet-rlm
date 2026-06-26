@@ -15,6 +15,7 @@ Support boundary:
 | `build_ui.py` | Repo wrapper around `src/fleet_rlm/ui/build.py`, which builds `src/frontend` and syncs packaged UI assets into `src/fleet_rlm/ui/dist` | `pnpm` on `PATH` | `uv run python scripts/build_ui.py` |
 | `check_agents_md_freshness.py` | Validate `AGENTS.md` files against current repo paths, commands, and links | None | `uv run python scripts/check_agents_md_freshness.py` |
 | `check_docs_quality.py` | Validate docs links, reachability, and contract sanity | None | `uv run python scripts/check_docs_quality.py` |
+| `check_codebase_tree.py` | Enforce import boundaries defined in docs/reference/codebase-map.md (runtime/ may not import api.routers, quality/ may only import api.schemas, frontend features/components must use lib/rlm-api for backend types) | None | `uv run python scripts/check_codebase_tree.py` |
 | `check_harness_engineering.py` | Validate root agent-map budget, harness docs, `.codex` config, script inventory, and structural boundaries | None | `uv run python scripts/check_harness_engineering.py` |
 | `codex_feedback_loop.py` | Run the safe local Codex feedback loop and write a concise report | None for `--profile safe`; running app for `--profile app` | `uv run python scripts/codex_feedback_loop.py --profile safe` |
 | `openapi_tools.py` | Generate or validate the root OpenAPI contract | Backend dependencies | `uv run python scripts/openapi_tools.py generate` |

@@ -1,18 +1,62 @@
 # Backend Codebase Map
 
-This document summarizes the current backend package layout with the live runtime core first and the transport shell called out explicitly.
+This document summarizes the current backend and frontend package layout with ownership, public exports, allowed importers, and off-limits imports for each package.
 
-## Top-Level Areas
+## Backend Packages (8 canonical + extras)
 
-| Path | Role | Notes |
+The backend lives under `src/fleet_rlm/` and consists of eight canonical packages plus additional utility packages.
+
+### Canonical Backend Packages
+
+| Package | Ownership | Public Exports | Allowed Importers | Off-Limits Imports |
+| --- | --- | --- | --- | --- |
+| `api/` | FastAPI transport shell: app factory, auth, routers, schemas, websocket transport, runtime services, event shaping | `main.py`, `bootstrap.py`, `routers/`, `runtime_services/`, `schemas/`, `events/`, `config.py`, `dependencies.py` | `cli/`, tests | None (top-level transport) |
+| `runtime/` | Runtime core: DSPy agent, execution helpers, tools, streaming events, content helpers | `events.py`, `factory.py`, `agent/`, `execution/`, `modules/`, `tools/`, `lm.py`, `config.py` | `api/`, `cli/`, `quality/`, tests | `api.routers` (may import `api.events`, `api.config` but not routers) |
+| `integrations/` | External integrations: Daytona substrate, database, LLM profiles, observability, config, local store | `daytona/`, `database/`, `llm_profiles/`, `observability/`, `config/`, `local_store.py`, `persistence_protocol.py` | `api/`, `runtime/`, `cli/`, `quality/`, tests | None (shared integration layer) |
+| `config/` | Centralized constants and configuration | `constants.py` | All packages | None (leaf package) |
+| `quality/` | Offline DSPy evaluation and optimization (not on live request path); includes `eval/` subpackage for MLflow GenAI evaluation | `eval/` (judges, metrics, evaluate, report, trace_record), `optimization_runner.py`, `module_registry.py`, `scorers.py`, `datasets.py`, `gepa_evidence.py`, `mlflow_evaluation.py` | `cli/`, `api/runtime_services/`, tests | `api.routers`, `api.runtime_services` (may import `api.schemas` for data structures and may import `runtime/` and `integrations/` but not `api/` business logic) |
+| `cli/` | Operator surface: `fleet` and `fleet-rlm` entrypoints, command registration, terminal UX | `main.py`, `fleet_cli.py`, `runners.py`, `commands/`, `terminal/`, `api_client/` | Tests, package entrypoints | None (top-level operator surface) |
+| `migrations/` | Alembic migrations (lives at repo-root `migrations/`, not `src/fleet_rlm/migrations/`) | `env.py`, `versions/`, `script.py.mako` | Alembic tooling only | No intra-backend imports (vendored/build tooling) |
+| `ui/` | Packaged UI assets: built frontend artifacts for installed distributions | `build.py`, `dist/` | `api/spa.py` (mounts UI), build tooling | No intra-backend imports (vendored/build tooling) |
+
+### Additional Backend Packages (not in canonical 8)
+
+| Package | Role | Notes |
 | --- | --- | --- |
-| `src/fleet_rlm/runtime/` | runtime core | shared chat logic, recursive execution, execution helpers, tools, and content helpers |
-| `src/fleet_rlm/quality/` | offline optimization | GEPA/DSPy evaluation and optimization (not on live request path) |
-| `src/fleet_rlm/integrations/daytona/` | Daytona substrate | interpreter, runtime/session lifecycle, filesystem helpers, diagnostics, and volume access |
-| `src/fleet_rlm/api/` | transport shell | FastAPI app factory, auth, routers, schemas, websocket transport, runtime services, and event shaping |
-| `src/fleet_rlm/cli/` | operator surface | `fleet` / `fleet-rlm` entrypoints, command registration, and terminal UX |
-| `src/fleet_rlm/ui/` | packaged UI assets | built frontend artifacts for installed distributions |
-| `src/fleet_rlm/utils/` | shared helpers | small reusable utilities |
+| `utils/` | Shared helpers: identity, logging, marker search, paths, preview, sandbox ownership, session titles, time, volume tree | Imported by multiple packages; not a primary boundary but a utility layer |
+| `scaffold/` | Scaffold skills and skill authoring reference | Contains `skills/` with DSPy/MLflow/Daytona skill definitions; used by runtime and CLI but not a primary package boundary |
+
+## Frontend Packages (6 canonical + extras)
+
+The frontend lives under `src/frontend/src/` and consists of six canonical packages plus additional utility and component packages.
+
+### Canonical Frontend Packages
+
+| Package | Ownership | Public Exports | Allowed Importers | Off-Limits Imports |
+| --- | --- | --- | --- | --- |
+| `features/` | Feature modules: workspace, optimization, volumes, settings, layout | `workspace/`, `optimization/`, `volumes/`, `settings/`, `layout/` | `routes/`, `app/`, tests | Direct imports into `src/fleet_rlm/**` (must use `lib/rlm-api/` for backend types); may import from `components/`, `lib/`, `hooks/`, `stores/` |
+| `components/agent-elements/` | Agent Elements design system: chat UI, tool renderers, input bar, message list, markdown, icons | `agent-chat.tsx`, `input-bar.tsx`, `message-list.tsx`, `tools/`, `input/`, `icons/`, `utils/`, `types.ts` | `features/`, `routes/`, tests | Direct imports into `src/fleet_rlm/**` (must use `lib/rlm-api/` for backend types); may import from `lib/`, `hooks/`, `stores/` |
+| `lib/workspace/` | Workspace runtime: WS adapter, tool parts, step router, artifact store, chat store, session turns | `backend-chat-event-adapter.ts`, `backend-chat-event-tool-parts.ts`, `agent-tool-parts.ts`, `backend-chat-event-step-router.ts`, `chat-store.ts`, `workspace-types.ts`, `use-workspace-runtime.ts` | `features/workspace/`, `components/agent-elements/`, tests | Direct imports into `src/fleet_rlm/**`; may import from `lib/rlm-api/`, `lib/utils/`, `hooks/`, `stores/` |
+| `routes/` | TanStack Router route tree (generated `routeTree.gen.ts` plus hand-written route files) | `routeTree.gen.ts`, `__root.tsx`, `app.tsx`, `app/`, `$.tsx`, `404.tsx`, `login.tsx`, `signup.tsx` | `app/`, TanStack Router tooling | Direct imports into `src/fleet_rlm/**`; may import from `features/`, `components/`, `lib/` |
+| `lib/rlm-api/` | OpenAPI-generated client for backend HTTP and WebSocket APIs | `generated/openapi.ts`, `client.ts`, `types.ts`, `use-rlm-api.ts` | `features/`, `components/`, `lib/workspace/`, tests | None (backend API gateway); this is the ONLY path for frontend to import backend types |
+| `config/` | Frontend configuration and environment variables | `env.ts`, `constants.ts` | All packages | None (leaf package) |
+
+### Additional Frontend Packages (not in canonical 6)
+
+| Package | Role | Notes |
+| --- | --- | --- |
+| `app/` | App shell: `App.tsx`, `providers.tsx` | Thin wrapper mounting routes and providers; imports from `routes/`, `components/`, `lib/` |
+| `hooks/` | Shared React hooks: `use-app-navigate.ts`, `runtime/`, `ui/` | Imported by `features/`, `components/`, `lib/` |
+| `stores/` | Zustand stores: `navigation-store.ts`, `theme-store.ts`, `navigation-types.ts` | Imported by `features/`, `components/`, `lib/`, `routes/` |
+| `styles/` | Global CSS: `globals.css` | Imported by `app/`, `main.tsx` |
+| `test/` | Test setup: `setup.ts` | Imported by test files only |
+| `lib/auth/` | Auth utilities: Neon Auth integration, JWT handling | Imported by `features/`, `routes/`, `lib/workspace/` |
+| `lib/utils/` | Shared utilities: formatting, validation, helpers | Imported by all packages |
+| `lib/mlflow/` | MLflow trace formatting and display helpers | Imported by `features/workspace/`, `components/agent-elements/tools/` |
+| `lib/telemetry/` | Telemetry and analytics helpers | Imported by `features/`, `lib/workspace/` |
+| `lib/data/` | Data transformation and normalization helpers | Imported by `features/`, `lib/workspace/` |
+| `components/product/` | Product-specific UI components (non-agent-elements) | Imported by `features/`, `routes/` |
+| `components/ui/` | Vendored shadcn/ui components | Imported by `features/`, `components/agent-elements/`, `components/product/` |
 
 ## Layer Map
 
