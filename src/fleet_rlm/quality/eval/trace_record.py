@@ -49,8 +49,10 @@ class TraceRecord:
         """Create a TraceRecord from an MLflow trace dictionary.
 
         Args:
-            trace_dict: Dictionary representation of an MLflow trace with keys
-                like trace_id, spans, inputs, outputs, etc.
+            trace_dict: Dictionary representation of an MLflow trace. MLflow traces
+                have a nested structure with 'info' and 'data' at the top level.
+                The 'info' section contains metadata like trace_id, request_time, etc.
+                The 'data' section contains the actual trace data (spans, etc.).
 
         Returns:
             A normalized TraceRecord with all fields populated.
@@ -59,55 +61,108 @@ class TraceRecord:
             KeyError: If required fields are missing from the trace.
             TypeError: If trace_dict is not a dictionary.
         """
+        import json
+
         if not isinstance(trace_dict, dict):
             msg = f"trace_dict must be a dict, got {type(trace_dict).__name__}"
             raise TypeError(msg)
 
-        # Extract trace_id
-        trace_id = str(trace_dict.get("trace_id", trace_dict.get("traceId", "")))
+        # MLflow traces have nested structure: {info: {...}, data: {...}}
+        info = trace_dict.get("info", {})
+        data = trace_dict.get("data", {})
 
-        # Extract spans
-        spans_data = trace_dict.get("spans", [])
+        # Also support flat structure for backwards compatibility
+        if not info and not data:
+            info = trace_dict
+            data = trace_dict
+
+        # Extract trace_id from info section
+        trace_id = str(info.get("trace_id", info.get("traceId", "")))
+
+        # Extract spans from data section
+        spans_data = data.get("spans", data.get("span_data", []))
+        if not isinstance(spans_data, list):
+            spans_data = []
+
         trajectory_spans = []
         for span in spans_data:
             if isinstance(span, dict):
+                # Extract span attributes
+                attributes = span.get("attributes", {})
+                if isinstance(attributes, str):
+                    try:
+                        attributes = json.loads(attributes)
+                    except json.JSONDecodeError:
+                        attributes = {}
+
                 trajectory_spans.append(
                     TrajectorySpan(
                         name=str(span.get("name", "")),
                         kind=str(span.get("kind", span.get("spanKind", "UNKNOWN"))),
                         start=float(span.get("start_time", span.get("startTime", 0.0))),
                         end=float(span.get("end_time", span.get("endTime", 0.0))),
-                        tool_name=span.get("tool_name", span.get("attributes", {}).get("gen_ai.tool.name")),
+                        tool_name=span.get("tool_name", attributes.get("gen_ai.tool.name")),
                         tool_input=span.get("tool_input", span.get("inputs")),
                         tool_output=span.get("tool_output", span.get("outputs")),
-                        attributes=span.get("attributes", {}),
+                        attributes=attributes,
                     )
                 )
 
-        # Extract inputs (user_request, core_memory, history, active_skills, context)
-        inputs = trace_dict.get("inputs", {})
-        if not isinstance(inputs, dict):
+        # Extract metadata from info section
+        trace_metadata = info.get("trace_metadata", {})
+        if isinstance(trace_metadata, str):
+            try:
+                trace_metadata = json.loads(trace_metadata)
+            except json.JSONDecodeError:
+                trace_metadata = {}
+
+        # Extract inputs from trace_metadata (stored as JSON strings)
+        inputs_str = trace_metadata.get("mlflow.traceInputs", "{}")
+        try:
+            inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
+        except json.JSONDecodeError:
             inputs = {}
 
-        user_request = str(inputs.get("user_request", inputs.get("question", "")))
+        if not isinstance(inputs, dict):
+            inputs = {"message": str(inputs)} if inputs else {}
+
+        user_request = str(inputs.get("user_request", inputs.get("question", inputs.get("message", ""))))
         core_memory = str(inputs.get("core_memory", inputs.get("memory", "")))
         history = inputs.get("history", [])
         if not isinstance(history, list):
             history = []
         active_skills = inputs.get("active_skills", inputs.get("skills", []))
         if not isinstance(active_skills, list):
-            active_skills = []
+            # Try to parse from comma-separated string
+            if isinstance(active_skills, str):
+                active_skills = [s.strip() for s in active_skills.split(",") if s.strip()]
+            else:
+                active_skills = []
         context = str(inputs.get("context", ""))
 
-        # Extract outputs (final_answer)
-        outputs = trace_dict.get("outputs", {})
+        # Extract outputs from trace_metadata
+        outputs_str = trace_metadata.get("mlflow.traceOutputs", "{}")
+        try:
+            outputs = json.loads(outputs_str) if isinstance(outputs_str, str) else outputs_str
+        except json.JSONDecodeError:
+            outputs = {}
+
         if isinstance(outputs, dict):
             final_answer = str(outputs.get("final_answer", outputs.get("answer", outputs.get("response", ""))))
         else:
             final_answer = str(outputs) if outputs else ""
 
-        # Extract route
-        route = str(trace_dict.get("route", trace_dict.get("execution_mode", "")))
+        # Fallback to response_preview if no final_answer
+        if not final_answer:
+            final_answer = str(info.get("response_preview", ""))
+
+        # Extract route from trace_metadata or tags
+        route = str(
+            trace_metadata.get(
+                "fleet_rlm.execution_mode",
+                info.get("tags", {}).get("fleet_rlm.execution_mode", trace_dict.get("route", "")),
+            )
+        )
 
         # Extract timeouts
         timeouts = trace_dict.get("timeouts", {})
@@ -119,8 +174,8 @@ class TraceRecord:
         if not isinstance(trace_outputs, dict):
             trace_outputs = {}
 
-        # Extract metadata
-        metadata = trace_dict.get("metadata", {})
+        # Use trace_metadata as the main metadata source
+        metadata = trace_metadata if trace_metadata else trace_dict.get("metadata", {})
         if not isinstance(metadata, dict):
             metadata = {}
 
@@ -134,9 +189,12 @@ class TraceRecord:
             if isinstance(completion_tokens, (int, float)):
                 token_cost += int(completion_tokens)
 
-        # Calculate latency_s from trace duration or span durations
+        # Calculate latency_s from execution_duration_ms in info or span durations
         latency_s = 0.0
-        if trajectory_spans:
+        execution_duration_ms = info.get("execution_duration_ms", 0)
+        if isinstance(execution_duration_ms, (int, float)) and execution_duration_ms > 0:
+            latency_s = float(execution_duration_ms) / 1000.0
+        elif trajectory_spans:
             starts = [s.start for s in trajectory_spans if s.start >= 0]
             ends = [s.end for s in trajectory_spans if s.end >= 0]
             if starts and ends:
@@ -144,6 +202,7 @@ class TraceRecord:
                 max_end = max(ends)
                 if max_end > min_start:
                     latency_s = max_end - min_start
+
         if latency_s == 0.0:
             # Fallback to trace-level duration if available
             duration = trace_dict.get("duration", trace_dict.get("duration_ms", 0))

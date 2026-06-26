@@ -349,6 +349,7 @@ class ResponseAPILM(dspy.BaseLM):
 
         Converts LMRequest → OpenAI Response API call → LMResponse.
         Supports LM-native tool calling for ReAct/FleetAgent.
+        Falls back to Chat Completions API for non-OpenAI providers.
         """
         # Extract messages and convert to OpenAI format
         messages = self._convert_messages(request.messages)
@@ -356,6 +357,25 @@ class ResponseAPILM(dspy.BaseLM):
         # Extract tools if present (for LM-native tool calling)
         tools = self._convert_tools(request.tools) if request.tools else None
 
+        # Check if we're using a non-OpenAI provider (e.g., Google's compatibility layer)
+        # These providers don't support the Response API, only Chat Completions
+        is_non_openai_provider = self._api_base and (
+            "googleapis" in self._api_base
+            or "generativelanguage" in self._api_base
+            or self._custom_provider not in (None, "openai")
+        )
+
+        if is_non_openai_provider:
+            # Fall back to Chat Completions API
+            return self._forward_chat_completions(request, messages, tools)
+        else:
+            # Use Response API for actual OpenAI
+            return self._forward_response_api(request, messages, tools)
+
+    def _forward_response_api(
+        self, request: dspy.LMRequest, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    ) -> dspy.LMResponse:
+        """Call OpenAI Response API."""
         # Build request params
         request_kwargs: dict[str, Any] = {
             "model": request.model,
@@ -382,6 +402,55 @@ class ResponseAPILM(dspy.BaseLM):
         usage = {
             "input_tokens": response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,
+        }
+
+        # Build LMResponse
+        lm_response = dspy.LMResponse.from_text(
+            text=text,
+            model=response.model,
+            usage=usage,
+        )
+
+        # Append to history for backward compatibility
+        self.history.append(
+            {
+                "usage": usage,
+                "model": response.model,
+            }
+        )
+
+        return lm_response
+
+    def _forward_chat_completions(
+        self, request: dspy.LMRequest, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    ) -> dspy.LMResponse:
+        """Call Chat Completions API for non-OpenAI providers."""
+        # Build request params for chat completions
+        request_kwargs: dict[str, Any] = {
+            "model": request.model,
+            "messages": messages,
+        }
+
+        if tools:
+            request_kwargs["tools"] = tools
+
+        # Apply config overrides (temperature, max_tokens)
+        if request.config:
+            if request.config.temperature is not None:
+                request_kwargs["temperature"] = request.config.temperature
+            if request.config.max_tokens is not None:
+                request_kwargs["max_tokens"] = request.config.max_tokens
+
+        # Call Chat Completions API
+        response = self._client.chat.completions.create(**request_kwargs)
+
+        # Extract text from response
+        text = response.choices[0].message.content or ""
+
+        # Extract usage
+        usage = {
+            "input_tokens": response.usage.prompt_tokens if response.usage else 0,
+            "output_tokens": response.usage.completion_tokens if response.usage else 0,
         }
 
         # Build LMResponse
