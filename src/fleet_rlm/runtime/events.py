@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -80,6 +80,7 @@ class RuntimeEventKind(str, Enum):
     SANDBOX_EXEC = "sandbox_exec"
     RLM_DELEGATE = "rlm_delegate"
     MLFLOW_SPAN = "mlflow_span"
+    TURN_INPUTS = "turn_inputs"
 
     @classmethod
     def terminal_kinds(cls) -> frozenset[RuntimeEventKind]:
@@ -97,6 +98,21 @@ class RuntimeToolInfo(BaseModel):
     tool_input: str | None = None
     tool_output: Any | None = None
     step_index: int | None = None
+
+
+class TurnInputRow(BaseModel):
+    """A single row in the turn-inputs event — one assembled input the model received.
+
+    Rows are displayed in the chat transcript as interleaved inline labeled rows,
+    one per assembled input, for trajectory transparency.
+    """
+
+    label: str = Field(description="Human-readable label for the row (e.g., 'Request', 'Active skills')")
+    kind: Literal["request", "skills", "history", "core_memory", "context"] = Field(
+        description="Semantic kind identifying which assembled input this row represents"
+    )
+    value: Any = Field(description="The actual value passed to the model (str, list, or dict)")
+    preview: str = Field(default="", description="Single-line preview text for collapsed display")
 
 
 class RuntimeActorContext(BaseModel):
@@ -329,6 +345,28 @@ class RuntimeEvent(BaseModel):
             context=context,
         )
 
+    @classmethod
+    def turn_inputs(
+        cls,
+        rows: list[TurnInputRow],
+        *,
+        actor: RuntimeActorContext | None = None,
+        context: RuntimeEventContext | None = None,
+    ) -> RuntimeEvent:
+        """Factory for a turn-inputs event carrying the assembled model inputs.
+
+        Emitted once at the start of each route (RLM, ReAct, or CoT) to surface
+        the inputs the model actually received as interleaved inline labeled rows
+        in the chat transcript.
+        """
+        return cls(
+            kind=RuntimeEventKind.TURN_INPUTS,
+            text="Turn inputs",
+            payload={"rows": [row.model_dump() for row in rows]},
+            actor=actor,
+            context=context,
+        )
+
 
 __all__ = [
     "EVENT_SCHEMA_VERSION",
@@ -337,4 +375,5 @@ __all__ = [
     "RuntimeToolInfo",
     "RuntimeActorContext",
     "RuntimeEventContext",
+    "TurnInputRow",
 ]
