@@ -1,0 +1,66 @@
+"""Evaluation endpoints for GenAI trace quality assessment.
+
+This module provides POST /api/v1/evaluations to kick off an evaluation run
+and GET /api/v1/evaluations/{run_id} to retrieve the full report JSON.
+
+Following the thin-router pattern (VAL-C-048), route handlers delegate to
+runtime_services/evaluations.py which in turn delegates to quality/eval.
+"""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Path
+
+from ..runtime_services import evaluations as evaluation_service
+from ..schemas.evaluations import (
+    EvaluationReportResponse,
+    EvaluationRequest,
+    EvaluationRunResponse,
+)
+
+router = APIRouter(
+    prefix="/evaluations",
+    tags=["evaluations"],
+)
+
+
+@router.post(
+    "",
+    response_model=EvaluationRunResponse,
+    responses={
+        401: {"description": "Authentication is required or the provided token is invalid."},
+        503: {"description": "MLflow or evaluation services are unavailable."},
+    },
+    summary="Start evaluation run",
+    description=(
+        "Kick off a GenAI evaluation run on MLflow traces. Returns a run_id "
+        "that can be used to retrieve the full report via GET /evaluations/{run_id}."
+    ),
+)
+async def start_evaluation(
+    request: EvaluationRequest,
+) -> EvaluationRunResponse:
+    """Start an evaluation run and return the run_id (VAL-C-014, VAL-C-017, VAL-C-056)."""
+    return await evaluation_service.start_evaluation_run(request)
+
+
+@router.get(
+    "/{run_id}",
+    response_model=EvaluationReportResponse,
+    responses={
+        401: {"description": "Authentication is required or the provided token is invalid."},
+        404: {"description": "Evaluation run not found."},
+    },
+    summary="Get evaluation report",
+    description=(
+        "Retrieve the full evaluation report for a given run_id. The report includes "
+        "per-trace scores (4 judges + 6 metrics) and aggregate statistics."
+    ),
+)
+async def get_evaluation(
+    run_id: Annotated[str, Path(description="Unique identifier for the evaluation run.")],
+) -> EvaluationReportResponse:
+    """Retrieve the full evaluation report (VAL-C-015, VAL-C-016, VAL-C-018)."""
+    return await evaluation_service.get_evaluation_report(run_id)

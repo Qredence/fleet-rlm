@@ -1,0 +1,46 @@
+"""Pydantic schemas for evaluation API endpoints."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class EvaluationRequest(BaseModel):
+    """Request body for POST /api/v1/evaluations."""
+
+    trace_ids: list[str] | None = Field(
+        default=None,
+        description="Optional list of specific trace IDs to evaluate.",
+    )
+    limit: int | None = Field(
+        default=None,
+        description="Optional maximum number of traces to evaluate.",
+    )
+    from_last_days: int = Field(
+        default=1,
+        description="Number of days to look back for traces (default: 1).",
+    )
+
+
+class EvaluationRunResponse(BaseModel):
+    """Response body for POST /api/v1/evaluations."""
+
+    run_id: str = Field(description="Unique identifier for this evaluation run.")
+
+
+class EvaluationReportResponse(BaseModel):
+    """Response body for GET /api/v1/evaluations/{run_id}."""
+
+    run_id: str = Field(description="Unique identifier for this evaluation run.")
+    created_at: str = Field(description="ISO8601 timestamp when the report was created.")
+    filters: dict[str, Any] = Field(
+        description="Dictionary echoing the trace_ids/limit/from_last_days used.",
+    )
+    per_trace: list[dict[str, Any]] = Field(
+        description="List of per-trace score dictionaries with all 10 metrics.",
+    )
+    aggregates: dict[str, dict[str, float]] = Field(
+        description="Dictionary with mean and median for each score.",
+    )
