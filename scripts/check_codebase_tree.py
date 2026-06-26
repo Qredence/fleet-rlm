@@ -25,7 +25,9 @@ BACKEND_ROOT = Path("src/fleet_rlm")
 # Frontend root
 FRONTEND_ROOT = Path("src/frontend/src")
 
-# Patterns to exempt from scanning (directory names and specific file paths)
+# Patterns to exempt from scanning (directory names and specific file paths).
+# These are generated artifacts, out-of-scope packages, test directories,
+# and build outputs that would produce noise or false positives (VAL-D-017).
 EXEMPT_DIR_NAMES = {
     "tests",
     "test",
@@ -34,12 +36,13 @@ EXEMPT_DIR_NAMES = {
     ".venv",
     "dist",
     "build",
+    "scaffold",  # Out-of-scope package (skill authoring reference)
 }
 
 EXEMPT_PATH_SUFFIXES = {
-    "src/fleet_rlm/ui/dist",
-    "src/frontend/src/routeTree.gen.ts",
-    "src/frontend/src/lib/rlm-api/generated",
+    "src/fleet_rlm/ui/dist",  # Packaged UI assets (generated)
+    "src/frontend/src/routeTree.gen.ts",  # TanStack Router generated route tree
+    "src/frontend/src/lib/rlm-api/generated",  # OpenAPI generated client
 }
 
 
@@ -86,8 +89,46 @@ def is_exempt(path: Path) -> bool:
     return any(path_str.endswith(suffix) or suffix in path_str for suffix in EXEMPT_PATH_SUFFIXES)
 
 
-def extract_python_imports(file_path: Path) -> list[str]:
-    """Extract import module names from a Python file."""
+def resolve_relative_import(file_path: Path, backend_root: Path, level: int, module: str | None) -> str | None:
+    """Resolve a relative import to an absolute module path.
+
+    Args:
+        file_path: The file containing the import
+        backend_root: The backend package root (src/fleet_rlm)
+        level: Number of dots (1 for ., 2 for .., etc.)
+        module: The module being imported (may be None for 'from . import X')
+
+    Returns:
+        The resolved absolute module path, or None if resolution fails
+    """
+    try:
+        # Get the directory containing the file
+        current_dir = file_path.parent
+
+        # Go up 'level' directories (level=1 means current package, level=2 means parent, etc.)
+        for _ in range(level - 1):
+            current_dir = current_dir.parent
+
+        # Convert the directory to a module path
+        rel_to_root = current_dir.relative_to(backend_root.parent)
+        base_module = ".".join(rel_to_root.parts)
+
+        # Append the module if specified
+        if module:
+            return f"{base_module}.{module}" if base_module else module
+        return base_module
+    except (ValueError, Exception):
+        # If we can't resolve, return None
+        return None
+
+
+def extract_python_imports(file_path: Path, backend_root: Path) -> list[str]:
+    """Extract import module names from a Python file.
+
+    Args:
+        file_path: Path to the Python file
+        backend_root: The backend package root for resolving relative imports
+    """
     try:
         code = file_path.read_text(encoding="utf-8", errors="ignore")
         tree = ast.parse(code, filename=str(file_path))
@@ -103,10 +144,12 @@ def extract_python_imports(file_path: Path) -> list[str]:
             if node.module:
                 # Handle relative imports
                 if node.level > 0:
-                    # Relative import - resolve to absolute if possible
-                    # For now, skip relative imports as they're harder to track
-                    continue
-                imports.append(node.module)
+                    # Relative import - resolve to absolute
+                    resolved = resolve_relative_import(file_path, backend_root, node.level, node.module)
+                    if resolved:
+                        imports.append(resolved)
+                else:
+                    imports.append(node.module)
     return imports
 
 
@@ -124,18 +167,22 @@ def extract_ts_imports(file_path: Path) -> list[str]:
 
 
 def check_backend_runtime_imports() -> list[str]:
-    """Check that runtime/ does not import from api.routers."""
+    """Check that runtime/ does not import from api.routers.
+
+    Per architecture.md §2.7: runtime/ may import api.events and api.config
+    but NOT api.routers. This catches both absolute and relative imports.
+    """
     violations = []
     runtime_dir = BACKEND_ROOT / "runtime"
 
     if not runtime_dir.exists():
         return violations
 
-    for py_file in runtime_dir.rglob("*.py"):
+    for py_file in sorted(runtime_dir.rglob("*.py")):
         if is_exempt(py_file):
             continue
 
-        imports = extract_python_imports(py_file)
+        imports = extract_python_imports(py_file, BACKEND_ROOT)
         for imp in imports:
             if imp.startswith("fleet_rlm.api.routers"):
                 violations.append(f"{py_file}: imports {imp} (runtime/ may not import api.routers)")
@@ -158,11 +205,11 @@ def check_backend_quality_imports() -> list[str]:
     # Allowed api subpackages for quality/ (data structures only)
     allowed_api_imports = {"fleet_rlm.api.schemas"}
 
-    for py_file in quality_dir.rglob("*.py"):
+    for py_file in sorted(quality_dir.rglob("*.py")):
         if is_exempt(py_file):
             continue
 
-        imports = extract_python_imports(py_file)
+        imports = extract_python_imports(py_file, BACKEND_ROOT)
         for imp in imports:
             if imp.startswith("fleet_rlm.api"):
                 # Check if it's an allowed import (api.schemas)
@@ -176,25 +223,30 @@ def check_backend_quality_imports() -> list[str]:
 
 
 def check_frontend_no_backend_imports() -> list[str]:
-    """Check that features/ and components/ do not import from src/fleet_rlm/."""
+    """Check that features/ and components/ do not import from src/fleet_rlm/.
+
+    Per architecture.md §2.7: frontend callers in features/ and components/
+    must import backend types through lib/rlm-api/ only. Direct imports
+    into src/fleet_rlm/ are forbidden (typo guard).
+    """
     violations = []
 
-    for subdir in ["features", "components"]:
+    for subdir in sorted(["features", "components"]):
         check_dir = FRONTEND_ROOT / subdir
         if not check_dir.exists():
             continue
 
-        for ts_file in check_dir.rglob("*.ts"):
+        for ts_file in sorted(check_dir.rglob("*.ts")):
             if is_exempt(ts_file):
                 continue
 
             imports = extract_ts_imports(ts_file)
             for imp in imports:
-                # Check for direct backend imports
+                # Check for direct backend imports (both ESM and dynamic)
                 if "fleet_rlm" in imp or imp.startswith("../../fleet_rlm"):
                     violations.append(f"{ts_file}: imports {imp} (must use lib/rlm-api/ for backend types)")
 
-        for tsx_file in check_dir.rglob("*.tsx"):
+        for tsx_file in sorted(check_dir.rglob("*.tsx")):
             if is_exempt(tsx_file):
                 continue
 
