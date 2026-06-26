@@ -6,9 +6,11 @@ runtime from Claude Code, Codex, or any agent that loads skill markdown.
 
 ## What's Here
 
-| Skill               | Purpose                                                              |
-| ------------------- | -------------------------------------------------------------------- |
-| `rlm`              | Hub router — core model + decision tree pointing to the right skill  |
+### Runtime & execution skills
+
+| Skill                 | Purpose                                                              |
+| --------------------- | -------------------------------------------------------------------- |
+| `rlm`                | Hub router — core model + decision tree pointing to the right skill  |
 | `sandbox-execution` | Execute Python in Daytona sandboxes with durable volume persistence  |
 | `delegation`        | Recursive child RLMs, batch fan-out, budget management               |
 | `dspy-programs`     | Signature design, module registry, execution mode selection           |
@@ -16,6 +18,27 @@ runtime from Claude Code, Codex, or any agent that loads skill markdown.
 | `optimization`      | GEPA optimization loops, RLM skill artifacts, evaluation metrics, MLflow tracking |
 | `diagnostics`       | Symptom→cause decision tree, test lane selection, error catalog       |
 | `volume-bootstrap`  | In-sandbox volume filesystem contract, CRUD helpers, persistence guarantees |
+| `daytona`           | Create and manage isolated Daytona cloud sandboxes (secure compute, SDK/API/CLI ops) |
+| `browser-interaction` | Fetch and inspect JavaScript-heavy pages with Playwright in a Daytona browser-capable snapshot |
+
+### MLflow observability skills
+
+| Skill                            | Purpose                                                              |
+| -------------------------------- | -------------------------------------------------------------------- |
+| `mlflow-agent`                  | Master dispatcher for all MLflow workflows — routes to the right sub-skill |
+| `mlflow-onboarding`             | Get started with MLflow: use-case detection, quickstart, integration  |
+| `instrumenting-with-mlflow-tracing` | Add MLflow Tracing to Python/TS code (LangGraph, OpenAI, DSPy, etc.) |
+| `retrieving-mlflow-traces`      | Get/search/filter traces by ID, status, tags, execution time         |
+| `analyzing-mlflow-trace`        | Debug a single trace by ID — root-cause errors, investigate behavior  |
+| `analyzing-mlflow-session`      | Debug a multi-turn chat session — find where a conversation went wrong |
+| `querying-mlflow-metrics`       | Aggregated trace metrics: token usage, latency, costs, quality scores |
+| `searching-mlflow-docs`         | Search and retrieve official MLflow documentation                     |
+
+### Skill-authoring reference
+
+| Skill                 | Purpose                                                              |
+| --------------------- | -------------------------------------------------------------------- |
+| `writing-great-skills` | Vocabulary and principles for writing predictable, well-structured skills |
 
 Each skill is a directory containing a `SKILL.md` (with YAML frontmatter)
 plus optional `references/` and `scripts/` subdirectories.
@@ -79,6 +102,22 @@ workflow skill based on what you're trying to accomplish:
 - **Process large documents** → `long-context`
 - **Optimize programs** → `optimization`
 - **Diagnose failures** → `diagnostics`
+- **Provision/manage a sandbox** → `daytona`
+- **Scrape or inspect a JS-heavy page** → `browser-interaction`
+
+For MLflow observability work, start with `mlflow-agent` — it dispatches to
+the right sub-skill so you don't have to pick:
+
+- **Get started with MLflow** → `mlflow-onboarding`
+- **Add tracing to code** → `instrumenting-with-mlflow-tracing`
+- **Get/search traces** → `retrieving-mlflow-traces`
+- **Debug one trace** → `analyzing-mlflow-trace`
+- **Debug a chat session** → `analyzing-mlflow-session`
+- **Query token/cost/latency metrics** → `querying-mlflow-metrics`
+- **Look up MLflow docs/API** → `searching-mlflow-docs`
+
+When authoring or revising a skill of your own, consult
+`writing-great-skills` for the shared vocabulary and principles.
 
 ## Stability
 
