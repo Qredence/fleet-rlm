@@ -151,8 +151,8 @@ def test_configure_planner_from_env_builds_lm_and_configures_dspy(
     assert configured is True
     assert fake_dspy.configure_cache_calls[0]["enable_disk_cache"] is False
     lm = fake_dspy.configure_calls[0]["lm"]
-    # _build_lm passes the model identifier through as-is (provider prefix included).
-    assert lm.model == "openai/gpt-4.1"
+    # _build_lm strips the openai/ prefix for ResponseAPILM.
+    assert lm.model == "gpt-4.1"
     assert lm.kwargs == {
         "api_base": "https://api.example.test",
         "api_key": "planner-key",

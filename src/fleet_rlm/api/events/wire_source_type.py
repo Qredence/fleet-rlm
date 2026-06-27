@@ -21,6 +21,7 @@ _BACKEND_KIND_VALUES = frozenset(
         "turn_completed",
         "turn_failed",
         "mlflow_span",
+        "turn_inputs",
     }
 )
 

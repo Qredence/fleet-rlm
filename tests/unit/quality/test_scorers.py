@@ -123,6 +123,7 @@ def test_reasoning_quality_scorer_uses_predict_judge_and_redacts_trace_inputs(cl
 
 
 def test_get_default_judge_model_returns_repo_default(clean_runtime_env, monkeypatch) -> None:
+    monkeypatch.setenv("DSPY_LM_MODEL", "openai/gemini-3-flash-preview")
     module = _import_scorers_module(monkeypatch)
 
     assert module.get_default_judge_model() == "openai/gemini-3-flash-preview"
