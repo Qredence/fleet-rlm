@@ -298,8 +298,7 @@ async def _resolve_byok_planner(
     """
     cfg = config_deps.config
     if (
-        cfg.auth_mode != "neon"
-        or persistence_deps is None
+        persistence_deps is None
         or persistence_deps.db_manager is None
         or persistence_deps.repository is None
         or persisted_identity is None
@@ -592,7 +591,7 @@ def build_runtime_status_response(
         app_env=config_deps.config.app_env,
         write_enabled=settings_write_enabled,
         settings_write_enabled=settings_write_enabled,
-        profile_write_enabled=settings_write_enabled or config_deps.config.auth_mode == "neon",
+        profile_write_enabled=settings_write_enabled,
         ready=ready,
         sandbox_provider="daytona",
         active_models=RuntimeActiveModels(

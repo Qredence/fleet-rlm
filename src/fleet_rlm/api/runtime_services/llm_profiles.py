@@ -44,7 +44,7 @@ from fleet_rlm.integrations.llm_profiles.types import (
 )
 
 from ..bootstrap import get_delegate_lm_from_env, get_delegate_small_lm_from_env, get_planner_lm_from_env
-from ..config import ServerRuntimeConfig
+from ..config import AppConfig
 from ..dependencies import ConfigDeps, DiagnosticsDeps, LmDeps, PersistenceDeps
 from ..runtime_services.common import (
     LM_SMOKE_TEST_TIMEOUT_SECONDS,
@@ -80,11 +80,11 @@ IMPORT_PROFILE_NAME = "Imported from .env"
 logger = logging.getLogger(__name__)
 
 
-def profile_writes_enabled(config: ServerRuntimeConfig) -> bool:
-    return config.app_env == "local" or config.auth_mode == "neon"
+def profile_writes_enabled(config: AppConfig) -> bool:
+    return config.app_env == "local"
 
 
-def _ensure_profile_writes(config: ServerRuntimeConfig) -> None:
+def _ensure_profile_writes(config: AppConfig) -> None:
     if not profile_writes_enabled(config):
         raise HTTPException(
             status_code=403,
@@ -92,7 +92,7 @@ def _ensure_profile_writes(config: ServerRuntimeConfig) -> None:
         )
 
 
-def _ensure_local_env_import(config: ServerRuntimeConfig) -> None:
+def _ensure_local_env_import(config: AppConfig) -> None:
     if config.app_env != "local":
         raise HTTPException(
             status_code=403,
