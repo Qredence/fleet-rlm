@@ -54,13 +54,14 @@ def _fetch_traces_from_mlflow(
         tracking_uri = "http://127.0.0.1:5001"
 
     # Quick connectivity check to fail fast when MLflow is unreachable (VAL-C-058)
-    try:
-        from urllib.request import urlopen
+    if tracking_uri.startswith(("http://", "https://")):
+        try:
+            from urllib.request import urlopen
 
-        urlopen(tracking_uri, timeout=5)
-    except Exception as conn_err:
-        msg = f"MLflow tracking server unreachable at {tracking_uri}: {conn_err}"
-        raise RuntimeError(msg) from conn_err
+            urlopen(tracking_uri, timeout=5)
+        except Exception as conn_err:
+            msg = f"MLflow tracking server unreachable at {tracking_uri}: {conn_err}"
+            raise RuntimeError(msg) from conn_err
 
     client = MlflowClient(tracking_uri)
 
