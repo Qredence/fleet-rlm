@@ -25,7 +25,7 @@ export const SkillsRow = memo(function SkillsRow({ part }: SkillsRowProps) {
           {skills.map((skill) => (
             <span
               key={skill}
-              className="inline-flex items-center rounded-an-action-md bg-muted px-2 py-0.5 text-xs font-medium"
+              className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium"
             >
               {skill}
             </span>
