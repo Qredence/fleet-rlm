@@ -151,7 +151,9 @@ def test_configure_planner_from_env_builds_lm_and_configures_dspy(
     assert configured is True
     assert fake_dspy.configure_cache_calls[0]["enable_disk_cache"] is False
     lm = fake_dspy.configure_calls[0]["lm"]
-    assert lm.model == "openai/gpt-4.1"
+    # _build_lm strips the "openai/" prefix for ResponseAPILM (OpenAI Response API
+    # expects the bare model name, not the litellm provider-prefixed form).
+    assert lm.model == "gpt-4.1"
     # ResponseAPILM inherits from BaseLM which always includes temperature in kwargs
     assert lm.kwargs == {
         "api_base": "https://api.example.test",

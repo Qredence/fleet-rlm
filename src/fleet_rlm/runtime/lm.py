@@ -344,7 +344,7 @@ class ResponseAPILM(dspy.BaseLM):
 
         # History is initialized by BaseLM.__init__ as self.history = []
 
-    def forward(self, request: dspy.LMRequest) -> dspy.LMResponse:
+    def forward(self, request: dspy.LMRequest) -> dspy.LMResponse:  # ty:ignore[invalid-method-override]
         """Implement typed_lm forward contract.
 
         Converts LMRequest → OpenAI Response API call → LMResponse.
@@ -525,7 +525,7 @@ class ResponseAPILM(dspy.BaseLM):
             "temperature": self.kwargs.get("temperature"),
         }
 
-    def load_state(self, state: dict[str, Any]) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:  # ty:ignore[invalid-method-override]
         """Deserialize LM state."""
         self.model = state.get("model", self.model)
         self._api_base = state.get("api_base")

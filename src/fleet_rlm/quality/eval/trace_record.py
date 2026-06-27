@@ -250,11 +250,15 @@ class TraceRecord:
         if not isinstance(timeouts, dict):
             timeouts = {}
 
-        # Extract trace_outputs - use the already-parsed outputs dict
-        trace_outputs = outputs if isinstance(outputs, dict) else {}
-        if not trace_outputs:
-            # Fallback: try to get from trace_dict
-            trace_outputs = trace_dict.get("trace_outputs", trace_dict.get("traceOutputs", {}))
+        # Extract trace_outputs - prefer the explicit trace_outputs key, fall
+        # back to the parsed outputs dict (which may contain final_answer etc.)
+        explicit_trace_outputs = trace_dict.get("trace_outputs", trace_dict.get("traceOutputs", {}))
+        if isinstance(explicit_trace_outputs, dict) and explicit_trace_outputs:
+            trace_outputs = explicit_trace_outputs
+        elif isinstance(outputs, dict) and outputs:
+            trace_outputs = outputs
+        else:
+            trace_outputs = {}
             if not isinstance(trace_outputs, dict):
                 trace_outputs = {}
 

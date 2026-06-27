@@ -95,6 +95,7 @@ class NeonAuthProvider:
                 "NEON_AUTH_URL is required.",
                 status_code=503,
             )
+
     def _fetch_jwks(self) -> KeySet:
         assert self.neon_auth_url is not None
         now = time.time()

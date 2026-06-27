@@ -187,10 +187,15 @@ def _call_judge_lm(
             # Construct LMRequest for typed_lm LMs
             try:
                 import dspy
+                from dspy.core.types import LMTextPart
 
+                # LMRequest expects list[LMMessage] with role + parts (typed part objects)
+                typed_messages: list[dspy.LMMessage] = [
+                    dspy.LMMessage(role="user", parts=[LMTextPart(text=full_prompt)])
+                ]
                 request = dspy.LMRequest(
                     model=lm.model,
-                    messages=messages,
+                    messages=typed_messages,
                     config=dspy.LMConfig(
                         temperature=0.0,
                         max_tokens=512,
