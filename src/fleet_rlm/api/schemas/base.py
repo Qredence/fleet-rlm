@@ -88,6 +88,7 @@ class ServiceInfoResponse(BaseModel):
         description="Package version currently serving the API.",
     )
     app_env: Literal["local", "staging", "production"] = Field(description="Active deployment environment.")
+    auth_mode: Literal["dev", "entra", "neon"] = Field(description="Authentication mode the server is running under.")
     auth_required: bool = Field(description="Whether authentication is enforced for all API requests.")
     sandbox_provider: str = Field(description="Active sandbox backend selected for runtime execution.")
     database_enabled: bool = Field(description="Whether a durable database backend is configured.")
