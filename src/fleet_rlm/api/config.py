@@ -143,6 +143,7 @@ class AppConfig(BaseSettings):
     ws_execution_max_queue: int = 256
     ws_execution_drop_policy: Literal["drop_oldest", "drop_newest"] = "drop_oldest"
     neon_tenant_claim: str = Field(default="default", alias="NEON_TENANT_CLAIM")
+    dev_jwt_secret: str = "change-me"
     secret_encryption_key: str | None = Field(default=None, alias="FLEET_SECRET_ENCRYPTION_KEY")
     auth_required: bool = True
     serve_ui: bool = Field(default=True, alias="FLEET_RLM_SERVE_UI")

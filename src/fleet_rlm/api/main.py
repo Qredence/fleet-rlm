@@ -63,9 +63,6 @@ def _register_api_routes(app: FastAPI) -> None:
     api_v1.include_router(runs.router)
     api_v1.include_router(optimization.router)
     api_v1.include_router(traces.router)
-    from .routers import evaluations
-
-    api_v1.include_router(evaluations.router)
     app.include_router(api_v1)
 
 

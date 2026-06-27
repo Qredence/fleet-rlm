@@ -22,8 +22,8 @@ from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.runtime.factory import build_chat_agent
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
-from ..auth import AuthError, NormalizedIdentity
-from ..config import AppConfig
+from ..auth import AuthError, NormalizedIdentity, resolve_admitted_identity
+from ..config import ServerRuntimeConfig
 from ..dependencies import ConfigDeps, DiagnosticsDeps, LmDeps, PersistenceDeps
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class PreparedChatRuntime:
-    cfg: AppConfig
+    cfg: ServerRuntimeConfig
     planner_lm: object
     delegate_lm: object | None
     repository: FleetRepository | None
@@ -176,7 +176,7 @@ class ChatAgentProtocol(Protocol):
         pass
 
 
-def set_interpreter_default_profile(interpreter: object | None, cfg: AppConfig) -> None:
+def set_interpreter_default_profile(interpreter: object | None, cfg: ServerRuntimeConfig) -> None:
     if interpreter is None:
         return
     runtime_interpreter = cast(Any, interpreter)
@@ -196,11 +196,11 @@ async def _ensure_runtime_models(
 
 async def _resolve_identity_scoped_lms(
     *,
-    cfg: AppConfig,
+    cfg: ServerRuntimeConfig,
     persistence_deps: PersistenceDeps,
     identity_rows: IdentityUpsertResult | None,
 ) -> tuple[Any | None, Any | None]:
-    if persistence_deps.db_manager is None or identity_rows is None:
+    if not cfg.auth_required or persistence_deps.db_manager is None or identity_rows is None:
         return None, None
 
     role_configs = await resolve_active_role_configs(
@@ -225,10 +225,12 @@ async def _resolve_identity_scoped_lms(
 
 async def _resolve_persisted_identity(
     *,
-    cfg: AppConfig,
+    cfg: ServerRuntimeConfig,
     repository: FleetRepository,
     identity: NormalizedIdentity,
 ) -> IdentityUpsertResult:
+    if cfg.auth_required:
+        return await resolve_admitted_identity(repository, identity)
     return await repository.upsert_identity(
         entra_tenant_id=identity.tenant_claim,
         entra_user_id=identity.user_claim,

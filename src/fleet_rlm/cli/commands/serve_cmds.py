@@ -9,9 +9,7 @@ from importlib.util import find_spec
 
 import typer
 
-from fleet_rlm.api.config import ServerRuntimeConfig
 
-from ..config import require_current_app_config
 
 
 def serve_api_command(
@@ -19,7 +17,6 @@ def serve_api_command(
     port: int = typer.Option(8000, help="Bind port"),
 ) -> None:
     """Run the FastAPI server surface (used by `fleet web`)."""
-    config = require_current_app_config()
     missing = [pkg for pkg in ("fastapi", "uvicorn") if find_spec(pkg) is None]
     if missing:
         typer.echo(
@@ -35,5 +32,5 @@ def serve_api_command(
 
     from fleet_rlm.api.main import create_app
 
-    app_obj = create_app(config=ServerRuntimeConfig.from_app_config(config))
+    app_obj = create_app()
     uvicorn.run(app_obj, host=host, port=port)
