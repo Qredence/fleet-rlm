@@ -271,3 +271,10 @@ class AppConfig(BaseSettings):
                 raise ValueError("DATABASE_REQUIRED must be true when AUTH_REQUIRED is true")
             if not self.neon_tenant_claim.strip():
                 raise ValueError("NEON_TENANT_CLAIM is required when AUTH_REQUIRED is true")
+
+
+# Backward-compatible alias — the class was renamed from ServerRuntimeConfig
+# to AppConfig.  Keep the old name available so callers that still reference
+# ``ServerRuntimeConfig`` (tests, bootstrap, dependencies, etc.) continue to
+# work without an immediate migration.
+ServerRuntimeConfig = AppConfig
