@@ -120,7 +120,8 @@ def _output_for_kind(event: RuntimeEvent) -> Any:
     if kind in {RuntimeEventKind.DONE, RuntimeEventKind.ERROR}:
         return {"text": event.text, "payload": dict(event.payload)}
     if kind == RuntimeEventKind.TURN_INPUTS:
-        return {"rows": event.payload.get("rows", [])}
+        payload_dict = event.payload if isinstance(event.payload, dict) else {}
+        return {"rows": payload_dict.get("rows", [])}
     return {"text": event.text} if event.text else None
 
 
