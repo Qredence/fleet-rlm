@@ -178,7 +178,10 @@ class RepositoryContextMixin:
         )
         await session.execute(
             runtime_insert.on_conflict_do_update(
-                index_elements=[WorkspaceRuntimeSetting.workspace_id],
+                index_elements=[
+                    WorkspaceRuntimeSetting.tenant_id,
+                    WorkspaceRuntimeSetting.workspace_id,
+                ],
                 set_={
                     "updated_at": _utc_now(),
                     "updated_by_user_id": func.coalesce(

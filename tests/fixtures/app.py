@@ -16,13 +16,12 @@ def no_db_app(monkeypatch):
     monkeypatch.setenv("POSTHOG_ENABLED", "false")
     monkeypatch.setenv("MLFLOW_ENABLED", "false")
 
-    from fleet_rlm.api.config import ServerRuntimeConfig
+    from fleet_rlm.api.config import AppConfig
     from fleet_rlm.api.main import create_app
 
     app = create_app(
-        config=ServerRuntimeConfig(
+        config=AppConfig(
             app_env="local",
-            auth_mode="dev",
             auth_required=False,
             database_required=False,
             database_url=None,  # ty: ignore[unknown-argument] — populate_by_name=True lets callers use the Python field name; ty doesn't model this

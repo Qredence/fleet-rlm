@@ -30,5 +30,10 @@ def serve_api_command(
 
     from fleet_rlm.api.main import create_app
 
+    # The server reads its configuration directly from environment variables
+    # (AppConfig is a BaseSettings subclass). Hydra overrides applied to the
+    # CLI's AppConfig (integrations/config/env.py) are mirrored into the
+    # process environment before the server boots, so no explicit config
+    # conversion is needed here.
     app_obj = create_app()
     uvicorn.run(app_obj, host=host, port=port)

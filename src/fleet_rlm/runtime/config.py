@@ -55,34 +55,17 @@ STRUCTURE_SENSITIVE_RUNTIME_MODULES: frozenset[str] = frozenset(
 _DISABLED_ADAPTER_NAMES: frozenset[str] = frozenset({"", "auto", "none", "off"})
 
 
-def load_posthog_settings_from_env() -> dict[str, object]:
-    """Load PostHog analytics settings from environment variables."""
-    from fleet_rlm.integrations.observability.config import (
-        PROJECT_POSTHOG_DEFAULT_API_KEY,
-        PROJECT_POSTHOG_DEFAULT_HOST,
-    )
-
-    api_key = (os.getenv("POSTHOG_API_KEY") or "").strip() or PROJECT_POSTHOG_DEFAULT_API_KEY
-    host = (os.getenv("POSTHOG_HOST") or "").strip() or PROJECT_POSTHOG_DEFAULT_HOST
-    enabled_raw = os.getenv("POSTHOG_ENABLED")
-    return {
-        "enabled": _env_bool(enabled_raw, default=bool(api_key)),
-        "api_key": api_key,
-        "host": host,
-        "flush_interval": float(os.getenv("POSTHOG_FLUSH_INTERVAL", "10.0")),
-        "flush_at": max(1, int(os.getenv("POSTHOG_FLUSH_AT", "10"))),
-        "enable_dspy_optimization": _env_bool(os.getenv("POSTHOG_ENABLE_DSPY_OPTIMIZATION"), default=False),
-        "input_truncation_chars": max(1, int(os.getenv("POSTHOG_INPUT_TRUNCATION", "10000"))),
-        "output_truncation_chars": max(1, int(os.getenv("POSTHOG_OUTPUT_TRUNCATION", "5000"))),
-        "redact_sensitive": _env_bool(os.getenv("POSTHOG_REDACT_SENSITIVE"), default=True),
-        "distinct_id": os.getenv("POSTHOG_DISTINCT_ID") or None,
-    }
-
-
 def configure_posthog_analytics_from_env() -> object | None:
-    """Best-effort env-driven analytics setup (non-blocking and idempotent)."""
-    settings = load_posthog_settings_from_env()
-    if not settings.get("enabled") or not settings.get("api_key"):
+    """Best-effort env-driven analytics setup (non-blocking and idempotent).
+
+    Uses :meth:`PostHogConfig.from_env` (the canonical PostHog env loader in
+    ``integrations/observability/config.py``) instead of duplicating the
+    ``POSTHOG_*`` env-reading logic here.
+    """
+    from fleet_rlm.integrations.observability.config import PostHogConfig
+
+    settings = PostHogConfig.from_env()
+    if not settings.enabled or not settings.api_key:
         return None
 
     try:
@@ -92,9 +75,9 @@ def configure_posthog_analytics_from_env() -> object | None:
 
     try:
         return configure_analytics(
-            api_key=settings["api_key"] if isinstance(settings["api_key"], str) else None,
-            host=settings["host"] if isinstance(settings["host"], str) else "https://eu.i.posthog.com",
-            distinct_id=settings["distinct_id"] if isinstance(settings["distinct_id"], str) else None,
+            api_key=settings.api_key,
+            host=settings.host,
+            distinct_id=os.getenv("POSTHOG_DISTINCT_ID") or None,
             enabled=True,
         )
     except Exception:
@@ -169,13 +152,12 @@ def _resolve_max_tokens(value: int | str | None, *, default: int = 64000) -> int
         return default
 
 
-# Normalized LM API guard (dspy.ai/community/normalized-lm-api-migration):
-# fleet-rlm uses the stock ``dspy.LM`` with no custom BaseLM/Adapter subclass, so it
-# sits in the migration's "nothing required" bucket. Keep it that way: always invoke
-# the LM as ``lm(...)`` (never ``lm.forward(...)``). When bumping to dspy 3.3+, the
-# typed LM API stays opt-in via ``dspy.context(experimental=True)`` — no behaviour
-# change. Any future custom LM/adapter must declare ``forward_contract`` and build
-# ``LMRequest`` / parse ``LMResponse`` rather than reaching into ``forward``.
+# Normalized LM API (dspy.ai/community/normalized-lm-api-migration):
+# fleet-rlm uses a custom BaseLM subclass (ResponseAPILM) for OpenAI providers
+# with the typed_lm forward contract and OpenAI Response API. For non-OpenAI
+# providers (anthropic, google, openai_compatible, etc.), we use stock dspy.LM
+# (litellm-backed). The ResponseAPILM is defined in runtime/lm.py.
+# Always invoke the LM as lm(...) (never lm.forward(...)).
 def _build_lm(
     *,
     model: str,
@@ -184,21 +166,44 @@ def _build_lm(
     max_tokens: int,
     custom_provider: str | None = None,
 ) -> Any:
-    extra: dict[str, Any] = {}
-    # Opt-in provider hint. When callers set ``DSPY_LM_CUSTOM_PROVIDER`` (or the
-    # delegate equivalent) we forward it so litellm routes bare model names
-    # against the custom api_base with the right wire format. Without an
-    # explicit hint we leave provider detection to litellm so non-OpenAI
-    # compatible endpoints (e.g. Anthropic) keep working.
-    if custom_provider:
-        extra["custom_llm_provider"] = custom_provider
-    return _import_dspy().LM(
-        model,
-        api_base=api_base,
-        api_key=api_key,
-        max_tokens=max_tokens,
-        **extra,
+    """Build an LM instance. Uses ResponseAPILM for OpenAI, stock dspy.LM for others."""
+    from fleet_rlm.runtime.lm import ResponseAPILM
+
+    # Check if this is an OpenAI provider
+    is_openai = (
+        model.startswith("openai/") or custom_provider == "openai" or (api_base and "openai" in api_base.lower())
     )
+
+    if is_openai:
+        # Strip provider prefix (e.g., "openai/gemini-3.5-flash" -> "gemini-3.5-flash")
+        # for OpenAI-compatible APIs that don't expect the prefix
+        model_name = model.split("/", 1)[1] if "/" in model else model
+
+        # Use custom ResponseAPILM with OpenAI Response API
+        return ResponseAPILM(
+            model=model_name,
+            api_key=api_key,
+            api_base=api_base,
+            max_tokens=max_tokens,
+            custom_llm_provider=custom_provider,
+        )
+    else:
+        # Fall back to stock dspy.LM (litellm-backed) for non-OpenAI providers
+        extra: dict[str, Any] = {}
+        # Opt-in provider hint. When callers set ``DSPY_LM_CUSTOM_PROVIDER`` (or the
+        # delegate equivalent) we forward it so litellm routes bare model names
+        # against the custom api_base with the right wire format. Without an
+        # explicit hint we leave provider detection to litellm so non-OpenAI
+        # compatible endpoints (e.g. Anthropic) keep working.
+        if custom_provider:
+            extra["custom_llm_provider"] = custom_provider
+        return _import_dspy().LM(
+            model,
+            api_base=api_base,
+            api_key=api_key,
+            max_tokens=max_tokens,
+            **extra,
+        )
 
 
 def _planner_lm_kwargs(
@@ -207,7 +212,18 @@ def _planner_lm_kwargs(
 ) -> dict[str, Any] | None:
     api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
     model = model_name or os.environ.get("DSPY_LM_MODEL")
-    if not model or not api_key:
+    if not model:
+        logger.warning(
+            "No planner LM model configured (DSPY_LM_MODEL is unset/empty); "
+            "returning None. Set DSPY_LM_MODEL or configure a BYOK LLM profile."
+        )
+        return None
+    if not api_key:
+        logger.warning(
+            "Planner LM model '%s' is configured but no API key is available "
+            "(DSPY_LLM_API_KEY/DSPY_LM_API_KEY unset); returning None.",
+            model,
+        )
         return None
 
     custom_provider = (os.environ.get("DSPY_LM_CUSTOM_PROVIDER") or "").strip() or None
@@ -229,6 +245,10 @@ def _delegate_lm_kwargs(
 ) -> dict[str, Any] | None:
     model = model_name or os.environ.get("DSPY_DELEGATE_LM_MODEL")
     if not model:
+        logger.warning(
+            "No delegate LM model configured (DSPY_DELEGATE_LM_MODEL is unset/empty); "
+            "returning None. Callers should fall back to the planner LM."
+        )
         return None
 
     api_key = (
@@ -434,6 +454,12 @@ def resolve_lm(
             return None
         dspy = _import_dspy()
         configure_dspy_cache_security(dspy)
+        # Use ResponseAPILM for OpenAI providers
+        if model_name.startswith("openai/"):
+            from fleet_rlm.runtime.lm import ResponseAPILM
+
+            api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY") or ""
+            return ResponseAPILM(model=model_name, api_key=api_key, temperature=0.0)
         return dspy.LM(model_name, temperature=0.0)
     raise ValueError(f"Unknown LM role: {role!r}")
 

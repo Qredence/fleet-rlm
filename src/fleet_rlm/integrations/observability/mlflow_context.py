@@ -47,6 +47,12 @@ _CURRENT_TRACE_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar[s
 _TRACE_ID_LOCK = Lock()
 _TRACE_IDS_BY_CLIENT_REQUEST_ID: dict[str, str] = {}
 _TRAJECTORY_VALUE_LIMIT = 8_000
+
+# ---------------------------------------------------------------------------
+# Idempotent DSPy autolog registration (VAL-C-012, VAL-C-036)
+# ---------------------------------------------------------------------------
+_AUTOLOG_REGISTERED: bool = False
+_AUTOLOG_LOCK = Lock()
 _RLM_REPL_TOOL_SCHEMA: dict[str, Any] = {
     "type": "function",
     "function": {
@@ -99,7 +105,11 @@ def _application_turn_span(context: MlflowTraceRequestContext):
     attributes = {
         "fleet_rlm.trace_kind": "application",
         "mlflow.traceName": "fleet_rlm.chat_turn",
+        # GenAI semantic convention attributes (VAL-C-013)
+        "gen_ai.system": "fleet-rlm",
     }
+    if context.model_id:
+        attributes["gen_ai.request.model"] = context.model_id
     entered = False
     try:
         with start_span(name="fleet_rlm.chat_turn", span_type="CHAIN", attributes=attributes) as span:
@@ -116,15 +126,64 @@ def _application_turn_span(context: MlflowTraceRequestContext):
                 outputs: dict[str, Any] = {}
                 if context.final_response_preview:
                     outputs["response"] = context.final_response_preview
+                else:
+                    # Fallback: ensure traceOutputs is never empty
+                    outputs["response"] = "[No response captured - RLM iteration incomplete]"
                 if outputs:
                     set_outputs = getattr(span, "set_outputs", None)
                     if callable(set_outputs):
                         set_outputs(outputs)
+                # Set GenAI usage attributes on the application turn span (VAL-C-013)
+                set_attribute = getattr(span, "set_attribute", None)
+                if callable(set_attribute):
+                    if context.total_input_tokens > 0:
+                        try:
+                            set_attribute("gen_ai.usage.prompt_tokens", context.total_input_tokens)
+                        except Exception:
+                            runtime.logger.debug("Failed to set gen_ai.usage.prompt_tokens", exc_info=True)
+                    if context.total_output_tokens > 0:
+                        try:
+                            set_attribute("gen_ai.usage.completion_tokens", context.total_output_tokens)
+                        except Exception:
+                            runtime.logger.debug("Failed to set gen_ai.usage.completion_tokens", exc_info=True)
     except Exception:
         runtime.logger.debug("MLflow application turn span skipped.", exc_info=True)
         if not entered:
             yield None
         raise
+
+
+def _register_dspy_autolog(mlflow: Any) -> bool:
+    """Register ``mlflow.dspy.autolog()`` exactly once per process.
+
+    Guards against duplicate registration with a module-level flag so that
+    multiple chat turns in the same process do not re-register autolog
+    (VAL-C-012, VAL-C-036).
+
+    Returns:
+        True if autolog is registered, False otherwise.
+    """
+    global _AUTOLOG_REGISTERED  # noqa: PLW0603
+
+    with _AUTOLOG_LOCK:
+        if _AUTOLOG_REGISTERED:
+            return True
+
+        dspy_autolog = getattr(getattr(mlflow, "dspy", None), "autolog", None)
+        if not callable(dspy_autolog):
+            return False
+
+        try:
+            dspy_autolog(
+                log_traces=True,
+                log_compiles=True,
+                log_evals=True,
+            )
+            _AUTOLOG_REGISTERED = True
+            return True
+        except Exception:
+            _runtime_module().logger.debug("mlflow.dspy.autolog registration skipped.", exc_info=True)
+            return False
 
 
 def _try_initialize_mlflow_for_turn() -> None:
@@ -140,6 +199,11 @@ def _try_initialize_mlflow_for_turn() -> None:
         return
 
     initialize_mlflow(config)
+
+    # Ensure DSPy autolog is registered (idempotent; VAL-C-012, VAL-C-036)
+    mlflow = _import_mlflow()
+    if mlflow is not None:
+        _register_dspy_autolog(mlflow)
 
 
 @contextmanager
@@ -399,6 +463,9 @@ def record_rlm_trajectory_spans(trajectory: Any) -> int:
             "fleet_rlm.trajectory_has_output": str(
                 step.get("output") is not None or step.get("observation") is not None
             ).lower(),
+            # GenAI semantic convention attributes (VAL-C-013)
+            "gen_ai.system": "fleet-rlm",
+            "gen_ai.tool.name": str(tool_name),
         }
         failed = _trajectory_step_failed(step)
         if failed:
@@ -720,14 +787,148 @@ def merge_trace_result_metadata(
     return merged
 
 
+# ---------------------------------------------------------------------------
+# GenAI trace attribute setters (VAL-C-013, VAL-C-037)
+# ---------------------------------------------------------------------------
+
+
+def set_gen_ai_system_attributes(
+    span: Any,
+    *,
+    system: str = "fleet-rlm",
+    model: str | None = None,
+) -> None:
+    """Set GenAI system attributes on a span (no-op when MLflow unavailable).
+
+    Sets the following GenAI semantic convention attributes:
+    - gen_ai.system: The AI system identifier
+    - gen_ai.request.model: The model being used
+
+    Args:
+        span: The MLflow span to update.
+        system: The AI system name (default: "fleet-rlm").
+        model: The model identifier (optional).
+
+    Note:
+        This function is a no-op when MLFLOW_ENABLED=false or when the span
+        is None (VAL-C-037).
+    """
+    if not _env_bool(os.getenv("MLFLOW_ENABLED"), default=True):
+        return
+    if span is None:
+        return
+
+    attributes: dict[str, Any] = {
+        "gen_ai.system": system,
+    }
+    if model:
+        attributes["gen_ai.request.model"] = model
+
+    # Try to set attributes via span.set_attribute or update_current_trace
+    for key, value in attributes.items():
+        try:
+            set_attribute = getattr(span, "set_attribute", None)
+            if callable(set_attribute):
+                set_attribute(key, value)
+        except Exception:
+            _runtime_module().logger.debug("Failed to set GenAI attribute %s", key, exc_info=True)
+
+
+def set_gen_ai_usage_attributes(
+    span: Any,
+    *,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+) -> None:
+    """Set GenAI usage attributes on a span (no-op when MLflow unavailable).
+
+    Sets the following GenAI semantic convention attributes:
+    - gen_ai.usage.prompt_tokens: Number of prompt tokens
+    - gen_ai.usage.completion_tokens: Number of completion tokens
+
+    Args:
+        span: The MLflow span to update.
+        prompt_tokens: Number of prompt/input tokens (optional).
+        completion_tokens: Number of completion/output tokens (optional).
+
+    Note:
+        This function is a no-op when MLFLOW_ENABLED=false or when the span
+        is None (VAL-C-037).
+    """
+    if not _env_bool(os.getenv("MLFLOW_ENABLED"), default=True):
+        return
+    if span is None:
+        return
+
+    if prompt_tokens is not None:
+        try:
+            set_attribute = getattr(span, "set_attribute", None)
+            if callable(set_attribute):
+                set_attribute("gen_ai.usage.prompt_tokens", prompt_tokens)
+        except Exception:
+            _runtime_module().logger.debug("Failed to set gen_ai.usage.prompt_tokens", exc_info=True)
+
+    if completion_tokens is not None:
+        try:
+            set_attribute = getattr(span, "set_attribute", None)
+            if callable(set_attribute):
+                set_attribute("gen_ai.usage.completion_tokens", completion_tokens)
+        except Exception:
+            _runtime_module().logger.debug("Failed to set gen_ai.usage.completion_tokens", exc_info=True)
+
+
+def set_gen_ai_tool_attributes(
+    span: Any,
+    *,
+    tool_name: str,
+) -> None:
+    """Set GenAI tool attributes on a span (no-op when MLflow unavailable).
+
+    Sets the following GenAI semantic convention attributes:
+    - gen_ai.tool.name: The name of the tool being called
+
+    Args:
+        span: The MLflow span to update.
+        tool_name: The name of the tool.
+
+    Note:
+        This function is a no-op when MLFLOW_ENABLED=false or when the span
+        is None (VAL-C-037).
+    """
+    if not _env_bool(os.getenv("MLFLOW_ENABLED"), default=True):
+        return
+    if span is None:
+        return
+
+    try:
+        set_attribute = getattr(span, "set_attribute", None)
+        if callable(set_attribute):
+            set_attribute("gen_ai.tool.name", tool_name)
+    except Exception:
+        _runtime_module().logger.debug("Failed to set gen_ai.tool.name", exc_info=True)
+
+
+def is_autolog_registered() -> bool:
+    """Return whether DSPy autolog has been registered.
+
+    Returns:
+        True if mlflow.dspy.autolog has been called successfully.
+    """
+    return _AUTOLOG_REGISTERED
+
+
 __all__ = [
     "MlflowTraceRequestContext",
     "capture_last_active_trace_id",
     "current_request_context",
+    "is_autolog_registered",
     "merge_trace_result_metadata",
     "mlflow_child_span",
     "mlflow_request_context",
     "new_client_request_id",
+    "set_gen_ai_system_attributes",
+    "set_gen_ai_tool_attributes",
+    "set_gen_ai_usage_attributes",
     "set_mlflow_span_outputs",
     "trace_result_metadata",
     "update_current_mlflow_trace",

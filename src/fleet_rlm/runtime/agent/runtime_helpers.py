@@ -264,6 +264,27 @@ def relay_event_from_rlm_step(payload: dict[str, Any]) -> RuntimeEvent | None:
             return None
         return RuntimeEvent.status(text, payload=dict(payload))
 
+    # Categorized sandbox events emitted by LogStreamParser. phase is
+    # "sandbox_<category>" where category is one of: code_exec, tool_call,
+    # output, error, status.
+    if phase.startswith("sandbox_"):
+        category = phase[len("sandbox_") :]
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            return None
+        # Errors get a STATUS event with error tone so they stand out.
+        # Other categories stream as STATUS events carrying the raw message
+        # plus a category tag for the frontend to render an icon.
+        return RuntimeEvent.status(
+            text,
+            payload={
+                "phase": "sandbox_activity",
+                "source_type": "sandbox_activity",
+                "category": category,
+                "details": payload.get("details"),
+            },
+        )
+
     return None
 
 
@@ -279,6 +300,11 @@ def relay_event_from_interpreter_hook(payload: dict[str, Any]) -> RuntimeEvent |
         event = RuntimeEvent.tool_call(tool_name="repl_execute", tool_args=tool_args)
         event.payload["phase"] = "sandbox_exec"
         event.payload["code_hash"] = payload.get("code_hash")
+        # For SANDBOX_EXEC projections (VAL-A-020), ensure tool.tool_input
+        # carries the raw code string so the frontend can extract it as a
+        # fallback when tool.tool_args["code"] is not available.
+        if event.tool is not None and code_preview:
+            event.tool.tool_input = code_preview
         return event
 
     if phase == "complete":
@@ -290,6 +316,12 @@ def relay_event_from_interpreter_hook(payload: dict[str, Any]) -> RuntimeEvent |
         event.payload["success"] = payload.get("success")
         if stderr:
             event.payload["stderr_preview"] = stderr
+        # For SANDBOX_EXEC projections (VAL-A-020), ensure tool.tool_args and
+        # tool.tool_input carry the raw code string so the frontend can
+        # extract it even from tool_result events.
+        if event.tool is not None and code_preview:
+            event.tool.tool_args = {"code": code_preview}
+            event.tool.tool_input = code_preview
         return event
 
     if phase == "progress":

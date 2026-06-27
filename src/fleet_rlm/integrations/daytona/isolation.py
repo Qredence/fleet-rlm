@@ -1137,8 +1137,14 @@ def stage_context_paths(
                         source_id=source_id,
                     )
                 )
-        except DaytonaDiagnosticError:
-            raise
+        except DaytonaDiagnosticError as exc:
+            # A non-existent or unreadable host context path is recoverable:
+            # skip it, warn, and stage the remaining paths rather than aborting
+            # the whole turn. Inferred context paths captured from chat text
+            # (e.g. URL routes like /docs) routinely don't exist on the host,
+            # and a missing optional context source must not block the turn.
+            logger.warning("Skipping unreachable context path %r: %s", raw_path, exc)
+            continue
         except Exception as exc:
             raise DaytonaDiagnosticError(
                 f"Failed to stage context path '{display_path}': {exc}",

@@ -43,7 +43,6 @@ class _FakeFleetRepository(FleetRepository):
 def _make_deps(secret_key: str, repo: _FakeFleetRepository, identity):
     config = SimpleNamespace(
         app_env="production",
-        auth_mode="neon",
         secret_encryption_key=secret_key,
         env_path=None,
     )

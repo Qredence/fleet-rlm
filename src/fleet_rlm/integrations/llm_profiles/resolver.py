@@ -102,6 +102,7 @@ def build_lm_kwargs_from_resolved(
     *,
     max_tokens: int | None = None,
     timeout: int | float | None = None,
+    temperature: float | None = None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
         "model": config.litellm_model,
@@ -124,6 +125,8 @@ def build_lm_kwargs_from_resolved(
         kwargs["max_tokens"] = max_tokens
     if timeout is not None:
         kwargs["timeout"] = timeout
+    if temperature is not None:
+        kwargs["temperature"] = temperature
     return kwargs
 
 

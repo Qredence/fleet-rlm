@@ -77,3 +77,51 @@ def test_build_lm_kwargs_from_resolved_uses_env_litellm_model_name() -> None:
     assert kwargs["model"] == "openai/gemini-3.1-pro-preview"
     assert kwargs["api_key"] == "test-key"
     assert kwargs["max_tokens"] == 32
+
+
+def test_build_lm_kwargs_from_resolved_forwards_timeout_and_temperature() -> None:
+    """Planner guardrails (timeout/temperature) must reach dspy.LM kwargs.
+
+    Regression guard for tr-52a8d5b5d13d43ac102f7aba2aca9f58, where the hosted
+    BYOK path constructed the planner LM with no ``timeout``/``temperature``
+    (and no ``max_tokens``), letting a single stalled glm-5.2 call run 156s.
+    """
+    config = ResolvedRoleLmConfig(
+        role="planner",
+        profile_id=uuid4(),
+        profile_name="Planner",
+        model_id="glm-5.2",
+        litellm_model="openai/glm-5.2",
+        api_key="test-key",
+        api_base="https://api.example.com/v1",
+    )
+
+    kwargs = build_lm_kwargs_from_resolved(
+        config,
+        max_tokens=64000,
+        timeout=60.0,
+        temperature=0.7,
+    )
+
+    assert kwargs["max_tokens"] == 64000
+    assert kwargs["timeout"] == 60.0
+    assert kwargs["temperature"] == 0.7
+
+
+def test_build_lm_kwargs_from_resolved_omits_unset_guardrails() -> None:
+    """Unset guardrails must not pollute kwargs (dspy.LM uses its own defaults)."""
+    config = ResolvedRoleLmConfig(
+        role="planner",
+        profile_id=uuid4(),
+        profile_name="Planner",
+        model_id="glm-5.2",
+        litellm_model="openai/glm-5.2",
+        api_key="test-key",
+        api_base=None,
+    )
+
+    kwargs = build_lm_kwargs_from_resolved(config)
+
+    assert "max_tokens" not in kwargs
+    assert "timeout" not in kwargs
+    assert "temperature" not in kwargs

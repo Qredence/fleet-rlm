@@ -62,15 +62,17 @@ def test_canonical_http_routes_return_stable_status_codes(no_db_client, auth_hea
     assert ready.status_code == 200
 
     auth_me = no_db_client.get("/api/v1/auth/me", headers=auth_headers)
-    assert auth_me.status_code in {200, 401}
+    # 200 = authenticated, 401 = auth required/rejected, 503 = DB unavailable
+    # (the no_db_app fixture has no DATABASE_URL, so tenant admission returns 503)
+    assert auth_me.status_code in {200, 401, 503}
 
     ws_ticket = no_db_client.post("/api/v1/auth/ws-ticket", headers=auth_headers)
-    assert ws_ticket.status_code in {200, 401}
+    assert ws_ticket.status_code in {200, 401, 503}
     if ws_ticket.status_code == 200:
         assert ws_ticket.json()["ticket"]
 
     session_state = no_db_client.get("/api/v1/sessions/state", headers=auth_headers)
-    assert session_state.status_code in {200, 500}
+    assert session_state.status_code in {200, 500, 503}
 
 
 def test_route_tree_contains_canonical_paths_and_excludes_retired_routes(no_db_app) -> None:

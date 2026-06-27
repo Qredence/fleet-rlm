@@ -2157,6 +2157,87 @@ paths:
                 $ref: "#/components/schemas/HTTPValidationError"
       security:
         - HTTPBearer: []
+  /api/v1/evaluations:
+    get:
+      tags:
+        - evaluations
+      summary: List evaluation runs
+      description: Return a list of all evaluation runs, most recent first. Use the
+        run_id to fetch the full report via GET /evaluations/{run_id}.
+      operationId: list_evaluations_api_v1_evaluations_get
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvaluationRunListResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+    post:
+      tags:
+        - evaluations
+      summary: Start evaluation run
+      description: Kick off a GenAI evaluation run on MLflow traces. Returns a run_id
+        that can be used to retrieve the full report via GET /evaluations/{run_id}.
+      operationId: start_evaluation_api_v1_evaluations_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvaluationRequest"
+        required: true
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvaluationRunResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "503":
+          description: MLflow or evaluation services are unavailable.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/evaluations/{run_id}:
+    get:
+      tags:
+        - evaluations
+      summary: Get evaluation report
+      description: Retrieve the full evaluation report for a given run_id. The report
+        includes per-trace scores (4 judges + 6 metrics) and aggregate statistics.
+      operationId: get_evaluation_api_v1_evaluations__run_id__get
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Unique identifier for the evaluation run.
+            title: Run Id
+          description: Unique identifier for the evaluation run.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvaluationReportResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: Evaluation run not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
 components:
   schemas:
     AuthMeResponse:
@@ -2338,6 +2419,69 @@ components:
         - created_at
       title: DatasetResponse
       description: Metadata for a registered dataset.
+    EvaluationReportResponse:
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+          description: Unique identifier for this evaluation run.
+        created_at:
+          type: string
+          title: Created At
+          description: ISO8601 timestamp when the report was created.
+        filters:
+          additionalProperties: true
+          type: object
+          title: Filters
+          description: Dictionary echoing the trace_ids/limit/from_last_days used.
+        per_trace:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Per Trace
+          description: List of per-trace score dictionaries with all 10 metrics.
+        aggregates:
+          additionalProperties:
+            additionalProperties:
+              type: number
+            type: object
+          type: object
+          title: Aggregates
+          description: Dictionary with mean and median for each score.
+      type: object
+      required:
+        - run_id
+        - created_at
+        - filters
+        - per_trace
+        - aggregates
+      title: EvaluationReportResponse
+      description: Response body for GET /api/v1/evaluations/{run_id}.
+    EvaluationRequest:
+      properties:
+        trace_ids:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          title: Trace Ids
+          description: Optional list of specific trace IDs to evaluate.
+        limit:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Limit
+          description: Optional maximum number of traces to evaluate.
+        from_last_days:
+          type: integer
+          title: From Last Days
+          description: "Number of days to look back for traces (default: 1)."
+          default: 1
+      type: object
+      title: EvaluationRequest
+      description: Request body for POST /api/v1/evaluations.
     EvaluationResultItem:
       properties:
         id:
@@ -2409,6 +2553,51 @@ components:
         - has_more
       title: EvaluationResultsResponse
       description: Paginated evaluation results for a run.
+    EvaluationRunListItem:
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+          description: Unique identifier for this evaluation run.
+        created_at:
+          type: string
+          title: Created At
+          description: ISO8601 timestamp when the report was created.
+        trace_count:
+          type: integer
+          title: Trace Count
+          description: Number of traces evaluated in this run.
+      type: object
+      required:
+        - run_id
+        - created_at
+        - trace_count
+      title: EvaluationRunListItem
+      description: Summary entry for a single evaluation run in a listing.
+    EvaluationRunListResponse:
+      properties:
+        runs:
+          items:
+            $ref: "#/components/schemas/EvaluationRunListItem"
+          type: array
+          title: Runs
+          description: List of evaluation runs, most recent first.
+      type: object
+      required:
+        - runs
+      title: EvaluationRunListResponse
+      description: Response body for GET /api/v1/evaluations.
+    EvaluationRunResponse:
+      properties:
+        run_id:
+          type: string
+          title: Run Id
+          description: Unique identifier for this evaluation run.
+      type: object
+      required:
+        - run_id
+      title: EvaluationRunResponse
+      description: Response body for POST /api/v1/evaluations.
     GEPAModuleInfo:
       properties:
         slug:
@@ -4103,7 +4292,8 @@ components:
             type: string
           type: array
           title: Skipped
-          description: Runtime setting keys that were accepted in the request but not persisted (e.g. masked secret round-trips).
+          description: Runtime setting keys that were accepted in the request but
+            not persisted (e.g. masked secret round-trips).
         env_path:
           type: string
           title: Env Path
@@ -4430,14 +4620,6 @@ components:
             - production
           title: App Env
           description: Active deployment environment.
-        auth_mode:
-          type: string
-          enum:
-            - dev
-            - entra
-            - neon
-          title: Auth Mode
-          description: Authentication mode the server is running under.
         auth_required:
           type: boolean
           title: Auth Required
@@ -4476,7 +4658,6 @@ components:
       type: object
       required:
         - app_env
-        - auth_mode
         - auth_required
         - sandbox_provider
         - database_enabled

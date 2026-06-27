@@ -524,3 +524,454 @@ def test_mlflow_child_span_records_inputs_outputs_and_errors(monkeypatch) -> Non
 
     assert captured[1]["name"] == "fleet_rlm.failing"
     assert captured[1]["status"] == "ERROR"
+
+
+def test_register_dspy_autolog_is_idempotent(monkeypatch) -> None:
+    """VAL-C-012, VAL-C-036: autolog should only be registered once."""
+    from fleet_rlm.integrations.observability import mlflow_context
+
+    call_count = 0
+
+    def mock_autolog(**kwargs: Any) -> None:
+        nonlocal call_count
+        call_count += 1
+        # Verify the correct parameters are passed
+        assert kwargs.get("log_traces") is True
+        assert kwargs.get("log_compiles") is True
+        assert kwargs.get("log_evals") is True
+
+    fake_mlflow = SimpleNamespace(
+        dspy=SimpleNamespace(autolog=mock_autolog),
+    )
+
+    # Reset the global flag
+    monkeypatch.setattr(mlflow_context, "_AUTOLOG_REGISTERED", False)
+
+    # First call should register
+    result1 = mlflow_context._register_dspy_autolog(fake_mlflow)
+    assert result1 is True
+    assert call_count == 1
+    assert mlflow_context._AUTOLOG_REGISTERED is True
+
+    # Second call should be idempotent (no additional call)
+    result2 = mlflow_context._register_dspy_autolog(fake_mlflow)
+    assert result2 is True
+    assert call_count == 1  # Still 1, not 2
+    assert mlflow_context._AUTOLOG_REGISTERED is True
+
+
+def test_register_dspy_autolog_handles_missing_dspy_module(monkeypatch) -> None:
+    """_register_dspy_autolog should handle missing dspy module gracefully."""
+    from fleet_rlm.integrations.observability import mlflow_context
+
+    fake_mlflow = SimpleNamespace()  # No dspy attribute
+
+    monkeypatch.setattr(mlflow_context, "_AUTOLOG_REGISTERED", False)
+
+    result = mlflow_context._register_dspy_autolog(fake_mlflow)
+    assert result is False
+    assert mlflow_context._AUTOLOG_REGISTERED is False
+
+
+def test_set_gen_ai_system_attributes_sets_correct_attributes(monkeypatch) -> None:
+    """VAL-C-013: set_gen_ai_system_attributes should set system and model attributes."""
+    from fleet_rlm.integrations.observability import mlflow_context
+
+    captured_attrs: dict[str, Any] = {}
+
+    class FakeSpan:
+        def set_attribute(self, key: str, value: Any) -> None:
+            captured_attrs[key] = value
+
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+
+    span = FakeSpan()
+    mlflow_context.set_gen_ai_system_attributes(
+        span,
+        system="test-system",
+        model="test-model",
+    )
+
+    assert captured_attrs["gen_ai.system"] == "test-system"
+    assert captured_attrs["gen_ai.request.model"] == "test-model"
+
+
+def test_set_gen_ai_system_attributes_is_noop_when_disabled(monkeypatch) -> None:
+    """VAL-C-037: attribute setters should be no-ops when MLflow is disabled."""
+    from fleet_rlm.integrations.observability import mlflow_context
+
+    captured_attrs: dict[str, Any] = {}
+
+    class FakeSpan:
+        def set_attribute(self, key: str, value: Any) -> None:
+            captured_attrs[key] = value
+
+    monkeypatch.setenv("MLFLOW_ENABLED", "false")
+
+    span = FakeSpan()
+    mlflow_context.set_gen_ai_system_attributes(
+        span,
+        system="test-system",
+        model="test-model",
+    )
+
+    # Should not set any attributes when disabled
+    assert len(captured_attrs) == 0
+
+
+def test_set_gen_ai_system_attributes_handles_none_span(monkeypatch) -> None:
+    """set_gen_ai_system_attributes should handle None span gracefully."""
+    from fleet_rlm.integrations.observability import mlflow_context
+
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+
+    # Should not raise an exception
+    mlflow_context.set_gen_ai_system_attributes(
+        None,
+        system="test-system",
+        model="test-model",
+    )
+
+
+def test_set_gen_ai_usage_attributes_sets_token_counts(monkeypatch) -> None:
+    """VAL-C-013: set_gen_ai_usage_attributes should set token usage attributes."""
+    from fleet_rlm.integrations.observability import mlflow_context
+
+    captured_attrs: dict[str, Any] = {}
+
+    class FakeSpan:
+        def set_attribute(self, key: str, value: Any) -> None:
+            captured_attrs[key] = value
+
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+
+    span = FakeSpan()
+    mlflow_context.set_gen_ai_usage_attributes(
+        span,
+        prompt_tokens=100,
+        completion_tokens=50,
+    )
+
+    assert captured_attrs["gen_ai.usage.prompt_tokens"] == 100
+    assert captured_attrs["gen_ai.usage.completion_tokens"] == 50
+
+
+def test_set_gen_ai_usage_attributes_is_noop_when_disabled(monkeypatch) -> None:
+    """VAL-C-037: usage attribute setter should be no-op when MLflow is disabled."""
+    from fleet_rlm.integrations.observability import mlflow_context
+
+    captured_attrs: dict[str, Any] = {}
+
+    class FakeSpan:
+        def set_attribute(self, key: str, value: Any) -> None:
+            captured_attrs[key] = value
+
+    monkeypatch.setenv("MLFLOW_ENABLED", "false")
+
+    span = FakeSpan()
+    mlflow_context.set_gen_ai_usage_attributes(
+        span,
+        prompt_tokens=100,
+        completion_tokens=50,
+    )
+
+    assert len(captured_attrs) == 0
+
+
+def test_set_gen_ai_tool_attributes_sets_tool_name(monkeypatch) -> None:
+    """VAL-C-013: set_gen_ai_tool_attributes should set tool name attribute."""
+    from fleet_rlm.integrations.observability import mlflow_context
+
+    captured_attrs: dict[str, Any] = {}
+
+    class FakeSpan:
+        def set_attribute(self, key: str, value: Any) -> None:
+            captured_attrs[key] = value
+
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+
+    span = FakeSpan()
+    mlflow_context.set_gen_ai_tool_attributes(
+        span,
+        tool_name="test-tool",
+    )
+
+    assert captured_attrs["gen_ai.tool.name"] == "test-tool"
+
+
+def test_set_gen_ai_tool_attributes_is_noop_when_disabled(monkeypatch) -> None:
+    """VAL-C-037: tool attribute setter should be no-op when MLflow is disabled."""
+    from fleet_rlm.integrations.observability import mlflow_context
+
+    captured_attrs: dict[str, Any] = {}
+
+    class FakeSpan:
+        def set_attribute(self, key: str, value: Any) -> None:
+            captured_attrs[key] = value
+
+    monkeypatch.setenv("MLFLOW_ENABLED", "false")
+
+    span = FakeSpan()
+    mlflow_context.set_gen_ai_tool_attributes(
+        span,
+        tool_name="test-tool",
+    )
+
+    assert len(captured_attrs) == 0
+
+
+def test_gen_ai_attributes_in_application_turn_span(monkeypatch) -> None:
+    """VAL-C-013: application turn span should include gen_ai.system attribute."""
+    from fleet_rlm.integrations.observability import mlflow_context
+    from fleet_rlm.integrations.observability.mlflow_context import (
+        MlflowTraceRequestContext,
+        mlflow_request_context,
+    )
+
+    captured: list[dict[str, object]] = []
+
+    class FakeSpan:
+        def __init__(self, name: str, span_type: str | None, attributes: dict[str, object] | None) -> None:
+            self.record: dict[str, object] = {
+                "name": name,
+                "span_type": span_type,
+                "attributes": attributes or {},
+            }
+
+        def __enter__(self) -> "FakeSpan":
+            captured.append(self.record)
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def set_inputs(self, inputs: object) -> None:
+            self.record["inputs"] = inputs
+
+        def set_outputs(self, outputs: object) -> None:
+            self.record["outputs"] = outputs
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=object,
+        get_active_trace_id=lambda: "tr-parent",
+        update_current_trace=lambda **kwargs: None,
+        start_span=lambda name, span_type=None, attributes=None: FakeSpan(name, span_type, attributes),
+    )
+    monkeypatch.setattr(
+        mlflow_context,
+        "_runtime_module",
+        lambda: SimpleNamespace(
+            _import_mlflow=lambda: fake_mlflow,
+            get_mlflow_config=lambda: SimpleNamespace(active_model_id=None),
+            flush_mlflow_traces=lambda: None,
+            logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        ),
+    )
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+
+    with mlflow_request_context(
+        MlflowTraceRequestContext(
+            client_request_id="chat-genai",
+            model_id="gemini-2.0-flash",
+        )
+    ):
+        pass
+
+    # Check that gen_ai attributes are present
+    assert captured[0]["name"] == "fleet_rlm.chat_turn"
+    assert captured[0]["attributes"]["gen_ai.system"] == "fleet-rlm"
+    assert captured[0]["attributes"]["gen_ai.request.model"] == "gemini-2.0-flash"
+
+
+def test_gen_ai_attributes_in_trajectory_spans(monkeypatch) -> None:
+    """VAL-C-013: trajectory spans should include gen_ai.tool.name attribute."""
+    from fleet_rlm.integrations.observability import mlflow_context
+
+    captured: list[dict[str, Any]] = []
+
+    class FakeSpan:
+        def __init__(self, name: str, span_type: str | None, attributes: dict[str, Any] | None) -> None:
+            self.record = {"name": name, "span_type": span_type, "attributes": attributes or {}, "status": "OK"}
+
+        def __enter__(self) -> "FakeSpan":
+            captured.append(self.record)
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def set_inputs(self, inputs: Any) -> None:
+            self.record["inputs"] = inputs
+
+        def set_outputs(self, outputs: Any) -> None:
+            self.record["outputs"] = outputs
+
+        def set_status(self, status: str) -> None:
+            self.record["status"] = status
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=object,
+        start_span=lambda name, span_type=None, attributes=None: FakeSpan(name, span_type, attributes),
+    )
+    monkeypatch.setattr(
+        mlflow_context,
+        "_runtime_module",
+        lambda: SimpleNamespace(
+            _import_mlflow=lambda: fake_mlflow,
+            logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        ),
+    )
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+
+    recorded = mlflow_context.record_rlm_trajectory_spans(
+        [
+            {
+                "tool_name": "search",
+                "tool_input": {"query": "test"},
+                "output": "result",
+            }
+        ]
+    )
+
+    assert recorded == 1
+    # Find the TOOL span (not the available_tools span)
+    tool_span = next(s for s in captured if s["span_type"] == "TOOL")
+    assert tool_span["attributes"]["gen_ai.system"] == "fleet-rlm"
+    assert tool_span["attributes"]["gen_ai.tool.name"] == "search"
+
+
+def test_gen_ai_usage_attributes_in_application_turn_span(monkeypatch) -> None:
+    """VAL-C-013: application turn span should include gen_ai.usage.* attributes when tokens are available."""
+    from fleet_rlm.integrations.observability import mlflow_context
+    from fleet_rlm.integrations.observability.mlflow_context import (
+        MlflowTraceRequestContext,
+        mlflow_request_context,
+    )
+
+    captured: list[dict[str, Any]] = []
+
+    class FakeSpan:
+        def __init__(self, name: str, span_type: str | None, attributes: dict[str, Any] | None) -> None:
+            self.record: dict[str, Any] = {
+                "name": name,
+                "span_type": span_type,
+                "attributes": attributes or {},
+                "dynamic_attributes": {},
+            }
+
+        def __enter__(self) -> "FakeSpan":
+            captured.append(self.record)
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def set_inputs(self, inputs: object) -> None:
+            self.record["inputs"] = inputs
+
+        def set_outputs(self, outputs: object) -> None:
+            self.record["outputs"] = outputs
+
+        def set_attribute(self, key: str, value: Any) -> None:
+            self.record["dynamic_attributes"][key] = value
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=object,
+        get_active_trace_id=lambda: "tr-usage",
+        update_current_trace=lambda **kwargs: None,
+        start_span=lambda name, span_type=None, attributes=None: FakeSpan(name, span_type, attributes),
+    )
+    monkeypatch.setattr(
+        mlflow_context,
+        "_runtime_module",
+        lambda: SimpleNamespace(
+            _import_mlflow=lambda: fake_mlflow,
+            get_mlflow_config=lambda: SimpleNamespace(active_model_id=None),
+            flush_mlflow_traces=lambda: None,
+            logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        ),
+    )
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+
+    with mlflow_request_context(
+        MlflowTraceRequestContext(
+            client_request_id="chat-usage",
+            model_id="gemini-2.0-flash",
+            total_input_tokens=150,
+            total_output_tokens=75,
+        )
+    ):
+        pass
+
+    # Check that gen_ai.usage.* attributes are present on the application turn span
+    assert captured[0]["name"] == "fleet_rlm.chat_turn"
+    assert captured[0]["dynamic_attributes"]["gen_ai.usage.prompt_tokens"] == 150
+    assert captured[0]["dynamic_attributes"]["gen_ai.usage.completion_tokens"] == 75
+
+
+def test_gen_ai_usage_attributes_not_set_when_zero_tokens(monkeypatch) -> None:
+    """VAL-C-013: gen_ai.usage.* attributes should not be set when token counts are zero."""
+    from fleet_rlm.integrations.observability import mlflow_context
+    from fleet_rlm.integrations.observability.mlflow_context import (
+        MlflowTraceRequestContext,
+        mlflow_request_context,
+    )
+
+    captured: list[dict[str, Any]] = []
+
+    class FakeSpan:
+        def __init__(self, name: str, span_type: str | None, attributes: dict[str, Any] | None) -> None:
+            self.record: dict[str, Any] = {
+                "name": name,
+                "span_type": span_type,
+                "attributes": attributes or {},
+                "dynamic_attributes": {},
+            }
+
+        def __enter__(self) -> "FakeSpan":
+            captured.append(self.record)
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def set_inputs(self, inputs: object) -> None:
+            self.record["inputs"] = inputs
+
+        def set_outputs(self, outputs: object) -> None:
+            self.record["outputs"] = outputs
+
+        def set_attribute(self, key: str, value: Any) -> None:
+            self.record["dynamic_attributes"][key] = value
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=object,
+        get_active_trace_id=lambda: "tr-zero",
+        update_current_trace=lambda **kwargs: None,
+        start_span=lambda name, span_type=None, attributes=None: FakeSpan(name, span_type, attributes),
+    )
+    monkeypatch.setattr(
+        mlflow_context,
+        "_runtime_module",
+        lambda: SimpleNamespace(
+            _import_mlflow=lambda: fake_mlflow,
+            get_mlflow_config=lambda: SimpleNamespace(active_model_id=None),
+            flush_mlflow_traces=lambda: None,
+            logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        ),
+    )
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+
+    with mlflow_request_context(
+        MlflowTraceRequestContext(
+            client_request_id="chat-zero",
+            total_input_tokens=0,
+            total_output_tokens=0,
+        )
+    ):
+        pass
+
+    # Check that gen_ai.usage.* attributes are NOT set when tokens are zero
+    assert captured[0]["name"] == "fleet_rlm.chat_turn"
+    assert "gen_ai.usage.prompt_tokens" not in captured[0]["dynamic_attributes"]
+    assert "gen_ai.usage.completion_tokens" not in captured[0]["dynamic_attributes"]

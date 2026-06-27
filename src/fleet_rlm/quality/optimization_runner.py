@@ -225,6 +225,12 @@ def _resolve_reflection_lm(reflection_lm_config: dict[str, Any] | None = None) -
         lm_kwargs = dict(reflection_lm_config.get("lm_kwargs") or {})
         if not lm_kwargs:
             raise RuntimeError("Selected reflection model is missing DSPy LM configuration.")
+        # Use ResponseAPILM for OpenAI providers
+        model = lm_kwargs.get("model", "")
+        if model.startswith("openai/"):
+            from fleet_rlm.runtime.lm import ResponseAPILM
+
+            return ResponseAPILM(**lm_kwargs)
         return dspy.LM(**lm_kwargs)
 
     from fleet_rlm.runtime.config import resolve_lm
