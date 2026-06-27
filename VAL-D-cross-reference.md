@@ -4,14 +4,14 @@ This document maps each boundary rule from `architecture.md` §2.7 to the corres
 
 | Rule ID | Architecture Reference | Codebase-Map Entry | Script Implementation |
 |---------|----------------------|-------------------|----------------------|
-| VAL-D-008 | §2.7: runtime/ may not import from api.routers | `runtime/` package table: "Off-Limits Imports: api.routers" | `check_backend_runtime_imports()` function, lines ~200-215 |
-| VAL-D-009 | §2.7: quality/ may not import from api/ business logic | `quality/` package table: "Off-Limits Imports: api.routers, api.runtime_services" | `check_backend_quality_imports()` function, lines ~220-240 |
+| VAL-D-008 | §2.7: runtime/ may not import from api.routers | `runtime/` package table: "Off-Limits Imports: api.routers" | `check_backend_runtime_imports()` function, lines ~169-190 |
+| VAL-D-009 | §2.7: quality/ may not import from api/ business logic | `quality/` package table: "Off-Limits Imports: api.routers, api.runtime_services" | `check_backend_quality_imports()` function, lines ~193-222 |
 | VAL-D-010 | §2.7: quality/ may import from runtime/integrations | `quality/` package table: "Allowed Importers: runtime/, integrations/" | Allowed by default (not in violation list) |
-| VAL-D-011 | §2.7: frontend/features may not import from src/fleet_rlm | `features/` package table: "Off-Limits Imports: src/fleet_rlm" | `check_frontend_features_imports()` function, lines ~245-265 |
+| VAL-D-011 | §2.7: frontend/features may not import from src/fleet_rlm | `features/` package table: "Off-Limits Imports: src/fleet_rlm" | `check_frontend_no_backend_imports()` function, lines ~225-258 |
 | VAL-D-012 | §2.7: frontend/features may import via lib/rlm-api | `features/` package table: "Allowed Importers: lib/rlm-api" | Allowed by default (not in violation list) |
 | VAL-D-014 | §2.7: codebase-map documents all off-limits imports | All package tables have "Off-Limits Imports" column | N/A (documentation requirement) |
 | VAL-D-015 | §2.7: checks must be deterministic | N/A (implementation requirement) | All `for` loops use `sorted()` on file lists |
-| VAL-D-017 | §2.7: generated artifacts exempt from checks | N/A (implementation requirement) | `is_exempt_path()` function, lines ~50-70 |
+| VAL-D-017 | §2.7: generated artifacts exempt from checks | N/A (implementation requirement) | `is_exempt()` function, lines ~63-77 |
 | VAL-D-018 | §2.7: all three sources must align | This cross-reference table | All rules implemented and tested |
 
 ## Verification Summary

@@ -377,7 +377,7 @@ async def resolve_persisted_identity(
     identity: HTTPIdentityDep,
 ) -> IdentityUpsertResult:
     """Resolve the caller's persisted identity via the unified persistence backend."""
-    if isinstance(persistence, FleetRepository):
+    if isinstance(persistence, FleetRepository) and config_deps.config.auth_required:
         try:
             return await resolve_admitted_identity(persistence, identity)
         except AuthError as exc:

@@ -155,8 +155,8 @@ _RUNTIME_SETTING_DEFINITIONS: tuple[RuntimeSettingDefinition, ...] = (
         label="RLM action max tokens",
         description="Maximum token budget for each RLM action-generation call; separate from REPL output truncation.",
         reload_required=True,
-        placeholder="4096",
-        default="4096",
+        placeholder="2048",
+        default="2048",
     ),
     _definition(
         "DSPY_PLANNER_LM_TIMEOUT_S",

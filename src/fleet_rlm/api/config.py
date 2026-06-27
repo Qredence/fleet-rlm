@@ -142,8 +142,7 @@ class AppConfig(BaseSettings):
     cors_allowed_origins: list[str] | str = Field(default_factory=list)
     ws_execution_max_queue: int = 256
     ws_execution_drop_policy: Literal["drop_oldest", "drop_newest"] = "drop_oldest"
-    neon_tenant_claim: str = Field(default="default", alias="NEON_TENANT_CLAIM")
-    dev_jwt_secret: str = "change-me"
+    neon_tenant_claim: str | None = Field(default=None, alias="NEON_TENANT_CLAIM")
     secret_encryption_key: str | None = Field(default=None, alias="FLEET_SECRET_ENCRYPTION_KEY")
     auth_required: bool = True
     serve_ui: bool = Field(default=True, alias="FLEET_RLM_SERVE_UI")
@@ -210,11 +209,12 @@ class AppConfig(BaseSettings):
         # database_required defaults to True in staging/production, or when
         # AUTH_REQUIRED is explicitly set (auth requires a database-backed tenant).
         if "database_required" not in values and "DATABASE_REQUIRED" not in values:
-            auth_required_raw = (
-                str(values.get("auth_required") or values.get("AUTH_REQUIRED") or os.getenv("AUTH_REQUIRED") or "")
-                .strip()
-                .lower()
-            )
+            if "auth_required" in values:
+                auth_required_raw = str(values["auth_required"]).strip().lower()
+            elif "AUTH_REQUIRED" in values:
+                auth_required_raw = str(values["AUTH_REQUIRED"]).strip().lower()
+            else:
+                auth_required_raw = str(os.getenv("AUTH_REQUIRED") or "").strip().lower()
             auth_required_explicit = auth_required_raw in {"1", "true", "yes", "on"}
             values["database_required"] = app_env in {"staging", "production"} or auth_required_explicit
 
@@ -270,7 +270,7 @@ class AppConfig(BaseSettings):
         if self.auth_required:
             if not self.database_required:
                 raise ValueError("DATABASE_REQUIRED must be true when AUTH_REQUIRED is true")
-            if not self.neon_tenant_claim.strip():
+            if not (self.neon_tenant_claim or "").strip():
                 raise ValueError("NEON_TENANT_CLAIM is required when AUTH_REQUIRED is true")
 
 

@@ -10,8 +10,6 @@ from importlib.util import find_spec
 import typer
 
 
-
-
 def serve_api_command(
     host: str = typer.Option("127.0.0.1", help="Bind host"),
     port: int = typer.Option(8000, help="Bind port"),

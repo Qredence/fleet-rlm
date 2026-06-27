@@ -102,6 +102,7 @@ def test_neon_auth_defaults_database_required(clean_runtime_env):
     )
 
     assert cfg.auth_required is True
+    assert cfg.database_required is True
 
 
 def test_validate_startup_requires_secret_encryption_key_for_hosted_neon(clean_runtime_env):
