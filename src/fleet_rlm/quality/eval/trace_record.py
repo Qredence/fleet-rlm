@@ -151,7 +151,8 @@ class TraceRecord:
                             )
                             break
                         except json.JSONDecodeError:
-                            pass
+                            # Ignore malformed span input payloads and continue checking other spans.
+                            inputs = {}
 
         if not isinstance(inputs, dict):
             inputs = {"message": str(inputs)} if inputs else {}
