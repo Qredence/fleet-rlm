@@ -50,7 +50,8 @@ describe("sandboxFromPayload - top-level code extraction", () => {
     const payload = {
       source_type: "sandbox_exec",
       tool_name: "repl_execute",
-      code_preview: "def fibonacci(n):\n    fibs = [0, 1]\n    for i in range(2, n):\n        fibs.append(fibs[-1] + fibs[-2])\n    return fibs",
+      code_preview:
+        "def fibonacci(n):\n    fibs = [0, 1]\n    for i in range(2, n):\n        fibs.append(fibs[-1] + fibs[-2])\n    return fibs",
       step: {
         type: "repl",
         label: "repl_execute",
@@ -69,9 +70,9 @@ describe("sandboxFromPayload - top-level code extraction", () => {
     );
 
     const traceMessage = result.find((m) => m.type === "trace");
-    const sandboxPart = traceMessage?.renderParts?.find(
-      (p) => p.kind === "sandbox",
-    ) as Extract<ChatRenderPart, { kind: "sandbox" }> | undefined;
+    const sandboxPart = traceMessage?.renderParts?.find((p) => p.kind === "sandbox") as
+      | Extract<ChatRenderPart, { kind: "sandbox" }>
+      | undefined;
 
     expect(sandboxPart).toBeDefined();
     expect(sandboxPart?.code).toBe(
@@ -104,9 +105,9 @@ describe("sandboxFromPayload - top-level code extraction", () => {
     );
 
     const traceMessage = result.find((m) => m.type === "trace");
-    const sandboxPart = traceMessage?.renderParts?.find(
-      (p) => p.kind === "sandbox",
-    ) as Extract<ChatRenderPart, { kind: "sandbox" }> | undefined;
+    const sandboxPart = traceMessage?.renderParts?.find((p) => p.kind === "sandbox") as
+      | Extract<ChatRenderPart, { kind: "sandbox" }>
+      | undefined;
 
     expect(sandboxPart).toBeDefined();
     expect(sandboxPart?.code).toBe("print('hello world')");
@@ -117,7 +118,8 @@ describe("sandboxFromPayload - top-level code extraction", () => {
     const payload = {
       source_type: "sandbox_exec",
       tool_name: "repl_execute",
-      code_preview: "def fibonacci(n):\n    return n if n <= 1 else fibonacci(n-1) + fibonacci(n-2)",
+      code_preview:
+        "def fibonacci(n):\n    return n if n <= 1 else fibonacci(n-1) + fibonacci(n-2)",
       code: "short",
       step: {
         type: "repl",
@@ -137,9 +139,9 @@ describe("sandboxFromPayload - top-level code extraction", () => {
     );
 
     const traceMessage = result.find((m) => m.type === "trace");
-    const sandboxPart = traceMessage?.renderParts?.find(
-      (p) => p.kind === "sandbox",
-    ) as Extract<ChatRenderPart, { kind: "sandbox" }> | undefined;
+    const sandboxPart = traceMessage?.renderParts?.find((p) => p.kind === "sandbox") as
+      | Extract<ChatRenderPart, { kind: "sandbox" }>
+      | undefined;
 
     expect(sandboxPart?.code).toBe(
       "def fibonacci(n):\n    return n if n <= 1 else fibonacci(n-1) + fibonacci(n-2)",
@@ -172,9 +174,9 @@ describe("sandboxFromPayload - top-level code extraction", () => {
     );
 
     const traceMessage = result.find((m) => m.type === "trace");
-    const sandboxPart = traceMessage?.renderParts?.find(
-      (p) => p.kind === "sandbox",
-    ) as Extract<ChatRenderPart, { kind: "sandbox" }> | undefined;
+    const sandboxPart = traceMessage?.renderParts?.find((p) => p.kind === "sandbox") as
+      | Extract<ChatRenderPart, { kind: "sandbox" }>
+      | undefined;
 
     expect(sandboxPart).toBeDefined();
     expect(sandboxPart?.code).toBe("x = 42\nprint(x)");
@@ -203,9 +205,9 @@ describe("sandboxFromPayload - top-level code extraction", () => {
     );
 
     const traceMessage = result.find((m) => m.type === "trace");
-    const sandboxPart = traceMessage?.renderParts?.find(
-      (p) => p.kind === "sandbox",
-    ) as Extract<ChatRenderPart, { kind: "sandbox" }> | undefined;
+    const sandboxPart = traceMessage?.renderParts?.find((p) => p.kind === "sandbox") as
+      | Extract<ChatRenderPart, { kind: "sandbox" }>
+      | undefined;
 
     expect(sandboxPart).toBeDefined();
     expect(sandboxPart?.code).toBe("ls -la");
@@ -235,9 +237,9 @@ describe("sandboxFromPayload - top-level code extraction", () => {
     );
 
     const traceMessage = result.find((m) => m.type === "trace");
-    const sandboxPart = traceMessage?.renderParts?.find(
-      (p) => p.kind === "sandbox",
-    ) as Extract<ChatRenderPart, { kind: "sandbox" }> | undefined;
+    const sandboxPart = traceMessage?.renderParts?.find((p) => p.kind === "sandbox") as
+      | Extract<ChatRenderPart, { kind: "sandbox" }>
+      | undefined;
 
     expect(sandboxPart).toBeDefined();
     expect(sandboxPart?.code).toBe("import os\nprint(os.getcwd())");
@@ -269,9 +271,9 @@ describe("sandboxFromPayload - top-level code extraction", () => {
     );
 
     const traceMessage = result.find((m) => m.type === "trace");
-    const sandboxPart = traceMessage?.renderParts?.find(
-      (p) => p.kind === "sandbox",
-    ) as Extract<ChatRenderPart, { kind: "sandbox" }> | undefined;
+    const sandboxPart = traceMessage?.renderParts?.find((p) => p.kind === "sandbox") as
+      | Extract<ChatRenderPart, { kind: "sandbox" }>
+      | undefined;
 
     expect(sandboxPart?.code).toBe("def top_level():\n    pass");
   });
@@ -376,7 +378,8 @@ describe("getBetterCode upsert path (VAL-A-022)", () => {
     const callPayload = {
       source_type: "sandbox_exec",
       tool_name: "repl_execute",
-      code_preview: "def fib(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a",
+      code_preview:
+        "def fib(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a",
       step: {
         type: "repl",
         label: "repl_execute",
@@ -399,7 +402,8 @@ describe("getBetterCode upsert path (VAL-A-022)", () => {
     const resultPayload = {
       source_type: "sandbox_exec",
       tool_name: "repl_execute",
-      code_preview: "def fib(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a",
+      code_preview:
+        "def fib(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a",
       step: {
         type: "repl",
         label: "repl_execute",

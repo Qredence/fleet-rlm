@@ -209,14 +209,11 @@ export function routeExecutionStepBySourceType(
       // P2-5: Route RLM reasoning to a compact status trace instead of
       // displaying full internal monologue in the chat. The full reasoning
       // is still available in the trajectory tab.
-      const truncated =
-        trimmed.length > 200 ? trimmed.slice(0, 200) + "..." : trimmed;
-      return deps.appendStatusTrace(
-        messages,
-        truncated || "Reasoning",
-        "neutral",
-        { ...mergedPayload, source_type: "rlm_progress" },
-      );
+      const truncated = trimmed.length > 200 ? trimmed.slice(0, 200) + "..." : trimmed;
+      return deps.appendStatusTrace(messages, truncated || "Reasoning", "neutral", {
+        ...mergedPayload,
+        source_type: "rlm_progress",
+      });
     }
     case "text":
       return trimmed ? deps.appendAssistantToken(messages, trimmed) : messages;
@@ -283,18 +280,11 @@ export function routeExecutionStepBySourceType(
       // P1-4 + P2-7: Display RLM progress events (rlm_start, rlm_iteration,
       // rlm_action_gen, rlm_complete) as status traces in the chat.
       const status = mergedPayload["status"];
-      const tone =
-        status === "failed"
-          ? "error"
-          : status === "completed"
-            ? "success"
-            : "neutral";
-      return deps.appendStatusTrace(
-        messages,
-        trimmed || "RLM progress",
-        tone,
-        { ...mergedPayload, source_type: "status" },
-      );
+      const tone = status === "failed" ? "error" : status === "completed" ? "success" : "neutral";
+      return deps.appendStatusTrace(messages, trimmed || "RLM progress", tone, {
+        ...mergedPayload,
+        source_type: "status",
+      });
     }
     case "clarification":
       return deps.appendClarificationMessage(messages, trimmed, mergedPayload);
@@ -306,16 +296,11 @@ export function routeExecutionStepBySourceType(
           : category === "output" || category === "status"
             ? "neutral"
             : "neutral";
-      return deps.appendStatusTrace(
-        messages,
-        trimmed || "Sandbox activity",
-        tone,
-        {
-          ...mergedPayload,
-          source_type: "sandbox_activity",
-          category,
-        },
-      );
+      return deps.appendStatusTrace(messages, trimmed || "Sandbox activity", tone, {
+        ...mergedPayload,
+        source_type: "sandbox_activity",
+        category,
+      });
     }
     case "turn_inputs": {
       const rows = Array.isArray(mergedPayload.rows) ? mergedPayload.rows : [];

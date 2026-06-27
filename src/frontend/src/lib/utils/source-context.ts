@@ -19,6 +19,14 @@ export function detectContextPaths(value: string): string[] {
     if (!candidate || candidate === "/" || candidate.includes("://")) {
       continue;
     }
+    // Drop bare URL-route-like tokens (e.g. "/docs", "/api", "/v1") that the
+    // regex captures from prose but which almost never refer to real host
+    // files. Keep multi-segment absolutes, home-relative (~/), relative
+    // (./, ../), and anything with a file extension.
+    const tail = candidate.slice(1);
+    if (candidate.startsWith("/") && !tail.includes("/") && !/\.[A-Za-z0-9]+$/.test(tail)) {
+      continue;
+    }
     detected.add(candidate);
   }
   return [...detected];

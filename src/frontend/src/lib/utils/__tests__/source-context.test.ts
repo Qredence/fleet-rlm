@@ -18,4 +18,18 @@ describe("sourceContext", () => {
       ),
     ).toEqual(["/tmp/context.md"]);
   });
+
+  it("drops bare URL-route tokens like /docs but keeps multi-segment paths", () => {
+    // /docs is a single-segment route with no extension -> dropped.
+    expect(detectContextPaths("see the /docs endpoint")).toEqual([]);
+
+    // ~/ relative and multi-segment absolutes are kept.
+    expect(detectContextPaths("check ~/notes.md and /etc/hosts")).toEqual([
+      "~/notes.md",
+      "/etc/hosts",
+    ]);
+
+    // /api/v1/x is multi-segment -> kept (only single-segment routes drop).
+    expect(detectContextPaths("hit /api/v1/x")).toEqual(["/api/v1/x"]);
+  });
 });

@@ -13,6 +13,7 @@ export {
   createBackendSessionId,
 } from "@/lib/rlm-api/ws-client";
 export { authEndpoints } from "@/lib/rlm-api/auth";
+export { evaluationsEndpoints } from "@/lib/rlm-api/evaluations";
 export { infoEndpoints } from "@/lib/rlm-api/info";
 export { optimizationEndpoints } from "@/lib/rlm-api/optimization";
 export { sessionsEndpoints } from "@/lib/rlm-api/sessions";
@@ -29,6 +30,13 @@ export type {
   SessionTraceDebugSpan,
   SessionTraceDebugResponse,
 } from "@/lib/rlm-api/sessions";
+export type {
+  EvaluationRequest,
+  EvaluationRunResponse,
+  EvaluationRunListItem,
+  EvaluationRunListResponse,
+  EvaluationReportResponse,
+} from "@/lib/rlm-api/evaluations";
 export type {
   DatasetListResponse,
   DatasetResponse,

@@ -2,10 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { applyWsFrameToMessages } from "@/lib/workspace/backend-chat-event-adapter";
 import type { WsServerMessage } from "@/lib/rlm-api";
 
-function makeCompletionEvent(
-  text: string,
-  payload?: Record<string, unknown>,
-): WsServerMessage {
+function makeCompletionEvent(text: string, payload?: Record<string, unknown>): WsServerMessage {
   return {
     type: "event",
     data: {
@@ -23,8 +20,9 @@ function makeCompletionEvent(
 describe("resolveFinalAssistantText - prefers full content over summary (VAL-A-018c)", () => {
   it("code_file artifact: returns value.content, not value.summary", () => {
     const fullCode =
-      "def fibonacci(n):\n    \"\"\"Calculate the first N Fibonacci numbers.\n\n    Args:\n        n: The number of Fibonacci numbers to generate.\n\n    Returns:\n        A list containing the first N Fibonacci numbers.\n    \"\"\"\n    if n <= 0:\n        return []\n    if n == 1:\n        return [0]\n    fibs = [0, 1]\n    for i in range(2, n):\n        fibs.append(fibs[-1] + fibs[-2])\n    return fibs\n\n\n# Example usage\nif __name__ == \"__main__\":\n    result = fibonacci(10)\n    print(f\"First 10 Fibonacci numbers: {result}\")";
-    const summary = "def fibonacci(n): Calculate the first N Fibonacci numbers. Args: n: The number of Fibonacci…";
+      'def fibonacci(n):\n    """Calculate the first N Fibonacci numbers.\n\n    Args:\n        n: The number of Fibonacci numbers to generate.\n\n    Returns:\n        A list containing the first N Fibonacci numbers.\n    """\n    if n <= 0:\n        return []\n    if n == 1:\n        return [0]\n    fibs = [0, 1]\n    for i in range(2, n):\n        fibs.append(fibs[-1] + fibs[-2])\n    return fibs\n\n\n# Example usage\nif __name__ == "__main__":\n    result = fibonacci(10)\n    print(f"First 10 Fibonacci numbers: {result}")';
+    const summary =
+      "def fibonacci(n): Calculate the first N Fibonacci numbers. Args: n: The number of Fibonacci…";
 
     const frame = makeCompletionEvent("Canonical text", {
       final_artifact: {

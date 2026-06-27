@@ -96,10 +96,11 @@ describe("backend chat event adapter contract", () => {
     const afterReasoning = applyWsFrameToMessages([], reasoningFrame);
     expect(afterReasoning.messages).toHaveLength(1);
     expect(afterReasoning.messages[0]?.type).toBe("trace");
+    // P2-5: reasoning source_type now routes to compact status traces
+    // instead of full reasoning blocks in the main chat.
     expect(afterReasoning.messages[0]?.renderParts?.[0]).toMatchObject({
-      kind: "reasoning",
-      isStreaming: true,
-      parts: [{ type: "text", text: "I should inspect the repo layout first." }],
+      kind: "status_note",
+      text: "I should inspect the repo layout first.",
     });
 
     const toolCallFrame: WsServerMessage = {
@@ -122,7 +123,8 @@ describe("backend chat event adapter contract", () => {
     const afterToolCall = applyWsFrameToMessages(afterReasoning.messages, toolCallFrame);
     const traceAfterTool = afterToolCall.messages.find((message) => message.type === "trace");
     expect(traceAfterTool?.renderParts).toHaveLength(2);
-    expect(traceAfterTool?.renderParts?.[0]?.kind).toBe("reasoning");
+    // P2-5: reasoning is now rendered as status_note
+    expect(traceAfterTool?.renderParts?.[0]?.kind).toBe("status_note");
     expect(traceAfterTool?.renderParts?.[1]?.kind).toBe("tool");
 
     const toolResultFrame: WsServerMessage = {
@@ -145,8 +147,9 @@ describe("backend chat event adapter contract", () => {
     const afterToolResult = applyWsFrameToMessages(afterToolCall.messages, toolResultFrame);
     const traceAfterResult = afterToolResult.messages.find((message) => message.type === "trace");
     expect(traceAfterResult?.renderParts).toHaveLength(3);
+    // P2-5: reasoning now renders as status_note
     expect(traceAfterResult?.renderParts?.map((part) => part.kind)).toEqual([
-      "reasoning",
+      "status_note",
       "tool",
       "tool",
     ]);
@@ -240,8 +243,10 @@ describe("backend chat event adapter contract", () => {
 
     const result = applyWsFrameToMessages(afterReasoning.messages, completionFrame);
     const trace = result.messages.find((message) => message.type === "trace");
-    const reasoningPart = trace?.renderParts?.find((part) => part.kind === "reasoning");
-    expect(reasoningPart).toMatchObject({ isStreaming: false });
+    // P2-5: reasoning now routes to status_note, not reasoning kind.
+    // Status notes don't have isStreaming — they're always complete.
+    const reasoningPart = trace?.renderParts?.find((part) => part.kind === "status_note");
+    expect(reasoningPart).toBeDefined();
   });
 
   it("renders canonical execution completion events", () => {

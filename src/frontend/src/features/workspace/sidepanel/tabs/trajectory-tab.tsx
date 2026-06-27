@@ -7,6 +7,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { EmptyPanel } from "@/components/product/empty-panel";
 import { buildAssistantContentModel } from "@/features/workspace/conversation/assistant-content/model";
 import {
+  type SandboxActivityEvent,
+  SandboxActivityPanel,
+} from "@/features/workspace/inspection/sandbox-activity-panel";
+import {
   DetailBlock,
   executionSectionState,
   renderBadges,
@@ -57,14 +61,24 @@ export function SelectedTurnTrajectory({ selectedTurn }: { selectedTurn: Assista
     [selectedTurn],
   );
 
+  const sandboxEvents = useMemo<SandboxActivityEvent[]>(
+    () => extractSandboxEvents(selectedTurn),
+    [selectedTurn],
+  );
+
   if (!selectedTurn || !model) return null;
 
   const status = selectedTurnStatus(model);
   const tone = statusTone(status);
   const hasTimeline =
-    model.trajectory.hasContent || model.execution.hasContent || model.answer.hasContent;
+    model.trajectory.hasContent ||
+    model.execution.hasContent ||
+    model.answer.hasContent ||
+    sandboxEvents.length > 0;
 
   if (!hasTimeline) return null;
+
+  const isRunning = status === "in_progress";
 
   return (
     <div className="workspace-trajectory-content flex min-w-0 max-w-full flex-col gap-3 overflow-hidden">
@@ -151,8 +165,38 @@ export function SelectedTurnTrajectory({ selectedTurn }: { selectedTurn: Assista
           </TrajectoryChainStep>
         ))}
       </TrajectoryChain>
+      <SandboxActivityPanel events={sandboxEvents} isRunning={isRunning} />
     </div>
   );
+}
+
+/**
+ * Extract categorized sandbox activity events from the selected turn's trace
+ * parts. Status notes carrying a ``sandboxCategory`` originate from the
+ * Daytona log stream relay and are surfaced in the SandboxActivityPanel.
+ */
+function extractSandboxEvents(selectedTurn: AssistantTurn | null): SandboxActivityEvent[] {
+  if (!selectedTurn) return [];
+  const parts = selectedTurn.attachedTraceParts ?? [];
+  const now = Date.now();
+  let counter = 0;
+  const events: SandboxActivityEvent[] = [];
+  for (const entry of parts) {
+    const part = entry?.part;
+    if (!part || part.kind !== "status_note" || !part.sandboxCategory) continue;
+    const category = String(part.sandboxCategory) as SandboxActivityEvent["category"];
+    // Trace parts arrive in append order; synthesize a monotonically
+    // increasing timestamp so the panel renders them in arrival order.
+    events.push({
+      id: `sb-${counter}`,
+      category,
+      message: part.text,
+      details: part.sandboxDetails,
+      timestamp: now + counter,
+    });
+    counter += 1;
+  }
+  return events;
 }
 
 export function LiveTurnTrajectoryFallback({

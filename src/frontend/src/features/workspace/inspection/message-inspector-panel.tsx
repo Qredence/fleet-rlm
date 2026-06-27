@@ -11,7 +11,9 @@ import { useChatStore } from "@/features/workspace/use-workspace";
 import { useWorkspaceUiStore } from "@/features/workspace/use-workspace";
 import type { InspectorTab } from "@/features/workspace/use-workspace";
 import { executionSectionState } from "./inspector-ui";
+import { InspectorTabPanel } from "./inspector-tab-panel";
 
+import { EvalGauge } from "./eval-gauge";
 import { ExecutionInspectorTab } from "./tabs/execution-inspector-tab";
 import { hasMeaningfulGraph } from "./tabs/graph-inspector-content";
 import { GraphInspectorTab } from "./tabs/graph-inspector-tab";
@@ -109,6 +111,7 @@ export function MessageInspectorPanel() {
         : []),
       ...(showGraph ? ([{ id: "graph", label: "Graph" }] as TabOption[]) : []),
       { id: "trace", label: "Trace" },
+      { id: "eval", label: "Eval" },
     ];
   }, [model, showGraph]);
 
@@ -147,6 +150,9 @@ export function MessageInspectorPanel() {
         {model.execution.hasContent ? <ExecutionInspectorTab model={model} /> : null}
         {showGraph ? <GraphInspectorTab steps={graphSteps} /> : null}
         <TraceInspectorTab sessionId={sessionId} selectedTurn={selectedTurn} messages={messages} />
+        <InspectorTabPanel value="eval">
+          <EvalGauge />
+        </InspectorTabPanel>
       </Tabs>
     </div>
   );

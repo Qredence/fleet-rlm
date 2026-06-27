@@ -18,7 +18,8 @@ export type InspectorTab =
   | "documents"
   | "memory"
   | "context"
-  | "checkpoint";
+  | "checkpoint"
+  | "eval";
 
 export interface ChatMessage {
   id: string;
