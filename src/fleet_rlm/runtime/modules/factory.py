@@ -316,17 +316,29 @@ class _StreamingRLM(_DSPY_RLM_BASE):
 
     @staticmethod
     def _is_parse_error(exc: Exception) -> bool:
-        """Return True if the exception is a JSONAdapter parse error."""
+        """Return True if the exception is a JSONAdapter / JSON parse error.
+
+        Narrowed to JSON-specific markers and ``json.JSONDecodeError`` so that
+        broad substrings like ``"expected"``, ``"invalid"``, or ``"decode"`` in
+        isolation (e.g. ``ValueError("Invalid API key")``) do NOT trigger the
+        parse-error retry path. Only genuine JSON parse failures (containing
+        ``"json"``, ``"json.decode"``, ``"json parse"``, ``"malformed json"``,
+        ``"parse error"``) or ``json.JSONDecodeError`` instances are classified
+        as parse errors.
+        """
+        import json
+
+        if isinstance(exc, json.JSONDecodeError):
+            return True
         msg = str(exc).lower()
         return any(
             marker in msg
             for marker in (
                 "json",
-                "parse",
-                "expected",
-                "invalid",
-                "decode",
-                "malformed",
+                "json.decode",
+                "json parse",
+                "malformed json",
+                "parse error",
             )
         )
 
@@ -367,7 +379,44 @@ class _StreamingRLM(_DSPY_RLM_BASE):
             set_mlflow_span_outputs,
         )
 
-        iteration = getattr(self.generate_action, "current_iteration", 0)
+        # Base ``dspy.RLM.forward`` calls ``_execute_iteration`` positionally as
+        # ``_execute_iteration(repl, variables, history, iteration, input_args,
+        # output_field_names)`` — so ``kwargs`` is empty and the previous
+        # ``getattr(self.generate_action, "current_iteration", 0)`` always
+        # returned 0 (the attribute is only set when ``_EmittingAction.forward``
+        # receives an ``iteration`` kwarg, which never happened because kwargs
+        # was empty). Reconstruct the kwargs the base class would have passed to
+        # ``generate_action`` so it receives ``variables_info``, ``repl_history``,
+        # and ``iteration`` (otherwise it raises ``TypeError``), and read the
+        # iteration index from ``args[3]`` so progress events and MLflow spans
+        # report the correct iteration number (0, 1, 2, ...).
+        iteration = args[3] if len(args) >= 4 else 0
+        try:
+            iteration = int(iteration)
+        except (TypeError, ValueError):
+            iteration = 0
+        # Keep ``_EmittingAction.current_iteration`` in sync so
+        # ``_process_execution_result`` and ``_execute_code`` (which read it)
+        # emit the correct iteration on ``rlm_tool_result`` / repl spans.
+        try:
+            self.generate_action.current_iteration = iteration
+        except Exception:
+            pass
+
+        if not kwargs and len(args) >= 4:
+            # args layout: (repl, variables, history, iteration, input_args, output_field_names)
+            variables = args[1]
+            history = args[2]
+            try:
+                variables_info = [v.format() for v in (variables or [])]
+            except Exception:
+                variables_info = variables if isinstance(variables, list) else []
+            kwargs = {
+                "variables_info": variables_info,
+                "repl_history": history,
+                "iteration": f"{iteration + 1}/{self.max_iterations}",
+            }
+
         timeout = self.action_timeout
         original_generate_action = self.generate_action
         bounded_lm = self._get_bounded_action_lm()
