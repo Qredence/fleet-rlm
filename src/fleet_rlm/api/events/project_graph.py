@@ -63,6 +63,19 @@ def _label_from_event(event: RuntimeEvent) -> str | None:
     return kind.value
 
 
+def _serialize_rows(rows: list[Any]) -> list[dict[str, Any]]:
+    """Serialize TurnInputRow models or pre-serialized dicts to JSON-safe dicts."""
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        if isinstance(row, dict):
+            result.append(row)
+        elif hasattr(row, "model_dump"):
+            result.append(row.model_dump(mode="json"))
+        else:
+            result.append({"label": str(getattr(row, "label", "")), "kind": str(getattr(row, "kind", "")), "value": str(row)})
+    return result
+
+
 def _input_for_kind(event: RuntimeEvent) -> Any:
     kind = event.kind
     if kind == RuntimeEventKind.TOOL_CALL:
@@ -74,7 +87,7 @@ def _input_for_kind(event: RuntimeEvent) -> Any:
     if kind == RuntimeEventKind.TEXT:
         return {"event_kind": "text"}
     if kind == RuntimeEventKind.TURN_INPUTS:
-        return {"rows": _serialize_rows(event.input_rows)}
+        return {"rows": _serialize_rows(event.payload.get("rows", []))}
     if kind in {RuntimeEventKind.STATUS, RuntimeEventKind.WARNING}:
         return {"event_kind": kind.value}
     if kind in {RuntimeEventKind.DONE, RuntimeEventKind.ERROR}:
@@ -91,7 +104,7 @@ def _output_for_kind(event: RuntimeEvent) -> Any:
             return event.tool.tool_output
         return dict(event.payload)
     if kind == RuntimeEventKind.TURN_INPUTS:
-        return {"rows": _serialize_rows(event.input_rows)}
+        return {"rows": _serialize_rows(event.payload.get("rows", []))}
     if kind == RuntimeEventKind.TEXT:
         return {"text": event.text}
     if kind == RuntimeEventKind.REASONING:

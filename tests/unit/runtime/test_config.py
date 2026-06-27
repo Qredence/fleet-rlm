@@ -157,6 +157,7 @@ def test_configure_planner_from_env_builds_lm_and_configures_dspy(
         "api_base": "https://api.example.test",
         "api_key": "planner-key",
         "max_tokens": 777,
+        "temperature": None,
     }
 
 
