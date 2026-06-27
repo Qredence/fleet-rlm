@@ -15,6 +15,7 @@ from dotenv import set_key
 from rich.panel import Panel
 
 from fleet_rlm.cli import runners
+from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
 
 from .ui import _prompt_choice, _prompt_value
 
@@ -59,7 +60,7 @@ def settings_llm(session: Any, *, model_only: bool) -> None:
         session: The terminal chat session instance.
         model_only: If True, only configure the model name.
     """
-    env_path = _resolve_env_path()
+    env_path = resolve_env_path()
     current_values = {
         "DSPY_LM_MODEL": os.environ.get("DSPY_LM_MODEL", ""),
         "DSPY_LLM_API_KEY": os.environ.get("DSPY_LLM_API_KEY", ""),
@@ -283,21 +284,6 @@ def run_long_context(session: Any, arg_text: str) -> None:
             return
 
     session._print_result(result, title="run-long-context")
-
-
-def _resolve_env_path() -> Path:
-    """Resolve the path to the .env file.
-
-    Searches upward from the current directory for a pyproject.toml
-    and places .env alongside it. Falls back to current directory.
-
-    Returns:
-        Path to the .env file.
-    """
-    for parent in [Path.cwd(), *Path.cwd().parents]:
-        if (parent / "pyproject.toml").exists():
-            return parent / ".env"
-    return Path.cwd() / ".env"
 
 
 def _write_env_updates(*, env_path: Path, updates: dict[str, str]) -> None:

@@ -4103,7 +4103,8 @@ components:
             type: string
           type: array
           title: Skipped
-          description: Runtime setting keys that were accepted in the request but not persisted (e.g. masked secret round-trips).
+          description: Runtime setting keys that were accepted in the request but
+            not persisted (e.g. masked secret round-trips).
         env_path:
           type: string
           title: Env Path

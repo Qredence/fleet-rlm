@@ -342,35 +342,89 @@ def shutdown_mlflow() -> None:
 def _extract_token_usage(
     outputs: dict[str, Any] | None,
 ) -> tuple[int | None, int | None]:
-    """Extract (input_tokens, output_tokens) from LM call outputs."""
+    """Extract (input_tokens, output_tokens) from LM call outputs.
+
+    Falls back to estimating tokens from text length (4 chars ≈ 1 token)
+    when usage data is not available in the outputs.
+    """
     if not isinstance(outputs, dict):
         return None, None
+
+    # Try to extract from usage dict
     usage = outputs.get("usage")
     if not isinstance(usage, dict):
         usage = outputs.get("token_usage")
     if not isinstance(usage, dict):
-        return None, None
+        usage = outputs.get("usage_metadata")
 
-    def _int_or_none(value: Any) -> int | None:
-        if isinstance(value, bool) or value is None:
+    if isinstance(usage, dict):
+
+        def _int_or_none(value: Any) -> int | None:
+            if isinstance(value, bool) or value is None:
+                return None
+            if isinstance(value, int):
+                return value
+            if isinstance(value, float):
+                return int(value)
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
             return None
-        if isinstance(value, int):
-            return value
-        if isinstance(value, float):
-            return int(value)
-        if isinstance(value, str) and value.isdigit():
-            return int(value)
-        return None
 
-    input_tokens = _int_or_none(
-        usage.get("prompt_tokens") or usage.get("input_tokens") or usage.get("promptTokens") or usage.get("inputTokens")
-    )
-    output_tokens = _int_or_none(
-        usage.get("completion_tokens")
-        or usage.get("output_tokens")
-        or usage.get("completionTokens")
-        or usage.get("outputTokens")
-    )
+        input_tokens = _int_or_none(
+            usage.get("prompt_tokens")
+            or usage.get("input_tokens")
+            or usage.get("promptTokens")
+            or usage.get("inputTokens")
+        )
+        output_tokens = _int_or_none(
+            usage.get("completion_tokens")
+            or usage.get("output_tokens")
+            or usage.get("completionTokens")
+            or usage.get("outputTokens")
+        )
+
+        # If we got at least one, return both
+        if input_tokens is not None or output_tokens is not None:
+            return input_tokens, output_tokens
+
+    # Fallback: estimate tokens from text length (4 chars ≈ 1 token)
+    # Try to extract text from outputs
+    input_text = None
+    output_text = None
+
+    # Try to get input text from messages or prompt
+    messages = outputs.get("messages")
+    if isinstance(messages, list):
+        # Extract the ``content`` field from message dicts before joining
+        # instead of ``str(dict)`` which would include keys, braces, quotes,
+        # and syntax (roughly doubling the estimated token count).
+        parts = []
+        for m in messages:
+            if isinstance(m, dict):
+                parts.append(str(m.get("content", "")))
+            else:
+                parts.append(str(m))
+        input_text = " ".join(parts)
+    elif "prompt" in outputs:
+        input_text = str(outputs["prompt"])
+
+    # Try to get output text from choices or text
+    choices = outputs.get("choices")
+    if isinstance(choices, list) and choices:
+        first_choice = choices[0]
+        if isinstance(first_choice, dict):
+            message = first_choice.get("message")
+            if isinstance(message, dict):
+                output_text = message.get("content")
+            if not output_text:
+                output_text = first_choice.get("text")
+    if not output_text and "text" in outputs:
+        output_text = str(outputs["text"])
+
+    # Estimate tokens: 4 characters ≈ 1 token
+    input_tokens = len(input_text) // 4 if input_text else None
+    output_tokens = len(output_text) // 4 if output_text else None
+
     return input_tokens, output_tokens
 
 

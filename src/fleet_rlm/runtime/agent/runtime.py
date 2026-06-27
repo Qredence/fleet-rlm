@@ -48,6 +48,7 @@ class AgentRuntime:
         rlm_max_llm_calls: int | None = None,
         rlm_max_output_chars: int | None = None,
         rlm_action_max_tokens: int | None = None,
+        rlm_action_timeout: int | None = None,
         history_max_turns: int | None = 6,
         extra_tools: list[Any] | None = None,
         repository: Any | None = None,
@@ -78,6 +79,7 @@ class AgentRuntime:
         self.rlm_max_llm_calls = rlm_max_llm_calls if rlm_max_llm_calls is not None else 50
         self.rlm_max_output_chars = rlm_max_output_chars
         self.rlm_action_max_tokens = rlm_action_max_tokens
+        self.rlm_action_timeout = rlm_action_timeout
 
         # Conversation summary for context compression (Phase 2)
         self.conversation_summary: str = ""
@@ -122,6 +124,7 @@ class AgentRuntime:
                 max_llm_calls=self.rlm_max_llm_calls,
                 max_output_chars=self.rlm_max_output_chars,
                 action_max_tokens=self.rlm_action_max_tokens,
+                action_timeout=self.rlm_action_timeout,
                 summary_interval=self._summary_interval,
             )
         return FleetAgent(

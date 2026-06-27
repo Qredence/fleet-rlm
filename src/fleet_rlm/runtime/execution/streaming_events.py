@@ -168,9 +168,25 @@ def _normalize_structured_trajectory_step(step: dict[str, Any], index: int) -> d
     # them into Fleet's generic tool/repl shape so websocket and frontend
     # adapters can render them as visible sandbox execution rows.
     if "code" in step_copy and "tool_name" not in step_copy:
+        code = step_copy.get("code")
         step_copy["tool_name"] = "repl_execute"
-        step_copy.setdefault("input", step_copy.get("code"))
-        step_copy.setdefault("tool_args", step_copy.get("code"))
+        step_copy.setdefault("input", code)
+        # For SANDBOX_EXEC projections the frontend reads
+        # tool.tool_args["code"] (and falls back to tool.tool_input). Always
+        # shape tool_args as a dict carrying the raw code so the projection
+        # populates the Bash tool card and MLflow trace outputs.
+        existing_tool_args = step_copy.get("tool_args")
+        if existing_tool_args is None:
+            step_copy["tool_args"] = {"code": code} if code else {}
+        elif not isinstance(existing_tool_args, dict):
+            step_copy["tool_args"] = {"code": code} if code else {"code": existing_tool_args}
+        else:
+            existing_tool_args.setdefault("code", code)
+        # tool_input carries the raw code string as a secondary fallback for
+        # SANDBOX_EXEC projections (VAL-A-020).
+        tool_input = step_copy.get("tool_input")
+        if tool_input is None:
+            step_copy["tool_input"] = code if isinstance(code, str) else (str(code) if code is not None else "")
     if "reasoning" in step_copy and "thought" not in step_copy:
         step_copy["thought"] = step_copy.get("reasoning")
     if "output" in step_copy and "observation" not in step_copy:

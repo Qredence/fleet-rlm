@@ -260,11 +260,30 @@ async def _await_turn_with_live_progress(
                     # Relay wait timed out (returned None): recreate next pass.
                     live_getter = None
             if not progressed:
-                elapsed = int(_time.monotonic() - t0)
-                yield RuntimeEvent.status(
-                    f"RLM execution in progress ({elapsed}s)...",
-                    payload={"phase": "rlm_progress", "elapsed_s": elapsed},
-                )
+                # Prefer real sandbox activity over a generic heartbeat: drain
+                # any buffered Daytona log events and surface them to the UI.
+                interpreter = getattr(runtime, "interpreter", None)
+                drained_sandbox = False
+                if interpreter is not None:
+                    drain_fn = getattr(interpreter, "drain_sandbox_logs", None)
+                    if callable(drain_fn):
+                        for sb_event in drain_fn():
+                            drained_sandbox = True
+                            yield RuntimeEvent.status(
+                                text=sb_event.message,
+                                payload={
+                                    "phase": f"sandbox_{sb_event.category}",
+                                    "category": sb_event.category,
+                                    "details": sb_event.details,
+                                    "sandbox_event": True,
+                                },
+                            )
+                if not drained_sandbox:
+                    elapsed = int(_time.monotonic() - t0)
+                    yield RuntimeEvent.status(
+                        f"RLM execution in progress ({elapsed}s)...",
+                        payload={"phase": "rlm_progress", "elapsed_s": elapsed},
+                    )
 
         result = await task
     except asyncio.CancelledError:

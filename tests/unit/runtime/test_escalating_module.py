@@ -19,6 +19,11 @@ class _FakePrediction(dspy.Prediction):
         super().__init__(**kwargs)
         for k, v in kwargs.items():
             object.__setattr__(self, k, v)
+        # Default to having a trajectory so RLM results pass the has_trajectory
+        # check (P0-1). Tests that need no-trajectory behavior can explicitly
+        # set trajectory=None.
+        if "trajectory" not in kwargs:
+            object.__setattr__(self, "trajectory", [])
 
 
 def _make_module(*, interpreter: Any | None = None) -> EscalatingFleetModule:
@@ -124,8 +129,8 @@ class TestEscalatingFleetModule:
 
         assert len(calls) == 3
         url_call = calls[2]
-        assert url_call["max_iterations"] == 4
-        assert url_call["max_llm_calls"] == 8
+        assert url_call["max_iterations"] == 12
+        assert url_call["max_llm_calls"] == 30
         assert "tools" not in url_call
         assert url_call["include_llm_tools"] is True
         # The main and workspace RLMs share user tools (plus delegation tools).
@@ -721,3 +726,184 @@ class TestBuildChatAgentRuntimeDefault:
         assert rt.rlm_max_llm_calls == 11
         assert rt.rlm_max_output_chars == 12_345
         assert rt.rlm_action_max_tokens == 4096
+
+
+# ---------------------------------------------------------------------------
+# Fallback timeout guards (Fix 2 — trace tr-b97106f765b55f9307c9d780fdb4d66e)
+# ---------------------------------------------------------------------------
+
+
+class TestFallbackTimeout:
+    """Verify that the escalation fallback and corrective retries are deadline-bounded."""
+
+    @staticmethod
+    def _noop_span() -> Any:
+        import contextlib
+
+        @contextlib.contextmanager
+        def _span(*args: Any, **kwargs: Any):
+            class _Span:
+                def __enter__(self) -> Any:
+                    return self
+
+                def __exit__(self, *a: Any) -> bool:
+                    return False
+
+            yield _Span()
+
+        return _span
+
+    def test_fallback_respond_timeout_returns_degraded_payload(self) -> None:
+        """A hanging ``self.respond`` fallback must time out and return a degraded payload."""
+        import time
+        from unittest.mock import patch
+
+        module = _make_module(interpreter=None)
+        module._fallback_timeout = 1
+
+        def _always_parse_error(**_: Any) -> Any:
+            raise Exception("could not parse JSON: LM Response: [1]")
+
+        module._rlm = MagicMock(side_effect=_always_parse_error)
+
+        def _slow_respond(**_: Any) -> Any:
+            time.sleep(3)
+            return _FakePrediction(response="should not reach")
+
+        module.respond = MagicMock(side_effect=_slow_respond)
+        _stub_summarize(module)
+
+        with patch(
+            "fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span",
+            self._noop_span(),
+        ):
+            result = module._run_rlm(
+                user_request="What is the answer?",
+                core_memory="",
+                history=dspy.History(messages=[]),
+                conversation_summary="",
+            )
+
+        assert result["degraded"] is True
+        assert result["runtime_failure_phase"] == "escalating_rlm_timeout"
+        assert result["runtime_failure_category"] == "rlm_fallback_timeout"
+        assert result["runtime_fallback_used"] is True
+        assert "timed out" in result["response"]
+
+    def test_malformed_retry_timeout_falls_through_to_fallback(self) -> None:
+        """A timeout during the malformed-result retry falls through to the (bounded) fallback."""
+        import time
+        from unittest.mock import patch
+
+        module = _make_module(interpreter=None)
+        module._fallback_timeout = 1
+
+        call_count = {"n": 0}
+
+        def _flaky_rlm(**kwargs: Any) -> Any:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return "[1]"  # malformed → triggers corrective retry
+            time.sleep(3)  # retry hangs → bounded timeout
+            return _FakePrediction(response="should not reach")
+
+        module._rlm = MagicMock(side_effect=_flaky_rlm)
+        module.respond = MagicMock(return_value=_FakePrediction(response="fallback answer"))
+        _stub_summarize(module)
+
+        with patch(
+            "fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span",
+            self._noop_span(),
+        ):
+            result = module._run_rlm(
+                user_request="What is the answer?",
+                core_memory="",
+                history=dspy.History(messages=[]),
+                conversation_summary="",
+            )
+
+        # Malformed retry timed out → fell through to the normal fallback path.
+        assert result["degraded"] is True
+        assert result["runtime_fallback_used"] is True
+        assert result["runtime_failure_category"] == "rlm_fallback"
+        assert result.get("response") == "fallback answer"
+
+    def test_non_parse_failure_retries_with_reduced_budget(self) -> None:
+        """A non-parse RLM failure (e.g. dspy.LMError from repeated action-gen
+        timeouts) retries once with a reduced budget and returns the retried
+        result with a soft runtime warning — without invoking the CoT fallback."""
+        from unittest.mock import patch
+
+        module = _make_module(interpreter=None)
+        module._fallback_timeout = 5
+
+        call_count = {"n": 0}
+
+        def _flaky_rlm(**kwargs: Any) -> Any:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise dspy.LMError("action generation timed out")
+            return _FakePrediction(response="retried answer")
+
+        module._rlm = MagicMock(side_effect=_flaky_rlm)
+        module.respond = MagicMock(return_value=_FakePrediction(response="should not reach"))
+        _stub_summarize(module)
+
+        with patch(
+            "fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span",
+            self._noop_span(),
+        ):
+            result = module._run_rlm(
+                user_request="What is the answer?",
+                core_memory="",
+                history=dspy.History(messages=[]),
+                conversation_summary="",
+            )
+
+        assert call_count["n"] == 2  # initial failure + reduced-budget retry
+        assert result.get("response") == "retried answer"
+        assert result["runtime_degraded"] is True
+        assert result["runtime_failure_category"] == "rlm_reduced_retry"
+        assert result["runtime_warning"]
+        module.respond.assert_not_called()  # CoT fallback not reached
+
+    def test_run_with_timeout_propagates_dspy_context(self) -> None:
+        """``_run_with_timeout`` must propagate ``dspy.settings.lm`` into the worker."""
+        from fleet_rlm.runtime.modules.escalating import _run_with_timeout
+
+        observed: list[Any] = []
+
+        def _capture() -> str:
+            observed.append(getattr(dspy.settings, "lm", None))
+            return "ok"
+
+        fake_lm = MagicMock(name="session_lm")
+        with dspy.context(lm=fake_lm):
+            result = _run_with_timeout(_capture, timeout=5)
+
+        assert result == "ok"
+        assert observed[0] is fake_lm
+
+    def test_run_with_timeout_raises_on_timeout(self) -> None:
+        """``_run_with_timeout`` raises ``concurrent.futures.TimeoutError`` on timeout."""
+        import concurrent.futures
+        import time
+
+        from fleet_rlm.runtime.modules.escalating import _run_with_timeout
+
+        def _slow() -> str:
+            time.sleep(3)
+            return "should not reach"
+
+        with pytest.raises(concurrent.futures.TimeoutError):
+            _run_with_timeout(_slow, timeout=1)
+
+    def test_run_with_timeout_reraises_real_exceptions(self) -> None:
+        """``_run_with_timeout`` re-raises non-timeout exceptions unchanged."""
+        from fleet_rlm.runtime.modules.escalating import _run_with_timeout
+
+        def _fail() -> str:
+            raise ValueError("real error")
+
+        with pytest.raises(ValueError, match="real error"):
+            _run_with_timeout(_fail, timeout=5)

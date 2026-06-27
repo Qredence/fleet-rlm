@@ -354,3 +354,83 @@ def test_runtime_trace_metadata_counts_structured_rlm_trajectory():
     assert metadata["fleet_rlm.trajectory_has_tools"] == "true"
     assert metadata["fleet_rlm.trajectory_has_repl"] == "true"
     assert metadata["fleet_rlm.trajectory_has_outputs"] == "true"
+
+
+def test_derive_wire_source_type_returns_turn_inputs_for_enum_kind():
+    """VAL-B-027: derive_wire_source_type returns 'turn_inputs' for RuntimeEventKind.TURN_INPUTS."""
+    wire_source_type = importlib.import_module("fleet_rlm.api.events.wire_source_type")
+    events_module = importlib.import_module("fleet_rlm.runtime.events")
+
+    source_type = wire_source_type.derive_wire_source_type(events_module.RuntimeEventKind.TURN_INPUTS)
+
+    assert source_type == "turn_inputs"
+
+
+def test_derive_wire_source_type_returns_turn_inputs_for_string_kind():
+    """VAL-B-027: derive_wire_source_type returns 'turn_inputs' for the string 'turn_inputs'."""
+    wire_source_type = importlib.import_module("fleet_rlm.api.events.wire_source_type")
+
+    source_type = wire_source_type.derive_wire_source_type("turn_inputs")
+
+    assert source_type == "turn_inputs"
+
+
+def test_project_chat_turn_inputs_produces_source_type_and_preserves_rows():
+    """VAL-B-007: project_chat produces frame with source_type='turn_inputs' and payload['rows'] survives."""
+    project_chat = importlib.import_module("fleet_rlm.api.events.project_chat")
+    events_module = importlib.import_module("fleet_rlm.runtime.events")
+
+    rows = [
+        events_module.TurnInputRow(
+            label="Request", kind="request", value="What is the weather?", preview="What is the weather?"
+        ),
+        events_module.TurnInputRow(label="History", kind="history", value={"messages": 3}, preview="3 messages"),
+        events_module.TurnInputRow(
+            label="Core memory",
+            kind="core_memory",
+            value="User prefers concise answers.",
+            preview="User prefers concise answers.",
+        ),
+    ]
+    event = events_module.RuntimeEvent.turn_inputs(rows)
+    frame = project_chat.project_chat(event, sequence=1, run_id="run-abc")
+
+    assert frame["kind"] == "execution_step"
+    assert frame["payload"]["source_type"] == "turn_inputs"
+    assert isinstance(frame["payload"]["rows"], list)
+    assert len(frame["payload"]["rows"]) == 3
+    assert frame["payload"]["rows"][0]["label"] == "Request"
+    assert frame["payload"]["rows"][0]["kind"] == "request"
+    assert frame["payload"]["rows"][1]["label"] == "History"
+    assert frame["payload"]["rows"][2]["label"] == "Core memory"
+    assert frame["event_id"] == "run-abc:1"
+    assert frame["sequence"] == 1
+
+
+def test_project_chat_turn_inputs_preserves_rows_without_sanitization():
+    """VAL-B-007: payload['rows'] survives sanitize_event_payload for turn_inputs events."""
+    project_chat = importlib.import_module("fleet_rlm.api.events.project_chat")
+    sanitizer_module = importlib.import_module("fleet_rlm.api.events.sanitizer")
+    events_module = importlib.import_module("fleet_rlm.runtime.events")
+
+    # Force aggressive limits to prove rows survive
+    import unittest.mock as mock
+
+    with (
+        mock.patch.object(sanitizer_module, "_max_text_chars", lambda: 10),
+        mock.patch.object(sanitizer_module, "_max_collection_items", lambda: 2),
+        mock.patch.object(sanitizer_module, "_max_recursion_depth", lambda: 2),
+    ):
+        rows = [
+            events_module.TurnInputRow(label="Request", kind="request", value="A" * 100, preview="A" * 100),
+            events_module.TurnInputRow(label="History", kind="history", value="B" * 100, preview="B" * 100),
+            events_module.TurnInputRow(label="Core memory", kind="core_memory", value="C" * 100, preview="C" * 100),
+        ]
+        event = events_module.RuntimeEvent.turn_inputs(rows)
+        frame = project_chat.project_chat(event)
+
+        # Rows should survive intact because sanitize_event_payload is NOT called on turn_inputs payloads
+        assert len(frame["payload"]["rows"]) == 3
+        assert frame["payload"]["rows"][0]["value"] == "A" * 100
+        assert frame["payload"]["rows"][1]["value"] == "B" * 100
+        assert frame["payload"]["rows"][2]["value"] == "C" * 100

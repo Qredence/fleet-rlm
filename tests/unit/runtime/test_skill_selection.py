@@ -81,3 +81,89 @@ def test_skill_selection_parses_stringified_skill_list() -> None:
     selected = module._parse_skill_names("['sandbox-execution', 'delegation']")
 
     assert selected == ["sandbox-execution", "delegation"]
+
+
+def test_skill_selection_lm_clone_caps_tokens_and_disables_qwen_thinking() -> None:
+    from fleet_rlm.runtime.lm import BoundedChatLM
+    from fleet_rlm.runtime.modules.skill_selection import _build_skill_selection_lm
+
+    base = MagicMock()
+    base.model = "qwen3.7-max"
+    base.kwargs = {
+        "api_key": "test-key",
+        "api_base": "http://localhost:11434",
+        "custom_llm_provider": "openai",
+        "max_tokens": 65536,
+        "timeout": 60.0,
+    }
+
+    capped = _build_skill_selection_lm(base)
+
+    assert isinstance(capped, BoundedChatLM)
+    assert capped.model == "qwen3.7-max"
+    assert capped._max_tokens == 512
+    assert capped._temperature == 0.0
+    assert capped._timeout == 30.0
+    assert capped.num_retries == 0
+    assert capped._disable_thinking is True  # qwen thinking auto-off
+    assert capped._api_key == "test-key"
+    assert capped._api_base == "http://localhost:11434"
+
+
+def test_skill_selection_lm_clone_returns_none_for_none_base() -> None:
+    from fleet_rlm.runtime.modules.skill_selection import _build_skill_selection_lm
+
+    assert _build_skill_selection_lm(None) is None
+
+
+def test_skill_selection_module_threads_delegate_lm_into_capped_clone() -> None:
+    from fleet_rlm.runtime.lm import BoundedChatLM
+
+    base = MagicMock()
+    base.model = "qwen3.7-max"
+    base.kwargs = {"api_key": "k", "max_tokens": 65536}
+
+    module = SkillSelectionModule(lm=base)
+
+    assert module._select_lm is base
+    # The capped clone is a BoundedChatLM built from the delegate LM's creds.
+    assert isinstance(module._select_lm_capped, BoundedChatLM)
+
+
+def test_skill_selection_invoke_select_binds_capped_lm_context() -> None:
+    module = SkillSelectionModule()
+
+    seen: dict = {}
+
+    def _record_select(**kwargs):
+        seen["lm"] = getattr(dspy.settings, "lm", None)
+        return dspy.Prediction(skills=["diagnostics"], reasoning="ok")
+
+    module.select = _record_select
+    capped = MagicMock(name="capped_lm")
+    module._select_lm_capped = capped
+    module._select_lm = MagicMock(name="raw_delegate")
+
+    module._invoke_select(context="ctx", available_skills="- a: b")
+
+    # The capped clone is bound as the active LM for the duration of the call.
+    assert seen["lm"] is capped
+
+
+def test_skill_selection_invoke_select_skips_context_when_no_lm() -> None:
+    module = SkillSelectionModule()
+
+    seen: dict = {}
+
+    def _record_select(**kwargs):
+        seen["lm"] = getattr(dspy.settings, "lm", None)
+        return dspy.Prediction(skills=["diagnostics"], reasoning="ok")
+
+    module.select = _record_select
+    module._select_lm_capped = None
+    module._select_lm = None
+
+    module._invoke_select(context="ctx", available_skills="- a: b")
+
+    # No delegate LM configured → falls back to the global dspy LM (no override).
+    assert seen["lm"] is getattr(dspy.settings, "lm", None)

@@ -439,3 +439,59 @@ def test_build_runtime_module_rejects_unknown_names() -> None:
         assert "Unknown runtime module" in str(exc)
     else:
         raise AssertionError("Expected ValueError for unknown runtime module")
+
+
+def test_execute_iteration_returns_repl_history_on_single_timeout() -> None:
+    """On a single action-gen timeout, _execute_iteration must return the
+    (updated) REPLHistory — not None — so the RLM loop contract
+    (``history = result``) holds and dspy's _extract_fallback can salvage."""
+    import dspy
+    from dspy.primitives.repl_types import REPLHistory
+
+    from fleet_rlm.runtime.agent.signatures import RLMTurnSignature
+    from fleet_rlm.runtime.modules.factory import create_runtime_rlm
+
+    rlm = create_runtime_rlm(
+        signature=RLMTurnSignature,
+        interpreter=SimpleNamespace(),
+        max_iterations=2,
+        max_llm_calls=3,
+        verbose=False,
+    )
+    rlm.generate_action = MagicMock(side_effect=dspy.LMError("timeout"))
+    history = REPLHistory(max_output_chars=1500)
+
+    # Base dspy.RLM.forward calls _execute_iteration positionally:
+    # (repl, variables, history, iteration, input_args, output_field_names)
+    result = rlm._execute_iteration(SimpleNamespace(), [], history, 0, {}, ["response"])
+
+    assert result is not None
+    assert isinstance(result, REPLHistory)
+    assert len(result.entries) == 1
+    assert "[Timeout]" in (result.entries[0].output or "")
+    assert rlm._consecutive_timeouts == 1
+
+
+def test_execute_iteration_raises_after_repeated_timeouts() -> None:
+    """After 2 consecutive action-gen timeouts, _execute_iteration raises so
+    EscalatingFleetModule._run_rlm can warn + retry with reduced context."""
+    import dspy
+    import pytest
+    from dspy.primitives.repl_types import REPLHistory
+
+    from fleet_rlm.runtime.agent.signatures import RLMTurnSignature
+    from fleet_rlm.runtime.modules.factory import create_runtime_rlm
+
+    rlm = create_runtime_rlm(
+        signature=RLMTurnSignature,
+        interpreter=SimpleNamespace(),
+        max_iterations=2,
+        max_llm_calls=3,
+        verbose=False,
+    )
+    rlm.generate_action = MagicMock(side_effect=dspy.LMError("timeout"))
+    rlm._consecutive_timeouts = 1  # one prior timeout already recorded
+    history = REPLHistory(max_output_chars=1500)
+
+    with pytest.raises(dspy.LMError):
+        rlm._execute_iteration(SimpleNamespace(), [], history, 0, {}, ["response"])
