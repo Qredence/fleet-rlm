@@ -28,6 +28,8 @@ def no_db_app(monkeypatch):
             db_validate_on_startup=False,
             serve_ui=False,  # ty: ignore[unknown-argument]
             expose_root=False,  # ty: ignore[unknown-argument]
+            interpreter_pool_size=0,
+            interpreter_pool_overflow_max=0,
         )
     )
     return app
