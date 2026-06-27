@@ -62,19 +62,19 @@ def test_initialize_and_get_current_app_config_lifecycle(
         config_module.OmegaConf,
         "to_container",
         lambda cfg, resolve: {
-            "agent": {"model": "openai/test-model"},
+            "llm": {"model": "openai/test-model"},
             "interpreter": {"timeout": 123},
         },
     )
 
-    config = config_module.initialize_app_config(["agent.model=openai/test-model"])
+    config = config_module.initialize_app_config(["llm.model=openai/test-model"])
     config_module.set_current_app_config(config)
 
     assert compose_calls == {
         "config_name": "config",
-        "overrides": ["agent.model=openai/test-model"],
+        "overrides": ["llm.model=openai/test-model"],
     }
-    assert config.agent.model == "openai/test-model"
+    assert config.llm.model == "openai/test-model"
     assert config.interpreter.timeout == 123
     assert config_module.get_current_app_config() is config
     assert config_module.require_current_app_config() is config

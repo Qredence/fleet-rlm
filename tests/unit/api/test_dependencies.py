@@ -34,7 +34,7 @@ def test_compose_server_state_preserves_dependency_slices(clean_runtime_env):
     dependencies_module = importlib.import_module("fleet_rlm.api.dependencies")
     config_module = importlib.import_module("fleet_rlm.api.config")
 
-    cfg = config_module.ServerRuntimeConfig(database_required=False)
+    cfg = config_module.AppConfig(database_required=False)
     config_deps = dependencies_module.ConfigDeps(config=cfg)
     lm_deps = dependencies_module.LmDeps(planner_lm=None, delegate_lm=None)
     auth_deps = dependencies_module.AuthDeps(auth_provider=object())  # ty: ignore[invalid-argument-type]
@@ -65,7 +65,7 @@ def test_dependency_getters_use_direct_state_slices_and_server_state_fallback(cl
     dependencies_module = importlib.import_module("fleet_rlm.api.dependencies")
     config_module = importlib.import_module("fleet_rlm.api.config")
 
-    cfg = config_module.ServerRuntimeConfig(database_required=False)
+    cfg = config_module.AppConfig(database_required=False)
     config_deps = dependencies_module.ConfigDeps(config=cfg)
     lm_deps = dependencies_module.LmDeps(planner_lm=object())
     auth_deps = dependencies_module.AuthDeps(auth_provider=object())  # ty: ignore[invalid-argument-type]

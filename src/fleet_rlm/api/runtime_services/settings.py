@@ -25,7 +25,7 @@ from ..bootstrap import (
     get_planner_lm_from_env,
     schedule_optional_runtime_startup,
 )
-from ..config import ServerRuntimeConfig
+from ..config import AppConfig
 from ..dependencies import (
     AuthDeps,
     ConfigDeps,
@@ -108,7 +108,7 @@ class RuntimeConfigSnapshot(TypedDict):
     planner_temperature: float | None
 
 
-def apply_runtime_settings_to_config(*, config: ServerRuntimeConfig, normalized: dict[str, str]) -> None:
+def apply_runtime_settings_to_config(*, config: AppConfig, normalized: dict[str, str]) -> None:
     if "DSPY_LM_MODEL" in normalized:
         resolved_planner_model = normalized["DSPY_LM_MODEL"].strip()
         config.agent_model = resolved_planner_model or None
@@ -184,7 +184,7 @@ def apply_runtime_settings_to_config(*, config: ServerRuntimeConfig, normalized:
         config.db_validate_on_startup = _settings_bool(normalized["DB_VALIDATE_ON_STARTUP"])
 
 
-def _capture_runtime_config_snapshot(*, config: ServerRuntimeConfig, lm_deps: LmDeps) -> RuntimeConfigSnapshot:
+def _capture_runtime_config_snapshot(*, config: AppConfig, lm_deps: LmDeps) -> RuntimeConfigSnapshot:
     return {
         "agent_model": config.agent_model,
         "agent_delegate_model": config.agent_delegate_model,
@@ -203,7 +203,7 @@ def _capture_runtime_config_snapshot(*, config: ServerRuntimeConfig, lm_deps: Lm
 
 def _restore_runtime_config_snapshot(
     *,
-    config: ServerRuntimeConfig,
+    config: AppConfig,
     lm_deps: LmDeps,
     snapshot: RuntimeConfigSnapshot,
 ) -> None:

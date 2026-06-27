@@ -21,7 +21,7 @@ from .bootstrap_observability import (
     set_optional_service_status,
     terminate_process,
 )
-from .config import ServerRuntimeConfig
+from .config import AppConfig
 from .dependencies import (
     AuthDeps,
     ConfigDeps,
@@ -44,7 +44,7 @@ _LLM_MODEL_ENV_KEYS = (
 )
 
 
-def _sync_llm_model_config_from_env(cfg: ServerRuntimeConfig) -> None:
+def _sync_llm_model_config_from_env(cfg: AppConfig) -> None:
     """Align in-memory runtime config with current process env model settings."""
     normalized = {key: os.environ[key] for key in _LLM_MODEL_ENV_KEYS if key in os.environ}
     if not normalized:
@@ -90,8 +90,8 @@ def get_delegate_small_lm_from_env(*args, **kwargs):
 
 
 def resolve_runtime_config(
-    config: ServerRuntimeConfig | None = None,
-) -> ServerRuntimeConfig:
+    config: AppConfig | None = None,
+) -> AppConfig:
     """Resolve the runtime config, loading `.env` when needed."""
     if config is not None:
         return config
@@ -104,10 +104,10 @@ def resolve_runtime_config(
     )
     app_env = (os.getenv("APP_ENV") or "local").strip().lower()
     load_dotenv(dotenv_path=str(env_path), override=app_env == "local")
-    return ServerRuntimeConfig(env_path=env_path)
+    return AppConfig(env_path=env_path)
 
 
-def prime_runtime_env(cfg: ServerRuntimeConfig) -> None:
+def prime_runtime_env(cfg: AppConfig) -> None:
     """Load configured .env into process env before runtime initialization."""
     load_dotenv(
         dotenv_path=str(cfg.env_path),
@@ -115,7 +115,7 @@ def prime_runtime_env(cfg: ServerRuntimeConfig) -> None:
     )
 
 
-def build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
+def build_server_state(cfg: AppConfig) -> ServerState:
     """Build initialized in-memory server state container.
 
     Constructs focused dependency slices individually and composes them into
@@ -169,7 +169,7 @@ def attach_server_state(app: FastAPI, state: ServerState) -> None:
     app.state.interpreter_pool_deps = state.interpreter_pool_deps
 
 
-async def initialize_persistence(persistence_deps: PersistenceDeps, cfg: ServerRuntimeConfig) -> None:
+async def initialize_persistence(persistence_deps: PersistenceDeps, cfg: AppConfig) -> None:
     """Initialize persistence paths based on runtime config."""
     from fleet_rlm.integrations.local_store import LocalStore
 

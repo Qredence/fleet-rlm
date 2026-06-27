@@ -17,7 +17,7 @@ from fleet_rlm.utils.identity import owner_fingerprint
 
 from .auth import AuthError, AuthProvider, NormalizedIdentity, resolve_admitted_identity
 from .auth.ws_ticket import WebSocketTicketStore
-from .config import ServerRuntimeConfig
+from .config import AppConfig
 from .events import ExecutionEventEmitter
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ HTTPBearerCredentialsDep = Annotated[
 class ConfigDeps:
     """Runtime configuration dependency slice."""
 
-    config: ServerRuntimeConfig = field(default_factory=ServerRuntimeConfig)
+    config: AppConfig = field(default_factory=AppConfig)
 
 
 @dataclass
@@ -126,7 +126,7 @@ class ServerState:
     def __init__(
         self,
         *,
-        config: ServerRuntimeConfig | None = None,
+        config: AppConfig | None = None,
         execution_event_emitter: ExecutionEventEmitter | None = None,
         config_deps: ConfigDeps | None = None,
         lm_deps: LmDeps | None = None,
@@ -137,7 +137,7 @@ class ServerState:
         diagnostics_deps: DiagnosticsDeps | None = None,
         interpreter_pool_deps: InterpreterPoolDeps | None = None,
     ) -> None:
-        self.config_deps = config_deps or ConfigDeps(config=config or ServerRuntimeConfig())
+        self.config_deps = config_deps or ConfigDeps(config=config or AppConfig())
         self.lm_deps = lm_deps or LmDeps()
         self.auth_deps = auth_deps or AuthDeps()
         self.ws_ticket_deps = ws_ticket_deps or WebSocketTicketDeps()
@@ -329,10 +329,10 @@ PersistenceDep = Annotated[PersistenceProtocol, Depends(get_persistence)]
 
 
 def build_unauthenticated_identity(
-    config: ServerRuntimeConfig | None = None,
+    config: AppConfig | None = None,
 ) -> NormalizedIdentity:
     """Create the fallback development identity used when auth is optional."""
-    cfg = config or ServerRuntimeConfig()
+    cfg = config or AppConfig()
     return NormalizedIdentity(
         tenant_claim=cfg.ws_default_workspace_id,
         user_claim=cfg.ws_default_user_id,

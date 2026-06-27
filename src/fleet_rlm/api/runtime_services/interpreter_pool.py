@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from ..config import ServerRuntimeConfig
+from ..config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class InterpreterPool:
 
     def __init__(
         self,
-        cfg: ServerRuntimeConfig,
+        cfg: AppConfig,
         *,
         pool_size: int | None = None,
         overflow_max: int | None = None,
@@ -123,7 +123,7 @@ class InterpreterPool:
         self._health_task = asyncio.create_task(self._health_check_loop(), name="pool-health")
         self._replenish_task = asyncio.create_task(self._replenish_loop(), name="pool-replenish")
 
-    async def acquire(self, cfg: ServerRuntimeConfig | None = None) -> Any | None:
+    async def acquire(self, cfg: AppConfig | None = None) -> Any | None:
         """Get a ready interpreter from the pool.
 
         Tries in order:

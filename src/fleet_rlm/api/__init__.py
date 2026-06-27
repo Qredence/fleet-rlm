@@ -1,7 +1,7 @@
 """Server integration package (optional extras required).
 
 Imports are lazy to avoid pulling in FastAPI/uvicorn when only
-``ServerRuntimeConfig`` is needed (e.g. from CLI or test fixtures).
+``AppConfig`` is needed (e.g. from CLI or test fixtures).
 """
 
 from __future__ import annotations
@@ -9,15 +9,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .config import ServerRuntimeConfig as ServerRuntimeConfig
+    from .config import AppConfig as AppConfig
     from .main import create_app as create_app
 
 
 def __getattr__(name: str):  # noqa: ANN001
-    if name == "ServerRuntimeConfig":
-        from .config import ServerRuntimeConfig
+    if name == "AppConfig":
+        from .config import AppConfig
 
-        return ServerRuntimeConfig
+        return AppConfig
     if name == "create_app":
         from .main import create_app
 
@@ -25,4 +25,4 @@ def __getattr__(name: str):  # noqa: ANN001
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["ServerRuntimeConfig", "create_app"]
+__all__ = ["AppConfig", "create_app"]

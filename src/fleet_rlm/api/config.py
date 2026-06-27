@@ -1,10 +1,17 @@
-"""Server runtime configuration."""
+"""Server runtime configuration.
+
+``AppConfig`` is the single config model for the server runtime. It is a
+``BaseSettings`` subclass that reads from environment variables (and an
+optional ``.env`` file). The CLI/Hydra ``AppConfig`` defined in
+``integrations/config/env.py`` is a separate nested model used for YAML
+configuration; the server uses this env-var-backed ``AppConfig`` directly.
+"""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from pydantic import (
     Field,
@@ -16,10 +23,6 @@ from pydantic import (
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
-
-if TYPE_CHECKING:
-    from fleet_rlm.integrations.config.env import AppConfig
-
 
 DEFAULT_SERVER_VOLUME_NAME = "rlm-volume-dspy"
 
@@ -34,9 +37,8 @@ def _resolve_server_env_path() -> Path:
     )
 
 
-def resolve_server_volume_name(config: AppConfig) -> str | None:
-    """Resolve the server-side volume name from shared app config."""
-    volume_name = config.volumes.name
+def resolve_server_volume_name(volume_name: str | None) -> str | None:
+    """Resolve the server-side volume name from a configured volume name."""
     return volume_name if volume_name is not None else DEFAULT_SERVER_VOLUME_NAME
 
 
@@ -57,11 +59,12 @@ def _looks_like_managed_runtime(
     return bool(resolved_port) and resolved_cwd == Path("/app")
 
 
-class ServerRuntimeConfig(BaseSettings):
+class AppConfig(BaseSettings):
     """Server runtime configuration loaded from environment variables.
 
-    Fields are automatically populated from environment variables matching
-    the field name (case-insensitive).  For example, ``app_env`` reads from
+    This is the single config model for the server runtime. Fields are
+    automatically populated from environment variables matching the field
+    name (case-insensitive).  For example, ``app_env`` reads from
     ``APP_ENV``, ``volume_name`` reads from ``VOLUME_NAME``, etc.
     """
 
@@ -172,55 +175,9 @@ class ServerRuntimeConfig(BaseSettings):
         # provider hint + api_base at the LLM-profile layer (see
         # integrations/llm_profiles/resolver.py::build_lm_kwargs_from_resolved),
         # which is the only place that knows whether a provider will be supplied.
-        # ServerRuntimeConfig has no api_base/provider context, so rejecting bare
+        # AppConfig has no api_base/provider context, so rejecting bare
         # ids here would forbid configs the runtime legitimately supports.
         return normalized
-
-    @classmethod
-    def from_app_config(cls, config: AppConfig) -> ServerRuntimeConfig:
-        """Build server runtime settings from the shared application config."""
-        database_url = config.database.url or os.getenv("DATABASE_URL")
-        database_admin_url = config.database.admin_url or os.getenv("DATABASE_ADMIN_URL")
-        database_required = config.database.required
-        if "DATABASE_REQUIRED" not in os.environ:
-            database_required = True
-
-        kwargs: dict = {
-            "secret_name": config.sandbox.secret_name,
-            "volume_name": resolve_server_volume_name(config),
-            "timeout": config.sandbox.timeout,
-            "react_max_iters": config.rlm_settings.max_iters,
-            "deep_react_max_iters": config.rlm_settings.deep_max_iters,
-            "enable_adaptive_iters": config.rlm_settings.enable_adaptive_iters,
-            "rlm_max_iterations": config.llm.rlm_max_iterations,
-            "rlm_max_llm_calls": config.rlm_settings.max_llm_calls,
-            "rlm_action_max_tokens": config.rlm_settings.action_max_tokens,
-            "rlm_max_depth": config.rlm_settings.max_depth,
-            "rlm_child_isolation_mode": config.rlm_settings.child_isolation_mode,
-            "rlm_child_fork_fallback": config.rlm_settings.child_fork_fallback,
-            "delegate_max_calls_per_turn": config.rlm_settings.delegate_max_calls_per_turn,
-            "delegate_result_truncation_chars": config.rlm_settings.delegate_result_truncation_chars,
-            "delegate_execution_timeout": config.rlm_settings.delegate_execution_timeout,
-            "delegate_max_iterations": config.rlm_settings.delegate_max_iterations,
-            "delegate_adapter": config.rlm_settings.delegate_adapter,
-            "daytona_broker_health_timeout": config.rlm_settings.daytona_broker_health_timeout,
-            "daytona_broker_tool_call_timeout": config.rlm_settings.daytona_broker_tool_call_timeout,
-            "daytona_broker_start_retries": config.rlm_settings.daytona_broker_start_retries,
-            "interpreter_async_execute": config.sandbox.async_execute,
-            "agent_guardrail_mode": config.llm.guardrail_mode,
-            "agent_min_substantive_chars": config.llm.min_substantive_chars,
-            "agent_max_output_chars": config.rlm_settings.max_output_chars,
-            "agent_model": config.llm.model,
-            "agent_delegate_model": config.llm.delegate_model,
-            "agent_delegate_small_model": config.llm.delegate_small_model,
-            "agent_delegate_max_tokens": config.llm.delegate_max_tokens,
-            "database_url": database_url,
-            "database_admin_url": database_admin_url,
-            "database_required": database_required,
-            "db_echo": config.database.echo,
-            "db_validate_on_startup": config.database.validate_on_startup,
-        }
-        return cls(**kwargs)
 
     @computed_field
     @property
@@ -255,9 +212,16 @@ class ServerRuntimeConfig(BaseSettings):
         values.pop("SANDBOX_PROVIDER", None)
         app_env = str(values.get("app_env") or values.get("APP_ENV") or os.getenv("APP_ENV") or "local").strip().lower()
 
-        # database_required defaults to True in staging/production.
+        # database_required defaults to True in staging/production, or when
+        # AUTH_REQUIRED is explicitly set (auth requires a database-backed tenant).
         if "database_required" not in values and "DATABASE_REQUIRED" not in values:
-            values["database_required"] = app_env in {"staging", "production"}
+            auth_required_raw = (
+                str(values.get("auth_required") or values.get("AUTH_REQUIRED") or os.getenv("AUTH_REQUIRED") or "")
+                .strip()
+                .lower()
+            )
+            auth_required_explicit = auth_required_raw in {"1", "true", "yes", "on"}
+            values["database_required"] = app_env in {"staging", "production"} or auth_required_explicit
 
         # allow_debug_auth defaults to True only in local
         if "allow_debug_auth" not in values and "ALLOW_DEBUG_AUTH" not in values:

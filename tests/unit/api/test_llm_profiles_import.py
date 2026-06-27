@@ -38,10 +38,10 @@ def llm_profiles_client(llm_profiles_env, no_db_app) -> Iterator[TestClient]:
 
 
 def test_import_env_applies_delegate_api_base(llm_profiles_env, llm_profiles_client, monkeypatch) -> None:
-    from fleet_rlm.api.config import ServerRuntimeConfig
+    from fleet_rlm.api.config import AppConfig
     from fleet_rlm.api.dependencies import get_config_deps
 
-    config = ServerRuntimeConfig(
+    config = AppConfig(
         app_env="local",
         database_required=False,
         database_url=None,  # ty: ignore[unknown-argument]
@@ -99,10 +99,10 @@ def test_import_env_applies_delegate_api_base(llm_profiles_env, llm_profiles_cli
 
 
 def test_import_env_is_local_only(llm_profiles_env, llm_profiles_client) -> None:
-    from fleet_rlm.api.config import ServerRuntimeConfig
+    from fleet_rlm.api.config import AppConfig
     from fleet_rlm.api.dependencies import get_config_deps
 
-    config = ServerRuntimeConfig(
+    config = AppConfig(
         app_env="production",
         auth_required=False,
         database_required=False,

@@ -55,34 +55,17 @@ STRUCTURE_SENSITIVE_RUNTIME_MODULES: frozenset[str] = frozenset(
 _DISABLED_ADAPTER_NAMES: frozenset[str] = frozenset({"", "auto", "none", "off"})
 
 
-def load_posthog_settings_from_env() -> dict[str, object]:
-    """Load PostHog analytics settings from environment variables."""
-    from fleet_rlm.integrations.observability.config import (
-        PROJECT_POSTHOG_DEFAULT_API_KEY,
-        PROJECT_POSTHOG_DEFAULT_HOST,
-    )
-
-    api_key = (os.getenv("POSTHOG_API_KEY") or "").strip() or PROJECT_POSTHOG_DEFAULT_API_KEY
-    host = (os.getenv("POSTHOG_HOST") or "").strip() or PROJECT_POSTHOG_DEFAULT_HOST
-    enabled_raw = os.getenv("POSTHOG_ENABLED")
-    return {
-        "enabled": _env_bool(enabled_raw, default=bool(api_key)),
-        "api_key": api_key,
-        "host": host,
-        "flush_interval": float(os.getenv("POSTHOG_FLUSH_INTERVAL", "10.0")),
-        "flush_at": max(1, int(os.getenv("POSTHOG_FLUSH_AT", "10"))),
-        "enable_dspy_optimization": _env_bool(os.getenv("POSTHOG_ENABLE_DSPY_OPTIMIZATION"), default=False),
-        "input_truncation_chars": max(1, int(os.getenv("POSTHOG_INPUT_TRUNCATION", "10000"))),
-        "output_truncation_chars": max(1, int(os.getenv("POSTHOG_OUTPUT_TRUNCATION", "5000"))),
-        "redact_sensitive": _env_bool(os.getenv("POSTHOG_REDACT_SENSITIVE"), default=True),
-        "distinct_id": os.getenv("POSTHOG_DISTINCT_ID") or None,
-    }
-
-
 def configure_posthog_analytics_from_env() -> object | None:
-    """Best-effort env-driven analytics setup (non-blocking and idempotent)."""
-    settings = load_posthog_settings_from_env()
-    if not settings.get("enabled") or not settings.get("api_key"):
+    """Best-effort env-driven analytics setup (non-blocking and idempotent).
+
+    Uses :meth:`PostHogConfig.from_env` (the canonical PostHog env loader in
+    ``integrations/observability/config.py``) instead of duplicating the
+    ``POSTHOG_*`` env-reading logic here.
+    """
+    from fleet_rlm.integrations.observability.config import PostHogConfig
+
+    settings = PostHogConfig.from_env()
+    if not settings.enabled or not settings.api_key:
         return None
 
     try:
@@ -92,9 +75,9 @@ def configure_posthog_analytics_from_env() -> object | None:
 
     try:
         return configure_analytics(
-            api_key=settings["api_key"] if isinstance(settings["api_key"], str) else None,
-            host=settings["host"] if isinstance(settings["host"], str) else "https://eu.i.posthog.com",
-            distinct_id=settings["distinct_id"] if isinstance(settings["distinct_id"], str) else None,
+            api_key=settings.api_key,
+            host=settings.host,
+            distinct_id=os.getenv("POSTHOG_DISTINCT_ID") or None,
             enabled=True,
         )
     except Exception:

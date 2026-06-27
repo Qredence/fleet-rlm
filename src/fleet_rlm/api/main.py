@@ -18,7 +18,7 @@ from .bootstrap import (
     shutdown_server_state,
     startup_server_state,
 )
-from .config import ServerRuntimeConfig
+from .config import AppConfig
 from .docs import mount_scalar_docs
 from .errors import add_exception_handlers
 from .middleware import add_middlewares
@@ -69,7 +69,7 @@ def _register_api_routes(app: FastAPI) -> None:
     app.include_router(api_v1)
 
 
-def create_app(*, config: ServerRuntimeConfig | None = None) -> FastAPI:
+def create_app(*, config: AppConfig | None = None) -> FastAPI:
     """Create the FastAPI application instance."""
     install_log_redaction_filters()
     cfg = resolve_runtime_config(config)
