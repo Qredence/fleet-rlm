@@ -37,11 +37,6 @@ const _CATEGORY_TONES: Record<
   status: "secondary",
 };
 
-function CategoryIcon({ category }: { category: SandboxEventCategory }) {
-  const Icon = _CATEGORY_ICONS[category] ?? Terminal;
-  return <Icon className="size-4 shrink-0" />;
-}
-
 export interface SandboxEventRendererProps {
   category: SandboxEventCategory;
   message: string;
