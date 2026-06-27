@@ -554,9 +554,10 @@ def test_register_dspy_autolog_is_idempotent(monkeypatch) -> None:
     assert mlflow_context._AUTOLOG_REGISTERED is True
 
     # Second call should be idempotent (no additional call)
+    call_count_before_second_call = call_count
     result2 = mlflow_context._register_dspy_autolog(fake_mlflow)
     assert result2 is True
-    assert call_count == 1  # Still 1, not 2
+    assert call_count == call_count_before_second_call  # No additional autolog call
     assert mlflow_context._AUTOLOG_REGISTERED is True
 
 
