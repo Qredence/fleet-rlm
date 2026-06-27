@@ -195,8 +195,9 @@ class LogStreamParser:
 
     def drain(self) -> list[SandboxEvent]:
         """Return all collected events and clear the buffer."""
-        events = list(self._events)
-        self._events.clear()
+        with self._lock:
+            events = list(self._events)
+            self._events.clear()
         return events
 
 
