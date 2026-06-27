@@ -269,8 +269,7 @@ async def _await_turn_with_live_progress(
                     if callable(drain_fn):
                         for sb_event in drain_fn():
                             drained_sandbox = True
-                            yield RuntimeEvent(
-                                kind=RuntimeEventKind.STATUS,
+                            yield RuntimeEvent.status(
                                 text=sb_event.message,
                                 payload={
                                     "phase": f"sandbox_{sb_event.category}",

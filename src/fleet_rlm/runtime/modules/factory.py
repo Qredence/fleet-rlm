@@ -849,8 +849,16 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                 # Capture preview from trajectory
                 if isinstance(trajectory, list) and trajectory:
                     last_action = trajectory[-1]
-                    reasoning = getattr(last_action, "reasoning", "") or ""
-                    code = getattr(last_action, "code", "") or ""
+                    reasoning = (
+                        last_action.get("reasoning") or last_action.get("thought") or ""
+                        if isinstance(last_action, dict)
+                        else getattr(last_action, "reasoning", "") or getattr(last_action, "thought", "") or ""
+                    )
+                    code = (
+                        last_action.get("code") or ""
+                        if isinstance(last_action, dict)
+                        else getattr(last_action, "code", "") or ""
+                    )
                     preview = (
                         f"[RLM Action] {reasoning[:150]}\n{code[:200]}"
                         if code
