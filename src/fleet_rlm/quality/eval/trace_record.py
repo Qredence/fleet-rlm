@@ -205,7 +205,8 @@ class TraceRecord:
                             )
                             break
                         except json.JSONDecodeError:
-                            pass
+                            # Ignore malformed span outputs in this fallback path and keep searching other spans.
+                            continue
 
         if isinstance(outputs, dict):
             final_answer = str(outputs.get("final_answer", outputs.get("answer", outputs.get("response", ""))))
