@@ -405,8 +405,15 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         # emit the correct iteration on ``rlm_tool_result`` / repl spans.
         try:
             self.generate_action.current_iteration = iteration
+        except (AttributeError, TypeError):
+            logger.debug(
+                "Unable to set generate_action.current_iteration; continuing without sync."
+            )
         except Exception:
-            pass
+            logger.warning(
+                "Unexpected error while setting generate_action.current_iteration; continuing.",
+                exc_info=True,
+            )
 
         if not kwargs and len(args) >= 4:
             # args layout: (repl, variables, history, iteration, input_args, output_field_names)
