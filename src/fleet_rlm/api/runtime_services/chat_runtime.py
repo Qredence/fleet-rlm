@@ -200,7 +200,7 @@ async def _resolve_identity_scoped_lms(
     persistence_deps: PersistenceDeps,
     identity_rows: IdentityUpsertResult | None,
 ) -> tuple[Any | None, Any | None]:
-    if cfg.auth_mode != "neon" or persistence_deps.db_manager is None or identity_rows is None:
+    if not cfg.auth_required or persistence_deps.db_manager is None or identity_rows is None:
         return None, None
 
     role_configs = await resolve_active_role_configs(
@@ -229,7 +229,7 @@ async def _resolve_persisted_identity(
     repository: FleetRepository,
     identity: NormalizedIdentity,
 ) -> IdentityUpsertResult:
-    if cfg.auth_mode in {"entra", "neon"}:
+    if cfg.auth_required:
         return await resolve_admitted_identity(repository, identity)
     return await repository.upsert_identity(
         entra_tenant_id=identity.tenant_claim,

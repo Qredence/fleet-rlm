@@ -104,6 +104,17 @@ For deeper detail:
 - [Frontend/backend integration](docs/reference/frontend-backend-integration.md)
 - [HTTP and WebSocket API](docs/reference/http-api.md)
 
+## Codetree
+
+The repository is organized into well-defined packages with explicit ownership and import boundaries. The backend (`src/fleet_rlm/`) contains eight canonical packages: `api/` (FastAPI transport), `runtime/` (DSPy agent core), `integrations/` (Daytona, database, observability), `config/` (constants), `quality/` (offline evaluation and optimization), `cli/` (operator commands), `migrations/` (Alembic schema migrations), and `ui/` (packaged frontend assets). The frontend (`src/frontend/src/`) contains six canonical packages: `features/` (feature modules), `components/agent-elements/` (design system), `lib/workspace/` (WS adapter and runtime), `routes/` (TanStack Router), `lib/rlm-api/` (backend API client), and `config/` (environment configuration).
+
+Import boundaries are enforced by `make check-codebase-tree`. Key rules:
+- `runtime/` may not import from `api.routers`
+- `quality/` may import from `runtime/` and `integrations/` but not from `api/`
+- Frontend `features/` and `components/` must not import directly from `src/fleet_rlm/` (must use `lib/rlm-api/` for backend types)
+
+See the [codebase map](docs/reference/codebase-map.md) for the full package inventory, ownership, public exports, allowed importers, and off-limits imports.
+
 ## Runtime Contract
 
 The current backend runtime is Daytona-backed and exposes these stable public surfaces:

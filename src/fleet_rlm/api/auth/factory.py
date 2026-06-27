@@ -42,7 +42,6 @@ def build_auth_provider(
         )
     if mode == "neon":
         return NeonAuthProvider(
-            neon_auth_url=neon_auth_url,
             tenant_claim=neon_tenant_claim,
             allow_query_auth_tokens=allow_query_auth_tokens,
         )

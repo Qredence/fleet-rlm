@@ -81,7 +81,7 @@ logger = logging.getLogger(__name__)
 
 
 def profile_writes_enabled(config: ServerRuntimeConfig) -> bool:
-    return config.app_env == "local" or config.auth_mode == "neon"
+    return config.app_env == "local" or config.auth_required
 
 
 def _ensure_profile_writes(config: ServerRuntimeConfig) -> None:

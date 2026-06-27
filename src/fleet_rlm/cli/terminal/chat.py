@@ -317,10 +317,10 @@ class _TerminalChatSession:
         if hasattr(signal, "SIGWINCH"):
             signal.signal(signal.SIGWINCH, lambda *_: self._render_shell())
 
-        planner_lm = get_planner_lm_from_env(model_name=self.config.agent.model)
+        planner_lm = get_planner_lm_from_env(model_name=self.config.llm.model)
         delegate_lm = get_delegate_lm_from_env(
-            model_name=self.config.agent.delegate_model,
-            default_max_tokens=self.config.agent.delegate_max_tokens,
+            model_name=self.config.llm.delegate_model,
+            default_max_tokens=self.config.llm.delegate_max_tokens,
         )
         self._print_banner(planner_ready=planner_lm is not None)
 
@@ -405,7 +405,7 @@ class _TerminalChatSession:
         def _layout(draft: str = "") -> Any:
             return build_shell_layout(
                 session_id=self.session_id,
-                model=self.config.agent.model,
+                model=self.config.llm.model,
                 trace_mode=self.trace_mode,
                 last_status=self.last_status,
                 transcript=self.transcript,
@@ -536,7 +536,7 @@ class _TerminalChatSession:
         """Return the bottom toolbar HTML."""
         return _bottom_toolbar_impl(
             self,
-            model=self.config.agent.model,
+            model=self.config.llm.model,
             docs_count=0,
             trace_mode=self.trace_mode,
         )

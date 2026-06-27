@@ -6,9 +6,11 @@ runtime from Claude Code, Codex, or any agent that loads skill markdown.
 
 ## What's Here
 
-| Skill               | Purpose                                                              |
-| ------------------- | -------------------------------------------------------------------- |
-| `rlm`              | Hub router — core model + decision tree pointing to the right skill  |
+### Runtime & execution skills
+
+| Skill                 | Purpose                                                              |
+| --------------------- | -------------------------------------------------------------------- |
+| `rlm`                | Hub router — core model + decision tree pointing to the right skill  |
 | `sandbox-execution` | Execute Python in Daytona sandboxes with durable volume persistence  |
 | `delegation`        | Recursive child RLMs, batch fan-out, budget management               |
 | `dspy-programs`     | Signature design, module registry, execution mode selection           |
@@ -16,6 +18,13 @@ runtime from Claude Code, Codex, or any agent that loads skill markdown.
 | `optimization`      | GEPA optimization loops, RLM skill artifacts, evaluation metrics, MLflow tracking |
 | `diagnostics`       | Symptom→cause decision tree, test lane selection, error catalog       |
 | `volume-bootstrap`  | In-sandbox volume filesystem contract, CRUD helpers, persistence guarantees |
+| `browser-interaction` | Fetch and inspect JavaScript-heavy pages with Playwright in a Daytona browser-capable snapshot |
+
+### Skill-authoring reference
+
+| Skill                 | Purpose                                                              |
+| --------------------- | -------------------------------------------------------------------- |
+| `writing-great-skills` | Vocabulary and principles for writing predictable, well-structured skills |
 
 Each skill is a directory containing a `SKILL.md` (with YAML frontmatter)
 plus optional `references/` and `scripts/` subdirectories.
@@ -79,6 +88,11 @@ workflow skill based on what you're trying to accomplish:
 - **Process large documents** → `long-context`
 - **Optimize programs** → `optimization`
 - **Diagnose failures** → `diagnostics`
+- **Provision/manage a sandbox** → `sandbox-execution`
+- **Scrape or inspect a JS-heavy page** → `browser-interaction`
+
+When authoring or revising a skill of your own, consult
+`writing-great-skills` for the shared vocabulary and principles.
 
 ## Stability
 

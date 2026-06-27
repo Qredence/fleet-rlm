@@ -101,6 +101,7 @@ src/output/
 results/
 archive/
 artifacts/
+artifacts/eval/
 !src/frontend/src/features/artifacts/
 !src/frontend/src/features/artifacts/*.tsx
 
@@ -110,6 +111,7 @@ artifacts/
 *.db
 *.pid
 *.log
+logs/*.log
 fleet_rlm.db
 server.log
 .remember/
@@ -131,6 +133,7 @@ vendor/
 # AI-generated analysis (ephemeral)
 code-analysis/
 research/
+FINDINGS_REPORT.md
 
 # Playground / one-off
 plugins/
@@ -163,3 +166,10 @@ skill-optimization/
 traces/
 plan/
 transcript-vvqo_92l.jsonl
+
+# chunk active sidecar tracking
+.chunk/sidecar.json
+.chunk/sidecar.*.json
+.cursor/settings.json
+.cursor/hooks/state/continual-learning-index.json
+.cursor/hooks/state/continual-learning.json

@@ -9,10 +9,10 @@ def test_build_server_state_creates_ready_compatible_state(clean_runtime_env):
     config_module = importlib.import_module("fleet_rlm.api.config")
     auth_module = importlib.import_module("fleet_rlm.api.auth")
 
-    cfg = config_module.ServerRuntimeConfig(
+    cfg = config_module.AppConfig(
         app_env="local",
+        auth_required=True,
         database_required=False,
-        auth_mode="dev",
         ws_execution_max_queue=8,
         ws_execution_drop_policy="drop_newest",
     )
@@ -20,7 +20,7 @@ def test_build_server_state_creates_ready_compatible_state(clean_runtime_env):
     state = bootstrap_module.build_server_state(cfg)
 
     assert state.config_deps.config is cfg
-    assert isinstance(state.auth_deps.auth_provider, auth_module.DevAuthProvider)
+    assert isinstance(state.auth_deps.auth_provider, auth_module.NeonAuthProvider)
     assert state.session_cache_deps.sessions == {}
     assert state.diagnostics_deps.optional_service_status["planner_lm"] == "pending"
     assert state.is_ready is False
@@ -37,7 +37,7 @@ def test_prime_runtime_env_loads_env_file_in_local_mode(clean_runtime_env, tmp_p
     env_path.write_text("FEATURE_FLAG=from-file\n", encoding="utf-8")
     monkeypatch.setenv("FEATURE_FLAG", "existing")
 
-    cfg = config_module.ServerRuntimeConfig(app_env="local", env_path=env_path)
+    cfg = config_module.AppConfig(app_env="local", env_path=env_path)
     bootstrap_module.prime_runtime_env(cfg)
 
     assert os.getenv("FEATURE_FLAG") == "from-file"
@@ -60,7 +60,7 @@ def test_sync_llm_model_config_from_env_overrides_stale_hydra_defaults(clean_run
     bootstrap_module = importlib.import_module("fleet_rlm.api.bootstrap")
     config_module = importlib.import_module("fleet_rlm.api.config")
 
-    cfg = config_module.ServerRuntimeConfig(
+    cfg = config_module.AppConfig(
         agent_model="openai/gemini/gemini-flash-lite-latest",
         agent_delegate_model=None,
         agent_delegate_small_model=None,
@@ -84,7 +84,7 @@ def test_prime_runtime_env_preserves_existing_values_outside_local(clean_runtime
     env_path.write_text("FEATURE_FLAG=from-file\n", encoding="utf-8")
     monkeypatch.setenv("FEATURE_FLAG", "existing")
 
-    cfg = config_module.ServerRuntimeConfig(app_env="staging", env_path=env_path)
+    cfg = config_module.AppConfig(app_env="staging", env_path=env_path)
     bootstrap_module.prime_runtime_env(cfg)
 
     assert os.getenv("FEATURE_FLAG") == "existing"

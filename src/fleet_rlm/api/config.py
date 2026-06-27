@@ -1,10 +1,17 @@
-"""Server runtime configuration."""
+"""Server runtime configuration.
+
+``AppConfig`` is the single config model for the server runtime. It is a
+``BaseSettings`` subclass that reads from environment variables (and an
+optional ``.env`` file). The CLI/Hydra ``AppConfig`` defined in
+``integrations/config/env.py`` is a separate nested model used for YAML
+configuration; the server uses this env-var-backed ``AppConfig`` directly.
+"""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from pydantic import (
     Field,
@@ -16,10 +23,6 @@ from pydantic import (
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
-
-if TYPE_CHECKING:
-    from fleet_rlm.integrations.config.env import AppConfig
-
 
 DEFAULT_SERVER_VOLUME_NAME = "rlm-volume-dspy"
 
@@ -34,9 +37,8 @@ def _resolve_server_env_path() -> Path:
     )
 
 
-def resolve_server_volume_name(config: AppConfig) -> str | None:
-    """Resolve the server-side volume name from shared app config."""
-    volume_name = config.volumes.name
+def resolve_server_volume_name(volume_name: str | None) -> str | None:
+    """Resolve the server-side volume name from a configured volume name."""
     return volume_name if volume_name is not None else DEFAULT_SERVER_VOLUME_NAME
 
 
@@ -57,11 +59,12 @@ def _looks_like_managed_runtime(
     return bool(resolved_port) and resolved_cwd == Path("/app")
 
 
-class ServerRuntimeConfig(BaseSettings):
+class AppConfig(BaseSettings):
     """Server runtime configuration loaded from environment variables.
 
-    Fields are automatically populated from environment variables matching
-    the field name (case-insensitive).  For example, ``app_env`` reads from
+    This is the single config model for the server runtime. Fields are
+    automatically populated from environment variables matching the field
+    name (case-insensitive).  For example, ``app_env`` reads from
     ``APP_ENV``, ``volume_name`` reads from ``VOLUME_NAME``, etc.
     """
 
@@ -81,7 +84,7 @@ class ServerRuntimeConfig(BaseSettings):
     enable_adaptive_iters: bool = True
     rlm_max_iterations: int = 30
     rlm_max_llm_calls: int = 50
-    rlm_action_max_tokens: int = Field(default=4096, alias="FLEET_RLM_ACTION_MAX_TOKENS")
+    rlm_action_max_tokens: int = Field(default=2048, alias="FLEET_RLM_ACTION_MAX_TOKENS")
     rlm_max_depth: int = 2
     rlm_child_isolation_mode: Literal["auto", "context"] = Field(default="auto", alias="RLM_CHILD_ISOLATION_MODE")
     rlm_child_fork_fallback: Literal["clean", "fail"] = Field(default="clean", alias="RLM_CHILD_FORK_FALLBACK")
@@ -118,32 +121,30 @@ class ServerRuntimeConfig(BaseSettings):
     agent_delegate_model: str | None = Field(default=None, alias="DSPY_DELEGATE_LM_MODEL")
     agent_delegate_small_model: str | None = Field(default=None, alias="DSPY_DELEGATE_LM_SMALL_MODEL")
     agent_delegate_max_tokens: int = Field(default=64000, alias="DSPY_DELEGATE_LM_MAX_TOKENS")
+    # Planner LM generation guardrails. ``planner_max_tokens`` caps a single
+    # planner generation (the RLM/LongCoT loop) so one response can't run
+    # unbounded; ``planner_lm_timeout_s`` bounds the per-request wall-clock so a
+    # stalled provider can't hold a chat turn for minutes (see trace
+    # tr-52a8d5b5d13d43ac102f7aba2aca9f58: one glm-5.2 call took 156s for a
+    # 1.2k-char output). ``planner_temperature`` is optional; None leaves it to
+    # the provider/model default. ``DSPY_LM_MAX_TOKENS`` is reused for the
+    # planner cap to match the legacy ``_planner_lm_kwargs`` env-var convention.
+    planner_max_tokens: int = Field(default=64000, alias="DSPY_LM_MAX_TOKENS")
+    planner_lm_timeout_s: float = Field(default=60.0, alias="DSPY_PLANNER_LM_TIMEOUT_S")
+    planner_temperature: float | None = Field(default=None, alias="DSPY_PLANNER_LM_TEMPERATURE")
+    delegate_lm_timeout_s: float = Field(default=60.0, alias="DSPY_DELEGATE_LM_TIMEOUT_S")
 
     database_url: str | None = Field(default=None, alias="DATABASE_URL")
     database_admin_url: str | None = Field(default=None, alias="DATABASE_ADMIN_URL")
     database_required: bool = False
     db_echo: bool = False
     db_validate_on_startup: bool = False
-    allow_debug_auth: bool = False
-    allow_query_auth_tokens: bool = False
     cors_allowed_origins: list[str] | str = Field(default_factory=list)
     ws_execution_max_queue: int = 256
     ws_execution_drop_policy: Literal["drop_oldest", "drop_newest"] = "drop_oldest"
-    auth_mode: Literal["dev", "entra", "neon"] = "dev"
-    neon_auth_url: str | None = Field(
-        default="https://ep-broad-water-al4k5bh7.neonauth.c-3.eu-central-1.aws.neon.tech/neondb/auth",
-        alias="NEON_AUTH_URL",
-    )
-    neon_tenant_claim: str = Field(default="default", alias="NEON_TENANT_CLAIM")
+    neon_tenant_claim: str | None = Field(default=None, alias="NEON_TENANT_CLAIM")
     secret_encryption_key: str | None = Field(default=None, alias="FLEET_SECRET_ENCRYPTION_KEY")
-    auth_required: bool = False
-    dev_jwt_secret: str = "change-me"
-    entra_jwks_url: str | None = None
-    entra_issuer_url: str | None = Field(default=None, alias="ENTRA_ISSUER_URL")
-    entra_issuer_template: str | None = "https://login.microsoftonline.com/{tenantid}/v2.0"
-    entra_audience: str | None = None
-    entra_allowed_user_ids: list[str] | str = Field(default_factory=list, alias="ENTRA_ALLOWED_USER_IDS")
-    entra_allowed_group_ids: list[str] | str = Field(default_factory=list, alias="ENTRA_ALLOWED_GROUP_IDS")
+    auth_required: bool = True
     serve_ui: bool = Field(default=True, alias="FLEET_RLM_SERVE_UI")
     expose_docs: bool = Field(default=False, alias="FLEET_RLM_EXPOSE_DOCS")
     expose_root: bool = Field(default=False, alias="FLEET_RLM_EXPOSE_ROOT")
@@ -163,59 +164,14 @@ class ServerRuntimeConfig(BaseSettings):
         if not normalized:
             return None
 
-        if "/" not in normalized:
-            raise ValueError(
-                f"LiteLLM model identifiers must include a provider prefix "
-                f"(e.g. 'openai/gpt-4o' or 'anthropic/claude-3-5-sonnet'), got {value!r}"
-            )
+        # Bare model ids (no provider prefix) are valid at this layer. Custom
+        # OpenAI-/Anthropic-compatible endpoints resolve them with an explicit
+        # provider hint + api_base at the LLM-profile layer (see
+        # integrations/llm_profiles/resolver.py::build_lm_kwargs_from_resolved),
+        # which is the only place that knows whether a provider will be supplied.
+        # AppConfig has no api_base/provider context, so rejecting bare
+        # ids here would forbid configs the runtime legitimately supports.
         return normalized
-
-    @classmethod
-    def from_app_config(cls, config: AppConfig) -> ServerRuntimeConfig:
-        """Build server runtime settings from the shared application config."""
-        auth_mode = (os.getenv("AUTH_MODE") or "dev").strip().lower()
-        database_url = config.database.url or os.getenv("DATABASE_URL")
-        database_admin_url = config.database.admin_url or os.getenv("DATABASE_ADMIN_URL")
-        database_required = config.database.required
-        if "DATABASE_REQUIRED" not in os.environ and auth_mode in {"entra", "neon"}:
-            database_required = True
-
-        kwargs: dict = {
-            "secret_name": config.sandbox.secret_name,
-            "volume_name": resolve_server_volume_name(config),
-            "timeout": config.sandbox.timeout,
-            "react_max_iters": config.rlm_settings.max_iters,
-            "deep_react_max_iters": config.rlm_settings.deep_max_iters,
-            "enable_adaptive_iters": config.rlm_settings.enable_adaptive_iters,
-            "rlm_max_iterations": config.llm.rlm_max_iterations,
-            "rlm_max_llm_calls": config.rlm_settings.max_llm_calls,
-            "rlm_action_max_tokens": config.rlm_settings.action_max_tokens,
-            "rlm_max_depth": config.rlm_settings.max_depth,
-            "rlm_child_isolation_mode": config.rlm_settings.child_isolation_mode,
-            "rlm_child_fork_fallback": config.rlm_settings.child_fork_fallback,
-            "delegate_max_calls_per_turn": config.rlm_settings.delegate_max_calls_per_turn,
-            "delegate_result_truncation_chars": config.rlm_settings.delegate_result_truncation_chars,
-            "delegate_execution_timeout": config.rlm_settings.delegate_execution_timeout,
-            "delegate_max_iterations": config.rlm_settings.delegate_max_iterations,
-            "delegate_adapter": config.rlm_settings.delegate_adapter,
-            "daytona_broker_health_timeout": config.rlm_settings.daytona_broker_health_timeout,
-            "daytona_broker_tool_call_timeout": config.rlm_settings.daytona_broker_tool_call_timeout,
-            "daytona_broker_start_retries": config.rlm_settings.daytona_broker_start_retries,
-            "interpreter_async_execute": config.sandbox.async_execute,
-            "agent_guardrail_mode": config.llm.guardrail_mode,
-            "agent_min_substantive_chars": config.llm.min_substantive_chars,
-            "agent_max_output_chars": config.rlm_settings.max_output_chars,
-            "agent_model": config.llm.model,
-            "agent_delegate_model": config.llm.delegate_model,
-            "agent_delegate_small_model": config.llm.delegate_small_model,
-            "agent_delegate_max_tokens": config.llm.delegate_max_tokens,
-            "database_url": database_url,
-            "database_admin_url": database_admin_url,
-            "database_required": database_required,
-            "db_echo": config.database.echo,
-            "db_validate_on_startup": config.database.validate_on_startup,
-        }
-        return cls(**kwargs)
 
     @computed_field
     @property
@@ -223,22 +179,8 @@ class ServerRuntimeConfig(BaseSettings):
         """Return CORS origins as a normalized list."""
         return list(self.cors_allowed_origins)
 
-    @computed_field
-    @property
-    def entra_allowed_user_ids_list(self) -> list[str]:
-        """Return the configured Entra beta user allowlist."""
-        return list(self.entra_allowed_user_ids)
-
-    @computed_field
-    @property
-    def entra_allowed_group_ids_list(self) -> list[str]:
-        """Return the configured Entra beta group allowlist."""
-        return list(self.entra_allowed_group_ids)
-
     @field_validator(
         "cors_allowed_origins",
-        "entra_allowed_user_ids",
-        "entra_allowed_group_ids",
         mode="before",
     )
     @classmethod
@@ -256,37 +198,25 @@ class ServerRuntimeConfig(BaseSettings):
         field_name = (info.field_name or "value").upper()
         raise ValueError(f"{field_name} must be provided as a comma-separated string or list")
 
-    @field_validator("entra_issuer_url", "entra_issuer_template", mode="before")
-    @classmethod
-    def _normalize_optional_string(cls, value: object) -> str | None:
-        if value is None:
-            return None
-        normalized = str(value).strip()
-        return normalized or None
-
     @model_validator(mode="before")
     @classmethod
     def _apply_env_aware_defaults(cls, values: dict) -> dict:
-        """Apply cross-field defaults that depend on app_env and auth_mode."""
+        """Apply cross-field defaults that depend on app_env."""
         values.pop("sandbox_provider", None)
         values.pop("SANDBOX_PROVIDER", None)
         app_env = str(values.get("app_env") or values.get("APP_ENV") or os.getenv("APP_ENV") or "local").strip().lower()
-        auth_mode = (
-            str(values.get("auth_mode") or values.get("AUTH_MODE") or os.getenv("AUTH_MODE") or "dev").strip().lower()
-        )
 
-        # database_required defaults to True in staging/production and in
-        # repository-backed auth modes that need tenant admission.
+        # database_required defaults to True in staging/production, or when
+        # AUTH_REQUIRED is explicitly set (auth requires a database-backed tenant).
         if "database_required" not in values and "DATABASE_REQUIRED" not in values:
-            values["database_required"] = app_env in {"staging", "production"} or auth_mode in {"entra", "neon"}
-
-        # allow_debug_auth defaults to True only in local
-        if "allow_debug_auth" not in values and "ALLOW_DEBUG_AUTH" not in values:
-            values["allow_debug_auth"] = app_env == "local"
-
-        # allow_query_auth_tokens defaults based on env and auth_mode
-        if "allow_query_auth_tokens" not in values and "ALLOW_QUERY_AUTH_TOKENS" not in values:
-            values["allow_query_auth_tokens"] = app_env == "local" or auth_mode == "entra"
+            if "auth_required" in values:
+                auth_required_raw = str(values["auth_required"]).strip().lower()
+            elif "AUTH_REQUIRED" in values:
+                auth_required_raw = str(values["AUTH_REQUIRED"]).strip().lower()
+            else:
+                auth_required_raw = str(os.getenv("AUTH_REQUIRED") or "").strip().lower()
+            auth_required_explicit = auth_required_raw in {"1", "true", "yes", "on"}
+            values["database_required"] = app_env in {"staging", "production"} or auth_required_explicit
 
         # cors_allowed_origins defaults to "*" in local
         if "cors_allowed_origins" not in values and "CORS_ALLOWED_ORIGINS" not in values:
@@ -299,22 +229,14 @@ class ServerRuntimeConfig(BaseSettings):
             values["serve_ui"] = app_env == "local"
 
         if "expose_docs" not in values and "FLEET_RLM_EXPOSE_DOCS" not in values:
-            values["expose_docs"] = app_env == "local" or (app_env == "staging" and auth_mode != "entra")
+            values["expose_docs"] = app_env == "local"
 
         if "expose_root" not in values and "FLEET_RLM_EXPOSE_ROOT" not in values:
-            values["expose_root"] = app_env == "local" or (app_env == "staging" and auth_mode != "entra")
+            values["expose_root"] = app_env == "local"
 
-        # auth_required defaults to True when auth_mode is entra or neon
+        # auth_required defaults to True in staging/production, False in local
         if "auth_required" not in values and "AUTH_REQUIRED" not in values:
-            values["auth_required"] = auth_mode in {"entra", "neon"}
-
-        explicit_issuer_template = values.get("entra_issuer_template") or values.get("ENTRA_ISSUER_TEMPLATE")
-        explicit_issuer_url = values.get("entra_issuer_url") or values.get("ENTRA_ISSUER_URL")
-        if explicit_issuer_url:
-            values["entra_issuer_template"] = None
-        if explicit_issuer_template and not explicit_issuer_url and "{tenantid}" not in str(explicit_issuer_template):
-            values["entra_issuer_url"] = str(explicit_issuer_template).strip()
-            values["entra_issuer_template"] = None
+            values["auth_required"] = app_env in {"staging", "production"}
 
         return values
 
@@ -337,57 +259,23 @@ class ServerRuntimeConfig(BaseSettings):
         if self.app_env in {"staging", "production"}:
             if not self.auth_required:
                 raise ValueError("AUTH_REQUIRED must be true when APP_ENV is staging/production")
-            if self.allow_debug_auth:
-                raise ValueError("ALLOW_DEBUG_AUTH must be false when APP_ENV is staging/production")
-            if self.allow_query_auth_tokens and self.auth_mode != "entra":
-                raise ValueError("ALLOW_QUERY_AUTH_TOKENS must be false when APP_ENV is staging/production")
             if "*" in self.cors_origins_list:
                 raise ValueError("CORS_ALLOWED_ORIGINS cannot contain '*' in staging/production")
-            if self.auth_mode == "dev" and self.dev_jwt_secret == "change-me":
-                raise ValueError("DEV_JWT_SECRET must be customized for staging/production in AUTH_MODE=dev")
+            if not (self.secret_encryption_key or "").strip():
+                raise ValueError("FLEET_SECRET_ENCRYPTION_KEY is required for hosted Neon Auth BYOK profiles")
 
-        if self.auth_mode == "entra":
-            if not self.auth_required:
-                raise ValueError("AUTH_REQUIRED must be true when AUTH_MODE=entra")
+        # Neon Auth validation (required when auth_required=True). The Neon Auth
+        # URL itself is hardcoded as a class constant on NeonAuthProvider, so it
+        # is not validated here; only the tenant claim and database backing.
+        if self.auth_required:
             if not self.database_required:
-                raise ValueError("DATABASE_REQUIRED must be true when AUTH_MODE=entra")
-            if not self.entra_jwks_url:
-                raise ValueError("ENTRA_JWKS_URL is required when AUTH_MODE=entra")
-            if not self.entra_audience:
-                raise ValueError("ENTRA_AUDIENCE is required when AUTH_MODE=entra")
-            if self.entra_issuer_url:
-                if "{tenantid}" in self.entra_issuer_url:
-                    raise ValueError("ENTRA_ISSUER_URL must be a fixed issuer URL, not a template")
-            elif not self.entra_issuer_template:
-                raise ValueError("Set ENTRA_ISSUER_URL or ENTRA_ISSUER_TEMPLATE when AUTH_MODE=entra")
-            elif "{tenantid}" not in self.entra_issuer_template:
-                raise ValueError(
-                    "ENTRA_ISSUER_TEMPLATE must contain the {tenantid} placeholder "
-                    "when AUTH_MODE=entra; use ENTRA_ISSUER_URL for a single-tenant issuer"
-                )
-            if self.app_env in {"staging", "production"} and self.auth_mode == "entra":
-                if self.expose_docs:
-                    raise ValueError("FLEET_RLM_EXPOSE_DOCS must be false when AUTH_MODE=entra in staging/production")
-                if self.expose_root:
-                    raise ValueError("FLEET_RLM_EXPOSE_ROOT must be false when AUTH_MODE=entra in staging/production")
-                if (
-                    self.entra_issuer_url
-                    and not self.entra_allowed_user_ids_list
-                    and not self.entra_allowed_group_ids_list
-                ):
-                    raise ValueError(
-                        "Single-tenant Entra deployments in staging/production "
-                        "must configure ENTRA_ALLOWED_USER_IDS or ENTRA_ALLOWED_GROUP_IDS"
-                    )
+                raise ValueError("DATABASE_REQUIRED must be true when AUTH_REQUIRED is true")
+            if not (self.neon_tenant_claim or "").strip():
+                raise ValueError("NEON_TENANT_CLAIM is required when AUTH_REQUIRED is true")
 
-        if self.auth_mode == "neon":
-            if not self.auth_required:
-                raise ValueError("AUTH_REQUIRED must be true when AUTH_MODE=neon")
-            if not self.database_required:
-                raise ValueError("DATABASE_REQUIRED must be true when AUTH_MODE=neon")
-            if not self.neon_auth_url:
-                raise ValueError("NEON_AUTH_URL is required when AUTH_MODE=neon")
-            if not self.neon_tenant_claim.strip():
-                raise ValueError("NEON_TENANT_CLAIM is required when AUTH_MODE=neon")
-            if self.app_env in {"staging", "production"} and not (self.secret_encryption_key or "").strip():
-                raise ValueError("FLEET_SECRET_ENCRYPTION_KEY is required for hosted AUTH_MODE=neon BYOK profiles")
+
+# Backward-compatible alias — the class was renamed from ServerRuntimeConfig
+# to AppConfig.  Keep the old name available so callers that still reference
+# ``ServerRuntimeConfig`` (tests, bootstrap, dependencies, etc.) continue to
+# work without an immediate migration.
+ServerRuntimeConfig = AppConfig
