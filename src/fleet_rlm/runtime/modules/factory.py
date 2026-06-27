@@ -633,7 +633,10 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                 base = small_lm
                 logger.debug("Using small delegate LM for bounded action generation")
         except Exception:
-            pass
+            logger.debug(
+                "Failed to load small delegate LM; falling back to default LM.",
+                exc_info=True,
+            )
 
         if base is None:
             base = getattr(_dspy.settings, "lm", None)
