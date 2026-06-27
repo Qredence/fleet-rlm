@@ -129,6 +129,7 @@ def build_server_state(cfg: AppConfig) -> ServerState:
     auth_deps = AuthDeps(
         auth_provider=build_auth_provider(
             neon_tenant_claim=cfg.neon_tenant_claim,
+            dev_mode=not cfg.auth_required,
         ),
     )
     ws_ticket_deps = WebSocketTicketDeps()
