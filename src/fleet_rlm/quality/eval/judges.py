@@ -94,7 +94,9 @@ def _extract_score(response: str) -> float:
                 # Clamp to [0.0, 1.0] (VAL-C-026)
                 return max(0.0, min(1.0, score))
         except (json.JSONDecodeError, ValueError, TypeError):
-            pass
+            # JSON parsing is optional; fall through to other score extraction
+            # strategies below (pure float parsing, then regex extraction).
+            logger.debug("Failed to parse JSON score from judge response; falling back.")
 
     # Try to parse as a pure float first
     try:
