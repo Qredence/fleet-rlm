@@ -15,6 +15,46 @@ from fleet_rlm.runtime.tools.skill_tools import _load_skill_impl, discover_scaff
 
 logger = logging.getLogger(__name__)
 
+# Skill selection picks 1-2 skills from a keyword-filtered candidate set — a
+# cheap classification, not a reasoning task. These caps stop the planner LM
+# (e.g. qwen3.7-max with max_tokens=65536 and extended thinking) from turning a
+# routing pick into a multi-minute call that retries past its 60s timeout.
+# See: analyzing-mlflow-session trace tr-73ee45…/tr-d6ad21… (skill-selection
+# LM.__call__ took 138s/140s per turn, ~70-80% of total turn latency).
+_SKILL_SELECTION_MAX_TOKENS = 512
+_SKILL_SELECTION_TEMPERATURE = 0.0
+_SKILL_SELECTION_TIMEOUT_S = 30.0
+
+
+def _build_skill_selection_lm(base: Any | None) -> Any | None:
+    """Build a bounded ``BoundedChatLM`` for the skill-routing pick.
+
+    Uses ``build_bounded_chat_lm`` (a ``dspy.BaseLM`` subclass, no litellm) with
+    ``max_tokens`` capped to 512, deterministic temperature, a 30s real HTTP
+    timeout, ``num_retries=0``, and qwen extended thinking disabled. Returns
+    ``None`` if ``base`` is ``None`` or its credentials cannot be extracted, so
+    the caller can fall back to ``base`` (a delegate LM already built with a
+    bounded ``max_tokens``) and finally to the global dspy LM.
+
+    Rationale: skill selection picks 1-2 skills from a keyword-filtered
+    candidate set — a cheap classification, not a reasoning task. Without these
+    caps the planner LM (qwen3.7-max, max_tokens=65536, thinking on) turned this
+    into a 138s/turn call that retried past its 60s litellm timeout. See MLflow
+    traces tr-73ee45…/tr-d6ad21…/tr-a15557e… .
+    """
+    if base is None:
+        return None
+    from fleet_rlm.runtime.lm import build_bounded_chat_lm
+
+    return build_bounded_chat_lm(
+        base,
+        max_tokens=_SKILL_SELECTION_MAX_TOKENS,
+        temperature=_SKILL_SELECTION_TEMPERATURE,
+        timeout=_SKILL_SELECTION_TIMEOUT_S,
+        num_retries=0,
+    )
+
+
 # Keyword overrides for skills not fully captured by frontmatter alone.
 _KEYWORD_OVERRIDES: dict[str, list[str]] = {
     "rlm": [
@@ -223,11 +263,22 @@ def _format_available_skills() -> str:
 class SkillSelectionModule(dspy.Module):
     """Selects relevant skills and loads their instructions for injection."""
 
-    def __init__(self, *, volume_mount_path: str | None = None, max_skills: int = 2) -> None:
+    def __init__(
+        self,
+        *,
+        volume_mount_path: str | None = None,
+        max_skills: int = 2,
+        lm: Any | None = None,
+    ) -> None:
         super().__init__()
         self.select = dspy.ChainOfThought(SkillSelectionSignature)
         self._volume_mount_path = volume_mount_path
         self._max_skills = max_skills
+        # Prefer a capped clone of the delegate LM for the LLM disambiguation
+        # call; fall back to the raw delegate LM (already bounded by
+        # agent_delegate_max_tokens) and finally to the global dspy LM.
+        self._select_lm = lm
+        self._select_lm_capped = _build_skill_selection_lm(lm)
 
     def _load_active_skills(self, names: list[str]) -> ActiveSkills:
         instructions: dict[str, str] = {}
@@ -284,6 +335,20 @@ class SkillSelectionModule(dspy.Module):
             names = [s.strip().strip("[]()").strip("\"'") for s in re.split(r"[,\n]", text) if s.strip()]
         return [n for n in names if n in AVAILABLE_SKILLS]
 
+    def _invoke_select(self, *, context: str, available_skills: str) -> dspy.Prediction:
+        """Run the LLM skill selector on a bounded LM.
+
+        Binds the capped delegate LM (or raw delegate fallback) via
+        ``dspy.settings.context`` so this trivial routing call never lands on
+        the unbounded planner LM. The context manager is thread/session-local
+        and does not leak into sibling predictors sharing the global LM.
+        """
+        select_lm = self._select_lm_capped or self._select_lm
+        if select_lm is not None:
+            with dspy.settings.context(lm=select_lm):
+                return self.select(context=context, available_skills=available_skills)
+        return self.select(context=context, available_skills=available_skills)
+
     def forward(
         self,
         *,
@@ -306,7 +371,7 @@ class SkillSelectionModule(dspy.Module):
         if len(candidates) > self._max_skills:
             context = f"{user_request}\n\nRecent context: {core_memory[:500]}" if core_memory else user_request
             try:
-                prediction = self.select(
+                prediction = self._invoke_select(
                     context=context,
                     available_skills=_format_available_skills(),
                 )

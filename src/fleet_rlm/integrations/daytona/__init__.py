@@ -18,6 +18,7 @@ if TYPE_CHECKING:
         VolumeNotReadyError,
     )
     from .interpreter import DaytonaInterpreter
+    from .log_stream import LogStreamParser, SandboxEvent, SandboxEventCategory
     from .memory_db import ainit_memory_db, init_memory_db
     from .models import (
         ContextSource,
@@ -42,7 +43,10 @@ __all__ = [
     "DaytonaRunCancelled",
     "DaytonaSandboxRuntime",
     "DaytonaSandboxSession",
+    "LogStreamParser",
     "ResolvedDaytonaConfig",
+    "SandboxEvent",
+    "SandboxEventCategory",
     "SandboxLmRuntimeConfig",
     "SandboxSpec",
     "VolumeNotReadyError",
@@ -72,6 +76,18 @@ _IMPORT_MAP: dict[str, tuple[str, str]] = {
     "DaytonaRunCancelled": (
         "fleet_rlm.integrations.daytona.errors",
         "DaytonaRunCancelled",
+    ),
+    "LogStreamParser": (
+        "fleet_rlm.integrations.daytona.log_stream",
+        "LogStreamParser",
+    ),
+    "SandboxEvent": (
+        "fleet_rlm.integrations.daytona.log_stream",
+        "SandboxEvent",
+    ),
+    "SandboxEventCategory": (
+        "fleet_rlm.integrations.daytona.log_stream",
+        "SandboxEventCategory",
     ),
     "DaytonaSandboxRuntime": (
         "fleet_rlm.integrations.daytona.runtime",

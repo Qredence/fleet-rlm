@@ -36,7 +36,7 @@ rlm_settings:
   max_iterations: 60
   max_llm_calls: 50
   max_output_chars: 5000
-  action_max_tokens: ${oc.env:FLEET_RLM_ACTION_MAX_TOKENS,4096}
+  action_max_tokens: ${oc.env:FLEET_RLM_ACTION_MAX_TOKENS,2048}
   delegate_max_calls_per_turn: 8
   delegate_result_truncation_chars: 8000
   delegate_execution_timeout: ${oc.env:RLM_DELEGATE_EXECUTION_TIMEOUT,300}

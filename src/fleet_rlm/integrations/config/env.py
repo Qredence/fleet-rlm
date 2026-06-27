@@ -214,7 +214,7 @@ class AgentConfig(BaseModel):
     )
     model: str = Field(
         default="openai/gemini-3-flash-preview",
-        description="LLM model identifier to use. Must include LiteLLM provider prefix e.g. 'openai/model-name'.",
+        description="LLM model identifier to use. Include a LiteLLM provider prefix e.g. 'openai/model-name'; a bare id is permitted when an LLM profile supplies api_base + provider_type (resolved in integrations/llm_profiles/resolver.py).",
     )
     temperature: float = Field(
         default=1.0,
@@ -277,8 +277,20 @@ class RlmSettings(BaseModel):
         description="Maximum REPL output characters exposed back to the RLM per step.",
     )
     action_max_tokens: int = Field(
-        default=4096,
+        default=16384,
         description="Maximum model tokens for each RLM action-generation call.",
+    )
+    action_timeout: int = Field(
+        default=90,
+        description="Maximum seconds for each RLM action-generation call before timeout.",
+    )
+    url_document_max_iterations: int = Field(
+        default=12,
+        description="Maximum iterations for URL-document RLM analysis.",
+    )
+    url_document_max_llm_calls: int = Field(
+        default=30,
+        description="Maximum LLM calls for URL-document RLM analysis.",
     )
     delegate_max_calls_per_turn: int = Field(
         default=8,

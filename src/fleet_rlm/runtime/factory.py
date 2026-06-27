@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -9,6 +10,8 @@ from typing import Any
 
 from fleet_rlm.integrations.config._env_utils import env_bool as _env_bool
 from fleet_rlm.runtime.config import configure_planner_from_env
+
+logger = logging.getLogger(__name__)
 
 ESCALATING_RUNTIME_ENV_VAR = "FLEET_RLM_USE_ESCALATING_RUNTIME"
 
@@ -37,6 +40,7 @@ def build_chat_agent(
     rlm_max_llm_calls: int | None = None,
     rlm_max_output_chars: int | None = None,
     rlm_action_max_tokens: int | None = None,
+    rlm_action_timeout: int | None = None,
     history_max_turns: int | None = None,
     extra_tools: list[Callable[..., Any]] | None = None,
     env_file: Path | None = None,
@@ -57,6 +61,12 @@ def build_chat_agent(
         effective_sub_lm = sub_lm if sub_lm is not None else delegate_lm
         if effective_sub_lm is not None:
             interpreter.sub_lm = effective_sub_lm
+        else:
+            logger.info(
+                "No delegate LM configured (DSPY_DELEGATE_LM_MODEL not set). "
+                "Main planner model will be used for sub_lm calls, which increases cost. "
+                "Consider configuring a cheaper model for sub_lm."
+            )
 
     agent = AgentRuntime(
         interpreter=interpreter,
@@ -65,6 +75,7 @@ def build_chat_agent(
         rlm_max_llm_calls=rlm_max_llm_calls,
         rlm_max_output_chars=rlm_max_output_chars,
         rlm_action_max_tokens=rlm_action_max_tokens,
+        rlm_action_timeout=rlm_action_timeout,
         history_max_turns=history_max_turns,
         extra_tools=extra_tools,
         repository=repository,

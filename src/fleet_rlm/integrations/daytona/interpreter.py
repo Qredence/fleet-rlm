@@ -50,6 +50,7 @@ from .isolation import (
     normalize_child_fork_fallback,
     normalize_child_isolation_mode,
 )
+from .log_stream import LogStreamParser, SandboxEvent
 from .models import (
     ReconfigureOutcome,
     WorkspaceConfig,
@@ -200,6 +201,8 @@ class DaytonaInterpreter(
             executor=self._executor,
             callback_owner=self,
         )
+        # Log stream parser for categorized sandbox event streaming
+        self._log_stream_parser: LogStreamParser | None = None
 
     @property
     def runtime(self) -> DaytonaSandboxRuntime:
@@ -315,6 +318,37 @@ class DaytonaInterpreter(
         if self._executor is None:
             raise RuntimeError("Daytona interpreter executor has not been initialized")
         return self._executor
+
+    @property
+    def log_stream_parser(self) -> LogStreamParser:
+        """Lazily-created :class:`LogStreamParser` for sandbox log events.
+
+        Feed raw sandbox log lines via :meth:`feed_sandbox_log`; parsed
+        :class:`~fleet_rlm.integrations.daytona.log_stream.SandboxEvent`
+        objects are relayed to the ``_turn_step_callback`` so the frontend
+        sees real sandbox activity instead of a generic progress heartbeat.
+        """
+        parser = getattr(self, "_log_stream_parser", None)
+        if parser is None:
+            parser = LogStreamParser(interpreter=self)
+            self._log_stream_parser = parser
+        return parser
+
+    def feed_sandbox_log(self, line: str) -> SandboxEvent | None:
+        """Parse and relay one Daytona sandbox log line.
+
+        Returns the parsed :class:`SandboxEvent` (or ``None`` for blank lines)
+        so callers can inspect the categorization. Safe to call before the
+        parser is started; events are buffered until :meth:`drain_sandbox_logs`.
+        """
+        return self.log_stream_parser.feed_line(line)
+
+    def drain_sandbox_logs(self) -> list[SandboxEvent]:
+        """Return and clear all buffered sandbox log events."""
+        parser = getattr(self, "_log_stream_parser", None)
+        if parser is None:
+            return []
+        return parser.drain()
 
     def __enter__(self) -> DaytonaInterpreter:
         return _sync_enter_impl(self)
@@ -491,6 +525,7 @@ class DaytonaInterpreter(
         self.child_isolation_metadata = None
         self.output_fields = None
         self._llm_call_count = 0
+        self._log_stream_parser = None
 
         if self._executor is not None:
             await self._executor.asoft_reset()

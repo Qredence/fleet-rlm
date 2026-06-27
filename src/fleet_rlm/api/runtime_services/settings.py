@@ -72,6 +72,27 @@ def _settings_positive_int(value: str, *, default: int) -> int:
     return max(int(value.strip() or str(default)), 1)
 
 
+def _settings_positive_float(value: str, *, default: float) -> float:
+    parsed = value.strip() or str(default)
+    try:
+        result = float(parsed)
+    except ValueError as exc:
+        raise ValueError(f"expected a positive float, got {value!r}") from exc
+    if result <= 0:
+        raise ValueError(f"expected a positive float, got {result}")
+    return result
+
+
+def _settings_optional_float(value: str) -> float | None:
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        return float(stripped)
+    except ValueError as exc:
+        raise ValueError(f"expected a float, got {value!r}") from exc
+
+
 class RuntimeConfigSnapshot(TypedDict):
     agent_model: str | None
     agent_delegate_model: str | None
@@ -81,6 +102,10 @@ class RuntimeConfigSnapshot(TypedDict):
     planner_lm: object | None
     delegate_lm: object | None
     delegate_small_lm: object | None
+    planner_max_tokens: int
+    planner_lm_timeout_s: float
+    delegate_lm_timeout_s: float
+    planner_temperature: float | None
 
 
 def apply_runtime_settings_to_config(*, config: ServerRuntimeConfig, normalized: dict[str, str]) -> None:
@@ -100,6 +125,29 @@ def apply_runtime_settings_to_config(*, config: ServerRuntimeConfig, normalized:
         config.agent_delegate_max_tokens = _settings_positive_int(
             normalized["DSPY_DELEGATE_LM_MAX_TOKENS"],
             default=64000,
+        )
+
+    if "DSPY_LM_MAX_TOKENS" in normalized:
+        config.planner_max_tokens = _settings_positive_int(
+            normalized["DSPY_LM_MAX_TOKENS"],
+            default=64000,
+        )
+
+    if "DSPY_PLANNER_LM_TIMEOUT_S" in normalized:
+        config.planner_lm_timeout_s = _settings_positive_float(
+            normalized["DSPY_PLANNER_LM_TIMEOUT_S"],
+            default=60.0,
+        )
+
+    if "DSPY_DELEGATE_LM_TIMEOUT_S" in normalized:
+        config.delegate_lm_timeout_s = _settings_positive_float(
+            normalized["DSPY_DELEGATE_LM_TIMEOUT_S"],
+            default=60.0,
+        )
+
+    if "DSPY_PLANNER_LM_TEMPERATURE" in normalized:
+        config.planner_temperature = _settings_optional_float(
+            normalized["DSPY_PLANNER_LM_TEMPERATURE"],
         )
 
     if "FLEET_RLM_ACTION_MAX_TOKENS" in normalized:
@@ -146,6 +194,10 @@ def _capture_runtime_config_snapshot(*, config: ServerRuntimeConfig, lm_deps: Lm
         "planner_lm": lm_deps.planner_lm,
         "delegate_lm": lm_deps.delegate_lm,
         "delegate_small_lm": lm_deps.delegate_small_lm,
+        "planner_max_tokens": config.planner_max_tokens,
+        "planner_lm_timeout_s": config.planner_lm_timeout_s,
+        "delegate_lm_timeout_s": config.delegate_lm_timeout_s,
+        "planner_temperature": config.planner_temperature,
     }
 
 
@@ -163,6 +215,10 @@ def _restore_runtime_config_snapshot(
     lm_deps.planner_lm = snapshot["planner_lm"]
     lm_deps.delegate_lm = snapshot["delegate_lm"]
     lm_deps.delegate_small_lm = snapshot["delegate_small_lm"]
+    config.planner_max_tokens = snapshot["planner_max_tokens"]
+    config.planner_lm_timeout_s = snapshot["planner_lm_timeout_s"]
+    config.delegate_lm_timeout_s = snapshot["delegate_lm_timeout_s"]
+    config.planner_temperature = snapshot["planner_temperature"]
 
 
 def _restore_runtime_settings_env(

@@ -526,14 +526,18 @@ class RLMDocumentTurnSignature(dspy.Signature):
 class RLMWorkspaceTurnSignature(dspy.Signature):
     """Answer a request over large local context staged for the sandbox.
 
+    On iteration 0, always read the context manifest first to understand what
+    files are available: ``print(context['manifest'])`` or read
+    ``.fleet-rlm/context/manifest.json`` from the workspace. This reveals the
+    staged file paths, sizes, and metadata needed to plan your exploration.
+
     ``context`` is reconstructed in the sandbox as a dict with keys
     ``document_text``, ``context_paths``, ``manifest``, and ``metadata``. When
-    ``document_text`` is empty, read ``.fleet-rlm/context/manifest.json`` in the
-    workspace and open each staged ``.extracted.txt`` file; ``context_paths``
-    are host paths recorded for reference only. Inspect with Python slices and
-    regex, use ``llm_query`` on focused excerpts, inspect selected workflow
-    guidance through ``active_skills``, and call ``SUBMIT(response=...)`` for
-    the final answer.
+    ``document_text`` is empty, open each staged ``.extracted.txt`` file listed
+    in the manifest; ``context_paths`` are host paths recorded for reference
+    only. Inspect with Python slices and regex, use ``llm_query`` on focused
+    excerpts, inspect selected workflow guidance through ``active_skills``, and
+    call ``SUBMIT(response=...)`` for the final answer.
     """
 
     user_request: str = dspy.InputField(desc="The current user request to solve")
