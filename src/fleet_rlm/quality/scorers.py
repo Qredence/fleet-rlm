@@ -97,8 +97,13 @@ def _load_mlflow_scorers() -> tuple[Any, Any, Any, Any, Any, Any, Any]:
 
 def get_default_judge_model() -> str:
     """Get the model ID configured for the LLM judge.
-    Returns the DSPY_LM_MODEL or a default appropriate for ``dspy.LM``."""
-    return os.environ.get("DSPY_LM_MODEL", "openai/gemini-3-flash-preview")
+
+    Returns the ``DSPY_LM_MODEL`` env var, or an empty string when unset.
+    An empty string signals that no judge model is configured; callers should
+    skip LLM-judge scoring in that case rather than silently falling back to a
+    hardcoded provider default.
+    """
+    return os.environ.get("DSPY_LM_MODEL", "")
 
 
 def build_rlm_scorers(
@@ -128,6 +133,12 @@ def build_rlm_scorers(
     _ = _AssessmentSource, _Feedback, scorer
 
     judge_model = model or get_default_judge_model()
+
+    # When no judge model is configured (empty string), skip LLM-judge scorers
+    # entirely. Returning an empty list means evaluation runs proceed without
+    # LLM-based scores rather than silently falling back to a hardcoded model.
+    if not judge_model:
+        return []
 
     scorers = [
         # Evaluates if the agent's final answer solves the user's initial query

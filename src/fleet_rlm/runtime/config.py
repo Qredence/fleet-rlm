@@ -229,7 +229,18 @@ def _planner_lm_kwargs(
 ) -> dict[str, Any] | None:
     api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY")
     model = model_name or os.environ.get("DSPY_LM_MODEL")
-    if not model or not api_key:
+    if not model:
+        logger.warning(
+            "No planner LM model configured (DSPY_LM_MODEL is unset/empty); "
+            "returning None. Set DSPY_LM_MODEL or configure a BYOK LLM profile."
+        )
+        return None
+    if not api_key:
+        logger.warning(
+            "Planner LM model '%s' is configured but no API key is available "
+            "(DSPY_LLM_API_KEY/DSPY_LM_API_KEY unset); returning None.",
+            model,
+        )
         return None
 
     custom_provider = (os.environ.get("DSPY_LM_CUSTOM_PROVIDER") or "").strip() or None
@@ -251,6 +262,10 @@ def _delegate_lm_kwargs(
 ) -> dict[str, Any] | None:
     model = model_name or os.environ.get("DSPY_DELEGATE_LM_MODEL")
     if not model:
+        logger.warning(
+            "No delegate LM model configured (DSPY_DELEGATE_LM_MODEL is unset/empty); "
+            "returning None. Callers should fall back to the planner LM."
+        )
         return None
 
     api_key = (

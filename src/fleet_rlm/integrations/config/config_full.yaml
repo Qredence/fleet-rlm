@@ -3,7 +3,7 @@ defaults:
 
 llm:
   max_iters: 60
-  model: ${oc.env:DSPY_LM_MODEL,openai/gemini/gemini-flash-lite-latest}
+  model: ${oc.env:DSPY_LM_MODEL,""}
   temperature: 1
   delegate_model: ${oc.env:DSPY_DELEGATE_LM_MODEL,null}
   delegate_small_model: ${oc.env:DSPY_DELEGATE_LM_SMALL_MODEL,null}

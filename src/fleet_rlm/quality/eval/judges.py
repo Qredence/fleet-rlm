@@ -132,7 +132,7 @@ def _call_judge_lm(
     prompt: str,
     trace_record: TraceRecord,
     lm: Any,
-) -> float:
+) -> float | None:
     """Call an LLM to judge a trace.
 
     Args:
@@ -142,8 +142,16 @@ def _call_judge_lm(
         lm: Language model to use for judging.
 
     Returns:
-        Score in [0.0, 1.0], or 0.0 on error.
+        Score in [0.0, 1.0], ``None`` when no LM is configured (so callers
+        record a null score), or ``0.0`` on error.
     """
+    if lm is None:
+        logger.info(
+            "Skipping LLM judge '%s': no judge model is configured. "
+            "Set DSPY_LM_MODEL or configure a BYOK LLM profile to enable LLM-judge scoring.",
+            judge_name,
+        )
+        return None
     try:
         # Build evaluation context
         context_parts = [
@@ -235,7 +243,7 @@ def _call_judge_lm(
         return 0.0
 
 
-def answer_relevance(trace_record: TraceRecord, lm: Any) -> float:
+def answer_relevance(trace_record: TraceRecord, lm: Any) -> float | None:
     """Score how relevant the final answer is to the user's request.
 
     Args:
@@ -243,7 +251,7 @@ def answer_relevance(trace_record: TraceRecord, lm: Any) -> float:
         lm: Language model to use for judging.
 
     Returns:
-        Score in [0.0, 1.0].
+        Score in [0.0, 1.0], or ``None`` when no LM is configured.
     """
     try:
         prompt = _load_prompt("answer_relevance")
@@ -254,7 +262,7 @@ def answer_relevance(trace_record: TraceRecord, lm: Any) -> float:
     return _call_judge_lm("answer_relevance", prompt, trace_record, lm)
 
 
-def faithfulness_to_context(trace_record: TraceRecord, lm: Any) -> float:
+def faithfulness_to_context(trace_record: TraceRecord, lm: Any) -> float | None:
     """Score how faithful the answer is to the provided context.
 
     Args:
@@ -262,7 +270,7 @@ def faithfulness_to_context(trace_record: TraceRecord, lm: Any) -> float:
         lm: Language model to use for judging.
 
     Returns:
-        Score in [0.0, 1.0].
+        Score in [0.0, 1.0], or ``None`` when no LM is configured.
     """
     try:
         prompt = _load_prompt("faithfulness_to_context")
@@ -273,7 +281,7 @@ def faithfulness_to_context(trace_record: TraceRecord, lm: Any) -> float:
     return _call_judge_lm("faithfulness_to_context", prompt, trace_record, lm)
 
 
-def trajectory_coherence(trace_record: TraceRecord, lm: Any) -> float:
+def trajectory_coherence(trace_record: TraceRecord, lm: Any) -> float | None:
     """Score how coherent the execution trajectory is.
 
     Args:
@@ -281,7 +289,7 @@ def trajectory_coherence(trace_record: TraceRecord, lm: Any) -> float:
         lm: Language model to use for judging.
 
     Returns:
-        Score in [0.0, 1.0].
+        Score in [0.0, 1.0], or ``None`` when no LM is configured.
     """
     try:
         prompt = _load_prompt("trajectory_coherence")
@@ -292,7 +300,7 @@ def trajectory_coherence(trace_record: TraceRecord, lm: Any) -> float:
     return _call_judge_lm("trajectory_coherence", prompt, trace_record, lm)
 
 
-def tool_selection_quality(trace_record: TraceRecord, lm: Any) -> float:
+def tool_selection_quality(trace_record: TraceRecord, lm: Any) -> float | None:
     """Score how appropriate the tool selection was.
 
     Args:
@@ -300,7 +308,7 @@ def tool_selection_quality(trace_record: TraceRecord, lm: Any) -> float:
         lm: Language model to use for judging.
 
     Returns:
-        Score in [0.0, 1.0].
+        Score in [0.0, 1.0], or ``None`` when no LM is configured.
     """
     try:
         prompt = _load_prompt("tool_selection_quality")

@@ -213,11 +213,11 @@ class TestJudgeClamping:
         assert score == 0.0
 
     def test_judge_handles_none_lm(self):
-        """Judge returns 0.0 when LM is None."""
+        """Judge returns None (skips LLM call) when no LM is configured."""
         trace = self._make_trace()
 
         score = answer_relevance(trace, None)
-        assert score == 0.0
+        assert score is None
 
     def test_judge_handles_lm_exception(self):
         """Judge returns 0.0 when LM raises an exception."""

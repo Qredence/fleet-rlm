@@ -60,8 +60,8 @@ class LlmConfig(BaseModel):
     """Configuration for language-model provider and model selection."""
 
     model: str = Field(
-        default="openai/gemini-3-flash-preview",
-        description="Planner LLM model identifier.",
+        default="",
+        description="Planner LLM model identifier. Empty means no model configured; resolvers return None and log a warning.",
     )
     delegate_model: str | None = Field(
         default=None,
@@ -213,8 +213,8 @@ class AgentConfig(BaseModel):
         description="Maximum number of ReAct loop iterations per turn.",
     )
     model: str = Field(
-        default="openai/gemini-3-flash-preview",
-        description="LLM model identifier to use. Include a LiteLLM provider prefix e.g. 'openai/model-name'; a bare id is permitted when an LLM profile supplies api_base + provider_type (resolved in integrations/llm_profiles/resolver.py).",
+        default="",
+        description="LLM model identifier to use. Include a LiteLLM provider prefix e.g. 'openai/model-name'; a bare id is permitted when an LLM profile supplies api_base + provider_type (resolved in integrations/llm_profiles/resolver.py). Empty means no model configured; resolvers return None and log a warning.",
     )
     temperature: float = Field(
         default=1.0,

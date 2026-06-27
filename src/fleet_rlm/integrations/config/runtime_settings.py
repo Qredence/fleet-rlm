@@ -97,7 +97,7 @@ _RUNTIME_SETTING_DEFINITIONS: tuple[RuntimeSettingDefinition, ...] = (
         description="Model identifier for the planner runtime.",
         reload_required=True,
         placeholder="openai/gpt-4o",
-        default="openai/gemini-3-flash-preview",
+        default="",
     ),
     _definition(
         "DSPY_DELEGATE_LM_MODEL",
