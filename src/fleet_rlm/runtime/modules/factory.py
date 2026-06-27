@@ -406,9 +406,7 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         try:
             self.generate_action.current_iteration = iteration
         except (AttributeError, TypeError):
-            logger.debug(
-                "Unable to set generate_action.current_iteration; continuing without sync."
-            )
+            logger.debug("Unable to set generate_action.current_iteration; continuing without sync.")
         except Exception:
             logger.warning(
                 "Unexpected error while setting generate_action.current_iteration; continuing.",

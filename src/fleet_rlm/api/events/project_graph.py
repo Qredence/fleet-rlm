@@ -72,7 +72,9 @@ def _serialize_rows(rows: list[Any]) -> list[dict[str, Any]]:
         elif hasattr(row, "model_dump"):
             result.append(row.model_dump(mode="json"))
         else:
-            result.append({"label": str(getattr(row, "label", "")), "kind": str(getattr(row, "kind", "")), "value": str(row)})
+            result.append(
+                {"label": str(getattr(row, "label", "")), "kind": str(getattr(row, "kind", "")), "value": str(row)}
+            )
     return result
 
 
