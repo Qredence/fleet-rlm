@@ -2174,6 +2174,8 @@ paths:
                 $ref: "#/components/schemas/EvaluationRunListResponse"
         "401":
           description: Authentication is required or the provided token is invalid.
+      security:
+        - HTTPBearer: []
     post:
       tags:
         - evaluations
@@ -2204,6 +2206,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+      security:
+        - HTTPBearer: []
   /api/v1/evaluations/{run_id}:
     get:
       tags:
@@ -2212,15 +2216,18 @@ paths:
       description: Retrieve the full evaluation report for a given run_id. The report
         includes per-trace scores (4 judges + 6 metrics) and aggregate statistics.
       operationId: get_evaluation_api_v1_evaluations__run_id__get
+      security:
+        - HTTPBearer: []
       parameters:
         - name: run_id
           in: path
           required: true
           schema:
             type: string
-            description: Unique identifier for the evaluation run.
+            pattern: ^[a-f0-9-]{36}$
+            description: Unique identifier (UUID) for the evaluation run.
             title: Run Id
-          description: Unique identifier for the evaluation run.
+          description: Unique identifier (UUID) for the evaluation run.
       responses:
         "200":
           description: Successful Response
@@ -2425,10 +2432,17 @@ components:
           type: string
           title: Run Id
           description: Unique identifier for this evaluation run.
+        status:
+          type: string
+          title: Status
+          description: Lifecycle status of the run (pending/running/completed/failed).
+          default: completed
         created_at:
           type: string
           title: Created At
-          description: ISO8601 timestamp when the report was created.
+          description: ISO8601 timestamp when the report was created (empty until
+            completed).
+          default: ""
         filters:
           additionalProperties: true
           type: object
@@ -2452,12 +2466,19 @@ components:
       type: object
       required:
         - run_id
-        - created_at
-        - filters
-        - per_trace
-        - aggregates
       title: EvaluationReportResponse
-      description: Response body for GET /api/v1/evaluations/{run_id}.
+      description: 'Response body for GET /api/v1/evaluations/{run_id}.
+
+
+        The ``status`` field reflects the background task lifecycle
+
+        (``pending``/``running``/``completed``/``failed``). When the run is still
+
+        in progress, the report-specific fields (``filters``, ``per_trace``,
+
+        ``aggregates``) are populated with empty/placeholder values and the client
+
+        should poll again. When ``status="completed"`` the full report is present.'
     EvaluationRequest:
       properties:
         trace_ids:
@@ -2465,19 +2486,24 @@ components:
             - items:
                 type: string
               type: array
+              maxItems: 100
             - type: "null"
           title: Trace Ids
-          description: Optional list of specific trace IDs to evaluate.
+          description: Optional list of specific trace IDs to evaluate (max 100).
         limit:
           anyOf:
             - type: integer
+              maximum: 1000.0
+              minimum: 1.0
             - type: "null"
           title: Limit
-          description: Optional maximum number of traces to evaluate.
+          description: Optional maximum number of traces to evaluate (1-1000).
         from_last_days:
           type: integer
+          maximum: 365.0
+          minimum: 0.0
           title: From Last Days
-          description: "Number of days to look back for traces (default: 1)."
+          description: "Number of days to look back for traces (0-365, default: 1)."
           default: 1
       type: object
       title: EvaluationRequest
@@ -2593,11 +2619,29 @@ components:
           type: string
           title: Run Id
           description: Unique identifier for this evaluation run.
+        status:
+          type: string
+          title: Status
+          description: "Lifecycle status of the run: ``pending`` (queued/just-started),
+            ``running`` (background task executing), ``completed`` (report available),
+            or ``failed`` (evaluation error)."
+          default: pending
       type: object
       required:
         - run_id
       title: EvaluationRunResponse
-      description: Response body for POST /api/v1/evaluations.
+      description: 'Response body for POST /api/v1/evaluations.
+
+
+        The POST endpoint returns immediately with ``status="pending"``; the
+
+        actual evaluation runs as a background ``asyncio.create_task`` so the
+
+        event loop stays free to serve other requests (VAL-SEC-009, VAL-SEC-011).
+
+        Clients poll ``GET /api/v1/evaluations/{run_id}`` to observe the
+
+        ``pending`` -> ``running`` -> ``completed`` transition (VAL-SEC-010).'
     GEPAModuleInfo:
       properties:
         slug:

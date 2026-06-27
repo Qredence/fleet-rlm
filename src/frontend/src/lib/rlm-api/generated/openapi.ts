@@ -535,6 +535,12 @@ export interface components {
     /**
      * EvaluationReportResponse
      * @description Response body for GET /api/v1/evaluations/{run_id}.
+     *
+     * The ``status`` field reflects the background task lifecycle
+     * (``pending``/``running``/``completed``/``failed``). When the run is still
+     * in progress, the report-specific fields (``filters``, ``per_trace``,
+     * ``aggregates``) are populated with empty/placeholder values and the client
+     * should poll again. When ``status="completed"`` the full report is present.
      */
     EvaluationReportResponse: {
       /**
@@ -543,29 +549,36 @@ export interface components {
        */
       run_id: string;
       /**
-       * Created At
-       * @description ISO8601 timestamp when the report was created.
+       * Status
+       * @description Lifecycle status of the run (pending/running/completed/failed).
+       * @default completed
        */
-      created_at: string;
+      status?: string;
+      /**
+       * Created At
+       * @description ISO8601 timestamp when the report was created (empty until completed).
+       * @default
+       */
+      created_at?: string;
       /**
        * Filters
        * @description Dictionary echoing the trace_ids/limit/from_last_days used.
        */
-      filters: {
+      filters?: {
         [key: string]: unknown;
       };
       /**
        * Per Trace
        * @description List of per-trace score dictionaries with all 10 metrics.
        */
-      per_trace: {
+      per_trace?: {
         [key: string]: unknown;
       }[];
       /**
        * Aggregates
        * @description Dictionary with mean and median for each score.
        */
-      aggregates: {
+      aggregates?: {
         [key: string]: {
           [key: string]: number;
         };
@@ -578,17 +591,17 @@ export interface components {
     EvaluationRequest: {
       /**
        * Trace Ids
-       * @description Optional list of specific trace IDs to evaluate.
+       * @description Optional list of specific trace IDs to evaluate (max 100).
        */
       trace_ids?: string[] | null;
       /**
        * Limit
-       * @description Optional maximum number of traces to evaluate.
+       * @description Optional maximum number of traces to evaluate (1-1000).
        */
       limit?: number | null;
       /**
        * From Last Days
-       * @description Number of days to look back for traces (default: 1).
+       * @description Number of days to look back for traces (0-365, default: 1).
        * @default 1
        */
       from_last_days?: number;
@@ -695,6 +708,12 @@ export interface components {
     /**
      * EvaluationRunResponse
      * @description Response body for POST /api/v1/evaluations.
+     *
+     * The POST endpoint returns immediately with ``status="pending"``; the
+     * actual evaluation runs as a background ``asyncio.create_task`` so the
+     * event loop stays free to serve other requests (VAL-SEC-009, VAL-SEC-011).
+     * Clients poll ``GET /api/v1/evaluations/{run_id}`` to observe the
+     * ``pending`` -> ``running`` -> ``completed`` transition (VAL-SEC-010).
      */
     EvaluationRunResponse: {
       /**
@@ -702,6 +721,12 @@ export interface components {
        * @description Unique identifier for this evaluation run.
        */
       run_id: string;
+      /**
+       * Status
+       * @description Lifecycle status of the run: ``pending`` (queued/just-started), ``running`` (background task executing), ``completed`` (report available), or ``failed`` (evaluation error).
+       * @default pending
+       */
+      status?: string;
     };
     /**
      * GEPAModuleInfo
@@ -5779,7 +5804,7 @@ export interface operations {
   get_evaluation_api_v1_evaluations__run_id__get: {
     parameters: {
       path: {
-        /** @description Unique identifier for the evaluation run. */
+        /** @description Unique identifier (UUID) for the evaluation run. */
         run_id: string;
       };
     };

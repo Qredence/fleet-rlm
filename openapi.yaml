@@ -2432,10 +2432,17 @@ components:
           type: string
           title: Run Id
           description: Unique identifier for this evaluation run.
+        status:
+          type: string
+          title: Status
+          description: Lifecycle status of the run (pending/running/completed/failed).
+          default: completed
         created_at:
           type: string
           title: Created At
-          description: ISO8601 timestamp when the report was created.
+          description: ISO8601 timestamp when the report was created (empty until
+            completed).
+          default: ''
         filters:
           additionalProperties: true
           type: object
@@ -2459,12 +2466,19 @@ components:
       type: object
       required:
       - run_id
-      - created_at
-      - filters
-      - per_trace
-      - aggregates
       title: EvaluationReportResponse
-      description: Response body for GET /api/v1/evaluations/{run_id}.
+      description: 'Response body for GET /api/v1/evaluations/{run_id}.
+
+
+        The ``status`` field reflects the background task lifecycle
+
+        (``pending``/``running``/``completed``/``failed``). When the run is still
+
+        in progress, the report-specific fields (``filters``, ``per_trace``,
+
+        ``aggregates``) are populated with empty/placeholder values and the client
+
+        should poll again. When ``status="completed"`` the full report is present.'
     EvaluationRequest:
       properties:
         trace_ids:
@@ -2605,11 +2619,29 @@ components:
           type: string
           title: Run Id
           description: Unique identifier for this evaluation run.
+        status:
+          type: string
+          title: Status
+          description: 'Lifecycle status of the run: ``pending`` (queued/just-started),
+            ``running`` (background task executing), ``completed`` (report available),
+            or ``failed`` (evaluation error).'
+          default: pending
       type: object
       required:
       - run_id
       title: EvaluationRunResponse
-      description: Response body for POST /api/v1/evaluations.
+      description: 'Response body for POST /api/v1/evaluations.
+
+
+        The POST endpoint returns immediately with ``status="pending"``; the
+
+        actual evaluation runs as a background ``asyncio.create_task`` so the
+
+        event loop stays free to serve other requests (VAL-SEC-009, VAL-SEC-011).
+
+        Clients poll ``GET /api/v1/evaluations/{run_id}`` to observe the
+
+        ``pending`` -> ``running`` -> ``completed`` transition (VAL-SEC-010).'
     GEPAModuleInfo:
       properties:
         slug:

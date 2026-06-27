@@ -66,7 +66,9 @@ function formatMetricValue(key: string, value: number | null | undefined): strin
   return value.toFixed(2);
 }
 
-function getMetricTone(value: number | null | undefined): "default" | "strong" | "warning" | "error" {
+function getMetricTone(
+  value: number | null | undefined,
+): "default" | "strong" | "warning" | "error" {
   if (value == null) return "default";
 
   // For most metrics, higher is better

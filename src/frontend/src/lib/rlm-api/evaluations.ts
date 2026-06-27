@@ -21,9 +21,7 @@ export const evaluationsEndpoints = {
    * List all evaluation runs, most recent first.
    */
   list(signal?: AbortSignal) {
-    return unwrap(
-      typedClient.GET("/api/v1/evaluations", { signal: withTimeout(signal) }),
-    );
+    return unwrap(typedClient.GET("/api/v1/evaluations", { signal: withTimeout(signal) }));
   },
 
   /**
