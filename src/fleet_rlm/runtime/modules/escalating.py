@@ -124,18 +124,30 @@ def _run_with_timeout(fn: Callable[..., Any], *, timeout: int) -> Any:
 
 
 def _is_rlm_parse_error(exc: Exception) -> bool:
-    """Return True if the exception indicates a JSON/parse error from RLM extraction."""
+    """Return True if the exception indicates a JSON/parse error from RLM extraction.
+
+    Narrowed to JSON-specific markers and ``json.JSONDecodeError`` so that
+    broad substrings like ``"expected"``, ``"invalid"``, ``"decode"``, or
+    ``"extraction"`` in isolation (e.g. ``ValueError("Invalid API key")`` or
+    ``RuntimeError("extraction failed")``) do NOT trigger the parse-error
+    retry path. Only genuine JSON parse failures (containing ``"json"``,
+    ``"json.decode"``, ``"json parse"``, ``"malformed json"``,
+    ``"parse error"``) or ``json.JSONDecodeError`` instances are classified
+    as parse errors.
+    """
+    import json
+
+    if isinstance(exc, json.JSONDecodeError):
+        return True
     msg = str(exc).lower()
     return any(
         marker in msg
         for marker in (
             "json",
-            "parse",
-            "expected",
-            "invalid",
-            "decode",
-            "malformed",
-            "extraction",
+            "json.decode",
+            "json parse",
+            "malformed json",
+            "parse error",
         )
     )
 

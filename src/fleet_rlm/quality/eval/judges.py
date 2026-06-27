@@ -64,6 +64,12 @@ def _extract_score(response: str) -> float:
     - With explanation: "Score: 0.85" or "0.85 - good answer"
     - Out-of-range values are clamped to [0.0, 1.0] (VAL-C-026)
 
+    VAL-CORR-001: When multiple numbers are present, the LAST numeric match is
+    returned (not the first). Numbers already in the [0.0, 1.0] range are
+    preferred over out-of-range numbers, so a response like
+    ``"On a scale of 100, I rate this 0.85"`` extracts ``0.85`` rather than the
+    clamped ``100``. The final value is always clamped to ``[0.0, 1.0]``.
+
     Args:
         response: Raw LLM response text.
 
@@ -98,18 +104,27 @@ def _extract_score(response: str) -> float:
     except ValueError:
         pass
 
-    # Try to parse any number and clamp to [0.0, 1.0]
+    # Find ALL numbers in the response. Prefer the LAST number that is already
+    # in the [0.0, 1.0] range; if none qualify, fall back to the LAST number
+    # (clamped). This avoids grabbing the first number (e.g. "100" in "On a
+    # scale of 100, I rate this 0.85") instead of the intended score.
     number_pattern = r"[-+]?\d*\.?\d+"
     matches = re.findall(number_pattern, response)
+    floats: list[float] = []
     for match in matches:
         try:
-            score = float(match)
-            # Clamp to [0.0, 1.0] (VAL-C-026)
-            return max(0.0, min(1.0, score))
+            floats.append(float(match))
         except ValueError:
             continue
+    if not floats:
+        return 0.0
 
-    return 0.0
+    in_range = [f for f in floats if 0.0 <= f <= 1.0]
+    if in_range:
+        # Last in-range number; clamp defensively in case of float artifacts.
+        return max(0.0, min(1.0, in_range[-1]))
+    # No in-range number: take the last number found and clamp it.
+    return max(0.0, min(1.0, floats[-1]))
 
 
 def _call_judge_lm(
