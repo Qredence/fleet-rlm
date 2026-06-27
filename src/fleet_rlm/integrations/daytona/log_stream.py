@@ -150,10 +150,11 @@ class LogStreamParser:
 
     def _emit(self, event: SandboxEvent) -> None:
         """Append to the internal buffer and relay to the callback."""
-        self._events.append(event)
-        if len(self._events) > self._max_events:
-            # Drop oldest entries to bound memory.
-            self._events = self._events[-self._max_events :]
+        with self._lock:
+            self._events.append(event)
+            if len(self._events) > self._max_events:
+                # Drop oldest entries to bound memory.
+                self._events = self._events[-self._max_events :]
         callback = self._callback
         if callback is None and self._interpreter is not None:
             callback = getattr(self._interpreter, "_turn_step_callback", None)
