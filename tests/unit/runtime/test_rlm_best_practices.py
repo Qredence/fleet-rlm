@@ -136,9 +136,7 @@ class TestExtractionPhaseRetry:
 
         # Patch mlflow_child_span to a no-op so the retry path runs without MLflow.
         with patch(
-            "fleet_rlm.runtime.modules.escalating.mlflow_child_span"
-            if False
-            else "fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span",
+            "fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span",
         ):
             import contextlib
 
