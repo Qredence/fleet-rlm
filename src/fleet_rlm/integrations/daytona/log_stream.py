@@ -133,11 +133,14 @@ class LogStreamParser:
         callback: Any | None = None,
         max_events: int = 500,
     ) -> None:
+        import threading
+
         self._interpreter = interpreter
         # Prefer an explicit callback; fall back to the interpreter's step callback.
         self._callback = callback
         self._max_events = max_events
         self._events: list[SandboxEvent] = []
+        self._lock = threading.Lock()
         self._started = False
 
     @property
