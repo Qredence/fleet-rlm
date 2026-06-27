@@ -26,14 +26,16 @@ from .types import NormalizedIdentity
 class NeonAuthProvider:
     """Authenticate HTTP and WebSocket traffic with Neon Auth (Better Auth) JWTs."""
 
+    #: Hardcoded Neon Auth URL. Not configurable via env or config.
+    NEON_AUTH_URL = "https://ep-broad-water-al4k5bh7.neonauth.c-3.eu-central-1.aws.neon.tech/neondb/auth"
+
     def __init__(
         self,
         *,
-        neon_auth_url: str | None = None,
         tenant_claim: str | None = None,
         allow_query_auth_tokens: bool = True,
     ) -> None:
-        self.neon_auth_url = neon_auth_url
+        self.neon_auth_url = self.NEON_AUTH_URL
         self.tenant_claim = (tenant_claim or "").strip() or "default"
         self._allow_query_auth_tokens = allow_query_auth_tokens
 
@@ -93,7 +95,6 @@ class NeonAuthProvider:
                 "NEON_AUTH_URL is required.",
                 status_code=503,
             )
-
     def _fetch_jwks(self) -> KeySet:
         assert self.neon_auth_url is not None
         now = time.time()

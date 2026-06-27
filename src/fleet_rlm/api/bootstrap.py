@@ -128,7 +128,6 @@ def build_server_state(cfg: AppConfig) -> ServerState:
     lm_deps = LmDeps()
     auth_deps = AuthDeps(
         auth_provider=build_auth_provider(
-            neon_auth_url=cfg.neon_auth_url,
             neon_tenant_claim=cfg.neon_tenant_claim,
         ),
     )

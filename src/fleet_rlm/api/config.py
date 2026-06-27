@@ -139,15 +139,9 @@ class AppConfig(BaseSettings):
     database_required: bool = False
     db_echo: bool = False
     db_validate_on_startup: bool = False
-    allow_debug_auth: bool = False
-    allow_query_auth_tokens: bool = False
     cors_allowed_origins: list[str] | str = Field(default_factory=list)
     ws_execution_max_queue: int = 256
     ws_execution_drop_policy: Literal["drop_oldest", "drop_newest"] = "drop_oldest"
-    neon_auth_url: str | None = Field(
-        default="https://ep-broad-water-al4k5bh7.neonauth.c-3.eu-central-1.aws.neon.tech/neondb/auth",
-        alias="NEON_AUTH_URL",
-    )
     neon_tenant_claim: str = Field(default="default", alias="NEON_TENANT_CLAIM")
     secret_encryption_key: str | None = Field(default=None, alias="FLEET_SECRET_ENCRYPTION_KEY")
     auth_required: bool = True
@@ -223,10 +217,6 @@ class AppConfig(BaseSettings):
             auth_required_explicit = auth_required_raw in {"1", "true", "yes", "on"}
             values["database_required"] = app_env in {"staging", "production"} or auth_required_explicit
 
-        # allow_debug_auth defaults to True only in local
-        if "allow_debug_auth" not in values and "ALLOW_DEBUG_AUTH" not in values:
-            values["allow_debug_auth"] = app_env == "local"
-
         # cors_allowed_origins defaults to "*" in local
         if "cors_allowed_origins" not in values and "CORS_ALLOWED_ORIGINS" not in values:
             values["cors_allowed_origins"] = ["*"] if app_env == "local" else []
@@ -268,18 +258,16 @@ class AppConfig(BaseSettings):
         if self.app_env in {"staging", "production"}:
             if not self.auth_required:
                 raise ValueError("AUTH_REQUIRED must be true when APP_ENV is staging/production")
-            if self.allow_debug_auth:
-                raise ValueError("ALLOW_DEBUG_AUTH must be false when APP_ENV is staging/production")
             if "*" in self.cors_origins_list:
                 raise ValueError("CORS_ALLOWED_ORIGINS cannot contain '*' in staging/production")
             if not (self.secret_encryption_key or "").strip():
                 raise ValueError("FLEET_SECRET_ENCRYPTION_KEY is required for hosted Neon Auth BYOK profiles")
 
-        # Neon Auth validation (required when auth_required=True)
+        # Neon Auth validation (required when auth_required=True). The Neon Auth
+        # URL itself is hardcoded as a class constant on NeonAuthProvider, so it
+        # is not validated here; only the tenant claim and database backing.
         if self.auth_required:
             if not self.database_required:
                 raise ValueError("DATABASE_REQUIRED must be true when AUTH_REQUIRED is true")
-            if not self.neon_auth_url:
-                raise ValueError("NEON_AUTH_URL is required when AUTH_REQUIRED is true")
             if not self.neon_tenant_claim.strip():
                 raise ValueError("NEON_TENANT_CLAIM is required when AUTH_REQUIRED is true")

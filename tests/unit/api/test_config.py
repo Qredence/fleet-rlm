@@ -11,7 +11,6 @@ def test_app_config_defaults_and_computed_lists(clean_runtime_env):
     defaults = config_module.AppConfig()
     assert defaults.app_env == "local"
     assert defaults.database_required is False
-    assert defaults.allow_debug_auth is True
     assert defaults.cors_origins_list == ["*"]
     assert defaults.serve_ui is True
     assert defaults.expose_docs is True
@@ -35,7 +34,6 @@ def test_app_config_applies_environment_aware_defaults(clean_runtime_env, monkey
 
     staging = config_module.AppConfig(app_env="staging")
     assert staging.database_required is True
-    assert staging.allow_debug_auth is False
     assert staging.serve_ui is False
     assert staging.expose_docs is False
     assert staging.expose_root is False
@@ -76,7 +74,6 @@ def test_validate_startup_or_raise_rejects_insecure_staging_configuration(clean_
         database_required=True,
         database_url="postgresql://example.invalid/db",  # ty: ignore[unknown-argument]
         auth_required=True,
-        allow_debug_auth=False,
         cors_allowed_origins=["*"],
     )
 
@@ -90,7 +87,6 @@ def test_validate_startup_or_raise_requires_database_for_neon(clean_runtime_env)
     cfg = config_module.AppConfig(
         auth_required=True,
         database_required=False,
-        neon_auth_url="https://ep-xxx.neonauth.us-east-1.aws.neon.tech/neondb/auth",
     )
 
     with pytest.raises(ValueError, match="DATABASE_REQUIRED must be true"):
@@ -103,7 +99,6 @@ def test_neon_auth_defaults_database_required(clean_runtime_env):
     cfg = config_module.AppConfig(
         auth_required=True,
         database_url="postgresql://example.invalid/db",  # ty: ignore[unknown-argument]
-        neon_auth_url="https://ep-xxx.neonauth.us-east-1.aws.neon.tech/neondb/auth",
     )
 
     assert cfg.auth_required is True
@@ -117,8 +112,6 @@ def test_validate_startup_requires_secret_encryption_key_for_hosted_neon(clean_r
         auth_required=True,
         database_required=True,
         database_url="postgresql://example.invalid/db",  # ty: ignore[unknown-argument]
-        neon_auth_url="https://ep-xxx.neonauth.us-east-1.aws.neon.tech/neondb/auth",
-        allow_debug_auth=False,
         cors_allowed_origins=["https://preview.qredence.ai"],
     )
 
@@ -149,8 +142,6 @@ def test_validate_startup_or_raise_accepts_valid_neon_configuration(clean_runtim
         auth_required=True,
         database_required=True,
         database_url="postgresql://example.invalid/db",  # ty: ignore[unknown-argument]
-        allow_debug_auth=False,
-        neon_auth_url="https://ep-xxx.neonauth.us-east-1.aws.neon.tech/neondb/auth",
         neon_tenant_claim="fleet-prod",
         secret_encryption_key=Fernet.generate_key().decode("ascii"),
         cors_allowed_origins=["https://app.example"],

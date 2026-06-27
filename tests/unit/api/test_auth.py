@@ -46,9 +46,7 @@ def test_normalized_identity_preserves_claim_values():
 def test_build_auth_provider_returns_neon_provider():
     auth_module = importlib.import_module("fleet_rlm.api.auth")
 
-    neon_provider = auth_module.build_auth_provider(
-        neon_auth_url="https://ep-xxx.neonauth.us-east-1.aws.neon.tech/neondb/auth",
-    )
+    neon_provider = auth_module.build_auth_provider()
 
     assert isinstance(neon_provider, auth_module.NeonAuthProvider)
 
@@ -57,7 +55,7 @@ def test_build_auth_provider_returns_neon_provider():
 async def test_neon_auth_provider_rejects_missing_http_credentials():
     auth_module = importlib.import_module("fleet_rlm.api.auth")
 
-    provider = auth_module.NeonAuthProvider(neon_auth_url="https://ep-xxx.neonauth.us-east-1.aws.neon.tech/neondb/auth")
+    provider = auth_module.NeonAuthProvider()
 
     with pytest.raises(auth_module.AuthError, match="Missing Neon Auth bearer token"):
         await provider.authenticate_http(_build_request())
@@ -67,7 +65,7 @@ async def test_neon_auth_provider_rejects_missing_http_credentials():
 async def test_neon_auth_provider_rejects_query_access_tokens():
     auth_module = importlib.import_module("fleet_rlm.api.auth")
 
-    provider = auth_module.NeonAuthProvider(neon_auth_url="https://ep-xxx.neonauth.us-east-1.aws.neon.tech/neondb/auth")
+    provider = auth_module.NeonAuthProvider()
 
     with pytest.raises(auth_module.AuthError, match="Query auth tokens are disabled"):
         await provider.authenticate_websocket(_FakeWebSocket(query_params={"access_token": "raw-jwt"}))
@@ -76,7 +74,6 @@ async def test_neon_auth_provider_rejects_query_access_tokens():
 def test_neon_auth_provider_uses_configured_single_tenant_claim():
     auth_module = importlib.import_module("fleet_rlm.api.auth")
     provider = auth_module.NeonAuthProvider(
-        neon_auth_url="https://ep-xxx.neonauth.us-east-1.aws.neon.tech/neondb/auth",
         tenant_claim="fleet-prod",
     )
 
@@ -93,6 +90,16 @@ def test_neon_auth_provider_uses_configured_single_tenant_claim():
     assert identity.user_claim == "neon-user-1"
     assert identity.email == "alice@example.com"
     assert identity.name == "Alice"
+
+
+def test_neon_auth_provider_hardcodes_neon_auth_url():
+    """NeonAuthProvider exposes NEON_AUTH_URL as a hardcoded class constant."""
+    auth_module = importlib.import_module("fleet_rlm.api.auth")
+
+    expected = "https://ep-broad-water-al4k5bh7.neonauth.c-3.eu-central-1.aws.neon.tech/neondb/auth"
+    assert auth_module.NeonAuthProvider.NEON_AUTH_URL == expected
+    provider = auth_module.NeonAuthProvider()
+    assert provider.neon_auth_url == expected
 
 
 def test_websocket_ticket_store_is_single_use():
@@ -125,7 +132,11 @@ async def test_neon_auth_decode_suppresses_eddsa_deprecation_warning(monkeypatch
 
     from fleet_rlm.api.auth.neon import NeonAuthProvider
 
-    issuer = "https://x.example"
+    # The Neon Auth URL is hardcoded as a class constant; the token's iss/aud
+    # must match the URL's origin (scheme://netloc) for claims validation to
+    # pass, since _decode_token derives expected_origin from urlparse(netloc).
+    parsed_origin = "https://ep-broad-water-al4k5bh7.neonauth.c-3.eu-central-1.aws.neon.tech"
+    issuer = parsed_origin
     priv = Ed25519PrivateKey.generate()
     priv_pem = priv.private_bytes(
         serialization.Encoding.PEM,
@@ -152,7 +163,7 @@ async def test_neon_auth_decode_suppresses_eddsa_deprecation_warning(monkeypatch
         warnings.filterwarnings("ignore", message="EdDSA is deprecated.*", category=SecurityWarning)
         token = jwt.encode({"alg": "EdDSA"}, claims, private_key, algorithms=["EdDSA"])
 
-    provider = NeonAuthProvider(neon_auth_url=issuer)
+    provider = NeonAuthProvider()
     monkeypatch.setattr(provider, "_fetch_jwks", lambda: public_keyset)
 
     with warnings.catch_warnings(record=True) as caught:
