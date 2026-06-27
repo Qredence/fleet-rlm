@@ -99,7 +99,8 @@ def _input_for_kind(event: RuntimeEvent) -> Any:
     if kind in {RuntimeEventKind.DONE, RuntimeEventKind.ERROR}:
         return {"event_kind": kind.value}
     if kind == RuntimeEventKind.TURN_INPUTS:
-        return {"event_kind": "turn_inputs", "rows": event.payload.get("rows", [])}
+        payload_dict = event.payload if isinstance(event.payload, dict) else {}
+        return {"event_kind": "turn_inputs", "rows": payload_dict.get("rows", [])}
     return dict(event.payload)
 
 
