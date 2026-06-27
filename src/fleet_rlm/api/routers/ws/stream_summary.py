@@ -159,13 +159,16 @@ def _extract_run_result_answer(payload: dict[str, Any]) -> str | None:
 
     trajectory = _normalize_trajectory(payload.get("trajectory"))
     if trajectory:
+    if trajectory:
         for step in reversed(trajectory):
-            if not isinstance(step, dict):
-                continue
-            output = _as_text(step.get("output") or step.get("observation"))
+            val = (
+                (step.get("output") or step.get("observation"))
+                if isinstance(step, dict)
+                else (getattr(step, "output", None) or getattr(step, "observation", None))
+            )
+            output = _as_text(val)
             if output:
                 return output
-
     return None
 
 
