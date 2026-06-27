@@ -212,7 +212,9 @@ def routing_correctness(trace_record: TraceRecord) -> float:
     """Check if the executed route matches the expected route.
 
     Uses heuristics on user_request to infer the expected route and
-    compares it to the actual route taken.
+    compares it to the actual route taken. When the route is "auto" or empty,
+    falls back to active_skills to determine the actual route. Handles
+    comma-separated route lists (e.g., "volume-bootstrap,optimization").
 
     Args:
         trace_record: The trace to evaluate.
@@ -223,22 +225,45 @@ def routing_correctness(trace_record: TraceRecord) -> float:
     expected_route = _infer_expected_route(trace_record.user_request)
     actual_route = trace_record.route.lower()
 
-    # Normalize route names
+    # Handle comma-separated routes (e.g., "volume-bootstrap,optimization")
+    # Split and check if any route matches
+    actual_routes = [r.strip() for r in actual_route.split(",") if r.strip()]
+
+    # When route is "auto" or empty, derive from active_skills
+    if not actual_routes or actual_route == "auto":
+        skills = [s.lower() for s in trace_record.active_skills]
+        if "rlm" in skills:
+            actual_routes = ["rlm"]
+        elif "react" in skills or "tools" in skills:
+            actual_routes = ["react"]
+        elif "cot" in skills or "chain_of_thought" in skills:
+            actual_routes = ["cot"]
+        else:
+            actual_routes = []
+
+    # Normalize route names - handle both exact matches and compound names
     route_aliases = {
-        "rlm": ["rlm", "rlm_only"],
+        "rlm": ["rlm", "rlm_only", "large_context_rlm"],
         "react": ["react", "tools"],
         "cot": ["cot", "direct", "chain_of_thought"],
     }
 
     expected_normalized = expected_route.lower()
-    actual_normalized = actual_route
 
-    # Check if actual route matches expected route or its aliases
-    if actual_normalized == expected_normalized:
-        return 1.0
+    # Check if any actual route matches expected route or its aliases
+    for actual_route_lower in actual_routes:
+        # Direct match
+        if actual_route_lower == expected_normalized:
+            return 1.0
 
-    if expected_normalized in route_aliases:
-        if actual_normalized in route_aliases[expected_normalized]:
+        # Check against aliases
+        if expected_normalized in route_aliases:
+            if actual_route_lower in route_aliases[expected_normalized]:
+                return 1.0
+
+        # Check if the route contains the expected route as a substring
+        # (e.g., "large_context_rlm" contains "rlm")
+        if expected_normalized in actual_route_lower:
             return 1.0
 
     return 0.0

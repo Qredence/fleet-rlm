@@ -17,6 +17,7 @@ from ..runtime_services import evaluations as evaluation_service
 from ..schemas.evaluations import (
     EvaluationReportResponse,
     EvaluationRequest,
+    EvaluationRunListResponse,
     EvaluationRunResponse,
 )
 
@@ -44,6 +45,23 @@ async def start_evaluation(
 ) -> EvaluationRunResponse:
     """Start an evaluation run and return the run_id (VAL-C-014, VAL-C-017, VAL-C-056)."""
     return await evaluation_service.start_evaluation_run(request)
+
+
+@router.get(
+    "",
+    response_model=EvaluationRunListResponse,
+    responses={
+        401: {"description": "Authentication is required or the provided token is invalid."},
+    },
+    summary="List evaluation runs",
+    description=(
+        "Return a list of all evaluation runs, most recent first. "
+        "Use the run_id to fetch the full report via GET /evaluations/{run_id}."
+    ),
+)
+async def list_evaluations() -> EvaluationRunListResponse:
+    """List all evaluation runs (VAL-C-050)."""
+    return await evaluation_service.list_evaluation_runs()
 
 
 @router.get(

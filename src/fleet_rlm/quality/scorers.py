@@ -97,7 +97,7 @@ def _load_mlflow_scorers() -> tuple[Any, Any, Any, Any, Any, Any, Any]:
 
 def get_default_judge_model() -> str:
     """Get the model ID configured for the LLM judge.
-    Returns the DSPY_LM_MODEL or a default appropriate for litellm."""
+    Returns the DSPY_LM_MODEL or a default appropriate for ``dspy.LM``."""
     return os.environ.get("DSPY_LM_MODEL", "openai/gemini-3-flash-preview")
 
 

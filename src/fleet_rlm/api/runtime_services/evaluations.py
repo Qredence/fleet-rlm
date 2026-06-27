@@ -18,6 +18,8 @@ from fleet_rlm.quality.eval.report import EvaluationReport
 from ..schemas.evaluations import (
     EvaluationReportResponse,
     EvaluationRequest,
+    EvaluationRunListItem,
+    EvaluationRunListResponse,
     EvaluationRunResponse,
 )
 
@@ -112,20 +114,48 @@ async def get_evaluation_report(run_id: str) -> EvaluationReportResponse:
     )
 
 
-def list_evaluation_runs() -> list[str]:
-    """List all available evaluation run IDs.
+async def list_evaluation_runs() -> EvaluationRunListResponse:
+    """List all available evaluation runs with metadata.
 
     Returns:
-        List of run_id strings.
+        Response with list of evaluation runs, most recent first.
     """
     # Combine in-memory and disk-based reports
-    run_ids = set(_EVALUATION_STORE.keys())
+    runs: list[EvaluationRunListItem] = []
+
+    # First, add in-memory reports with their metadata
+    for run_id, report in _EVALUATION_STORE.items():
+        runs.append(
+            EvaluationRunListItem(
+                run_id=run_id,
+                created_at=report.created_at,
+                trace_count=len(report.per_trace),
+            )
+        )
 
     # Scan mlartifacts/eval/ directory for additional reports
     eval_dir = Path.cwd() / "mlartifacts" / "eval"
     if eval_dir.exists():
         for run_dir in eval_dir.iterdir():
             if run_dir.is_dir() and (run_dir / "report.json").exists():
-                run_ids.add(run_dir.name)
+                run_id = run_dir.name
+                # Skip if already in memory
+                if run_id in _EVALUATION_STORE:
+                    continue
+                # Load metadata from disk
+                try:
+                    report = EvaluationReport.read_from_disk(run_dir)
+                    runs.append(
+                        EvaluationRunListItem(
+                            run_id=run_id,
+                            created_at=report.created_at,
+                            trace_count=len(report.per_trace),
+                        )
+                    )
+                except Exception as e:
+                    logger.warning("Failed to load report metadata for %s: %s", run_id, e)
 
-    return sorted(run_ids)
+    # Sort by created_at descending (most recent first)
+    runs.sort(key=lambda r: r.created_at, reverse=True)
+
+    return EvaluationRunListResponse(runs=runs)

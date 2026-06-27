@@ -95,12 +95,19 @@ class TraceRecord:
                     except json.JSONDecodeError:
                         attributes = {}
 
+                # Extract timestamps - MLflow uses start_time_unix_nano (nanoseconds)
+                # Convert to seconds by dividing by 1e9 if value is in nanoseconds (> 1e15)
+                start_nano = float(span.get("start_time_unix_nano", span.get("start_time", span.get("startTime", 0))))
+                end_nano = float(span.get("end_time_unix_nano", span.get("end_time", span.get("endTime", 0))))
+                start_s = start_nano / 1e9 if start_nano > 1e15 else start_nano
+                end_s = end_nano / 1e9 if end_nano > 1e15 else end_nano
+
                 trajectory_spans.append(
                     TrajectorySpan(
                         name=str(span.get("name", "")),
                         kind=str(span.get("kind", span.get("spanKind", "UNKNOWN"))),
-                        start=float(span.get("start_time", span.get("startTime", 0.0))),
-                        end=float(span.get("end_time", span.get("endTime", 0.0))),
+                        start=start_s,
+                        end=end_s,
                         tool_name=span.get("tool_name", attributes.get("gen_ai.tool.name")),
                         tool_input=span.get("tool_input", span.get("inputs")),
                         tool_output=span.get("tool_output", span.get("outputs")),
@@ -116,7 +123,7 @@ class TraceRecord:
             except json.JSONDecodeError:
                 trace_metadata = {}
 
-        # Extract inputs - check flat structure first, then trace_metadata
+        # Extract inputs - check flat structure first, then trace_metadata, then root span attributes
         inputs = trace_dict.get("inputs", {})
         if not inputs:
             # Try to get from trace_metadata (nested MLflow structure)
@@ -125,6 +132,26 @@ class TraceRecord:
                 inputs = json.loads(inputs_str) if isinstance(inputs_str, str) else inputs_str
             except json.JSONDecodeError:
                 inputs = {}
+
+        if not inputs:
+            # Fallback: try root span's mlflow.spanInputs attribute
+            for span in spans_data:
+                if isinstance(span, dict):
+                    span_attrs = span.get("attributes", {})
+                    if isinstance(span_attrs, str):
+                        try:
+                            span_attrs = json.loads(span_attrs)
+                        except json.JSONDecodeError:
+                            span_attrs = {}
+                    span_inputs_str = span_attrs.get("mlflow.spanInputs")
+                    if span_inputs_str:
+                        try:
+                            inputs = (
+                                json.loads(span_inputs_str) if isinstance(span_inputs_str, str) else span_inputs_str
+                            )
+                            break
+                        except json.JSONDecodeError:
+                            pass
 
         if not isinstance(inputs, dict):
             inputs = {"message": str(inputs)} if inputs else {}
@@ -141,9 +168,15 @@ class TraceRecord:
                 active_skills = [s.strip() for s in active_skills.split(",") if s.strip()]
             else:
                 active_skills = []
+
+        # Fallback: populate active_skills from selected_skills in metadata
+        if not active_skills:
+            selected_skills_str = trace_metadata.get("fleet_rlm.selected_skills", "")
+            if isinstance(selected_skills_str, str) and selected_skills_str:
+                active_skills = [s.strip() for s in selected_skills_str.split(",") if s.strip()]
         context = str(inputs.get("context", ""))
 
-        # Extract outputs - check flat structure first, then trace_metadata
+        # Extract outputs - check flat structure first, then trace_metadata, then root span attributes
         outputs = trace_dict.get("outputs", {})
         if not outputs:
             # Try to get from trace_metadata (nested MLflow structure)
@@ -152,6 +185,26 @@ class TraceRecord:
                 outputs = json.loads(outputs_str) if isinstance(outputs_str, str) else outputs_str
             except json.JSONDecodeError:
                 outputs = {}
+
+        if not outputs:
+            # Fallback: try root span's mlflow.spanOutputs attribute
+            for span in spans_data:
+                if isinstance(span, dict):
+                    span_attrs = span.get("attributes", {})
+                    if isinstance(span_attrs, str):
+                        try:
+                            span_attrs = json.loads(span_attrs)
+                        except json.JSONDecodeError:
+                            span_attrs = {}
+                    span_outputs_str = span_attrs.get("mlflow.spanOutputs")
+                    if span_outputs_str:
+                        try:
+                            outputs = (
+                                json.loads(span_outputs_str) if isinstance(span_outputs_str, str) else span_outputs_str
+                            )
+                            break
+                        except json.JSONDecodeError:
+                            pass
 
         if isinstance(outputs, dict):
             final_answer = str(outputs.get("final_answer", outputs.get("answer", outputs.get("response", ""))))
@@ -163,22 +216,47 @@ class TraceRecord:
             final_answer = str(info.get("response_preview", ""))
 
         # Extract route from trace_metadata or tags
-        route = str(
+        # Priority: routing_decision > execution_mode > selected_skills
+        routing_decision = str(
+            trace_metadata.get(
+                "fleet_rlm.routing_decision",
+                info.get("tags", {}).get("fleet_rlm.routing_decision", ""),
+            )
+        )
+        execution_mode = str(
             trace_metadata.get(
                 "fleet_rlm.execution_mode",
                 info.get("tags", {}).get("fleet_rlm.execution_mode", trace_dict.get("route", "")),
             )
         )
 
+        # Use routing_decision if available (e.g., "large_context_rlm", "cot", "react")
+        if routing_decision and routing_decision != "auto":
+            route = routing_decision
+        elif execution_mode and execution_mode != "auto":
+            route = execution_mode
+        else:
+            # Fall back to selected_skills when both are "auto" or empty
+            selected_skills = str(
+                trace_metadata.get(
+                    "fleet_rlm.selected_skills",
+                    info.get("tags", {}).get("fleet_rlm.selected_skills", ""),
+                )
+            )
+            route = selected_skills if selected_skills else execution_mode
+
         # Extract timeouts
         timeouts = trace_dict.get("timeouts", {})
         if not isinstance(timeouts, dict):
             timeouts = {}
 
-        # Extract trace_outputs
-        trace_outputs = trace_dict.get("trace_outputs", trace_dict.get("traceOutputs", {}))
-        if not isinstance(trace_outputs, dict):
-            trace_outputs = {}
+        # Extract trace_outputs - use the already-parsed outputs dict
+        trace_outputs = outputs if isinstance(outputs, dict) else {}
+        if not trace_outputs:
+            # Fallback: try to get from trace_dict
+            trace_outputs = trace_dict.get("trace_outputs", trace_dict.get("traceOutputs", {}))
+            if not isinstance(trace_outputs, dict):
+                trace_outputs = {}
 
         # Use trace_metadata as the main metadata source
         metadata = trace_metadata if trace_metadata else trace_dict.get("metadata", {})

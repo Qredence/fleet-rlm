@@ -30,6 +30,24 @@ class EvaluationRunResponse(BaseModel):
     run_id: str = Field(description="Unique identifier for this evaluation run.")
 
 
+class EvaluationRunListItem(BaseModel):
+    """Summary entry for a single evaluation run in a listing."""
+
+    run_id: str = Field(description="Unique identifier for this evaluation run.")
+    created_at: str = Field(description="ISO8601 timestamp when the report was created.")
+    trace_count: int = Field(
+        description="Number of traces evaluated in this run.",
+    )
+
+
+class EvaluationRunListResponse(BaseModel):
+    """Response body for GET /api/v1/evaluations."""
+
+    runs: list[EvaluationRunListItem] = Field(
+        description="List of evaluation runs, most recent first.",
+    )
+
+
 class EvaluationReportResponse(BaseModel):
     """Response body for GET /api/v1/evaluations/{run_id}."""
 

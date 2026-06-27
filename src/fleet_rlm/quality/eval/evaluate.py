@@ -89,17 +89,23 @@ def _fetch_traces_from_mlflow(
                     logger.warning("Failed to fetch trace %s: %s", trace_id, e)
             return traces
 
-        # Search for traces in time window
-        # Resolve the correct experiment - prefer "fleet-rlm", fall back to default "0"
+        # Search for chat traces across experiments 0 (Default) and 1 (fleet-rlm).
+        # Only fetch traces tagged as fleet_rlm.chat_turn to exclude judge LLM traces
+        # that pollute experiment 1 when eval runs are executed.
         experiment_ids = ["0"]
         fleet_exp = mlflow.get_experiment_by_name("fleet-rlm")
         if fleet_exp:
-            experiment_ids = [fleet_exp.experiment_id]
+            experiment_ids = ["0", fleet_exp.experiment_id]
+
+        # Filter to only chat turn traces (excludes ResponseAPILM judge traces)
+        base_filter = f"trace.timestamp >= {start_time_ms} AND trace.timestamp <= {end_time_ms}"
+        trace_name_filter = 'tags.`mlflow.traceName` = "fleet_rlm.chat_turn"'
+        combined_filter = f"{base_filter} AND {trace_name_filter}"
 
         # Note: MLflow search_traces returns Trace objects, we need to convert to dict
         traces = client.search_traces(
             experiment_ids=experiment_ids,
-            filter_string=f"trace.timestamp >= {start_time_ms} AND trace.timestamp <= {end_time_ms}",
+            filter_string=combined_filter,
             max_results=limit or 100,
         )
 
