@@ -104,7 +104,7 @@ evaluation = [
     "decorator==5.2.1",
     "executing==2.2.1",
     "ipykernel==7.2.0",
-    "ipython==9.13.0",
+    "ipython==9.15.0",
     "ipython-pygments-lexers==1.1.1",
     "jedi==0.19.2",
     "jupyter-client==8.8.0",
