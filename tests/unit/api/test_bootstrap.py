@@ -11,6 +11,7 @@ def test_build_server_state_creates_ready_compatible_state(clean_runtime_env):
 
     cfg = config_module.AppConfig(
         app_env="local",
+        auth_required=True,
         database_required=False,
         ws_execution_max_queue=8,
         ws_execution_drop_policy="drop_newest",

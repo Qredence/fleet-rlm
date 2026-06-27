@@ -52,7 +52,7 @@ Updated test expectations to account for ResponseAPILM's kwargs structure (inclu
 
 1. **Selective Migration**: Only OpenAI providers use ResponseAPILM; other providers continue using stock dspy.LM to preserve multi-provider support.
 
-2. **Model String Handling**: Pass model strings as-is to OpenAI client (e.g., "openai/gpt-4o") rather than stripping prefixes.
+2. **Model String Handling**: Strip the `"openai/"` prefix before passing to OpenAI client (e.g., `"openai/gpt-4o"` becomes `"gpt-4o"`) to match the bare model name expected by the Response API.
 
 3. **Message Format Conversion**: Convert DSPy's `LMMessage` format (with `parts` list) to OpenAI's Response API input format.
 

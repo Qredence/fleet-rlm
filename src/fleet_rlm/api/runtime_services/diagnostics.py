@@ -296,8 +296,10 @@ async def _resolve_byok_planner(
       ``LlmProviderProfileRecord`` (for /models validation), ``config`` is the
       ``ResolvedRoleLmConfig`` (for the chat-completion path).
     """
+    cfg = config_deps.config
     if (
-        persistence_deps is None
+        not cfg.auth_required
+        or persistence_deps is None
         or persistence_deps.db_manager is None
         or persistence_deps.repository is None
         or persisted_identity is None
@@ -383,21 +385,12 @@ async def run_lm_connection_test(
 
             from fleet_rlm.integrations.llm_profiles.resolver import build_lm_kwargs_from_resolved
 
-            lm_kwargs = build_lm_kwargs_from_resolved(byok_config, timeout=LM_SMOKE_TEST_TIMEOUT_SECONDS - 2)
-            # Use ResponseAPILM for OpenAI providers
-            model = lm_kwargs.get("model", "")
-            if model.startswith("openai/"):
-                from fleet_rlm.runtime.lm import ResponseAPILM
-
-                planner_lm = await run_blocking(
-                    lambda: ResponseAPILM(**lm_kwargs),
-                    timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
-                )
-            else:
-                planner_lm = await run_blocking(
-                    lambda: dspy.LM(**lm_kwargs),
-                    timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
-                )
+            planner_lm = await run_blocking(
+                lambda: dspy.LM(
+                    **build_lm_kwargs_from_resolved(byok_config, timeout=LM_SMOKE_TEST_TIMEOUT_SECONDS - 2)
+                ),
+                timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
+            )
         elif byok_error:
             raise RuntimeError(byok_error)
         elif planner_loader is None and delegate_loader is None:
@@ -599,7 +592,7 @@ def build_runtime_status_response(
         app_env=config_deps.config.app_env,
         write_enabled=settings_write_enabled,
         settings_write_enabled=settings_write_enabled,
-        profile_write_enabled=settings_write_enabled,
+        profile_write_enabled=settings_write_enabled or config_deps.config.auth_required,
         ready=ready,
         sandbox_provider="daytona",
         active_models=RuntimeActiveModels(

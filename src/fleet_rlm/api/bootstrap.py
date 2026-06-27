@@ -129,6 +129,7 @@ def build_server_state(cfg: AppConfig) -> ServerState:
     auth_deps = AuthDeps(
         auth_provider=build_auth_provider(
             neon_tenant_claim=cfg.neon_tenant_claim,
+            dev_mode=not cfg.auth_required,
         ),
     )
     ws_ticket_deps = WebSocketTicketDeps()
@@ -196,8 +197,9 @@ async def initialize_persistence(persistence_deps: PersistenceDeps, cfg: AppConf
         persistence_deps.db_manager = db_manager
         persistence_deps.repository = FleetRepository(db_manager)
 
-        # Auto-seed the NEON_TENANT_CLAIM on startup
-        if cfg.neon_tenant_claim:
+        # Auto-seed the NEON_TENANT_CLAIM on startup — only when
+        # auth_required is True (Neon Auth path) and an explicit claim is set.
+        if cfg.auth_required and cfg.neon_tenant_claim:
             try:
                 tenant = await persistence_deps.repository.resolve_tenant_by_entra_claim(
                     entra_tenant_id=cfg.neon_tenant_claim

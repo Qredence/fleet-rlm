@@ -29,15 +29,16 @@ async def get_me(
 ) -> AuthMeResponse:
     """Return the authenticated identity and any admitted control-plane IDs."""
     persisted_identity = None
-    if not isinstance(persistence, FleetRepository):
-        raise HTTPException(
-            status_code=503,
-            detail="Database repository unavailable for tenant admission.",
-        )
-    try:
-        persisted_identity = await resolve_admitted_identity(persistence, identity)
-    except AuthError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    if config_deps.config.auth_required:
+        if not isinstance(persistence, FleetRepository):
+            raise HTTPException(
+                status_code=503,
+                detail="Database repository unavailable for tenant admission.",
+            )
+        try:
+            persisted_identity = await resolve_admitted_identity(persistence, identity)
+        except AuthError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
     return AuthMeResponse(
         tenant_claim=identity.tenant_claim,
@@ -65,15 +66,16 @@ async def create_ws_ticket(
     ws_ticket_deps: WebSocketTicketDepsDep,
 ) -> WebSocketTicketResponse:
     """Exchange an authenticated HTTP identity for a one-time WebSocket ticket."""
-    if not isinstance(persistence, FleetRepository):
-        raise HTTPException(
-            status_code=503,
-            detail="Database repository unavailable for tenant admission.",
-        )
-    try:
-        await resolve_admitted_identity(persistence, identity)
-    except AuthError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    if config_deps.config.auth_required:
+        if not isinstance(persistence, FleetRepository):
+            raise HTTPException(
+                status_code=503,
+                detail="Database repository unavailable for tenant admission.",
+            )
+        try:
+            await resolve_admitted_identity(persistence, identity)
+        except AuthError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
     ticket, expires_at = ws_ticket_deps.tickets.issue(identity)
     return WebSocketTicketResponse(

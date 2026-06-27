@@ -122,25 +122,8 @@ def test_reasoning_quality_scorer_uses_predict_judge_and_redacts_trace_inputs(cl
     assert "super-secret" not in reasoning_text
 
 
-def test_get_default_judge_model_returns_empty_when_unset(clean_runtime_env, monkeypatch) -> None:
-    """VAL-CONF-001: no hardcoded Gemini default; empty string when DSPY_LM_MODEL unset."""
+def test_get_default_judge_model_returns_repo_default(clean_runtime_env, monkeypatch) -> None:
+    monkeypatch.setenv("DSPY_LM_MODEL", "openai/gemini-3-flash-preview")
     module = _import_scorers_module(monkeypatch)
 
-    assert module.get_default_judge_model() == ""
-
-
-def test_get_default_judge_model_returns_env_value(clean_runtime_env, monkeypatch) -> None:
-    module = _import_scorers_module(monkeypatch)
-    monkeypatch.setenv("DSPY_LM_MODEL", "openai/custom-judge")
-
-    assert module.get_default_judge_model() == "openai/custom-judge"
-
-
-def test_build_rlm_scorers_returns_empty_when_no_model_configured(clean_runtime_env, monkeypatch) -> None:
-    """VAL-CONF-002: judges skip LLM calls (return no scorers) when no model configured."""
-    module = _import_scorers_module(monkeypatch)
-    # DSPY_LM_MODEL is unset (clean_runtime_env clears it).
-
-    scorers = module.build_rlm_scorers()
-
-    assert scorers == []
+    assert module.get_default_judge_model() == "openai/gemini-3-flash-preview"

@@ -8,8 +8,9 @@ from uuid import uuid4
 import pytest
 
 
-def _lm_test_deps():
+def _lm_test_deps(auth_required: bool = True):
     config = SimpleNamespace(
+        auth_required=auth_required,
         env_path=None,
         agent_model="openai/gpt-4o",
         agent_delegate_model="openai/gpt-4o",
@@ -74,7 +75,7 @@ async def test_lm_connection_byok_models_compatible_validates_via_models(monkeyp
     monkeypatch.setattr(diagnostics, "_resolve_byok_planner", fake_resolve)
     monkeypatch.setattr(diagnostics, "validate_profile_via_models_catalog", fake_validate)
 
-    config_deps, lm_deps, diagnostics_deps = _lm_test_deps()
+    config_deps, lm_deps, diagnostics_deps = _lm_test_deps(True)
     result = await diagnostics.run_lm_connection_test(
         config_deps=config_deps,
         lm_deps=lm_deps,
@@ -107,7 +108,7 @@ async def test_lm_connection_byok_models_error_surfaces_catalog_error(monkeypatc
     monkeypatch.setattr(diagnostics, "_resolve_byok_planner", fake_resolve)
     monkeypatch.setattr(diagnostics, "validate_profile_via_models_catalog", fake_validate)
 
-    config_deps, lm_deps, diagnostics_deps = _lm_test_deps()
+    config_deps, lm_deps, diagnostics_deps = _lm_test_deps(True)
     result = await diagnostics.run_lm_connection_test(
         config_deps=config_deps,
         lm_deps=lm_deps,
@@ -148,7 +149,7 @@ async def test_lm_connection_byok_anthropic_uses_chat_path(monkeypatch) -> None:
     monkeypatch.setattr(diagnostics, "run_blocking", fake_run_blocking)
     monkeypatch.setattr(dspy, "LM", _OkLm)
 
-    config_deps, lm_deps, diagnostics_deps = _lm_test_deps()
+    config_deps, lm_deps, diagnostics_deps = _lm_test_deps(True)
     result = await diagnostics.run_lm_connection_test(
         config_deps=config_deps,
         lm_deps=lm_deps,
@@ -172,7 +173,7 @@ async def test_lm_connection_reports_missing_byok_planner(monkeypatch) -> None:
 
     monkeypatch.setattr(diagnostics, "_resolve_byok_planner", fake_resolve)
 
-    config_deps, lm_deps, diagnostics_deps = _lm_test_deps()
+    config_deps, lm_deps, diagnostics_deps = _lm_test_deps(True)
     result = await diagnostics.run_lm_connection_test(
         config_deps=config_deps,
         lm_deps=lm_deps,
@@ -188,7 +189,7 @@ async def test_lm_connection_reports_missing_byok_planner(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_lm_connection_falls_back_to_env_loader(monkeypatch) -> None:
+async def test_lm_connection_falls_back_to_env_loader_in_dev_mode(monkeypatch) -> None:
     from fleet_rlm.api.runtime_services import diagnostics
 
     async def fake_run_blocking(fn, *args, timeout=None):
@@ -198,7 +199,7 @@ async def test_lm_connection_falls_back_to_env_loader(monkeypatch) -> None:
     monkeypatch.setenv("DSPY_LM_MODEL", "openai/gpt-4o")
     monkeypatch.setenv("DSPY_LM_API_KEY", "sk-dev")
 
-    config_deps, lm_deps, diagnostics_deps = _lm_test_deps()
+    config_deps, lm_deps, diagnostics_deps = _lm_test_deps(False)
     result = await diagnostics.run_lm_connection_test(
         config_deps=config_deps,
         lm_deps=lm_deps,

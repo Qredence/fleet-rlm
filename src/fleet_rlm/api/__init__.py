@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .config import AppConfig as AppConfig
+    from .config import ServerRuntimeConfig as ServerRuntimeConfig
     from .main import create_app as create_app
 
 
@@ -18,6 +19,10 @@ def __getattr__(name: str):  # noqa: ANN001
         from .config import AppConfig
 
         return AppConfig
+    if name == "ServerRuntimeConfig":
+        from .config import ServerRuntimeConfig
+
+        return ServerRuntimeConfig
     if name == "create_app":
         from .main import create_app
 
@@ -25,4 +30,4 @@ def __getattr__(name: str):  # noqa: ANN001
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["AppConfig", "create_app"]
+__all__ = ["AppConfig", "ServerRuntimeConfig", "create_app"]

@@ -46,18 +46,6 @@ EXEMPT_PATH_SUFFIXES = {
 }
 
 
-# Python import patterns
-PYTHON_IMPORT_RE = re.compile(
-    r"""
-    ^(?:
-        from\s+([\w.]+)\s+import  # from X import Y
-        |
-        import\s+([\w.]+)  # import X
-    )
-    """,
-    re.MULTILINE | re.VERBOSE,
-)
-
 # TypeScript import patterns (ESM)
 TS_IMPORT_RE = re.compile(
     r"""
@@ -86,7 +74,9 @@ def is_exempt(path: Path) -> bool:
             return True
 
     # Check for specific path suffixes (generated files, dist dirs)
-    return any(path_str.endswith(suffix) or suffix in path_str for suffix in EXEMPT_PATH_SUFFIXES)
+    # Use component-aware suffix matching: match if the path ends with the suffix
+    # (as a full path component), not if the suffix appears as a substring.
+    return any(path_str.endswith(suffix) for suffix in EXEMPT_PATH_SUFFIXES)
 
 
 def resolve_relative_import(file_path: Path, backend_root: Path, level: int, module: str | None) -> str | None:
@@ -141,15 +131,21 @@ def extract_python_imports(file_path: Path, backend_root: Path) -> list[str]:
             for alias in node.names:
                 imports.append(alias.name)
         elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                # Handle relative imports
-                if node.level > 0:
-                    # Relative import - resolve to absolute
+            if node.level > 0:
+                # Relative import - resolve to absolute
+                if node.module is None:
+                    # "from . import X" or "from .. import X" —
+                    # resolve each alias individually
+                    for alias in node.names:
+                        resolved = resolve_relative_import(file_path, backend_root, node.level, alias.name)
+                        if resolved:
+                            imports.append(resolved)
+                else:
                     resolved = resolve_relative_import(file_path, backend_root, node.level, node.module)
                     if resolved:
                         imports.append(resolved)
-                else:
-                    imports.append(node.module)
+            elif node.module:
+                imports.append(node.module)
     return imports
 
 

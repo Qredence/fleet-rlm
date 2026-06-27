@@ -52,5 +52,8 @@ def test_auth_boundaries_accept_authenticated_request_in_local_mode(
     # 200 = handler fully processed; 503 = auth passed but DB unavailable for
     # tenant admission (only for /api/v1/auth/me). Neither is 401 (which would
     # mean auth was rejected).
-    assert response.status_code in {200, 503}, response.text
+    if path == "/api/v1/auth/me":
+        assert response.status_code in {200, 503}, response.text
+    else:
+        assert response.status_code == 200, response.text
     assert response.status_code != 401, "authenticated request must not be rejected"

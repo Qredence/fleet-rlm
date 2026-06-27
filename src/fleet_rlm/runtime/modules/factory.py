@@ -405,8 +405,13 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         # emit the correct iteration on ``rlm_tool_result`` / repl spans.
         try:
             self.generate_action.current_iteration = iteration
+        except (AttributeError, TypeError):
+            logger.debug("Unable to set generate_action.current_iteration; continuing without sync.")
         except Exception:
-            pass
+            logger.warning(
+                "Unexpected error while setting generate_action.current_iteration; continuing.",
+                exc_info=True,
+            )
 
         if not kwargs and len(args) >= 4:
             # args layout: (repl, variables, history, iteration, input_args, output_field_names)
@@ -626,7 +631,10 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                 base = small_lm
                 logger.debug("Using small delegate LM for bounded action generation")
         except Exception:
-            pass
+            logger.debug(
+                "Failed to load small delegate LM; falling back to default LM.",
+                exc_info=True,
+            )
 
         if base is None:
             base = getattr(_dspy.settings, "lm", None)
@@ -841,8 +849,16 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                 # Capture preview from trajectory
                 if isinstance(trajectory, list) and trajectory:
                     last_action = trajectory[-1]
-                    reasoning = getattr(last_action, "reasoning", "") or ""
-                    code = getattr(last_action, "code", "") or ""
+                    reasoning = (
+                        last_action.get("reasoning") or last_action.get("thought") or ""
+                        if isinstance(last_action, dict)
+                        else getattr(last_action, "reasoning", "") or getattr(last_action, "thought", "") or ""
+                    )
+                    code = (
+                        last_action.get("code") or ""
+                        if isinstance(last_action, dict)
+                        else getattr(last_action, "code", "") or ""
+                    )
                     preview = (
                         f"[RLM Action] {reasoning[:150]}\n{code[:200]}"
                         if code

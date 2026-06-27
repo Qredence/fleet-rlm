@@ -23,7 +23,7 @@ from fleet_rlm.runtime.factory import build_chat_agent
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
 from ..auth import AuthError, NormalizedIdentity, resolve_admitted_identity
-from ..config import AppConfig
+from ..config import ServerRuntimeConfig
 from ..dependencies import ConfigDeps, DiagnosticsDeps, LmDeps, PersistenceDeps
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class PreparedChatRuntime:
-    cfg: AppConfig
+    cfg: ServerRuntimeConfig
     planner_lm: object
     delegate_lm: object | None
     repository: FleetRepository | None
@@ -176,7 +176,7 @@ class ChatAgentProtocol(Protocol):
         pass
 
 
-def set_interpreter_default_profile(interpreter: object | None, cfg: AppConfig) -> None:
+def set_interpreter_default_profile(interpreter: object | None, cfg: ServerRuntimeConfig) -> None:
     if interpreter is None:
         return
     runtime_interpreter = cast(Any, interpreter)
@@ -196,11 +196,11 @@ async def _ensure_runtime_models(
 
 async def _resolve_identity_scoped_lms(
     *,
-    cfg: AppConfig,
+    cfg: ServerRuntimeConfig,
     persistence_deps: PersistenceDeps,
     identity_rows: IdentityUpsertResult | None,
 ) -> tuple[Any | None, Any | None]:
-    if persistence_deps.db_manager is None or identity_rows is None:
+    if not cfg.auth_required or persistence_deps.db_manager is None or identity_rows is None:
         return None, None
 
     role_configs = await resolve_active_role_configs(
@@ -212,36 +212,31 @@ async def _resolve_identity_scoped_lms(
 
     import dspy
 
-    planner_lm = await asyncio.to_thread(
-        dspy.LM,
-        **build_lm_kwargs_from_resolved(
-            planner_config,
-            max_tokens=cfg.planner_max_tokens,
-            timeout=cfg.planner_lm_timeout_s,
-            temperature=cfg.planner_temperature,
-        ),
-    )
+    planner_lm = await asyncio.to_thread(dspy.LM, **build_lm_kwargs_from_resolved(planner_config))
     delegate_config = role_configs.get("delegate") or role_configs.get("delegate_small")
     delegate_lm = None
     if delegate_config is not None:
         delegate_lm = await asyncio.to_thread(
             dspy.LM,
-            **build_lm_kwargs_from_resolved(
-                delegate_config,
-                max_tokens=cfg.agent_delegate_max_tokens,
-                timeout=cfg.delegate_lm_timeout_s,
-            ),
+            **build_lm_kwargs_from_resolved(delegate_config, max_tokens=cfg.agent_delegate_max_tokens),
         )
     return planner_lm, delegate_lm
 
 
 async def _resolve_persisted_identity(
     *,
-    cfg: AppConfig,
+    cfg: ServerRuntimeConfig,
     repository: FleetRepository,
     identity: NormalizedIdentity,
 ) -> IdentityUpsertResult:
-    return await resolve_admitted_identity(repository, identity)
+    if cfg.auth_required:
+        return await resolve_admitted_identity(repository, identity)
+    return await repository.upsert_identity(
+        entra_tenant_id=identity.tenant_claim,
+        entra_user_id=identity.user_claim,
+        email=identity.email,
+        full_name=identity.name,
+    )
 
 
 async def prepare_chat_runtime(

@@ -302,7 +302,7 @@ class ResponseAPILM(dspy.BaseLM):
         self,
         model: str,
         *,
-        api_key: str,
+        api_key: str | None = None,
         api_base: str | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .admission import resolve_admitted_identity
 from .base import AuthError, AuthProvider
+from .dev import DevAuthProvider
 from .neon import NeonAuthProvider
 from .types import NormalizedIdentity
 from .ws_ticket import WebSocketTicketStore
@@ -12,12 +13,21 @@ from .ws_ticket import WebSocketTicketStore
 def build_auth_provider(
     *,
     neon_tenant_claim: str | None = None,
+    dev_mode: bool = False,
+    dev_jwt_secret: str = "change-me",
 ) -> AuthProvider:
-    """Build the Neon Auth provider (the only authentication method).
+    """Build the appropriate auth provider.
 
-    The Neon Auth URL is hardcoded as a class constant on
-    :class:`NeonAuthProvider`; it is not read from environment or config.
+    In production mode (dev_mode=False), returns a :class:`NeonAuthProvider`
+    wired to the Neon Auth URL.
+
+    In dev mode, returns a :class:`DevAuthProvider` that accepts debug headers
+    and local bearer tokens for testing.
     """
+    if dev_mode:
+        return DevAuthProvider(
+            jwt_secret=dev_jwt_secret,
+        )
     return NeonAuthProvider(
         tenant_claim=neon_tenant_claim,
     )

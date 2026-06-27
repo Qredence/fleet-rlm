@@ -133,11 +133,14 @@ class LogStreamParser:
         callback: Any | None = None,
         max_events: int = 500,
     ) -> None:
+        import threading
+
         self._interpreter = interpreter
         # Prefer an explicit callback; fall back to the interpreter's step callback.
         self._callback = callback
         self._max_events = max_events
         self._events: list[SandboxEvent] = []
+        self._lock = threading.Lock()
         self._started = False
 
     @property
@@ -147,10 +150,11 @@ class LogStreamParser:
 
     def _emit(self, event: SandboxEvent) -> None:
         """Append to the internal buffer and relay to the callback."""
-        self._events.append(event)
-        if len(self._events) > self._max_events:
-            # Drop oldest entries to bound memory.
-            self._events = self._events[-self._max_events :]
+        with self._lock:
+            self._events.append(event)
+            if len(self._events) > self._max_events:
+                # Drop oldest entries to bound memory.
+                self._events = self._events[-self._max_events :]
         callback = self._callback
         if callback is None and self._interpreter is not None:
             callback = getattr(self._interpreter, "_turn_step_callback", None)
@@ -195,8 +199,9 @@ class LogStreamParser:
 
     def drain(self) -> list[SandboxEvent]:
         """Return all collected events and clear the buffer."""
-        events = list(self._events)
-        self._events.clear()
+        with self._lock:
+            events = list(self._events)
+            self._events.clear()
         return events
 
 

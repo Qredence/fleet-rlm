@@ -44,7 +44,7 @@ from fleet_rlm.integrations.llm_profiles.types import (
 )
 
 from ..bootstrap import get_delegate_lm_from_env, get_delegate_small_lm_from_env, get_planner_lm_from_env
-from ..config import AppConfig
+from ..config import ServerRuntimeConfig
 from ..dependencies import ConfigDeps, DiagnosticsDeps, LmDeps, PersistenceDeps
 from ..runtime_services.common import (
     LM_SMOKE_TEST_TIMEOUT_SECONDS,
@@ -80,19 +80,19 @@ IMPORT_PROFILE_NAME = "Imported from .env"
 logger = logging.getLogger(__name__)
 
 
-def profile_writes_enabled(config: AppConfig) -> bool:
-    return config.app_env == "local"
+def profile_writes_enabled(config: ServerRuntimeConfig) -> bool:
+    return config.app_env == "local" or config.auth_required
 
 
-def _ensure_profile_writes(config: AppConfig) -> None:
+def _ensure_profile_writes(config: ServerRuntimeConfig) -> None:
     if not profile_writes_enabled(config):
         raise HTTPException(
             status_code=403,
-            detail="LLM profile updates are allowed only when APP_ENV=local.",
+            detail="LLM profile updates are allowed only when APP_ENV=local or AUTH_MODE=neon with admission.",
         )
 
 
-def _ensure_local_env_import(config: AppConfig) -> None:
+def _ensure_local_env_import(config: ServerRuntimeConfig) -> None:
     if config.app_env != "local":
         raise HTTPException(
             status_code=403,
@@ -342,21 +342,10 @@ async def test_profile_connection(
         checks["model_set"] = bool(resolved.litellm_model)
         preflight_ok = checks["api_key_set"] and checks["model_set"]
         try:
-            lm_kwargs = build_lm_kwargs_from_resolved(resolved, timeout=LM_SMOKE_TEST_TIMEOUT_SECONDS - 2)
-            # Use ResponseAPILM for OpenAI providers
-            model = lm_kwargs.get("model", "")
-            if model.startswith("openai/"):
-                from fleet_rlm.runtime.lm import ResponseAPILM
-
-                profile_lm = await run_blocking(
-                    lambda: ResponseAPILM(**lm_kwargs),
-                    timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
-                )
-            else:
-                profile_lm = await run_blocking(
-                    lambda: dspy.LM(**lm_kwargs),
-                    timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
-                )
+            profile_lm = await run_blocking(
+                lambda: dspy.LM(**build_lm_kwargs_from_resolved(resolved, timeout=LM_SMOKE_TEST_TIMEOUT_SECONDS - 2)),
+                timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
+            )
 
             def _invoke() -> str:
                 response = profile_lm("Reply with exactly OK")
