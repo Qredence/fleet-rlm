@@ -138,7 +138,7 @@ function EvalReportView({ report }: { report: EvaluationReportResponse }) {
           </Badge>
         </div>
         <p className="typo-helper text-muted-foreground">
-          Run {report.run_id.slice(0, 8)} • {new Date(report.created_at).toLocaleString()}
+          Run {report.run_id.slice(0, 8)} • {report.created_at ? new Date(report.created_at).toLocaleString() : "Pending"}
         </p>
       </CardHeader>
 
