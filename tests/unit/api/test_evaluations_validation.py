@@ -7,6 +7,7 @@ in-range values (which may then return 200/503 depending on MLflow).
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from unittest.mock import patch
 from uuid import uuid4
@@ -49,16 +50,40 @@ def _stub_persisted_identity() -> IdentityUpsertResult:
 
 @pytest.fixture
 def evaluations_client(no_db_app) -> Iterator[TestClient]:
-    """Client with auth dependencies stubbed so validation is the only gate."""
+    """Client with auth dependencies stubbed so validation is the only gate.
+
+    The background ``asyncio.create_task`` scheduled by ``start_evaluation_run``
+    is stubbed to a no-op (the coroutine is closed without running) so the
+    validation tests (which only assert 422/200 boundary behavior) do not
+    leave a lingering ``asyncio.to_thread`` worker thread that would hang the
+    TestClient portal shutdown. Non-blocking behavior is verified in
+    ``test_evaluations_background.py``.
+    """
     app = no_db_app
     app.dependency_overrides[require_http_identity] = _stub_identity  # type: ignore[assignment]
     app.dependency_overrides[resolve_persisted_identity] = _stub_persisted_identity  # type: ignore[assignment]
-    with TestClient(app) as client:
-        yield client
+    evaluation_service._EVALUATION_STORE.clear()
+
+    def _noop_create_task(coro, *_args, **_kwargs):
+        coro.close()
+        loop = asyncio.get_event_loop()
+        return loop.create_task(asyncio.sleep(0))
+
+    with patch.object(evaluation_service.asyncio, "create_task", side_effect=_noop_create_task):
+        with TestClient(app) as client:
+            yield client
+    evaluation_service._EVALUATION_STORE.clear()
+    evaluation_service._INFLIGHT_TASKS.clear()
 
 
 def _patch_run_evaluation(run_id: str):
-    """Patch run_evaluation so in-range requests return 200 instead of hitting MLflow."""
+    """Patch run_evaluation so in-range requests return 200 instead of hitting MLflow.
+
+    With background-task conversion (VAL-SEC-009), POST returns a freshly
+    generated run_id with ``status="pending"``; the patched ``run_evaluation``
+    only matters if the background task actually runs. We assert the POST
+    response shape (200 + status=pending), not the patched report's run_id.
+    """
     fake_report = EvaluationReport(
         run_id=run_id,
         created_at="2026-01-01T00:00:00+00:00",
@@ -106,7 +131,9 @@ def test_post_evaluations_accepts_in_range_limit(
 
     assert response.status_code != 422, response.text
     assert response.status_code == 200
-    assert response.json()["run_id"] == run_id
+    body = response.json()
+    assert "run_id" in body
+    assert body["status"] == "pending"
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +171,9 @@ def test_post_evaluations_accepts_in_range_from_last_days(
 
     assert response.status_code != 422, response.text
     assert response.status_code == 200
-    assert response.json()["run_id"] == run_id
+    body = response.json()
+    assert "run_id" in body
+    assert body["status"] == "pending"
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +206,9 @@ def test_post_evaluations_accepts_max_trace_ids(evaluations_client: TestClient) 
 
     assert response.status_code != 422, response.text
     assert response.status_code == 200
-    assert response.json()["run_id"] == run_id
+    body = response.json()
+    assert "run_id" in body
+    assert body["status"] == "pending"
 
 
 def test_post_evaluations_accepts_empty_trace_ids(evaluations_client: TestClient) -> None:
@@ -191,6 +222,7 @@ def test_post_evaluations_accepts_empty_trace_ids(evaluations_client: TestClient
 
     assert response.status_code != 422, response.text
     assert response.status_code == 200
+    assert response.json()["status"] == "pending"
 
 
 def test_post_evaluations_accepts_null_trace_ids(evaluations_client: TestClient) -> None:
@@ -204,3 +236,4 @@ def test_post_evaluations_accepts_null_trace_ids(evaluations_client: TestClient)
 
     assert response.status_code != 422, response.text
     assert response.status_code == 200
+    assert response.json()["status"] == "pending"

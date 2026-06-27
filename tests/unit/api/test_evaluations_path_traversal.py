@@ -92,8 +92,7 @@ def test_get_evaluation_rejects_non_uuid_run_id(
     response = evaluations_client.get(f"/api/v1/evaluations/{run_id}")
 
     assert response.status_code in {422, 404}, (
-        f"expected 422 or 404 for run_id={run_id!r}, "
-        f"got {response.status_code}: {response.text}"
+        f"expected 422 or 404 for run_id={run_id!r}, got {response.status_code}: {response.text}"
     )
     # Crucially, the handler must never be reached (no 200) and no server error.
     assert response.status_code != 200

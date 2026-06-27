@@ -8,6 +8,7 @@ before the route handler executes, and accept authenticated requests.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from unittest.mock import patch
 from uuid import uuid4
@@ -60,12 +61,31 @@ def evaluations_client(no_db_app) -> Iterator[TestClient]:
     the real Neon auth dependency rejects the missing token. For the 200 cases
     we install stub overrides so the request reaches the handler without
     touching the Neon JWKS endpoint.
+
+    The background ``asyncio.create_task`` scheduled by ``start_evaluation_run``
+    is stubbed to a no-op that immediately closes the coroutine (so no
+    ``asyncio.to_thread`` worker thread is spawned). This lets the auth tests
+    (which only assert the 401/200 boundary) avoid leaving a lingering worker
+    thread that would hang the TestClient portal shutdown. The non-blocking
+    behavior is verified separately in ``test_evaluations_background.py``.
     """
     app = no_db_app
     app.dependency_overrides[require_http_identity] = _stub_identity  # type: ignore[assignment]
     app.dependency_overrides[resolve_persisted_identity] = _stub_persisted_identity  # type: ignore[assignment]
-    with TestClient(app) as client:
-        yield client
+    evaluation_service._EVALUATION_STORE.clear()
+
+    def _noop_create_task(coro, *_args, **_kwargs):
+        # Close the coroutine without running it so no background work is
+        # scheduled and no worker thread is spawned.
+        coro.close()
+        loop = asyncio.get_event_loop()
+        return loop.create_task(asyncio.sleep(0))  # return a real Task object
+
+    with patch.object(evaluation_service.asyncio, "create_task", side_effect=_noop_create_task):
+        with TestClient(app) as client:
+            yield client
+    evaluation_service._EVALUATION_STORE.clear()
+    evaluation_service._INFLIGHT_TASKS.clear()
 
 
 def _require_auth(client: TestClient) -> None:
@@ -101,7 +121,14 @@ def test_post_evaluations_rejects_invalid_token(evaluations_client: TestClient) 
 
 
 def test_post_evaluations_accepts_authenticated_request(evaluations_client: TestClient) -> None:
-    """VAL-SEC-001: POST with a valid (stubbed) identity reaches the handler."""
+    """VAL-SEC-001: POST with a valid (stubbed) identity reaches the handler.
+
+    With background-task conversion (VAL-SEC-009), POST returns immediately
+    with a generated run_id and ``status="pending"``; the actual evaluation is
+    scheduled via ``asyncio.create_task`` and never blocks the response. We
+    patch ``run_evaluation`` so the background task (if it runs) returns a
+    known report, but we only assert the immediate POST response shape.
+    """
     run_id = str(uuid4())
     fake_report = EvaluationReport(
         run_id=run_id,
@@ -110,6 +137,7 @@ def test_post_evaluations_accepts_authenticated_request(evaluations_client: Test
         per_trace=[],
         aggregates={"mean": {}, "median": {}},
     )
+    evaluation_service._EVALUATION_STORE.clear()
     evaluations_client.app.state.config_deps.config.auth_required = False
 
     with patch.object(evaluation_service, "run_evaluation", return_value=fake_report):
@@ -119,7 +147,9 @@ def test_post_evaluations_accepts_authenticated_request(evaluations_client: Test
         )
 
     assert response.status_code == 200, response.text
-    assert response.json()["run_id"] == run_id
+    body = response.json()
+    assert "run_id" in body
+    assert body["status"] == "pending"
 
 
 def test_get_evaluations_list_rejects_missing_token(evaluations_client: TestClient) -> None:
