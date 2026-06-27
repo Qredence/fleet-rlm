@@ -60,8 +60,8 @@ class LlmConfig(BaseModel):
     """Configuration for language-model provider and model selection."""
 
     model: str = Field(
-        default="openai/gemini-3-flash-preview",
-        description="Planner LLM model identifier.",
+        default="",
+        description="Planner LLM model identifier. Empty means no model configured; resolvers return None and log a warning.",
     )
     delegate_model: str | None = Field(
         default=None,
@@ -206,30 +206,20 @@ class DatabaseConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
-    """Configuration for the agent."""
+    """Configuration for the agent.
+
+    LM settings (model, delegate_model, delegate_max_tokens, api_key,
+    api_base, etc.) live exclusively on :class:`LlmConfig`. This class
+    retains only agent-behavior fields that are not LM settings.
+    """
 
     max_iters: int = Field(
         default=60,
         description="Maximum number of ReAct loop iterations per turn.",
     )
-    model: str = Field(
-        default="openai/gemini-3-flash-preview",
-        description="LLM model identifier to use. Must include LiteLLM provider prefix e.g. 'openai/model-name'.",
-    )
     temperature: float = Field(
         default=1.0,
         description="LLM sampling temperature.",
-    )
-    delegate_model: str | None = Field(
-        default=None,
-        description=(
-            "Optional cheaper model identifier used for delegate/sub-agent turns. "
-            "When unset, delegates use the parent planner model."
-        ),
-    )
-    delegate_max_tokens: int = Field(
-        default=64000,
-        description="Maximum token budget for delegate model calls.",
     )
     rlm_max_iterations: int = Field(
         default=30,
@@ -277,8 +267,20 @@ class RlmSettings(BaseModel):
         description="Maximum REPL output characters exposed back to the RLM per step.",
     )
     action_max_tokens: int = Field(
-        default=4096,
+        default=2048,
         description="Maximum model tokens for each RLM action-generation call.",
+    )
+    action_timeout: int = Field(
+        default=90,
+        description="Maximum seconds for each RLM action-generation call before timeout.",
+    )
+    url_document_max_iterations: int = Field(
+        default=12,
+        description="Maximum iterations for URL-document RLM analysis.",
+    )
+    url_document_max_llm_calls: int = Field(
+        default=30,
+        description="Maximum LLM calls for URL-document RLM analysis.",
     )
     delegate_max_calls_per_turn: int = Field(
         default=8,
@@ -362,30 +364,15 @@ class AppConfig(BaseModel):
     analytics: AnalyticsConfig = Field(default_factory=AnalyticsConfig)
 
     @model_validator(mode="after")
-    def _sync_runtime_sections(self) -> AppConfig:
+    def _sync_interpreter_sections(self) -> AppConfig:
+        """Sync interpreter/sandbox/volumes sections.
+
+        LM fields are no longer duplicated between ``LlmConfig`` and
+        ``AgentConfig`` (``LlmConfig`` is the single source), so the former
+        cross-section LM sync is gone. Only the interpreter/sandbox/volumes
+        bidirectional sync remains.
+        """
         fields_set = set(self.model_fields_set)
-        if "llm" in fields_set or "agent" not in fields_set:
-            self.agent = AgentConfig(
-                max_iters=self.llm.max_iters,
-                model=self.llm.model,
-                temperature=self.llm.temperature,
-                delegate_model=self.llm.delegate_model,
-                delegate_max_tokens=self.llm.delegate_max_tokens,
-                rlm_max_iterations=self.llm.rlm_max_iterations,
-                guardrail_mode=self.llm.guardrail_mode,
-                min_substantive_chars=self.llm.min_substantive_chars,
-            )
-        else:
-            self.llm = LlmConfig(
-                model=self.agent.model,
-                delegate_model=self.agent.delegate_model,
-                delegate_max_tokens=self.agent.delegate_max_tokens,
-                max_iters=self.agent.max_iters,
-                temperature=self.agent.temperature,
-                rlm_max_iterations=self.agent.rlm_max_iterations,
-                guardrail_mode=self.agent.guardrail_mode,
-                min_substantive_chars=self.agent.min_substantive_chars,
-            )
 
         if "interpreter" not in fields_set:
             self.interpreter = InterpreterConfig(

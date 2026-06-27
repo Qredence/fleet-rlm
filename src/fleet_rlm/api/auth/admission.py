@@ -1,4 +1,4 @@
-"""Tenant admission helpers for Entra-authenticated identities."""
+"""Tenant admission helpers for Neon-authenticated identities."""
 
 from __future__ import annotations
 

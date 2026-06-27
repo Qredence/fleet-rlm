@@ -39,7 +39,7 @@
       "args": [
         "run",
         "--with",
-        "mlflow[mcp]>=3.5.1",
+        "mlflow[mcp]>=3.14.0",
         "mlflow",
         "mcp",
         "run"

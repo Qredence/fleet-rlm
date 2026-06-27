@@ -7,7 +7,7 @@ PYTEST := uv run --no-sync pytest
 	install install-dev install-all \
 	dev format format-check lint typecheck \
 	test test-fast test-unit test-integration test-e2e \
-	check quality-gate check-release check-docs check-duplicates check-security check-deps check-frontend api-check api-sync \
+	check quality-gate check-release check-docs check-duplicates check-security check-deps check-frontend check-codebase-tree api-check api-sync \
 	build build-ui build-release release release-check \
 	clean cli mlflow precommit-install precommit-run precommit \
 	sync sync-dev sync-all metadata-check docs-check security-check dependency-check frontend-check sync-ui release-artifacts cli-help mlflow-server mlflow-upgrade \
@@ -40,6 +40,7 @@ help:
 	@echo "  make check-security   - Run pip-audit + bandit"
 	@echo "  make check-deps       - Check for unused dependencies (deptry, knip)"
 	@echo "  make check-frontend   - Run frontend checks when src/frontend exists"
+	@echo "  make check-codebase-tree - Enforce import boundaries defined in codebase map"
 	@echo "  make api-check        - Validate OpenAPI artifacts and frontend API sync"
 	@echo "  make api-sync         - Regenerate OpenAPI and frontend API artifacts"
 	@echo ""
@@ -106,7 +107,7 @@ test-e2e:
 		echo "No src/frontend/package.json found, skipping frontend e2e tests."; \
 	fi
 
-check: lint format-check typecheck test check-release check-docs check-duplicates check-frontend
+check: lint format-check typecheck test check-release check-docs check-duplicates check-frontend check-codebase-tree
 
 quality-gate: check
 
@@ -144,6 +145,9 @@ check-frontend:
 	else \
 		echo "No src/frontend/package.json found, skipping frontend checks."; \
 	fi
+
+check-codebase-tree:
+	uv run python scripts/check_codebase_tree.py
 
 api-check:
 	uv run python scripts/openapi_tools.py validate

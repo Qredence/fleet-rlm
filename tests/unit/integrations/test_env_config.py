@@ -120,9 +120,9 @@ def test_app_config_syncs_agent_and_interpreter_sections() -> None:
         }
     )
 
-    assert config.agent.model == "openai/gpt-4.1"
-    assert config.agent.delegate_model == "openai/gpt-4.1-mini"
-    assert config.agent.delegate_max_tokens == 2048
+    assert config.llm.model == "openai/gpt-4.1"
+    assert config.llm.delegate_model == "openai/gpt-4.1-mini"
+    assert config.llm.delegate_max_tokens == 2048
     assert config.interpreter.timeout == 321
     assert config.interpreter.async_execute is False
     assert config.interpreter.volume_name == "tenant-volume"
@@ -144,8 +144,7 @@ def test_initialize_app_config_loads_pruned_default_config(clean_runtime_env: py
     assert config.analytics.posthog.enabled is False
 
 
-def test_server_runtime_config_carries_delegate_timeout_settings() -> None:
-    from fleet_rlm.api.config import ServerRuntimeConfig
+def test_app_config_carries_delegate_timeout_settings() -> None:
     from fleet_rlm.integrations.config.env import AppConfig
 
     config = AppConfig.model_validate(
@@ -158,8 +157,6 @@ def test_server_runtime_config_carries_delegate_timeout_settings() -> None:
         }
     )
 
-    runtime_config = ServerRuntimeConfig.from_app_config(config)
-
-    assert runtime_config.delegate_execution_timeout == 45
-    assert runtime_config.daytona_broker_health_timeout == 7.5
-    assert runtime_config.daytona_broker_start_retries == 2
+    assert config.rlm_settings.delegate_execution_timeout == 45
+    assert config.rlm_settings.daytona_broker_health_timeout == 7.5
+    assert config.rlm_settings.daytona_broker_start_retries == 2

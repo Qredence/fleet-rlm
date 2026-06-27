@@ -21,7 +21,7 @@ from .bootstrap_observability import (
     set_optional_service_status,
     terminate_process,
 )
-from .config import ServerRuntimeConfig
+from .config import AppConfig
 from .dependencies import (
     AuthDeps,
     ConfigDeps,
@@ -44,7 +44,7 @@ _LLM_MODEL_ENV_KEYS = (
 )
 
 
-def _sync_llm_model_config_from_env(cfg: ServerRuntimeConfig) -> None:
+def _sync_llm_model_config_from_env(cfg: AppConfig) -> None:
     """Align in-memory runtime config with current process env model settings."""
     normalized = {key: os.environ[key] for key in _LLM_MODEL_ENV_KEYS if key in os.environ}
     if not normalized:
@@ -90,8 +90,8 @@ def get_delegate_small_lm_from_env(*args, **kwargs):
 
 
 def resolve_runtime_config(
-    config: ServerRuntimeConfig | None = None,
-) -> ServerRuntimeConfig:
+    config: AppConfig | None = None,
+) -> AppConfig:
     """Resolve the runtime config, loading `.env` when needed."""
     if config is not None:
         return config
@@ -104,10 +104,10 @@ def resolve_runtime_config(
     )
     app_env = (os.getenv("APP_ENV") or "local").strip().lower()
     load_dotenv(dotenv_path=str(env_path), override=app_env == "local")
-    return ServerRuntimeConfig(env_path=env_path)
+    return AppConfig(env_path=env_path)
 
 
-def prime_runtime_env(cfg: ServerRuntimeConfig) -> None:
+def prime_runtime_env(cfg: AppConfig) -> None:
     """Load configured .env into process env before runtime initialization."""
     load_dotenv(
         dotenv_path=str(cfg.env_path),
@@ -115,7 +115,7 @@ def prime_runtime_env(cfg: ServerRuntimeConfig) -> None:
     )
 
 
-def build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
+def build_server_state(cfg: AppConfig) -> ServerState:
     """Build initialized in-memory server state container.
 
     Constructs focused dependency slices individually and composes them into
@@ -128,17 +128,6 @@ def build_server_state(cfg: ServerRuntimeConfig) -> ServerState:
     lm_deps = LmDeps()
     auth_deps = AuthDeps(
         auth_provider=build_auth_provider(
-            auth_mode=cfg.auth_mode,
-            dev_jwt_secret=cfg.dev_jwt_secret,
-            allow_debug_auth=cfg.allow_debug_auth,
-            allow_query_auth_tokens=cfg.allow_query_auth_tokens,
-            entra_jwks_url=cfg.entra_jwks_url,
-            entra_issuer_url=cfg.entra_issuer_url,
-            entra_issuer_template=cfg.entra_issuer_template,
-            entra_audience=cfg.entra_audience,
-            entra_allowed_user_ids=set(cfg.entra_allowed_user_ids_list),
-            entra_allowed_group_ids=set(cfg.entra_allowed_group_ids_list),
-            neon_auth_url=cfg.neon_auth_url,
             neon_tenant_claim=cfg.neon_tenant_claim,
         ),
     )
@@ -179,7 +168,7 @@ def attach_server_state(app: FastAPI, state: ServerState) -> None:
     app.state.interpreter_pool_deps = state.interpreter_pool_deps
 
 
-async def initialize_persistence(persistence_deps: PersistenceDeps, cfg: ServerRuntimeConfig) -> None:
+async def initialize_persistence(persistence_deps: PersistenceDeps, cfg: AppConfig) -> None:
     """Initialize persistence paths based on runtime config."""
     from fleet_rlm.integrations.local_store import LocalStore
 
@@ -207,17 +196,16 @@ async def initialize_persistence(persistence_deps: PersistenceDeps, cfg: ServerR
         persistence_deps.db_manager = db_manager
         persistence_deps.repository = FleetRepository(db_manager)
 
-        # Auto-seed the NEON_TENANT_CLAIM on startup in neon/entra auth modes
-        if cfg.auth_mode in {"entra", "neon"} and cfg.neon_tenant_claim:
+        # Auto-seed the NEON_TENANT_CLAIM on startup
+        if cfg.neon_tenant_claim:
             try:
                 tenant = await persistence_deps.repository.resolve_tenant_by_entra_claim(
                     entra_tenant_id=cfg.neon_tenant_claim
                 )
                 if tenant is None:
                     logger.info(
-                        "Auto-seeding tenant '%s' for %s auth mode...",
+                        "Auto-seeding tenant '%s' for Neon auth...",
                         cfg.neon_tenant_claim,
-                        cfg.auth_mode,
                     )
                     await persistence_deps.repository.upsert_tenant(
                         entra_tenant_id=cfg.neon_tenant_claim,
@@ -331,7 +319,6 @@ async def _initialize_posthog_runtime(
     await initialize_posthog_runtime_service(
         state.diagnostics_deps,
         app_env=state.config_deps.config.app_env,
-        auth_mode=state.config_deps.config.auth_mode,
         database_required=state.config_deps.config.database_required,
     )
 
