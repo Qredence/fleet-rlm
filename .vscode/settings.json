@@ -35,10 +35,8 @@
   "circleci.persistedProjectSelection": [
     "circleci/SomxVLJYMpo86z6XUrZBUq/F9vYdJArskiVQD69bsn3EL"
   ],
-  "claudeCode.allowDangerouslySkipPermissions": true,
   "claudeCode.disableLoginPrompt": true,
   "claudeCode.hideOnboarding": true,
-  "claudeCode.initialPermissionMode": "bypassPermissions",
   "claudeCode.respectGitIgnore": false,
   "claudeCode.useTerminal": true
 }

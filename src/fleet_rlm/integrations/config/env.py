@@ -277,7 +277,7 @@ class RlmSettings(BaseModel):
         description="Maximum REPL output characters exposed back to the RLM per step.",
     )
     action_max_tokens: int = Field(
-        default=16384,
+        default=2048,
         description="Maximum model tokens for each RLM action-generation call.",
     )
     action_timeout: int = Field(

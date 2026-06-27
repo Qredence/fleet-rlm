@@ -237,6 +237,11 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         self.action_timeout = action_timeout if action_timeout is not None else _env_int("FLEET_RLM_ACTION_TIMEOUT", 90)
         self._consecutive_timeouts = 0
         self._max_consecutive_timeouts = 2
+        # Per-instance cache (NOT class-level) so two RLM instances with the
+        # same variable names but different content do not share cached data.
+        # Cleared at the start of each forward() call to prevent stale data
+        # from a previous turn leaking into the next turn.
+        self._prepared_serializable_cache: dict[frozenset[str], dict[str, Any]] = {}
 
     def _emit_step(self, payload: dict[str, Any]) -> None:
         interpreter = getattr(self, "_interpreter", None)
@@ -747,11 +752,14 @@ class _StreamingRLM(_DSPY_RLM_BASE):
             return result
 
     # ── P1: Cached serializable variable preparation ───────────────────────
-    # _prepared_serializable_vars stores the result of the last
+    # _prepared_serializable_cache stores the result of the last
     # _prepare_serializable_vars call keyed by (frozenset of input arg names).
     # Large objects like WorkspaceContext and ActiveSkills are expensive to
     # serialize (4.3s in the observed trace) but immutable across iterations.
-    _prepared_serializable_cache: dict[frozenset[str], dict[str, Any]] = {}
+    # NOTE: The cache is a per-instance dict initialized in __init__ (not a
+    # class-level attribute) so two RLM instances with the same variable names
+    # but different content do not share cached data. It is cleared at the
+    # start of each forward() call to prevent stale data across turns.
 
     def _prepare_serializable_vars(self, input_args: dict[str, Any], repl: Any) -> dict[str, Any]:
         from dspy.predict.rlm import SandboxSerializable
@@ -805,6 +813,11 @@ class _StreamingRLM(_DSPY_RLM_BASE):
             return
 
     def forward(self, **input_args: Any) -> dspy.Prediction:
+        # Clear the per-instance serializable cache at the start of each
+        # forward() call so stale data from a previous turn does not leak
+        # into the next turn (variable content may differ across turns even
+        # when the variable names are identical).
+        self._prepared_serializable_cache.clear()
         # Validate critical variables are present
         variables_info = input_args.get("variables_info")
         if not variables_info or not isinstance(variables_info, str) or len(variables_info) < 50:

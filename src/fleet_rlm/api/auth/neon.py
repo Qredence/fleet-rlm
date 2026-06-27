@@ -90,7 +90,7 @@ class NeonAuthProvider:
     def _validate_configuration(self) -> None:
         if not self.neon_auth_url:
             raise AuthError(
-                "AUTH_MODE=neon requires NEON_AUTH_URL to be configured.",
+                "NEON_AUTH_URL is required.",
                 status_code=503,
             )
 

@@ -395,7 +395,16 @@ def _extract_token_usage(
     # Try to get input text from messages or prompt
     messages = outputs.get("messages")
     if isinstance(messages, list):
-        input_text = " ".join(str(m) for m in messages)
+        # Extract the ``content`` field from message dicts before joining
+        # instead of ``str(dict)`` which would include keys, braces, quotes,
+        # and syntax (roughly doubling the estimated token count).
+        parts = []
+        for m in messages:
+            if isinstance(m, dict):
+                parts.append(str(m.get("content", "")))
+            else:
+                parts.append(str(m))
+        input_text = " ".join(parts)
     elif "prompt" in outputs:
         input_text = str(outputs["prompt"])
 
