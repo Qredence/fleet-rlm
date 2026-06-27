@@ -152,10 +152,12 @@ def test_configure_planner_from_env_builds_lm_and_configures_dspy(
     assert fake_dspy.configure_cache_calls[0]["enable_disk_cache"] is False
     lm = fake_dspy.configure_calls[0]["lm"]
     assert lm.model == "openai/gpt-4.1"
+    # ResponseAPILM inherits from BaseLM which always includes temperature in kwargs
     assert lm.kwargs == {
         "api_base": "https://api.example.test",
         "api_key": "planner-key",
         "max_tokens": 777,
+        "temperature": None,
     }
 
 

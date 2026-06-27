@@ -46,6 +46,37 @@ def test_default_sandbox_name_keeps_timestamp_prefix_and_adds_unique_suffix(
     assert re.fullmatch(r"fleet-rlm-\d{8}-\d{6}-[0-9a-f]{8}", first)
 
 
+def test_stage_context_paths_skips_nonexistent_and_warns(
+    tmp_path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A non-existent context path is skipped (warned), not fatal; the rest still stage."""
+    from fleet_rlm.integrations.daytona.isolation import stage_context_paths
+    from fleet_rlm.integrations.daytona.models import ContextSource
+
+    real_file = tmp_path / "real.txt"
+    real_file.write_text("hello context", encoding="utf-8")
+    nonexistent = str(tmp_path / "missing")
+
+    sandbox = MagicMock()
+    sandbox.fs = MagicMock()
+
+    caplog.set_level("WARNING", logger="fleet_rlm.integrations.daytona.isolation")
+    result = stage_context_paths(
+        sandbox=sandbox,
+        workspace_path="/workspace",
+        context_paths=[nonexistent, str(real_file)],
+    )
+
+    # Only the real file is staged; the missing path is skipped, not raised.
+    assert len(result) == 1
+    assert isinstance(result[0], ContextSource)
+    assert result[0].kind == "file"
+    assert result[0].host_path == str(real_file.resolve())
+    assert any("Skipping unreachable context path" in record.getMessage() for record in caplog.records)
+    assert any(nonexistent in record.getMessage() for record in caplog.records)
+
+
 class DaytonaConflictError(Exception):
     pass
 
