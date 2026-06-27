@@ -2174,6 +2174,8 @@ paths:
                 $ref: '#/components/schemas/EvaluationRunListResponse'
         '401':
           description: Authentication is required or the provided token is invalid.
+      security:
+      - HTTPBearer: []
     post:
       tags:
       - evaluations
@@ -2204,6 +2206,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
   /api/v1/evaluations/{run_id}:
     get:
       tags:
@@ -2212,15 +2216,18 @@ paths:
       description: Retrieve the full evaluation report for a given run_id. The report
         includes per-trace scores (4 judges + 6 metrics) and aggregate statistics.
       operationId: get_evaluation_api_v1_evaluations__run_id__get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: run_id
         in: path
         required: true
         schema:
           type: string
-          description: Unique identifier for the evaluation run.
+          pattern: ^[a-f0-9-]{36}$
+          description: Unique identifier (UUID) for the evaluation run.
           title: Run Id
-        description: Unique identifier for the evaluation run.
+        description: Unique identifier (UUID) for the evaluation run.
       responses:
         '200':
           description: Successful Response
@@ -2465,19 +2472,24 @@ components:
           - items:
               type: string
             type: array
+            maxItems: 100
           - type: 'null'
           title: Trace Ids
-          description: Optional list of specific trace IDs to evaluate.
+          description: Optional list of specific trace IDs to evaluate (max 100).
         limit:
           anyOf:
           - type: integer
+            maximum: 1000.0
+            minimum: 1.0
           - type: 'null'
           title: Limit
-          description: Optional maximum number of traces to evaluate.
+          description: Optional maximum number of traces to evaluate (1-1000).
         from_last_days:
           type: integer
+          maximum: 365.0
+          minimum: 0.0
           title: From Last Days
-          description: 'Number of days to look back for traces (default: 1).'
+          description: 'Number of days to look back for traces (0-365, default: 1).'
           default: 1
       type: object
       title: EvaluationRequest

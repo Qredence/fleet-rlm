@@ -13,6 +13,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Path
 
+from ..dependencies import HTTPIdentityDep, PersistedIdentityDep, PersistenceDep
 from ..runtime_services import evaluations as evaluation_service
 from ..schemas.evaluations import (
     EvaluationReportResponse,
@@ -20,6 +21,11 @@ from ..schemas.evaluations import (
     EvaluationRunListResponse,
     EvaluationRunResponse,
 )
+
+# UUID pattern for run_id path parameter (VAL-SEC-004).
+# Rejects path traversal sequences (.., %2F, slashes) and non-UUID strings
+# at the router layer before the service layer is reached.
+_RUN_ID_PATTERN = r"^[a-f0-9-]{36}$"
 
 router = APIRouter(
     prefix="/evaluations",
@@ -42,8 +48,12 @@ router = APIRouter(
 )
 async def start_evaluation(
     request: EvaluationRequest,
+    identity: HTTPIdentityDep,
+    persistence: PersistenceDep,
+    persisted_identity: PersistedIdentityDep,
 ) -> EvaluationRunResponse:
     """Start an evaluation run and return the run_id (VAL-C-014, VAL-C-017, VAL-C-056)."""
+    _ = (identity, persistence, persisted_identity)
     return await evaluation_service.start_evaluation_run(request)
 
 
@@ -59,8 +69,13 @@ async def start_evaluation(
         "Use the run_id to fetch the full report via GET /evaluations/{run_id}."
     ),
 )
-async def list_evaluations() -> EvaluationRunListResponse:
+async def list_evaluations(
+    identity: HTTPIdentityDep,
+    persistence: PersistenceDep,
+    persisted_identity: PersistedIdentityDep,
+) -> EvaluationRunListResponse:
     """List all evaluation runs (VAL-C-050)."""
+    _ = (identity, persistence, persisted_identity)
     return await evaluation_service.list_evaluation_runs()
 
 
@@ -78,7 +93,17 @@ async def list_evaluations() -> EvaluationRunListResponse:
     ),
 )
 async def get_evaluation(
-    run_id: Annotated[str, Path(description="Unique identifier for the evaluation run.")],
+    run_id: Annotated[
+        str,
+        Path(
+            description="Unique identifier (UUID) for the evaluation run.",
+            pattern=_RUN_ID_PATTERN,
+        ),
+    ],
+    identity: HTTPIdentityDep,
+    persistence: PersistenceDep,
+    persisted_identity: PersistedIdentityDep,
 ) -> EvaluationReportResponse:
     """Retrieve the full evaluation report (VAL-C-015, VAL-C-016, VAL-C-018)."""
+    _ = (identity, persistence, persisted_identity)
     return await evaluation_service.get_evaluation_report(run_id)

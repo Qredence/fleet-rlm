@@ -30,6 +30,32 @@ logger = logging.getLogger(__name__)
 _EVALUATION_STORE: dict[str, EvaluationReport] = {}
 
 
+def _eval_root() -> Path:
+    """Return the resolved canonical evaluation artifacts root (VAL-SEC-005)."""
+    return (Path.cwd() / "mlartifacts" / "eval").resolve()
+
+
+def _resolve_report_path(run_id: str) -> Path:
+    """Resolve and validate the report path for a run_id (VAL-SEC-005).
+
+    The router-level UUID pattern check (VAL-SEC-004) already rejects most
+    traversal attempts, but this defense-in-depth check ensures the resolved
+    path stays within ``mlartifacts/eval/`` even if a symlink or OS-level path
+    quirk would otherwise escape it.
+    """
+    eval_root = _eval_root()
+    report_path = (eval_root / run_id / "report.json").resolve()
+    # Containment check: the resolved report path must be inside the eval root.
+    try:
+        report_path.relative_to(eval_root)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Invalid run_id: {run_id}",
+        ) from exc
+    return report_path
+
+
 def _report_to_response(report: EvaluationReport) -> EvaluationReportResponse:
     """Convert an EvaluationReport to an API response."""
     return EvaluationReportResponse(
@@ -96,8 +122,8 @@ async def get_evaluation_report(run_id: str) -> EvaluationReportResponse:
         report = _EVALUATION_STORE[run_id]
         return _report_to_response(report)
 
-    # Fallback: try to load from disk
-    report_path = Path.cwd() / "mlartifacts" / "eval" / run_id / "report.json"
+    # Fallback: try to load from disk (with path containment check, VAL-SEC-005)
+    report_path = _resolve_report_path(run_id)
     if report_path.exists():
         try:
             report = EvaluationReport.read_from_disk(report_path.parent)
@@ -134,26 +160,36 @@ async def list_evaluation_runs() -> EvaluationRunListResponse:
         )
 
     # Scan mlartifacts/eval/ directory for additional reports
-    eval_dir = Path.cwd() / "mlartifacts" / "eval"
+    eval_dir = _eval_root()
     if eval_dir.exists():
         for run_dir in eval_dir.iterdir():
-            if run_dir.is_dir() and (run_dir / "report.json").exists():
-                run_id = run_dir.name
-                # Skip if already in memory
-                if run_id in _EVALUATION_STORE:
-                    continue
-                # Load metadata from disk
-                try:
-                    report = EvaluationReport.read_from_disk(run_dir)
-                    runs.append(
-                        EvaluationRunListItem(
-                            run_id=run_id,
-                            created_at=report.created_at,
-                            trace_count=len(report.per_trace),
-                        )
+            if not run_dir.is_dir():
+                continue
+            # Containment check: skip entries that resolve outside the eval root
+            # (defense in depth against symlinks, VAL-SEC-005).
+            try:
+                run_dir.resolve().relative_to(eval_dir)
+            except ValueError:
+                logger.warning("Skipping directory outside eval root: %s", run_dir)
+                continue
+            if not (run_dir / "report.json").exists():
+                continue
+            run_id = run_dir.name
+            # Skip if already in memory
+            if run_id in _EVALUATION_STORE:
+                continue
+            # Load metadata from disk
+            try:
+                report = EvaluationReport.read_from_disk(run_dir)
+                runs.append(
+                    EvaluationRunListItem(
+                        run_id=run_id,
+                        created_at=report.created_at,
+                        trace_count=len(report.per_trace),
                     )
-                except Exception as e:
-                    logger.warning("Failed to load report metadata for %s: %s", run_id, e)
+                )
+            except Exception as e:
+                logger.warning("Failed to load report metadata for %s: %s", run_id, e)
 
     # Sort by created_at descending (most recent first)
     runs.sort(key=lambda r: r.created_at, reverse=True)

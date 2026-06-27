@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
@@ -10,17 +10,17 @@ from pydantic import BaseModel, Field
 class EvaluationRequest(BaseModel):
     """Request body for POST /api/v1/evaluations."""
 
-    trace_ids: list[str] | None = Field(
+    trace_ids: Annotated[list[str] | None, Field(max_length=100)] = Field(
         default=None,
-        description="Optional list of specific trace IDs to evaluate.",
+        description="Optional list of specific trace IDs to evaluate (max 100).",
     )
-    limit: int | None = Field(
+    limit: Annotated[int | None, Field(ge=1, le=1000)] = Field(
         default=None,
-        description="Optional maximum number of traces to evaluate.",
+        description="Optional maximum number of traces to evaluate (1-1000).",
     )
-    from_last_days: int = Field(
+    from_last_days: Annotated[int, Field(ge=0, le=365)] = Field(
         default=1,
-        description="Number of days to look back for traces (default: 1).",
+        description="Number of days to look back for traces (0-365, default: 1).",
     )
 
 
