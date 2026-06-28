@@ -1,13 +1,30 @@
 from __future__ import annotations
 
+import pytest
 
-def test_runtime_status_includes_daytona_slot_diagnostics() -> None:
-    import fleet_rlm.integrations.daytona.concurrency as concurrency
-    from fleet_rlm.api.dependencies import ConfigDeps, DiagnosticsDeps, LmDeps
-    from fleet_rlm.api.runtime_services.diagnostics import build_runtime_status_response
+import fleet_rlm.integrations.daytona.concurrency as concurrency
 
+
+@pytest.fixture(autouse=True)
+def reset_concurrency_globals(monkeypatch) -> None:
+    """Reset global sandbox semaphore state and disable external services.
+
+    This ensures that leaked semaphore state from preceding tests does not
+    trigger real Daytona API network calls, and that MLflow / PostHog are
+    disabled by default so they don't make outbound tracking connections.
+    """
+    monkeypatch.setenv("MLFLOW_ENABLED", "false")
+    monkeypatch.setenv("POSTHOG_ENABLED", "false")
     concurrency._GLOBAL_SEMAPHORE = None
     concurrency._INITIALIZED_CONFIG = None
+    yield
+    concurrency._GLOBAL_SEMAPHORE = None
+    concurrency._INITIALIZED_CONFIG = None
+
+
+def test_runtime_status_includes_daytona_slot_diagnostics() -> None:
+    from fleet_rlm.api.dependencies import ConfigDeps, DiagnosticsDeps, LmDeps
+    from fleet_rlm.api.runtime_services.diagnostics import build_runtime_status_response
 
     response = build_runtime_status_response(
         config_deps=ConfigDeps(),

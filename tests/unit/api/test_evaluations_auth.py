@@ -54,7 +54,7 @@ def _stub_persisted_identity() -> IdentityUpsertResult:
 
 
 @pytest.fixture
-def evaluations_client(no_db_app) -> Iterator[TestClient]:
+def evaluations_client(no_db_app, monkeypatch) -> Iterator[TestClient]:
     """Client with the eval auth dependencies overridden to a stub identity.
 
     For the 401 cases we flip ``auth_required=True`` and clear the overrides so
@@ -69,6 +69,12 @@ def evaluations_client(no_db_app) -> Iterator[TestClient]:
     thread that would hang the TestClient portal shutdown. The non-blocking
     behavior is verified separately in ``test_evaluations_background.py``.
     """
+    from joserfc.jwk import KeySet
+
+    from fleet_rlm.api.auth.neon import NeonAuthProvider
+
+    monkeypatch.setattr(NeonAuthProvider, "_fetch_jwks", lambda self: KeySet([]))
+
     app = no_db_app
     app.dependency_overrides[require_http_identity] = _stub_identity  # type: ignore[assignment]
     app.dependency_overrides[resolve_persisted_identity] = _stub_persisted_identity  # type: ignore[assignment]
