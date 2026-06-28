@@ -159,7 +159,6 @@ def _extract_run_result_answer(payload: dict[str, Any]) -> str | None:
 
     trajectory = _normalize_trajectory(payload.get("trajectory"))
     if trajectory:
-    if trajectory:
         for step in reversed(trajectory):
             val = (
                 (step.get("output") or step.get("observation"))
