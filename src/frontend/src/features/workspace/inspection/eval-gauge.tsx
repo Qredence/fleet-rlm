@@ -118,7 +118,7 @@ function EvalReportView({ report }: { report: EvaluationReportResponse }) {
 
     // Extract means from aggregates
     for (const key of [...JUDGE_METRICS, ...PROGRAMMATIC_METRICS]) {
-      const agg = report.aggregates[key];
+      const agg = report.aggregates?.[key];
       means[key] = agg?.mean ?? null;
     }
 
@@ -134,7 +134,7 @@ function EvalReportView({ report }: { report: EvaluationReportResponse }) {
             Eval Gauge
           </CardTitle>
           <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-            {report.per_trace.length} traces
+            {report.per_trace?.length ?? 0} traces
           </Badge>
         </div>
         <p className="typo-helper text-muted-foreground">
