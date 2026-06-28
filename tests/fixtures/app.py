@@ -16,22 +16,35 @@ def no_db_app(monkeypatch):
     monkeypatch.setenv("POSTHOG_ENABLED", "false")
     monkeypatch.setenv("MLFLOW_ENABLED", "false")
 
-    # Stub recover_stale_optimization_runs before main.create_app() runs;
-    # the lifespan closure captures the name from main's namespace (it is
-    # imported with `from ... import ...`, binding directly in main.py).
-    # The synchronous SQLite session in recover_local_stale_runs() blocks
-    # the TestClient portal thread in CI (120 s timeout).  Unit tests
-    # never populate the optimization-run table, so skipping is safe.
+    # Stub the heavy lifespan hooks BEFORE main.create_app() runs.
+    # main.py imports these with `from ... import ...`, binding them in
+    # main's namespace where the lifespan closure captures them.
+    #
+    # recover_stale_optimization_runs: the synchronous SQLite session in
+    #   recover_local_stale_runs() blocks the TestClient portal thread in
+    #   CI (120 s timeout).  Unit tests never populate the state table.
+    # startup_server_state: interpreter pool warm-up, optional service
+    #   scheduling (MLflow / PostHog / LLM model loading), and profile
+    #   repair are all unnecessary for no-database unit tests and can
+    #   compete with the TestClient portal thread in CI.
+    #   Persistence initialization (LocalStore) is still performed so
+    #   tests depending on persistence_deps.local_store continue to work.
     from fleet_rlm.api import main as _main
 
     async def _noop_recovery(_state):
         return
 
-    monkeypatch.setattr(
-        _main,
-        "recover_stale_optimization_runs",
-        _noop_recovery,
-    )
+    async def _minimal_startup(state):
+        from fleet_rlm.integrations.local_store import LocalStore
+
+        state.persistence_deps.local_store = LocalStore()
+
+    async def _noop_shutdown(_state):
+        return
+
+    monkeypatch.setattr(_main, "startup_server_state", _minimal_startup)
+    monkeypatch.setattr(_main, "recover_stale_optimization_runs", _noop_recovery)
+    monkeypatch.setattr(_main, "shutdown_server_state", _noop_shutdown)
 
     from fleet_rlm.api.config import AppConfig
     from fleet_rlm.api.main import create_app
