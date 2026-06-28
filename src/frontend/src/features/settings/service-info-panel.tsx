@@ -64,7 +64,7 @@ export function ServiceInfoPanel() {
           </FieldDescription>
         </FieldContent>
         <div className="flex min-w-0 flex-col items-end gap-1 text-right text-xs text-muted-foreground">
-          <Badge variant={info.auth_required ? "default" : "secondary"}>{info.auth_mode}</Badge>
+          <Badge variant={info.auth_required ? "default" : "secondary"}>Neon Auth</Badge>
           <span>{info.auth_required ? "Required" : "Optional"}</span>
         </div>
       </Field>

@@ -255,7 +255,7 @@ export function enrichDelegateToolInput(
 function commandInput(part: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }>) {
   if (part.kind === "sandbox") {
     return {
-      command: part.code || part.title,
+      command: part.code || "",
       description: part.title,
       language: part.language,
     };
@@ -411,6 +411,67 @@ export function chatRenderPartToAgentToolPart(
           required: variable.required,
         })),
       },
+    };
+  }
+
+  if (part.kind === "request_row") {
+    return {
+      type: "tool-RequestRow",
+      toolCallId: stableToolCallId(messageId, "request_row", index, undefined, options?.parentId),
+      state: "output-available",
+      input: { label: part.label, value: part.value, preview: part.preview },
+      output: { label: part.label, value: part.value },
+    };
+  }
+
+  if (part.kind === "skills_row") {
+    return {
+      type: "tool-SkillsRow",
+      toolCallId: stableToolCallId(messageId, "skills_row", index, undefined, options?.parentId),
+      state: "output-available",
+      input: { label: part.label, skills: part.skills, preview: part.preview },
+      output: { label: part.label, skills: part.skills },
+    };
+  }
+
+  if (part.kind === "history_row") {
+    return {
+      type: "tool-HistoryRow",
+      toolCallId: stableToolCallId(messageId, "history_row", index, undefined, options?.parentId),
+      state: "output-available",
+      input: {
+        label: part.label,
+        turnCount: part.turnCount,
+        value: part.value,
+        preview: part.preview,
+      },
+      output: { label: part.label, turnCount: part.turnCount, value: part.value },
+    };
+  }
+
+  if (part.kind === "core_memory_row") {
+    return {
+      type: "tool-CoreMemoryRow",
+      toolCallId: stableToolCallId(
+        messageId,
+        "core_memory_row",
+        index,
+        undefined,
+        options?.parentId,
+      ),
+      state: "output-available",
+      input: { label: part.label, value: part.value, preview: part.preview },
+      output: { label: part.label, value: part.value },
+    };
+  }
+
+  if (part.kind === "context_row") {
+    return {
+      type: "tool-ContextRow",
+      toolCallId: stableToolCallId(messageId, "context_row", index, undefined, options?.parentId),
+      state: "output-available",
+      input: { label: part.label, value: part.value, preview: part.preview },
+      output: { label: part.label, value: part.value },
     };
   }
 

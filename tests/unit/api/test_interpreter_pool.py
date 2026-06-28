@@ -8,7 +8,7 @@ import pytest
 
 
 def _mock_cfg(**overrides):
-    """Build a minimal ServerRuntimeConfig-like object for pool tests."""
+    """Build a minimal AppConfig-like object for pool tests."""
     defaults = {
         "interpreter_pool_size": 2,
         "interpreter_pool_overflow_max": 4,

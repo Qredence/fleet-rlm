@@ -13,6 +13,11 @@ import {
   IconChecklist as ListTodo,
   IconLogout as LogOut,
   IconActivityHeartbeat as ActivityHeartbeat,
+  IconUser as User,
+  IconPuzzle as Puzzle,
+  IconHistory as History,
+  IconBrain as Brain,
+  IconFileText as FileText,
 } from "@tabler/icons-react";
 
 export type ToolVariant = "simple" | "collapsible";
@@ -357,6 +362,65 @@ export const toolRegistry: Record<string, ToolMeta> = {
             : `${(durationMs / 1000).toFixed(durationMs < 10_000 ? 1 : 0)}s`
           : "";
       return [status, duration].filter(Boolean).join(" - ");
+    },
+    variant: "collapsible",
+  },
+  "tool-RequestRow": {
+    icon: User,
+    title: (part) => part.input?.label || "Request",
+    subtitle: (part) => {
+      const preview = part.input?.preview;
+      if (typeof preview === "string" && preview.trim()) return preview;
+      const value = part.input?.value || "";
+      return value.length > 50 ? value.slice(0, 47) + "..." : value;
+    },
+    variant: "simple",
+  },
+  "tool-SkillsRow": {
+    icon: Puzzle,
+    title: (part) => part.input?.label || "Active skills",
+    subtitle: (part) => {
+      const skills = part.input?.skills;
+      if (!Array.isArray(skills) || skills.length === 0) return "(none selected)";
+      return skills.join(", ");
+    },
+    variant: "simple",
+  },
+  "tool-HistoryRow": {
+    icon: History,
+    title: (part) => part.input?.label || "History",
+    subtitle: (part) => {
+      const turnCount = part.input?.turnCount;
+      if (typeof turnCount === "number") {
+        return turnCount === 0
+          ? "No prior history"
+          : `${turnCount} ${turnCount === 1 ? "turn" : "turns"}`;
+      }
+      const preview = part.input?.preview;
+      if (typeof preview === "string" && preview.trim()) return preview;
+      return "";
+    },
+    variant: "collapsible",
+  },
+  "tool-CoreMemoryRow": {
+    icon: Brain,
+    title: (part) => part.input?.label || "Core memory",
+    subtitle: (part) => {
+      const preview = part.input?.preview;
+      if (typeof preview === "string" && preview.trim()) return preview;
+      const value = part.input?.value || "";
+      return value.length > 50 ? value.slice(0, 47) + "..." : value;
+    },
+    variant: "collapsible",
+  },
+  "tool-ContextRow": {
+    icon: FileText,
+    title: (part) => part.input?.label || "Context",
+    subtitle: (part) => {
+      const preview = part.input?.preview;
+      if (typeof preview === "string" && preview.trim()) return preview;
+      const value = part.input?.value || "";
+      return value.length > 50 ? value.slice(0, 47) + "..." : value;
     },
     variant: "collapsible",
   },

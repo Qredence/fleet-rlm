@@ -30,6 +30,7 @@ _KIND_ALIASES: dict[RuntimeEventKind, str] = {
     RuntimeEventKind.DONE: "turn_completed",
     RuntimeEventKind.ERROR: "turn_failed",
     RuntimeEventKind.MLFLOW_SPAN: "mlflow_span",
+    RuntimeEventKind.TURN_INPUTS: "turn_inputs",
 }
 
 

@@ -10,6 +10,10 @@ import pytest
 # Prevent remote model-cost fetch during test collection.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
 
+# Disable MLflow and PostHog by default during all test runs to prevent outbound network hangs/connections.
+os.environ.setdefault("MLFLOW_ENABLED", "false")
+os.environ.setdefault("POSTHOG_ENABLED", "false")
+
 # Register fixture packages.
 pytest_plugins = (
     "tests.fixtures.app",

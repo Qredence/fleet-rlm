@@ -36,6 +36,8 @@ def _step_type_from_kind(kind: RuntimeEventKind, tool_name: str | None) -> Execu
         return _tool_step_type(tool_name)
     if kind in {RuntimeEventKind.DONE, RuntimeEventKind.ERROR}:
         return "output"
+    if kind == RuntimeEventKind.TURN_INPUTS:
+        return "turn_inputs"
     return "llm"
 
 
@@ -60,6 +62,8 @@ def _label_from_event(event: RuntimeEvent) -> str | None:
         if stripped in {"Calling tool:", "Tool finished."}:
             return None
         return stripped
+    if kind == RuntimeEventKind.TURN_INPUTS:
+        return "turn_inputs"
     return kind.value
 
 
@@ -94,6 +98,9 @@ def _input_for_kind(event: RuntimeEvent) -> Any:
         return {"event_kind": kind.value}
     if kind in {RuntimeEventKind.DONE, RuntimeEventKind.ERROR}:
         return {"event_kind": kind.value}
+    if kind == RuntimeEventKind.TURN_INPUTS:
+        payload_dict = event.payload if isinstance(event.payload, dict) else {}
+        return {"event_kind": "turn_inputs", "rows": payload_dict.get("rows", [])}
     return dict(event.payload)
 
 
@@ -113,6 +120,9 @@ def _output_for_kind(event: RuntimeEvent) -> Any:
         return {"text": event.text}
     if kind in {RuntimeEventKind.DONE, RuntimeEventKind.ERROR}:
         return {"text": event.text, "payload": dict(event.payload)}
+    if kind == RuntimeEventKind.TURN_INPUTS:
+        payload_dict = event.payload if isinstance(event.payload, dict) else {}
+        return {"rows": payload_dict.get("rows", [])}
     return {"text": event.text} if event.text else None
 
 

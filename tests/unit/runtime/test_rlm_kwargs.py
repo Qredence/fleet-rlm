@@ -157,10 +157,14 @@ def test_execute_iteration_reconstructs_kwargs_and_does_not_raise_typeerror(monk
     # Force the bounded-LM path off so _run_action uses the plain global LM path.
     monkeypatch.setattr(_StreamingRLM, "_get_bounded_action_lm", lambda self: None)
 
-    repl = SimpleNamespace()
-    variables = [_FakeVariable("user_request", "hello")]
+    # _execute_iteration now EXECUTES the generated code (regression fix), so
+    # the repl must support ``.execute()``; returning a ``FinalOutput`` simulates
+    # a successful SUBMIT → a ``Prediction`` with a trajectory.
+    from dspy.primitives.code_interpreter import FinalOutput
     from dspy.primitives.repl_types import REPLHistory
 
+    repl = _FakeRepl(result=FinalOutput({"response": "done"}))
+    variables = [_FakeVariable("user_request", "hello")]
     history = REPLHistory(max_output_chars=1500)
 
     # Base dspy.RLM.forward signature: (repl, variables, history, iteration, input_args, output_field_names)
@@ -247,9 +251,11 @@ def test_execute_iteration_reads_iteration_from_args3(monkeypatch: pytest.Monkey
 
     from dspy.primitives.repl_types import REPLHistory
 
-    # Pass iteration=2 as args[3] (the 4th positional arg).
+    # Pass iteration=2 as args[3] (the 4th positional arg). ``_execute_iteration``
+    # now runs the generated code; a fake repl returning a plain string keeps the
+    # loop going (non-final) so the call completes.
     rlm._execute_iteration(
-        SimpleNamespace(),
+        _FakeRepl(result="ok"),
         [_FakeVariable("x", "1")],
         REPLHistory(max_output_chars=1500),
         2,  # args[3] = iteration
@@ -282,9 +288,14 @@ def test_execute_iteration_iteration_zero_when_args_too_short(monkeypatch: pytes
     _patch_mlflow(monkeypatch)
     rlm = _make_streaming_rlm_bypass_init()
     monkeypatch.setattr(_StreamingRLM, "_get_bounded_action_lm", lambda self: None)
+    # _execute_iteration now runs the action through strip → execute → process.
+    # This test only checks the args-length guard (no IndexError), so stub out
+    # execution/processing to avoid needing a real repl.
+    rlm.generate_action = MagicMock(return_value=dspy.Prediction(reasoning="ok", code="pass"))
+    rlm._execute_code = MagicMock(return_value="ok")
+    rlm._process_execution_result = MagicMock(return_value=dspy.Prediction(response="done"))
 
     # Should not raise IndexError; iteration defaults to 0.
-    # (generate_action is a MagicMock, so it won't raise TypeError either.)
     rlm._execute_iteration()
 
 
@@ -320,10 +331,11 @@ def test_progress_events_report_increasing_iteration_across_iterations(monkeypat
     history = REPLHistory(max_output_chars=1500)
     variables = [_FakeVariable("x", "1")]
 
-    # Iteration 0 (first iteration)
-    rlm._execute_iteration(SimpleNamespace(), variables, history, 0, {}, ["response"])
+    # Iteration 0 (first iteration). A fake repl returning a plain string keeps
+    # the loop non-final so the call completes.
+    rlm._execute_iteration(_FakeRepl(result="ok"), variables, history, 0, {}, ["response"])
     # Iteration 1 (second iteration)
-    rlm._execute_iteration(SimpleNamespace(), variables, history, 1, {}, ["response"])
+    rlm._execute_iteration(_FakeRepl(result="ok"), variables, history, 1, {}, ["response"])
 
     iteration_values = sorted({e["iteration"] for e in events if "iteration" in e})
     assert iteration_values == [0, 1], (
@@ -372,3 +384,95 @@ def test_is_parse_error_does_not_match_invalid_api_key() -> None:
     assert _StreamingRLM._is_parse_error(ValueError("Invalid API key")) is False
     assert _StreamingRLM._is_parse_error(RuntimeError("invalid state")) is False
     assert _StreamingRLM._is_parse_error(ValueError("expected output")) is False
+
+
+# ---------------------------------------------------------------------------
+# Regression: _execute_iteration must EXECUTE the generated code and build a
+# trajectory (not return the bare action Prediction). See plan
+# now-let-me-extract-shiny-flame.md — bug introduced in 3c8490f4b.
+# ---------------------------------------------------------------------------
+
+
+class _FakeRepl:
+    """Minimal REPL stub recording every executed code string and returning a
+    canned result (FinalOutput for SUBMIT, plain string for exploration)."""
+
+    def __init__(self, result: Any) -> None:
+        self.executed: list[str] = []
+        self._result = result
+
+    def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
+        self.executed.append(code)
+        return self._result
+
+
+def test_execute_iteration_runs_code_and_builds_trajectory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A successfully-generated SUBMIT action must be EXECUTED in the REPL and
+    produce a ``Prediction`` with a non-None ``trajectory``.
+
+    Before the fix, ``_execute_iteration`` returned the raw action
+    ``Prediction`` (reasoning+code only) without calling ``_execute_code`` /
+    ``_process_execution_result``. The REPL was never invoked
+    (``repl.executed == []``), ``SUBMIT`` was never detected, and the
+    ``Prediction`` had no ``trajectory`` → ``has_trajectory=false`` →
+    ``RuntimeError("...no trajectory was produced...")`` in
+    ``EscalatingFleetModule._run_rlm``.
+    """
+    from dspy.primitives.code_interpreter import FinalOutput
+    from dspy.primitives.repl_types import REPLHistory
+
+    _patch_mlflow(monkeypatch)
+    rlm, _events = _make_rlm(max_iterations=3)
+    monkeypatch.setattr(_StreamingRLM, "_get_bounded_action_lm", lambda self: None)
+
+    rlm.generate_action._inner = MagicMock(return_value=dspy.Prediction(reasoning="ok", code="SUBMIT(response='done')"))
+
+    repl = _FakeRepl(result=FinalOutput({"response": "done"}))
+    history = REPLHistory(max_output_chars=1500)
+    variables = [_FakeVariable("user_request", "hello")]
+
+    result = rlm._execute_iteration(repl, variables, history, 0, {}, ["response"])
+
+    # The action's code MUST have been executed in the sandbox REPL.
+    assert repl.executed == ["SUBMIT(response='done')"], (
+        f"expected _execute_code to run the action code, repl.executed={repl.executed!r}"
+    )
+    # And the result must carry a real trajectory (the exact check from
+    # escalating.py:1129 that gates the RuntimeError).
+    assert isinstance(result, dspy.Prediction)
+    trajectory = getattr(result, "trajectory", None)
+    assert trajectory is not None, "result.Prediction has no trajectory attribute"
+    assert len(trajectory) >= 1, f"trajectory should include the SUBMIT step, got {trajectory!r}"
+    assert getattr(result, "response", None) == "done"
+
+
+def test_execute_iteration_strips_fences_and_continues_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-terminal (exploratory) action with fenced code must have its
+    fences stripped before REPL execution, and return a ``REPLHistory`` so the
+    RLM loop continues to the next iteration (NOT a bare ``Prediction``).
+    """
+    from dspy.primitives.repl_types import REPLHistory
+
+    _patch_mlflow(monkeypatch)
+    rlm, _events = _make_rlm(max_iterations=3)
+    monkeypatch.setattr(_StreamingRLM, "_get_bounded_action_lm", lambda self: None)
+
+    rlm.generate_action._inner = MagicMock(
+        return_value=dspy.Prediction(
+            reasoning="explore the context",
+            code="```python\nprint('hi')\n```",
+        )
+    )
+
+    repl = _FakeRepl(result="hi")  # plain string → non-final, loop continues
+    history = REPLHistory(max_output_chars=1500)
+    variables = [_FakeVariable("user_request", "hello")]
+
+    result = rlm._execute_iteration(repl, variables, history, 0, {}, ["response"])
+
+    # Fences stripped before execution — the REPL receives bare python.
+    assert repl.executed == ["print('hi')"], f"expected fences stripped before execute, repl.executed={repl.executed!r}"
+    # Non-final result → REPLHistory (loop continues), not a Prediction.
+    assert isinstance(result, REPLHistory), (
+        f"non-terminal action should return REPLHistory to continue the loop, got {type(result).__name__}"
+    )

@@ -14,6 +14,11 @@ import { ToolGroup } from "./tool-group";
 import { deriveFallbackToolPresentation } from "./tool-presentation";
 import { MlflowSpanTool } from "./mlflow-span-tool";
 import { QuestionTool } from "../question/question-tool";
+import { RequestRow } from "./turn-input-tools/request-row";
+import { SkillsRow } from "./turn-input-tools/skills-row";
+import { HistoryRow } from "./turn-input-tools/history-row";
+import { CoreMemoryRow } from "./turn-input-tools/core-memory-row";
+import { ContextRow } from "./turn-input-tools/context-row";
 import type { CustomToolRendererProps } from "../types";
 
 export type ToolRendererProps = {
@@ -74,6 +79,16 @@ export const ToolRenderer = memo(function ToolRenderer({
       return <ThinkingTool part={part} />;
     case "tool-MlflowSpan":
       return <MlflowSpanTool part={part} chatStatus={chatStatus} />;
+    case "tool-RequestRow":
+      return <RequestRow part={part} />;
+    case "tool-SkillsRow":
+      return <SkillsRow part={part} />;
+    case "tool-HistoryRow":
+      return <HistoryRow part={part} />;
+    case "tool-CoreMemoryRow":
+      return <CoreMemoryRow part={part} />;
+    case "tool-ContextRow":
+      return <ContextRow part={part} />;
   }
 
   // MCP tools

@@ -103,17 +103,42 @@ class NeonAuthProvider:
             return self._cached_keyset
 
         jwks_url = f"{self.neon_auth_url.rstrip('/')}/.well-known/jwks.json"
-        try:
-            req = urllib.request.Request(jwks_url, headers={"User-Agent": "fleet-rlm"})
-            with urllib.request.urlopen(req, timeout=10) as response:
-                data = json.loads(response.read())
-                self._cached_keyset = KeySet.import_key_set(data)
-                self._last_jwks_fetch_time = now
-                return self._cached_keyset
-        except (URLError, ValueError) as exc:
-            if self._cached_keyset:
-                return self._cached_keyset
-            raise AuthError(f"Failed to fetch Neon Auth JWKS: {exc}", status_code=503) from exc
+        last_exc: Exception | None = None
+
+        # Retry with exponential backoff: 3 attempts with 1s, 2s, 4s delays
+        for attempt in range(3):
+            try:
+                req = urllib.request.Request(jwks_url, headers={"User-Agent": "fleet-rlm"})
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    data = json.loads(response.read())
+                    self._cached_keyset = KeySet.import_key_set(data)
+                    self._last_jwks_fetch_time = now
+                    return self._cached_keyset
+            except (URLError, ValueError, TimeoutError) as exc:
+                last_exc = exc
+                if attempt < 2:
+                    # Exponential backoff: 1s, 2s
+                    time.sleep(2**attempt)
+                    continue
+                # Final attempt failed
+                if self._cached_keyset:
+                    logging.warning(
+                        "JWKS fetch failed after 3 attempts, using stale cache: %s",
+                        exc,
+                    )
+                    return self._cached_keyset
+                raise AuthError(
+                    f"Failed to fetch Neon Auth JWKS after 3 attempts: {exc}",
+                    status_code=503,
+                ) from exc
+
+        # Should not reach here, but handle defensively
+        if self._cached_keyset:
+            return self._cached_keyset
+        raise AuthError(
+            f"Failed to fetch Neon Auth JWKS: {last_exc}",
+            status_code=503,
+        )
 
     async def _decode_token(self, token: str) -> NormalizedIdentity:
         assert self.neon_auth_url is not None
@@ -174,7 +199,7 @@ class NeonAuthProvider:
             logging.warning("Unexpected error during Neon Auth token validation", exc_info=True)
             raise AuthError(
                 f"Failed to validate Neon Auth token: {exc}",
-                status_code=503,
+                status_code=401,
             ) from exc
         return self._normalize_claims(claims)
 

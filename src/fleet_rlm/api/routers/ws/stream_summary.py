@@ -150,6 +150,27 @@ def _canonical_run_status(
     return "error"
 
 
+def _extract_run_result_answer(payload: dict[str, Any]) -> str | None:
+    """Extract final_answer from run_result or the last trajectory step output."""
+    run_result = _as_record(payload.get("run_result"))
+    answer = _as_text(run_result.get("final_answer"))
+    if answer:
+        return answer
+
+    trajectory = _normalize_trajectory(payload.get("trajectory"))
+    if trajectory:
+        for step in reversed(trajectory):
+            val = (
+                (step.get("output") or step.get("observation"))
+                if isinstance(step, dict)
+                else (getattr(step, "output", None) or getattr(step, "observation", None))
+            )
+            output = _as_text(val)
+            if output:
+                return output
+    return None
+
+
 def _build_fallback_final_artifact(
     event: StreamEventLike,
     *,
@@ -157,12 +178,35 @@ def _build_fallback_final_artifact(
 ) -> dict[str, Any] | None:
     if event.kind != "done":
         return None
+    payload = event.payload if isinstance(event.payload, dict) else {}
+    routing_decision = _as_text(payload.get("routing_decision"))
+
+    # Try run_result.final_answer or trajectory[-1].output first
+    run_result_answer = _extract_run_result_answer(payload)
+    if run_result_answer:
+        artifact = build_final_artifact_from_answer(
+            run_result_answer,
+            task=request_message or None,
+            routing_decision=routing_decision,
+            finalization_mode="RETURN",
+        )
+        if artifact is not None:
+            return artifact
+        return {
+            "kind": "assistant_response",
+            "value": {
+                "text": run_result_answer,
+                "final_markdown": run_result_answer,
+                "summary": run_result_answer,
+            },
+            "finalization_mode": "RETURN",
+        }
+
+    # Fall back to event.text (the DONE event's text field)
     text = _as_text(event.text)
     if not text:
         return None
 
-    payload = event.payload if isinstance(event.payload, dict) else {}
-    routing_decision = _as_text(payload.get("routing_decision"))
     artifact = build_final_artifact_from_answer(
         text,
         task=request_message or None,

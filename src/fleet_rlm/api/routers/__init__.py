@@ -13,6 +13,7 @@ __all__ = [
     "runs",
     "optimization",
     "traces",
+    "evaluations",
 ]
 
 # Lazy-load each submodule to avoid importing all heavy routers at once.
@@ -27,6 +28,7 @@ _IMPORT_MAP: dict[str, str] = {
     "runs": "fleet_rlm.api.routers.runs",
     "optimization": "fleet_rlm.api.routers.optimization",
     "traces": "fleet_rlm.api.routers.traces",
+    "evaluations": "fleet_rlm.api.routers.evaluations",
 }
 
 

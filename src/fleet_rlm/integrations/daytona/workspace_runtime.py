@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
@@ -15,6 +16,7 @@ from ._git_helpers import (
     _areconcile_repo_checkout,
     _aresolve_clone_ref,
 )
+from ._local_repo_mount import amount_local_repo_tree
 from .async_compat import _run_async_compat
 from .models import SandboxSpec
 from .sdk_ops import (
@@ -132,6 +134,13 @@ async def acreate_workspace_session(
                 sandbox=sandbox,
                 workspace_path=workspace_path,
             )
+            # Local-dev mode (no repo_url): mount the host repo source tree so
+            # the agent's filesystem ops (os.listdir("src/fleet_rlm/"), etc.)
+            # succeed instead of dead-ending on the lossy snapshot. No-op in
+            # cloud (cwd isn't a project root) and never breaks session creation.
+            mount_started = time.perf_counter()
+            await asyncio.to_thread(amount_local_repo_tree, sandbox=sandbox, workspace_path=workspace_path)
+            timings["local_repo_mount"] = int((time.perf_counter() - mount_started) * 1000)
 
         context_started = time.perf_counter()
         context_sources = _astage_context_paths(

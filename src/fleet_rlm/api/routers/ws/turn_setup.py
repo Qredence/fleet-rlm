@@ -364,6 +364,9 @@ def _build_trace_context(
     )
 
     client_request_id = new_client_request_id(prefix="chat")
+    # Check if delegate LM (sub_lm) is configured for cost tracking. Use
+    # getattr so test/mocked runtimes without a delegate_lm attribute don't crash.
+    sub_lm_configured = getattr(runtime, "delegate_lm", None) is not None
     metadata = {
         "fleet_rlm.workspace_id": workspace_id,
         "fleet_rlm.turn_index": str(turn_index),
@@ -373,6 +376,7 @@ def _build_trace_context(
         "fleet_rlm.client_request_id": client_request_id,
         "fleet_rlm.runtime_mode": "daytona_pilot",
         "fleet_rlm.events_mode": execution_mode,
+        "fleet_rlm.sub_lm_configured": str(sub_lm_configured).lower(),
     }
     if run_id:
         metadata["fleet_rlm.run_id"] = run_id

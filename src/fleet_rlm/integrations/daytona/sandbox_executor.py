@@ -486,10 +486,10 @@ class SandboxCallbackOwner(Protocol):
 
     _tools: dict[str, Callable[..., Any]]
 
-    def llm_query(self, prompt: str) -> Any:
+    def llm_query(self, prompt: str, context: str = "") -> Any:
         pass
 
-    def llm_query_batched(self, prompts: list[str]) -> Any:
+    def llm_query_batched(self, prompts: list[str], context: str = "") -> Any:
         pass
 
 

@@ -723,7 +723,6 @@ def test_set_gen_ai_tool_attributes_is_noop_when_disabled(monkeypatch) -> None:
 
 def test_gen_ai_attributes_in_application_turn_span(monkeypatch) -> None:
     """VAL-C-013: application turn span should include gen_ai.system attribute."""
-    from fleet_rlm.integrations.observability import mlflow_context
     from fleet_rlm.integrations.observability.mlflow_context import (
         MlflowTraceRequestContext,
         mlflow_request_context,
@@ -759,14 +758,16 @@ def test_gen_ai_attributes_in_application_turn_span(monkeypatch) -> None:
         start_span=lambda name, span_type=None, attributes=None: FakeSpan(name, span_type, attributes),
     )
     monkeypatch.setattr(
-        mlflow_context,
-        "_runtime_module",
-        lambda: SimpleNamespace(
-            _import_mlflow=lambda: fake_mlflow,
-            get_mlflow_config=lambda: SimpleNamespace(active_model_id=None),
-            flush_mlflow_traces=lambda: None,
-            logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
-        ),
+        "fleet_rlm.integrations.observability.mlflow_runtime._import_mlflow",
+        lambda: fake_mlflow,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.mlflow_runtime.get_mlflow_config",
+        lambda: SimpleNamespace(enabled=True, active_model_id=None),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.mlflow_runtime.initialize_mlflow",
+        lambda *args, **kwargs: None,
     )
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
 
@@ -843,7 +844,6 @@ def test_gen_ai_attributes_in_trajectory_spans(monkeypatch) -> None:
 
 def test_gen_ai_usage_attributes_in_application_turn_span(monkeypatch) -> None:
     """VAL-C-013: application turn span should include gen_ai.usage.* attributes when tokens are available."""
-    from fleet_rlm.integrations.observability import mlflow_context
     from fleet_rlm.integrations.observability.mlflow_context import (
         MlflowTraceRequestContext,
         mlflow_request_context,
@@ -883,14 +883,16 @@ def test_gen_ai_usage_attributes_in_application_turn_span(monkeypatch) -> None:
         start_span=lambda name, span_type=None, attributes=None: FakeSpan(name, span_type, attributes),
     )
     monkeypatch.setattr(
-        mlflow_context,
-        "_runtime_module",
-        lambda: SimpleNamespace(
-            _import_mlflow=lambda: fake_mlflow,
-            get_mlflow_config=lambda: SimpleNamespace(active_model_id=None),
-            flush_mlflow_traces=lambda: None,
-            logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
-        ),
+        "fleet_rlm.integrations.observability.mlflow_runtime._import_mlflow",
+        lambda: fake_mlflow,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.mlflow_runtime.get_mlflow_config",
+        lambda: SimpleNamespace(enabled=True, active_model_id=None),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.mlflow_runtime.initialize_mlflow",
+        lambda *args, **kwargs: None,
     )
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
 
@@ -912,7 +914,6 @@ def test_gen_ai_usage_attributes_in_application_turn_span(monkeypatch) -> None:
 
 def test_gen_ai_usage_attributes_not_set_when_zero_tokens(monkeypatch) -> None:
     """VAL-C-013: gen_ai.usage.* attributes should not be set when token counts are zero."""
-    from fleet_rlm.integrations.observability import mlflow_context
     from fleet_rlm.integrations.observability.mlflow_context import (
         MlflowTraceRequestContext,
         mlflow_request_context,
@@ -952,14 +953,16 @@ def test_gen_ai_usage_attributes_not_set_when_zero_tokens(monkeypatch) -> None:
         start_span=lambda name, span_type=None, attributes=None: FakeSpan(name, span_type, attributes),
     )
     monkeypatch.setattr(
-        mlflow_context,
-        "_runtime_module",
-        lambda: SimpleNamespace(
-            _import_mlflow=lambda: fake_mlflow,
-            get_mlflow_config=lambda: SimpleNamespace(active_model_id=None),
-            flush_mlflow_traces=lambda: None,
-            logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
-        ),
+        "fleet_rlm.integrations.observability.mlflow_runtime._import_mlflow",
+        lambda: fake_mlflow,
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.mlflow_runtime.get_mlflow_config",
+        lambda: SimpleNamespace(enabled=True, active_model_id=None),
+    )
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.mlflow_runtime.initialize_mlflow",
+        lambda *args, **kwargs: None,
     )
     monkeypatch.setenv("MLFLOW_ENABLED", "true")
 

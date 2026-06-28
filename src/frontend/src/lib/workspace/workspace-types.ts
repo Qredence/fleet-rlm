@@ -18,7 +18,8 @@ export type InspectorTab =
   | "documents"
   | "memory"
   | "context"
-  | "checkpoint";
+  | "checkpoint"
+  | "eval";
 
 export interface ChatMessage {
   id: string;
@@ -235,6 +236,39 @@ export type ChatRenderPart =
       toolName?: string;
       stepIndex?: number;
       runtimeContext?: RuntimeContext;
+      sandboxCategory?: string;
+      sandboxDetails?: Record<string, unknown>;
+    }
+  | {
+      kind: "request_row";
+      label: string;
+      value: string;
+      preview?: string;
+    }
+  | {
+      kind: "skills_row";
+      label: string;
+      skills: string[];
+      preview?: string;
+    }
+  | {
+      kind: "history_row";
+      label: string;
+      turnCount: number;
+      value?: string;
+      preview?: string;
+    }
+  | {
+      kind: "core_memory_row";
+      label: string;
+      value: string;
+      preview?: string;
+    }
+  | {
+      kind: "context_row";
+      label: string;
+      value: string;
+      preview?: string;
     };
 
 export type ArtifactStepType = "llm" | "repl" | "tool" | "memory" | "output";

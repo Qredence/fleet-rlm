@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextvars
 import logging
+import os
 import re
 import threading
 from concurrent.futures import (
@@ -28,6 +29,18 @@ from fleet_rlm.utils.marker_search import contains_marker
 logger = logging.getLogger(__name__)
 
 _BROKER_ERROR_MARKER = "Broker server failed to start"
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an int env var, returning ``default`` when unset/invalid."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
 
 # Separate executors for llm_query_batched and sub_rlm_batched to avoid
 # deadlocks under nested usage: sub_rlm children may call llm_query_batched
@@ -141,9 +154,46 @@ class LLMQueryMixin:
     _llm_call_lock: threading.Lock
     _sub_lm_executor: ThreadPoolExecutor | None
     _sub_lm_executor_lock: threading.Lock
+    # Cached BoundedChatLM wrapping the sub-LM so each call has a real HTTP
+    # timeout, max_tokens cap, and qwen thinking OFF. Lazily built on first use.
+    _bounded_sub_lm: Any | None
+    _bounded_sub_lm_base: Any | None
 
     def build_delegate_child(self, *, remaining_llm_budget: int) -> Any:
         """Create a child interpreter — implemented by the host class."""
+
+    def _get_bounded_sub_lm(self, base: Any) -> Any:
+        """Return a ``BoundedChatLM`` wrapping ``base``, cached per interpreter.
+
+        Mirrors ``_get_bounded_action_lm`` so sub-LLM calls get a real HTTP
+        timeout (the future-timeout in ``_query_sub_lm`` cannot kill the running
+        worker thread), a ``max_tokens`` cap, and qwen extended thinking
+        disabled. Falls back to the raw ``base`` if a ``BoundedChatLM`` cannot
+        be built (e.g. credentials cannot be extracted) — no new failure mode.
+
+        Without this a slow streaming server ran unbounded: a 77s sub-LLM call
+        was observed in trace tr-5671ce47 (iteration 4 ``repl_execute``).
+        """
+        cached = getattr(self, "_bounded_sub_lm", None)
+        cached_base = getattr(self, "_bounded_sub_lm_base", None)
+        if cached is not None and cached_base is base:
+            return cached
+        from fleet_rlm.runtime.lm import build_bounded_chat_lm
+
+        bounded = build_bounded_chat_lm(
+            base,
+            max_tokens=_env_int("FLEET_RLM_LLM_QUERY_MAX_TOKENS", 4096),
+            temperature=0.0,
+            timeout=float(self.llm_call_timeout),
+            num_retries=0,
+        )
+        if bounded is None:
+            self._bounded_sub_lm = base
+            self._bounded_sub_lm_base = base
+            return base
+        self._bounded_sub_lm = bounded
+        self._bounded_sub_lm_base = base
+        return bounded
 
     def _check_and_increment_llm_calls(self, n: int = 1) -> None:
         """Check and increment the LLM call counter.
@@ -179,6 +229,14 @@ class LLMQueryMixin:
         if target_lm is None:
             raise RuntimeError("No LM configured. Use dspy.configure(lm=...) or pass sub_lm to the active interpreter.")
 
+        # Wrap in a BoundedChatLM so the sub-call has a real HTTP timeout,
+        # max_tokens cap, and qwen thinking OFF. Without this a slow server
+        # stream runs unbounded (observed 77s in tr-5671ce47 iter-4) — the
+        # future-timeout below cannot kill the running worker thread.
+        raw_target_lm = target_lm
+        target_lm = self._get_bounded_sub_lm(target_lm)
+        bounded = target_lm is not raw_target_lm
+
         from fleet_rlm.integrations.observability.mlflow_context import (
             _bounded_value,
             mlflow_child_span,
@@ -210,6 +268,8 @@ class LLMQueryMixin:
                 "fleet_rlm.tool_name": "llm_query",
                 "fleet_rlm.prompt_chars": str(len(prompt)),
                 "fleet_rlm.llm_call_timeout_s": str(self.llm_call_timeout),
+                "fleet_rlm.bounded": str(bounded),
+                "fleet_rlm.sub_lm_model": str(getattr(target_lm, "model", "?")),
             },
             inputs={"prompt_chars": len(prompt), "prompt_preview": _bounded_value(prompt, limit=1_000)},
         ) as span:
@@ -243,7 +303,7 @@ class LLMQueryMixin:
                     "Consider increasing llm_call_timeout or checking API connectivity."
                 ) from exc
 
-    def llm_query(self, prompt: str) -> str:
+    def llm_query(self, prompt: str, context: str = "") -> str:
         """Query a sub-LLM for semantic analysis.
 
         This is a built-in RLM tool that allows sandboxed code to make
@@ -251,6 +311,11 @@ class LLMQueryMixin:
 
         Args:
             prompt: The prompt to send to the sub-LLM.
+            context: Optional supporting context prepended to the prompt
+                (e.g. a document slice). Pass workspace content explicitly:
+                ``llm_query("summarise", context['document_text'][:50_000])``.
+                The host does NOT auto-include sandbox ``context`` — without
+                this argument the sub-LLM sees only ``prompt``.
 
         Returns:
             The response text from the sub-LLM.
@@ -261,13 +326,15 @@ class LLMQueryMixin:
 
         Example:
             >>> result = llm_query("Summarize this text in one sentence.")
+            >>> result = llm_query("What does this code do?", context=snippet)
         """
         if not prompt:
             raise ValueError("prompt cannot be empty")
         self._check_and_increment_llm_calls(1)
-        return self._query_sub_lm(prompt)
+        full_prompt = f"{context}\n\n{prompt}" if context else prompt
+        return self._query_sub_lm(full_prompt)
 
-    def llm_query_batched(self, prompts: list[str]) -> list[str]:
+    def llm_query_batched(self, prompts: list[str], context: str = "") -> list[str]:
         """Query the sub-LLM with multiple prompts concurrently.
 
         This is a built-in RLM tool for making multiple LLM calls in parallel.
@@ -275,6 +342,10 @@ class LLMQueryMixin:
 
         Args:
             prompts: List of prompts to send to the sub-LLM.
+            context: Optional supporting context prepended to every prompt
+                (mirrors ``sub_rlm_batched``). The host does NOT auto-include
+                sandbox ``context`` — pass it explicitly when the sub-LLM needs
+                workspace content.
 
         Returns:
             List of response texts, in the same order as prompts.
@@ -290,6 +361,8 @@ class LLMQueryMixin:
         if not prompts:
             return []
         self._check_and_increment_llm_calls(len(prompts))
+        if context:
+            prompts = [f"{context}\n\n{p}" if p else p for p in prompts]
 
         from fleet_rlm.integrations.observability.mlflow_context import (
             mlflow_child_span,

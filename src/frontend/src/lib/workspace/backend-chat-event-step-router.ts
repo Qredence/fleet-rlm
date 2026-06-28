@@ -1,4 +1,4 @@
-import type { ChatMessage } from "@/lib/workspace/workspace-types";
+import type { ChatMessage, ChatRenderPart } from "@/lib/workspace/workspace-types";
 import { asOptionalText, asRecord } from "@/lib/workspace/backend-chat-event-payload";
 import {
   appendToolLikePart,
@@ -123,6 +123,52 @@ function mlflowSpanEventKind(payload: Record<string, unknown>): "tool_call" | "t
   return status === "completed" || status === "error" ? "tool_result" : "tool_call";
 }
 
+function turnInputRowToRenderPart(
+  rowKind: string,
+  label: string,
+  value: string,
+  preview?: string,
+): ChatRenderPart {
+  switch (rowKind) {
+    case "user_request":
+      return { kind: "request_row", label, value, preview };
+    case "active_skills": {
+      // Parse skills from value (comma-separated or JSON array)
+      let skills: string[] = [];
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          skills = parsed.map((s) => String(s)).filter(Boolean);
+        }
+      } catch {
+        // Fallback: comma-separated list
+        skills = value
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+      return { kind: "skills_row", label, skills, preview };
+    }
+    case "history": {
+      // Extract turn count from value or preview
+      const countMatch = value.match(/(\d+)\s*turns?/i) || preview?.match(/(\d+)\s*turns?/i);
+      const turnCount = countMatch && countMatch[1] ? parseInt(countMatch[1], 10) : 0;
+      return { kind: "history_row", label, turnCount, value, preview };
+    }
+    case "core_memory":
+      return { kind: "core_memory_row", label, value, preview };
+    case "context":
+      return { kind: "context_row", label, value, preview };
+    default:
+      // Unknown row kind: fall back to generic status-note
+      return {
+        kind: "status_note",
+        text: `${label}: ${preview || value || "(empty)"}`,
+        tone: "neutral",
+      };
+  }
+}
+
 function routingStatusText(text: string, payload?: Record<string, unknown>): string {
   const selectedSkills = Array.isArray(payload?.selected_skills)
     ? payload.selected_skills.map((item) => String(item)).filter(Boolean)
@@ -159,10 +205,16 @@ export function routeExecutionStepBySourceType(
         deps.appendTracePart,
       );
     }
-    case "reasoning":
-      return trimmed
-        ? deps.appendOrExtendReasoningEvent(messages, trimmed, "live", mergedPayload)
-        : messages;
+    case "reasoning": {
+      // P2-5: Route RLM reasoning to a compact status trace instead of
+      // displaying full internal monologue in the chat. The full reasoning
+      // is still available in the trajectory tab.
+      const truncated = trimmed.length > 200 ? trimmed.slice(0, 200) + "..." : trimmed;
+      return deps.appendStatusTrace(messages, truncated || "Reasoning", "neutral", {
+        ...mergedPayload,
+        source_type: "rlm_progress",
+      });
+    }
     case "text":
       return trimmed ? deps.appendAssistantToken(messages, trimmed) : messages;
     case "tool_call":
@@ -224,8 +276,47 @@ export function routeExecutionStepBySourceType(
         },
         deps.appendTracePart,
       );
+    case "rlm_progress": {
+      // P1-4 + P2-7: Display RLM progress events (rlm_start, rlm_iteration,
+      // rlm_action_gen, rlm_complete) as status traces in the chat.
+      const status = mergedPayload["status"];
+      const tone = status === "failed" ? "error" : status === "completed" ? "success" : "neutral";
+      return deps.appendStatusTrace(messages, trimmed || "RLM progress", tone, {
+        ...mergedPayload,
+        source_type: "status",
+      });
+    }
     case "clarification":
       return deps.appendClarificationMessage(messages, trimmed, mergedPayload);
+    case "sandbox_activity": {
+      const category = asOptionalText(mergedPayload.category)?.toLowerCase() ?? "status";
+      const tone =
+        category === "error"
+          ? "error"
+          : category === "output" || category === "status"
+            ? "neutral"
+            : "neutral";
+      return deps.appendStatusTrace(messages, trimmed || "Sandbox activity", tone, {
+        ...mergedPayload,
+        source_type: "sandbox_activity",
+        category,
+      });
+    }
+    case "turn_inputs": {
+      const rows = Array.isArray(mergedPayload.rows) ? mergedPayload.rows : [];
+      let nextMessages = messages;
+      for (const rawRow of rows) {
+        const row = asRecord(rawRow);
+        if (!row) continue;
+        const rowKind = asOptionalText(row.kind)?.toLowerCase() ?? "";
+        const label = asOptionalText(row.label) ?? rowKind;
+        const value = asOptionalText(row.value) ?? "";
+        const preview = asOptionalText(row.preview);
+        const part = turnInputRowToRenderPart(rowKind, label, value, preview);
+        nextMessages = deps.appendTracePart(nextMessages, part, value);
+      }
+      return nextMessages;
+    }
     default:
       return deps.appendStatusTrace(
         messages,
