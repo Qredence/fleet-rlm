@@ -16,18 +16,19 @@ def no_db_app(monkeypatch):
     monkeypatch.setenv("POSTHOG_ENABLED", "false")
     monkeypatch.setenv("MLFLOW_ENABLED", "false")
 
-    # Stub recover_stale_optimization_runs before main.py imports it.
+    # Stub recover_stale_optimization_runs before main.create_app() runs;
+    # the lifespan closure captures the name from main's namespace (it is
+    # imported with `from ... import ...`, binding directly in main.py).
     # The synchronous SQLite session in recover_local_stale_runs() blocks
-    # the TestClient portal thread in CI environments (120 s timeout).
-    # Unit tests never populate the optimization-run state table, so
-    # skipping recovery is safe.
-    from fleet_rlm.api import bootstrap as _bootstrap
+    # the TestClient portal thread in CI (120 s timeout).  Unit tests
+    # never populate the optimization-run table, so skipping is safe.
+    from fleet_rlm.api import main as _main
 
-    async def _noop_recovery(_state):  # noqa: ARG001
+    async def _noop_recovery(_state):
         return
 
     monkeypatch.setattr(
-        _bootstrap,
+        _main,
         "recover_stale_optimization_runs",
         _noop_recovery,
     )
