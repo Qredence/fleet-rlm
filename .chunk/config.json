@@ -65,7 +65,7 @@
       },
       {
         "name": "pnpm",
-        "command": "command -v corepack >/dev/null 2>&1 || sudo npm install -g corepack; sudo corepack enable && sudo corepack prepare pnpm@11.8.0 --activate"
+        "command": "(command -v corepack >/dev/null 2>&1 || sudo npm install -g corepack) && sudo corepack enable && sudo corepack prepare pnpm@11.8.0 --activate"
       },
       {
         "name": "python-deps",
@@ -77,7 +77,7 @@
       },
       {
         "name": "chunk-testsuite",
-        "command": "command -v circleci >/dev/null 2>&1 || curl -fLSs https://raw.githubusercontent.com/CircleCI-Public/circleci-cli/master/install.sh | bash; curl -fLO https://circleci-binary-releases.s3.amazonaws.com/circleci-cli-plugins/circleci-testsuite/1.0.44205-511b6d4/linux/amd64/circleci-testsuite.gz && echo \"c7a4fd0e5489e72f576cbef4cbcc19c73802602bad76acb909d71cff91f02f70  circleci-testsuite.gz\" | sha256sum -c - && gunzip -f circleci-testsuite.gz && sudo install -m 0755 circleci-testsuite /usr/local/bin/circleci-testsuite"
+        "command": "(command -v circleci >/dev/null 2>&1 || curl -fLSs https://raw.githubusercontent.com/CircleCI-Public/circleci-cli/master/install.sh | bash) && curl -fLO https://circleci-binary-releases.s3.amazonaws.com/circleci-cli-plugins/circleci-testsuite/1.0.44205-511b6d4/linux/amd64/circleci-testsuite.gz && echo \"c7a4fd0e5489e72f576cbef4cbcc19c73802602bad76acb909d71cff91f02f70  circleci-testsuite.gz\" | sha256sum -c - && gunzip -f circleci-testsuite.gz && sudo install -m 0755 circleci-testsuite /usr/local/bin/circleci-testsuite"
       }
     ],
     "image": "cimg/python",
