@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "dev": "vite dev",
-    "build": "rm -rf dist && vp build && cd ../.. && uv run python scripts/ensure_frontend_entrypoint.py",
+    "build": "rm -rf dist && vp build && uv run --active python ../../scripts/ensure_frontend_entrypoint.py --dist-dir dist",
     "preview": "vite preview",
     "type-check": "tsc -p tsconfig.app.json --noEmit",
     "type-check:relaxed": "tsc -p tsconfig.app.json --noEmit --strict false --noUnusedLocals false --noUnusedParameters false --noUncheckedIndexedAccess false",

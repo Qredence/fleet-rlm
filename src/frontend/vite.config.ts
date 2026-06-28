@@ -314,6 +314,12 @@ export default defineConfig({
     minify: "oxc",
     cssMinify: "lightningcss",
     rollupOptions: {
+      onwarn(warning, defaultHandler) {
+        if (warning.code === "INVALID_ANNOTATION") {
+          return;
+        }
+        defaultHandler(warning);
+      },
       output: {
         manualChunks: (id: string) => {
           if (id.includes("node_modules/react") || id.includes("node_modules/react-dom")) {
