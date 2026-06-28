@@ -87,8 +87,8 @@ def evaluations_client(no_db_app, monkeypatch) -> Iterator[TestClient]:
         loop = asyncio.get_event_loop()
         return loop.create_task(asyncio.sleep(0))  # return a real Task object
 
-    with patch.object(evaluation_service.asyncio, "create_task", side_effect=_noop_create_task):
-        with TestClient(app) as client:
+    with TestClient(app) as client:
+        with patch.object(evaluation_service.asyncio, "create_task", side_effect=_noop_create_task):
             yield client
     evaluation_service._EVALUATION_STORE.clear()
     evaluation_service._INFLIGHT_TASKS.clear()
