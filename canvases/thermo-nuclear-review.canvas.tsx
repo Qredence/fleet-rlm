@@ -5,7 +5,6 @@ import {
   Grid,
   H1,
   H2,
-  H3,
   Text,
   Divider,
   Card,
@@ -17,7 +16,6 @@ import {
   Callout,
   useHostTheme,
   useCanvasAction,
-  Table,
 } from "cursor/canvas";
 
 export default function ThermoNuclearReview() {
