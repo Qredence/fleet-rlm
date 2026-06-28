@@ -25,10 +25,7 @@ const _CATEGORY_LABELS: Record<SandboxEventCategory, string> = {
   status: "Status",
 };
 
-const _CATEGORY_TONES: Record<
-  SandboxEventCategory,
-  "default" | "destructive" | "secondary"
-> = {
+const _CATEGORY_TONES: Record<SandboxEventCategory, "default" | "destructive" | "secondary"> = {
   code_exec: "default",
   tool_call: "secondary",
   output: "default",

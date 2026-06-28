@@ -16,6 +16,22 @@ def no_db_app(monkeypatch):
     monkeypatch.setenv("POSTHOG_ENABLED", "false")
     monkeypatch.setenv("MLFLOW_ENABLED", "false")
 
+    # Stub recover_stale_optimization_runs before main.py imports it.
+    # The synchronous SQLite session in recover_local_stale_runs() blocks
+    # the TestClient portal thread in CI environments (120 s timeout).
+    # Unit tests never populate the optimization-run state table, so
+    # skipping recovery is safe.
+    from fleet_rlm.api import bootstrap as _bootstrap
+
+    async def _noop_recovery(_state):  # noqa: ARG001
+        return
+
+    monkeypatch.setattr(
+        _bootstrap,
+        "recover_stale_optimization_runs",
+        _noop_recovery,
+    )
+
     from fleet_rlm.api.config import AppConfig
     from fleet_rlm.api.main import create_app
 
