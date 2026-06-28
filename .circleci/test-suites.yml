@@ -5,7 +5,7 @@ run: .venv/bin/pytest -p no:warnings -m "not live_llm and not live_daytona and n
 outputs:
   junit: test-results/pytest-unit.xml
 options:
-  dynamic-test-splitting: true
+  dynamic-test-splitting: false
 ---
 name: pytest-integration
 discover: .venv/bin/pytest --collect-only -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db" tests/integration tests/e2e 2>/dev/null | tr -d '\r' | grep '^tests/.*::'
@@ -13,4 +13,4 @@ run: .venv/bin/pytest -p no:warnings -m "not live_llm and not live_daytona and n
 outputs:
   junit: test-results/pytest-integration.xml
 options:
-  dynamic-test-splitting: true
+  dynamic-test-splitting: false
