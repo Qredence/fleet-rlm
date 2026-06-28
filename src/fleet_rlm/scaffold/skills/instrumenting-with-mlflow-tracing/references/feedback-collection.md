@@ -4,11 +4,6 @@ Log user feedback on traces for evaluation, debugging, and fine-tuning. Essentia
 
 ---
 
-## Recording User Feedback
-
-**Python:**
-
-```python
 import mlflow
 
 def record_feedback(trace_id: str, rating: int):
@@ -17,12 +12,11 @@ def record_feedback(trace_id: str, rating: int):
         trace_id=trace_id,
         name="user_rating",
         value=rating,
-        source=mlflow.entities.feedback.FeedbackSource(
+        source=mlflow.entities.AssessmentSource(
             source_type="HUMAN",
             source_id="web_ui"
         )
     )
-```
 
 **TypeScript:**
 
