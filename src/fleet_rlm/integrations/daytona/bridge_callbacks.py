@@ -113,10 +113,12 @@ def invoke_tool(
     try:
         if name == "llm_query":
             prompt = _callback_arg(args, kwargs, 0, "prompt", "")
-            value = interpreter.llm_query(str(prompt))
+            context = _callback_arg(args, kwargs, 1, "context", "")
+            value = interpreter.llm_query(str(prompt), context=str(context or ""))
         elif name == "llm_query_batched":
             prompts = _normalize_callback_prompts(_callback_arg(args, kwargs, 0, "prompts", []))
-            value = interpreter.llm_query_batched(prompts)
+            context = _callback_arg(args, kwargs, 1, "context", "")
+            value = interpreter.llm_query_batched(prompts, context=str(context or ""))
         elif name == "sub_rlm":
             prompt = _callback_arg(args, kwargs, 0, "prompt", "")
             context = _callback_arg(args, kwargs, 1, "context", "")

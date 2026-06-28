@@ -165,17 +165,19 @@ def sandbox_driver() -> None:
 
         return SUBMIT
 
-    def make_llm_query(tool_call: Callable[..., Any]) -> Callable[[str], str]:
-        def llm_query(prompt: str) -> str:
-            return tool_call("llm_query", prompt)
+    def make_llm_query(tool_call: Callable[..., Any]) -> Callable[..., Any]:
+        def llm_query(prompt: str, context: str = "") -> str:
+            # Forward context as a positional arg so the host-side dispatch
+            # (bridge_callbacks.invoke_tool) can prepend it to the prompt.
+            return tool_call("llm_query", prompt, context)
 
         return llm_query
 
     def make_llm_query_batched(
         tool_call: Callable[..., Any],
-    ) -> Callable[[list[str]], list[str]]:
-        def llm_query_batched(prompts: list[str]) -> list[str]:
-            return tool_call("llm_query_batched", prompts)
+    ) -> Callable[..., Any]:
+        def llm_query_batched(prompts: list[str], context: str = "") -> list[str]:
+            return tool_call("llm_query_batched", prompts, context)
 
         return llm_query_batched
 

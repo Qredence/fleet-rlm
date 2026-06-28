@@ -150,7 +150,7 @@ def test_skill_selection_invoke_select_binds_capped_lm_context() -> None:
     assert seen["lm"] is capped
 
 
-def test_skill_selection_invoke_select_skips_context_when_no_lm() -> None:
+def test_skill_selection_invoke_select_skips_context_when_no_lm(monkeypatch) -> None:
     module = SkillSelectionModule()
 
     seen: dict = {}
@@ -160,10 +160,62 @@ def test_skill_selection_invoke_select_skips_context_when_no_lm() -> None:
         return dspy.Prediction(skills=["diagnostics"], reasoning="ok")
 
     module.select = _record_select
-    module._select_lm_capped = None
-    module._select_lm = None
+    # No bounded LM resolvable at all → _invoke_select must fall back to the
+    # global dspy LM without overriding the context.
+    monkeypatch.setattr(module, "_get_skill_selection_lm", lambda: None)
 
     module._invoke_select(context="ctx", available_skills="- a: b")
 
-    # No delegate LM configured → falls back to the global dspy LM (no override).
+    # No LM resolvable → falls back to the global dspy LM (no override).
     assert seen["lm"] is getattr(dspy.settings, "lm", None)
+
+
+def test_get_skill_selection_lm_self_resolves_when_no_wired_lm(monkeypatch) -> None:
+    """Regression: ``AgentRuntime`` does not forward the delegate LM to
+    ``SkillSelectionModule`` (``self._select_lm`` is ``None`` in production), so
+    ``_get_skill_selection_lm`` must self-resolve from env and bound it —
+    otherwise skill selection lands on the unbounded planner LM (qwen3.7-plus,
+    thinking ON) for 18-26s/turn (tr-0dc96586 / tr-5671ce47).
+    """
+    from fleet_rlm.runtime import config as rt_config
+    from fleet_rlm.runtime.lm import BoundedChatLM
+
+    module = SkillSelectionModule()  # lm=None — the regression condition
+    assert module._select_lm is None
+
+    fake_base = MagicMock(name="delegate_base")
+    fake_base.model = "gemini-3.1-flash-lite"
+    fake_base.kwargs = {"api_key": "k", "api_base": "http://x", "max_tokens": 8192}
+
+    monkeypatch.setattr(rt_config, "get_delegate_small_lm_from_env", lambda: fake_base)
+    monkeypatch.setattr(rt_config, "get_delegate_lm_from_env", lambda: None)
+
+    resolved = module._get_skill_selection_lm()
+
+    assert isinstance(resolved, BoundedChatLM), "expected self-resolved bounded LM, fell back to raw/global instead"
+
+
+def test_invoke_select_self_resolves_and_binds_bounded_lm(monkeypatch) -> None:
+    """When no LM is wired in, ``_invoke_select`` self-resolves a bounded LM
+    and binds it via ``dspy.settings.context`` (not the global planner LM)."""
+    from fleet_rlm.runtime import config as rt_config
+    from fleet_rlm.runtime.lm import BoundedChatLM
+
+    module = SkillSelectionModule()
+    seen: dict = {}
+
+    def _record_select(**kwargs):
+        seen["lm"] = getattr(dspy.settings, "lm", None)
+        return dspy.Prediction(skills=["diagnostics"], reasoning="ok")
+
+    module.select = _record_select
+
+    fake_base = MagicMock(name="delegate_base")
+    fake_base.model = "gemini-3.1-flash-lite"
+    fake_base.kwargs = {"api_key": "k", "api_base": "http://x", "max_tokens": 8192}
+    monkeypatch.setattr(rt_config, "get_delegate_small_lm_from_env", lambda: fake_base)
+    monkeypatch.setattr(rt_config, "get_delegate_lm_from_env", lambda: None)
+
+    module._invoke_select(context="ctx", available_skills="- a: b")
+
+    assert isinstance(seen["lm"], BoundedChatLM), f"expected bounded LM bound during select, got {seen.get('lm')!r}"

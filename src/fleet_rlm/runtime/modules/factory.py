@@ -62,8 +62,8 @@ _TOOL_DOC_KEEP_FULL: frozenset[str] = frozenset(
 
 _COMPRESSED_TOOLS_INTRO = (
     "Available tools (import and inspect for full signatures):\n"
-    "- `llm_query(prompt: string)` — query a sub-LLM for semantic analysis\n"
-    "- `llm_query_batched(prompts: list[string])` — query multiple prompts concurrently\n"
+    '- `llm_query(prompt: string, context: string = "")` — query a sub-LLM for semantic analysis. Pass workspace content explicitly via `context` (e.g. `llm_query("summarise", context[\'document_text\'][:50_000])`); the sub-LLM does NOT auto-see sandbox `context`.\n'
+    '- `llm_query_batched(prompts: list[string], context: string = "")` — query multiple prompts concurrently (context prepended to each)\n'
     "- `SUBMIT(response=...)` — submit final answer\n"
     "- `inspect_tool(name: string)` — print any tool's full signature and docs\n"
     "- Other REPL callables: see `dir()` for the full list; use `inspect_tool()` for details."
@@ -595,11 +595,30 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                     },
                 )
 
-        # If we got a valid action result, process it through the normal path
+        # If we got a valid action, run it through the base's strip → execute →
+        # process pipeline. The base ``_execute_iteration`` would re-call
+        # ``generate_action``; we already have the action (generated under the
+        # bounded LM), so inline the three steps. Without this the loop exits
+        # with a ``Prediction`` that carries only ``reasoning``/``code`` and has
+        # no ``trajectory`` → ``has_trajectory=false`` (regression: the override
+        # meant to *wrap* action-gen, not *replace* the execute+process half).
         if action_result is not None:
-            return action_result
+            repl = args[0] if len(args) >= 1 else None
+            input_args = args[4] if len(args) >= 5 else {}
+            history = args[2] if len(args) >= 3 else kwargs.get("repl_history")
+            output_field_names = args[5] if len(args) >= 6 else []
+            try:
+                code = _strip_code_fences(action_result.code)
+            except SyntaxError as e:
+                code = action_result.code
+                result = f"[Error] {e}"
+                return self._process_execution_result(action_result, code, result, history, output_field_names)
+            result = self._execute_code(repl, code, input_args)
+            return self._process_execution_result(action_result, code, result, history, output_field_names)
 
-        # Otherwise delegate to base class _execute_iteration for normal flow
+        # Action generation failed (parse-error/timeout we couldn't recover
+        # from); delegate to the base ``_execute_iteration`` so dspy's
+        # ``_extract_fallback`` can still salvage a real answer.
         return super()._execute_iteration(*args, **kwargs)
 
     def _get_bounded_action_lm(self) -> Any | None:

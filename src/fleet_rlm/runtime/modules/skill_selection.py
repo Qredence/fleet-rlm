@@ -335,6 +335,39 @@ class SkillSelectionModule(dspy.Module):
             names = [s.strip().strip("[]()").strip("\"'") for s in re.split(r"[,\n]", text) if s.strip()]
         return [n for n in names if n in AVAILABLE_SKILLS]
 
+    def _get_skill_selection_lm(self) -> Any | None:
+        """Resolve a bounded LM for the skill-routing pick, lazily.
+
+        Mirrors ``_get_bounded_action_lm`` (factory.py): prefer a wired-in
+        delegate LM (``self._select_lm``), else self-resolve from env at call
+        time — small delegate → delegate → ``dspy.settings.lm`` — and bound it
+        via ``_build_skill_selection_lm`` (max_tokens=512, thinking off, 30s
+        timeout). Returns ``None`` if no LM is available so the caller falls
+        back to the global LM (unchanged behavior).
+
+        Why lazy: ``AgentRuntime._build_agent`` does not forward the delegate
+        LM to ``SkillSelectionModule`` (regression), so ``self._select_lm`` is
+        ``None`` in production and ``_build_skill_selection_lm(None)`` returned
+        ``None`` → skill selection landed on the unbounded planner LM
+        (qwen3.7-plus, thinking ON, 65K tokens) for 18-26s/turn. Self-resolving
+        at call time (when ``dspy.settings.lm`` is set) restores the bounded
+        path without waiting for the ``AgentRuntime`` wiring fix.
+        """
+        if self._select_lm is not None:
+            return self._select_lm_capped or self._select_lm
+        from fleet_rlm.runtime.config import get_delegate_lm_from_env, get_delegate_small_lm_from_env
+
+        base: Any | None = None
+        try:
+            base = get_delegate_small_lm_from_env() or get_delegate_lm_from_env()
+        except Exception:
+            base = None
+        if base is None:
+            base = getattr(dspy.settings, "lm", None)
+        if base is None:
+            return None
+        return _build_skill_selection_lm(base)
+
     def _invoke_select(self, *, context: str, available_skills: str) -> dspy.Prediction:
         """Run the LLM skill selector on a bounded LM.
 
@@ -343,7 +376,7 @@ class SkillSelectionModule(dspy.Module):
         the unbounded planner LM. The context manager is thread/session-local
         and does not leak into sibling predictors sharing the global LM.
         """
-        select_lm = self._select_lm_capped or self._select_lm
+        select_lm = self._get_skill_selection_lm()
         if select_lm is not None:
             with dspy.settings.context(lm=select_lm):
                 return self.select(context=context, available_skills=available_skills)
