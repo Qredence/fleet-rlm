@@ -74,6 +74,7 @@ commands:
 jobs:
   quality:
     executor: python
+    resource_class: small
     steps:
       - checkout
       - install_python_dependencies
@@ -92,9 +93,11 @@ jobs:
 
   lint-typecheck:
     executor: python
+    resource_class: small
     steps:
       - checkout
       - install_python_dependencies
+      - save_uv_cache
       - run:
           name: Ruff and ty
           command: |
@@ -104,18 +107,18 @@ jobs:
 
   test-unit:
     executor: python
+    resource_class: medium+
+    parallelism: 4
     steps:
       - checkout
       - install_python_dependencies
+      - save_uv_cache
       - run:
-          name: Unit and contract tests
+          name: Run unit/contract atom subset (Smarter Testing)
+          no_output_timeout: 10m
           command: |
             mkdir -p test-results
-            uv run --no-sync pytest -q -n 0 tests/unit tests/contracts \
-              --timeout=120 \
-              --timeout-method=thread \
-              -m "not live_llm and not live_daytona and not benchmark and not db" \
-              --junitxml=test-results/pytest-unit.xml
+            circleci run testsuite "pytest-unit"
       - store_test_results:
           path: test-results
       - store_artifacts:
@@ -124,16 +127,18 @@ jobs:
 
   test-integration:
     executor: python
+    resource_class: medium+
+    parallelism: 2
     steps:
       - checkout
       - install_python_dependencies
+      - save_uv_cache
       - run:
-          name: Integration and e2e tests
+          name: Run integration/e2e atom subset (Smarter Testing)
+          no_output_timeout: 10m
           command: |
             mkdir -p test-results
-            uv run --no-sync pytest -q tests/integration tests/e2e \
-              -m "not live_llm and not live_daytona and not benchmark and not db" \
-              --junitxml=test-results/pytest-integration.xml
+            circleci run testsuite "pytest-integration"
       - store_test_results:
           path: test-results
       - store_artifacts:
@@ -142,6 +147,7 @@ jobs:
 
   frontend-check:
     executor: node
+    resource_class: medium
     steps:
       - checkout
       - install_uv
@@ -183,5 +189,7 @@ workflows:
       - quality
       - lint-typecheck
       - test-unit
-      - test-integration
+      - test-integration:
+          requires:
+            - test-unit
       - frontend-check

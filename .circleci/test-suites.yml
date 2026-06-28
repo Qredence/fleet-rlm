@@ -1,0 +1,16 @@
+---
+name: pytest-unit
+discover: uv run --no-sync pytest --collect-only -q -m "not live_llm and not live_daytona and not benchmark and not db" tests/unit tests/contracts
+run: uv run --no-sync pytest -m "not live_llm and not live_daytona and not benchmark and not db" --junit-xml=<< outputs.junit >> << test.atoms >>
+outputs:
+  junit: test-results/pytest-unit.xml
+options:
+  dynamic-test-splitting: true
+---
+name: pytest-integration
+discover: uv run --no-sync pytest --collect-only -q -m "not live_llm and not live_daytona and not benchmark and not db" tests/integration tests/e2e
+run: uv run --no-sync pytest -m "not live_llm and not live_daytona and not benchmark and not db" --junit-xml=<< outputs.junit >> << test.atoms >>
+outputs:
+  junit: test-results/pytest-integration.xml
+options:
+  dynamic-test-splitting: true
