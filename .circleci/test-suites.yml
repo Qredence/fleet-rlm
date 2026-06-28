@@ -1,6 +1,6 @@
 ---
 name: pytest-unit
-discover: .venv/bin/pytest --collect-only -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db" tests/unit tests/contracts | tr -d '\r' | grep '^tests/.*::'
+discover: .venv/bin/pytest --collect-only -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db" tests/unit tests/contracts 2>/dev/null | tr -d '\r' | grep '^tests/.*::'
 run: .venv/bin/pytest -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db" --junit-xml=<< outputs.junit >> << test.atoms >>
 outputs:
   junit: test-results/pytest-unit.xml
@@ -8,7 +8,7 @@ options:
   dynamic-test-splitting: true
 ---
 name: pytest-integration
-discover: .venv/bin/pytest --collect-only -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db" tests/integration tests/e2e | tr -d '\r' | grep '^tests/.*::'
+discover: .venv/bin/pytest --collect-only -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db" tests/integration tests/e2e 2>/dev/null | tr -d '\r' | grep '^tests/.*::'
 run: .venv/bin/pytest -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db" --junit-xml=<< outputs.junit >> << test.atoms >>
 outputs:
   junit: test-results/pytest-integration.xml

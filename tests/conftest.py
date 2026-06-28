@@ -37,6 +37,14 @@ def _suite_from_path(path: Path) -> str | None:
     return None
 
 
+def pytest_make_parametrize_id(config: pytest.Config, val: object, argname: str) -> str | None:
+    """Sanitize parametrize IDs to avoid spaces in node IDs for CI tooling."""
+    _ = config, argname
+    if isinstance(val, str) and " " in val:
+        return val.replace(" ", "_")
+    return None
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Auto-apply suite markers and skip live tests unless opted-in."""
     _ = config
