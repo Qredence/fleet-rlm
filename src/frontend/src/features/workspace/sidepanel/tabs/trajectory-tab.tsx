@@ -78,7 +78,7 @@ export function SelectedTurnTrajectory({ selectedTurn }: { selectedTurn: Assista
 
   if (!hasTimeline) return null;
 
-  const isRunning = status === "in_progress";
+  const isRunning = status === "running";
 
   return (
     <div className="workspace-trajectory-content flex min-w-0 max-w-full flex-col gap-3 overflow-hidden">

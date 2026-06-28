@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { memo } from "react";
 import { AlertCircle, Code2, MessageSquare, Terminal, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -28,7 +27,7 @@ const _CATEGORY_LABELS: Record<SandboxEventCategory, string> = {
 
 const _CATEGORY_TONES: Record<
   SandboxEventCategory,
-  "default" | "warning" | "destructive" | "secondary"
+  "default" | "destructive" | "secondary"
 > = {
   code_exec: "default",
   tool_call: "secondary",
