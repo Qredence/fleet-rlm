@@ -246,7 +246,13 @@ class AppConfig(BaseSettings):
 
         # auth_required defaults to True in staging/production, False in local.
         # We parse potential string/env flags to guarantee a clean boolean state.
-        auth_required_val = values.get("auth_required") or values.get("AUTH_REQUIRED")
+        if "auth_required" in values:
+            auth_required_val = values["auth_required"]
+        elif "AUTH_REQUIRED" in values:
+            auth_required_val = values["AUTH_REQUIRED"]
+        else:
+            auth_required_val = None
+
         if auth_required_val is None:
             auth_required_raw = str(os.getenv("AUTH_REQUIRED") or "").strip().lower()
             if auth_required_raw:
@@ -261,7 +267,13 @@ class AppConfig(BaseSettings):
         values["auth_required"] = auth_required
 
         # Set default/override for auth_mode based on auth_required
-        auth_mode_val = values.get("auth_mode") or values.get("AUTH_MODE")
+        if "auth_mode" in values:
+            auth_mode_val = values["auth_mode"]
+        elif "AUTH_MODE" in values:
+            auth_mode_val = values["AUTH_MODE"]
+        else:
+            auth_mode_val = None
+
         if not auth_required:
             values["auth_mode"] = "dev"
         elif auth_mode_val is None:
