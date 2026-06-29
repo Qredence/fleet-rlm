@@ -46,7 +46,8 @@ commands:
       - restore_uv_cache
       - run:
           name: Install Python dependencies
-          command: uv sync --all-extras --dev --python 3.13
+          no_output_timeout: 15m
+          command: uv sync --all-extras --dev --python 3.13 --verbose
 
   setup_pnpm:
     steps:
