@@ -8,7 +8,7 @@
     "src/**/*.test.{ts,tsx}"
   ],
   "project": ["src/**/*.{ts,tsx}"],
-  "ignoreBinaries": ["uv", "python3", "python"],
+  "ignoreBinaries": [],
   "ignoreUnresolved": ["/src/.*"],
   "ignoreDependencies": [
     "globals",

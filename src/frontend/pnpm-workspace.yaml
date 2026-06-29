@@ -36,3 +36,6 @@ patchedDependencies:
 peerDependencyRules:
   allowAny:
     - "vitest"
+
+minimumReleaseAgeExclude:
+  - lucide-react@1.22.0

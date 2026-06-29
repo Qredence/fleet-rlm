@@ -334,6 +334,18 @@ export default defineConfig({
           if (id.includes("node_modules/zustand")) {
             return "vendor-zustand";
           }
+          if (id.includes("node_modules/shiki")) {
+            return "vendor-shiki";
+          }
+          if (id.includes("node_modules/@pierre/diffs")) {
+            return "vendor-pierre-diffs";
+          }
+          if (id.includes("node_modules/lottie-web") || id.includes("node_modules/lottie-react")) {
+            return "vendor-lottie";
+          }
+          if (id.includes("node_modules/streamdown") || id.includes("node_modules/@streamdown")) {
+            return "vendor-streamdown";
+          }
         },
       },
     },
