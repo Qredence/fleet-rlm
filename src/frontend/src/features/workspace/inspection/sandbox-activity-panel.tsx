@@ -33,8 +33,8 @@ const _CATEGORY_LABELS: Record<SandboxEventCategory, string> = {
 };
 
 const _CATEGORY_TONES: Record<SandboxEventCategory, string> = {
-  code_exec: "text-blue-500",
-  tool_call: "text-amber-500",
+  code_exec: "text-info",
+  tool_call: "text-warning",
   output: "text-muted-foreground",
   error: "text-destructive",
   status: "text-muted-foreground",
@@ -161,7 +161,7 @@ export const SandboxActivityPanel = memo(function SandboxActivityPanel({
               >
                 <CategoryIcon category={event.category} />
                 <span className="min-w-0 flex-1 text-muted-foreground">
-                  <span className="font-mono text-[10px] text-muted-foreground/60 mr-1.5">
+                  <span className="font-mono typo-helper text-muted-foreground/60 mr-1.5">
                     {formatEventTime(event.timestamp)}
                   </span>
                   <span className="text-foreground/90">{event.message}</span>

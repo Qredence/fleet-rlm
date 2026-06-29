@@ -1,35 +1,86 @@
 {
   "commands": [
     {
+      "name": "format-check",
+      "run": "make format-check",
+      "timeout": 300,
+      "limit": 3,
+      "remote": true
+    },
+    {
+      "name": "lint",
+      "run": "make lint",
+      "timeout": 300,
+      "limit": 3,
+      "remote": true
+    },
+    {
+      "name": "typecheck",
+      "run": "make typecheck",
+      "timeout": 300,
+      "limit": 3,
+      "remote": true
+    },
+    {
       "name": "test",
       "run": "make test",
       "role": "gate",
-      "timeout": 300,
-      "limit": 3
+      "timeout": 600,
+      "limit": 3,
+      "remote": true
+    },
+    {
+      "name": "check-security",
+      "run": "make check-security",
+      "timeout": 600,
+      "limit": 3,
+      "remote": true
+    },
+    {
+      "name": "frontend-check",
+      "run": "make check-frontend",
+      "timeout": 900,
+      "limit": 3,
+      "remote": true
     }
   ],
   "vcs": {
     "org": "Qredence",
     "repo": "fleet-rlm"
   },
+  "validation": {
+    "sidecarImage": "e5f41fe9-8885-401e-b427-73bba5168d25"
+  },
   "orgID": "d0fc62ae-1f4a-4037-8ccb-d357adfdfda6",
   "environment": {
-    "stack": "javascript",
+    "stack": "python",
     "setup": [
       {
         "name": "system",
         "command": "curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs --no-install-recommends && sudo rm -rf /var/lib/apt/lists/*"
       },
       {
-        "name": "install",
-        "command": "npm install"
+        "name": "uv",
+        "command": "curl -LsSf https://astral.sh/uv/install.sh | sh && sudo ln -sf $HOME/.local/bin/uv /usr/local/bin/uv && sudo ln -sf $HOME/.local/bin/uvx /usr/local/bin/uvx"
       },
       {
-        "name": "test",
-        "command": "npm test"
+        "name": "pnpm",
+        "command": "(command -v corepack >/dev/null 2>&1 || sudo npm install -g corepack) && sudo corepack enable && sudo corepack prepare pnpm@11.8.0 --activate"
+      },
+      {
+        "name": "python-deps",
+        "command": "uv sync --all-extras --dev --python 3.13"
+      },
+      {
+        "name": "frontend-deps",
+        "command": "cd src/frontend && pnpm install --frozen-lockfile"
+      },
+      {
+        "name": "chunk-testsuite",
+        "command": "(command -v circleci >/dev/null 2>&1 || curl -fLSs https://raw.githubusercontent.com/CircleCI-Public/circleci-cli/master/install.sh | bash) && curl -fLO https://circleci-binary-releases.s3.amazonaws.com/circleci-cli-plugins/circleci-testsuite/1.0.44205-511b6d4/linux/amd64/circleci-testsuite.gz && echo \"c7a4fd0e5489e72f576cbef4cbcc19c73802602bad76acb909d71cff91f02f70  circleci-testsuite.gz\" | sha256sum -c - && gunzip -f circleci-testsuite.gz && sudo install -m 0755 circleci-testsuite /usr/local/bin/circleci-testsuite"
       }
     ],
-    "image": "cimg/node",
-    "image_version": "24.16.0"
+    "image": "cimg/python",
+    "image_version": "3.13.11-node"
   }
 }
