@@ -58,7 +58,7 @@ dependencies = [
     "sqlmodel>=0.0.38",
     "tomli>=2.0.0; python_version < '3.11'",
     # Web API surface.
-    "fastapi[standard]==0.137.1",
+    "fastapi[standard]==0.138.1",
     "joserfc>=1.0.1",
     "uvicorn>=0.47.0,<1",
     # Observability and external services.
