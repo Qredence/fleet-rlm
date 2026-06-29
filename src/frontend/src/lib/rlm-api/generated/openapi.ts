@@ -1039,7 +1039,7 @@ export interface components {
       /**
        * Version
        * @description Package version currently serving the API.
-       * @default 0.6.0
+       * @default 0.6.2
        */
       version?: string;
     };
@@ -2572,7 +2572,7 @@ export interface components {
       /**
        * Version
        * @description Package version currently serving the API.
-       * @default 0.6.0
+       * @default 0.6.2
        */
       version?: string;
       /**
@@ -2581,6 +2581,12 @@ export interface components {
        * @enum {string}
        */
       app_env: "local" | "staging" | "production";
+      /**
+       * Auth Mode
+       * @description Authentication mode the server is running under.
+       * @enum {string}
+       */
+      auth_mode: "dev" | "entra" | "neon";
       /**
        * Auth Required
        * @description Whether authentication is enforced for all API requests.

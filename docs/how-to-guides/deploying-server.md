@@ -276,7 +276,7 @@ Response:
 ```json
 {
   "ok": true,
-  "version": "0.6.0"
+  "version": "0.6.2"
 }
 ```
 
@@ -434,7 +434,7 @@ Use `--no-wait` for operational deploys where a separate watcher will follow sta
 
 ```bash
 curl https://<assigned-host>/health
-# => {"ok": true, "version": "0.6.0"}
+# => {"ok": true, "version": "0.6.2"}
 
 curl https://<assigned-host>/ready
 # => {"ready": true, "planner": "ready", "database": "ready", ...}

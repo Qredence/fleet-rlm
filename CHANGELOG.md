@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## [0.6.2] - 2026-06-29
 
 ### Added
 
@@ -45,6 +45,10 @@ All notable changes to this project are documented in this file.
   empty incoming value for a key with an existing stored credential as a no-op.
   **Outcome:** Decrypt failures are observable instead of silent, and a failed
   GET no longer enables an empty save that wipes the stored key.
+- **Change:** Upgraded a comprehensive set of direct, optional, and dev dependencies in `pyproject.toml` to their latest stable 2026 semver floors. This includes bumping `pypdf` (`>=6.13.3`), `typer` (`>=0.26.7,<1`), `rich` (`>=15.0.0,<16`), `sqlalchemy[asyncio]` (`>=2.0.51,<3`), `sqlmodel` (`>=0.0.39`), `tomli` (`>=2.4.1`), `fastapi[standard]` (`>=0.138.1`), `opentelemetry-exporter-otlp-proto-grpc` (`>=1.42.1`), `posthog` (`>=7.21.0`), `alembic` (`>=1.18.5,<2`), `pytest` (`>=9.1.1`), `ruff` (`>=0.15.20`), and `ty` (`>=0.0.50`), while keeping `cryptography` compatible with `mlflow`'s strict upper bounds.
+  **Outcome:** The workspace benefits from modern security patches, performance gains, and library robust alignment across all backend and CLI layers.
+- **Change:** Bumped the `litellm` override-dependency floor to `>=1.87.0` to resolve critical vulnerabilities and ensure secure API proxy integration.
+  **Outcome:** Built-in model orchestration maintains secure, up-to-date Litellm clients for core workspace tasks.
 
 ### Fixed
 
@@ -1236,6 +1240,7 @@ All notable changes to this project are documented in this file.
 - Removed checked-in `__pycache__` directories under `src/fleet_rlm/`.
 - Moved non-runtime memory-topology notes out of package source and into docs.
 
+[0.6.2]: https://github.com/Qredence/fleet-rlm/compare/v0.6.0...v0.6.2
 [0.6.0]: https://github.com/Qredence/fleet-rlm/compare/v0.5.50...v0.6.0
 [0.5.50]: https://github.com/Qredence/fleet-rlm/compare/v0.5.40...v0.5.50
 [0.5.40]: https://github.com/Qredence/fleet-rlm/compare/v0.5.31...v0.5.40

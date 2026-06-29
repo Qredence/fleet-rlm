@@ -128,8 +128,15 @@ def build_server_state(cfg: AppConfig) -> ServerState:
     lm_deps = LmDeps()
     auth_deps = AuthDeps(
         auth_provider=build_auth_provider(
+            auth_mode=cfg.auth_mode,
+            dev_jwt_secret=cfg.dev_jwt_secret,
+            entra_jwks_url=cfg.entra_jwks_url,
+            entra_issuer_url=cfg.entra_issuer_url,
+            entra_issuer_template=cfg.entra_issuer_template,
+            entra_audience=cfg.entra_audience,
+            entra_allowed_user_ids=set(cfg.entra_allowed_user_ids) if cfg.entra_allowed_user_ids else None,
+            entra_allowed_group_ids=set(cfg.entra_allowed_group_ids) if cfg.entra_allowed_group_ids else None,
             neon_tenant_claim=cfg.neon_tenant_claim,
-            dev_mode=not cfg.auth_required,
         ),
     )
     ws_ticket_deps = WebSocketTicketDeps()

@@ -145,6 +145,14 @@ class AppConfig(BaseSettings):
     neon_tenant_claim: str | None = Field(default=None, alias="NEON_TENANT_CLAIM")
     secret_encryption_key: str | None = Field(default=None, alias="FLEET_SECRET_ENCRYPTION_KEY")
     auth_required: bool = True
+    auth_mode: Literal["dev", "entra", "neon"] = Field(default="dev", alias="AUTH_MODE")
+    dev_jwt_secret: str = Field(default="change-me", alias="DEV_JWT_SECRET")
+    entra_jwks_url: str | None = Field(default=None, alias="ENTRA_JWKS_URL")
+    entra_audience: str | None = Field(default=None, alias="ENTRA_AUDIENCE")
+    entra_issuer_url: str | None = Field(default=None, alias="ENTRA_ISSUER_URL")
+    entra_issuer_template: str | None = Field(default=None, alias="ENTRA_ISSUER_TEMPLATE")
+    entra_allowed_user_ids: list[str] | str = Field(default_factory=list, alias="ENTRA_ALLOWED_USER_IDS")
+    entra_allowed_group_ids: list[str] | str = Field(default_factory=list, alias="ENTRA_ALLOWED_GROUP_IDS")
     serve_ui: bool = Field(default=True, alias="FLEET_RLM_SERVE_UI")
     expose_docs: bool = Field(default=False, alias="FLEET_RLM_EXPOSE_DOCS")
     expose_root: bool = Field(default=False, alias="FLEET_RLM_EXPOSE_ROOT")
@@ -181,6 +189,8 @@ class AppConfig(BaseSettings):
 
     @field_validator(
         "cors_allowed_origins",
+        "entra_allowed_user_ids",
+        "entra_allowed_group_ids",
         mode="before",
     )
     @classmethod
@@ -238,6 +248,15 @@ class AppConfig(BaseSettings):
         if "auth_required" not in values and "AUTH_REQUIRED" not in values:
             values["auth_required"] = app_env in {"staging", "production"}
 
+        auth_required = values.get("auth_required")
+        if auth_required is None:
+            auth_required = app_env in {"staging", "production"}
+
+        if not auth_required:
+            values["auth_mode"] = "dev"
+        elif "auth_mode" not in values and "AUTH_MODE" not in values:
+            values["auth_mode"] = "neon"
+
         return values
 
     def validate_startup_or_raise(self) -> None:
@@ -264,14 +283,14 @@ class AppConfig(BaseSettings):
             if not (self.secret_encryption_key or "").strip():
                 raise ValueError("FLEET_SECRET_ENCRYPTION_KEY is required for hosted Neon Auth BYOK profiles")
 
-        # Neon Auth validation (required when auth_required=True). The Neon Auth
+        # Neon Auth validation (required when auth_required=True and auth_mode=neon). The Neon Auth
         # URL itself is hardcoded as a class constant on NeonAuthProvider, so it
         # is not validated here; only the tenant claim and database backing.
         if self.auth_required:
             if not self.database_required:
                 raise ValueError("DATABASE_REQUIRED must be true when AUTH_REQUIRED is true")
-            if not (self.neon_tenant_claim or "").strip():
-                raise ValueError("NEON_TENANT_CLAIM is required when AUTH_REQUIRED is true")
+            if self.auth_mode == "neon" and not (self.neon_tenant_claim or "").strip():
+                raise ValueError("NEON_TENANT_CLAIM is required when AUTH_REQUIRED is true and AUTH_MODE is neon")
 
 
 # Backward-compatible alias — the class was renamed from ServerRuntimeConfig

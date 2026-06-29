@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: fleet-rlm
-  version: 0.6.0
+  version: 0.6.2
 paths:
   /health:
     get:
@@ -2982,7 +2982,7 @@ components:
           type: string
           title: Version
           description: Package version currently serving the API.
-          default: 0.6.0
+          default: 0.6.2
       type: object
       title: HealthResponse
       description: Response body for the lightweight health endpoint.
@@ -4655,7 +4655,7 @@ components:
           type: string
           title: Version
           description: Package version currently serving the API.
-          default: 0.6.0
+          default: 0.6.2
         app_env:
           type: string
           enum:
@@ -4664,6 +4664,14 @@ components:
             - production
           title: App Env
           description: Active deployment environment.
+        auth_mode:
+          type: string
+          enum:
+            - dev
+            - entra
+            - neon
+          title: Auth Mode
+          description: Authentication mode the server is running under.
         auth_required:
           type: boolean
           title: Auth Required
@@ -4702,6 +4710,7 @@ components:
       type: object
       required:
         - app_env
+        - auth_mode
         - auth_required
         - sandbox_provider
         - database_enabled

@@ -48,7 +48,7 @@ class AgentsMdValidator:
     EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "#")
 
     # Directories to exclude from AGENTS.md validation (third-party)
-    EXCLUDED_DIRS = ("node_modules", ".venv", "__pycache__", "dist", "build", ".evo")
+    EXCLUDED_DIRS = ("node_modules", ".venv", "__pycache__", "dist", "build", ".evo", ".claude")
 
     def validate_all(self) -> list[ValidationError]:
         """Run all validation checks."""

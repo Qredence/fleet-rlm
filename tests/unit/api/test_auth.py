@@ -46,9 +46,14 @@ def test_normalized_identity_preserves_claim_values():
 def test_build_auth_provider_returns_neon_provider():
     auth_module = importlib.import_module("fleet_rlm.api.auth")
 
-    neon_provider = auth_module.build_auth_provider()
-
+    neon_provider = auth_module.build_auth_provider(auth_mode="neon")
     assert isinstance(neon_provider, auth_module.NeonAuthProvider)
+
+    dev_provider = auth_module.build_auth_provider(auth_mode="dev")
+    assert isinstance(dev_provider, auth_module.DevAuthProvider)
+
+    with pytest.raises(ValueError, match="Unsupported auth mode"):
+        auth_module.build_auth_provider(auth_mode="invalid")
 
 
 @pytest.mark.asyncio

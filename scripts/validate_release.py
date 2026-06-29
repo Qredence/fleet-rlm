@@ -41,6 +41,7 @@ FORBIDDEN_TRACKED_MJS_PATTERN = re.compile(r"\.mjs$")
 ALLOWED_TRACKED_MJS_EXACT = {
     "src/frontend/postcss.config.mjs",
     "src/frontend/scripts/check-api-sync.mjs",
+    "src/frontend/scripts/ensure-entrypoint.mjs",
 }
 WHEEL_UI_PREFIX = "fleet_rlm/ui/dist/"
 UI_ENTRYPOINT_CANDIDATES = ("index.html", "client/index.html")
