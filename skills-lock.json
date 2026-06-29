@@ -37,59 +37,17 @@
       "skillPath": "skills/engineering/codebase-design/SKILL.md",
       "computedHash": "2426dc4accf1a85dedfb560edb3a877ec8828b7375ea08c970df2b6c900a2a22"
     },
-    "daytona": {
-      "source": "daytona/skills",
-      "sourceType": "github",
-      "skillPath": "skills/daytona/SKILL.md",
-      "computedHash": "3de5279040cb8bbe632937b444576be34178d6358f4a3ba83691cc768cf5b382"
-    },
     "grilling": {
       "source": "mattpocock/skills",
       "sourceType": "github",
       "skillPath": "skills/productivity/grilling/SKILL.md",
       "computedHash": "ef685a6fa0bbe73b05bbd8dc1ec97258191587f07c6aa7dbc9006675ceb8f90f"
     },
-    "instrumenting-with-mlflow-tracing": {
-      "source": "mlflow/skills",
-      "sourceType": "github",
-      "skillPath": "instrumenting-with-mlflow-tracing/SKILL.md",
-      "computedHash": "cc0c9867e4a53c8261710ee064010966dc7a03a5247088e60c90139650bed2b6"
-    },
     "loop-me": {
       "source": "mattpocock/skills",
       "sourceType": "github",
       "skillPath": "skills/in-progress/loop-me/SKILL.md",
       "computedHash": "b3306d9b5af2e9ed341ec290ea97898205f27fb3131b16b8535549b8c90343f8"
-    },
-    "mlflow-agent": {
-      "source": "mlflow/skills",
-      "sourceType": "github",
-      "skillPath": "mlflow-agent/SKILL.md",
-      "computedHash": "e1bc8147d7b557beb4a24699cd7d51b60f3cf9a8667b0f8fb3f8dfe221355e9e"
-    },
-    "mlflow-onboarding": {
-      "source": "mlflow/skills",
-      "sourceType": "github",
-      "skillPath": "mlflow-onboarding/SKILL.md",
-      "computedHash": "f38bc94c8ae4dbb246bc0ee55c0994e21c6ff9e4b245e4b6d3e8d04674bd8cde"
-    },
-    "querying-mlflow-metrics": {
-      "source": "mlflow/skills",
-      "sourceType": "github",
-      "skillPath": "querying-mlflow-metrics/SKILL.md",
-      "computedHash": "851006ac9d4e3d5b40dea8f304c1f66c2badf544d3b3e40b62bf0b2aa7775041"
-    },
-    "retrieving-mlflow-traces": {
-      "source": "mlflow/skills",
-      "sourceType": "github",
-      "skillPath": "retrieving-mlflow-traces/SKILL.md",
-      "computedHash": "ec202398a25511ddac389ab111a536d3d3a7858350b25ca00f7198c01224e033"
-    },
-    "searching-mlflow-docs": {
-      "source": "mlflow/skills",
-      "sourceType": "github",
-      "skillPath": "searching-mlflow-docs/SKILL.md",
-      "computedHash": "b493bd3becb75a2bed6a6cb385700b25fe5ca0656a0c505756af4873d4c237dd"
     },
     "shadcn": {
       "source": "shadcn/ui",

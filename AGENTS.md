@@ -70,23 +70,18 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Always include direct absolute markdown links to `.canvas.tsx` files when creating or mentioning an IDE Canvas.
 - Prefer preserving Agent Elements design tokens (`--an-max-width`) rather than introducing arbitrary Tailwind classes for chat width adjustments.
 - Use `pnpm run check` in `src/frontend` to verify formats, types, lints, and unit tests in a single pass.
+- Prefer running Python scripts/commands using `uv run` over raw `python3` or `python` (aligned with user CLI tooling preferences).
 
 ## Learned Workspace Facts
 
-- Local development runs API on `:8000`, Vite dev server on `:5173`, and MLflow on `:5001` (Python 3.13+).
+- Local development runs API on `:8000`, Vite dev server on `:5173`, and MLflow telemetry on `:5001` (Python 3.13+), standardizing streaming responses on `RuntimeEvent` (`runtime/events.py`) projected using `project_chat`.
 - The Daytona-backed recursive chat runtime runs via `dspy.RLM` with support for major LLM providers and OpenAI-compatible models.
 - Database schema drift checking (`alembic check`) requires importing all active SQLAlchemy models inside `migrations/env.py`.
 - Custom IDE Canvases (.canvas.tsx) are designed for standalone analytical outputs, supporting category colors: `gray`, `purple`, `green`, `yellow`, `pink`, `blue`, and `orange`.
-- Streaming responses in the runtime are standardized on `RuntimeEvent` (`runtime/events.py`) and projected using `project_chat`.
-- The Agent Elements conversation column width can be adjusted by changing the design token `--an-max-width` in `src/frontend/src/components/agent-elements/agent-ui.css`.
-- FastAPI Cloud's packaging engine relies on a `.fastapicloudignore` file in the repository root, which takes absolute precedence over `.gitignore` during deployment.
-- Serving compiled Web UI on FastAPI Cloud requires `.fastapicloudignore` explicitly allowing the frontend build output directory (`!src/frontend/dist/` or `!src/frontend/dist/client`).
-- The production Neon Auth instance URL for the deployed FastAPI Cloud app is `https://ep-broad-water-al4k5bh7.neonauth.c-3.eu-central-1.aws.neon.tech/neondb/auth`.
-- Authentication is locked specifically to Neon Project ID `old-bird-44339002` using `@neondatabase/auth-ui` on catch-all paths with JWT EdDSA token verification.
-- `https://fleet-rlm.fastapicloud.dev` (and the variant without trailing slash) is a configured trusted origin in Neon project `old-bird-44339002` to prevent INVALID_ORIGIN rejection.
-- Postgres Row-Level Security (RLS) on `llm_provider_profiles` secures user BYOK data via context-derived tenant/user/workspace scope.
-- `FLEET_SECRET_ENCRYPTION_KEY` (Fernet key) is required in `neon` auth mode to encrypt/decrypt per-workspace BYOK provider credentials stored in `llm_provider_profiles`; generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
-- BYOK settings round-trips skip empty values and masked values (reported as `skipped`, not `updated`) to prevent wiping existing encrypted keys.
-- The `.gitignore` file excludes scratch artifacts that should not be committed: `mlartifacts/` (MLflow local artifacts), `artifacts/` (evaluation outputs), `logs/*.log` (runtime logs), and `FINDINGS_REPORT.md` (temporary audit reports). These paths are recreated by evaluation runs and should remain untracked.
-- Codex hooks are configured inline in `.codex/config.toml` under `[hooks]` sections (e.g., `PreToolUse`, `PostToolUse`, `Stop`). The deprecated `.codex/hooks.json` file should not be used; all hook matchers and commands are defined in TOML format within `config.toml`.
-- Database fallback: when `DATABASE_URL` is unset or the Neon connection fails, the backend falls back to a local SQLite store (`integrations/local_store.py`) that supports sessions, history, optimization runs, datasets, and evaluation results. `DATABASE_REQUIRED=true` (default in staging/production) disables fallback and raises on missing DB. `DATABASE_URL` can be configured at runtime via `PATCH /api/v1/runtime/settings` (local-only). Authentication always uses Neon Auth regardless of database backend.
+- The Agent Elements conversation column width is controlled via `--an-max-width` in `src/frontend/src/components/agent-elements/agent-ui.css` rather than raw Tailwind class overrides.
+- FastAPI Cloud's packaging and deployment rely on `.fastapicloudignore` (preceding `.gitignore`) which must explicitly allow the compiled Web UI build output directory (`!src/frontend/dist/` or `!src/frontend/dist/client`) to be served.
+- Authentication uses `@neondatabase/auth-ui` locked to Neon Project ID `old-bird-44339002` (`https://ep-broad-water-al4k5bh7.neonauth.c-3.eu-central-1.aws.neon.tech/neondb/auth`) with JWT EdDSA token verification, trusting origin `https://fleet-rlm.fastapicloud.dev`.
+- Tenant BYOK data is secured via Postgres RLS on `llm_provider_profiles` and Fernet encrypted via `FLEET_SECRET_ENCRYPTION_KEY` in `neon` auth mode, skipping empty/masked values to prevent key wipes.
+- Scratch or evaluation directories (`mlartifacts/`, `artifacts/`, `logs/`, `FINDINGS_REPORT.md`) are untracked by `.gitignore`. Codex hooks must be configured inline under `[hooks]` in `.codex/config.toml`, as `.codex/hooks.json` is deprecated.
+- The backend falls back to local SQLite store (`integrations/local_store.py`) if `DATABASE_URL` is unset, unless `DATABASE_REQUIRED=true` (staging/production). Local settings are patchable via `PATCH /api/v1/runtime/settings` (local-only).
+- To prevent cascading timeouts and state leakage in test suites: intercept/stub out external auth network calls like `NeonAuthProvider._fetch_jwks` returning empty keys, and reset global singletons/semaphores using aggressive `autouse` teardown fixtures.

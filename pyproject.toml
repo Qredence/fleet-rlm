@@ -299,7 +299,6 @@ exclude = [
     "tests/",
     "scripts/",
     "notebooks/",
-    "test_modal_guard.py",
     "setup.py",
 ]
 
