@@ -72,8 +72,12 @@ def test_split_slash_command_normalizes_input() -> None:
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ('{"count": 2, "enabled": true}', {"count": 2, "enabled": True}),
-        ("path=README.md retries=3 enabled=false", {"path": "README.md", "retries": 3, "enabled": False}),
+        pytest.param('{"count": 2, "enabled": true}', {"count": 2, "enabled": True}, id="json-input"),
+        pytest.param(
+            "path=README.md retries=3 enabled=false",
+            {"path": "README.md", "retries": 3, "enabled": False},
+            id="key-value-input",
+        ),
     ],
 )
 def test_parse_command_payload_supports_json_and_key_values(raw: str, expected: dict[str, object]) -> None:
