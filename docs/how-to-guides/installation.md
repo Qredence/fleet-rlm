@@ -46,7 +46,7 @@ cd fleet-rlm
 uv sync --all-extras
 ```
 
-> **Note:** The `--all-extras` flag includes the `dev`, `server`, and `full` optional extras. `uv sync` also includes the default `dev` dependency group for this repo.
+> **Note:** The `--all-extras` flag includes the `dev` and `server` optional extras. `uv sync` also includes the default `dev` dependency group for this repo.
 
 ### 2. Set Up Environment Variables
 
