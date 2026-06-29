@@ -52,6 +52,9 @@ def test_build_auth_provider_returns_neon_provider():
     dev_provider = auth_module.build_auth_provider(auth_mode="dev")
     assert isinstance(dev_provider, auth_module.DevAuthProvider)
 
+    entra_provider = auth_module.build_auth_provider(auth_mode="entra")
+    assert entra_provider.__class__.__name__ == "EntraAuthProvider"
+
     with pytest.raises(ValueError, match="Unsupported auth mode"):
         auth_module.build_auth_provider(auth_mode="invalid")
 

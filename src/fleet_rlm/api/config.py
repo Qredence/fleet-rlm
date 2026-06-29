@@ -244,17 +244,27 @@ class AppConfig(BaseSettings):
         if "expose_root" not in values and "FLEET_RLM_EXPOSE_ROOT" not in values:
             values["expose_root"] = app_env == "local"
 
-        # auth_required defaults to True in staging/production, False in local
-        if "auth_required" not in values and "AUTH_REQUIRED" not in values:
-            values["auth_required"] = app_env in {"staging", "production"}
+        # auth_required defaults to True in staging/production, False in local.
+        # We parse potential string/env flags to guarantee a clean boolean state.
+        auth_required_val = values.get("auth_required") or values.get("AUTH_REQUIRED")
+        if auth_required_val is None:
+            auth_required_raw = str(os.getenv("AUTH_REQUIRED") or "").strip().lower()
+            if auth_required_raw:
+                auth_required = auth_required_raw in {"1", "true", "yes", "on"}
+            else:
+                auth_required = app_env in {"staging", "production"}
+        elif isinstance(auth_required_val, str):
+            auth_required = auth_required_val.strip().lower() in {"1", "true", "yes", "on"}
+        else:
+            auth_required = bool(auth_required_val)
 
-        auth_required = values.get("auth_required")
-        if auth_required is None:
-            auth_required = app_env in {"staging", "production"}
+        values["auth_required"] = auth_required
 
+        # Set default/override for auth_mode based on auth_required
+        auth_mode_val = values.get("auth_mode") or values.get("AUTH_MODE")
         if not auth_required:
             values["auth_mode"] = "dev"
-        elif "auth_mode" not in values and "AUTH_MODE" not in values:
+        elif auth_mode_val is None:
             values["auth_mode"] = "neon"
 
         return values
@@ -278,6 +288,8 @@ class AppConfig(BaseSettings):
         if self.app_env in {"staging", "production"}:
             if not self.auth_required:
                 raise ValueError("AUTH_REQUIRED must be true when APP_ENV is staging/production")
+            if self.auth_mode == "dev":
+                raise ValueError("AUTH_MODE=dev is not allowed when APP_ENV is staging/production")
             if "*" in self.cors_origins_list:
                 raise ValueError("CORS_ALLOWED_ORIGINS cannot contain '*' in staging/production")
             if not (self.secret_encryption_key or "").strip():

@@ -149,3 +149,30 @@ def test_validate_startup_or_raise_accepts_valid_neon_configuration(clean_runtim
     )
 
     cfg.validate_startup_or_raise()
+
+
+def test_app_config_normalizes_auth_required_string_and_sets_auth_mode_dev(clean_runtime_env):
+    config_module = importlib.import_module("fleet_rlm.api.config")
+
+    cfg = config_module.AppConfig(
+        auth_required="false",
+    )
+    assert cfg.auth_required is False
+    assert cfg.auth_mode == "dev"
+
+
+def test_validate_startup_or_raise_rejects_auth_mode_dev_in_hosted_env(clean_runtime_env):
+    config_module = importlib.import_module("fleet_rlm.api.config")
+
+    cfg = config_module.AppConfig(
+        app_env="production",
+        auth_required=True,
+        auth_mode="dev",
+        database_required=True,
+        database_url="postgresql://example.invalid/db",  # ty: ignore[unknown-argument]
+        secret_encryption_key="some-key",
+        cors_allowed_origins=["https://app.example"],
+    )
+
+    with pytest.raises(ValueError, match="AUTH_MODE=dev is not allowed when APP_ENV is staging/production"):
+        cfg.validate_startup_or_raise()

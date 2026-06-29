@@ -42,7 +42,7 @@ Basic liveness check.
 
 ```json
 {
-  "ok": true,
+  "status": "live",
   "version": "0.6.2"
 }
 ```
