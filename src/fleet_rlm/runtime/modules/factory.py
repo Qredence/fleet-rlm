@@ -1361,14 +1361,9 @@ class _StreamingRLM(_DSPY_RLM_BASE):
             return
 
     def forward(self, **input_args: Any) -> dspy.Prediction:
-        # NOTE: the serializable-var cache is NOT cleared here. It is reset
-        # once per turn by ``EscalatingFleetModule._run_rlm`` (on the chosen
-        # RLM instance) so a corrective/parse-error retry inside the same
-        # turn can reuse the serialized variables without re-triggering the
-        # expensive 4.3s ``rlm_prepare_variables`` work. The ``(name, id(val))``
-        # cache key guarantees content-safety across turns even if the reset
-        # hook is somehow bypassed.
-        # Clear REPL output cache and summary guardrail flag for this turn
+        # Clear per-turn caches at the start of each call so stale data from
+        # a previous turn does not leak into the next turn.
+        self._prepared_serializable_cache.clear()
         self._repl_output_cache.clear()
         self._summary_directive_injected = False
         # Validate critical variables are present

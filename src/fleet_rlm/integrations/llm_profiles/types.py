@@ -54,6 +54,15 @@ class LlmProfileBundle:
     role_bindings: list[LlmRoleBindingRecord]
 
 
+def model_type_for(provider_type: LlmProviderType) -> str:
+    """Return the dspy.LM model_type string for a given provider type.
+
+    Genuine OpenAI uses the Response API; every OpenAI-compatible endpoint
+    and Anthropic/Google use Chat Completions.
+    """
+    return "responses" if provider_type == "openai" else "chat"
+
+
 @dataclass(slots=True)
 class ResolvedRoleLmConfig:
     role: LlmRoleName
