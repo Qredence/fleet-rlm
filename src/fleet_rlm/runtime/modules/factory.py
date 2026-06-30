@@ -499,7 +499,8 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         try:
             if isinstance(__import__("json").loads(stripped), dict):
                 return False
-        except Exception:
+        except (ValueError, TypeError):
+            # Not valid JSON (or wrong input type): continue heuristic checks.
             pass
         # Detect echo-back: the model is replaying variables_info instead of
         # generating an action. This was the exact cause of the 13s anomaly
