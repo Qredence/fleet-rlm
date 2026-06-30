@@ -225,12 +225,16 @@ def _resolve_reflection_lm(reflection_lm_config: dict[str, Any] | None = None) -
         lm_kwargs = dict(reflection_lm_config.get("lm_kwargs") or {})
         if not lm_kwargs:
             raise RuntimeError("Selected reflection model is missing DSPy LM configuration.")
-        # Use ResponseAPILM for OpenAI providers
-        model = lm_kwargs.get("model", "")
-        if model.startswith("openai/"):
-            from fleet_rlm.runtime.lm import ResponseAPILM
+        from fleet_rlm.integrations.llm_profiles.resolver import infer_provider_type_from_model
+        from fleet_rlm.integrations.llm_profiles.types import model_type_for
 
-            return ResponseAPILM(**lm_kwargs)
+        # Normalized LM API: model_type is derived from the provider, not hardcoded.
+        model = lm_kwargs.get("model", "")
+        model_type = model_type_for(infer_provider_type_from_model(model, api_base=lm_kwargs.get("api_base")))
+        lm_kwargs["model_type"] = model_type
+        # The Response API path expects max_output_tokens (max_tokens is silently dropped).
+        if model_type == "responses" and "max_tokens" in lm_kwargs:
+            lm_kwargs["max_output_tokens"] = lm_kwargs.pop("max_tokens")
         return dspy.LM(**lm_kwargs)
 
     from fleet_rlm.runtime.config import resolve_lm
