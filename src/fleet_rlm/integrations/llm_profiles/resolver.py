@@ -157,11 +157,12 @@ def import_env_profile_payload() -> dict[str, str]:
     }
 
 
-def infer_provider_type_from_model(model_id: str) -> LlmProviderType:
+def infer_provider_type_from_model(model_id: str, *, api_base: str | None = None) -> LlmProviderType:
     if model_id.startswith("anthropic/"):
         return "anthropic"
     if model_id.startswith("gemini/") or "gemini" in model_id:
         return "google"
     if model_id.startswith("openai/"):
-        return "openai_compatible" if os.getenv("DSPY_LM_API_BASE", "").strip() else "openai"
+        effective_api_base = api_base if api_base is not None else os.getenv("DSPY_LM_API_BASE", "").strip()
+        return "openai_compatible" if effective_api_base else "openai"
     return "openai_compatible"
