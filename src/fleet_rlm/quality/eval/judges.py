@@ -7,7 +7,7 @@ in [0.0, 1.0].
 BYOK (Bring-Your-Own-Key) compliance (VAL-C-025):
     Judges use the configured chat LM from the BYOK environment, not hardcoded
     API keys. The LM is resolved via get_delegate_lm_from_env or
-    build_bounded_lm from runtime.config, which respect the per-user BYOK
+    build_lm_config from runtime.config, which respect the per-user BYOK
     credentials stored in llm_provider_profiles with RLS.
 
 Score clamping (VAL-C-026):

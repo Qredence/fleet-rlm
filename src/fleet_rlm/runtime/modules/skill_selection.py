@@ -26,35 +26,6 @@ _SKILL_SELECTION_TEMPERATURE = 0.0
 _SKILL_SELECTION_TIMEOUT_S = 30.0
 
 
-def _build_skill_selection_lm(base: Any | None) -> Any | None:
-    """Build a bounded ``BoundedChatLM`` for the skill-routing pick.
-
-    Uses ``build_bounded_chat_lm`` (a ``dspy.BaseLM`` subclass, no litellm) with
-    ``max_tokens`` capped to 512, deterministic temperature, a 30s real HTTP
-    timeout, ``num_retries=0``, and qwen extended thinking disabled. Returns
-    ``None`` if ``base`` is ``None`` or its credentials cannot be extracted, so
-    the caller can fall back to ``base`` (a delegate LM already built with a
-    bounded ``max_tokens``) and finally to the global dspy LM.
-
-    Rationale: skill selection picks 1-2 skills from a keyword-filtered
-    candidate set — a cheap classification, not a reasoning task. Without these
-    caps the planner LM (qwen3.7-max, max_tokens=65536, thinking on) turned this
-    into a 138s/turn call that retried past its 60s litellm timeout. See MLflow
-    traces tr-73ee45…/tr-d6ad21…/tr-a15557e… .
-    """
-    if base is None:
-        return None
-    from fleet_rlm.runtime.lm import build_bounded_chat_lm
-
-    return build_bounded_chat_lm(
-        base,
-        max_tokens=_SKILL_SELECTION_MAX_TOKENS,
-        temperature=_SKILL_SELECTION_TEMPERATURE,
-        timeout=_SKILL_SELECTION_TIMEOUT_S,
-        num_retries=0,
-    )
-
-
 # Keyword overrides for skills not fully captured by frontmatter alone.
 _KEYWORD_OVERRIDES: dict[str, list[str]] = {
     "rlm": [
@@ -278,7 +249,6 @@ class SkillSelectionModule(dspy.Module):
         # call; fall back to the raw delegate LM (already bounded by
         # agent_delegate_max_tokens) and finally to the global dspy LM.
         self._select_lm = lm
-        self._select_lm_capped = _build_skill_selection_lm(lm)
 
     def _load_active_skills(self, names: list[str]) -> ActiveSkills:
         instructions: dict[str, str] = {}
@@ -335,52 +305,57 @@ class SkillSelectionModule(dspy.Module):
             names = [s.strip().strip("[]()").strip("\"'") for s in re.split(r"[,\n]", text) if s.strip()]
         return [n for n in names if n in AVAILABLE_SKILLS]
 
-    def _get_skill_selection_lm(self) -> Any | None:
-        """Resolve a bounded LM for the skill-routing pick, lazily.
+    def _get_skill_selection_config(self) -> tuple[Any | None, dict[str, Any]]:
+        """Resolve delegate/small/global LM and its stateless config overrides.
 
-        Mirrors ``_get_bounded_action_lm`` (factory.py): prefer a wired-in
+        Mirrors ``_get_action_lm_config`` (factory.py): prefer a wired-in
         delegate LM (``self._select_lm``), else self-resolve from env at call
-        time — small delegate → delegate → ``dspy.settings.lm`` — and bound it
-        via ``_build_skill_selection_lm`` (max_tokens=512, thinking off, 30s
-        timeout). Returns ``None`` if no LM is available so the caller falls
-        back to the global LM (unchanged behavior).
-
-        Why lazy: ``AgentRuntime._build_agent`` does not forward the delegate
-        LM to ``SkillSelectionModule`` (regression), so ``self._select_lm`` is
-        ``None`` in production and ``_build_skill_selection_lm(None)`` returned
-        ``None`` → skill selection landed on the unbounded planner LM
-        (qwen3.7-plus, thinking ON, 65K tokens) for 18-26s/turn. Self-resolving
-        at call time (when ``dspy.settings.lm`` is set) restores the bounded
-        path without waiting for the ``AgentRuntime`` wiring fix.
+        time — small delegate → delegate → ``dspy.settings.lm``. Returns
+        ``(base_lm, config_overrides)``.
         """
-        if self._select_lm is not None:
-            return self._select_lm_capped or self._select_lm
-        from fleet_rlm.runtime.config import get_delegate_lm_from_env, get_delegate_small_lm_from_env
+        import dspy as _dspy
+
+        from fleet_rlm.runtime.config import (
+            build_lm_config,
+            get_delegate_lm_from_env,
+            get_delegate_small_lm_from_env,
+        )
 
         base: Any | None = None
-        try:
-            base = get_delegate_small_lm_from_env() or get_delegate_lm_from_env()
-        except Exception:
-            base = None
-        if base is None:
-            base = getattr(dspy.settings, "lm", None)
-        if base is None:
-            return None
-        return _build_skill_selection_lm(base)
+        if self._select_lm is not None:
+            base = self._select_lm
+        else:
+            try:
+                base = get_delegate_small_lm_from_env() or get_delegate_lm_from_env()
+            except Exception:
+                base = None
+
+        target_lm = base if base is not None else getattr(_dspy.settings, "lm", None)
+
+        config_overrides = build_lm_config(
+            target_lm,
+            max_tokens=_SKILL_SELECTION_MAX_TOKENS,
+            temperature=_SKILL_SELECTION_TEMPERATURE,
+            timeout=_SKILL_SELECTION_TIMEOUT_S,
+            num_retries=0,
+        )
+        return base, config_overrides
 
     def _invoke_select(self, *, context: str, available_skills: str) -> dspy.Prediction:
         """Run the LLM skill selector on a bounded LM.
 
-        Binds the capped delegate LM (or raw delegate fallback) via
-        ``dspy.settings.context`` so this trivial routing call never lands on
-        the unbounded planner LM. The context manager is thread/session-local
-        and does not leak into sibling predictors sharing the global LM.
+        Binds the capped delegate LM via ``dspy.settings.context`` and passes
+        call-time config overrides so this trivial routing call never lands on
+        the unbounded planner LM.
         """
-        select_lm = self._get_skill_selection_lm()
-        if select_lm is not None:
-            with dspy.settings.context(lm=select_lm):
-                return self.select(context=context, available_skills=available_skills)
-        return self.select(context=context, available_skills=available_skills)
+        base_lm, config_overrides = self._get_skill_selection_config()
+        kw: dict[str, Any] = {}
+        if config_overrides:
+            kw["config"] = config_overrides
+        if base_lm is not None:
+            with dspy.settings.context(lm=base_lm):
+                return self.select(context=context, available_skills=available_skills, **kw)
+        return self.select(context=context, available_skills=available_skills, **kw)
 
     def forward(
         self,

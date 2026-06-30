@@ -155,7 +155,7 @@ def test_execute_iteration_reconstructs_kwargs_and_does_not_raise_typeerror(monk
 
     rlm.generate_action._inner = FakeInner()
     # Force the bounded-LM path off so _run_action uses the plain global LM path.
-    monkeypatch.setattr(_StreamingRLM, "_get_bounded_action_lm", lambda self: None)
+    monkeypatch.setattr(_StreamingRLM, "_get_action_lm_config", lambda self: (None, {}))
 
     # _execute_iteration now EXECUTES the generated code (regression fix), so
     # the repl must support ``.execute()``; returning a ``FinalOutput`` simulates
@@ -247,7 +247,7 @@ def test_execute_iteration_reads_iteration_from_args3(monkeypatch: pytest.Monkey
 
     rlm, events = _make_rlm(max_iterations=3)
     rlm.generate_action._inner = MagicMock(return_value=dspy.Prediction(reasoning="ok", code="SUBMIT(response='done')"))
-    monkeypatch.setattr(_StreamingRLM, "_get_bounded_action_lm", lambda self: None)
+    monkeypatch.setattr(_StreamingRLM, "_get_action_lm_config", lambda self: (None, {}))
 
     from dspy.primitives.repl_types import REPLHistory
 
@@ -287,7 +287,7 @@ def test_execute_iteration_iteration_zero_when_args_too_short(monkeypatch: pytes
     back to 0 rather than raising ``IndexError``."""
     _patch_mlflow(monkeypatch)
     rlm = _make_streaming_rlm_bypass_init()
-    monkeypatch.setattr(_StreamingRLM, "_get_bounded_action_lm", lambda self: None)
+    monkeypatch.setattr(_StreamingRLM, "_get_action_lm_config", lambda self: (None, {}))
     # _execute_iteration now runs the action through strip → execute → process.
     # This test only checks the args-length guard (no IndexError), so stub out
     # execution/processing to avoid needing a real repl.
@@ -324,7 +324,7 @@ def test_progress_events_report_increasing_iteration_across_iterations(monkeypat
     _patch_mlflow(monkeypatch)
     rlm, events = _make_rlm(max_iterations=3)
     rlm.generate_action._inner = MagicMock(return_value=dspy.Prediction(reasoning="ok", code="SUBMIT(response='done')"))
-    monkeypatch.setattr(_StreamingRLM, "_get_bounded_action_lm", lambda self: None)
+    monkeypatch.setattr(_StreamingRLM, "_get_action_lm_config", lambda self: (None, {}))
 
     from dspy.primitives.repl_types import REPLHistory
 
@@ -423,7 +423,7 @@ def test_execute_iteration_runs_code_and_builds_trajectory(monkeypatch: pytest.M
 
     _patch_mlflow(monkeypatch)
     rlm, _events = _make_rlm(max_iterations=3)
-    monkeypatch.setattr(_StreamingRLM, "_get_bounded_action_lm", lambda self: None)
+    monkeypatch.setattr(_StreamingRLM, "_get_action_lm_config", lambda self: (None, {}))
 
     rlm.generate_action._inner = MagicMock(return_value=dspy.Prediction(reasoning="ok", code="SUBMIT(response='done')"))
 
@@ -455,7 +455,7 @@ def test_execute_iteration_strips_fences_and_continues_loop(monkeypatch: pytest.
 
     _patch_mlflow(monkeypatch)
     rlm, _events = _make_rlm(max_iterations=3)
-    monkeypatch.setattr(_StreamingRLM, "_get_bounded_action_lm", lambda self: None)
+    monkeypatch.setattr(_StreamingRLM, "_get_action_lm_config", lambda self: (None, {}))
 
     rlm.generate_action._inner = MagicMock(
         return_value=dspy.Prediction(

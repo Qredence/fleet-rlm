@@ -1075,6 +1075,17 @@ class EscalatingFleetModule(dspy.Module):
         ]
         _emit_turn_inputs(self._interpreter, rlm_rows, module=self)
 
+        # Reset the chosen RLM instance's serializable-var cache once per
+        # ``_run_rlm`` invocation so the primary call and any corrective /
+        # parse-error / timeout retry share the freshly serialized variables
+        # (the 4.3s ``rlm_prepare_variables`` cost is paid once per turn, not
+        # once per retry). The ``(name, id(val))`` cache key in
+        # ``_prepare_serializable_vars`` guarantees content-safety across turns
+        # even if this reset is somehow bypassed.
+        prepared_cache = getattr(rlm, "_prepared_serializable_cache", None)
+        if isinstance(prepared_cache, dict):
+            prepared_cache.clear()
+
         try:
             from fleet_rlm.integrations.observability.mlflow_context import (
                 mlflow_child_span,
@@ -1234,12 +1245,13 @@ class EscalatingFleetModule(dspy.Module):
                     )
 
             logger.warning("EscalatingFleetModule: RLM path failed (%s), falling back to ChainOfThought", exc)
-            # Cap the fallback responder with a bounded BaseLM (real timeout, no
-            # litellm, qwen thinking off) so it can't run unbounded on the planner.
-            from fleet_rlm.runtime.lm import build_bounded_chat_lm
+            # Cap the fallback responder with stateless config overrides (per-IO
+            # timeout, qwen thinking off) so it can't run unbounded on the planner.
+            from fleet_rlm.runtime.config import build_lm_config
 
-            fallback_lm = build_bounded_chat_lm(
-                getattr(dspy.settings, "lm", None),
+            base_lm = getattr(dspy.settings, "lm", None)
+            config_overrides = build_lm_config(
+                base_lm,
                 max_tokens=2048,
                 temperature=0.0,
                 timeout=float(self._fallback_timeout),
@@ -1247,17 +1259,12 @@ class EscalatingFleetModule(dspy.Module):
             )
 
             def _respond() -> Any:
-                if fallback_lm is not None:
-                    with dspy.settings.context(lm=fallback_lm):
-                        return self.respond(
-                            user_request=user_request,
-                            core_memory=core_memory,
-                            history=history,
-                        )
+                kw = {"config": config_overrides} if config_overrides else {}
                 return self.respond(
                     user_request=user_request,
                     core_memory=core_memory,
                     history=history,
+                    **kw,
                 )
 
             try:

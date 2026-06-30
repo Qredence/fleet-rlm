@@ -154,46 +154,26 @@ class LLMQueryMixin:
     _llm_call_lock: threading.Lock
     _sub_lm_executor: ThreadPoolExecutor | None
     _sub_lm_executor_lock: threading.Lock
-    # Cached BoundedChatLM wrapping the sub-LM so each call has a real HTTP
-    # timeout, max_tokens cap, and qwen thinking OFF. Lazily built on first use.
-    _bounded_sub_lm: Any | None
-    _bounded_sub_lm_base: Any | None
 
     def build_delegate_child(self, *, remaining_llm_budget: int) -> Any:
         """Create a child interpreter — implemented by the host class."""
 
-    def _get_bounded_sub_lm(self, base: Any) -> Any:
-        """Return a ``BoundedChatLM`` wrapping ``base``, cached per interpreter.
+    def _get_sub_lm_config(self, base: Any) -> dict[str, Any]:
+        """Return a stateless configuration dictionary for overrides.
 
-        Mirrors ``_get_bounded_action_lm`` so sub-LLM calls get a real HTTP
-        timeout (the future-timeout in ``_query_sub_lm`` cannot kill the running
-        worker thread), a ``max_tokens`` cap, and qwen extended thinking
-        disabled. Falls back to the raw ``base`` if a ``BoundedChatLM`` cannot
-        be built (e.g. credentials cannot be extracted) — no new failure mode.
-
-        Without this a slow streaming server ran unbounded: a 77s sub-LLM call
-        was observed in trace tr-5671ce47 (iteration 4 ``repl_execute``).
+        Mirrors ``_get_action_lm_config`` so sub-LLM calls get a per-IO timeout
+        (the future-timeout in ``_query_sub_lm`` cannot kill the running worker
+        thread), a ``max_tokens`` cap, and qwen extended thinking disabled.
         """
-        cached = getattr(self, "_bounded_sub_lm", None)
-        cached_base = getattr(self, "_bounded_sub_lm_base", None)
-        if cached is not None and cached_base is base:
-            return cached
-        from fleet_rlm.runtime.lm import build_bounded_chat_lm
+        from fleet_rlm.runtime.config import build_lm_config
 
-        bounded = build_bounded_chat_lm(
+        return build_lm_config(
             base,
             max_tokens=_env_int("FLEET_RLM_LLM_QUERY_MAX_TOKENS", 4096),
             temperature=0.0,
             timeout=float(self.llm_call_timeout),
             num_retries=0,
         )
-        if bounded is None:
-            self._bounded_sub_lm = base
-            self._bounded_sub_lm_base = base
-            return base
-        self._bounded_sub_lm = bounded
-        self._bounded_sub_lm_base = base
-        return bounded
 
     def _check_and_increment_llm_calls(self, n: int = 1) -> None:
         """Check and increment the LLM call counter.
@@ -225,17 +205,10 @@ class LLMQueryMixin:
         Raises:
             RuntimeError: If no LM is configured or if the call times out.
         """
-        target_lm = self.sub_lm if self.sub_lm is not None else dspy.settings.lm
-        if target_lm is None:
-            raise RuntimeError("No LM configured. Use dspy.configure(lm=...) or pass sub_lm to the active interpreter.")
-
-        # Wrap in a BoundedChatLM so the sub-call has a real HTTP timeout,
-        # max_tokens cap, and qwen thinking OFF. Without this a slow server
-        # stream runs unbounded (observed 77s in tr-5671ce47 iter-4) — the
-        # future-timeout below cannot kill the running worker thread.
-        raw_target_lm = target_lm
-        target_lm = self._get_bounded_sub_lm(target_lm)
-        bounded = target_lm is not raw_target_lm
+        temp_target_lm = self.sub_lm if self.sub_lm is not None else dspy.settings.lm
+        config_overrides = self._get_sub_lm_config(temp_target_lm) if temp_target_lm is not None else {}
+        bounded = bool(config_overrides)
+        sub_lm_model = str(getattr(temp_target_lm, "model", "?")) if temp_target_lm is not None else "?"
 
         from fleet_rlm.integrations.observability.mlflow_context import (
             _bounded_value,
@@ -243,9 +216,16 @@ class LLMQueryMixin:
             set_mlflow_span_outputs,
         )
 
-        # Execute LM call with timeout to prevent hangs
+        # Execute LM call with timeout to prevent hangs.
+        # Resolve target_lm inside the thread at call time to guarantee context-awareness.
         def _execute_lm() -> str:
-            response = target_lm(prompt)
+            target_lm = self.sub_lm if self.sub_lm is not None else dspy.settings.lm
+            if target_lm is None:
+                raise RuntimeError(
+                    "No LM configured. Use dspy.configure(lm=...) or pass sub_lm to the active interpreter."
+                )
+            call_overrides = self._get_sub_lm_config(target_lm)
+            response = target_lm(prompt, **call_overrides)
             if isinstance(response, list) and response:
                 item = response[0]
                 if isinstance(item, dict) and "text" in item:
@@ -269,7 +249,7 @@ class LLMQueryMixin:
                 "fleet_rlm.prompt_chars": str(len(prompt)),
                 "fleet_rlm.llm_call_timeout_s": str(self.llm_call_timeout),
                 "fleet_rlm.bounded": str(bounded),
-                "fleet_rlm.sub_lm_model": str(getattr(target_lm, "model", "?")),
+                "fleet_rlm.sub_lm_model": sub_lm_model,
             },
             inputs={"prompt_chars": len(prompt), "prompt_preview": _bounded_value(prompt, limit=1_000)},
         ) as span:

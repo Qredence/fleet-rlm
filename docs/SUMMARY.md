@@ -49,7 +49,6 @@
 ## Specs
 
 * [Specs](specs/index.md)
-  * [Frontend Simplification Design](specs/frontend-simplification-design.md)
 
 ## Reference
 

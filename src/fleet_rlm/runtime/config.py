@@ -153,11 +153,13 @@ def _resolve_max_tokens(value: int | str | None, *, default: int = 64000) -> int
 
 
 # Normalized LM API (dspy.ai/community/normalized-lm-api-migration):
-# fleet-rlm uses a custom BaseLM subclass (ResponseAPILM) for OpenAI providers
-# with the typed_lm forward contract and OpenAI Response API. For non-OpenAI
-# providers (anthropic, google, openai_compatible, etc.), we use stock dspy.LM
-# (litellm-backed). The ResponseAPILM is defined in runtime/lm.py.
-# Always invoke the LM as lm(...) (never lm.forward(...)).
+# fleet-rlm routes every LM through stock ``dspy.LM`` (litellm-backed). The wire
+# format (``model_type``) is purely derived from the provider type — genuine
+# OpenAI uses the Response API (``model_type="responses"``); every OpenAI-
+# compatible endpoint (Alibaba MaaS, vLLM, Ollama, LiteLLM proxies) and
+# Anthropic/Google use Chat Completions (``model_type="chat"``). No custom
+# BaseLM subclass, no per-profile override. Always invoke the LM as ``lm(...)``
+# (never ``lm.forward(...)``).
 def _build_lm(
     *,
     model: str,
@@ -166,44 +168,80 @@ def _build_lm(
     max_tokens: int,
     custom_provider: str | None = None,
 ) -> Any:
-    """Build an LM instance. Uses ResponseAPILM for OpenAI, stock dspy.LM for others."""
-    from fleet_rlm.runtime.lm import ResponseAPILM
+    """Build a stock ``dspy.LM`` for the given provider credentials.
 
-    # Check if this is an OpenAI provider
-    is_openai = (
-        model.startswith("openai/") or custom_provider == "openai" or (api_base and "openai" in api_base.lower())
+    ``model_type`` is derived via :func:`model_type_for` from the provider type
+    inferred from the model id + api_base. For the Response API, litellm expects
+    ``max_output_tokens`` (``max_tokens`` is silently dropped on that path).
+    """
+    from fleet_rlm.integrations.llm_profiles.resolver import infer_provider_type_from_model
+    from fleet_rlm.integrations.llm_profiles.types import model_type_for
+
+    provider_type = infer_provider_type_from_model(model, api_base=api_base)
+    model_type = model_type_for(provider_type)
+    tok_key = "max_output_tokens" if model_type == "responses" else "max_tokens"
+
+    # Normalize the model id: an ``openai/`` or ``anthropic/`` prefix on an
+    # OpenAI-/Anthropic-compatible endpoint declares the provider, so strip it
+    # and pass a custom_llm_provider hint so litellm routes the bare id against
+    # the custom api_base. A *bare* model id is left to litellm's own detection
+    # (e.g. claude-* → anthropic) unless the caller opts in via custom_provider
+    # — we do not guess "openai" for every bare model + api_base.
+    litellm_model = model
+    stripped_prefix = False
+    if provider_type in ("openai_compatible", "anthropic_compatible") and "/" in model:
+        litellm_model = model.split("/", 1)[1]
+        stripped_prefix = True
+
+    extra: dict[str, Any] = {}
+    if stripped_prefix:
+        if provider_type == "openai_compatible":
+            extra["custom_llm_provider"] = "openai"
+        elif provider_type == "anthropic_compatible":
+            extra["custom_llm_provider"] = "anthropic"
+    # Opt-in provider hint. When callers set ``DSPY_LM_CUSTOM_PROVIDER`` (or the
+    # delegate equivalent) we forward it so litellm routes bare model names
+    # against the custom api_base with the right wire format.
+    if custom_provider:
+        extra["custom_llm_provider"] = custom_provider
+    return _import_dspy().LM(
+        litellm_model,
+        model_type=model_type,
+        api_base=api_base,
+        api_key=api_key,
+        **{tok_key: max_tokens},
+        **extra,
     )
 
-    if is_openai:
-        # Strip provider prefix (e.g., "openai/gemini-3.5-flash" -> "gemini-3.5-flash")
-        # for OpenAI-compatible APIs that don't expect the prefix
-        model_name = model.split("/", 1)[1] if "/" in model else model
 
-        # Use custom ResponseAPILM with OpenAI Response API
-        return ResponseAPILM(
-            model=model_name,
-            api_key=api_key,
-            api_base=api_base,
-            max_tokens=max_tokens,
-            custom_llm_provider=custom_provider,
-        )
-    else:
-        # Fall back to stock dspy.LM (litellm-backed) for non-OpenAI providers
-        extra: dict[str, Any] = {}
-        # Opt-in provider hint. When callers set ``DSPY_LM_CUSTOM_PROVIDER`` (or the
-        # delegate equivalent) we forward it so litellm routes bare model names
-        # against the custom api_base with the right wire format. Without an
-        # explicit hint we leave provider detection to litellm so non-OpenAI
-        # compatible endpoints (e.g. Anthropic) keep working.
-        if custom_provider:
-            extra["custom_llm_provider"] = custom_provider
-        return _import_dspy().LM(
-            model,
-            api_base=api_base,
-            api_key=api_key,
-            max_tokens=max_tokens,
-            **extra,
-        )
+def build_lm_config(
+    base: Any | None,
+    *,
+    max_tokens: int,
+    temperature: float,
+    timeout: float | None,
+    num_retries: int = 0,
+) -> dict[str, Any]:
+    """Build a stateless configuration dictionary for per-call overrides.
+
+    This avoids stateful LM copies and ensures thread and session safety
+    by generating standard configuration kwargs supported by DSPy.
+    """
+    if base is None:
+        return {}
+    model_type = getattr(base, "model_type", None)
+    if model_type not in ("chat", "text", "responses"):
+        model_type = "chat"
+    tok_key = "max_output_tokens" if model_type == "responses" else "max_tokens"
+    overrides: dict[str, Any] = {
+        tok_key: max_tokens,
+        "temperature": temperature,
+    }
+    if timeout is not None:
+        overrides["timeout"] = timeout
+    if "qwen" in str(getattr(base, "model", "")).lower():
+        overrides["extra_body"] = {"enable_thinking": False}
+    return overrides
 
 
 def _planner_lm_kwargs(
@@ -454,13 +492,17 @@ def resolve_lm(
             return None
         dspy = _import_dspy()
         configure_dspy_cache_security(dspy)
-        # Use ResponseAPILM for OpenAI providers
-        if model_name.startswith("openai/"):
-            from fleet_rlm.runtime.lm import ResponseAPILM
+        from fleet_rlm.integrations.llm_profiles.resolver import infer_provider_type_from_model
+        from fleet_rlm.integrations.llm_profiles.types import model_type_for
 
-            api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY") or ""
-            return ResponseAPILM(model=model_name, api_key=api_key, temperature=0.0)
-        return dspy.LM(model_name, temperature=0.0)
+        api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY") or ""
+        model_type = model_type_for(infer_provider_type_from_model(model_name))
+        return dspy.LM(
+            model_name,
+            api_key=api_key,
+            temperature=0.0,
+            model_type=model_type,
+        )
     raise ValueError(f"Unknown LM role: {role!r}")
 
 
