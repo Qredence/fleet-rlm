@@ -141,7 +141,7 @@ class JsonLlmProfileStore(LlmProfileStore):
         return LlmProviderProfileRecord(
             id=UUID(str(payload["id"])),
             name=str(payload["name"]),
-            provider_type=payload["provider_type"],  # type: ignore[assignment]
+            provider_type=cast(LlmProviderType, payload["provider_type"]),
             api_base=str(payload.get("api_base") or ""),
             api_key_ciphertext=str(payload.get("api_key_ciphertext") or ""),
             metadata_json=dict(payload.get("metadata_json") or {}),

@@ -326,7 +326,7 @@ async def test_profile_connection(
     preflight_ok = checks["api_key_set"] and checks["api_base_set"]
 
     if profile.provider_type in MODELS_ENDPOINT_PROVIDER_TYPES:
-        # Validate via GET /models (or /v1/models for anthropic_compatible).
+        # Validate via GET /models (or /v1/models for anthropic_messages).
         checks["models_found"] = False
         try:
             ok, output_preview, error = await validate_profile_via_models_catalog(profile)
@@ -339,7 +339,7 @@ async def test_profile_connection(
         # Providers without a /models endpoint (e.g. real Anthropic): chat-completion smoke test.
         bundle = await store.load_bundle()
         resolved = await _resolve_profile_test_config(profile, role_bindings=bundle.role_bindings)
-        checks["model_set"] = bool(resolved.litellm_model)
+        checks["model_set"] = bool(resolved.resolved_model_id)
         preflight_ok = checks["api_key_set"] and checks["model_set"]
         try:
             profile_lm = await run_blocking(

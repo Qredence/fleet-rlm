@@ -226,11 +226,12 @@ def _resolve_reflection_lm(reflection_lm_config: dict[str, Any] | None = None) -
         if not lm_kwargs:
             raise RuntimeError("Selected reflection model is missing DSPy LM configuration.")
         from fleet_rlm.integrations.llm_profiles.resolver import infer_provider_type_from_model
-        from fleet_rlm.integrations.llm_profiles.types import model_type_for
+        from fleet_rlm.integrations.llm_profiles.types import WIRE_FORMAT_TO_MODEL_TYPE
 
-        # Normalized LM API: model_type is derived from the provider, not hardcoded.
+        # Normalized LM API: model_type is derived from the inferred wire format.
         model = lm_kwargs.get("model", "")
-        model_type = model_type_for(infer_provider_type_from_model(model, api_base=lm_kwargs.get("api_base")))
+        provider_type = infer_provider_type_from_model(model, api_base=lm_kwargs.get("api_base"))
+        model_type = WIRE_FORMAT_TO_MODEL_TYPE[provider_type]
         lm_kwargs["model_type"] = model_type
         # The Response API path expects max_output_tokens (max_tokens is silently dropped).
         if model_type == "responses" and "max_tokens" in lm_kwargs:
@@ -269,7 +270,7 @@ def _reflection_lm_provenance(
             "model": str(reflection_lm_config.get("model_id") or _resolve_model_name(reflection_lm)),
             "source": "profile",
         }
-        for key in ("profile_id", "profile_name", "litellm_model"):
+        for key in ("profile_id", "profile_name", "resolved_model_id"):
             value = reflection_lm_config.get(key)
             if value:
                 provenance[key] = str(value)

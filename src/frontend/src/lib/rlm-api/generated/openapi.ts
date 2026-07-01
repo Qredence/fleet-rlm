@@ -1066,10 +1066,10 @@ export interface components {
        */
       label: string;
       /**
-       * Litellm Model
-       * @description LiteLLM model identifier used by the runtime.
+       * Resolved Model Id
+       * @description Normalized/prefixed model identifier used by the runtime.
        */
-      litellm_model: string;
+      resolved_model_id: string;
     };
     /** LlmModelCatalogResponse */
     LlmModelCatalogResponse: {
@@ -1108,13 +1108,7 @@ export interface components {
        * @description Provider integration type.
        * @enum {string}
        */
-      provider_type:
-        | "openai"
-        | "anthropic"
-        | "google"
-        | "openai_compatible"
-        | "litellm_proxy"
-        | "anthropic_compatible";
+      provider_type: "openai_responses" | "openai_chat_completion" | "anthropic_messages";
       /**
        * Api Base
        * @description Optional API base URL override.
@@ -1152,13 +1146,7 @@ export interface components {
        * @description Provider integration type.
        * @enum {string}
        */
-      provider_type:
-        | "openai"
-        | "anthropic"
-        | "google"
-        | "openai_compatible"
-        | "litellm_proxy"
-        | "anthropic_compatible";
+      provider_type: "openai_responses" | "openai_chat_completion" | "anthropic_messages";
       /**
        * Api Base
        * @description Configured API base URL for the provider.
@@ -1196,16 +1184,7 @@ export interface components {
        * Provider Type
        * @description Updated provider type.
        */
-      provider_type?:
-        | (
-            | "openai"
-            | "anthropic"
-            | "google"
-            | "openai_compatible"
-            | "litellm_proxy"
-            | "anthropic_compatible"
-          )
-        | null;
+      provider_type?: ("openai_responses" | "openai_chat_completion" | "anthropic_messages") | null;
       /**
        * Api Base
        * @description Updated API base URL.

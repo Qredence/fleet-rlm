@@ -3011,15 +3011,15 @@ components:
           type: string
           title: Label
           description: Display label for model dropdowns.
-        litellm_model:
+        resolved_model_id:
           type: string
-          title: Litellm Model
-          description: LiteLLM model identifier used by the runtime.
+          title: Resolved Model Id
+          description: Normalized/prefixed model identifier used by the runtime.
       type: object
       required:
         - id
         - label
-        - litellm_model
+        - resolved_model_id
       title: LlmModelCatalogEntry
     LlmModelCatalogResponse:
       properties:
@@ -3059,12 +3059,9 @@ components:
         provider_type:
           type: string
           enum:
-            - openai
-            - anthropic
-            - google
-            - openai_compatible
-            - litellm_proxy
-            - anthropic_compatible
+            - openai_responses
+            - openai_chat_completion
+            - anthropic_messages
           title: Provider Type
           description: Provider integration type.
         api_base:
@@ -3102,12 +3099,9 @@ components:
         provider_type:
           type: string
           enum:
-            - openai
-            - anthropic
-            - google
-            - openai_compatible
-            - litellm_proxy
-            - anthropic_compatible
+            - openai_responses
+            - openai_chat_completion
+            - anthropic_messages
           title: Provider Type
           description: Provider integration type.
         api_base:
@@ -3148,12 +3142,9 @@ components:
           anyOf:
             - type: string
               enum:
-                - openai
-                - anthropic
-                - google
-                - openai_compatible
-                - litellm_proxy
-                - anthropic_compatible
+                - openai_responses
+                - openai_chat_completion
+                - anthropic_messages
             - type: "null"
           title: Provider Type
           description: Updated provider type.

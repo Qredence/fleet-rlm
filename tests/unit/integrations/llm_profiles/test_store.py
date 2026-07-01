@@ -15,7 +15,7 @@ async def test_json_store_create_and_bind_profile(tmp_path: Path) -> None:
     store = JsonLlmProfileStore(path=tmp_path / "profiles.json")
     profile = await store.create_profile(
         name="OpenAI Dev",
-        provider_type="openai",
+        provider_type="openai_responses",
         api_base="https://api.openai.com/v1",
         api_key="sk-test",
     )

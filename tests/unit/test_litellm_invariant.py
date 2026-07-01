@@ -1,19 +1,29 @@
-"""Invariant test: fleet-rlm must not import or call litellm directly.
+"""Invariant tests for fleet-rlm's litellm policy.
 
-fleet-rlm interacts with language models exclusively through DSPy's normalized
-LM API (``dspy.LM``, ``dspy.settings.lm``, ``dspy.configure``). litellm is a
-transitive dependency of DSPy and remains DSPy's internal compatibility layer
-(see https://dspy.ai/community/normalized-lm-api-migration/ — "Removing the
-legacy BaseLM.forward contract does not necessitate removing LiteLLM").
+Two-part policy, both mechanically enforced here:
 
-This test enforces the policy mechanically so a future change cannot silently
-re-introduce direct litellm coupling. Uses AST parsing so comments, docstrings,
-and string literals do not trigger false positives.
+1. No source file under ``src/fleet_rlm/`` may import or call litellm directly.
+   fleet-rlm interacts with language models exclusively through DSPy's
+   normalized LM API (``dspy.LM``, ``dspy.settings.lm``, ``dspy.configure``).
+   litellm is a transitive dependency of DSPy and remains DSPy's internal
+   compatibility layer (see
+   https://dspy.ai/community/normalized-lm-api-migration/ — "Removing the
+   legacy BaseLM.forward contract does not necessitate removing LiteLLM").
+
+2. litellm MUST NOT be declared as a direct dependency in
+   ``[project].dependencies`` in ``pyproject.toml``. It MAY — and must —
+   remain pinned under ``[tool.uv].override-dependencies`` to close the
+   7 CVEs tracked in the override comment.
+
+Uses AST parsing for the import scan and ``tomllib`` for the pyproject policy
+check, so comments, docstrings, and string literals do not trigger false
+positives.
 """
 
 from __future__ import annotations
 
 import ast
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -70,17 +80,46 @@ def test_no_direct_litellm_usage(py_file: Path) -> None:
 
 
 def test_litellm_dependency_pin_is_intentional() -> None:
-    """The litellm override pin in pyproject.toml must carry a documenting comment.
+    """The litellm override pin in pyproject.toml must remain, and litellm must
+    NOT be declared as a direct dep.
 
-    litellm remains a transitive (DSPy) dependency. The override pin closes CVEs
-    and must not be removed without understanding DSPy's own litellm bound.
+    Policy: litellm is installed only as DSPy's transitive dependency.
+    ``[project].dependencies`` must not declare litellm; ``[tool.uv]
+    override-dependencies`` must pin a patched floor and document the CVE
+    rationale so the override is never silently removed.
     """
+
     pyproject = _SRC_ROOT.parents[1] / "pyproject.toml"
     if not pyproject.exists():
         pytest.skip("pyproject.toml not found")
-    text = pyproject.read_text(encoding="utf-8")
-    # The pin lives in [tool.uv] override-dependencies with a CVE rationale comment.
-    assert "litellm" in text, "litellm pin missing from pyproject.toml"
-    assert "CVE" in text or "cve" in text, (
+    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+
+    project_deps: list[str] = data.get("project", {}).get("dependencies", [])
+    litellm_in_direct = any(
+        dep.strip().split("=")[0].strip().lower().startswith("litellm")
+        or dep.strip().split()[0].lower().startswith("litellm")
+        for dep in project_deps
+    )
+    assert not litellm_in_direct, (
+        "litellm must NOT appear in [project].dependencies — it is installed only "
+        "as DSPy's transitive dependency. Found it among: "
+        f"{[dep for dep in project_deps if 'litellm' in dep.lower()]}"
+    )
+
+    uv_overrides: list[str] = data.get("tool", {}).get("uv", {}).get("override-dependencies", [])
+    litellm_in_override = any(
+        dep.strip().split("=")[0].strip().lower().startswith("litellm")
+        or dep.strip().split()[0].lower().startswith("litellm")
+        for dep in uv_overrides
+    )
+    assert litellm_in_override, (
+        "litellm pin missing from [tool.uv].override-dependencies. It must remain "
+        "pinned there to close the 7 documented CVEs."
+    )
+
+    # The override block must carry the CVE rationale comment, so the pin is
+    # never removed quietly as part of a broader cleanup.
+    pyproject_text = pyproject.read_text(encoding="utf-8")
+    assert "CVE" in pyproject_text or "cve" in pyproject_text, (
         "litellm override pin should document the CVE rationale (see existing comment)"
     )

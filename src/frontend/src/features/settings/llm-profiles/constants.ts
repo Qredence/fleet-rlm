@@ -5,20 +5,9 @@ export const SETTINGS_SECTION_CLASSNAME = "max-w-content gap-4";
 
 export const PROVIDER_OPTIONS: Array<{ id: LlmProviderType; label: string; defaultBase: string }> =
   [
-    { id: "openai", label: "OpenAI", defaultBase: "https://api.openai.com/v1" },
-    { id: "anthropic", label: "Anthropic", defaultBase: "https://api.anthropic.com" },
-    {
-      id: "google",
-      label: "Google Gemini",
-      defaultBase: "https://generativelanguage.googleapis.com/v1beta/openai/",
-    },
-    { id: "openai_compatible", label: "OpenAI-compatible (vLLM, Ollama, …)", defaultBase: "" },
-    { id: "litellm_proxy", label: "LiteLLM proxy", defaultBase: "" },
-    {
-      id: "anthropic_compatible",
-      label: "Anthropic-compatible (POST /v1/messages)",
-      defaultBase: "",
-    },
+    { id: "openai_responses", label: "OpenAI Responses", defaultBase: "https://api.openai.com/v1" },
+    { id: "openai_chat_completion", label: "OpenAI Chat Completion", defaultBase: "" },
+    { id: "anthropic_messages", label: "Anthropic Messages", defaultBase: "https://api.anthropic.com" },
   ];
 
 export const ROLE_ROWS = [
@@ -41,25 +30,32 @@ export const ROLE_ROWS = [
 
 export { errorMessage } from "../runtime-status-panel";
 
+const PROVIDER_TYPE_LABELS: Record<LlmProviderType, string> = {
+  openai_responses: "OpenAI Responses",
+  openai_chat_completion: "OpenAI Chat Completion",
+  anthropic_messages: "Anthropic Messages",
+};
+
 export function formatProfileLabel(profile: {
   id: string;
   name: string;
-  provider_type: string;
+  provider_type: LlmProviderType;
   api_base?: string;
 }): string {
   const shortId = profile.id.slice(0, 8);
   const base = profile.api_base?.replace(/^https?:\/\//, "") || "default base";
-  return `${profile.name} · ${profile.provider_type} · ${base} · ${shortId}`;
+  const typeLabel = PROVIDER_TYPE_LABELS[profile.provider_type] ?? profile.provider_type;
+  return `${profile.name} · ${typeLabel} · ${base} · ${shortId}`;
 }
 
-function stripGoogleNativeModelPrefix(modelId: string): string {
+function stripNativeModelsPrefix(modelId: string): string {
   return modelId.startsWith("models/") ? modelId.slice("models/".length) : modelId;
 }
 
 export function modelMatchesCatalog(modelId: string, catalogId: string): boolean {
   if (!modelId || !catalogId) return false;
-  const left = stripGoogleNativeModelPrefix(modelId);
-  const right = stripGoogleNativeModelPrefix(catalogId);
+  const left = stripNativeModelsPrefix(modelId);
+  const right = stripNativeModelsPrefix(catalogId);
   if (left === right) return true;
   return right.endsWith(`/${left}`) || left.endsWith(`/${right}`);
 }

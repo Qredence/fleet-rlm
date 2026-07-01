@@ -7,9 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-LlmProviderTypeSchema = Literal[
-    "openai", "anthropic", "google", "openai_compatible", "litellm_proxy", "anthropic_compatible"
-]
+LlmProviderTypeSchema = Literal["openai_responses", "openai_chat_completion", "anthropic_messages"]
 LlmRoleNameSchema = Literal["planner", "delegate", "delegate_small"]
 
 
@@ -49,7 +47,7 @@ class LlmProviderProfileUpdateRequest(BaseModel):
 class LlmModelCatalogEntry(BaseModel):
     id: str = Field(description="Provider-native model identifier.")
     label: str = Field(description="Display label for model dropdowns.")
-    litellm_model: str = Field(description="LiteLLM model identifier used by the runtime.")
+    resolved_model_id: str = Field(description="Normalized/prefixed model identifier used by the runtime.")
 
 
 class LlmModelCatalogResponse(BaseModel):

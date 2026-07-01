@@ -151,13 +151,15 @@ def test_configure_planner_from_env_builds_lm_and_configures_dspy(
     assert configured is True
     assert fake_dspy.configure_cache_calls[0]["enable_disk_cache"] is False
     lm = fake_dspy.configure_calls[0]["lm"]
-    # _build_lm strips the openai/ prefix for ResponseAPILM.
+    # openai/ prefix + custom api_base → openai_chat_completion → model_type="chat",
+    # prefix stripped, custom_llm_provider hint added so litellm uses the base.
     assert lm.model == "gpt-4.1"
     assert lm.kwargs == {
+        "model_type": "chat",
         "api_base": "https://api.example.test",
         "api_key": "planner-key",
         "max_tokens": 777,
-        "temperature": None,
+        "custom_llm_provider": "openai",
     }
 
 
@@ -197,9 +199,11 @@ def test_get_planner_and_delegate_lm_from_env_use_expected_fallbacks(
     assert planner.kwargs["api_key"] == "planner-key"
     assert delegate.model == "delegate-model"
     assert delegate.kwargs == {
+        "model_type": "chat",
         "api_base": "https://planner.example.test",
         "api_key": "planner-key",
         "max_tokens": 123,
+        "custom_llm_provider": "openai",
     }
 
 
@@ -262,28 +266,12 @@ def test_get_planner_lm_kwargs_warns_on_missing_api_key(
     assert result is None
 
 
-def test_build_lm_does_not_force_openai_provider_without_opt_in(
-    clean_runtime_env: pytest.MonkeyPatch,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Regression: bare model + api_base must NOT auto-inject openai provider."""
-    runtime_config, fake_dspy = _patch_runtime_config(monkeypatch)
-    clean_runtime_env.setenv("DSPY_LM_MODEL", "claude-sonnet-4")
-    clean_runtime_env.setenv("DSPY_LLM_API_KEY", "anthropic-key")
-    clean_runtime_env.setenv("DSPY_LM_API_BASE", "https://api.anthropic.com")
-
-    lm = runtime_config.get_planner_lm_from_env()
-
-    assert lm is not None
-    assert lm.model == "claude-sonnet-4"
-    assert "custom_llm_provider" not in lm.kwargs
-
-
 def test_build_lm_uses_explicit_custom_provider_hint(
     clean_runtime_env: pytest.MonkeyPatch,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Setting DSPY_LM_CUSTOM_PROVIDER=openai should forward the hint."""
+    """Setting DSPY_LM_CUSTOM_PROVIDER=openai should forward the hint,
+    overriding the wire-format's inferred provider hint."""
     runtime_config, fake_dspy = _patch_runtime_config(monkeypatch)
     clean_runtime_env.setenv("DSPY_LM_MODEL", "gemini-3-flash")
     clean_runtime_env.setenv("DSPY_LLM_API_KEY", "key")
@@ -294,6 +282,26 @@ def test_build_lm_uses_explicit_custom_provider_hint(
 
     assert lm is not None
     assert lm.kwargs.get("custom_llm_provider") == "openai"
+
+
+def test_build_lm_anthropic_bare_id_with_custom_provider_hint_routes_correctly(
+    clean_runtime_env: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bare Claude id on a custom Anthropic api_base: user must opt in via
+    DSPY_LM_CUSTOM_PROVIDER=anthropic (the bare-id env path does not infer the
+    wire format from the model name — that's a profile-row property)."""
+    runtime_config, fake_dspy = _patch_runtime_config(monkeypatch)
+    clean_runtime_env.setenv("DSPY_LM_MODEL", "claude-sonnet-4")
+    clean_runtime_env.setenv("DSPY_LLM_API_KEY", "anthropic-key")
+    clean_runtime_env.setenv("DSPY_LM_API_BASE", "https://api.anthropic.com")
+    clean_runtime_env.setenv("DSPY_LM_CUSTOM_PROVIDER", "anthropic")
+
+    lm = runtime_config.get_planner_lm_from_env()
+
+    assert lm is not None
+    assert lm.model == "claude-sonnet-4"
+    assert lm.kwargs.get("custom_llm_provider") == "anthropic"
 
 
 def test_delegate_build_lm_uses_delegate_custom_provider(

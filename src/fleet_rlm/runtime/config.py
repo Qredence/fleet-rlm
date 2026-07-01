@@ -157,9 +157,9 @@ def _resolve_max_tokens(value: int | str | None, *, default: int = 64000) -> int
 # format (``model_type``) is purely derived from the provider type — genuine
 # OpenAI uses the Response API (``model_type="responses"``); every OpenAI-
 # compatible endpoint (Alibaba MaaS, vLLM, Ollama, LiteLLM proxies) and
-# Anthropic/Google use Chat Completions (``model_type="chat"``). No custom
-# BaseLM subclass, no per-profile override. Always invoke the LM as ``lm(...)``
-# (never ``lm.forward(...)``).
+# All three wire formats use stock ``dspy.LM`` with a ``model_type`` kwarg
+# derived from the inferred wire-format type. No custom BaseLM subclass, no
+# per-profile override. Always invoke the LM as ``lm(...)`` (never ``lm.forward(...)``).
 def _build_lm(
     *,
     model: str,
@@ -170,42 +170,39 @@ def _build_lm(
 ) -> Any:
     """Build a stock ``dspy.LM`` for the given provider credentials.
 
-    ``model_type`` is derived via :func:`model_type_for` from the provider type
-    inferred from the model id + api_base. For the Response API, litellm expects
-    ``max_output_tokens`` (``max_tokens`` is silently dropped on that path).
+    ``model_type`` is derived from the inferred wire-format type
+    (:data:`WIRE_FORMAT_TO_MODEL_TYPE`). For the Responses API (``openai_responses``),
+    pass ``max_output_tokens`` — ``max_tokens`` is silently dropped on that path
+    in DSPy 3.3.0b1.
     """
     from fleet_rlm.integrations.llm_profiles.resolver import infer_provider_type_from_model
-    from fleet_rlm.integrations.llm_profiles.types import model_type_for
+    from fleet_rlm.integrations.llm_profiles.types import (
+        WIRE_FORMAT_TO_LITELLM_PROVIDER,
+        WIRE_FORMAT_TO_MODEL_TYPE,
+    )
 
     provider_type = infer_provider_type_from_model(model, api_base=api_base)
-    model_type = model_type_for(provider_type)
-    tok_key = "max_output_tokens" if model_type == "responses" else "max_tokens"
+    model_type = WIRE_FORMAT_TO_MODEL_TYPE[provider_type]
+    tok_key = "max_output_tokens" if provider_type == "openai_responses" else "max_tokens"
 
-    # Normalize the model id: an ``openai/`` or ``anthropic/`` prefix on an
-    # OpenAI-/Anthropic-compatible endpoint declares the provider, so strip it
-    # and pass a custom_llm_provider hint so litellm routes the bare id against
-    # the custom api_base. A *bare* model id is left to litellm's own detection
-    # (e.g. claude-* → anthropic) unless the caller opts in via custom_provider
-    # — we do not guess "openai" for every bare model + api_base.
-    litellm_model = model
-    stripped_prefix = False
-    if provider_type in ("openai_compatible", "anthropic_compatible") and "/" in model:
-        litellm_model = model.split("/", 1)[1]
-        stripped_prefix = True
+    # Strip a provider prefix (``openai/<id>``, ``anthropic/<id>``) — we route
+    # against the bare model id always, with custom_llm_provider as the hint.
+    resolved_model_id = model.split("/", 1)[1] if "/" in model else model
 
     extra: dict[str, Any] = {}
-    if stripped_prefix:
-        if provider_type == "openai_compatible":
-            extra["custom_llm_provider"] = "openai"
-        elif provider_type == "anthropic_compatible":
-            extra["custom_llm_provider"] = "anthropic"
-    # Opt-in provider hint. When callers set ``DSPY_LM_CUSTOM_PROVIDER`` (or the
-    # delegate equivalent) we forward it so litellm routes bare model names
-    # against the custom api_base with the right wire format.
+    # Any custom api_base (BYOK gateways like Alibaba MaaS, OpenRouter, vLLM,
+    # Anthropic-compatible proxies): forward the wire-format's provider hint so
+    # LiteLLM doesn't crash with "LLM Provider NOT provided" on bare ids.
+    if api_base:
+        provider_hint = WIRE_FORMAT_TO_LITELLM_PROVIDER[provider_type]
+        if provider_hint:
+            extra["custom_llm_provider"] = provider_hint
+    # Opt-in provider hint: when callers set ``DSPY_LM_CUSTOM_PROVIDER`` (or the
+    # delegate equivalent) we forward it, overriding the inferred hint.
     if custom_provider:
         extra["custom_llm_provider"] = custom_provider
     return _import_dspy().LM(
-        litellm_model,
+        resolved_model_id,
         model_type=model_type,
         api_base=api_base,
         api_key=api_key,
@@ -493,10 +490,10 @@ def resolve_lm(
         dspy = _import_dspy()
         configure_dspy_cache_security(dspy)
         from fleet_rlm.integrations.llm_profiles.resolver import infer_provider_type_from_model
-        from fleet_rlm.integrations.llm_profiles.types import model_type_for
+        from fleet_rlm.integrations.llm_profiles.types import WIRE_FORMAT_TO_MODEL_TYPE
 
         api_key = os.environ.get("DSPY_LLM_API_KEY") or os.environ.get("DSPY_LM_API_KEY") or ""
-        model_type = model_type_for(infer_provider_type_from_model(model_name))
+        model_type = WIRE_FORMAT_TO_MODEL_TYPE[infer_provider_type_from_model(model_name)]
         return dspy.LM(
             model_name,
             api_key=api_key,

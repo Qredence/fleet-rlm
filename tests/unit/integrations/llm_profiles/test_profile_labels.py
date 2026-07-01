@@ -18,8 +18,8 @@ def test_profile_labels_from_bundle_maps_role_to_profile_name() -> None:
         profiles=[
             LlmProviderProfileRecord(
                 id=profile_id,
-                name="LiteLLM Proxy",
-                provider_type="openai_compatible",
+                name="OpenAI-Compatible Proxy",
+                provider_type="openai_chat_completion",
                 api_base="https://proxy.example/v1",
                 api_key_ciphertext="cipher",
             )
@@ -33,6 +33,6 @@ def test_profile_labels_from_bundle_maps_role_to_profile_name() -> None:
 
     labels = profile_labels_from_bundle(bundle)
 
-    assert labels["planner"] == (str(profile_id), "LiteLLM Proxy")
-    assert labels["delegate"] == (str(profile_id), "LiteLLM Proxy")
+    assert labels["planner"] == (str(profile_id), "OpenAI-Compatible Proxy")
+    assert labels["delegate"] == (str(profile_id), "OpenAI-Compatible Proxy")
     assert labels["delegate_small"] == (None, None)
