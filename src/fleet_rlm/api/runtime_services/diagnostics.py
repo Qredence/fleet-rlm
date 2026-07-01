@@ -329,7 +329,7 @@ async def _resolve_byok_planner(
             )
         profile = profiles[planner_binding.profile_id]
         config = resolve_role_config(role="planner", binding=planner_binding, profile=profile)
-        if config is None or not config.litellm_model or not config.api_key:
+        if config is None or not config.resolved_model_id or not config.api_key:
             return None, None, "Planner BYOK profile is missing credentials."
         return profile, config, None
     except Exception as exc:

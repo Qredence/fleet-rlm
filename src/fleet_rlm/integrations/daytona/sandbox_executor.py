@@ -792,6 +792,16 @@ def sanitize_execution_code(code: str) -> str:
     if candidate.lower().startswith("code:\n"):
         candidate = candidate.split("\n", 1)[1].strip()
 
+    # If the code already parses, return it as-is — do NOT run DSPy-sentinel
+    # stripping. ``strip_dspy_sentinel_lines`` discards everything after a
+    # ``[[ ## field ## ]]`` match on a line, which is correct for LLM-emitted
+    # adapter framing but corrupts sentinels that appear INSIDE string literals
+    # (e.g. ``document_text`` content that legitimately contains the text
+    # ``[[ ## reasoning ## ]]``), truncating the literal mid-way and raising a
+    # spurious "unterminated string literal" ``CodeSanitizationError``.
+    if python_parses(candidate):
+        return candidate
+
     candidate = strip_trailing_fence(strip_dspy_sentinel_lines(candidate))
     if python_parses(candidate):
         return candidate

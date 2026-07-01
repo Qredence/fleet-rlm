@@ -279,4 +279,4 @@ The settings feature treats these operations as current:
 - test Daytona connectivity
 - refresh runtime status
 
-The runtime and LiteLLM forms use the backend runtime settings API.
+The runtime and LLM Provider Profile forms use the backend settings and provider profiles APIs.

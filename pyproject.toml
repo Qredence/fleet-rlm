@@ -168,6 +168,7 @@ namespaces = false
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+junit_family = "xunit1"
 addopts = "-q --strict-markers --timeout=30"
 timeout_method = "thread"
 markers = [

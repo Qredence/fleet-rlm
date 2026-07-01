@@ -142,7 +142,7 @@ Supported sections:
 
 - `appearance`
 - `telemetry`
-- `litellm`
+- `litellm` (LLM Providers / Profiles)
 - `runtime`
 
 Rules:

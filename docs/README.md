@@ -40,7 +40,7 @@ Then open `http://localhost:8000`.
 - [Installation](how-to-guides/installation.md)
 - [Runtime settings](how-to-guides/runtime-settings.md)
 - [Troubleshooting](how-to-guides/troubleshooting.md)
-- [LiteLLM proxy model availability](reference/litellm-models.md)
+- [LLM Provider Profiles](reference/llm-provider-profiles.md)
 
 ## Build and Integrate
 

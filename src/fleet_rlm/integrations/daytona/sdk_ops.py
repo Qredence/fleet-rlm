@@ -226,4 +226,15 @@ __all__ = [
     "afork_sandbox",
     "aget_sandbox",
     "aresume_workspace_session",
+    "get_sandbox_id_from_interpreter",
 ]
+
+
+def get_sandbox_id_from_interpreter(interpreter: Any) -> str:
+    """Extract the Daytona sandbox ID from a DaytonaInterpreter or session instance."""
+    return (
+        getattr(interpreter, "_persisted_sandbox_id", None)
+        or getattr(getattr(interpreter, "session", None), "sandbox_id", None)
+        or getattr(interpreter, "sandbox_id", "")
+        or ""
+    )

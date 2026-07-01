@@ -210,7 +210,7 @@ class DaytonaSandboxRuntime:
 
         When neither ``image`` nor ``snapshot`` is provided, the spec
         defaults to the ``fleet-rlm-base`` snapshot so that sandboxes
-        start with pre-installed core packages (dspy-ai, numpy, pandas,
+        start with pre-installed core packages (dspy, numpy, pandas,
         httpx, pydantic).  If the snapshot has not been created yet, the
         runtime falls back to a declarative image build at sandbox
         creation time (see ``create_sandbox``).

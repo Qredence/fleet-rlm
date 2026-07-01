@@ -81,7 +81,7 @@ The current implementation treats these Daytona docs as the normative baseline:
   - internal workspace manager code prefers async collaborators and can fall back to sync compatibility methods at test or adapter boundaries
 - Sandbox creation prefers the reusable `fleet-rlm-base` Daytona snapshot. That
   snapshot is an environment template built from a declarative image containing
-  fleet-rlm's default Python runtime packages (`dspy-ai`, `numpy`, `pandas`,
+  fleet-rlm's default Python runtime packages (`dspy`, `numpy`, `pandas`,
   `httpx`, and `pydantic`). If the snapshot is missing or not active, sandbox
   creation falls back to the same declarative image build so startup still has
   the expected dependencies. Operators can bootstrap or refresh the template

@@ -73,6 +73,8 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Prefer running Python scripts/commands using `uv run` over raw `python3` or `python` (aligned with user CLI tooling preferences).
 - Avoid introducing direct `litellm` usage in application code; reach LLM providers through `dspy.LM` instead.
 - Prefer wire-protocol-named Literal unions (`openai_responses`, `openai_chat_completion`, `anthropic_messages`) over vendor-flavored or `_compatible`-suffixed provider-type enums, and keep LLM profiles flat (profile name, provider type, base endpoint, API key) rather than over-abstracting.
+- Cite ONLY DSPy (installed 3.3.0b1 source + dspy.ai docs) as the reference contract for LLM/runtime design; do NOT cite the `/daytona` or `daytona-signature` skill as authority for DSPy/RLM decisions.
+- When asked for a plan, make it code-tree-explicit: exact file paths, line ranges, and ADD/REMOVE/EDIT tables describing what to clean, remove, edit, or add — not generic prose.
 
 ## Learned Workspace Facts
 
@@ -85,6 +87,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Authentication uses `@neondatabase/auth-ui` locked to Neon Project ID `old-bird-44339002` (`https://ep-broad-water-al4k5bh7.neonauth.c-3.eu-central-1.aws.neon.tech/neondb/auth`) with JWT EdDSA token verification, trusting origin `https://fleet-rlm.fastapicloud.dev`.
 - Tenant BYOK data is secured via Postgres RLS on `llm_provider_profiles` and Fernet encrypted via `FLEET_SECRET_ENCRYPTION_KEY` in `neon` auth mode, skipping empty/masked values to prevent key wipes.
 - Scratch or evaluation directories (`mlartifacts/`, `artifacts/`, `logs/`, `FINDINGS_REPORT.md`) are untracked by `.gitignore`. Codex hooks must be configured inline under `[hooks]` in `.codex/config.toml`, as `.codex/hooks.json` is deprecated.
+- The `daytona-signature` skill is OUTDATED; use the `/daytona` skill as the canonical reference for Daytona concerns. (For DSPy/RLM plan authority, cite only DSPy itself — see Learned User Preferences.)
 - The backend falls back to local SQLite store (`integrations/local_store.py`) if `DATABASE_URL` is unset, unless `DATABASE_REQUIRED=true` (staging/production). Local settings are patchable via `PATCH /api/v1/runtime/settings` (local-only).
 - To prevent cascading timeouts and state leakage in test suites: intercept/stub out external auth network calls like `NeonAuthProvider._fetch_jwks` returning empty keys, and reset global singletons/semaphores using aggressive `autouse` teardown fixtures.
 - Under DSPy 3.3.Xb (normalized LM API), any `BaseLM` or bounded LM must have its provider explicitly resolved (via prefix or `provider` kwargs). Prefer stock `dspy.LM` with stateless config overrides passed directly to predictors/LM calls (using `dspy.settings.context` if needed) over stateful `copy()` or custom wrappers to ensure thread/session safety.

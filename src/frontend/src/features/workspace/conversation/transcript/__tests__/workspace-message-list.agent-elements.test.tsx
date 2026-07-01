@@ -36,12 +36,12 @@ vi.mock("@/features/settings/use-llm-profiles", () => ({
         {
           id: "gemini-3-flash-preview",
           label: "gemini-3-flash-preview",
-          litellm_model: "openai/gemini-3-flash-preview",
+          resolved_model_id: "openai/gemini-3-flash-preview",
         },
         {
           id: "gemini-3-pro-preview",
           label: "gemini-3-pro-preview",
-          litellm_model: "openai/gemini-3-pro-preview",
+          resolved_model_id: "openai/gemini-3-pro-preview",
         },
       ],
     },
