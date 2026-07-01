@@ -1075,7 +1075,7 @@ class EscalatingFleetModule(dspy.Module):
         ]
         _emit_turn_inputs(self._interpreter, rlm_rows, module=self)
 
-        # Reset the chosen RLM instance's serializable-var cache once per
+        # Reset the chosen RLM instance's per-turn caches once per
         # ``_run_rlm`` invocation so the primary call and any corrective /
         # parse-error / timeout retry share the freshly serialized variables
         # (the 4.3s ``rlm_prepare_variables`` cost is paid once per turn, not
@@ -1085,6 +1085,11 @@ class EscalatingFleetModule(dspy.Module):
         prepared_cache = getattr(rlm, "_prepared_serializable_cache", None)
         if isinstance(prepared_cache, dict):
             prepared_cache.clear()
+        repl_cache = getattr(rlm, "_repl_output_cache", None)
+        if isinstance(repl_cache, dict):
+            repl_cache.clear()
+        if hasattr(rlm, "_summary_directive_injected"):
+            setattr(rlm, "_summary_directive_injected", False)
 
         try:
             from fleet_rlm.integrations.observability.mlflow_context import (
@@ -1255,7 +1260,6 @@ class EscalatingFleetModule(dspy.Module):
                 max_tokens=2048,
                 temperature=0.0,
                 timeout=float(self._fallback_timeout),
-                num_retries=0,
             )
 
             def _respond() -> Any:

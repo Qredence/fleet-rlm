@@ -164,17 +164,16 @@ def test_query_sub_lm_wraps_sub_lm_in_bounded_lm(monkeypatch) -> None:
 
     build_calls: list[dict[str, Any]] = []
 
-    def fake_build(base: Any, *, max_tokens: int, temperature: float, timeout: float | None, num_retries: int = 0):
+    def fake_build(base: Any, *, max_tokens: int, temperature: float, timeout: float | None):
         build_calls.append(
             {
                 "base": base,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 "timeout": timeout,
-                "num_retries": num_retries,
             }
         )
-        return {"max_tokens": max_tokens, "temperature": temperature, "timeout": timeout, "num_retries": num_retries}
+        return {"max_tokens": max_tokens, "temperature": temperature, "timeout": timeout}
 
     monkeypatch.setattr(rt_config, "build_lm_config", fake_build)
 
@@ -191,7 +190,6 @@ def test_query_sub_lm_wraps_sub_lm_in_bounded_lm(monkeypatch) -> None:
     assert len(build_calls) == 4
     assert build_calls[0]["timeout"] == 12, "timeout must mirror llm_call_timeout"
     assert build_calls[0]["max_tokens"] == 4096
-    assert build_calls[0]["num_retries"] == 0
     # The LM actually received the calls (with correct overrides passed).
     assert fake_bounded.calls == ["hello", "again"]
 

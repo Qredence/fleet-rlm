@@ -337,7 +337,6 @@ class SkillSelectionModule(dspy.Module):
             max_tokens=_SKILL_SELECTION_MAX_TOKENS,
             temperature=_SKILL_SELECTION_TEMPERATURE,
             timeout=_SKILL_SELECTION_TIMEOUT_S,
-            num_retries=0,
         )
         return base, config_overrides
 

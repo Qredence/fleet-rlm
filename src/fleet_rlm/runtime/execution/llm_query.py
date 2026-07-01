@@ -172,7 +172,6 @@ class LLMQueryMixin:
             max_tokens=_env_int("FLEET_RLM_LLM_QUERY_MAX_TOKENS", 4096),
             temperature=0.0,
             timeout=float(self.llm_call_timeout),
-            num_retries=0,
         )
 
     def _check_and_increment_llm_calls(self, n: int = 1) -> None:

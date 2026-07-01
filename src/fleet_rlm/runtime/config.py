@@ -217,7 +217,6 @@ def build_lm_config(
     max_tokens: int,
     temperature: float,
     timeout: float | None,
-    num_retries: int = 0,
 ) -> dict[str, Any]:
     """Build a stateless configuration dictionary for per-call overrides.
 

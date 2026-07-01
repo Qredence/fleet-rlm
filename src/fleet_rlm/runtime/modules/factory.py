@@ -1066,7 +1066,6 @@ class _StreamingRLM(_DSPY_RLM_BASE):
             max_tokens=max_tokens,
             temperature=0.0,
             timeout=timeout,
-            num_retries=0,
         )
         return base, config_overrides
 
@@ -1362,11 +1361,9 @@ class _StreamingRLM(_DSPY_RLM_BASE):
             return
 
     def forward(self, **input_args: Any) -> dspy.Prediction:
-        # Clear per-turn caches at the start of each call so stale data from
-        # a previous turn does not leak into the next turn.
-        self._prepared_serializable_cache.clear()
-        self._repl_output_cache.clear()
-        self._summary_directive_injected = False
+        # The cache reset is owned by EscalatingFleetModule._run_rlm (cleared
+        # once per turn before the execution loop) so corrective retries within
+        # a turn reuse the serialized variables. Do NOT clear here.
         # Validate critical variables are present
         variables_info = input_args.get("variables_info")
         if not variables_info or not isinstance(variables_info, str) or len(variables_info) < 50:
