@@ -192,7 +192,7 @@ async def resolve_reflection_lm_config(
         "profile_id": str(profile.id),
         "profile_name": profile.name,
         "model_id": request.reflection_model_id,
-        "litellm_model": resolved.litellm_model,
+        "resolved_model_id": resolved.resolved_model_id,
         "lm_kwargs": build_lm_kwargs_from_resolved(resolved, max_tokens=32_000),
     }
 
@@ -219,7 +219,7 @@ def build_run_metadata(
                 "reflection_profile_id": reflection_lm_config.get("profile_id"),
                 "reflection_profile_name": reflection_lm_config.get("profile_name"),
                 "reflection_model_id": reflection_lm_config.get("model_id"),
-                "reflection_litellm_model": reflection_lm_config.get("litellm_model"),
+                "reflection_resolved_model_id": reflection_lm_config.get("resolved_model_id"),
             }
         )
     return metadata

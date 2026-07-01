@@ -142,7 +142,7 @@ Boxes with `[external]` are remote services (API calls).
 |              EXTERNAL SERVICES  [external]                           |
 |                                                                      |
 |   +-------------------+      +----------------------+                |
-|   | LiteLLM proxy     |----->| Gemini 3.1 Pro       |                |
+|   | LLM Provider API  |----->| Gemini 3.1 Pro       |                |
 |   +-------------------+      +----------------------+                |
 |                                                                      |
 |   +--------------------------+                                       |

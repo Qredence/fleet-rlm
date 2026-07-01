@@ -228,3 +228,61 @@ def test_broker_start_failure_cooldown_allows_same_owner_retry() -> None:
     assert ensure_calls == 1
     assert owner._bridge_start_error is None
     assert _BROKER_START_FAILURES == {}
+
+
+# --- sanitize_execution_code: sentinel-inside-string-literal regression -----
+
+
+def test_sanitize_preserves_sentinels_inside_string_literals() -> None:
+    """Regression: document_text containing the literal text ``[[ ## reasoning ## ]]``
+    must not be truncated by the DSPy-sentinel stripper.
+
+    ``strip_dspy_sentinel_lines`` keeps only ``line[:match.start()]`` when a
+    sentinel appears on a line. When the sentinel lives INSIDE a string literal
+    (e.g. a workspace snapshot whose git diff mentions ``[[ ## reasoning ## ]]``),
+    that truncation drops the literal's closing quote and raises a spurious
+    ``CodeSanitizationError: unterminated string literal``. The injected
+    variable-assignment code is already valid Python, so ``sanitize_execution_code``
+    must return it unchanged.
+    """
+    import ast
+    import json
+
+    from fleet_rlm.integrations.daytona.sandbox_executor import (
+        inject_variables,
+        sanitize_execution_code,
+    )
+
+    document_text = (
+        "# qwen emits ``[[ ## reasoning ## ]]`` / ``[[ ## code ## ]]`` here\nmore content after the sentinels"
+    )
+    payload = json.dumps({"document_text": document_text})
+    injected = inject_variables(
+        None,
+        "import json\ncontext = json.loads(_raw_context)",
+        {"_raw_context": payload},
+    )
+
+    # The injected code is valid Python before sanitization.
+    ast.parse(injected)
+
+    out = sanitize_execution_code(injected)
+    ast.parse(out)  # must still parse
+    assert "context = json.loads(_raw_context)" in out
+    # The sentinel text inside the string literal must survive intact.
+    assert "[[ ## reasoning ## ]]" in out
+    assert "[[ ## code ## ]]" in out
+
+
+def test_sanitize_strips_bare_llm_sentinel_framing() -> None:
+    """LLM-emitted adapter framing (sentinels as bare code, not in strings) is
+    still stripped so the resulting code parses."""
+    import ast
+
+    from fleet_rlm.integrations.daytona.sandbox_executor import sanitize_execution_code
+
+    framed = "```python\n[[ ## reasoning ## ]]\nprint(1 + 1)\n[[ ## code ## ]]\n```"
+    out = sanitize_execution_code(framed)
+    ast.parse(out)
+    assert "print(1 + 1)" in out
+    assert "[[" not in out

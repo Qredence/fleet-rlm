@@ -31,7 +31,7 @@ interface ProviderProfileFormProps {
 
 export function ProviderProfileForm({ writeEnabled, mutations }: ProviderProfileFormProps) {
   const [draftName, setDraftName] = useState("My provider");
-  const [draftProviderType, setDraftProviderType] = useState<LlmProviderType>("openai");
+  const [draftProviderType, setDraftProviderType] = useState<LlmProviderType>("openai_responses");
   const [draftApiBase, setDraftApiBase] = useState(PROVIDER_OPTIONS[0]?.defaultBase ?? "");
   const [draftApiKey, setDraftApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);

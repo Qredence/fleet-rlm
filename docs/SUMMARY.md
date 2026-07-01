@@ -49,7 +49,6 @@
 ## Specs
 
 * [Specs](specs/index.md)
-  * [Frontend Simplification Design](specs/frontend-simplification-design.md)
 
 ## Reference
 
@@ -69,7 +68,7 @@
   * [Frontend Backend Integration](reference/frontend-backend-integration.md)
   * [Daytona Architecture](reference/daytona-architecture.md)
   * [DSPy Daytona Interpreter Boundary](reference/dspy-daytona-interpreter-boundary.md)
-  * [LiteLLM Proxy Models](reference/litellm-models.md)
+  * [LLM Provider Profiles](reference/llm-provider-profiles.md)
   * [Codebase Map](reference/codebase-map.md)
   * [Module Map](reference/module-map.md)
   * [Architecture Decision Records](reference/adr/README.md)

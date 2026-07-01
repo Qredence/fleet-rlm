@@ -65,7 +65,7 @@ class _RecordingLM:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def __call__(self, prompt: str) -> list[dict[str, str]]:
+    def __call__(self, prompt: str, **kwargs: Any) -> list[dict[str, str]]:
         self.calls.append(prompt)
         return [{"text": f"ok:{prompt}"}]
 
@@ -111,7 +111,7 @@ def test_llm_query_records_provider_wait_span(monkeypatch) -> None:
 
     class Host(LLMQueryMixin):
         def __init__(self) -> None:
-            self.sub_lm = lambda prompt: [{"text": f"answer: {prompt}"}]
+            self.sub_lm = lambda prompt, **kwargs: [{"text": f"answer: {prompt}"}]
             self.max_llm_calls = 3
             self.llm_call_timeout = 10
             self._llm_call_count = 0
@@ -154,50 +154,43 @@ def _make_host(sub_lm: Any, *, timeout: int = 10) -> Any:
     return Host()
 
 
-def test_query_sub_lm_wraps_sub_lm_in_bounded_chat_lm(monkeypatch) -> None:
-    """``_query_sub_lm`` must wrap the sub-LM in a ``BoundedChatLM`` with a real
-    HTTP timeout + max_tokens cap, cached per interpreter.
-
-    Regression: a 77s unbounded sub-LLM call was observed in tr-5671ce47 iter-4
-    — the future-timeout cannot kill the running worker thread, so the underlying
-    HTTP call needs its own ``timeout=`` (provided by ``BoundedChatLM``).
+def test_query_sub_lm_wraps_sub_lm_in_bounded_lm(monkeypatch) -> None:
+    """``_query_sub_lm`` must resolve stateless call-time config overrides using
+    ``build_lm_config`` with a per-IO timeout + max_tokens cap.
     """
-    from fleet_rlm.runtime import lm as lm_module
+    from fleet_rlm.runtime import config as rt_config
 
     _patch_mlflow(monkeypatch)
 
     build_calls: list[dict[str, Any]] = []
-    fake_bounded = _RecordingLM()
 
-    def fake_build(base: Any, *, max_tokens: int, temperature: float, timeout: float | None, num_retries: int = 0):
+    def fake_build(base: Any, *, max_tokens: int, temperature: float, timeout: float | None):
         build_calls.append(
             {
                 "base": base,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 "timeout": timeout,
-                "num_retries": num_retries,
             }
         )
-        return fake_bounded
+        return {"max_tokens": max_tokens, "temperature": temperature, "timeout": timeout}
 
-    monkeypatch.setattr(lm_module, "build_bounded_chat_lm", fake_build)
+    monkeypatch.setattr(rt_config, "build_lm_config", fake_build)
 
-    base_sentinel = object()  # non-None sub_lm so the bounded path is taken
-    host = _make_host(base_sentinel, timeout=12)
+    fake_bounded = _RecordingLM()
+    host = _make_host(fake_bounded, timeout=12)
     try:
         host.llm_query("hello")
-        host.llm_query("again")  # second call — must reuse the cached bounded LM
+        host.llm_query("again")
     finally:
         if host._sub_lm_executor is not None:
             host._sub_lm_executor.shutdown(wait=False)
 
-    # BoundedChatLM built once (cached on second call) with the sub-call caps.
-    assert len(build_calls) == 1, f"bounded LM should be cached (built once), got {len(build_calls)}"
+    # Config built twice per call (once for span setup, once inside executor thread).
+    assert len(build_calls) == 4
     assert build_calls[0]["timeout"] == 12, "timeout must mirror llm_call_timeout"
     assert build_calls[0]["max_tokens"] == 4096
-    assert build_calls[0]["num_retries"] == 0
-    # The bounded LM actually received the calls (not the raw base).
+    # The LM actually received the calls (with correct overrides passed).
     assert fake_bounded.calls == ["hello", "again"]
 
 
@@ -212,7 +205,7 @@ def test_llm_query_prepends_context_and_preserves_single_arg(monkeypatch) -> Non
     """
     _patch_mlflow(monkeypatch)
 
-    rec = _RecordingLM()  # no extractable credentials → build_bounded_chat_lm returns None → raw fallback
+    rec = _RecordingLM()  # no extractable credentials → build_bounded_lm returns None → raw fallback
     host = _make_host(rec)
     try:
         host.llm_query("what is this?", context="DOC")

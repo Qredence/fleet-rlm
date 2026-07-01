@@ -18,6 +18,12 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from fleet_rlm.integrations.daytona.sdk_ops import get_sandbox_id_from_interpreter
+from fleet_rlm.integrations.observability.mlflow_context import (
+    mlflow_child_span,
+    set_mlflow_span_outputs,
+)
+
 from ..config import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -124,6 +130,26 @@ class InterpreterPool:
         self._replenish_task = asyncio.create_task(self._replenish_loop(), name="pool-replenish")
 
     async def acquire(self, cfg: AppConfig | None = None) -> Any | None:
+        with mlflow_child_span(
+            "fleet_rlm.daytona_pool_acquire",
+            span_type="TOOL",
+            attributes={"fleet_rlm.sandbox_origin": "pool"},
+        ) as acquire_span:
+            try:
+                interpreter = await self._acquire_raw(cfg)
+                sandbox_id = get_sandbox_id_from_interpreter(interpreter) if interpreter is not None else ""
+                if sandbox_id and acquire_span is not None:
+                    acquire_span.set_attribute("fleet_rlm.sandbox_id", sandbox_id)
+                set_mlflow_span_outputs(
+                    acquire_span,
+                    {"status": "ok", "sandbox_id": str(sandbox_id or "")},
+                )
+                return interpreter
+            except Exception as acquire_exc:
+                set_mlflow_span_outputs(acquire_span, {"status": "error", "error": str(acquire_exc)})
+                raise
+
+    async def _acquire_raw(self, cfg: AppConfig | None = None) -> Any | None:
         """Get a ready interpreter from the pool.
 
         Tries in order:
@@ -173,6 +199,25 @@ class InterpreterPool:
         return interp
 
     async def release(self, interpreter: Any | None) -> None:
+        sandbox_id = get_sandbox_id_from_interpreter(interpreter) if interpreter is not None else ""
+        with mlflow_child_span(
+            "fleet_rlm.daytona_pool_release",
+            span_type="TOOL",
+            attributes={
+                "fleet_rlm.sandbox_origin": "pool",
+                "fleet_rlm.sandbox_id": str(sandbox_id or ""),
+            },
+        ) as span:
+            try:
+                await self._release_raw(interpreter)
+                set_mlflow_span_outputs(span, {"status": "ok", "sandbox_id": str(sandbox_id or "")})
+            except Exception as exc:
+                set_mlflow_span_outputs(
+                    span, {"status": "error", "error": str(exc), "sandbox_id": str(sandbox_id or "")}
+                )
+                raise
+
+    async def _release_raw(self, interpreter: Any | None) -> None:
         """Return an interpreter to the pool after use.
 
         Performs a lightweight reset (clears REPL state, preserves sandbox

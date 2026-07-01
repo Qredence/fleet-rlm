@@ -23,13 +23,13 @@ def _lm_test_deps(auth_required: bool = True):
     )
 
 
-def _byok_profile(provider_type: str = "openai_compatible", api_base: str = "https://x/v1"):
+def _byok_profile(provider_type: str = "openai_chat_completion", api_base: str = "https://x/v1"):
     return SimpleNamespace(provider_type=provider_type, api_base=api_base)
 
 
 def _byok_config(
-    provider_type: str = "openai_compatible",
-    litellm_model: str = "glm-5.2",
+    provider_type: str = "openai_chat_completion",
+    resolved_model_id: str = "glm-5.2",
     api_key: str = "sk-x",
     api_base: str = "https://x/v1",
 ):
@@ -39,8 +39,8 @@ def _byok_config(
         role="planner",
         profile_id=uuid4(),
         profile_name="p",
-        model_id=litellm_model,
-        litellm_model=litellm_model,
+        model_id=resolved_model_id,
+        resolved_model_id=resolved_model_id,
         api_key=api_key,
         api_base=api_base,
         provider_type=provider_type,
@@ -60,8 +60,8 @@ async def test_lm_connection_byok_models_compatible_validates_via_models(monkeyp
     """OpenAI-compatible BYOK planner validates via GET /models, not a chat completion."""
     from fleet_rlm.api.runtime_services import diagnostics
 
-    profile = _byok_profile("openai_compatible")
-    config = _byok_config("openai_compatible")
+    profile = _byok_profile("openai_chat_completion")
+    config = _byok_config("openai_chat_completion")
 
     async def fake_resolve(_c, _p, _i):
         return profile, config, None
@@ -96,8 +96,8 @@ async def test_lm_connection_byok_models_error_surfaces_catalog_error(monkeypatc
     """A failing /models GET yields ok=false with the (redacted) catalog error."""
     from fleet_rlm.api.runtime_services import diagnostics
 
-    profile = _byok_profile("openai_compatible")
-    config = _byok_config("openai_compatible", api_key="sk-secret")
+    profile = _byok_profile("openai_chat_completion")
+    config = _byok_config("openai_chat_completion", api_key="sk-secret")
 
     async def fake_resolve(_c, _p, _i):
         return profile, config, None
@@ -126,28 +126,30 @@ async def test_lm_connection_byok_models_error_surfaces_catalog_error(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_lm_connection_byok_anthropic_uses_chat_path(monkeypatch) -> None:
-    """Non-/models BYOK providers (e.g. real Anthropic) use the chat-completion smoke test."""
+async def test_lm_connection_byok_anthropic_uses_v1_models_path(monkeypatch) -> None:
+    """Anthropic-messages BYOK planners validate via GET /v1/models (x-api-key),
+    not a chat-completion smoke test."""
     import dspy
 
     from fleet_rlm.api.runtime_services import diagnostics
 
-    profile = _byok_profile("anthropic", api_base="https://api.anthropic.com")
+    profile = _byok_profile("anthropic_messages", api_base="https://api.anthropic.com")
     config = _byok_config(
-        "anthropic",
-        litellm_model="anthropic/claude-sonnet-4",
+        "anthropic_messages",
+        resolved_model_id="anthropic/claude-sonnet-4",
         api_base="https://api.anthropic.com",
     )
 
     async def fake_resolve(_c, _p, _i):
         return profile, config, None
 
-    async def fake_run_blocking(fn, *args, timeout=None):
-        return fn()
+    async def fake_validate(_profile):
+        return True, "GET https://api.anthropic.com/v1/models OK — 5 models: claude-sonnet-4", None
 
     monkeypatch.setattr(diagnostics, "_resolve_byok_planner", fake_resolve)
-    monkeypatch.setattr(diagnostics, "run_blocking", fake_run_blocking)
-    monkeypatch.setattr(dspy, "LM", _OkLm)
+    monkeypatch.setattr(diagnostics, "validate_profile_via_models_catalog", fake_validate)
+    # Defensive: chat path must not be taken for anthropic_messages any more.
+    monkeypatch.setattr(dspy, "LM", lambda **_k: (_ for _ in ()).throw(AssertionError("chat path must not run")))
 
     config_deps, lm_deps, diagnostics_deps = _lm_test_deps(True)
     result = await diagnostics.run_lm_connection_test(
@@ -161,7 +163,8 @@ async def test_lm_connection_byok_anthropic_uses_chat_path(monkeypatch) -> None:
     )
 
     assert result.ok is True
-    assert result.output_preview == "OK"
+    assert "/v1/models" in (result.output_preview or "")
+    assert result.checks["models_found"] is True
 
 
 @pytest.mark.asyncio

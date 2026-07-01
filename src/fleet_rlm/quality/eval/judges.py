@@ -7,8 +7,8 @@ in [0.0, 1.0].
 BYOK (Bring-Your-Own-Key) compliance (VAL-C-025):
     Judges use the configured chat LM from the BYOK environment, not hardcoded
     API keys. The LM is resolved via get_delegate_lm_from_env or
-    build_bounded_chat_lm from runtime.config/runtime.lm, which respect the
-    per-user BYOK credentials stored in llm_provider_profiles with RLS.
+    build_lm_config from runtime.config, which respect the per-user BYOK
+    credentials stored in llm_provider_profiles with RLS.
 
 Score clamping (VAL-C-026):
     Each judge returns a single float clamped to [0.0, 1.0], even when the
@@ -180,67 +180,32 @@ def _call_judge_lm(
         # Combine prompt and context
         full_prompt = f"{prompt}\n\nEvaluation Context:\n{evaluation_context}"
 
-        # Handle different LM types: ResponseAPILM (typed_lm), BoundedChatLM (legacy), dspy.LM
+        # Stock dspy.LM uses the legacy forward contract: invoke as lm(messages=...)
+        # and read the OpenAI-like chat completion response.
         messages: list[dict[str, str]] = [{"role": "user", "content": full_prompt}]
-
-        # Check if this is a typed_lm (ResponseAPILM) that needs LMRequest
-        forward_contract = getattr(lm, "forward_contract", None)
-        if forward_contract == "typed_lm":
-            # Construct LMRequest for typed_lm LMs
+        text = ""
+        if callable(lm):
             try:
-                import dspy
-                from dspy.core.types import LMTextPart
-
-                # LMRequest expects list[LMMessage] with role + parts (typed part objects)
-                typed_messages: list[dspy.LMMessage] = [
-                    dspy.LMMessage(role="user", parts=[LMTextPart(text=full_prompt)])
-                ]
-                request = dspy.LMRequest(
-                    model=lm.model,
-                    messages=typed_messages,
-                    config=dspy.LMConfig(
-                        temperature=0.0,
-                        max_tokens=512,
-                    ),
-                )
-                response = lm.forward(request)
-                # Extract text from LMResponse
-                if hasattr(response, "outputs") and response.outputs:
+                response = lm(messages=messages)
+                if isinstance(response, list):
+                    text = response[0] if response else ""
+                elif hasattr(response, "choices") and response.choices:
+                    text = response.choices[0].message.content
+                elif hasattr(response, "content"):
+                    text = response.content
+                elif hasattr(response, "outputs") and response.outputs:
+                    # LMResponse.outputs is a list of LMOutput objects
                     text = (
                         response.outputs[0].text if hasattr(response.outputs[0], "text") else str(response.outputs[0])
                     )
                 else:
                     text = str(response)
             except Exception as e:
-                logger.warning("typed_lm call failed for judge %s: %s", judge_name, e)
+                logger.warning("LM call failed for judge %s: %s", judge_name, e)
                 return 0.0
         else:
-            # Legacy LM interface (BoundedChatLM, dspy.LM)
-            if callable(lm):
-                try:
-                    response = lm(messages=messages)
-                    if isinstance(response, list):
-                        text = response[0] if response else ""
-                    elif hasattr(response, "choices") and response.choices:
-                        text = response.choices[0].message.content
-                    elif hasattr(response, "content"):
-                        text = response.content
-                    elif hasattr(response, "outputs") and response.outputs:
-                        # LMResponse.outputs is a list of LMOutput objects
-                        text = (
-                            response.outputs[0].text
-                            if hasattr(response.outputs[0], "text")
-                            else str(response.outputs[0])
-                        )
-                    else:
-                        text = str(response)
-                except Exception as e:
-                    logger.warning("Legacy LM call failed for judge %s: %s", judge_name, e)
-                    return 0.0
-            else:
-                # Fallback for unknown LM interface
-                logger.warning("Unknown LM interface for judge %s", judge_name)
-                return 0.0
+            logger.warning("Non-callable LM for judge %s", judge_name)
+            return 0.0
 
         # Extract score from response
         return _extract_score(str(text))

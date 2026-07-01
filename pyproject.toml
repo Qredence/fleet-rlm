@@ -31,12 +31,12 @@ dependencies = [
     # on RLM internals that are private API.
     "dspy==3.3.0b1",
     # Core orchestration and CLI/runtime ergonomics.
-    "daytona==0.187.0",
+    "daytona==0.192.0",
     "hydra-core>=1.3,<2",
     "prompt-toolkit>=3.0.50,<4",
     "rich>=15.0.0,<16",
     "structlog>=25.5.0,<26",
-    "typer>=0.26.7,<1",
+    "typer>=0.26.8,<1",
     # Data, document, and persistence layers.
     "aiosqlite>=0.20.0",
     "asyncpg>=0.31.0,<1",
@@ -50,23 +50,27 @@ dependencies = [
     "psycopg>=3.3.4,<4",
     "pydantic>=2.13.4,<3",
     "pydantic-settings>=2.14.2,<3",
-    "pypdf>=6.13.3",
-    "cryptography>=48.0.1",
+    "pypdf>=6.14.2",
+    # Capped <49 because mlflow==3.14.0 declares cryptography<49; 48.x is the
+    # patched floor and satisfies both. Drop the cap once mlflow relaxes it.
+    "cryptography>=48.0.1,<49",
     "python-dotenv>=1.2.2",
     "pyyaml>=6.0.3,<7",
     "sqlalchemy[asyncio]>=2.0.51,<3",
     "sqlmodel>=0.0.39",
     "tomli>=2.4.1; python_version < '3.11'",
     # Web API surface.
-    "fastapi[standard]>=0.138.1",
-    "joserfc>=1.0.1",
+    "fastapi[standard]>=0.138.2",
+    "joserfc>=1.7.2",
     "uvicorn>=0.47.0,<1",
     # Observability and external services.
-    # boto3 intentionally not a direct dep: zero imports in src/; litellm
-    # lazily imports boto3 only for Bedrock, which is not configured here.
+    # boto3 intentionally not a direct dep: zero imports in src/; litellm (DSPy's
+    # transitive dep) lazily imports boto3 only for Bedrock, which is not
+    # configured here.
     "mlflow[mcp]==3.14.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.42.1",
     "posthog>=7.21.0",
+    "fastapi-cloud-cli>=0.22.0",
 ]
 
 [project.urls]
@@ -131,10 +135,11 @@ override-dependencies = [
     "gitpython>=3.1.50",
     # Starlette <1.3.1 has form-limit DoS and request URL hostname parsing advisories.
     "starlette>=1.3.1",
-    # DSPy 3.2.x pins litellm<=1.82.6 but >=1.83.7 is required to resolve 7 CVEs.
-    # scorers.py no longer calls litellm directly (uses dspy.settings.lm instead),
-    # so the only litellm consumer is DSPy itself — its stable completion() path
-    # is unaffected by the 1.82→1.83 bump.
+    # litellm is installed only as DSPy's transitive dependency — fleet-rlm does
+    # NOT declare it as a direct dep in `[project].dependencies` and does not
+    # import it from `src/`. This override pin is the policy mechanism: DSPy
+    # 3.2.x pins litellm<=1.82.6 but >=1.83.7 is required to resolve 7 CVEs,
+    # and DSPy's stable completion() path is unaffected by the 1.82→1.83 bump.
     "litellm>=1.87.0",
     # urllib3 <2.7.0 has redirect header leak and streaming decompression issues.
     "urllib3>=2.7.0",
@@ -163,6 +168,7 @@ namespaces = false
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+junit_family = "xunit1"
 addopts = "-q --strict-markers --timeout=30"
 timeout_method = "thread"
 markers = [
@@ -299,7 +305,6 @@ exclude = [
     "tests/",
     "scripts/",
     "notebooks/",
-    "test_modal_guard.py",
     "setup.py",
 ]
 

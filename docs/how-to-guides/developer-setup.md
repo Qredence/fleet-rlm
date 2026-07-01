@@ -145,7 +145,7 @@ DSPY_LM_MODEL=openai/gpt-4o
 # LLM API Key (provider-specific)
 DSPY_LLM_API_KEY=sk-...
 
-# Optional: Custom API endpoint (for LiteLLM proxy or self-hosted)
+# Optional: Custom API endpoint (for custom LLM proxy/gateway or self-hosted)
 # DSPY_LM_API_BASE=https://your-proxy.com/v1
 
 # Development Auth Mode

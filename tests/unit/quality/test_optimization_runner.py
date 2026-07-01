@@ -370,7 +370,7 @@ def test_run_module_optimization_uses_selected_reflection_model(tmp_path, monkey
         "profile_id": "profile-1",
         "profile_name": "Research",
         "model_id": "provider/model-a",
-        "litellm_model": "openai/provider-model-a",
+        "resolved_model_id": "openai/provider-model-a",
         "lm_kwargs": {"model": "openai/provider-model-a", "api_key": "test"},
     }
 

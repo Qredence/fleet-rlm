@@ -367,7 +367,7 @@ Configure these in the FastAPI Cloud dashboard before deploying. This is the min
 | `DATABASE_REQUIRED` | `true` | Fail fast if Neon isn't reachable at startup; required for `AUTH_MODE=neon` admission |
 | `DATABASE_URL` | (injected by Neon add-on) | Pooled endpoint |
 | `FLEET_SECRET_ENCRYPTION_KEY` | (secret) | Fernet key used to encrypt hosted per-user BYOK provider credentials |
-| `DSPY_LM_MODEL` | e.g. `openai/gpt-4o` | LiteLLM model identifier with provider prefix |
+| `DSPY_LM_MODEL` | e.g. `openai/gpt-4o` | LLM model identifier with provider prefix (e.g. `openai/gpt-4o` or `anthropic/claude-3-5-sonnet`) |
 | `DSPY_DELEGATE_LM_MODEL` | e.g. `openai/gpt-4o-mini` | Optional but recommended |
 | `DSPY_LLM_API_KEY` | (secret) | LLM provider key |
 | `CORS_ALLOWED_ORIGINS` | `https://<your-frontend-host>` | Comma-separated; `*` is rejected in production |

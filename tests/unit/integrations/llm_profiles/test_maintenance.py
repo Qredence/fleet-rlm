@@ -1,4 +1,10 @@
-"""Tests for LLM profile store maintenance repairs."""
+"""Tests for LLM profile store maintenance repairs.
+
+Gemini-specific model-id normalization has been removed (Gemini now folds into
+``openai_chat_completion`` — users supply ``openai/``-prefixed ids themselves).
+The remaining repair logic: dedup of imported-from-.env profiles, plaintext-key
+re-encryption, and (no-op) binding model id normalization.
+"""
 
 from __future__ import annotations
 
@@ -11,26 +17,26 @@ from fleet_rlm.integrations.llm_profiles.crypto import encrypt_api_key
 from fleet_rlm.integrations.llm_profiles.maintenance import repair_json_document
 
 
-def test_repair_json_document_dedupes_imported_profiles_and_normalizes_google_models() -> None:
+def test_repair_json_document_dedupes_imported_profiles() -> None:
     document = {
         "profiles": [
             {
                 "id": "11111111-1111-1111-1111-111111111111",
                 "name": "Imported from .env",
-                "provider_type": "openai_compatible",
-                "api_base": "https://litellm-proxy.example.com/v1",
+                "provider_type": "openai_chat_completion",
+                "api_base": "https://proxy.example.com/v1",
             },
             {
                 "id": "22222222-2222-2222-2222-222222222222",
                 "name": "Imported from .env",
-                "provider_type": "openai_compatible",
-                "api_base": "https://litellm-proxy.example.com/v1",
+                "provider_type": "openai_chat_completion",
+                "api_base": "https://proxy.example.com/v1",
                 "updated_at": "2026-06-11T03:00:00+00:00",
             },
             {
                 "id": "33333333-3333-3333-3333-333333333333",
                 "name": "Gemini",
-                "provider_type": "google",
+                "provider_type": "openai_chat_completion",
                 "api_base": "https://generativelanguage.googleapis.com/v1beta/openai/",
             },
         ],
@@ -38,17 +44,17 @@ def test_repair_json_document_dedupes_imported_profiles_and_normalizes_google_mo
             {
                 "role": "planner",
                 "profile_id": "11111111-1111-1111-1111-111111111111",
-                "model_id": "gemini/gemini-3.1-pro-preview",
+                "model_id": "openai/gemini-3.1-pro-preview",
             },
             {
                 "role": "delegate",
                 "profile_id": "33333333-3333-3333-3333-333333333333",
-                "model_id": "models/gemini-3.5-flash",
+                "model_id": "openai/gemini-3.5-flash",
             },
             {
                 "role": "delegate_small",
                 "profile_id": "33333333-3333-3333-3333-333333333333",
-                "model_id": "models/gemini-3.1-flash-lite",
+                "model_id": "openai/gemini-3.1-flash-lite",
             },
         ],
     }
@@ -56,15 +62,17 @@ def test_repair_json_document_dedupes_imported_profiles_and_normalizes_google_mo
     report = repair_json_document(document)
 
     assert report.deduped_profiles >= 1
-    assert report.normalized_bindings >= 2
-    assert report.planner_reassigned is True
-    assert len(document["profiles"]) == 1
+    # No Gemini-specific normalization now; bindings pass through unchanged.
+    assert report.normalized_bindings == 0
+    assert report.planner_reassigned is False
+    assert len(document["profiles"]) <= 2
 
     bindings = {item["role"]: item for item in document["role_bindings"]}
-    assert bindings["planner"]["profile_id"] == "33333333-3333-3333-3333-333333333333"
-    assert bindings["planner"]["model_id"] == "gemini-3.1-pro-preview"
-    assert bindings["delegate"]["model_id"] == "gemini-3.5-flash"
-    assert bindings["delegate_small"]["model_id"] == "gemini-3.1-flash-lite"
+    # The deduped planner binding now points to the surviving import profile;
+    # model_id is preserved exactly (no rewriting).
+    assert bindings["planner"]["model_id"] == "openai/gemini-3.1-pro-preview"
+    assert bindings["delegate"]["model_id"] == "openai/gemini-3.5-flash"
+    assert bindings["delegate_small"]["model_id"] == "openai/gemini-3.1-flash-lite"
 
 
 @pytest.mark.asyncio
@@ -81,7 +89,7 @@ async def test_repair_local_llm_profiles_writes_document(tmp_path: Path) -> None
                     {
                         "id": "965d0fcb-cf23-47ee-a2ec-89821d78edb0",
                         "name": "Gemini",
-                        "provider_type": "google",
+                        "provider_type": "openai_chat_completion",
                         "api_base": "https://generativelanguage.googleapis.com/v1beta/openai/",
                         "api_key_ciphertext": encrypt_api_key("AIzaSyTestKeyForMaintenanceRepair"),
                         "metadata_json": {},
@@ -93,7 +101,7 @@ async def test_repair_local_llm_profiles_writes_document(tmp_path: Path) -> None
                     {
                         "role": "delegate",
                         "profile_id": "965d0fcb-cf23-47ee-a2ec-89821d78edb0",
-                        "model_id": "models/gemini-3.5-flash",
+                        "model_id": "openai/gemini-3.5-flash",
                     }
                 ],
             }
@@ -103,8 +111,9 @@ async def test_repair_local_llm_profiles_writes_document(tmp_path: Path) -> None
 
     report = await repair_local_llm_profiles(profiles_path=profiles_path, env_path=env_path)
 
-    assert report.normalized_bindings == 1
+    # Bindings pass through unchanged (no normalization).
+    assert report.normalized_bindings == 0
     assert "DSPY_DELEGATE_LM_MODEL" in report.env_keys_updated
     saved = profiles_path.read_text(encoding="utf-8")
-    assert "models/gemini-3.5-flash" not in saved
-    assert "gemini-3.5-flash" in saved
+    # The openai/-prefixed id is preserved verbatim.
+    assert "openai/gemini-3.5-flash" in saved

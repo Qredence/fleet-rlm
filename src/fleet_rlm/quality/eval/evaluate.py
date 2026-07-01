@@ -98,7 +98,7 @@ def _fetch_traces_from_mlflow(
         if fleet_exp:
             experiment_ids = ["0", fleet_exp.experiment_id]
 
-        # Filter to only chat turn traces (excludes ResponseAPILM judge traces)
+        # Filter to only chat turn traces (excludes judge-generated traces)
         base_filter = f"trace.timestamp >= {start_time_ms} AND trace.timestamp <= {end_time_ms}"
         trace_name_filter = 'tags.`mlflow.traceName` = "fleet_rlm.chat_turn"'
         combined_filter = f"{base_filter} AND {trace_name_filter}"
@@ -295,25 +295,6 @@ def _resolve_judge_lm(lm: Any = None) -> Any:
         logger.debug("runtime.config not available for planner LM resolution")
     except Exception as e:
         logger.warning("Failed to resolve judge LM from planner configuration: %s", e)
-
-    # Fallback: try build_bounded_chat_lm from the runtime
-    try:
-        from fleet_rlm.runtime.lm import build_bounded_chat_lm
-
-        # Attempt to construct a bounded LM from any available credentials
-        bounded_lm = build_bounded_chat_lm(
-            base=None,
-            max_tokens=4096,
-            temperature=0.0,
-            timeout=60.0,
-        )
-        if bounded_lm is not None:
-            logger.info("Resolved judge LM via build_bounded_chat_lm fallback")
-            return bounded_lm
-    except ImportError:
-        logger.debug("runtime.lm not available for LM resolution")
-    except Exception as e:
-        logger.warning("Failed to resolve judge LM via fallback: %s", e)
 
     logger.warning(
         "No judge LM available. Judges will return 0.0 for all traces. "

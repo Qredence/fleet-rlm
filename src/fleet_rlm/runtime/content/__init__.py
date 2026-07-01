@@ -21,6 +21,11 @@ from fleet_rlm.runtime.content.ingestion import (
     looks_like_binary,
     read_document_content,
 )
+from fleet_rlm.runtime.content.parse_recovery import (
+    extract_completion_from_parse_error,
+    is_degenerate_response,
+    truncate_completion,
+)
 
 __all__ = [
     "chunk_by_headers",
@@ -38,4 +43,7 @@ __all__ = [
     "extract_text_with_pypdf",
     "looks_like_binary",
     "read_document_content",
+    "extract_completion_from_parse_error",
+    "is_degenerate_response",
+    "truncate_completion",
 ]

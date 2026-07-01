@@ -95,6 +95,6 @@ The important rules are:
 ### Settings
 
 - `SettingsScreen` opens as a dialog first and falls back to the routed page.
-- Sections are `appearance`, `telemetry`, `litellm`, `runtime`, and `about`.
+- Sections are `appearance`, `telemetry`, `litellm` (LLM Providers / Profiles), `runtime`, and `about`.
 - Runtime settings and connectivity checks are handled in the settings feature
   tree, not in the workspace runtime.

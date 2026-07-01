@@ -462,6 +462,7 @@ async def build_chat_agent_context(runtime: PreparedChatRuntime, *, pool: Any | 
         from .interpreter_pool import InterpreterPool
 
         pool = InterpreterPool(runtime.cfg)
+
     interpreter = await pool.acquire(runtime.cfg)
     if interpreter is not None:
         kwargs["interpreter"] = interpreter

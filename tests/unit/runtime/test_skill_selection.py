@@ -83,71 +83,71 @@ def test_skill_selection_parses_stringified_skill_list() -> None:
     assert selected == ["sandbox-execution", "delegation"]
 
 
-def test_skill_selection_lm_clone_caps_tokens_and_disables_qwen_thinking() -> None:
-    from fleet_rlm.runtime.lm import BoundedChatLM
-    from fleet_rlm.runtime.modules.skill_selection import _build_skill_selection_lm
+def test_skill_selection_config_caps_tokens_and_disables_qwen_thinking() -> None:
+    import dspy
 
-    base = MagicMock()
-    base.model = "qwen3.7-max"
-    base.kwargs = {
-        "api_key": "test-key",
-        "api_base": "http://localhost:11434",
-        "custom_llm_provider": "openai",
-        "max_tokens": 65536,
-        "timeout": 60.0,
-    }
+    base = dspy.LM(
+        "qwen3.7-max",
+        api_key="test-key",
+        api_base="http://localhost:11434",
+        custom_llm_provider="openai",
+        max_tokens=65536,
+        timeout=60.0,
+    )
 
-    capped = _build_skill_selection_lm(base)
+    module = SkillSelectionModule(lm=base)
+    base_lm, config = module._get_skill_selection_config()
 
-    assert isinstance(capped, BoundedChatLM)
-    assert capped.model == "qwen3.7-max"
-    assert capped._max_tokens == 512
-    assert capped._temperature == 0.0
-    assert capped._timeout == 30.0
-    assert capped.num_retries == 0
-    assert capped._disable_thinking is True  # qwen thinking auto-off
-    assert capped._api_key == "test-key"
-    assert capped._api_base == "http://localhost:11434"
+    assert base_lm is base
+    assert config["max_tokens"] == 512
+    assert config["temperature"] == 0.0
+    assert config["timeout"] == 30.0
+    # qwen thinking auto-off via extra_body
+    assert config.get("extra_body") == {"enable_thinking": False}
 
 
-def test_skill_selection_lm_clone_returns_none_for_none_base() -> None:
-    from fleet_rlm.runtime.modules.skill_selection import _build_skill_selection_lm
+def test_skill_selection_config_returns_empty_overrides_for_none_base() -> None:
+    from fleet_rlm.runtime.config import build_lm_config
 
-    assert _build_skill_selection_lm(None) is None
+    assert build_lm_config(None, max_tokens=512, temperature=0.0, timeout=30.0) == {}
 
 
-def test_skill_selection_module_threads_delegate_lm_into_capped_clone() -> None:
-    from fleet_rlm.runtime.lm import BoundedChatLM
+def test_skill_selection_module_resolves_delegate_lm_into_config() -> None:
+    import dspy
 
-    base = MagicMock()
-    base.model = "qwen3.7-max"
-    base.kwargs = {"api_key": "k", "max_tokens": 65536}
+    base = dspy.LM(
+        "qwen3.7-max",
+        api_key="k",
+        max_tokens=65536,
+    )
 
     module = SkillSelectionModule(lm=base)
 
     assert module._select_lm is base
-    # The capped clone is a BoundedChatLM built from the delegate LM's creds.
-    assert isinstance(module._select_lm_capped, BoundedChatLM)
+    base_lm, config = module._get_skill_selection_config()
+    assert base_lm is base
+    assert config["max_tokens"] == 512
 
 
-def test_skill_selection_invoke_select_binds_capped_lm_context() -> None:
+def test_skill_selection_invoke_select_passes_config_overrides() -> None:
     module = SkillSelectionModule()
 
     seen: dict = {}
 
     def _record_select(**kwargs):
         seen["lm"] = getattr(dspy.settings, "lm", None)
+        seen["config"] = kwargs.get("config")
         return dspy.Prediction(skills=["diagnostics"], reasoning="ok")
 
     module.select = _record_select
-    capped = MagicMock(name="capped_lm")
-    module._select_lm_capped = capped
-    module._select_lm = MagicMock(name="raw_delegate")
+    raw_delegate = MagicMock(name="raw_delegate")
+    module._select_lm = raw_delegate
 
     module._invoke_select(context="ctx", available_skills="- a: b")
 
-    # The capped clone is bound as the active LM for the duration of the call.
-    assert seen["lm"] is capped
+    # The delegate is bound as the active LM, and overrides are passed to config.
+    assert seen["lm"] is raw_delegate
+    assert seen["config"]["max_tokens"] == 512
 
 
 def test_skill_selection_invoke_select_skips_context_when_no_lm(monkeypatch) -> None:
@@ -157,65 +157,75 @@ def test_skill_selection_invoke_select_skips_context_when_no_lm(monkeypatch) -> 
 
     def _record_select(**kwargs):
         seen["lm"] = getattr(dspy.settings, "lm", None)
+        seen["config"] = kwargs.get("config")
         return dspy.Prediction(skills=["diagnostics"], reasoning="ok")
 
     module.select = _record_select
-    # No bounded LM resolvable at all → _invoke_select must fall back to the
+    # No delegate LM resolvable at all → _invoke_select must fall back to the
     # global dspy LM without overriding the context.
-    monkeypatch.setattr(module, "_get_skill_selection_lm", lambda: None)
+    monkeypatch.setattr(module, "_get_skill_selection_config", lambda: (None, {"max_tokens": 512}))
 
     module._invoke_select(context="ctx", available_skills="- a: b")
 
-    # No LM resolvable → falls back to the global dspy LM (no override).
+    # No LM resolvable → falls back to the global dspy LM (no override), but config overrides are still passed.
     assert seen["lm"] is getattr(dspy.settings, "lm", None)
+    assert seen["config"] == {"max_tokens": 512}
 
 
-def test_get_skill_selection_lm_self_resolves_when_no_wired_lm(monkeypatch) -> None:
+def test_get_skill_selection_config_self_resolves_when_no_wired_lm(monkeypatch) -> None:
     """Regression: ``AgentRuntime`` does not forward the delegate LM to
     ``SkillSelectionModule`` (``self._select_lm`` is ``None`` in production), so
-    ``_get_skill_selection_lm`` must self-resolve from env and bound it —
-    otherwise skill selection lands on the unbounded planner LM (qwen3.7-plus,
-    thinking ON) for 18-26s/turn (tr-0dc96586 / tr-5671ce47).
+    ``_get_skill_selection_config`` must self-resolve from env.
     """
+    import dspy
+
     from fleet_rlm.runtime import config as rt_config
-    from fleet_rlm.runtime.lm import BoundedChatLM
 
     module = SkillSelectionModule()  # lm=None — the regression condition
     assert module._select_lm is None
 
-    fake_base = MagicMock(name="delegate_base")
-    fake_base.model = "gemini-3.1-flash-lite"
-    fake_base.kwargs = {"api_key": "k", "api_base": "http://x", "max_tokens": 8192}
+    fake_base = dspy.LM(
+        "gemini-3.1-flash-lite",
+        api_key="k",
+        api_base="http://x",
+        max_tokens=8192,
+    )
 
     monkeypatch.setattr(rt_config, "get_delegate_small_lm_from_env", lambda: fake_base)
     monkeypatch.setattr(rt_config, "get_delegate_lm_from_env", lambda: None)
 
-    resolved = module._get_skill_selection_lm()
+    base_lm, config = module._get_skill_selection_config()
 
-    assert isinstance(resolved, BoundedChatLM), "expected self-resolved bounded LM, fell back to raw/global instead"
+    assert base_lm is fake_base
+    assert config["max_tokens"] == 512
 
 
-def test_invoke_select_self_resolves_and_binds_bounded_lm(monkeypatch) -> None:
-    """When no LM is wired in, ``_invoke_select`` self-resolves a bounded LM
-    and binds it via ``dspy.settings.context`` (not the global planner LM)."""
+def test_invoke_select_self_resolves_and_binds_lm_context(monkeypatch) -> None:
+    """When no LM is wired in, ``_invoke_select`` self-resolves the LM and binds it via ``dspy.settings.context``."""
+    import dspy
+
     from fleet_rlm.runtime import config as rt_config
-    from fleet_rlm.runtime.lm import BoundedChatLM
 
     module = SkillSelectionModule()
     seen: dict = {}
 
     def _record_select(**kwargs):
         seen["lm"] = getattr(dspy.settings, "lm", None)
+        seen["config"] = kwargs.get("config")
         return dspy.Prediction(skills=["diagnostics"], reasoning="ok")
 
     module.select = _record_select
 
-    fake_base = MagicMock(name="delegate_base")
-    fake_base.model = "gemini-3.1-flash-lite"
-    fake_base.kwargs = {"api_key": "k", "api_base": "http://x", "max_tokens": 8192}
+    fake_base = dspy.LM(
+        "gemini-3.1-flash-lite",
+        api_key="k",
+        api_base="http://x",
+        max_tokens=8192,
+    )
     monkeypatch.setattr(rt_config, "get_delegate_small_lm_from_env", lambda: fake_base)
     monkeypatch.setattr(rt_config, "get_delegate_lm_from_env", lambda: None)
 
     module._invoke_select(context="ctx", available_skills="- a: b")
 
-    assert isinstance(seen["lm"], BoundedChatLM), f"expected bounded LM bound during select, got {seen.get('lm')!r}"
+    assert seen["lm"] is fake_base
+    assert seen["config"]["max_tokens"] == 512

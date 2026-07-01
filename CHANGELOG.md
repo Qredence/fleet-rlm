@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **Change:** Clarified that `litellm` is installed only as DSPy's transitive
+  dependency — it is no longer listed in `[project].dependencies` (it never
+  was, but the policy is now mechanically enforced). The
+  `[tool.uv].override-dependencies` pin `litellm>=1.87.0` remains the
+  mechanism closing 7 documented CVEs.
+  **Outcome:** `tests/unit/test_litellm_invariant.py` now parses
+  `pyproject.toml` via `tomllib` and fails if `litellm` is ever re-added to
+  direct deps or removed from the override pin.
+
 ## [0.6.2] - 2026-06-29
 
 ### Added

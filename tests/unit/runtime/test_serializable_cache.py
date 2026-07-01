@@ -4,15 +4,19 @@ VAL-CORR-004: ``_prepared_serializable_cache`` in
 ``runtime/modules/factory.py`` (``_StreamingRLM``) must be a per-instance dict
 (defined in ``__init__``), NOT a class-level dict. Two separate
 ``_StreamingRLM`` instances that receive input args with the same variable
-names but different content must NOT share cached data. Additionally, the
-cache must be cleared at the start of each ``forward()`` call so that stale
-data from a previous turn does not leak into the next turn.
+names but different content must NOT share cached data.
+
+The cache is reset once per ``EscalatingFleetModule._run_rlm`` invocation (on
+the chosen RLM instance) so that primary + corrective/parse-error retries
+within a turn reuse the serialized variables. ``forward()`` does NOT clear
+the cache — clearing is ``_run_rlm``'s responsibility. The cache key is
+``frozenset((name, id(value)))`` so content changes across turns (different
+object identities) miss the cache even when names are identical.
 """
 
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -98,71 +102,59 @@ class TestPreparedSerializableCachePerInstance:
 
 
 # ---------------------------------------------------------------------------
-# VAL-CORR-004: cache cleared at start of each forward() call
+# VAL-CORR-004: cache reset ownership and key shape
 # ---------------------------------------------------------------------------
 
 
-class TestPreparedSerializableCacheClearedPerForward:
-    """The cache is cleared at the start of each ``forward()`` call."""
+class TestPreparedSerializableCacheResetAndKey:
+    """``forward()`` does NOT clear the cache; ``_run_rlm`` owns the reset.
+    The cache key is ``frozenset((name, id(value)))`` so content changes across
+    turns miss the cache even when names are identical."""
 
-    def test_forward_clears_cache_at_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_forward_does_not_clear_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Populating the cache, then calling ``forward()`` (with the base
-        ``forward`` mocked so it does not execute the full RLM loop), must
-        leave the cache empty — confirming the clear-at-start logic runs
-        before the base ``forward`` body."""
+        ``forward`` mocked), must NOT clear the cache — the reset is
+        ``EscalatingFleetModule._run_rlm``'s responsibility so corrective
+        retries within a turn can reuse the serialized variables."""
         _patch_mlflow(monkeypatch)
         rlm = _make_rlm()
 
-        # Pre-populate the cache as if a previous turn left data behind.
         cache_key = frozenset({"context", "skills"})
         rlm._prepared_serializable_cache[cache_key] = {"context": "stale-data"}
         assert len(rlm._prepared_serializable_cache) == 1
 
-        # Mock the base class forward so we don't need a full RLM run, but
-        # still exercise the real _StreamingRLM.forward entry point which
-        # contains the cache-clear logic. The base forward is invoked via
-        # super().forward(**input_args) inside _StreamingRLM.forward.
         from fleet_rlm.runtime.modules import factory as factory_mod
 
         base_cls = factory_mod._DSPY_RLM_BASE
         monkeypatch.setattr(base_cls, "forward", lambda self, **kwargs: MagicMock())
 
-        # Call forward; the clear-at-start should empty the cache before
-        # (or regardless of) what the base forward does.
         rlm.forward()
 
-        assert rlm._prepared_serializable_cache == {}, (
-            "Cache must be cleared at the start of each forward() call so "
-            "stale data from a previous turn does not leak into the next turn."
+        # The pre-existing entry must still be present — forward() no longer
+        # clears. _run_rlm clears once per turn before the execution loop.
+        assert cache_key in rlm._prepared_serializable_cache, (
+            "forward() must NOT clear the serializable-var cache; the reset is "
+            "owned by EscalatingFleetModule._run_rlm so corrective retries "
+            "within a turn reuse the serialized variables."
         )
 
-    def test_forward_clears_cache_even_when_populated_within_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """After ``forward()`` returns, the cache reflects only data populated
-        during that same ``forward()`` call (the clear happens at the start,
-        so within-call population is preserved until the next call clears it)."""
-        _patch_mlflow(monkeypatch)
+    def test_cache_key_uses_name_and_object_identity(self) -> None:
+        """The cache key is ``frozenset((name, id(value)))``. Two
+        SandboxSerializable inputs with the same name but different object
+        identities must produce distinct cache keys so a new turn that rebinds
+        the same name to a fresh object misses the cache and re-serializes."""
         rlm = _make_rlm()
 
-        # Populate cache from a "previous turn".
-        rlm._prepared_serializable_cache[frozenset({"old"})] = {"old": "data"}
-        assert len(rlm._prepared_serializable_cache) == 1
+        obj_a = SimpleNamespace()
+        obj_b = SimpleNamespace()
+        key_a = frozenset([("context", id(obj_a))])
+        key_b = frozenset([("context", id(obj_b))])
 
-        captured: list[dict[str, Any]] = []
+        assert key_a != key_b, (
+            "Cache keys must include object identity (id(value)) so content "
+            "changes across turns miss the cache even when names are identical."
+        )
 
-        def fake_base_forward(self: Any, **kwargs: Any) -> Any:
-            # Simulate within-call population after the clear has run.
-            self._prepared_serializable_cache[frozenset({"new"})] = {"new": "data"}
-            captured.append(dict(self._prepared_serializable_cache))
-            return MagicMock()
-
-        from fleet_rlm.runtime.modules import factory as factory_mod
-
-        monkeypatch.setattr(factory_mod._DSPY_RLM_BASE, "forward", fake_base_forward)
-
-        rlm.forward()
-
-        # Within the call (after clear, during base forward), only the new
-        # entry should be present — the old entry must have been cleared.
-        assert len(captured) == 1
-        assert frozenset({"old"}) not in captured[0]
-        assert frozenset({"new"}) in captured[0]
+        rlm._prepared_serializable_cache[key_a] = {"context": "data-a"}
+        assert key_a in rlm._prepared_serializable_cache
+        assert key_b not in rlm._prepared_serializable_cache

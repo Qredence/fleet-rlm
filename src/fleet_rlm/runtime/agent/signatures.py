@@ -531,6 +531,14 @@ class RLMWorkspaceTurnSignature(dspy.Signature):
     ``.fleet-rlm/context/manifest.json`` from the workspace. This reveals the
     staged file paths, sizes, and metadata needed to plan your exploration.
 
+    If a ``context_index`` variable is available, inspect it FIRST — it contains
+    a pre-parsed structural index with section headers, character offsets, file
+    paths, and code block counts. Use ``context_index['sections']`` to locate
+    relevant sections by header, then slice ``context['document_text']`` using
+    the ``start`` and ``end`` offsets. Use ``context_index['file_paths']`` to
+    find specific files without scanning the full document. This avoids spending
+    iterations on trial-and-error regex to discover the document layout.
+
     ``context`` is reconstructed in the sandbox as a dict with keys
     ``document_text``, ``context_paths``, ``manifest``, and ``metadata``. When
     ``document_text`` is empty, open each staged ``.extracted.txt`` file listed

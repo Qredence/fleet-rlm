@@ -8,6 +8,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     pass
 
+from fleet_rlm.integrations.observability.mlflow_context import (
+    mlflow_child_span,
+    set_mlflow_span_outputs,
+)
 from fleet_rlm.runtime.execution.interpreter_protocol import (
     ExecutionProfile,
     StatefulWorkspaceInterpreterProtocol,
@@ -60,6 +64,7 @@ from .runtime import (
     DaytonaSandboxRuntime,
 )
 from .sandbox_executor import SandboxExecutor
+from .sdk_ops import get_sandbox_id_from_interpreter
 from .session_runtime import DaytonaSandboxSession
 from .workspace_manager import _UNSET, WorkspaceManager
 
@@ -358,11 +363,43 @@ class DaytonaInterpreter(
         return _sync_exit_impl(self)
 
     async def __aenter__(self) -> DaytonaInterpreter:
-        return await _async_enter_impl(self)
+        with mlflow_child_span(
+            "fleet_rlm.daytona_sandbox_setup",
+            span_type="TOOL",
+            attributes={
+                "fleet_rlm.sandbox_origin": "custom_interpreter",
+            },
+        ) as setup_span:
+            try:
+                res = await _async_enter_impl(self)
+                sandbox_id = get_sandbox_id_from_interpreter(self)
+                if sandbox_id and setup_span is not None:
+                    setup_span.set_attribute("fleet_rlm.sandbox_id", sandbox_id)
+                set_mlflow_span_outputs(setup_span, {"status": "ok", "sandbox_id": str(sandbox_id or "")})
+                return res
+            except Exception as exc:
+                set_mlflow_span_outputs(setup_span, {"status": "error", "error": str(exc)})
+                raise
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
-        _ = (exc_type, exc_val, exc_tb)
-        return await _async_exit_impl(self)
+        sandbox_id = get_sandbox_id_from_interpreter(self)
+        with mlflow_child_span(
+            "fleet_rlm.daytona_sandbox_teardown",
+            span_type="TOOL",
+            attributes={
+                "fleet_rlm.sandbox_origin": "custom_interpreter",
+                "fleet_rlm.sandbox_id": str(sandbox_id or ""),
+            },
+        ) as teardown_span:
+            try:
+                res = await _async_exit_impl(self)
+                set_mlflow_span_outputs(teardown_span, {"status": "ok", "sandbox_id": str(sandbox_id or "")})
+                return res
+            except Exception as exc:
+                set_mlflow_span_outputs(
+                    teardown_span, {"status": "error", "error": str(exc), "sandbox_id": str(sandbox_id or "")}
+                )
+                raise
 
     @property
     def tools(self) -> dict[str, Callable[..., Any]]:

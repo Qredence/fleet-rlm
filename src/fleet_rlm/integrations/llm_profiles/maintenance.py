@@ -1,4 +1,11 @@
-"""One-shot repairs for persisted LLM provider profiles and role bindings."""
+"""One-shot repairs for persisted LLM provider profiles and role bindings.
+
+The previous Google-specific model-id normalization branch is gone: Gemini now
+folds into ``openai_chat_completion`` (it speaks OpenAI-compatible Chat
+Completions via its ``/v1beta/openai/`` endpoint and users prefix with
+``openai/`` themselves). What remains: dedup of imported-from-.env profiles,
+plaintext-key re-encryption, and env mirroring.
+"""
 
 from __future__ import annotations
 
@@ -10,10 +17,9 @@ from typing import Any
 from fleet_rlm.integrations.config.runtime_settings import apply_env_updates, resolve_env_path
 
 from .crypto import decrypt_api_key, encrypt_api_key
-from .model_catalog import invalidate_profile_catalog, normalize_google_openai_model_id
+from .model_catalog import invalidate_profile_catalog
 from .resolver import mirror_role_configs_to_env, resolve_active_role_configs
 from .store import JsonLlmProfileStore, LlmProfileStore
-from .types import LlmProviderType
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +28,17 @@ IMPORT_PROFILE_LABEL = "Imported from .env"
 
 def normalize_api_base(api_base: str) -> str:
     return api_base.strip().rstrip("/")
+
+
+def normalize_binding_model_id(model_id: str) -> str:
+    """Pass through — no provider-specific normalization now.
+
+    Gemini id rewriting (``models/gemini-...`` -> bare) used to happen here;
+    it is no longer needed because Gemini users supply ``openai/``-prefixed
+    ids themselves against the OpenAI-compatible base, and the bare-id case
+    is handled by ``custom_llm_provider`` at the resolver layer.
+    """
+    return model_id.strip()
 
 
 def _repair_plaintext_api_keys(profiles: list[dict[str, Any]]) -> int:
@@ -37,15 +54,6 @@ def _repair_plaintext_api_keys(profiles: list[dict[str, Any]]) -> int:
                 profile["api_key_ciphertext"] = encrypt_api_key(ciphertext)
                 repaired += 1
     return repaired
-
-
-def normalize_binding_model_id(model_id: str, provider_type: LlmProviderType) -> str:
-    if provider_type != "google":
-        return model_id.strip()
-    normalized = normalize_google_openai_model_id(model_id.strip())
-    if normalized.startswith("gemini/"):
-        return normalized.removeprefix("gemini/")
-    return normalized
 
 
 @dataclass(slots=True)
@@ -96,38 +104,20 @@ def _repair_document(document: dict[str, Any]) -> LlmProfileRepairReport:
                 binding["profile_id"] = remap[str(profile_id)]
 
     profiles_by_id = {str(profile.get("id")): profile for profile in profiles}
-    google_profiles = [profile for profile in profiles if profile.get("provider_type") == "google"]
-    google_profile = next(
-        (profile for profile in google_profiles if profile.get("name") == "Gemini"),
-        google_profiles[0] if google_profiles else None,
-    )
 
     for binding in bindings:
-        role = binding.get("role")
         profile_id = binding.get("profile_id")
         if not profile_id:
             continue
         profile = profiles_by_id.get(str(profile_id))
         if profile is None:
             continue
-        provider_type = profile.get("provider_type", "openai_compatible")
         current_model = str(binding.get("model_id") or "")
-
-        if provider_type == "google":
-            google_model = normalize_binding_model_id(current_model, "google")
-            if google_model != current_model:
-                binding["model_id"] = google_model
-                report.normalized_bindings += 1
-                invalidate_profile_catalog(str(profile_id))
-            continue
-
-        if role == "planner" and google_profile is not None and "gemini" in current_model.lower():
-            google_model = normalize_binding_model_id(current_model, "google")
-            binding["profile_id"] = str(google_profile.get("id"))
-            binding["model_id"] = google_model or "gemini-3.1-pro-preview"
-            report.planner_reassigned = True
+        normalized_model = normalize_binding_model_id(current_model)
+        if normalized_model != current_model:
+            binding["model_id"] = normalized_model
             report.normalized_bindings += 1
-            invalidate_profile_catalog(str(google_profile.get("id")))
+            invalidate_profile_catalog(str(profile_id))
 
     report.repaired_plaintext_keys = _repair_plaintext_api_keys(profiles)
 
@@ -154,7 +144,7 @@ async def repair_persisted_llm_profiles(
     *,
     env_path: Path | None = None,
 ) -> LlmProfileRepairReport:
-    """Repair duplicate imports, Google model ids, and mirror bindings to .env."""
+    """Repair duplicate imports, normalize binding model ids, and mirror to .env."""
     report = LlmProfileRepairReport()
     if not isinstance(store, JsonLlmProfileStore):
         logger.info("Skipping LLM profile repair for non-JSON profile store.")

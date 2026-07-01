@@ -61,7 +61,7 @@ DSPY_LLM_API_KEY=sk-your-api-key-here
 # DSPY_LM_API_KEY=your-anthropic-key
 ```
 
-For other supported models, see the [LiteLLM model availability](../reference/litellm-models.md) guide.
+For other supported models and configurations, see the [LLM Provider Profiles](../reference/llm-provider-profiles.md) guide.
 
 ### 3. Environment Variables Reference
 
@@ -69,7 +69,7 @@ For other supported models, see the [LiteLLM model availability](../reference/li
 |----------|----------|-------------|
 | `DSPY_LM_MODEL` | Yes | LLM model identifier (e.g., `openai/gpt-4o-mini`) |
 | `DSPY_LLM_API_KEY` | Yes | API key for your LLM provider |
-| `DSPY_LM_API_BASE` | No | Custom API endpoint (for LiteLLM proxy) |
+| `DSPY_LM_API_BASE` | No | Custom API endpoint (for LLM proxy or gateway) |
 
 ## Launch the Web UI
 

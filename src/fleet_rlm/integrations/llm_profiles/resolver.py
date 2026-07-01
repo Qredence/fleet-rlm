@@ -6,9 +6,11 @@ import os
 from typing import Any
 from uuid import UUID
 
-from .model_catalog import _litellm_model_id
+from .model_catalog import _resolve_model_id
 from .store import LlmProfileStore, decrypt_profile_api_key
 from .types import (
+    WIRE_FORMAT_TO_LITELLM_PROVIDER,
+    WIRE_FORMAT_TO_MODEL_TYPE,
     LlmProfileBundle,
     LlmProviderProfileRecord,
     LlmProviderType,
@@ -51,13 +53,13 @@ def resolve_role_config(
     api_key = decrypt_profile_api_key(profile)
     if not api_key:
         return None
-    litellm_model = _litellm_model_id(profile.provider_type, binding.model_id)
+    resolved_model_id = _resolve_model_id(profile.provider_type, binding.model_id)
     return ResolvedRoleLmConfig(
         role=role,
         profile_id=profile.id,
         profile_name=profile.name,
         model_id=binding.model_id,
-        litellm_model=litellm_model,
+        resolved_model_id=resolved_model_id,
         api_key=api_key,
         api_base=profile.api_base or None,
         provider_type=profile.provider_type,
@@ -74,14 +76,14 @@ async def resolve_active_role_configs(store: LlmProfileStore) -> dict[LlmRoleNam
     return resolved
 
 
-def env_litellm_model_name(config: ResolvedRoleLmConfig) -> str:
-    """Map profile-native Google ids to LiteLLM-prefixed env identifiers."""
-    model = config.litellm_model.strip()
-    if model.startswith("gemini-") and "/" not in model:
-        return f"openai/{model}"
-    if model.startswith("gemini/gemini-"):
-        return f"openai/{model.removeprefix('gemini/')}"
-    return model
+def env_resolved_model_name(config: ResolvedRoleLmConfig) -> str:
+    """Return the resolved model id as it should be mirrored to env vars.
+
+    All wire formats now use LiteLLM-recognized provider prefixes already
+    (openai/ or anthropic/). Gemini users prefix with ``openai/`` themselves
+    — Gemini is folded into ``openai_chat_completion``.
+    """
+    return config.resolved_model_id.strip()
 
 
 def mirror_role_configs_to_env(role_configs: dict[LlmRoleName, ResolvedRoleLmConfig | None]) -> dict[str, str]:
@@ -90,7 +92,7 @@ def mirror_role_configs_to_env(role_configs: dict[LlmRoleName, ResolvedRoleLmCon
         config = role_configs.get(role)
         if config is None:
             continue
-        updates[env_keys["model"]] = env_litellm_model_name(config)
+        updates[env_keys["model"]] = env_resolved_model_name(config)
         updates[env_keys["api_key"]] = config.api_key
         if config.api_base:
             updates[env_keys["api_base"]] = config.api_base
@@ -104,25 +106,22 @@ def build_lm_kwargs_from_resolved(
     timeout: int | float | None = None,
     temperature: float | None = None,
 ) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {
-        "model": config.litellm_model,
-        "api_key": config.api_key,
-    }
+    kwargs: dict[str, Any] = {"model": config.resolved_model_id, "api_key": config.api_key}
     if config.api_base:
         kwargs["api_base"] = config.api_base
-    # OpenAI-/Anthropic-compatible endpoints that are not LiteLLM proxies use a raw
-    # model id (no provider prefix); pass an explicit provider hint so litellm
-    # routes the bare model name against the custom api_base. For Anthropic,
-    # litellm then appends "/v1/messages" to the api_base and sends x-api-key +
-    # anthropic-version. LiteLLM-proxy and real-OpenAI/Anthropic profiles keep
-    # their prefixed model id and need no hint.
-    if config.api_base and "/" not in config.litellm_model:
-        if config.provider_type == "openai_compatible":
-            kwargs["custom_llm_provider"] = "openai"
-        elif config.provider_type == "anthropic_compatible":
-            kwargs["custom_llm_provider"] = "anthropic"
+        provider_hint = WIRE_FORMAT_TO_LITELLM_PROVIDER[config.provider_type]
+        if provider_hint:
+            # Bare model id on a custom api_base — tell LiteLLM which
+            # transport to use so it doesn't crash with "LLM Provider NOT provided".
+            kwargs["custom_llm_provider"] = provider_hint
+    kwargs["model_type"] = WIRE_FORMAT_TO_MODEL_TYPE[config.provider_type]
     if max_tokens is not None:
-        kwargs["max_tokens"] = max_tokens
+        # The Responses endpoint drops `max_tokens` silently; it expects
+        # `max_output_tokens`. DSPy 3.3.0b1 does not rename it for us.
+        if config.provider_type == "openai_responses":
+            kwargs["max_output_tokens"] = max_tokens
+        else:
+            kwargs["max_tokens"] = max_tokens
     if timeout is not None:
         kwargs["timeout"] = timeout
     if temperature is not None:
@@ -157,11 +156,31 @@ def import_env_profile_payload() -> dict[str, str]:
     }
 
 
-def infer_provider_type_from_model(model_id: str) -> LlmProviderType:
+def infer_provider_type_from_model(
+    model_id: str,
+    *,
+    api_base: str | None = None,
+    api_base_env: str = "DSPY_LM_API_BASE",
+) -> LlmProviderType:
+    """Infer a wire-format type from a model id and optional api_base.
+
+    Used by the env-var fallback path (no profile row). ``api_base`` (when
+    provided) takes precedence; otherwise ``api_base_env`` is consulted.
+
+    Mapping:
+      - ``anthropic/<id>`` -> ``anthropic_messages``
+      - ``openai/<id>`` without a custom api_base -> ``openai_responses``
+        (canonical OpenAI endpoint, Responses API)
+      - any other prefix or a bare id *with* a custom api_base ->
+        ``openai_chat_completion``
+      - bare id without api_base -> ``openai_chat_completion``
+        (safe default; LiteLLM infers OpenAI for well-known ids)
+    Gemini is folded into ``openai_chat_completion`` (it speaks OpenAI-compatible
+    Chat Completions via its `/v1beta/openai/` endpoint — users prefix with ``openai/``).
+    """
+    resolved_api_base = api_base or os.getenv(api_base_env, "").strip()
     if model_id.startswith("anthropic/"):
-        return "anthropic"
-    if model_id.startswith("gemini/") or "gemini" in model_id:
-        return "google"
-    if model_id.startswith("openai/"):
-        return "openai_compatible" if os.getenv("DSPY_LM_API_BASE", "").strip() else "openai"
-    return "openai_compatible"
+        return "anthropic_messages"
+    if model_id.startswith("openai/") and not resolved_api_base:
+        return "openai_responses"
+    return "openai_chat_completion"

@@ -1,4 +1,12 @@
-"""Dynamic model catalog fetchers for LLM provider profiles."""
+"""Dynamic model catalog fetchers for LLM provider profiles.
+
+Two fetch patterns cover all three wire formats:
+  - Standard ``GET /models`` with ``Authorization: Bearer <key>`` for both
+    ``openai_responses`` and ``openai_chat_completion`` (OpenAI, OpenRouter,
+    vLLM, Ollama, Alibaba MaaS, Gemini's `/v1beta/openai/` endpoint, etc.).
+  - Anthropic ``GET /v1/models`` with ``x-api-key`` + ``anthropic-version``
+    headers for ``anthropic_messages`` (Anthropic-compatible proxies).
+"""
 
 from __future__ import annotations
 
@@ -11,7 +19,7 @@ from urllib.parse import urljoin
 import httpx
 
 from .store import decrypt_profile_api_key
-from .types import LITELLM_PROVIDER_PREFIX, LlmProviderProfileRecord, LlmProviderType
+from .types import LlmProviderProfileRecord, LlmProviderType
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +38,7 @@ ANTHROPIC_STATIC_MODELS: tuple[str, ...] = (
 class ModelCatalogEntry:
     id: str
     label: str
-    litellm_model: str
+    resolved_model_id: str
 
 
 @dataclass(slots=True)
@@ -56,43 +64,27 @@ def _normalize_base_url(api_base: str) -> str:
     return api_base.rstrip("/")
 
 
-def normalize_google_openai_model_id(model_id: str) -> str:
-    """Strip the native ``models/`` prefix from Gemini REST model ids."""
+def _resolve_model_id(provider_type: LlmProviderType, model_id: str) -> str:
+    """Normalize a model id for the given wire format.
+
+    All three formats accept either a LiteLLM-recognized provider prefix
+    (``openai/gpt-4o``, ``anthropic/claude-...``) passed through verbatim, or
+    a bare model id (preserved as-is so ``custom_llm_provider`` from
+    ``build_lm_kwargs_from_resolved`` does the routing against ``api_base``).
+    """
     normalized = model_id.strip()
-    if normalized.startswith("models/"):
-        return normalized.removeprefix("models/")
+    if "/" in normalized:
+        return normalized
     return normalized
 
 
-def _litellm_model_id(provider_type: LlmProviderType, model_id: str) -> str:
-    normalized = model_id.strip()
-    if provider_type == "google":
-        bare = normalize_google_openai_model_id(normalized)
-        if "/" in bare:
-            return bare
-        return f"{LITELLM_PROVIDER_PREFIX['google']}/{bare}"
-    if "/" in normalized:
-        return normalized
-    if provider_type in ("openai_compatible", "anthropic_compatible"):
-        # OpenAI-/Anthropic-compatible endpoint that is not a LiteLLM proxy
-        # (vLLM, Ollama, Aliyun MAAS, custom Anthropic gateway, ...): keep the
-        # raw model id. The caller passes custom_llm_provider so litellm routes
-        # it against the custom api_base without prefixing the model name.
-        return normalized
-    prefix = {
-        "openai": "openai",
-        "anthropic": "anthropic",
-        "litellm_proxy": "openai",
-    }[provider_type]
-    return f"{prefix}/{normalized}"
-
-
 def _entry(model_id: str, provider_type: LlmProviderType) -> ModelCatalogEntry:
-    litellm_model = _litellm_model_id(provider_type, model_id)
-    return ModelCatalogEntry(id=model_id, label=model_id, litellm_model=litellm_model)
+    resolved_model_id = _resolve_model_id(provider_type, model_id)
+    return ModelCatalogEntry(id=model_id, label=model_id, resolved_model_id=resolved_model_id)
 
 
-async def _fetch_openai_compatible_models(*, api_base: str, api_key: str) -> list[ModelCatalogEntry]:
+async def _fetch_openai_format_models(*, api_base: str, api_key: str) -> list[ModelCatalogEntry]:
+    """Standard ``GET /models`` with ``Authorization: Bearer <key>``."""
     base = _normalize_base_url(api_base)
     url = urljoin(f"{base}/", "models")
     headers = {"Authorization": f"Bearer {api_key}"}
@@ -104,15 +96,15 @@ async def _fetch_openai_compatible_models(*, api_base: str, api_key: str) -> lis
     if not isinstance(models, list):
         return []
     ids = sorted({str(item.get("id", "")).strip() for item in models if isinstance(item, dict) and item.get("id")})
-    return [_entry(model_id, "openai_compatible") for model_id in ids if model_id]
+    return [_entry(model_id, "openai_chat_completion") for model_id in ids if model_id]
 
 
-async def _fetch_anthropic_compatible_models(*, api_base: str, api_key: str) -> list[ModelCatalogEntry]:
+async def _fetch_anthropic_format_models(*, api_base: str, api_key: str) -> list[ModelCatalogEntry]:
     """Fetch models from a custom Anthropic-format endpoint (POST /v1/messages).
 
     Anthropic exposes ``GET {api_base}/v1/models`` and authenticates with the
-    ``x-api-key`` header plus an ``anthropic-version`` header. The response shape
-    (``{"data": [{"id": ...}]}``) matches the OpenAI /models payload.
+    ``x-api-key`` header plus an ``anthropic-version`` header. The response
+    shape (``{"data": [{"id": ...}]}``) matches the OpenAI /models payload.
     """
     base = _normalize_base_url(api_base)
     url = urljoin(f"{base}/", "v1/models")
@@ -125,7 +117,7 @@ async def _fetch_anthropic_compatible_models(*, api_base: str, api_key: str) -> 
     if not isinstance(models, list):
         return []
     ids = sorted({str(item.get("id", "")).strip() for item in models if isinstance(item, dict) and item.get("id")})
-    return [_entry(model_id, "anthropic_compatible") for model_id in ids if model_id]
+    return [_entry(model_id, "anthropic_messages") for model_id in ids if model_id]
 
 
 async def _fetch_provider_models(profile: LlmProviderProfileRecord) -> list[ModelCatalogEntry]:
@@ -136,38 +128,20 @@ async def _fetch_provider_models(profile: LlmProviderProfileRecord) -> list[Mode
     provider_type = profile.provider_type
     api_base = profile.api_base
 
-    if provider_type == "anthropic":
+    # Built-in Anthropic does not expose a public /models endpoint; return the
+    # curated static catalog so users can still pick a model in the UI.
+    if provider_type == "anthropic_messages" and not api_base:
         return [_entry(model_id, provider_type) for model_id in ANTHROPIC_STATIC_MODELS]
 
-    if provider_type in {"openai", "google", "openai_compatible", "litellm_proxy"}:
-        if not api_base:
-            return []
-        entries = await _fetch_openai_compatible_models(api_base=api_base, api_key=api_key)
-        if provider_type == "openai":
-            return [
-                ModelCatalogEntry(id=entry.id, label=entry.id, litellm_model=_litellm_model_id("openai", entry.id))
-                for entry in entries
-            ]
-        if provider_type == "google":
-            google_models: list[ModelCatalogEntry] = []
-            seen: set[str] = set()
-            for entry in entries:
-                model_id = normalize_google_openai_model_id(entry.id)
-                if not model_id or model_id in seen:
-                    continue
-                seen.add(model_id)
-                google_models.append(
-                    ModelCatalogEntry(id=model_id, label=model_id, litellm_model=model_id),
-                )
-            return google_models
-        return entries
+    if not api_base:
+        return []
 
-    if provider_type == "anthropic_compatible":
-        if not api_base:
-            return []
-        return await _fetch_anthropic_compatible_models(api_base=api_base, api_key=api_key)
+    if provider_type == "anthropic_messages":
+        return await _fetch_anthropic_format_models(api_base=api_base, api_key=api_key)
 
-    return []
+    # openai_responses and openai_chat_completion both use the standard
+    # Bearer /models pattern.
+    return await _fetch_openai_format_models(api_base=api_base, api_key=api_key)
 
 
 async def fetch_profile_model_catalog(
@@ -199,7 +173,7 @@ async def fetch_profile_model_catalog(
 
 
 def _provider_fallback(provider_type: LlmProviderType) -> tuple[str, ...]:
-    if provider_type == "anthropic":
+    if provider_type == "anthropic_messages":
         return ANTHROPIC_STATIC_MODELS
     return ()
 
@@ -209,16 +183,14 @@ def invalidate_profile_catalog(profile_id: str) -> None:
 
 
 def catalog_to_payload(models: list[ModelCatalogEntry]) -> list[dict[str, Any]]:
-    return [{"id": item.id, "label": item.label, "litellm_model": item.litellm_model} for item in models]
+    return [{"id": item.id, "label": item.label, "resolved_model_id": item.resolved_model_id} for item in models]
 
 
 # Provider types whose endpoints expose an OpenAI- or Anthropic-style /models
 # endpoint. For these, the connectivity Test validates via a lightweight
 # GET /models (Bearer) or GET /v1/models (x-api-key) instead of a chat
 # completion — no provider cold start, no token spend.
-MODELS_ENDPOINT_PROVIDER_TYPES = frozenset(
-    {"openai", "google", "openai_compatible", "litellm_proxy", "anthropic_compatible"}
-)
+MODELS_ENDPOINT_PROVIDER_TYPES = frozenset({"openai_responses", "openai_chat_completion", "anthropic_messages"})
 
 
 async def validate_profile_via_models_catalog(
@@ -233,7 +205,7 @@ async def validate_profile_via_models_catalog(
     catalog = await fetch_profile_model_catalog(profile, force_refresh=True)
     if catalog.models:
         ids = [entry.id for entry in catalog.models[:5]]
-        suffix = "v1/models" if profile.provider_type == "anthropic_compatible" else "models"
+        suffix = "v1/models" if profile.provider_type == "anthropic_messages" else "models"
         preview = f"GET {profile.api_base.rstrip('/')}/{suffix} OK — {len(catalog.models)} models: {', '.join(ids)}"
         return True, preview, None
     return False, None, catalog.error or "No models returned by /models endpoint."

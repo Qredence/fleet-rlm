@@ -309,8 +309,11 @@ The `dspy.RLM` class extends DSPy with Daytona sandbox execution. Configure it t
 
 ### Adapter Overrides
 
-Structured runtime modules default to `JSONAdapter`, while non-runtime-module DSPy contexts use
-the optional `DSPY_ADAPTER` override when configured.
+Structured runtime modules default to `ChatAdapter` (DSPy's default, with its native automatic
+fallback to `JSONAdapter` on parse failure — see DSPy's `dspy/adapters/chat_adapter.py`), while
+non-runtime-module DSPy contexts use the optional `DSPY_ADAPTER` override when configured. Set
+`DSPY_STRUCTURED_OUTPUT_ADAPTER=json` to opt back into `JSONAdapter` as the primary adapter for
+these modules.
 
 - `DSPY_STRUCTURED_OUTPUT_ADAPTER=chat|json|none`
 - `DSPY_ADAPTER=chat|json|none`
