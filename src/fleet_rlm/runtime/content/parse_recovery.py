@@ -141,3 +141,14 @@ def truncate_completion(completion: str) -> str:
     if len(completion) <= limit:
         return completion
     return completion[:limit]
+
+
+def format_parse_error_output(exc: Exception) -> str:
+    """Extract, analyze, and safely format a parse error to prevent REPL history pollution."""
+    raw_completion = extract_completion_from_parse_error(exc)
+    if raw_completion:
+        truncated = truncate_completion(raw_completion)
+        if is_degenerate_response(truncated):
+            return f"[ParseError] Degenerate response or echo-back detected: {truncated[:200]}..."
+        return f"[ParseError] Malformed structured output: {truncated[:200]}..."
+    return f"[ParseError] {str(exc)[:500]}"

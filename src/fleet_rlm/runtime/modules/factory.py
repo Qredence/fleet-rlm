@@ -38,6 +38,9 @@ from fleet_rlm.runtime.content.parse_recovery import (
     extract_completion_from_parse_error as _extract_completion,
 )
 from fleet_rlm.runtime.content.parse_recovery import (
+    format_parse_error_output,
+)
+from fleet_rlm.runtime.content.parse_recovery import (
     is_degenerate_response as _is_degenerate,
 )
 from fleet_rlm.runtime.content.parse_recovery import (
@@ -680,18 +683,8 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                             f"RLM action generation parse errors exceeded cap "
                             f"({self._consecutive_parse_errors}) at iteration {iteration}; escalating."
                         )
-                    # Truncate raw completion if extracted, to avoid polluting the REPL history
-                    # with potentially massive echoed inputs or malformed blocks.
-                    raw_completion = self._extract_completion_from_parse_error(exc)
-                    if raw_completion:
-                        truncated = self._truncate_completion(raw_completion)
-                        is_degenerate = self._is_degenerate_response(truncated)
-                        if is_degenerate:
-                            err_msg = f"[ParseError] Degenerate response or echo-back detected: {truncated[:200]}..."
-                        else:
-                            err_msg = f"[ParseError] Malformed structured output: {truncated[:200]}..."
-                    else:
-                        err_msg = f"[ParseError] {str(exc)[:500]}"
+                    # Safely format the parse error to prevent REPL history pollution.
+                    err_msg = format_parse_error_output(exc)
 
                     cur_history = self._resolve_repl_history(args, kwargs)
                     new_history = self._append_repl_entry(
