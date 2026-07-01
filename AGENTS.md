@@ -71,6 +71,8 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Prefer preserving Agent Elements design tokens (`--an-max-width`) rather than introducing arbitrary Tailwind classes for chat width adjustments.
 - Use `pnpm run check` in `src/frontend` to verify formats, types, lints, and unit tests in a single pass.
 - Prefer running Python scripts/commands using `uv run` over raw `python3` or `python` (aligned with user CLI tooling preferences).
+- Avoid introducing direct `litellm` usage in application code; reach LLM providers through `dspy.LM` instead.
+- Prefer wire-protocol-named Literal unions (`openai_responses`, `openai_chat_completion`, `anthropic_messages`) over vendor-flavored or `_compatible`-suffixed provider-type enums, and keep LLM profiles flat (profile name, provider type, base endpoint, API key) rather than over-abstracting.
 
 ## Learned Workspace Facts
 
@@ -85,3 +87,4 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Scratch or evaluation directories (`mlartifacts/`, `artifacts/`, `logs/`, `FINDINGS_REPORT.md`) are untracked by `.gitignore`. Codex hooks must be configured inline under `[hooks]` in `.codex/config.toml`, as `.codex/hooks.json` is deprecated.
 - The backend falls back to local SQLite store (`integrations/local_store.py`) if `DATABASE_URL` is unset, unless `DATABASE_REQUIRED=true` (staging/production). Local settings are patchable via `PATCH /api/v1/runtime/settings` (local-only).
 - To prevent cascading timeouts and state leakage in test suites: intercept/stub out external auth network calls like `NeonAuthProvider._fetch_jwks` returning empty keys, and reset global singletons/semaphores using aggressive `autouse` teardown fixtures.
+- Under DSPy 3.3.Xb (normalized LM API), any `BaseLM` or bounded LM must have its provider explicitly resolved (via prefix or `provider` kwargs). Prefer stock `dspy.LM` with stateless config overrides passed directly to predictors/LM calls (using `dspy.settings.context` if needed) over stateful `copy()` or custom wrappers to ensure thread/session safety.
