@@ -29,9 +29,7 @@ MCP-backed ReAct tools are the exception: they must use `dspy.Tool.from_mcp_tool
 `dspy.RLM` accepts `max_iterations`, `max_llm_calls`, and `max_output_chars`. Fleet wires these from runtime settings into `EscalatingFleetModule` / `AgentRuntime` construction in `runtime/factory.py`.
 Fleet defaults `max_output_chars` to 5000 for chat/runtime paths so repeated
 REPL inspection does not compound large outputs into later prompts. Streaming
-RLM action generation is scoped to DSPy's `JSONAdapter`, avoiding the default
-`ChatAdapter` parse-failure fallback that would otherwise make an extra LM call
-for structured `reasoning` / `code` outputs.
+RLM action generation is aligned with DSPy's default `ChatAdapter` (with its native automatic fallback to `JSONAdapter` on parse failure), rather than forcing `JSONAdapter` as primary.
 
 ## Related files
 

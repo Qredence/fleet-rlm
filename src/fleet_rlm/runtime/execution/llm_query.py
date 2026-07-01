@@ -215,16 +215,15 @@ class LLMQueryMixin:
             set_mlflow_span_outputs,
         )
 
+        # Resolve target_lm in parent thread to inherit thread-locals safely
+        resolved_lm = self.sub_lm if self.sub_lm is not None else dspy.settings.lm
+        if resolved_lm is None:
+            raise RuntimeError("No LM configured. Use dspy.configure(lm=...) or pass sub_lm to the active interpreter.")
+
         # Execute LM call with timeout to prevent hangs.
-        # Resolve target_lm inside the thread at call time to guarantee context-awareness.
-        def _execute_lm() -> str:
-            target_lm = self.sub_lm if self.sub_lm is not None else dspy.settings.lm
-            if target_lm is None:
-                raise RuntimeError(
-                    "No LM configured. Use dspy.configure(lm=...) or pass sub_lm to the active interpreter."
-                )
-            call_overrides = self._get_sub_lm_config(target_lm)
-            response = target_lm(prompt, **call_overrides)
+        def _execute_lm(lm: Any) -> str:
+            call_overrides = self._get_sub_lm_config(lm)
+            response = lm(prompt, **call_overrides)
             if isinstance(response, list) and response:
                 item = response[0]
                 if isinstance(item, dict) and "text" in item:
@@ -252,7 +251,7 @@ class LLMQueryMixin:
             },
             inputs={"prompt_chars": len(prompt), "prompt_preview": _bounded_value(prompt, limit=1_000)},
         ) as span:
-            future = executor.submit(ctx.run, _execute_lm)
+            future = executor.submit(ctx.run, _execute_lm, resolved_lm)
             try:
                 result = future.result(timeout=self.llm_call_timeout)
                 text = result if isinstance(result, str) else str(result)
@@ -267,12 +266,8 @@ class LLMQueryMixin:
                 return text
             except FutureTimeoutError as exc:
                 future.cancel()
-                # Running threads cannot be cancelled; discard the exhausted executor
-                # so subsequent calls get a fresh worker pool.
-                with self._sub_lm_executor_lock:
-                    if self._sub_lm_executor is not None:
-                        self._sub_lm_executor.shutdown(wait=False)
-                        self._sub_lm_executor = None
+                # Running threads cannot be cancelled; let the thread run in the background
+                # but do not tear down/discard the executor as that crashes concurrent batches.
                 if span is not None:
                     set_status = getattr(span, "set_status", None)
                     if callable(set_status):

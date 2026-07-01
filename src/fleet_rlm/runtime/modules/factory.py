@@ -680,12 +680,25 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                             f"RLM action generation parse errors exceeded cap "
                             f"({self._consecutive_parse_errors}) at iteration {iteration}; escalating."
                         )
+                    # Truncate raw completion if extracted, to avoid polluting the REPL history
+                    # with potentially massive echoed inputs or malformed blocks.
+                    raw_completion = self._extract_completion_from_parse_error(exc)
+                    if raw_completion:
+                        truncated = self._truncate_completion(raw_completion)
+                        is_degenerate = self._is_degenerate_response(truncated)
+                        if is_degenerate:
+                            err_msg = f"[ParseError] Degenerate response or echo-back detected: {truncated[:200]}..."
+                        else:
+                            err_msg = f"[ParseError] Malformed structured output: {truncated[:200]}..."
+                    else:
+                        err_msg = f"[ParseError] {str(exc)[:500]}"
+
                     cur_history = self._resolve_repl_history(args, kwargs)
                     new_history = self._append_repl_entry(
                         cur_history,
                         reasoning="Previous response could not be parsed.",
                         code="# [Parse Error] The adapter could not parse the previous response.",
-                        output=f"[ParseError] {exc}",
+                        output=err_msg,
                     )
                     if new_history is not None and "repl_history" in kwargs:
                         kwargs["repl_history"] = new_history
