@@ -326,15 +326,17 @@ def get_runtime_module_adapter(
 ) -> Any | None:
     """Return the adapter for structure-sensitive runtime modules.
 
-    By default these modules use ``JSONAdapter`` for clearer structured output.
-    Set ``DSPY_STRUCTURED_OUTPUT_ADAPTER=chat`` (or ``none``/``off``) to override.
+    By default these modules use ``ChatAdapter`` (DSPy's default, with its
+    native automatic fallback to ``JSONAdapter`` on parse failure — see
+    ``dspy/adapters/chat_adapter.py:46,68,87-94``). Set
+    ``DSPY_STRUCTURED_OUTPUT_ADAPTER=json`` (or ``none``/``off``) to override.
     """
     if module_name not in STRUCTURE_SENSITIVE_RUNTIME_MODULES:
         return None
 
     _prepare_env(env_file=env_file)
     return _build_adapter(
-        os.environ.get("DSPY_STRUCTURED_OUTPUT_ADAPTER", "json"),
+        os.environ.get("DSPY_STRUCTURED_OUTPUT_ADAPTER", "chat"),
         use_native_function_calling=_env_bool(
             os.environ.get("DSPY_STRUCTURED_OUTPUT_ADAPTER_USE_NATIVE_FUNCTION_CALLING"),
             default=False,

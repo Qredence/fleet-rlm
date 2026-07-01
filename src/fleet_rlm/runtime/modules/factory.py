@@ -2,11 +2,6 @@
 
 Performance-improvement flags (all env-configurable, default safe):
 
-- ``FLEET_RLM_RESPONSE_TRUNCATION_CHARS`` (default 8000) — truncate the raw LM
-  completion extracted from an ``AdapterParseError`` before re-parsing with
-  ChatAdapter. Prevents the 13-second echo-back anomaly where the model replays
-  the entire ``variables_info`` input back as its "response".
-
 - ``FLEET_RLM_SUMMARY_ITERATION_THRESHOLD`` (default 20) — if the RLM loop
   reaches this iteration index without receiving a ``SUBMIT``, the base RLM
   wrapper injects a "summarize and SUBMIT now" directive into ``repl_history``
@@ -32,11 +27,22 @@ from __future__ import annotations
 import logging
 import os
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable
 
 import dspy
 from dspy.predict.rlm import _strip_code_fences
+
+from fleet_rlm.runtime.content.parse_recovery import (
+    extract_completion_from_parse_error as _extract_completion,
+)
+from fleet_rlm.runtime.content.parse_recovery import (
+    is_degenerate_response as _is_degenerate,
+)
+from fleet_rlm.runtime.content.parse_recovery import (
+    truncate_completion as _truncate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,39 +78,6 @@ RLM_ACTION_HISTORY_REASONING_CHARS = 600
 # into every action-generation prompt, compact them into one-liners with an
 # "use inspect_tool()" escape hatch.  Reduces prompt size by 60-80%.
 _COMPRESSED_TOOL_DOCS_ENABLED = os.environ.get("FLEET_RLM_COMPRESSED_TOOL_DOCS", "1").strip().lower() not in {
-    "0",
-    "false",
-    "no",
-    "off",
-}
-
-# When JSONAdapter fails to parse an action-generation response, re-parse the
-# *same* LM completion with ChatAdapter in-process (no extra LLM call) before
-# falling back to a regeneration. qwen emits ``[[ ## reasoning ## ]]`` /
-# ``[[ ## code ## ]]`` output that JSONAdapter cannot parse but ChatAdapter can;
-# salvaging it avoids the wasted regeneration + escalation cascade.
-_CHATADAPTER_SALVAGE_ENABLED = os.environ.get("FLEET_RLM_CHATADAPTER_SALVAGE", "1").strip().lower() not in {
-    "0",
-    "false",
-    "no",
-    "off",
-}
-
-# ── P0: Response truncation before ChatAdapter salvage ────────────────────
-# When JSONAdapter fails and we salvage the raw completion via ChatAdapter,
-# truncate the completion to this many characters first. The observed trace
-# showed the model echoing the entire ``variables_info`` (5K+ chars) back as
-# its "response", causing a 13-second ChatAdapter parse that also failed.
-# Truncating before the salvage attempt bounds the parse cost and prevents
-# the model's echoed input from dominating the ChatAdapter's regex.
-_RESPONSE_TRUNCATION_CHARS = _env_int("FLEET_RLM_RESPONSE_TRUNCATION_CHARS", 8000)
-
-# ── P0: Third-fallback regex extraction ───────────────────────────────────
-# When both JSONAdapter and ChatAdapter fail to parse, try a lightweight regex
-# extraction before giving up and doing a full regeneration. This catches
-# slightly non-standard completions (e.g. missing the outer ``[[ ]]`` but still
-# containing the field labels).
-_REGEX_SALVAGE_ENABLED = os.environ.get("FLEET_RLM_REGEX_SALVAGE", "1").strip().lower() not in {
     "0",
     "false",
     "no",
@@ -326,9 +299,10 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         self.action_timeout = action_timeout if action_timeout is not None else _env_int("FLEET_RLM_ACTION_TIMEOUT", 90)
         self._consecutive_timeouts = 0
         self._max_consecutive_timeouts = 2
-        # Consecutive action-gen parse failures that salvage AND ChatAdapter
-        # re-call could not recover. Bounded so a persistently glitching model
-        # escalates to EscalatingFleetModule instead of burning max_iterations.
+        # Consecutive action-gen parse failures the adapter's native fallback
+        # (ChatAdapter → JSONAdapter, ``dspy/adapters/chat_adapter.py:46,68,87-94``)
+        # could not recover. Bounded so a persistently glitching model escalates
+        # to EscalatingFleetModule instead of burning max_iterations.
         self._consecutive_parse_errors = 0
         self._max_consecutive_parse_errors = _env_int("FLEET_RLM_MAX_CONSECUTIVE_PARSE_ERRORS", 3)
         # Per-instance cache (NOT class-level) so two RLM instances with the
@@ -384,8 +358,17 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         return "\n".join(lines)
 
     def _structured_action_context(self) -> Any:
-        """Use JSONAdapter for RLM action generation to avoid ChatAdapter fallback retries."""
-        return dspy.settings.context(adapter=dspy.JSONAdapter())
+        """RLM action generation runs under DSPy's default adapter (ChatAdapter).
+
+        ChatAdapter automatically falls back to JSONAdapter on parse failure
+        (``dspy/adapters/chat_adapter.py:46,68,87-94``); forcing JSONAdapter as
+        the primary caused a marker mismatch with qwen3.x output (which emits
+        ``[[ ## reasoning ## ]]`` / ``[[ ## code ## ]]``) and required a
+        hand-rolled salvage cascade — both removed in this change. Returning a
+        no-op context lets DSPy's default adapter resolution (configured via
+        ``DSPY_STRUCTURED_OUTPUT_ADAPTER``) take effect.
+        """
+        return nullcontext()
 
     def _record_iteration_token_usage(self, iteration: int) -> None:
         """Extract per-iteration token usage from dspy LM history and record as MLflow span attr."""
@@ -418,16 +401,25 @@ class _StreamingRLM(_DSPY_RLM_BASE):
             return
 
     @staticmethod
+    def _is_malformed_response(value: Any) -> bool:
+        """Check if a response value is a known malformed non-JSON-object pattern."""
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped in ("[[ ]]", "[]", "[1]", "[0]") or stripped.startswith("[["):
+                return True
+        return False
+
+    @staticmethod
     def _is_parse_error(exc: Exception) -> bool:
-        """Return True if the exception is a JSONAdapter / JSON parse error.
+        """Classify whether ``exc`` is an adapter parse failure (vs timeout/transport).
 
         Narrowed to JSON-specific markers and ``json.JSONDecodeError`` so that
         broad substrings like ``"expected"``, ``"invalid"``, or ``"decode"`` in
         isolation (e.g. ``ValueError("Invalid API key")``) do NOT trigger the
-        parse-error retry path. Only genuine JSON parse failures (containing
-        ``"json"``, ``"json.decode"``, ``"json parse"``, ``"malformed json"``,
-        ``"parse error"``) or ``json.JSONDecodeError`` instances are classified
-        as parse errors.
+        parse-error recovery path. This helper is orthogonal to the (now removed)
+        hand-rolled salvage cascade — it only routes between two recovery
+        behaviours: append a [Parse Error] REPL entry (loop continues) vs append a
+        [Timeout] REPL entry (loop continues after a bounded LM timeout).
         """
         import json
 
@@ -446,218 +438,39 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         )
 
     @staticmethod
-    def _is_malformed_response(value: Any) -> bool:
-        """Check if a response value is a known malformed non-JSON-object pattern."""
-        if isinstance(value, str):
-            stripped = value.strip()
-            if stripped in ("[[ ]]", "[]", "[1]", "[0]") or stripped.startswith("[["):
-                return True
-        return False
-
-    @staticmethod
     def _extract_completion_from_parse_error(exc: Exception) -> str | None:
         """Pull the raw LM completion text out of an ``AdapterParseError``.
 
-        DSPy embeds the offending completion in the exception message as
-        ``"LM Response: <text>\\n\\nExpected to find output fields..."``. Using
-        the exception payload (rather than ``lm.history``) is robust to the
-        bounded action-LM having already gone out of scope when the parse error
-        is caught.
+        Delegates to :func:`fleet_rlm.runtime.content.parse_recovery.extract_completion_from_parse_error`,
+        which prefers the public ``dspy.AdapterParseError.lm_response`` attribute
+        (``dspy/utils/exceptions.py:224-261``) and falls back to scraping the
+        UNDOCUMENTED ``"LM Response: "`` message format only as a defensive shim.
+        Orthogonal to adapter parsing — used by the echo-back / degenerate-output
+        guard.
         """
-        msg = str(exc)
-        marker = "LM Response: "
-        idx = msg.find(marker)
-        if idx < 0:
-            return None
-        tail = msg[idx + len(marker) :]
-        end = tail.find("\n\nExpected to find output fields")
-        completion = tail if end < 0 else tail[:end]
-        completion = completion.strip()
-        return completion or None
+        return _extract_completion(exc)
 
     @staticmethod
     def _is_degenerate_response(completion: Any) -> bool:
-        """True for unusable outputs no adapter can parse (e.g. ``{len(doc)}``).
+        """Prompt-shaping guard: detect unusable outputs (e.g. ``{len(doc)}``).
 
-        Salvage is only worth attempting when the completion carries ChatAdapter
-        ``[[ ## field ## ]]`` delimiters (the case-1 failure pattern) or is a
-        valid JSON object. Short fragments, bare f-string snippets, and prose
-        are degenerate and should skip straight to the re-call / escalation.
-
-        Also detects the echo-back anomaly: if the completion is longer than
-        the truncation limit AND contains the ``variables_info`` sentinel
-        pattern (``«««`` or ``Variable:``), it is classified as degenerate
-        — the model is replaying its input rather than generating an action.
+        Delegates to :func:`fleet_rlm.runtime.content.parse_recovery.is_degenerate_response`.
+        NOT adapter-parsing logic — DSPy's native ``ChatAdapter`` →
+        ``JSONAdapter`` fallback (``dspy/adapters/chat_adapter.py:46,68,87-94``)
+        handles parsing. This guard classifies completions for the echo-back /
+        degenerate-output budget guard.
         """
-        if not isinstance(completion, str):
-            return True
-        stripped = completion.strip()
-        if not stripped:
-            return True
-        if "[[ ##" in stripped:
-            return False
-        try:
-            if isinstance(__import__("json").loads(stripped), dict):
-                return False
-        except (ValueError, TypeError):
-            # Not valid JSON (or wrong input type): continue heuristic checks.
-            pass
-        # Detect echo-back: the model is replaying variables_info instead of
-        # generating an action. This was the exact cause of the 13s anomaly
-        # at iteration 19 in the observed trace.
-        if len(stripped) >= _RESPONSE_TRUNCATION_CHARS:
-            echo_markers = ("Variable: `", "«««", "Total length:", "Description:")
-            marker_hits = sum(1 for m in echo_markers if m in stripped)
-            if marker_hits >= 3:
-                logger.debug(
-                    "RLM action gen: detected echo-back anomaly "
-                    "(completion length=%s, markers=%s) — marking degenerate",
-                    len(stripped),
-                    marker_hits,
-                )
-                return True
-        return True
+        return _is_degenerate(completion)
 
     @staticmethod
     def _truncate_completion(completion: str) -> str:
-        """Truncate the raw completion to bound salvage cost and prevent echo-back parse delays.
+        """Truncate the raw completion for echo-back detection (prompt/cost shaping).
 
-        The observed trace showed a 13-second ChatAdapter parse when the model
-        echoed the entire ``variables_info`` (5K+ chars) back as its "response".
-        Truncating to ``_RESPONSE_TRUNCATION_CHARS`` bounds the regex cost and
-        also normalizes the content so the echo-back detection in
-        ``_is_degenerate_response`` can fire on the *truncated* text.
+        Delegates to :func:`fleet_rlm.runtime.content.parse_recovery.truncate_completion`.
+        NOT adapter-parsing logic — bounds the inspection cost for the echo-back
+        anomaly (the model replaying ``variables_info`` as its "response").
         """
-        if not isinstance(completion, str):
-            return ""
-        limit = _RESPONSE_TRUNCATION_CHARS
-        if len(completion) <= limit:
-            return completion
-        return completion[:limit]
-
-    @staticmethod
-    def _regex_salvage(completion: str) -> dict[str, str] | None:
-        """Third fallback: lightweight regex extraction of reasoning/code fields.
-
-        When both JSONAdapter and ChatAdapter fail, try a simple regex that
-        matches the ``[[ ## field ## ]]`` delimiters or ``"reasoning":``/``"code":``
-        JSON keys. This catches slightly non-standard completions that neither
-        adapter can parse but which do contain the required fields.
-        """
-        import re
-
-        if not isinstance(completion, str) or not completion.strip():
-            return None
-
-        reasoning = ""
-        code = ""
-
-        # Pattern 1: ChatAdapter-style delimited sections
-        # Matches: [[ ## reasoning ## ]]\n<content>\n[[ ## code ## ]]\n<content>
-        pattern1 = re.compile(
-            r"\[\[\s*##\s*reasoning\s*##\s*\]\]\s*(.*?)(?=\[\[\s*##\s*code\s*##\s*\]\]|$)",
-            re.DOTALL,
-        )
-        pattern2 = re.compile(
-            r"\[\[\s*##\s*code\s*##\s*\]\]\s*(.*?)(?=\[\[\s*##\s*\w+\s*##\s*\]\]|$)",
-            re.DOTALL,
-        )
-        m1 = pattern1.search(completion)
-        if m1:
-            reasoning = m1.group(1).strip()
-        m2 = pattern2.search(completion)
-        if m2:
-            code = m2.group(1).strip()
-
-        if not reasoning and not code:
-            # Pattern 2: JSON-with-optional-quotes
-            json_pattern = re.compile(
-                r'"reasoning"\s*:\s*"((?:[^"\\]|\\.)*)"\s*[,}].*?"code"\s*:\s*"((?:[^"\\]|\\.)*)"',
-                re.DOTALL,
-            )
-            jm = json_pattern.search(completion)
-            if jm:
-                reasoning = jm.group(1).replace("\\n", "\n").replace('\\"', '"')
-                code = jm.group(2).replace("\\n", "\n").replace('\\"', '"')
-
-        if not reasoning and not code:
-            return None
-
-        if not reasoning:
-            reasoning = "[Extracted via regex fallback]"
-        if not code:
-            code = ""
-
-        return {"reasoning": reasoning, "code": code}
-
-    def _salvage_with_chat_adapter(self, exc: Exception) -> Any | None:
-        """Re-parse the failed LM completion with ChatAdapter without a new LLM call.
-
-        ``qwen3.x`` emits ``[[ ## reasoning ## ]]`` / ``[[ ## code ## ]]``
-        output that ``JSONAdapter`` cannot parse but ``ChatAdapter`` can. When
-        JSONAdapter raises, the completion is already in hand (embedded in the
-        exception), so we re-parse it in-process instead of burning a
-        regeneration. Returns a ``dspy.Prediction`` on success, ``None`` on any
-        failure (caller falls through to the ChatAdapter re-call retry).
-
-        **Truncation**: The completion is truncated to
-        ``_RESPONSE_TRUNCATION_CHARS`` before salvage to bound parse cost and
-        prevent the 13-second echo-back anomaly observed in the trace.
-        """
-        if not _CHATADAPTER_SALVAGE_ENABLED:
-            return None
-        try:
-            completion = self._extract_completion_from_parse_error(exc)
-            if completion is None:
-                return None
-            # P0: Truncate before salvage to bound parse cost and enable
-            # echo-back detection on the truncated text.
-            completion = self._truncate_completion(completion)
-            if self._is_degenerate_response(completion):
-                return None
-            signature = getattr(self.generate_action, "signature", None)
-            if signature is None:
-                return None
-            parsed = dspy.ChatAdapter().parse(signature, completion)
-            if not isinstance(parsed, dict) or not parsed:
-                return None
-            if "code" not in parsed and "reasoning" not in parsed:
-                return None
-            logger.debug("RLM action gen: salvaged parse via ChatAdapter re-parse (no extra LLM call)")
-            return dspy.Prediction(**parsed)
-        except Exception:
-            logger.debug(
-                "ChatAdapter salvage failed; falling through to re-call retry",
-                exc_info=True,
-            )
-            return None
-
-    def _salvage_with_regex(self, exc: Exception) -> Any | None:
-        """Third-fallback regex extraction: lightweight, no adapter or LLM call.
-
-        Tries to extract ``reasoning`` and ``code`` from the raw completion
-        using simple regex patterns. Returns a ``dspy.Prediction`` on success,
-        ``None`` on failure. Called when both JSONAdapter salvage and the
-        ChatAdapter re-call retry have failed, before falling through to the
-        consecutive-parse-error cap.
-        """
-        if not _REGEX_SALVAGE_ENABLED:
-            return None
-        try:
-            completion = self._extract_completion_from_parse_error(exc)
-            if completion is None:
-                return None
-            completion = self._truncate_completion(completion)
-            parsed = self._regex_salvage(completion)
-            if parsed is None:
-                return None
-            if "code" not in parsed and "reasoning" not in parsed:
-                return None
-            logger.debug("RLM action gen: salvaged parse via regex fallback (no extra LLM call)")
-            return dspy.Prediction(**parsed)
-        except Exception:
-            logger.debug("Regex salvage failed", exc_info=True)
-            return None
+        return _truncate(completion)
 
     def _execute_iteration(self, *args: Any, **kwargs: Any) -> Any:
         """Override base RLM iteration to bound action-gen and respect the loop contract.
@@ -775,7 +588,6 @@ class _StreamingRLM(_DSPY_RLM_BASE):
 
         action_result: Any = None
         action_succeeded = False
-        parse_retry_attempted = False
 
         def _run_action(**kw: Any) -> Any:
             if config_overrides:
@@ -837,35 +649,52 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                     }
                 )
                 if self._is_parse_error(exc):
+                    # ChatAdapter (now the primary adapter) already ran its
+                    # native JSONAdapter fallback internally
+                    # (``dspy/adapters/chat_adapter.py:46,68,87-94``). If parsing
+                    # still fails there is no completion worth salvaging
+                    # in-process; respect the loop contract (like the timeout
+                    # path): append a [ParseError] REPL entry, return the
+                    # updated history so the loop continues and dspy's
+                    # ``_extract_fallback`` can salvage, and escalate only after
+                    # the consecutive-parse-error cap fires.
+                    self._consecutive_parse_errors += 1
                     logger.warning(
-                        "RLM action generation parse error (iteration %s): %s",
+                        "RLM action generation parse error (iteration %s, consecutive: %s): %s",
                         iteration,
+                        self._consecutive_parse_errors,
                         exc,
                     )
-                    # Try to salvage the already-fetched completion by re-parsing
-                    # it with ChatAdapter in-process (no extra LLM call). qwen
-                    # emits ``[[ ## reasoning ## ]]`` / ``[[ ## code ## ]]`` which
-                    # JSONAdapter cannot parse but ChatAdapter can — salvaging
-                    # avoids a wasted regeneration + the escalation cascade.
-                    salvaged = self._salvage_with_chat_adapter(exc)
-                    if salvaged is not None:
-                        action_result = salvaged
-                        action_succeeded = True
-                        parse_retry_attempted = False
-                        self._consecutive_parse_errors = 0
-                    else:
-                        # P0: Third fallback — try regex extraction before
-                        # falling through to the costly re-call retry.
-                        regex_salvaged = self._salvage_with_regex(exc)
-                        if regex_salvaged is not None:
-                            action_result = regex_salvaged
-                            action_succeeded = True
-                            parse_retry_attempted = False
-                            self._consecutive_parse_errors = 0
-                        else:
-                            action_result = None
-                            action_succeeded = False
-                            parse_retry_attempted = True
+                    if self._consecutive_parse_errors >= self._max_consecutive_parse_errors:
+                        # Persistently glitching model: stop burning iterations
+                        # and escalate to EscalatingFleetModule.
+                        set_mlflow_span_outputs(
+                            span,
+                            {
+                                "status": "parse_error_capped",
+                                "iteration": iteration,
+                                "consecutive_parse_errors": self._consecutive_parse_errors,
+                            },
+                        )
+                        raise _dspy.LMError(
+                            f"RLM action generation parse errors exceeded cap "
+                            f"({self._consecutive_parse_errors}) at iteration {iteration}; escalating."
+                        )
+                    cur_history = self._resolve_repl_history(args, kwargs)
+                    new_history = self._append_repl_entry(
+                        cur_history,
+                        reasoning="Previous response could not be parsed.",
+                        code="# [Parse Error] The adapter could not parse the previous response.",
+                        output=f"[ParseError] {exc}",
+                    )
+                    if new_history is not None and "repl_history" in kwargs:
+                        kwargs["repl_history"] = new_history
+                    set_mlflow_span_outputs(
+                        span,
+                        {"status": "parse_error", "iteration": iteration},
+                    )
+                    # Contract: return a REPLHistory so the loop continues.
+                    return new_history if new_history is not None else cur_history
                 elif isinstance(exc, _dspy.LMError):
                     # Real timeout/transport error from the bounded BaseLM (or the
                     # global LM if no bounded LM could be built). Respect the loop
@@ -902,81 +731,6 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                     return new_history if new_history is not None else cur_history
                 else:
                     raise
-
-            # --- Parse-error retry (ChatAdapter fallback) ---
-            if parse_retry_attempted and not action_succeeded:
-                self._consecutive_parse_errors += 1
-                if self._consecutive_parse_errors >= self._max_consecutive_parse_errors:
-                    # Persistently glitching model: stop burning iterations and
-                    # escalate to EscalatingFleetModule (reduced-budget / CoT).
-                    set_mlflow_span_outputs(
-                        span,
-                        {
-                            "status": "parse_error_capped",
-                            "iteration": iteration,
-                            "consecutive_parse_errors": self._consecutive_parse_errors,
-                        },
-                    )
-                    raise _dspy.LMError(
-                        f"RLM action generation parse errors exceeded cap "
-                        f"({self._consecutive_parse_errors}) at iteration {iteration}; escalating."
-                    )
-                logger.info(
-                    "RLM action generation: retrying under ChatAdapter (iteration %s)",
-                    iteration,
-                )
-                cur_history = self._resolve_repl_history(args, kwargs)
-                new_history = self._append_repl_entry(
-                    cur_history,
-                    reasoning="Previous response could not be parsed.",
-                    code="# [Parse Error] Retrying with the standard delimited response format.",
-                    output="",
-                )
-                if new_history is not None and "repl_history" in kwargs:
-                    kwargs["repl_history"] = new_history
-                try:
-                    with _dspy.settings.context(adapter=_dspy.ChatAdapter()):
-                        action_result = _run_action(**kwargs)
-                    action_succeeded = True
-                    self._consecutive_timeouts = 0
-                    self._consecutive_parse_errors = 0
-                except Exception as retry_exc:
-                    logger.warning(
-                        "RLM action generation ChatAdapter retry also failed (iteration %s): %s",
-                        iteration,
-                        retry_exc,
-                    )
-                    # P0: Third fallback — try regex extraction on the retry
-                    # completion before giving up and escalating.
-                    if _REGEX_SALVAGE_ENABLED and self._is_parse_error(retry_exc):
-                        regex_salvaged = self._salvage_with_regex(retry_exc)
-                        if regex_salvaged is not None:
-                            action_result = regex_salvaged
-                            action_succeeded = True
-                            self._consecutive_timeouts = 0
-                            self._consecutive_parse_errors = 0
-                            set_mlflow_span_outputs(
-                                span,
-                                {"status": "regex_salvaged", "iteration": iteration},
-                            )
-                        else:
-                            if isinstance(retry_exc, _dspy.LMError):
-                                set_mlflow_span_outputs(
-                                    span,
-                                    {"status": "retry_timeout", "iteration": iteration, "timeout_s": timeout},
-                                )
-                                # Contract: return a REPLHistory so the loop continues.
-                                return new_history if new_history is not None else cur_history
-                            raise
-                    elif isinstance(retry_exc, _dspy.LMError):
-                        set_mlflow_span_outputs(
-                            span,
-                            {"status": "retry_timeout", "iteration": iteration, "timeout_s": timeout},
-                        )
-                        # Contract: return a REPLHistory so the loop continues.
-                        return new_history if new_history is not None else cur_history
-                    else:
-                        raise
 
             # --- Record per-iteration token usage ---
             if action_succeeded and action_result is not None:
@@ -1461,7 +1215,13 @@ class _NoCallbackRLM(_StreamingRLM):
         return {}
 
     def _repl_only_context(self) -> Any:
-        return dspy.settings.context(adapter=dspy.JSONAdapter())
+        """No-op adapter context for the REPL-only RLM path.
+
+        Lets the DSPy-default ChatAdapter (with native JSONAdapter fallback,
+        ``dspy/adapters/chat_adapter.py:46,68,87-94``) handle structured output
+        instead of forcing ``JSONAdapter`` as primary.
+        """
+        return nullcontext()
 
     def forward(self, **input_args: Any) -> dspy.Prediction:
         interpreter = getattr(self, "_interpreter", None)
