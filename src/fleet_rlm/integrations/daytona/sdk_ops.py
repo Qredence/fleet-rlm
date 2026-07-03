@@ -164,24 +164,53 @@ def fork_sandbox(
     name: str | None = None,
     timeout: float = 60.0,
 ) -> Any:
-    """Fork a sandbox session, creating a copy-on-write clone."""
-    forked = _experimental_call(
-        session.sandbox,
-        "_experimental_fork",
-        name=name,
-        timeout=timeout,
-        category="sandbox_fork_error",
-        phase="sandbox_fork",
+    """Fork a sandbox session, creating a copy-on-write clone.
+
+    A forked sandbox is a new live sandbox that counts against the provider
+    vCPU/RAM quota, so it must also count against the Fleet concurrency limit.
+    We acquire a slot before forking and attach the release handler to the
+    forked sandbox so the slot is freed on teardown. Without this, child RLM
+    forks would bypass ``FLEET_MAX_CONCURRENT_SANDBOXES`` entirely (C2).
+    """
+    # C2: acquire a concurrency slot around the fork so child sandboxes are
+    # accounted for. ``acquire_sandbox_slot`` is async; bridge from this sync
+    # caller via the async-compat runner (handles both no-loop and nested-loop
+    # thread contexts).
+    from .async_compat import _run_async_compat
+    from .concurrency import (
+        acquire_sandbox_slot,
+        attach_slot_release_handler,
+        release_sandbox_slot,
     )
-    return runtime._build_workspace_session(
-        sandbox=forked,
-        repo_url=session.repo_url,
-        resolved_ref=session.ref,
-        volume_name=session.volume_name,
-        workspace_path=session.workspace_path,
-        context_sources=list(session.context_sources),
-        timings={"sandbox_fork": 0},
-    )
+
+    slot_acquired = False
+    try:
+        _run_async_compat(acquire_sandbox_slot, timeout=60.0)
+        slot_acquired = True
+        forked = _experimental_call(
+            session.sandbox,
+            "_experimental_fork",
+            name=name,
+            timeout=timeout,
+            category="sandbox_fork_error",
+            phase="sandbox_fork",
+        )
+        # Attach the slot release handler so delete()/stop()/pause()/archive()
+        # on the forked sandbox releases the Fleet slot exactly once.
+        attach_slot_release_handler(forked)
+        return runtime._build_workspace_session(
+            sandbox=forked,
+            repo_url=session.repo_url,
+            resolved_ref=session.ref,
+            volume_name=session.volume_name,
+            workspace_path=session.workspace_path,
+            context_sources=list(session.context_sources),
+            timings={"sandbox_fork": 0},
+        )
+    except Exception:
+        if slot_acquired:
+            release_sandbox_slot()
+        raise
 
 
 afork_sandbox = fork_sandbox

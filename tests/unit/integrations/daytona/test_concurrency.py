@@ -146,3 +146,102 @@ def test_config_clamps_range(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FLEET_MAX_CONCURRENT_SANDBOXES", "0")
     cfg = ConcurrencyConfig.from_env()
     assert cfg.max_sandboxes == 1  # clamped to min
+
+
+# ---------------------------------------------------------------------------
+# C2: fork_sandbox must acquire a concurrency slot around the fork
+# ---------------------------------------------------------------------------
+
+
+class _FakeForkableSandbox:
+    """Sandbox double whose ``_experimental_fork`` returns a new managed sandbox."""
+
+    def __init__(self) -> None:
+        self.id = "parent-sbx"
+        self.forked = _FakeSandbox()
+        self.forked.id = "child-sbx"
+        self.fork_call_count = 0
+
+    def _experimental_fork(self, *, name: str | None = None, timeout: float = 60.0) -> _FakeSandbox:
+        self.fork_call_count += 1
+        return self.forked
+
+
+class _FakeSession:
+    def __init__(self, sandbox: _FakeForkableSandbox) -> None:
+        self.sandbox = sandbox
+        self.repo_url = None
+        self.ref = None
+        self.volume_name = None
+        self.workspace_path = "/workspace"
+        self.context_sources: list = []
+
+
+class _FakeRuntime:
+    def __init__(self) -> None:
+        self.built_session = None
+
+    def _build_workspace_session(
+        self, *, sandbox, repo_url, resolved_ref, volume_name, workspace_path, context_sources, timings
+    ):
+        self.built_session = type("BuiltSession", (), {"sandbox": sandbox})()
+        return self.built_session
+
+
+def test_fork_sandbox_acquires_slot_and_attaches_handler() -> None:
+    """C2: fork_sandbox must acquire a slot and attach the release handler so
+    forked children are visible to FLEET_MAX_CONCURRENT_SANDBOXES."""
+    from fleet_rlm.integrations.daytona.sdk_ops import fork_sandbox
+
+    parent = _FakeForkableSandbox()
+    session = _FakeSession(parent)
+    runtime = _FakeRuntime()
+
+    result = fork_sandbox(runtime=runtime, session=session)
+
+    # The fork actually happened.
+    assert parent.fork_call_count == 1
+    # The forked sandbox is marked as slot-managed.
+    assert parent.forked._fleet_slot_managed is True
+    assert parent.forked._fleet_slot_released is False
+    # The runtime built a session wrapping the forked sandbox.
+    assert result is runtime.built_session
+    # The global semaphore now reports one active slot.
+    assert concurrency.get_current_sandbox_usage().active_count == 1
+
+
+def test_fork_sandbox_releases_slot_on_failure() -> None:
+    """C2: if the fork itself raises, the acquired slot must be returned."""
+    from fleet_rlm.integrations.daytona.sdk_ops import fork_sandbox
+
+    parent = _FakeForkableSandbox()
+
+    def _boom(*a: object, **k: object) -> None:
+        raise RuntimeError("fork exploded")
+
+    parent._experimental_fork = _boom  # type: ignore[method-assign]
+    session = _FakeSession(parent)
+    runtime = _FakeRuntime()
+
+    with pytest.raises(RuntimeError, match="fork exploded"):
+        fork_sandbox(runtime=runtime, session=session)
+
+    # Slot was acquired then released on failure: net zero active.
+    assert concurrency.get_current_sandbox_usage().active_count == 0
+
+
+def test_forked_sandbox_releases_slot_on_delete() -> None:
+    """C2: deleting the forked sandbox must release the slot exactly once."""
+    from fleet_rlm.integrations.daytona.sdk_ops import fork_sandbox
+
+    parent = _FakeForkableSandbox()
+    session = _FakeSession(parent)
+    runtime = _FakeRuntime()
+
+    fork_sandbox(runtime=runtime, session=session)
+    assert concurrency.get_current_sandbox_usage().active_count == 1
+
+    # Teardown of the forked sandbox releases the slot.
+    parent.forked.delete()
+    assert parent.forked._fleet_slot_released is True
+    assert concurrency.get_current_sandbox_usage().active_count == 0
