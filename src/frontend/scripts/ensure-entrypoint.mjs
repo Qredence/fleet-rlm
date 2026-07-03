@@ -1,32 +1,32 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Resolve dist directory from command-line args or default
 const args = process.argv.slice(2);
-let distDir = path.resolve(__dirname, '../dist');
-let renderUrl = 'http://127.0.0.1:8000/app/workspace';
+let distDir = path.resolve(__dirname, "../dist");
+let renderUrl = "http://127.0.0.1:8000/app/workspace";
 
 for (let i = 0; i < args.length; i++) {
-  if (args[i] === '--dist-dir' && args[i + 1]) {
+  if (args[i] === "--dist-dir" && args[i + 1]) {
     distDir = path.resolve(args[i + 1]);
     i++;
-  } else if (args[i] === '--render-url' && args[i + 1]) {
+  } else if (args[i] === "--render-url" && args[i + 1]) {
     renderUrl = args[i + 1];
     i++;
   }
 }
 
 async function run() {
-  const clientDir = path.join(distDir, 'client');
+  const clientDir = path.join(distDir, "client");
   if (!fs.existsSync(clientDir)) {
     console.error(`ERROR: Missing frontend client dist at ${clientDir}`);
     process.exit(1);
   }
 
-  const indexPath = path.join(clientDir, 'index.html');
+  const indexPath = path.join(clientDir, "index.html");
   if (fs.existsSync(indexPath)) {
     console.log(`OK: frontend entrypoint available at ${indexPath}`);
     process.exit(0);
@@ -35,7 +35,7 @@ async function run() {
   let renderedHtml = null;
 
   // Try rendering using TanStack Start's server build
-  const serverEntry = path.join(distDir, 'server/server.js');
+  const serverEntry = path.join(distDir, "server/server.js");
   if (fs.existsSync(serverEntry)) {
     try {
       renderedHtml = await renderStartEntrypoint(serverEntry, renderUrl);
@@ -45,21 +45,21 @@ async function run() {
   }
 
   if (renderedHtml) {
-    fs.writeFileSync(indexPath, renderedHtml, 'utf8');
+    fs.writeFileSync(indexPath, renderedHtml, "utf8");
     console.log(`OK: frontend entrypoint available at ${indexPath}`);
     process.exit(0);
   }
 
   // Fallback: Parse manifest
   try {
-    const serverAssetsDir = path.join(distDir, 'server/assets');
+    const serverAssetsDir = path.join(distDir, "server/assets");
     if (!fs.existsSync(serverAssetsDir)) {
       throw new Error(`Missing TanStack Start manifest under ${serverAssetsDir}`);
     }
 
     const files = fs.readdirSync(serverAssetsDir);
     const manifestFiles = files
-      .filter(f => f.startsWith('_tanstack-start-manifest') && f.endsWith('.js'))
+      .filter((f) => f.startsWith("_tanstack-start-manifest") && f.endsWith(".js"))
       .sort();
 
     if (manifestFiles.length === 0) {
@@ -67,7 +67,7 @@ async function run() {
     }
 
     const manifestPath = path.join(serverAssetsDir, manifestFiles[manifestFiles.length - 1]);
-    const content = fs.readFileSync(manifestPath, 'utf8');
+    const content = fs.readFileSync(manifestPath, "utf8");
 
     // Extract clientEntry path
     let clientEntry = null;
@@ -103,19 +103,19 @@ async function run() {
     // Verify assets exist
     const missingAssets = [];
     for (const assetPath of [clientEntry, ...cssPaths]) {
-      const fullAssetPath = path.join(clientDir, assetPath.replace(/^\//, ''));
+      const fullAssetPath = path.join(clientDir, assetPath.replace(/^\//, ""));
       if (!fs.existsSync(fullAssetPath)) {
         missingAssets.push(assetPath);
       }
     }
 
     if (missingAssets.length > 0) {
-      throw new Error(`Manifest references missing frontend assets: ${missingAssets.join(', ')}`);
+      throw new Error(`Manifest references missing frontend assets: ${missingAssets.join(", ")}`);
     }
 
     const stylesheetTags = cssPaths
-      .map(p => `    <link rel="stylesheet" href="${escapeHtml(p)}" />`)
-      .join('\n');
+      .map((p) => `    <link rel="stylesheet" href="${escapeHtml(p)}" />`)
+      .join("\n");
 
     const htmlText = `<!doctype html>
 <html lang="en">
@@ -133,7 +133,7 @@ ${stylesheetTags}
 </html>
 `;
 
-    fs.writeFileSync(indexPath, htmlText, 'utf8');
+    fs.writeFileSync(indexPath, htmlText, "utf8");
     console.log(`OK: frontend entrypoint available at ${indexPath}`);
     process.exit(0);
   } catch (err) {
@@ -146,13 +146,13 @@ async function renderStartEntrypoint(serverPath, url) {
   // Use Promise with a timeout
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error('Timeout rendering start entrypoint'));
+      reject(new Error("Timeout rendering start entrypoint"));
     }, 5000); // 5 seconds timeout for rendering (plenty of time)
 
     import(pathToFileURL(serverPath).href)
       .then(async (server) => {
         const handler = server.default;
-        if (!handler || typeof handler.fetch !== 'function') {
+        if (!handler || typeof handler.fetch !== "function") {
           clearTimeout(timer);
           reject(new Error(`${serverPath} does not export a fetch handler`));
           return;
@@ -162,10 +162,10 @@ async function renderStartEntrypoint(serverPath, url) {
           const response = await handler.fetch(
             new Request(url, {
               headers: {
-                accept: 'text/html',
-                'X-TSS_SHELL': 'true',
+                accept: "text/html",
+                "X-TSS_SHELL": "true",
               },
-            })
+            }),
           );
           if (!response.ok) {
             clearTimeout(timer);
@@ -175,7 +175,7 @@ async function renderStartEntrypoint(serverPath, url) {
           const text = await response.text();
           clearTimeout(timer);
           if (!text.trim()) {
-            reject(new Error('Empty rendered entrypoint'));
+            reject(new Error("Empty rendered entrypoint"));
           } else {
             resolve(text);
           }
@@ -193,11 +193,11 @@ async function renderStartEntrypoint(serverPath, url) {
 
 function escapeHtml(str) {
   return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 run();
