@@ -51,6 +51,14 @@ from urllib.parse import parse_qs, urlparse
 _lock = threading.Lock()
 _pending_requests: dict = {}
 _results: dict = {}
+_RESULT_TTL_S = 300.0  # orphan results older than this are swept
+
+
+def _sweep_stale_results(now):
+    \"\"\"Remove orphan results nobody will collect (host crashed mid-post).\"\"\"
+    stale = [cid for cid, ts in _results.items() if isinstance(ts, tuple) and now - ts[1] > _RESULT_TTL_S]
+    for cid in stale:
+        _results.pop(cid, None)
 
 
 def _read_json(handler):
@@ -94,6 +102,7 @@ class _BrokerHandler(BaseHTTPRequestHandler):
             requests_out = []
             with _lock:
                 now = time.time()
+                _sweep_stale_results(now)
                 for call_id, payload in _pending_requests.items():
                     if len(requests_out) >= max_items:
                         break
@@ -146,7 +155,8 @@ class _BrokerHandler(BaseHTTPRequestHandler):
             while elapsed < timeout:
                 with _lock:
                     if call_id in _results:
-                        result = _results.pop(call_id)
+                        entry = _results.pop(call_id)
+                        result = entry[0] if isinstance(entry, tuple) else entry
                         _pending_requests.pop(call_id, None)
                         _send_json(self, {"result": result})
                         return
@@ -171,7 +181,7 @@ class _BrokerHandler(BaseHTTPRequestHandler):
                 if not expected_token or claim_token != expected_token:
                     _send_json(self, {"error": "Stale or invalid claim token"}, 409)
                     return
-                _results[call_id] = result
+                _results[call_id] = (result, time.time())
                 req["lease_token"] = None
             _send_json(self, {"status": "ok"})
 
@@ -296,6 +306,64 @@ def generate_tool_wrapper(
 
 
 # ---------------------------------------------------------------------------
+# Broker circuit breaker (C3 reliability slice)
+# ---------------------------------------------------------------------------
+
+
+class BrokerCircuitBreaker:
+    """Trip after N consecutive broker failures to avoid infinite retry.
+
+    The host-side polling loop retries broker fetch failures with a short
+    sleep and no upper bound, so a dead broker (e.g. sandbox killed out of
+    band) pins a thread forever. The circuit breaker trips ``open`` after
+    ``threshold`` consecutive failures, raises on the next check, and goes
+    ``half_open`` after ``cooldown_seconds`` to allow a single probe.
+    """
+
+    __slots__ = ("_failures", "_opened_at", "_state", "cooldown_seconds", "threshold")
+
+    def __init__(self, *, threshold: int = 10, cooldown_seconds: float = 30.0) -> None:
+        if threshold < 1:
+            raise ValueError("threshold must be >= 1")
+        if cooldown_seconds < 0:
+            raise ValueError("cooldown_seconds must be >= 0")
+        self.threshold = int(threshold)
+        self.cooldown_seconds = float(cooldown_seconds)
+        self._failures = 0
+        self._opened_at: float | None = None
+        self._state = "closed"  # closed | open | half_open
+
+    @property
+    def state(self) -> str:
+        return self._state
+
+    def record_success(self) -> None:
+        self._failures = 0
+        self._opened_at = None
+        self._state = "closed"
+
+    def record_failure(self) -> None:
+        self._failures += 1
+        if self._failures >= self.threshold:
+            self._state = "open"
+            self._opened_at = time.monotonic()
+
+    def raise_if_open(self) -> None:
+        """Raise CodeInterpreterError if the circuit is open past cooldown."""
+        if self._state != "open":
+            return
+        assert self._opened_at is not None
+        if time.monotonic() - self._opened_at >= self.cooldown_seconds:
+            # Half-open: allow one probe call through.
+            self._state = "half_open"
+            return
+        raise CodeInterpreterError(
+            f"Broker circuit breaker tripped after {self._failures} consecutive failures "
+            f"(cooldown {self.cooldown_seconds}s)"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Bridge runtime
 # ---------------------------------------------------------------------------
 
@@ -347,6 +415,7 @@ class DaytonaToolBridge:
         self._injected_tools: set[str] = set()
         self._tool_executor_pool: ThreadPoolExecutor | None = None
         self._tool_executor_lock = Lock()
+        self._broker_circuit = BrokerCircuitBreaker(threshold=10, cooldown_seconds=30.0)
 
     def bind_context(self, context: Any) -> None:
         self.context = context
@@ -683,7 +752,10 @@ class DaytonaToolBridge:
 
             try:
                 pending_items = _fetch_pending(capacity)
+                self._broker_circuit.record_success()
             except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+                self._broker_circuit.record_failure()
+                self._broker_circuit.raise_if_open()
                 time.sleep(0.01)
                 continue
 

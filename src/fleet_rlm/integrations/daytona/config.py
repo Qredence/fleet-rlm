@@ -163,6 +163,29 @@ def build_daytona_client(config: ResolvedDaytonaConfig) -> Any:
     )
 
 
+def build_async_daytona_client(config: ResolvedDaytonaConfig) -> Any:
+    """Build an AsyncDaytona client for the native-async hot path.
+
+    AsyncDaytona exposes async ``create``/``get``/``delete``/``list``/
+    ``start``/``stop``/``close`` but lacks ``snapshot`` and ``volume``
+    sub-clients, so snapshot/volume operations must still go through the
+    sync client (behind ``asyncio.to_thread``). This client is used by the
+    async hot path (provider fleet count, ``aclose``) to avoid thread-
+    offloading sync SDK calls.
+    """
+    try:
+        from daytona import AsyncDaytona, DaytonaConfig
+    except ImportError as exc:  # pragma: no cover - environment specific
+        raise daytona_import_error(exc) from exc
+    return AsyncDaytona(
+        DaytonaConfig(
+            api_key=config.api_key,
+            api_url=config.api_url.rstrip("/"),
+            target=config.target,
+        )
+    )
+
+
 def _extract_status_code(value: Any) -> int | None:
     for attr in ("status", "status_code", "code"):
         raw = getattr(value, attr, None)
@@ -225,6 +248,7 @@ __all__ = [
     "DaytonaConfigError",
     "DaytonaSdkErrorClassification",
     "ResolvedDaytonaConfig",
+    "build_async_daytona_client",
     "build_daytona_client",
     "classify_daytona_sdk_error",
     "daytona_import_error",

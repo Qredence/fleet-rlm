@@ -20,6 +20,7 @@ from .concurrency import (
     release_sandbox_slot_for,
 )
 from .config import ResolvedDaytonaConfig, resolve_daytona_config
+from .config import build_async_daytona_client as _build_async_daytona_client
 from .config import build_daytona_client as _build_daytona_client
 from .config import (
     daytona_import_error as _daytona_import_error,
@@ -141,6 +142,7 @@ class DaytonaSandboxRuntime:
         resolved = config or resolve_daytona_config()
         self._resolved_config = resolved
         self._client: Any | None = None
+        self._async_client: Any | None = None
         self._client_lock = threading.Lock()
         self._closed = False
 
@@ -153,20 +155,63 @@ class DaytonaSandboxRuntime:
                 self._client = _build_daytona_client(self._resolved_config)
             return self._client
 
+    def _get_async_client(self) -> Any:
+        """Return the cached AsyncDaytona client for the native-async hot path.
+
+        AsyncDaytona provides async ``create``/``get``/``delete``/``list``/
+        ``close`` but no ``snapshot``/``volume`` sub-clients, so those stay on
+        the sync client (behind ``asyncio.to_thread``).
+        """
+        with self._client_lock:
+            if self._closed:
+                raise RuntimeError("Daytona runtime client is closed")
+            if self._async_client is None:
+                self._async_client = _build_async_daytona_client(self._resolved_config)
+            return self._async_client
+
     def close(self) -> None:
         """Close the runtime and release the underlying client."""
         with self._client_lock:
             self._closed = True
             client = self._client
+            self._async_client, async_client = None, self._async_client
             self._client = None
-        if client is None:
-            return
-        close = getattr(client, "close", None)
-        if close is not None and callable(close):
-            close()
+        if client is not None:
+            close = getattr(client, "close", None)
+            if close is not None and callable(close):
+                close()
+        if async_client is not None:
+            aclose = getattr(async_client, "aclose", None) or getattr(async_client, "close", None)
+            if aclose is not None and callable(aclose):
+                try:
+                    result = aclose()
+                    if inspect.isawaitable(result):
+
+                        async def _await_aclose() -> None:
+                            await result
+
+                        _run_async_compat(_await_aclose)
+                except Exception:
+                    logger.debug("Failed to close async Daytona client", exc_info=True)
 
     async def aclose(self) -> None:
-        await _run_sync_in_thread(self.close)
+        """Close both clients natively; the async client is awaited directly."""
+        with self._client_lock:
+            self._closed = True
+            client = self._client
+            self._async_client, async_client = None, self._async_client
+            self._client = None
+        if client is not None:
+            await _run_sync_in_thread(lambda: getattr(client, "close", lambda: None)())
+        if async_client is not None:
+            aclose = getattr(async_client, "aclose", None) or getattr(async_client, "close", None)
+            if aclose is not None and callable(aclose):
+                try:
+                    result = aclose()
+                    if inspect.isawaitable(result):
+                        await result
+                except Exception:
+                    logger.debug("Failed to close async Daytona client", exc_info=True)
 
     @staticmethod
     def _default_sandbox_name() -> str:
@@ -330,8 +375,16 @@ class DaytonaSandboxRuntime:
     async def acreate_sandbox_from_spec(self, spec: SandboxSpec) -> Any:
         """Create a sandbox from a declarative ``SandboxSpec`` (async).
 
-        Runs the synchronous Daytona SDK call in a thread to avoid
-        blocking the event loop.
+        **Important:** This thread-offloads the sync ``Daytona`` client
+        (sync ``Sandbox``) rather than using ``AsyncDaytona`` (which
+        returns an ``AsyncSandbox``). The reason is that the entire post-
+        creation pipeline (slot handler, volume layout, git helpers, local
+        repo mount, code-interpreter context) expects sync ``Sandbox``
+        method signatures. An ``AsyncSandbox`` in those paths produces
+        unawaited-coroutine warnings and ``DaytonaError`` at runtime.
+
+        Once the full isolation/executor/bridge stack is migrated to
+        native async this can switch to ``AsyncDaytona`` directly.
         """
         return await _run_sync_in_thread(self._create_sandbox_from_spec_impl, spec)
 
@@ -360,7 +413,54 @@ class DaytonaSandboxRuntime:
         return count
 
     async def _count_provider_fleet_sandboxes(self) -> int:
-        return await _run_sync_in_thread(self._count_provider_fleet_sandboxes_sync)
+        """Count provider-visible Fleet sandboxes via the native async client.
+
+        AsyncDaytona.list returns an AsyncIterator; iterate it natively
+        instead of thread-offloading the sync client. Falls back to the sync
+        implementation if the async client is unavailable (e.g. SDK missing
+        the async surface in an older pin).
+        """
+        try:
+            client = self._get_async_client()
+        except Exception:
+            return await _run_sync_in_thread(self._count_provider_fleet_sandboxes_sync)
+
+        signature = inspect.signature(client.list)
+        kwargs: dict[str, Any] = {}
+        if "labels" in signature.parameters:
+            kwargs["labels"] = self.DEFAULT_LABELS
+        result = client.list(**kwargs)
+        # AsyncDaytona.list returns an async iterator (not a list with .items).
+        count = 0
+        if hasattr(result, "__aiter__"):
+            async for sandbox in result:
+                labels = getattr(sandbox, "labels", None) or {}
+                if not isinstance(labels, dict):
+                    labels = {}
+                normalized = {str(key): str(value) for key, value in labels.items()}
+                if not all(normalized.get(key) == value for key, value in self.DEFAULT_LABELS.items()):
+                    continue
+                raw_state = getattr(sandbox, "state", None)
+                state = str(getattr(raw_state, "value", raw_state) or "").lower()
+                if state and state not in _PROVIDER_ACTIVE_STATES:
+                    continue
+                count += 1
+            return count
+        # Defensive: if a future SDK version returns a materialized list.
+        raw_items = getattr(result, "items", result) if result else []
+        for sandbox in raw_items:
+            labels = getattr(sandbox, "labels", None) or {}
+            if not isinstance(labels, dict):
+                labels = {}
+            normalized = {str(key): str(value) for key, value in labels.items()}
+            if not all(normalized.get(key) == value for key, value in self.DEFAULT_LABELS.items()):
+                continue
+            raw_state = getattr(sandbox, "state", None)
+            state = str(getattr(raw_state, "value", raw_state) or "").lower()
+            if state and state not in _PROVIDER_ACTIVE_STATES:
+                continue
+            count += 1
+        return count
 
     async def _acquire_slot_with_reconciliation(self) -> None:
         try:

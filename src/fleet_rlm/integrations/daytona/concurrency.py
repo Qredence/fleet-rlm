@@ -7,6 +7,7 @@ Provides a module-level asyncio.BoundedSemaphore to cap total active sandboxes
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import threading
@@ -393,9 +394,8 @@ async def sweep_paused_sandboxes_on_startup(*, runtime: Any) -> int:
         client = runtime._get_async_client()
     except Exception:
         return await asyncio.to_thread(_sweep_sync, runtime=runtime, default_labels=default_labels)
-    import inspect as _inspect
 
-    signature = _inspect.signature(client.list)
+    signature = inspect.signature(client.list)
     kwargs: dict[str, Any] = {}
     if "labels" in signature.parameters:
         kwargs["labels"] = default_labels
