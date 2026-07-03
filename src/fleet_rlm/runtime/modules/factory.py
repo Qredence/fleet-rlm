@@ -72,7 +72,7 @@ def _ensure_dspy_patched() -> None:
     with _PATCH_LOCK:
         if not _DSPY_PATCHED:
             if hasattr(_dspy_rlm, "_strip_code_fences"):
-                _dspy_rlm._strip_code_fences = _safe_strip_code_fences
+                setattr(_dspy_rlm, "_strip_code_fences", _safe_strip_code_fences)
                 _DSPY_PATCHED = True
             else:
                 logger.warning(
