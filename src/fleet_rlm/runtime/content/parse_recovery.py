@@ -181,9 +181,16 @@ def safe_strip_code_fences(code: str) -> str:
     if "```" not in code:
         return code
 
-    # Find the first opening fence
-    fence_start = code.find("```")
-    lang_line, sep, remainder = code[fence_start + 3 :].partition("\n")
+    # Only treat as a fenced block when the code itself starts with an opening
+    # fence. Otherwise the code is plain Python that happens to contain ``` inside
+    # string literals (e.g. regex patterns with embedded triple backticks); the
+    # upstream ``find("```")`` would match that interior backtick and truncate
+    # valid input or raise a spurious SyntaxError.
+    if not code.startswith("```"):
+        return code
+
+    # Opening fence is at the start of the code; split off the lang/info line.
+    lang_line, sep, remainder = code[3:].partition("\n")
     if not sep:
         return code
 

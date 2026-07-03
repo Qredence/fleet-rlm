@@ -20,9 +20,16 @@ function inferFenceLanguage(code: string): string {
  * executable code on the same line, which Streamdown then renders as one giant h1.
  */
 export function splitHeadingLinesWithInlineCode(text: string): string {
+  let inFence = false;
   return text
     .split("\n")
     .map((line) => {
+      if (/^`{3,}/.test(line.trim())) {
+        inFence = !inFence;
+        return line;
+      }
+      if (inFence) return line;
+
       const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
       if (!headingMatch) return line;
 

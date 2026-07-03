@@ -39,6 +39,25 @@ describe("normalizeMarkdownContent", () => {
       expect(normalizeMarkdownContent(input)).toBe(input);
     }
   });
+
+  it("leaves fenced code blocks with heading-like comment lines untouched", () => {
+    const inputs = [
+      "```python\n# print('debug')\nx = 1\n```",
+      "```python\n# print debug info\nprint('hello')\n```",
+      "```\n# import os\nimport os\n```",
+    ];
+    for (const input of inputs) {
+      expect(normalizeMarkdownContent(input)).toBe(input);
+    }
+  });
+
+  it("still splits headings outside of fenced code blocks", () => {
+    const input =
+      "```python\n# print('inside fence')\n```\n\n# Real heading print('outside fence')";
+    const expected =
+      "```python\n# print('inside fence')\n```\n\n# Real heading\n\n```python\nprint('outside fence')\n```";
+    expect(normalizeMarkdownContent(input)).toBe(expected);
+  });
 });
 
 describe("Streamdown wrapper", () => {
@@ -73,7 +92,7 @@ describe("Streamdown wrapper", () => {
 describe("raw Streamdown regression", () => {
   it("shows the unnormalized single-line heading bug", () => {
     const content =
-      "# First, let's look at the manifest to understand what files are available print(\"Manifest keys:\")";
+      '# First, let\'s look at the manifest to understand what files are available print("Manifest keys:")';
 
     const html = renderToStaticMarkup(
       <StreamdownRenderer mode="static">{content}</StreamdownRenderer>,
