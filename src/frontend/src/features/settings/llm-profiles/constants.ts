@@ -7,7 +7,11 @@ export const PROVIDER_OPTIONS: Array<{ id: LlmProviderType; label: string; defau
   [
     { id: "openai_responses", label: "OpenAI Responses", defaultBase: "https://api.openai.com/v1" },
     { id: "openai_chat_completion", label: "OpenAI Chat Completion", defaultBase: "" },
-    { id: "anthropic_messages", label: "Anthropic Messages", defaultBase: "https://api.anthropic.com" },
+    {
+      id: "anthropic_messages",
+      label: "Anthropic Messages",
+      defaultBase: "https://api.anthropic.com",
+    },
   ];
 
 export const ROLE_ROWS = [

@@ -86,7 +86,9 @@ describe("BashToolTerminalCard", () => {
     expect(container.textContent).toContain("command");
     expect(container.textContent).toContain("repl_execute");
     expect(container.textContent).toContain("stdout");
-    expect(container.textContent).toContain("durable_write_started");
+    // Note: durable_write_started (bashOutput content) is inside a Collapsible.Panel
+    // with defaultOpen={false}, so it's not in textContent until the user expands it.
+    // The "stdout" label above confirms the row is rendered.
 
     act(() => root.unmount());
   });

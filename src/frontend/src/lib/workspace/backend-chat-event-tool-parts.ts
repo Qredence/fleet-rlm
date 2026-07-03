@@ -271,8 +271,44 @@ export function extractRawToolName(payload?: Record<string, unknown>): string | 
   return undefined;
 }
 
+function parseDspyCompletion(completion: string): { reasoning: string; code: string } {
+  let reasoning = "";
+  let code = "";
+
+  const reasoningMatch = completion.match(
+    /\[\[\s*##\s*reasoning\s*##\s*\]\]([\s\S]*?)(?:\[\[\s*##\s*code\s*##\s*\]\]|$)/i,
+  );
+  if (reasoningMatch && reasoningMatch[1]) {
+    reasoning = reasoningMatch[1].trim();
+  }
+
+  const codeMatch = completion.match(
+    /\[\[\s*##\s*code\s*##\s*\]\]([\s\S]*?)(?:\[\[\s*##\s*completed\s*##\s*\]\]|$)/i,
+  );
+  if (codeMatch && codeMatch[1]) {
+    const rawCode = codeMatch[1].trim();
+    const fenceMatch = rawCode.match(/^```[a-zA-Z0-9_-]*\s*([\s\S]*?)```$/);
+    code = fenceMatch && fenceMatch[1] ? fenceMatch[1].trim() : rawCode;
+  }
+
+  return { reasoning, code };
+}
+
+function hasDspyMetadata(payload?: Record<string, unknown>): boolean {
+  if (!payload) return false;
+  if (payload.signature || payload.completion) return true;
+  const step =
+    payload.step && typeof payload.step === "object" && !Array.isArray(payload.step)
+      ? (payload.step as Record<string, unknown>)
+      : undefined;
+  if (step && (step.signature || step.completion)) return true;
+  return false;
+}
+
 function isSandboxPayload(payload?: Record<string, unknown>): boolean {
   if (!payload) return false;
+  if (hasDspyMetadata(payload)) return true;
+
   const step =
     payload.step && typeof payload.step === "object" && !Array.isArray(payload.step)
       ? (payload.step as Record<string, unknown>)
@@ -298,7 +334,7 @@ function sandboxFromPayload(
   const stepInput = asRecord(step?.input);
   const stepOutput = asRecord(step?.output);
   const argsRecord = asRecord(payload?.tool_args);
-  const code =
+  let code =
     asOptionalText(payload?.code_preview) ||
     asOptionalText(payload?.code) ||
     (typeof step?.input === "string" && step.input) ||
@@ -310,7 +346,7 @@ function sandboxFromPayload(
     (typeof payload?.tool_input === "string" && payload.tool_input) ||
     (typeof payload?.tool_args === "string" && payload.tool_args) ||
     "";
-  const output =
+  let output =
     (typeof step?.output === "string" && step.output) ||
     asOptionalText(stepOutput?.stdout) ||
     asOptionalText(stepOutput?.stderr) ||
@@ -318,6 +354,24 @@ function sandboxFromPayload(
     asOptionalText(stepOutput?.result) ||
     (typeof payload?.tool_output === "string" && payload.tool_output) ||
     text;
+
+  const signature = asOptionalText(payload?.signature) || asOptionalText(step?.signature) || "";
+  const completion = asOptionalText(payload?.completion) || asOptionalText(step?.completion) || "";
+  let reasoning = "";
+
+  if (completion) {
+    const parsed = parseDspyCompletion(completion);
+    if (parsed.code) {
+      code = parsed.code;
+    }
+    if (parsed.reasoning) {
+      reasoning = parsed.reasoning;
+      if (!output) {
+        output = parsed.reasoning;
+      }
+    }
+  }
+
   const state = inferToolState(kind, text, payload);
   const stepIndex = asOptionalNumber(payload?.step_index ?? payload?.stepIndex);
   const runtimeContext = parseRuntimeContext(payload);
@@ -330,9 +384,18 @@ function sandboxFromPayload(
     code,
     output,
     errorText: state === "output-error" ? (stringifyUnknown(output) ?? text) : undefined,
-    language: "text",
+    language: ["python", "repl", "interpreter"].some((s) =>
+      String(rawToolName ?? "Sandbox")
+        .toLowerCase()
+        .includes(s),
+    )
+      ? "python"
+      : "text",
+    ...(signature ? { signature } : {}),
+    ...(completion ? { completion } : {}),
+    ...(reasoning ? { reasoning } : {}),
     ...(runtimeContext ? { runtimeContext } : {}),
-  };
+  } as ToolLikeRenderPart;
 }
 
 export function sandboxProgressPartFromStatus(

@@ -114,6 +114,8 @@ export function mapToolInvocationToStep(
   if (toolName === "Bash") {
     step.bashCommand = args?.command ? String(args.command) : undefined;
     step.bashLanguage = args?.language ? String(args.language) : undefined;
+    step.bashSignature = args?.signature ? String(args.signature) : undefined;
+    step.bashReasoning = args?.reasoning ? String(args.reasoning) : undefined;
     if (toolInvocation.state === "result" && result) {
       if (typeof result === "string") {
         step.bashOutput = result;

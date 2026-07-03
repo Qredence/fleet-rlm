@@ -70,11 +70,13 @@ function NestedCodeRow({
   const formatted = cleanAndFormatSnippet(code);
   if (!formatted.trim()) return null;
 
+  const isSubtitleRedundant = subtitle && cleanAndFormatSnippet(subtitle) === formatted;
+
   return (
     <ToolRowBase
       completeLabel={label}
       isAnimating={false}
-      subtitle={subtitle}
+      subtitle={isSubtitleRedundant ? undefined : subtitle}
       expandable
       defaultOpen={defaultOpen}
     >
@@ -134,6 +136,26 @@ export function BashToolTerminalCard({
         showElapsed={false}
       >
         <div className="flex flex-col gap-2">
+          {step.bashSignature ? (
+            <NestedCodeRow
+              label="signature"
+              subtitle="DSPy Predictor Signature"
+              code={step.bashSignature}
+              filename="signature"
+              language="python"
+              defaultOpen={false}
+            />
+          ) : null}
+          {step.bashReasoning ? (
+            <NestedCodeRow
+              label="reasoning"
+              subtitle="Thinking process"
+              code={step.bashReasoning}
+              filename="reasoning"
+              language="text"
+              defaultOpen={true}
+            />
+          ) : null}
           <NestedCodeRow
             label="command"
             subtitle={commandSubtitle}

@@ -13,9 +13,7 @@ import {
 import {
   DetailBlock,
   executionSectionState,
-  renderBadges,
   renderExecutionSectionDetails,
-  statusTone,
 } from "@/features/workspace/inspection/inspector-ui";
 import { inspectorStyles } from "@/features/workspace/inspection/inspector-styles";
 import {
@@ -29,7 +27,6 @@ import {
   traceSpanLabel,
 } from "@/features/workspace/screen/workspace-session-trace-model";
 import { type SessionTraceDebugResponse } from "@/lib/rlm-api/sessions";
-import { cn } from "@/lib/utils";
 import { buildChatDisplayItems } from "@/lib/workspace/chat-display-items";
 import {
   TrajectoryChain,
@@ -43,12 +40,6 @@ type AssistantTurn = Extract<
   { kind: "assistant_turn" }
 >;
 
-const trajectoryCardClass = cn(inspectorStyles.card.root, "max-w-full");
-const trajectoryHeaderClass = cn(inspectorStyles.card.header, "min-w-0 max-w-full overflow-hidden");
-const trajectoryContentClass = cn(
-  inspectorStyles.card.content,
-  "min-w-0 max-w-full overflow-hidden",
-);
 export function selectedTurnHasTimeline(selectedTurn: AssistantTurn | null): boolean {
   if (!selectedTurn) return false;
   const model = buildAssistantContentModel(selectedTurn);
@@ -69,7 +60,6 @@ export function SelectedTurnTrajectory({ selectedTurn }: { selectedTurn: Assista
   if (!selectedTurn || !model) return null;
 
   const status = selectedTurnStatus(model);
-  const tone = statusTone(status);
   const hasTimeline =
     model.trajectory.hasContent ||
     model.execution.hasContent ||
@@ -82,44 +72,6 @@ export function SelectedTurnTrajectory({ selectedTurn }: { selectedTurn: Assista
 
   return (
     <div className="workspace-trajectory-content flex min-w-0 max-w-full flex-col gap-3 overflow-hidden">
-      <Card className={trajectoryCardClass}>
-        <CardHeader className={trajectoryHeaderClass}>
-          <div className="flex min-w-0 items-center justify-between gap-3">
-            <div className="min-w-0">
-              <CardTitle className="typo-label font-medium text-foreground">
-                Selected turn context
-              </CardTitle>
-              <CardDescription className="max-w-full typo-caption wrap-break-word">
-                Live transcript reasoning and execution detail for the selected assistant turn.
-              </CardDescription>
-            </div>
-            <Badge variant={tone.variant} className={inspectorStyles.badge.status}>
-              {tone.label}
-            </Badge>
-          </div>
-        </CardHeader>
-        <CardContent className={trajectoryContentClass}>
-          <div className={cn(inspectorStyles.badge.row, "min-w-0 max-w-full overflow-hidden")}>
-            {model.summary.trajectoryCount > 0 ? (
-              <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-                {model.summary.trajectoryCount} trajectories
-              </Badge>
-            ) : null}
-            {model.summary.toolSessionCount > 0 ? (
-              <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-                {model.summary.toolSessionCount} tool sessions
-              </Badge>
-            ) : null}
-            {model.summary.sourceCount > 0 ? (
-              <Badge variant="secondary" className={inspectorStyles.badge.meta}>
-                {model.summary.sourceCount} sources
-              </Badge>
-            ) : null}
-            {renderBadges(model.summary.runtimeBadges, "secondary")}
-          </div>
-        </CardContent>
-      </Card>
-
       <TrajectoryChain>
         {model.trajectory.overview ? (
           <TrajectoryChainStep
@@ -199,25 +151,10 @@ function extractSandboxEvents(selectedTurn: AssistantTurn | null): SandboxActivi
   return events;
 }
 
-export function LiveTurnTrajectoryFallback({
-  selectedTurn,
-  title,
-  description,
-}: {
-  selectedTurn: AssistantTurn;
-  title: string;
-  description: string;
-}) {
+export function LiveTurnTrajectoryFallback({ selectedTurn }: { selectedTurn: AssistantTurn }) {
   return (
     <div className="h-full w-full max-w-full overflow-y-auto overflow-x-hidden">
       <div className="workspace-trajectory-content flex min-w-0 max-w-full flex-col gap-3 overflow-hidden p-3">
-        <Alert className="min-w-0 max-w-full overflow-hidden">
-          <TriangleAlert className="text-muted-foreground" />
-          <AlertTitle className="typo-label">{title}</AlertTitle>
-          <AlertDescription className="typo-caption wrap-break-word">
-            {description}
-          </AlertDescription>
-        </Alert>
         <SelectedTurnTrajectory selectedTurn={selectedTurn} />
       </div>
     </div>
@@ -412,13 +349,7 @@ export function TrajectoryTimeline({
 
   if (traceState.traceDebugQuery.isError) {
     if (selectedTurn && selectedTurnHasTimeline(selectedTurn)) {
-      return (
-        <LiveTurnTrajectoryFallback
-          selectedTurn={selectedTurn}
-          title="Trace unavailable"
-          description="Rendering live transcript reasoning and tool events for this turn."
-        />
-      );
+      return <LiveTurnTrajectoryFallback selectedTurn={selectedTurn} />;
     }
     return <TraceErrorPanel title="Trace unavailable" error={traceState.traceDebugQuery.error} />;
   }
@@ -428,13 +359,7 @@ export function TrajectoryTimeline({
 
   if (!traceDebug || spans.length === 0) {
     if (selectedTurn && selectedTurnHasTimeline(selectedTurn)) {
-      return (
-        <LiveTurnTrajectoryFallback
-          selectedTurn={selectedTurn}
-          title="Trace spans unavailable"
-          description="Rendering live transcript reasoning and tool events because this trace has no debug spans."
-        />
-      );
+      return <LiveTurnTrajectoryFallback selectedTurn={selectedTurn} />;
     }
     return (
       <EmptyPanel

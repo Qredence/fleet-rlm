@@ -24,15 +24,17 @@ Performance-improvement flags (all env-configurable, default safe):
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import threading
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable
 
 import dspy
-from dspy.predict.rlm import _strip_code_fences
+import dspy.predict.rlm as _dspy_rlm
 
 from fleet_rlm.runtime.content.parse_recovery import (
     extract_completion_from_parse_error as _extract_completion,
@@ -44,10 +46,41 @@ from fleet_rlm.runtime.content.parse_recovery import (
     is_degenerate_response as _is_degenerate,
 )
 from fleet_rlm.runtime.content.parse_recovery import (
+    safe_strip_code_fences as _safe_strip_code_fences,
+)
+from fleet_rlm.runtime.content.parse_recovery import (
     truncate_completion as _truncate,
 )
 
+# Patch dspy module lazily on RLM initialization
+
+_PATCH_LOCK = threading.Lock()
+_DSPY_PATCHED = False
 logger = logging.getLogger(__name__)
+
+
+def _ensure_dspy_patched() -> None:
+    """Ensure dspy.predict.rlm is patched with safe_strip_code_fences lazily and thread-safely."""
+    global _DSPY_PATCHED
+    if _DSPY_PATCHED:
+        return
+    if not hasattr(_dspy_rlm, "_strip_code_fences"):
+        logger.warning(
+            "Skipping DSPy code-fence patch because dspy.predict.rlm lacks _strip_code_fences"
+        )
+        return
+    with _PATCH_LOCK:
+        if not _DSPY_PATCHED:
+            if hasattr(_dspy_rlm, "_strip_code_fences"):
+                setattr(_dspy_rlm, "_strip_code_fences", _safe_strip_code_fences)
+                _DSPY_PATCHED = True
+            else:
+                logger.warning(
+                    "Skipping DSPy code-fence patch because dspy.predict.rlm lacks _strip_code_fences"
+                )
+
+# Bind local reference for factory.py's own uses
+_strip_code_fences = _safe_strip_code_fences
 
 _DSPY_RLM_BASE: Any = dspy.RLM
 
@@ -295,6 +328,7 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         action_timeout: int | None = None,
         **kwargs: Any,
     ) -> None:
+        _ensure_dspy_patched()
         super().__init__(*args, **kwargs)
         self.generate_action = _EmittingAction(self.generate_action, self._emit_step)
         self.generate_action.action_max_tokens = action_max_tokens
@@ -920,12 +954,10 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                 "fleet_rlm.tool_name": "repl_execute",
                 "fleet_rlm.rlm_iteration": str(iteration),
                 "fleet_rlm.execution_origin": "dspy_rlm_execute_code",
+                "fleet_rlm.variable_names": json.dumps(sorted(str(key) for key in input_args), ensure_ascii=False),
             },
             inputs={
-                "tool_name": "repl_execute",
-                "iteration": iteration,
                 "code": _bounded_value(code),
-                "variable_names": sorted(str(key) for key in input_args),
             },
         ) as span:
             result = super()._execute_code(repl, code, input_args)

@@ -258,6 +258,9 @@ function commandInput(part: Extract<ChatRenderPart, { kind: "tool" | "sandbox" }
       command: part.code || "",
       description: part.title,
       language: part.language,
+      ...(part.signature ? { signature: part.signature } : {}),
+      ...(part.completion ? { completion: part.completion } : {}),
+      ...(part.reasoning ? { reasoning: part.reasoning } : {}),
     };
   }
   if (isRecord(part.input)) {

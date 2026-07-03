@@ -302,13 +302,7 @@ export function GraphTab({ traceState }: { traceState: SessionTraceState }) {
   if (traceState.traceDebugQuery.isError) {
     if (fallbackGraph) return fallbackGraph;
     if (selectedTurn && selectedTurnHasTimeline(selectedTurn)) {
-      return (
-        <LiveTurnTrajectoryFallback
-          selectedTurn={selectedTurn}
-          title="Trace graph unavailable"
-          description="Rendering live transcript reasoning and tool events for this turn."
-        />
-      );
+      return <LiveTurnTrajectoryFallback selectedTurn={selectedTurn} />;
     }
     return (
       <TraceErrorPanel title="Trace graph unavailable" error={traceState.traceDebugQuery.error} />
@@ -319,13 +313,7 @@ export function GraphTab({ traceState }: { traceState: SessionTraceState }) {
   if (!traceDebug || traceDebug.spans.length === 0) {
     if (fallbackGraph) return fallbackGraph;
     if (selectedTurn && selectedTurnHasTimeline(selectedTurn)) {
-      return (
-        <LiveTurnTrajectoryFallback
-          selectedTurn={selectedTurn}
-          title="Trace graph unavailable"
-          description="Rendering live transcript reasoning and tool events because this trace has no spans to visualize."
-        />
-      );
+      return <LiveTurnTrajectoryFallback selectedTurn={selectedTurn} />;
     }
     return (
       <EmptyPanel

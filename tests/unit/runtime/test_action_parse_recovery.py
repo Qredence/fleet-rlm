@@ -23,6 +23,7 @@ from typing import ClassVar
 import dspy
 import pytest
 
+from fleet_rlm.runtime.modules import factory as factory_module
 from fleet_rlm.runtime.modules.factory import _StreamingRLM
 
 
@@ -161,3 +162,74 @@ class TestConsecutiveParseErrorCap:
         from fleet_rlm.runtime.modules.factory import _env_int
 
         assert _env_int("FLEET_RLM_MAX_CONSECUTIVE_PARSE_ERRORS", 3) == 5
+
+
+class TestEnsureDspyPatched:
+    def test_skips_when_private_strip_helper_is_missing(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setattr(factory_module, "_DSPY_PATCHED", False)
+        monkeypatch.delattr(factory_module._dspy_rlm, "_strip_code_fences", raising=False)
+
+        with caplog.at_level("WARNING"):
+            factory_module._ensure_dspy_patched()
+
+        assert factory_module._DSPY_PATCHED is False
+        assert "Skipping DSPy code-fence patch" in caplog.text
+
+
+class TestSafeStripCodeFences:
+    """``safe_strip_code_fences`` must only strip actual fences, never interior
+    backticks embedded in plain Python string literals."""
+
+    def test_strips_python_fenced_block(self) -> None:
+        from fleet_rlm.runtime.content.parse_recovery import safe_strip_code_fences
+
+        assert safe_strip_code_fences("```python\nprint('ok')\n```") == "print('ok')"
+
+    def test_strips_bare_fenced_block(self) -> None:
+        from fleet_rlm.runtime.content.parse_recovery import safe_strip_code_fences
+
+        assert safe_strip_code_fences("```\nprint('ok')\n```") == "print('ok')"
+
+    def test_strips_decorative_outer_fence_pair(self) -> None:
+        from fleet_rlm.runtime.content.parse_recovery import safe_strip_code_fences
+
+        assert safe_strip_code_fences("```\n```\nprint('ok')\n```\n```") == "print('ok')"
+
+    def test_plain_code_without_backticks_unchanged(self) -> None:
+        from fleet_rlm.runtime.content.parse_recovery import safe_strip_code_fences
+
+        code = "print('hello')\nx = 1"
+        assert safe_strip_code_fences(code) == code
+
+    def test_plain_code_with_interior_backticks_unchanged(self) -> None:
+        """Regression: ``find("```")`` previously matched interior backticks in
+        a raw string literal and truncated valid code."""
+        from fleet_rlm.runtime.content.parse_recovery import safe_strip_code_fences
+
+        code = "x = r'--- FILE: (.+?) ---\n```(?:\\w+)?\n(.*?)\n```'\nprint(x)"
+        assert safe_strip_code_fences(code) == code
+
+    def test_plain_code_with_backtick_string_literal_unchanged(self) -> None:
+        from fleet_rlm.runtime.content.parse_recovery import safe_strip_code_fences
+
+        assert safe_strip_code_fences("print('```')") == "print('```')"
+
+    def test_plain_code_with_triple_quoted_backticks_unchanged(self) -> None:
+        from fleet_rlm.runtime.content.parse_recovery import safe_strip_code_fences
+
+        code = "x = '''\n```\nregex line\n```'''\nprint('ok')"
+        assert safe_strip_code_fences(code) == code
+
+    def test_non_python_fence_raises_syntax_error(self) -> None:
+        from fleet_rlm.runtime.content.parse_recovery import safe_strip_code_fences
+
+        with pytest.raises(SyntaxError, match="Expected Python code"):
+            safe_strip_code_fences("```bash\necho hi\n```")
+
+    def test_fenced_block_with_interior_backticks_extracts_correctly(self) -> None:
+        from fleet_rlm.runtime.content.parse_recovery import safe_strip_code_fences
+
+        code = "```python\nx = '```\nprint(x)\n```"
+        assert safe_strip_code_fences(code) == "x = '```\nprint(x)"

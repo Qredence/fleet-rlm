@@ -604,6 +604,14 @@
   background-color: color-mix(in srgb, var(--node-color) 15%, transparent);
 }
 
+@utility trace-llm-badge-bg {
+  background-color: var(--trace-llm);
+}
+
+@utility badge-muted-bg {
+  background-color: var(--color-muted);
+}
+
 @utility volume-tree-row {
   padding-left: calc(var(--tree-indent-base) + (var(--tree-depth, 0) * var(--tree-indent-step)));
 }
