@@ -447,11 +447,23 @@ def record_rlm_trajectory_spans(trajectory: Any) -> int:
 
         index = step.get("index")
         tool_name = step.get("tool_name") or ("repl_execute" if step.get("code") is not None else span_name)
-        inputs = {
-            "tool_name": tool_name,
-            "tool_args": _bounded_value(step.get("tool_args") or step.get("input")),
-            "code": _bounded_value(step.get("code")),
-        }
+        if tool_name == "repl_execute":
+            code_val = step.get("code")
+            if not code_val and isinstance(step.get("tool_args"), dict):
+                code_val = step.get("tool_args", {}).get("code")
+            inputs = {
+                "code": _bounded_value(code_val),
+            }
+            # Also preserve tool_args if present
+            tool_args = step.get("tool_args") or step.get("input")
+            if tool_args:
+                inputs["tool_args"] = _bounded_value(tool_args)
+        else:
+            inputs = {
+                "tool_name": tool_name,
+                "tool_args": _bounded_value(step.get("tool_args") or step.get("input")),
+                "code": _bounded_value(step.get("code")),
+            }
         outputs = {
             "observation": _bounded_value(step.get("observation")),
             "output": _bounded_value(step.get("output")),

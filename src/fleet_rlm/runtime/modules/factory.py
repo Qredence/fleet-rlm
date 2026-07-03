@@ -24,15 +24,17 @@ Performance-improvement flags (all env-configurable, default safe):
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import threading
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable
 
 import dspy
-from dspy.predict.rlm import _strip_code_fences
+import dspy.predict.rlm as _dspy_rlm
 
 from fleet_rlm.runtime.content.parse_recovery import (
     extract_completion_from_parse_error as _extract_completion,
@@ -46,6 +48,71 @@ from fleet_rlm.runtime.content.parse_recovery import (
 from fleet_rlm.runtime.content.parse_recovery import (
     truncate_completion as _truncate,
 )
+
+# --- Safer code-fence stripping (monkey-patches dspy) ---
+# The upstream _strip_code_fences uses ``remainder.find("```")`` which matches
+# the *first* triple-backtick in the remainder. When the LLM generates code
+# containing triple backticks inside string literals (e.g. regex patterns like
+# ``r'--- FILE: (.+?) ---\s*\n```(?:\w+)?\n(.*?)\n```'``), the function
+# truncates at the interior backtick, causing ``unterminated string literal``
+# errors in the REPL. This replacement walks lines and uses the *last*
+# standalone ````` line as the closing fence.
+
+_PYTHON_FENCE_LANGS = {"python", "py", ""}
+
+
+def _safe_strip_code_fences(code: str) -> str:
+    """Strip code fences using last-standalone-line matching."""
+    code = code.strip()
+    if "```" not in code:
+        return code
+
+    lines = code.splitlines()
+    # Strip outer decorative fence pairs
+    while len(lines) >= 2 and lines[0].strip() == "```" and lines[-1].strip() == "```":
+        lines.pop(0)
+        lines.pop()
+    code = "\n".join(lines).strip()
+    if "```" not in code:
+        return code
+
+    # Find the first opening fence
+    fence_start = code.find("```")
+    lang_line, sep, remainder = code[fence_start + 3 :].partition("\n")
+    if not sep:
+        return code
+
+    lang = (lang_line.strip().split(maxsplit=1)[0] if lang_line.strip() else "").lower()
+    if lang not in _PYTHON_FENCE_LANGS:
+        raise SyntaxError(f"Expected Python code but got ```{lang} fence. Write Python code, not {lang}.")
+
+    # Find closing fence: walk backwards for the last line that is exactly "```"
+    rlines = remainder.splitlines()
+    for i in range(len(rlines) - 1, -1, -1):
+        if rlines[i].strip() == "```":
+            return "\n".join(rlines[:i]).strip()
+    return remainder.strip()
+
+
+# Patch dspy module lazily on RLM initialization
+
+_PATCH_LOCK = threading.Lock()
+_DSPY_PATCHED = False
+
+
+def _ensure_dspy_patched() -> None:
+    """Ensure dspy.predict.rlm is patched with safe_strip_code_fences lazily and thread-safely."""
+    global _DSPY_PATCHED
+    if _DSPY_PATCHED:
+        return
+    with _PATCH_LOCK:
+        if not _DSPY_PATCHED:
+            _dspy_rlm._strip_code_fences = _safe_strip_code_fences
+            _DSPY_PATCHED = True
+
+
+# Bind local reference for factory.py's own uses
+_strip_code_fences = _safe_strip_code_fences
 
 logger = logging.getLogger(__name__)
 
@@ -295,6 +362,7 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         action_timeout: int | None = None,
         **kwargs: Any,
     ) -> None:
+        _ensure_dspy_patched()
         super().__init__(*args, **kwargs)
         self.generate_action = _EmittingAction(self.generate_action, self._emit_step)
         self.generate_action.action_max_tokens = action_max_tokens
@@ -920,12 +988,10 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                 "fleet_rlm.tool_name": "repl_execute",
                 "fleet_rlm.rlm_iteration": str(iteration),
                 "fleet_rlm.execution_origin": "dspy_rlm_execute_code",
+                "fleet_rlm.variable_names": json.dumps(sorted(str(key) for key in input_args), ensure_ascii=False),
             },
             inputs={
-                "tool_name": "repl_execute",
-                "iteration": iteration,
                 "code": _bounded_value(code),
-                "variable_names": sorted(str(key) for key in input_args),
             },
         ) as span:
             result = super()._execute_code(repl, code, input_args)
