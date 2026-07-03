@@ -95,7 +95,7 @@ This command:
 - Creates a virtual environment in `.venv/`
 - Installs all runtime dependencies
 - Installs development dependencies (`pytest`, `ruff`, `ty`, etc.)
-- Installs optional extras (`server`, `full`)
+- Installs optional extras (`server`, `datasets`)
 
 ### Install Pre-commit Hooks
 
