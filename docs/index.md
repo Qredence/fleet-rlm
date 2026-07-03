@@ -13,6 +13,7 @@
 
 - **[Reference Index](reference/index.md)** — CLI, HTTP/WebSocket API, Python API, auth modes, database, sandbox surfaces, source layout.
 - **[Frontend Product Surface Guide](explanation/frontend-product-surface.md)**
+- **[RLM Capability Evaluation](explanation/rlm-capability-evaluation.md)** — paper-comparable S-NIAH / OOLONG benchmark results and methodology.
 
 ## Architecture & Internals
 

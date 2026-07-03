@@ -20,7 +20,9 @@
   * [Testing Strategy](how-to-guides/testing-strategy.md)
   * [Runtime Setup from Frontend Settings](how-to-guides/runtime-settings.md)
   * [DSPy Integration Guide](how-to-guides/dspy-integration.md)
+  * [DSPy Optimization and Evaluation](how-to-guides/dspy-optimization-and-evaluation.md)
   * [Deploying the API Server](how-to-guides/deploying-server.md)
+  * [Releasing to PyPI](how-to-guides/releasing.md)
   * [Jupyter Notebook Workflows](how-to-guides/using-notebooks.md)
   * [MLflow Tracing, Feedback, Eval, and Optimization](how-to-guides/mlflow-workflows.md)
   * [Performance Regression Guardrail](how-to-guides/performance-regression-guardrail.md)
@@ -36,6 +38,7 @@
   * [User Interaction Flows](explanation/user-flows.md)
   * [Component UML](explanation/component-uml.md)
   * [Frontend Product Surface Guide](explanation/frontend-product-surface.md)
+  * [RLM Capability Evaluation](explanation/rlm-capability-evaluation.md)
   * [Wiring Analysis](explanation/wiring-analysis.md)
 
 ## Agent Harness

@@ -59,8 +59,10 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.51,<3",
     "sqlmodel>=0.0.39",
     "tomli>=2.4.1; python_version < '3.11'",
-    # Web API surface.
-    "fastapi[standard]>=0.138.2",
+    # Web API surface. Pinned exactly to 0.139.0 (latest PyPI release, Jul 1
+    # 2026) for reproducible installs; bump deliberately when a newer release is
+    # validated against the runtime + test suite.
+    "fastapi[standard]==0.139.0",
     "joserfc>=1.7.2",
     "uvicorn>=0.47.0,<1",
     # Observability and external services.

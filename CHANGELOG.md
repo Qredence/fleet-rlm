@@ -4,17 +4,6 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-### Changed
-
-- **Change:** Clarified that `litellm` is installed only as DSPy's transitive
-  dependency — it is no longer listed in `[project].dependencies` (it never
-  was, but the policy is now mechanically enforced). The
-  `[tool.uv].override-dependencies` pin `litellm>=1.87.0` remains the
-  mechanism closing 7 documented CVEs.
-  **Outcome:** `tests/unit/test_litellm_invariant.py` now parses
-  `pyproject.toml` via `tomllib` and fails if `litellm` is ever re-added to
-  direct deps or removed from the override pin.
-
 ## [0.6.2] - 2026-06-29
 
 ### Added
@@ -47,6 +36,29 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- **Change:** Clarified that `litellm` is installed only as DSPy's transitive
+  dependency — it is no longer listed in `[project].dependencies` (it never
+  was, but the policy is now mechanically enforced). The
+  `[tool.uv].override-dependencies` pin `litellm>=1.87.0` remains the
+  mechanism closing 7 documented CVEs.
+  **Outcome:** `tests/unit/test_litellm_invariant.py` now parses
+  `pyproject.toml` via `tomllib` and fails if `litellm` is ever re-added to
+  direct deps or removed from the override pin.
+- **Change:** Pinned `fastapi[standard]` exactly to `==0.139.0` (latest PyPI
+  release, Jul 1 2026) instead of the prior `>=0.138.2` floor, and re-locked
+  `uv.lock` accordingly.
+  **Outcome:** Installs are reproducible on the current validated FastAPI
+  release instead of floating forward unpredictably.
+- **Change:** Rewrote `README.md` with a tighter structure, updated feature
+  list, current 0.6.2 product surfaces, and refreshed quickstart/validation
+  commands.
+  **Outcome:** Onboarding reflects the actual routed surfaces
+  (`/app/workspace`, `/app/optimization`, `/app/volumes`, `/app/settings`)
+  and the current `make`/`pnpm` validation lanes.
+- **Change:** Updated `docs/SUMMARY.md` and `docs/index.md` to surface the
+  DSPy optimization/evaluation, releasing, and RLM capability-evaluation
+  pages that were present on disk but missing from the table of contents.
+  **Outcome:** The docs TOC matches the on-disk doc set.
 - **Change:** Reworked `PATCH /api/v1/runtime/settings` so hosted
   `AUTH_MODE=neon` (BYOK routing) persists `DAYTONA_*` keys per-workspace as
   encrypted ciphertext instead of returning `403`; non-Daytona keys remain
@@ -62,6 +74,15 @@ All notable changes to this project are documented in this file.
   **Outcome:** The workspace benefits from modern security patches, performance gains, and library robust alignment across all backend and CLI layers.
 - **Change:** Bumped the `litellm` override-dependency floor to `>=1.87.0` to resolve critical vulnerabilities and ensure secure API proxy integration.
   **Outcome:** Built-in model orchestration maintains secure, up-to-date Litellm clients for core workspace tasks.
+
+### Removed
+
+- **Change:** Deleted the legacy tracked `plan/` planning directory (old
+  phase-planning markdown and notebooks that were gitignored but
+  force-tracked) and the ephemeral `dspy-review-report.md` report.
+  **Outcome:** The repo root no longer carries stale phase-planning artifacts
+  or one-off review reports; neither path was referenced by docs, AGENTS, or
+  source.
 
 ### Fixed
 
