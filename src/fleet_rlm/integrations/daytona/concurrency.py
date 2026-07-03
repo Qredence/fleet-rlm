@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 import threading
+import time
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -273,3 +274,183 @@ def get_current_sandbox_usage() -> SandboxUsageStats:
     available = getattr(_GLOBAL_SEMAPHORE, "_value", 0)
     active = max(0, limit - available)
     return SandboxUsageStats(limit=limit, available_slots=available, active_count=active)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.5: Pause lifecycle for root sessions
+# ---------------------------------------------------------------------------
+
+_PAUSED_REGISTRY: dict[str, float] = {}
+_PAUSED_LOCK = threading.Lock()
+
+
+class SessionLifecycleConfig(BaseModel):
+    """Validated configuration for root-session teardown lifecycle."""
+
+    model_config = ConfigDict(frozen=True)
+
+    lifecycle: str = Field(default="delete")  # "pause" | "delete"
+    max_paused_sandboxes: int = Field(default=3, ge=0, le=50)
+
+    @field_validator("lifecycle", mode="before")
+    @classmethod
+    def _coerce_lifecycle(cls, value: Any) -> str:
+        if value is None or value == "":
+            return "delete"
+        normalized = str(value).strip().lower()
+        if normalized not in ("pause", "delete"):
+            logger.warning("Invalid FLEET_SESSION_LIFECYCLE=%s, falling back to delete", value)
+            return "delete"
+        return normalized
+
+    @field_validator("max_paused_sandboxes", mode="before")
+    @classmethod
+    def _coerce_max_paused(cls, value: Any) -> int:
+        if value is None or value == "":
+            return 3
+        try:
+            return max(0, min(int(value), 50))
+        except (TypeError, ValueError):
+            return 3
+
+    @classmethod
+    def from_env(cls) -> SessionLifecycleConfig:
+        raw_max = os.environ.get("FLEET_MAX_PAUSED_SANDBOXES", "").strip()
+        max_paused = 3
+        if raw_max:
+            try:
+                max_paused = int(raw_max)
+            except ValueError:
+                logger.warning("Invalid FLEET_MAX_PAUSED_SANDBOXES: %s", raw_max)
+        return cls(
+            lifecycle=os.environ.get("FLEET_SESSION_LIFECYCLE", "").strip(),
+            max_paused_sandboxes=max_paused,
+        )
+
+
+def should_pause_root_session() -> bool:
+    """True if root sessions should be paused instead of deleted on shutdown."""
+    return SessionLifecycleConfig.from_env().lifecycle == "pause"
+
+
+def register_paused_sandbox(sandbox_id: str) -> None:
+    """Record a paused root sandbox in the LRU registry."""
+    if not sandbox_id:
+        return
+    with _PAUSED_LOCK:
+        _PAUSED_REGISTRY[sandbox_id] = time.monotonic()
+
+
+def unregister_paused_sandbox(sandbox_id: str) -> None:
+    """Remove a paused sandbox from the registry (e.g. after deletion)."""
+    with _PAUSED_LOCK:
+        _PAUSED_REGISTRY.pop(sandbox_id, None)
+
+
+def get_paused_sandbox_count() -> int:
+    with _PAUSED_LOCK:
+        return len(_PAUSED_REGISTRY)
+
+
+async def reap_paused_sandboxes(*, runtime: Any) -> int:
+    """Delete oldest paused root sandboxes until under the configured limit.
+
+    Runs inline on every pause. Returns the number of sandboxes reaped.
+    Uses the async client (native); falls back to sync client in a thread if
+    the async client is unavailable.
+    """
+    config = SessionLifecycleConfig.from_env()
+    limit = config.max_paused_sandboxes
+    if limit == 0:
+        # Pausing disabled when limit is 0: delete everything tracked.
+        pass
+    with _PAUSED_LOCK:
+        items = sorted(_PAUSED_REGISTRY.items(), key=lambda kv: kv[1])
+    reaped = 0
+    # Keep only ``limit`` newest; delete the oldest excess.
+    while len(items) > limit:
+        sandbox_id, _ts = items.pop(0)
+        try:
+            await _delete_sandbox_by_id(runtime=runtime, sandbox_id=sandbox_id)
+            reaped += 1
+        except Exception:
+            logger.warning("Failed to reap paused sandbox %s", sandbox_id, exc_info=True)
+        finally:
+            unregister_paused_sandbox(sandbox_id)
+    return reaped
+
+
+async def sweep_paused_sandboxes_on_startup(*, runtime: Any) -> int:
+    """Best-effort startup sweep: delete provider-visible paused Fleet sandboxes.
+
+    The in-process registry is lost on restart, so paused sandboxes from a
+    previous run must be discovered via the provider list. This lists
+    Fleet-managed sandboxes in a paused state and deletes them so the fleet
+    does not leak paused sandboxes across restarts.
+    """
+    default_labels = getattr(runtime, "DEFAULT_LABELS", {"managed-by": "fleet-rlm"})
+    try:
+        client = runtime._get_async_client()
+    except Exception:
+        return await asyncio.to_thread(_sweep_sync, runtime=runtime, default_labels=default_labels)
+    import inspect as _inspect
+
+    signature = _inspect.signature(client.list)
+    kwargs: dict[str, Any] = {}
+    if "labels" in signature.parameters:
+        kwargs["labels"] = default_labels
+    result = client.list(**kwargs)
+    swept = 0
+    if hasattr(result, "__aiter__"):
+        async for sandbox in result:
+            raw_state = getattr(sandbox, "state", None)
+            state = str(getattr(raw_state, "value", raw_state) or "").lower()
+            if "paused" not in state and "paused" != state:
+                continue
+            try:
+                await client.delete(sandbox)
+                swept += 1
+                unregister_paused_sandbox(getattr(sandbox, "id", "") or "")
+            except Exception:
+                logger.warning("Startup sweep: failed to delete paused sandbox", exc_info=True)
+    return swept
+
+
+def _sweep_sync(*, runtime: Any, default_labels: dict[str, str]) -> int:
+    """Sync fallback for the startup sweep when the async client is unavailable."""
+    client = runtime._get_client()
+    signature = inspect.signature(client.list)
+    kwargs: dict[str, Any] = {}
+    if "labels" in signature.parameters:
+        kwargs["labels"] = default_labels
+    result = client.list(**kwargs)
+    raw_items = getattr(result, "items", result) if result else []
+    swept = 0
+    for sandbox in raw_items:
+        raw_state = getattr(sandbox, "state", None)
+        state = str(getattr(raw_state, "value", raw_state) or "").lower()
+        if "paused" not in state and "paused" != state:
+            continue
+        try:
+            client.delete(sandbox)
+            swept += 1
+        except Exception:
+            logger.warning("Startup sweep: failed to delete paused sandbox", exc_info=True)
+    return swept
+
+
+async def _delete_sandbox_by_id(*, runtime: Any, sandbox_id: str) -> None:
+    """Delete a paused sandbox by ID via the async client (sync fallback)."""
+    try:
+        client = runtime._get_async_client()
+    except Exception:
+        await asyncio.to_thread(_delete_sandbox_by_id_sync, runtime=runtime, sandbox_id=sandbox_id)
+        return
+    sandbox = await client.get(sandbox_id)
+    await client.delete(sandbox)
+
+
+def _delete_sandbox_by_id_sync(*, runtime: Any, sandbox_id: str) -> None:
+    client = runtime._get_client()
+    sandbox = client.get(sandbox_id)
+    client.delete(sandbox)

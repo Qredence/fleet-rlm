@@ -172,6 +172,19 @@ class DaytonaSandboxRuntime:
     def _default_sandbox_name() -> str:
         return _default_sandbox_name_helper()
 
+    async def asweep_paused_sandboxes(self) -> int:
+        """Startup sweep: delete provider-visible paused Fleet sandboxes.
+
+        The in-process paused-sandbox registry is lost on restart, so paused
+        root sessions from a previous run must be discovered via the provider
+        list. Call this once at app startup (before serving traffic) when
+        ``FLEET_SESSION_LIFECYCLE=pause`` is configured. Returns the number of
+        sandboxes swept.
+        """
+        from .concurrency import sweep_paused_sandboxes_on_startup
+
+        return await sweep_paused_sandboxes_on_startup(runtime=self)
+
     @staticmethod
     def _resolve_default_snapshot(*, image: Any, snapshot: str | None) -> str | None:
         return _resolve_default_snapshot(image=image, snapshot=snapshot)

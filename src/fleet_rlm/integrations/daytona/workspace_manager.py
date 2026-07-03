@@ -10,6 +10,11 @@ from typing import Any
 from fleet_rlm.utils.paths import dedupe_paths
 
 from .async_compat import _await_if_needed, _run_async_compat
+from .concurrency import (
+    reap_paused_sandboxes,
+    register_paused_sandbox,
+    should_pause_root_session,
+)
 from .models import ReconfigureOutcome, SandboxSpec, WorkspaceConfig, normalized_context_sources
 from .runtime import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH, DaytonaSandboxRuntime
 from .session_runtime import DaytonaSandboxSession
@@ -433,8 +438,15 @@ class WorkspaceManager:
         await self._aclose_bridge()
         try:
             if delete:
-                delete_fn = getattr(active_session, "adelete", None) or active_session.delete
-                await self._call_maybe_async(delete_fn)
+                # Phase 2.5: root sessions may pause instead of delete so they
+                # can be resumed quickly without a full sandbox rebuild. Only
+                # root sessions (owns_runtime) are eligible; children always
+                # delete-after-task to keep the recursive footprint bounded.
+                if self._owns_runtime and should_pause_root_session():
+                    await self._pause_root_session(active_session)
+                else:
+                    delete_fn = getattr(active_session, "adelete", None) or active_session.delete
+                    await self._call_maybe_async(delete_fn)
             elif self.delete_context_on_shutdown:
                 delete_context_fn = getattr(active_session, "adelete_context", None) or active_session.delete_context
                 await self._call_maybe_async(delete_context_fn)
@@ -455,6 +467,29 @@ class WorkspaceManager:
 
     async def _aclose_bridge(self) -> None:
         await self._close_executor()
+
+    async def _pause_root_session(self: Any, session: Any) -> None:
+        """Pause a root session for fast resume, then run the inline LRU reaper.
+
+        Pausing frees vCPU/RAM quota (only disk remains) while keeping the
+        sandbox warm for a quick ``start()`` on resume. The Fleet concurrency
+        slot is released via the slot handler's pause wrapper. The reaper
+        deletes the oldest paused sandboxes when the registry exceeds
+        ``FLEET_MAX_PAUSED_SANDBOXES``.
+        """
+        sandbox = getattr(session, "sandbox", None) or session
+        sandbox_id = getattr(sandbox, "id", None) or getattr(session, "sandbox_id", "")
+        pause_fn = getattr(sandbox, "pause", None) or getattr(session, "apause", None)
+        if pause_fn is not None:
+            await self._call_maybe_async(pause_fn)
+        if sandbox_id:
+            register_paused_sandbox(str(sandbox_id))
+        try:
+            await reap_paused_sandboxes(runtime=self.runtime)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).debug("Inline reaper failed during pause of %s", sandbox_id, exc_info=True)
 
     async def _aclose_runtime(self: Any) -> None:
         if not self._owns_runtime or self._runtime_closed:
