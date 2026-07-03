@@ -20,11 +20,21 @@ executors:
 commands:
   install_uv:
     steps:
+      - restore_cache:
+          keys:
+            - v1-uv-bin-{{ arch }}
       - run:
-          name: Install uv
+          name: Install uv (skip if cached)
           command: |
-            curl -LsSf https://astral.sh/uv/install.sh | sh
+            if [ ! -f "$HOME/.local/bin/uv" ]; then
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+            fi
             echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+      - save_cache:
+          key: v1-uv-bin-{{ arch }}
+          paths:
+            - ~/.local/bin/uv
+            - ~/.local/bin/uvx
 
   restore_uv_cache:
     steps:
@@ -151,7 +161,6 @@ jobs:
     resource_class: medium
     steps:
       - checkout
-      - install_uv
       - setup_pnpm
       - restore_pnpm_cache
       - run:
@@ -190,7 +199,5 @@ workflows:
       - quality
       - lint-typecheck
       - test-unit
-      - test-integration:
-          requires:
-            - test-unit
+      - test-integration
       - frontend-check
