@@ -1,6 +1,7 @@
 const INLINE_CODE_AFTER_HEADING =
   /\b(print\s*\(|import\s+[a-zA-Z_]|from\s+[a-zA-Z_]\w*\s+import|def\s+[a-zA-Z_]|class\s+[a-zA-Z_]|context\s*\[|(?:pnpm|npm|git|curl|cd|ls|cat|bash|sh)\s+)/;
 
+// Gate heading splits to code-like syntax so prose such as "class action" is left alone.
 const INLINE_CODE_SYNTAX =
   /(?:\bprint\s*\(|\bimport\s+[a-zA-Z_][\w.]*(?:\s+as\s+[a-zA-Z_]\w*)?(?:\s*,\s*[a-zA-Z_][\w.]*)*|\bfrom\s+[a-zA-Z_][\w.]*\s+import\b|\bdef\s+[a-zA-Z_]\w*\s*\(|\bclass\s+[a-zA-Z_]\w*(?:\([^)]*\))?:|\bcontext\s*\[[^\]]+\]|^(?:pnpm|npm|git|curl|cd|ls|cat|bash|sh)\s+[-./~\w])/;
 
