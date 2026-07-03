@@ -202,6 +202,9 @@ export type ChatRenderPart =
       output?: string;
       errorText?: string;
       language?: string;
+      signature?: string;
+      completion?: string;
+      reasoning?: string;
       runtimeContext?: RuntimeContext;
     }
   | {
