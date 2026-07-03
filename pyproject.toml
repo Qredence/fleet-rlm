@@ -71,6 +71,7 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.42.1",
     "posthog>=7.21.0",
     "fastapi-cloud-cli>=0.22.0",
+    "datasets>=5.0.0",
 ]
 
 [project.urls]
