@@ -64,6 +64,10 @@ def _ensure_dspy_patched() -> None:
     global _DSPY_PATCHED
     if _DSPY_PATCHED:
         return
+    if not hasattr(_dspy_rlm, "_strip_code_fences"):
+        logger.debug("DSPy patch skipped: dspy.predict.rlm._strip_code_fences not found")
+        _DSPY_PATCHED = True
+        return
     with _PATCH_LOCK:
         if not _DSPY_PATCHED:
             if hasattr(_dspy_rlm, "_strip_code_fences"):
@@ -73,7 +77,6 @@ def _ensure_dspy_patched() -> None:
                 logger.warning(
                     "Skipping DSPy code-fence patch because dspy.predict.rlm lacks _strip_code_fences"
                 )
-
 
 # Bind local reference for factory.py's own uses
 _strip_code_fences = _safe_strip_code_fences
