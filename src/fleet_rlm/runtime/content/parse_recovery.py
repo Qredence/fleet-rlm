@@ -152,3 +152,48 @@ def format_parse_error_output(exc: Exception) -> str:
             return f"[ParseError] Degenerate response or echo-back detected: {truncated[:200]}..."
         return f"[ParseError] Malformed structured output: {truncated[:200]}..."
     return f"[ParseError] {str(exc)[:500]}"
+
+
+_PYTHON_FENCE_LANGS = {"python", "py", ""}
+
+
+def safe_strip_code_fences(code: str) -> str:
+    """Strip code fences using last-standalone-line matching.
+
+    The upstream _strip_code_fences uses ``remainder.find("```")`` which matches
+    the *first* triple-backtick in the remainder. When the LLM generates code
+    containing triple backticks inside string literals (e.g. regex patterns like
+    ``r'--- FILE: (.+?) ---\\s*\n```(?:\\w+)?\n(.*?)\n```'``), the function
+    truncates at the interior backtick, causing ``unterminated string literal``
+    errors in the REPL. This replacement walks lines and uses the *last*
+    standalone ```` line as the closing fence.
+    """
+    code = code.strip()
+    if "```" not in code:
+        return code
+
+    lines = code.splitlines()
+    # Strip outer decorative fence pairs
+    while len(lines) >= 2 and lines[0].strip() == "```" and lines[-1].strip() == "```":
+        lines.pop(0)
+        lines.pop()
+    code = "\n".join(lines).strip()
+    if "```" not in code:
+        return code
+
+    # Find the first opening fence
+    fence_start = code.find("```")
+    lang_line, sep, remainder = code[fence_start + 3 :].partition("\n")
+    if not sep:
+        return code
+
+    lang = (lang_line.strip().split(maxsplit=1)[0] if lang_line.strip() else "").lower()
+    if lang not in _PYTHON_FENCE_LANGS:
+        raise SyntaxError(f"Expected Python code but got ```{lang} fence. Write Python code, not {lang}.")
+
+    # Find closing fence: walk backwards for the last line that is exactly "```"
+    rlines = remainder.splitlines()
+    for i in range(len(rlines) - 1, -1, -1):
+        if rlines[i].strip() == "```":
+            return "\n".join(rlines[:i]).strip()
+    return remainder.strip()

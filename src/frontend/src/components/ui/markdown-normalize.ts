@@ -1,5 +1,5 @@
 const INLINE_CODE_AFTER_HEADING =
-  /\b(print|import|from|def|class|if|for|while|return|context\[|await|async)\b/;
+  /\b(print\s*\(|import\s+[a-zA-Z_]|from\s+[a-zA-Z_]\w*\s+import|def\s+[a-zA-Z_]|class\s+[a-zA-Z_]|context\s*\[)/;
 
 function inferFenceLanguage(code: string): string {
   if (/\b(print|import|def|class|context\[)\b/.test(code)) return "python";
@@ -19,6 +19,8 @@ export function splitHeadingLinesWithInlineCode(text: string): string {
       if (!headingMatch) return line;
 
       const [, markers, body] = headingMatch;
+      if (!body) return line;
+
       const codeIndex = body.search(INLINE_CODE_AFTER_HEADING);
       if (codeIndex === -1) return line;
 

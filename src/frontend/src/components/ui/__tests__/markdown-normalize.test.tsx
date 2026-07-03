@@ -19,6 +19,18 @@ describe("normalizeMarkdownContent", () => {
     const input = "# Planning step\n\nprint('hello')";
     expect(normalizeMarkdownContent(input)).toBe(input);
   });
+
+  it("does not split headings containing normal English words like for, from, return, if, while", () => {
+    const inputs = [
+      "# Guidelines for return values",
+      "# What if we run the command?",
+      "# Planning step for the implementation",
+      "# Read files from the current workspace",
+    ];
+    for (const input of inputs) {
+      expect(normalizeMarkdownContent(input)).toBe(input);
+    }
+  });
 });
 
 describe("Streamdown wrapper", () => {
