@@ -41,6 +41,7 @@ function toolSessionStateForItem(item: ToolSessionItem): ChatRenderToolState {
 function toolSessionHeaderLabel(items: ToolSessionItem[]) {
   const first = items[0];
   const toolName = first?.toolName ?? "Tool";
+  if (toolName === "repl_execute") return "Sandbox Execution";
   return first?.eventKind === "tool_call" ? `Calling tool: ${toolName}` : `Tool: ${toolName}`;
 }
 
@@ -59,6 +60,7 @@ function summarizeToolSession(session: AssistantContentModel["attachedToolSessio
   }
   if (latestItem.part.errorText) return `Sandbox execution failed`;
   if (latestItem.part.state === "running") return `Running sandbox`;
+  if (toolName === "repl_execute") return `Executed code successfully`;
   return `Completed sandbox execution`;
 }
 

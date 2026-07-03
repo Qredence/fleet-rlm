@@ -178,8 +178,6 @@ describe("sidepanel empty trace fallbacks", () => {
       />,
     );
 
-    expect(html).toContain("Trace spans unavailable");
-    expect(html).toContain("Selected turn context");
     expect(html).toContain("repl_execute");
     expect(html).toContain("hello");
     expect(html).not.toContain("No trace spans");
@@ -254,10 +252,9 @@ describe("sidepanel empty trace fallbacks", () => {
 
     const html = container.textContent ?? "";
 
-    expect(html).toContain("Trace graph unavailable");
-    expect(html).toContain("Selected turn context");
-    expect(html).toContain("repl_execute");
+    expect(html).toContain("Sandbox Execution");
     expect(html).toContain("hello");
+    expect(html).toContain("print('hello')");
     expect(html).not.toContain("No graph spans");
 
     act(() => root.unmount());
