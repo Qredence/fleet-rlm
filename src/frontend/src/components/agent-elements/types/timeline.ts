@@ -31,6 +31,9 @@ export type TimelineStep =
       bashOutput?: string;
       bashLanguage?: string;
       bashSuccess?: boolean;
+      bashSignature?: string;
+      bashCompletion?: string;
+      bashReasoning?: string;
     }
   | {
       id: string;
