@@ -19,7 +19,10 @@ Implementation-facing contracts, interfaces, and current-state facts.
 - [Sandbox API](sandbox-api.md)
 - [Runs API](runs-api.md)
 - [Sandbox File System](sandbox-fs.md)
+- [Sandbox Execution Pipeline](sandbox-execution-pipeline.md)
 - [Daytona Architecture](daytona-architecture.md)
+- [DSPy Daytona Interpreter Boundary](dspy-daytona-interpreter-boundary.md)
+- [LLM Provider Profiles](llm-provider-profiles.md)
 
 ## Current Maps
 

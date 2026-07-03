@@ -103,7 +103,7 @@ graph LR
 | `integrations/local_store.py` | Local sidecar persistence | session history, turn transcripts, optimization-run tracking |
 
 | `integrations/observability/` | Telemetry and tracing | `posthog_callback.py`, `mlflow_runtime.py`, `mlflow_traces.py`, `trace_context.py` |
-| `integrations/daytona/` | Daytona execution and workspace substrate | `interpreter.py`, `workspace_manager.py`, `sandbox_executor.py`, `isolation.py`, `models.py`, `runtime.py`, `workspace_runtime.py`, `session_runtime.py`, `sdk_ops.py`, `config.py`, `diagnostics.py`, `errors.py`, `bridge.py` |
+| `integrations/daytona/` | Daytona execution and workspace substrate | `interpreter.py`, `workspace_manager.py`, `sandbox_executor.py`, `isolation.py`, `models.py`, `runtime.py`, `workspace_runtime.py`, `session_runtime.py`, `sdk_ops.py`, `file_browser.py`, `config.py`, `diagnostics.py`, `errors.py`, `bridge.py` |
 | `quality/` | DSPy evaluation and optimization | `dspy_evaluation.py`, `optimization_runner.py`, `mlflow_evaluation.py`, `workspace_metrics.py`, `scorers.py` |
 
 ## Verification

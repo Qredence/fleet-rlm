@@ -1,6 +1,6 @@
 # fleet-rlm Documentation
 
-`fleet-rlm` is a Daytona-backed recursive DSPy workbench. The maintained product surfaces are the live workbench, the durable volumes browser, and runtime settings and diagnostics. Workbench chat is primary and includes a workspace-local sidepanel with `Trajectories`, `Graph`, and `Volume` tabs; `/app/volumes` remains the full-page durable volume browser. This documentation mirrors that current product and keeps migration history separate.
+`fleet-rlm` is a Daytona-backed recursive DSPy workbench. The maintained product surfaces are the live workbench, the optimization surface, the durable volumes browser, and runtime settings and diagnostics. Workbench chat is primary and includes a workspace-local sidepanel with `Trajectories`, `Graph`, and `Volume` tabs; `/app/volumes` remains the full-page durable volume browser. This documentation mirrors that current product and keeps migration history separate.
 
 This documentation is for both:
 

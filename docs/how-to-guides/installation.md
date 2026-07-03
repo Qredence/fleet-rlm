@@ -138,7 +138,7 @@ The `.env.example` file contains all configurable environment variables. Key cat
 | Variable         | Description                                   | Default     |
 | ---------------- | --------------------------------------------- | ----------- |
 | `DATABASE_URL`   | PostgreSQL connection string (Neon)           | -           |
-| `AUTH_MODE`      | Auth mode: `dev` or `entra`                   | `dev`       |
+| `AUTH_MODE`      | Auth mode: `dev`, `entra`, or `neon`           | `dev`       |
 | `APP_ENV`        | Environment: `local`, `staging`, `production` | `local`     |
 | `AUTH_REQUIRED`  | Require authentication on API routes          | `false`     |
 | `DEV_JWT_SECRET` | Secret for local development tokens           | `change-me` |

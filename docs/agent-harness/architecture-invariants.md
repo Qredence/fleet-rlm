@@ -31,7 +31,7 @@ the callbacks.
 
 ## Async Execution Boundary
 
-The sandbox interpreters (Daytona, Modal) expose a synchronous, blocking `execute(...)` that
+The sandbox interpreter (Daytona) exposes a synchronous, blocking `execute(...)` that
 performs a network round-trip per code iteration. `dspy.RLM.aforward` only awaits the LM predictor
 calls — it still runs sandbox code through the **synchronous** `repl.execute(...)` (verified in
 dspy 3.3.0b1). Therefore the heavy RLM turn is driven sync-in-a-thread via

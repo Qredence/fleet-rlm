@@ -72,7 +72,7 @@ safe to run repeatedly.
 - `release-manager` for packaging, release hygiene, and bundled UI assets.
 - `sandbox-runtime` for sandbox lifecycle, volumes, child isolation, and
   diagnostics.
-- `docs-maintainer` for AGENTS.md, PLANS.md, README, and docs consistency.
+- `docs-maintainer` for AGENTS.md, README, docs/, and harness engineering consistency.
 
 These roles are Codex-native replacements for only the useful parts of older
 `.claude`, `.agents`, and `.factory` material. Do not copy retired prompts

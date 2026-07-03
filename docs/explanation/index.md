@@ -8,6 +8,7 @@ Conceptual documentation for the current maintained product and runtime.
 - [Concepts](concepts.md)
 - [RLM Capability Evaluation](rlm-capability-evaluation.md) — empirical benchmarks against published RLM research
 - [Architecture Overview](../architecture.md)
+- [Agent Runtime Execution Flow](agent-runtime-execution-flow.md) — traces a single chat turn through the cognition module
 - [User Interaction Flows](user-flows.md)
 - [Component UML](component-uml.md)
 
