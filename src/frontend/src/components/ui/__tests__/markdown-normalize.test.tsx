@@ -20,6 +20,13 @@ describe("normalizeMarkdownContent", () => {
     expect(normalizeMarkdownContent(input)).toBe(input);
   });
 
+  it("infers python fences for context lookups", () => {
+    const input = "# Check workspace context['manifest']";
+    expect(normalizeMarkdownContent(input)).toBe(
+      "# Check workspace\n\n```python\ncontext['manifest']\n```",
+    );
+  });
+
   it("does not split headings containing normal English words like for, from, return, if, while", () => {
     const inputs = [
       "# Guidelines for return values",

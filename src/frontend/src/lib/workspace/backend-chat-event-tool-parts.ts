@@ -287,7 +287,7 @@ function parseDspyCompletion(completion: string): { reasoning: string; code: str
   );
   if (codeMatch && codeMatch[1]) {
     const rawCode = codeMatch[1].trim();
-    const fenceMatch = rawCode.match(/^```(?:python)?([\s\S]*?)```$/i);
+    const fenceMatch = rawCode.match(/^```[a-zA-Z0-9_-]*\s*([\s\S]*?)```$/);
     code = fenceMatch && fenceMatch[1] ? fenceMatch[1].trim() : rawCode;
   }
 
@@ -310,6 +310,7 @@ function isSandboxPayload(payload?: Record<string, unknown>): boolean {
   if (hasDspyMetadata(payload)) return true;
 
   const step =
+    payload.step && typeof payload.step === "object" && !Array.isArray(payload.step)
       ? (payload.step as Record<string, unknown>)
       : undefined;
   if (step) {

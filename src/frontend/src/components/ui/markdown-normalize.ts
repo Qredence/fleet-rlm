@@ -10,7 +10,7 @@ function looksLikeInlineCode(code: string): boolean {
 }
 
 function inferFenceLanguage(code: string): string {
-  if (/\b(print|import|def|class|context\[)\b/.test(code)) return "python";
+  if (/(?:\b(print|import|def|class)\b|context\s*\[)/.test(code)) return "python";
   if (/\b(curl|git|npm|pnpm|cd|ls|cat|bash|sh)\b/.test(code)) return "bash";
   return "text";
 }
