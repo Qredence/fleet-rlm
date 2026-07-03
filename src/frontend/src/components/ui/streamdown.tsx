@@ -1,7 +1,31 @@
 import { memo, useEffect, useRef } from "react";
-import { Streamdown as StreamdownRenderer } from "streamdown";
+import { Streamdown as StreamdownRenderer, type Components } from "streamdown";
 import "streamdown/styles.css";
+import { normalizeMarkdownContent } from "@/components/ui/markdown-normalize";
 import { cn } from "@/lib/utils";
+
+const streamdownComponents: Components = {
+  h1: ({ children, ...props }) => (
+    <h1 className="typo-h4 font-semibold leading-tight mt-5 mb-2" {...props}>
+      {children}
+    </h1>
+  ),
+  h2: ({ children, ...props }) => (
+    <h2 className="typo-body-sm font-semibold leading-snug mt-4 mb-1.5" {...props}>
+      {children}
+    </h2>
+  ),
+  h3: ({ children, ...props }) => (
+    <h3 className="typo-label font-semibold leading-snug mt-3 mb-1" {...props}>
+      {children}
+    </h3>
+  ),
+  h4: ({ children, ...props }) => (
+    <h4 className="typo-body-sm font-medium leading-snug mt-2 mb-1" {...props}>
+      {children}
+    </h4>
+  ),
+};
 
 interface StreamdownProps {
   content: string;
@@ -37,12 +61,15 @@ export const Streamdown = memo(function Streamdown({
     }
   }, [streaming, onComplete]);
 
+  const normalizedContent = normalizeMarkdownContent(content);
+
   return (
     <div className={cn("streamdown-root", className)}>
       <StreamdownRenderer
         mode={streaming ? "streaming" : "static"}
         isAnimating={streaming}
-        parseIncompleteMarkdown
+        parseIncompleteMarkdown={streaming}
+        components={streamdownComponents}
         className={cn(
           "streamdown-content min-w-0 max-w-full space-y-4 whitespace-normal text-foreground wrap-break-word [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
           "typo-label leading-relaxed",
@@ -62,7 +89,7 @@ export const Streamdown = memo(function Streamdown({
           "[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2",
         )}
       >
-        {content}
+        {normalizedContent}
       </StreamdownRenderer>
     </div>
   );
