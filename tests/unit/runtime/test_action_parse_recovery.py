@@ -23,6 +23,7 @@ from typing import ClassVar
 import dspy
 import pytest
 
+from fleet_rlm.runtime.modules import factory as factory_module
 from fleet_rlm.runtime.modules.factory import _StreamingRLM
 
 
@@ -161,3 +162,17 @@ class TestConsecutiveParseErrorCap:
         from fleet_rlm.runtime.modules.factory import _env_int
 
         assert _env_int("FLEET_RLM_MAX_CONSECUTIVE_PARSE_ERRORS", 3) == 5
+
+
+class TestEnsureDspyPatched:
+    def test_skips_when_private_strip_helper_is_missing(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setattr(factory_module, "_DSPY_PATCHED", False)
+        monkeypatch.delattr(factory_module._dspy_rlm, "_strip_code_fences", raising=False)
+
+        with caplog.at_level("WARNING"):
+            factory_module._ensure_dspy_patched()
+
+        assert factory_module._DSPY_PATCHED is False
+        assert "Skipping DSPy code-fence patch" in caplog.text

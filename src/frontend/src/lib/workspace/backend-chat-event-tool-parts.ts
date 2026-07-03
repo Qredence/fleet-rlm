@@ -308,7 +308,7 @@ function hasDspyMetadata(payload?: Record<string, unknown>): boolean {
 function isSandboxPayload(payload?: Record<string, unknown>): boolean {
   if (!payload) return false;
   if (hasDspyMetadata(payload)) return true;
-  
+
   const step =
     payload.step && typeof payload.step === "object" && !Array.isArray(payload.step)
       ? (payload.step as Record<string, unknown>)

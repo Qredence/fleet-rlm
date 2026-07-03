@@ -26,6 +26,7 @@ describe("normalizeMarkdownContent", () => {
       "# What if we run the command?",
       "# Planning step for the implementation",
       "# Read files from the current workspace",
+      "# Understanding class action requirements",
     ];
     for (const input of inputs) {
       expect(normalizeMarkdownContent(input)).toBe(input);

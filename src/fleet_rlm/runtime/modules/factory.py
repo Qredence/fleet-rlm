@@ -56,6 +56,7 @@ from fleet_rlm.runtime.content.parse_recovery import (
 
 _PATCH_LOCK = threading.Lock()
 _DSPY_PATCHED = False
+logger = logging.getLogger(__name__)
 
 
 def _ensure_dspy_patched() -> None:
@@ -65,14 +66,17 @@ def _ensure_dspy_patched() -> None:
         return
     with _PATCH_LOCK:
         if not _DSPY_PATCHED:
-            _dspy_rlm._strip_code_fences = _safe_strip_code_fences
-            _DSPY_PATCHED = True
+            if hasattr(_dspy_rlm, "_strip_code_fences"):
+                _dspy_rlm._strip_code_fences = _safe_strip_code_fences
+                _DSPY_PATCHED = True
+            else:
+                logger.warning(
+                    "Skipping DSPy code-fence patch because dspy.predict.rlm lacks _strip_code_fences"
+                )
 
 
 # Bind local reference for factory.py's own uses
 _strip_code_fences = _safe_strip_code_fences
-
-logger = logging.getLogger(__name__)
 
 _DSPY_RLM_BASE: Any = dspy.RLM
 

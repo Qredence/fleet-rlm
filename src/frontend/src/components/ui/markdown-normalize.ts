@@ -1,5 +1,12 @@
 const INLINE_CODE_AFTER_HEADING =
-  /\b(print\s*\(|import\s+[a-zA-Z_]|from\s+[a-zA-Z_]\w*\s+import|def\s+[a-zA-Z_]|class\s+[a-zA-Z_]|context\s*\[)/;
+  /\b(print\s*\(|import\s+[a-zA-Z_]|from\s+[a-zA-Z_]\w*\s+import|def\s+[a-zA-Z_]|class\s+[a-zA-Z_]|context\s*\[|(?:pnpm|npm|git|curl|cd|ls|cat|bash|sh)\s+)/;
+
+const INLINE_CODE_SYNTAX =
+  /(?:\bprint\s*\(|\bimport\s+[a-zA-Z_][\w.]*(?:\s+as\s+[a-zA-Z_]\w*)?(?:\s*,\s*[a-zA-Z_][\w.]*)*|\bfrom\s+[a-zA-Z_][\w.]*\s+import\b|\bdef\s+[a-zA-Z_]\w*\s*\(|\bclass\s+[a-zA-Z_]\w*(?:\([^)]*\))?:|\bcontext\s*\[[^\]]+\]|^(?:pnpm|npm|git|curl|cd|ls|cat|bash|sh)\s+[-./~\w])/;
+
+function looksLikeInlineCode(code: string): boolean {
+  return INLINE_CODE_SYNTAX.test(code.trim());
+}
 
 function inferFenceLanguage(code: string): string {
   if (/\b(print|import|def|class|context\[)\b/.test(code)) return "python";
@@ -26,7 +33,7 @@ export function splitHeadingLinesWithInlineCode(text: string): string {
 
       const headingText = body.slice(0, codeIndex).trimEnd();
       const codeText = body.slice(codeIndex).trim();
-      if (!codeText) return line;
+      if (!codeText || !looksLikeInlineCode(codeText)) return line;
       if (!headingText) {
         return `\`\`\`${inferFenceLanguage(codeText)}\n${codeText}\n\`\`\``;
       }
