@@ -13,6 +13,7 @@ from ._sandbox_constants import (
     _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
     _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
 )
+from .errors import sandbox_safe_error
 
 
 def _bind_interpreter_tool(interpreter: Any, tool_func: Callable[..., Any]) -> Callable[..., Any]:
@@ -154,7 +155,10 @@ def invoke_tool(
             "status": "error",
             "reason": "tool_error",
             "tool_name": name,
-            "error": f"{type(exc).__name__}: {exc}",
+            # Redact credential-bearing values (DATABASE_URL, API keys, JWTs)
+            # so secrets in upstream exception messages never cross the
+            # sandbox boundary via tool error payloads.
+            "error": f"{type(exc).__name__}: {sandbox_safe_error(exc)}",
         }
 
 

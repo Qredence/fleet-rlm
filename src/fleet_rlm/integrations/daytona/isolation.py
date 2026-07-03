@@ -27,7 +27,7 @@ from fleet_rlm.runtime.execution.interpreter_support import initialize_sub_rlm_s
 from fleet_rlm.utils.paths import is_local_path
 
 from .async_compat import _run_async_compat
-from .errors import DaytonaDiagnosticError
+from .errors import DaytonaDiagnosticError, sandbox_safe_error
 from .models import ContextSource, SandboxSpec
 from .runtime import DaytonaSandboxRuntime
 from .sdk_ops import ensure_remote_directory as _ensure_remote_directory
@@ -620,36 +620,10 @@ _EVIDENCE_MAX_TAGS = 32
 _EVIDENCE_MAX_TAG_BYTES = 256
 _EVIDENCE_MAX_LIMIT = 500
 
-# Regex pattern to detect potential credential strings in error messages.
-# Ordered from most-specific to least-specific to avoid partial matches.
-_CREDENTIAL_PATTERN = re.compile(
-    r"("
-    # Full database/service URLs (match scheme + everything to next whitespace or comma)
-    r"(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|neon(?:db)?|redis|amqp)://[^\s,;'\"]*"
-    r"|password=[^\s,;'\"&]*"
-    r"|sslpassword=[^\s,;'\"&]*"
-    r"|host=[^\s,;'\"&]+"
-    # Named environment variable references
-    r"|DAYTONA_API_KEY"
-    r"|DATABASE(?:_ADMIN)?_URL"
-    r"|(?:LLM_|OPENAI_|ANTHROPIC_|AZURE_)?API_KEY"
-    r"|SECRET_KEY"
-    r"|ACCESS_TOKEN"
-    # JWT-like base64 tokens (at least 20 chars in the header section)
-    r"|eyJ[A-Za-z0-9+/\-_]{20,}"
-    r")",
-    re.IGNORECASE,
-)
-
-
-def _redact_error_message(message: str) -> str:
-    """Replace potential credential-bearing patterns with a safe placeholder."""
-    return _CREDENTIAL_PATTERN.sub("[REDACTED]", message)
-
 
 def _safe_error(exc: Exception) -> str:
-    """Return a redacted, sandbox-safe error string from an exception."""
-    return _redact_error_message(str(exc))
+    """Backward-compatible alias for the shared sandbox-boundary redactor."""
+    return sandbox_safe_error(exc)
 
 
 def _validate_evidence_payload(

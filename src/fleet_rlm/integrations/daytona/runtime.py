@@ -256,7 +256,10 @@ class DaytonaSandboxRuntime:
 
     @staticmethod
     def _ignore_snapshot_create_logs(_message: Any) -> None:
-        return None
+        # Route snapshot build logs to debug instead of swallowing entirely;
+        # a failed `uv pip install` is otherwise impossible to diagnose
+        # without re-running. Daytona passes each log line here.
+        logger.debug("daytona snapshot build: %s", _message)
 
     def _resolve_volume_id(self, spec: SandboxSpec) -> str | None:
         """Resolve a volume ID for the given spec, creating the volume if needed."""

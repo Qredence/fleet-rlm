@@ -219,19 +219,22 @@ def _set_sandbox_attr(sandbox: Any, name: str, value: Any) -> None:
 
 
 def attach_slot_release_handler(sandbox: Any) -> None:
-    """Patch sandbox.delete() and sandbox.stop() to auto-release the slot.
+    """Patch sandbox teardown methods to auto-release the slot.
 
-    The Daytona Python SDK exposes ``sandbox.delete()`` and ``sandbox.stop()``
-    as the only teardown methods. This function monkey-patches both to release
-    the global concurrency slot exactly once after a teardown call succeeds.
-
-    A ``_fleet_slot_released`` flag prevents double-release.
+    Wraps ``delete()``, ``stop()``, ``pause()``, and ``archive()`` so the
+    global concurrency slot is released exactly once after any teardown call
+    succeeds. ``pause``/``archive`` matter because paused/archived sandboxes
+    no longer count against vCPU/RAM quota (only disk), so the slot must be
+    freed for the next active sandbox. A ``_fleet_slot_released`` flag
+    prevents double-release when multiple teardown methods are called.
     """
     _set_sandbox_attr(sandbox, "_fleet_slot_managed", True)
     _set_sandbox_attr(sandbox, "_fleet_slot_released", False)
 
     original_delete = getattr(sandbox, "delete", None)
     original_stop = getattr(sandbox, "stop", None)
+    original_pause = getattr(sandbox, "pause", None)
+    original_archive = getattr(sandbox, "archive", None)
 
     def _make_release_wrapper(original: Any) -> Any:
         def _wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -247,10 +250,14 @@ def attach_slot_release_handler(sandbox: Any) -> None:
 
         return _wrapper
 
-    if original_delete is not None:
-        _set_sandbox_attr(sandbox, "delete", _make_release_wrapper(original_delete))
-    if original_stop is not None:
-        _set_sandbox_attr(sandbox, "stop", _make_release_wrapper(original_stop))
+    for original, attr_name in (
+        (original_delete, "delete"),
+        (original_stop, "stop"),
+        (original_pause, "pause"),
+        (original_archive, "archive"),
+    ):
+        if original is not None:
+            _set_sandbox_attr(sandbox, attr_name, _make_release_wrapper(original))
 
 
 # ---------------------------------------------------------------------------

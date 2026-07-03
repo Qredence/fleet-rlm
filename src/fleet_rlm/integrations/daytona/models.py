@@ -17,6 +17,13 @@ from fleet_rlm.utils.paths import dedupe_paths
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
+# Daytona Cloud per-sandbox hard limits (see skill references/platform/limits.md).
+# Used for friendly preflight validation in SandboxSpec.__post_init__.
+_SANDBOX_MAX_CPU = 4
+_SANDBOX_MAX_MEMORY_GB = 8
+_SANDBOX_MAX_DISK_GB = 10
+
+
 # ---------------------------------------------------------------------------
 # Text normalization helpers
 # ---------------------------------------------------------------------------
@@ -248,6 +255,24 @@ class SandboxSpec:
     network_block_all: bool | None = None
     network_allow_list: str | None = None
 
+    def __post_init__(self) -> None:
+        """Validate resource requests against Daytona Cloud per-sandbox maxima.
+
+        Raises a ``ValueError`` (with the offending value) so callers get a
+        friendly preflight message instead of an opaque SDK create-time error.
+        Tier-level aggregate budgets are not checked here (the org tier is
+        unknown at this layer); only the hard per-sandbox ceilings.
+        """
+        violations: list[str] = []
+        if self.cpu is not None and self.cpu > _SANDBOX_MAX_CPU:
+            violations.append(f"cpu={self.cpu} (max {_SANDBOX_MAX_CPU})")
+        if self.memory is not None and self.memory > _SANDBOX_MAX_MEMORY_GB:
+            violations.append(f"memory={self.memory} GB (max {_SANDBOX_MAX_MEMORY_GB} GB)")
+        if self.disk is not None and self.disk > _SANDBOX_MAX_DISK_GB:
+            violations.append(f"disk={self.disk} GB (max {_SANDBOX_MAX_DISK_GB} GB)")
+        if violations:
+            raise ValueError("Daytona sandbox resource limit exceeded: " + "; ".join(violations))
+
     @property
     def uses_declarative_image(self) -> bool:
         return self.image is not None
@@ -327,6 +352,9 @@ class SandboxSpec:
             if self.volume_subpath:
                 mount_kwargs_sdk["subpath"] = self.volume_subpath
             params["volumes"] = [volume_mount_cls(**mount_kwargs_sdk)]
+        # ``resources`` (cpu/memory/disk) are honored only for the declarative-
+        # image path. Snapshots bake resources in at build time, so resource
+        # requests are intentionally dropped for snapshot-based sandboxes.
         resources = params.pop("resources", None)
         if resources and self.uses_declarative_image:
             params["resources"] = resources_cls(**resources)

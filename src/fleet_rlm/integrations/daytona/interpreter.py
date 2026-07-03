@@ -563,6 +563,11 @@ class DaytonaInterpreter(
         self.output_fields = None
         self._llm_call_count = 0
         self._log_stream_parser = None
+        # Reset recursion depth so a pooled interpreter that hit depth N on a
+        # prior request does not start the next request at depth N and
+        # immediately fall back to llm_query. Keep max_depth (config, not
+        # per-request state).
+        initialize_sub_rlm_state(self, depth=0, max_depth=self._sub_rlm_max_depth)
 
         if self._executor is not None:
             await self._executor.asoft_reset()

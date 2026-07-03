@@ -89,6 +89,11 @@ def _resolve_workspace_path(path: str) -> tuple[str | None, str | None]:
         return None, f"[error: invalid workspace path: {{raw}}]"
     return str(resolved), None
 
+# ``run()`` is intentionally unrestricted shell: the Daytona sandbox VM is the
+# trust boundary, and the agent legitimately needs shell for builds, tests,
+# and exploration. The workspace path validation in ``resolve_path`` /
+# ``_resolve_workspace_path`` protects only the file helpers (read_file,
+# workspace_write, save_to_volume) from path-traversal, NOT shell escapes.
 def run(command: str, cwd: str | None = None) -> dict[str, object]:
     completed = _subprocess.run(
         command,
@@ -222,6 +227,14 @@ def extract_python_ast(path: str) -> str:
 
 _processes = globals().get("_processes", {{}})
 
+def _background_preexec():
+    # Cap background processes so a misbehaving agent cannot fork-bomb or OOM
+    # the sandbox: max 64 processes and ~1 GiB virtual address space per
+    # background process. Runs in the child before exec (Linux only).
+    import resource as _resource
+    _resource.setrlimit(_resource.RLIMIT_NPROC, (64, 64))
+    _resource.setrlimit(_resource.RLIMIT_AS, (1024 * 1024 * 1024, 1024 * 1024 * 1024))
+
 def start_background_process(process_id: str, command: str) -> str:
     if process_id in _processes:
         return f"Process {{process_id}} is already running."
@@ -229,7 +242,8 @@ def start_background_process(process_id: str, command: str) -> str:
     import collections as _collections
     proc = _subprocess.Popen(
         command, shell=True, cwd=REPO_PATH,
-        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True
+        stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT, text=True,
+        preexec_fn=_background_preexec,
     )
     log_buffer = _collections.deque(maxlen=1000)
     def _read_output():
@@ -886,7 +900,12 @@ def _inject_broker_failure_stubs(
     """
     if not tools:
         return
-    short_error = error[:200].replace("'", "\\'")
+    # Redact credential-bearing values before embedding the error string into
+    # sandbox-side code; broker start failures can include preview URLs, env
+    # values, or upstream SDK messages that may carry secrets.
+    from .errors import sandbox_safe_error
+
+    short_error = sandbox_safe_error(Exception(error))[:200].replace("'", "\\'")
     lines = [
         f"def {name}(*_a, **_kw):"
         f" raise RuntimeError('Tool {name!r} unavailable: broker failed to start. {short_error}')"

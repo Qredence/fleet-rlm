@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time as _time
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
@@ -311,7 +312,17 @@ def ensure_daytona_volume_layout(
             phase="sandbox_create",
         ) from exc
 
-    if Path(mounted_root).exists():
+    # Branch on APP_ENV (or explicit override) instead of host filesystem
+    # existence: checking ``Path(mounted_root).exists()`` is a leaky heuristic
+    # that silently changes behavior if a host happens to have
+    # ``/home/daytona/memory``. Local dev seeds via the host-mounted path when
+    # present; cloud (or force-remote) initializes the memory DB and skills
+    # inside the sandbox via the SDK.
+    use_local_path = (
+        os.getenv("APP_ENV", "local").strip().lower() == "local"
+        and os.getenv("FLEET_VOLUME_LAYOUT_LOCAL", "").strip() != "1"
+    )
+    if use_local_path and Path(mounted_root).exists():
         try:
             init_memory_db(mounted_root)
         except Exception as exc:
@@ -404,13 +415,37 @@ def _serialize_daytona_volume(volume: Any) -> dict[str, Any]:
 def list_daytona_volumes(*, limit: int = 100) -> list[dict[str, Any]]:
     """List Daytona persistent volumes with pagination support.
 
-    Uses cursor-based pagination (Daytona 0.180+) when available,
-    falling back to unbounded listing for older runners.
+    Probes for cursor-based pagination (Daytona SDK 0.180+) at runtime; falls
+    back to page/limit pagination for older runners, then to an unbounded
+    single call. ``page``-based pagination is deprecated once cursors land.
     """
     client = _build_daytona_client(resolve_daytona_config())
     try:
-        try:
+        import inspect as _inspect
+
+        list_sig = _inspect.signature(client.volume.list)
+        supports_cursor = "cursor" in list_sig.parameters
+        supports_page = "page" in list_sig.parameters
+
+        if supports_cursor:
             all_volumes: list[Any] = []
+            cursor: str | None = None
+            while True:
+                kwargs: dict[str, Any] = {"limit": limit}
+                if cursor is not None:
+                    kwargs["cursor"] = cursor
+                result = client.volume.list(**kwargs)
+                items = getattr(result, "items", result) if result else []
+                if not items:
+                    break
+                all_volumes.extend(items)
+                next_cursor = getattr(result, "next_cursor", None) or getattr(result, "cursor", None)
+                if not next_cursor or len(items) < limit:
+                    break
+                cursor = next_cursor
+            volumes = all_volumes
+        elif supports_page:
+            all_volumes = []
             page = 1
             while True:
                 result = client.volume.list(page=page, limit=limit)
@@ -422,8 +457,10 @@ def list_daytona_volumes(*, limit: int = 100) -> list[dict[str, Any]]:
                     break
                 page += 1
             volumes = all_volumes
-        except TypeError:
+        else:
             volumes = client.volume.list()
+    except TypeError:
+        volumes = client.volume.list()
     finally:
         with suppress(Exception):
             client.close()
@@ -437,7 +474,6 @@ async def alist_daytona_volumes(*, limit: int = 100) -> list[dict[str, Any]]:
 __all__ = [
     "DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH",
     "VFS_CANONICAL_ROOTS",
-    "_mounted_daytona_volume",
     "aensure_daytona_volume_layout",
     "aensure_remote_directory",
     "alist_daytona_volumes",

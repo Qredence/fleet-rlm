@@ -42,6 +42,38 @@ DEFAULT_SNAPSHOT_NAME = "fleet-rlm-base"
 DEFAULT_SNAPSHOT_BASE_IMAGE = "python:3.12-slim"
 _VALID_PACKAGE_SPEC_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-\[\],<>=!~]*$")
 
+
+def canonicalize_snapshot_state_token(value: Any) -> str:
+    """Normalize raw Daytona SDK snapshot state values to a lowercase token.
+
+    Mirrors ``volumes.canonicalize_volume_state_token`` so snapshot state
+    checks survive SDK enum stringification changes (``SnapshotState.ACTIVE``
+    vs ``ACTIVE`` vs ``SnapshotState.ACTIVE`` etc.).
+    """
+    candidates: list[str] = []
+    if isinstance(value, str):
+        candidates.append(value)
+    else:
+        state_value = getattr(value, "value", None)
+        if state_value not in (None, ""):
+            candidates.append(str(state_value))
+        state_name = getattr(value, "name", None)
+        if state_name not in (None, ""):
+            candidates.append(str(state_name))
+        if value not in (None, ""):
+            candidates.append(str(value))
+    for candidate in candidates:
+        normalized = candidate.strip().lower()
+        if not normalized:
+            continue
+        normalized = normalized.replace("-", "_").replace(" ", "_")
+        if "." in normalized:
+            normalized = normalized.rsplit(".", 1)[-1]
+        if normalized:
+            return normalized
+    return ""
+
+
 BROWSER_SNAPSHOT_NAME = "fleet-rlm-browser"
 BROWSER_SNAPSHOT_PACKAGES: list[str] = [
     *DEFAULT_SNAPSHOT_PACKAGES,
@@ -320,11 +352,20 @@ def _snapshot_lookup_missing(exc: BaseException) -> bool:
 
 
 def _snapshot_create_conflict(exc: BaseException) -> bool:
+    """Return True for a genuine snapshot name collision (HTTP 400/409).
+
+    Requires a name-collision token (``"already exists"`` or ``"snapshot"``
+    alongside ``"with name"``) so a 400 for a genuinely malformed snapshot name
+    containing the word "conflict" does not false-positive into the
+    create-then-reuse recovery path.
+    """
     classification = _classify_daytona_sdk_error(exc)
     lowered = classification.message.lower()
-    return classification.status_code in {400, 409} and any(
-        token in lowered for token in ("already exists", "conflict", "duplicate")
-    )
+    if classification.status_code not in {400, 409}:
+        return False
+    if "already exists" in lowered:
+        return True
+    return "conflict" in lowered and "with name" in lowered
 
 
 def _wait_for_snapshot_refresh_target(
@@ -483,8 +524,10 @@ def resolve_snapshot(
 ) -> str | None:
     """Return the snapshot name if it exists and is ``ACTIVE``, else ``None``."""
     info = get_snapshot(preferred_name, config=config)
-    state = str(info.get("state", "")).upper() if info else ""
-    if info and state in ("ACTIVE", "SNAPSHOTSTATE.ACTIVE"):
+    if not info:
+        return None
+    state = canonicalize_snapshot_state_token(info.get("state"))
+    if state == "active":
         return info["name"]
     return None
 
@@ -509,8 +552,12 @@ def resolve_sandbox_spec_snapshot(
     active_snapshot = resolve_snapshot(spec.snapshot, config=config)
     if active_snapshot is not None:
         return spec
-    logger.info(
-        "Snapshot '%s' not active; falling back to declarative image",
+    # Warn so operators know the snapshot is missing and a slower image build
+    # is being used. For the browser snapshot this also means Playwright may
+    # take a one-time ~2-5 min install (Daytona caches built images ~24h).
+    logger.warning(
+        "Daytona snapshot '%s' is not ACTIVE; falling back to a declarative image build. "
+        "Run the snapshot bootstrap to speed up sandbox start.",
         spec.snapshot,
     )
     return fallback_to_declarative_image(spec)
@@ -533,8 +580,19 @@ def resolve_default_snapshot(*, image: Any, snapshot: str | None) -> str | None:
 
 
 def fallback_to_declarative_image(spec: SandboxSpec) -> SandboxSpec:
-    """Replace a snapshot-based spec with a declarative image build."""
-    image = build_base_snapshot_image()
+    """Replace a snapshot-based spec with a declarative image build.
+
+    Snapshot-aware: if the spec requested the browser snapshot, fall back to
+    ``build_browser_snapshot_image`` so Playwright/Chromium remain available.
+    Otherwise fall back to the base image. Without this, a missing
+    ``fleet-rlm-browser`` snapshot would silently degrade to a plain Python
+    sandbox where ``import playwright`` fails at runtime.
+    """
+    intended_snapshot = spec.snapshot
+    if intended_snapshot == BROWSER_SNAPSHOT_NAME:
+        image = build_browser_snapshot_image()
+    else:
+        image = build_base_snapshot_image()
     return dataclasses.replace(spec, image=image, snapshot=None)
 
 
@@ -589,6 +647,7 @@ __all__ = [
     "bootstrap_browser_snapshot",
     "build_base_snapshot_image",
     "build_browser_snapshot_image",
+    "canonicalize_snapshot_state_token",
     "create_browser_snapshot",
     "fallback_to_declarative_image",
     "resolve_default_snapshot",

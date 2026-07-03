@@ -1,0 +1,43 @@
+name: Check dspy beta pin
+
+permissions:
+  contents: read
+
+on:
+  schedule:
+    # Daily at 06:00 UTC — catches a yanked beta before it causes an outage.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/fleet_rlm/integrations/daytona/snapshots.py"
+      - ".github/workflows/check-dspy-pin.yml"
+
+jobs:
+  check-dspy-beta-availability:
+    name: Verify dspy==3.3.0b1 is installable from PyPI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "latest"
+          enable-cache: false
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Check dspy==3.3.0b1 installability
+        run: |
+          # 3.3.0b1 is the contract pin (per AGENTS.md / snapshots.py).
+          # If PyPI yanks or removes the beta, snapshot builds and declarative-
+          # image fallbacks fail. Fail loudly here so we get early warning
+          # instead of a silent sandbox-creation outage.
+          if ! uv pip install --dry-run --python "$(uv python find 3.12)" "dspy==3.3.0b1"; then
+            echo "::error::dspy==3.3.0b1 is no longer installable from PyPI. The beta may have been yanked. Re-pin to a reissued beta or vendor the source per the AGENTS.md contract."
+            exit 1
+          fi
+          echo "dspy==3.3.0b1 is available from PyPI."
