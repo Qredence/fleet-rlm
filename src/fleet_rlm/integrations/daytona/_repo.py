@@ -18,12 +18,13 @@ from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+from daytona import DaytonaNotFoundError
+
 from .diagnostics import DaytonaDiagnosticError
-from .protocols import DaytonaSandbox
 from .volumes import ensure_remote_directory as _aensure_remote_directory
 
 if TYPE_CHECKING:
-    pass
+    from daytona import Sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +56,13 @@ def _aget_work_dir(sandbox: Any) -> str:
     return "/workspace"
 
 
-def _abuild_workspace_path(sandbox: DaytonaSandbox, repo_url: str | None) -> str:
+def _abuild_workspace_path(sandbox: Sandbox, repo_url: str | None) -> str:
     work_dir = _aget_work_dir(sandbox)
     workspace_name = _safe_workspace_name(repo_url)
     return str(PurePosixPath(work_dir) / "workspace" / workspace_name)
 
 
-def _aensure_workspace_root(*, sandbox: DaytonaSandbox, workspace_path: str) -> None:
+def _aensure_workspace_root(*, sandbox: Sandbox, workspace_path: str) -> None:
     try:
         _aensure_remote_directory(sandbox.fs, PurePosixPath(workspace_path))
     except Exception as exc:
@@ -155,7 +156,7 @@ def _build_clone_kwargs(
 
 def _aclone_repo(
     *,
-    sandbox: DaytonaSandbox,
+    sandbox: Sandbox,
     repo_url: str,
     ref: str | None,
     workspace_path: str,
@@ -172,15 +173,11 @@ def _aclone_repo(
             workspace_path=workspace_path,
         )
         if shallow:
-            try:
-                sandbox.git.clone(**clone_kwargs, depth=1)
-            except TypeError:
-                # SDK doesn't support depth kwarg; fall back to exec
-                branch_args = f" --branch {clone_kwargs['branch']}" if "branch" in clone_kwargs else ""
-                cmd = f"git clone --depth=1{branch_args} {repo_url} {workspace_path}"
-                sandbox.process.exec(cmd)
+            branch_args = f" --branch {clone_kwargs['branch']}" if "branch" in clone_kwargs else ""
+            cmd = f"git clone --depth=1{branch_args} {repo_url} {workspace_path}"
+            sandbox.process.exec(cmd)
         else:
-            sandbox.git.clone(**clone_kwargs)
+            sandbox.git.clone(**clone_kwargs)  # ty: ignore
     except Exception as exc:
         raise DaytonaDiagnosticError(
             f"Daytona repo clone failure: {exc}",
@@ -191,7 +188,7 @@ def _aclone_repo(
 
 def _areconcile_repo_checkout(
     *,
-    sandbox: DaytonaSandbox,
+    sandbox: Sandbox,
     repo_url: str | None,
     ref: str | None,
     workspace_path: str,
@@ -261,18 +258,16 @@ def _areconcile_repo_checkout(
 
 def _areplace_repo_checkout(
     *,
-    sandbox: DaytonaSandbox,
+    sandbox: Sandbox,
     repo_url: str,
     ref: str | None,
     workspace_path: str,
 ) -> None:
     """Replace a mismatched or non-git checkout before SDK cloning."""
-    _aexec_sandbox_command(
-        sandbox=sandbox,
-        command=shlex.join(["rm", "-rf", "--", workspace_path]),
-        phase="repo_clone",
-        error_prefix="Daytona repo replace failure",
-    )
+    try:
+        sandbox.fs.delete_file(workspace_path, recursive=True)
+    except DaytonaNotFoundError:
+        pass
     _aclone_repo(
         sandbox=sandbox,
         repo_url=repo_url,
@@ -281,29 +276,23 @@ def _areplace_repo_checkout(
     )
 
 
-def _apath_exists(*, sandbox: DaytonaSandbox, path: str) -> bool:
-    result = _aexec_sandbox_command(
-        sandbox=sandbox,
-        command=f"test -e {shlex.quote(path)}",
-        phase="repo_clone",
-        error_prefix="Daytona repo path probe failure",
-        check=False,
-    )
-    return _sandbox_exec_exit_code(result) == 0
+def _apath_exists(*, sandbox: Sandbox, path: str) -> bool:
+    try:
+        sandbox.fs.get_file_info(path)
+        return True
+    except DaytonaNotFoundError:
+        return False
 
 
-def _apath_has_git_metadata(*, sandbox: DaytonaSandbox, path: str) -> bool:
-    result = _aexec_sandbox_command(
-        sandbox=sandbox,
-        command=f"test -d {shlex.quote(str(PurePosixPath(path) / '.git'))}",
-        phase="repo_clone",
-        error_prefix="Daytona repo git probe failure",
-        check=False,
-    )
-    return _sandbox_exec_exit_code(result) == 0
+def _apath_has_git_metadata(*, sandbox: Sandbox, path: str) -> bool:
+    try:
+        info = sandbox.fs.get_file_info(f"{path}/.git")
+        return bool(getattr(info, "is_dir", False))
+    except DaytonaNotFoundError:
+        return False
 
 
-def _agit_remote_url(*, sandbox: DaytonaSandbox, workspace_path: str) -> str | None:
+def _agit_remote_url(*, sandbox: Sandbox, workspace_path: str) -> str | None:
     result = _aexec_git_command(
         sandbox=sandbox,
         workspace_path=workspace_path,
@@ -315,7 +304,7 @@ def _agit_remote_url(*, sandbox: DaytonaSandbox, workspace_path: str) -> str | N
     return _sandbox_exec_stdout(result).strip() or None
 
 
-def _apull_repo_checkout(*, sandbox: DaytonaSandbox, workspace_path: str) -> None:
+def _apull_repo_checkout(*, sandbox: Sandbox, workspace_path: str) -> None:
     try:
         with suppress(Exception):
             sandbox.git.status(workspace_path)
@@ -330,7 +319,7 @@ def _apull_repo_checkout(*, sandbox: DaytonaSandbox, workspace_path: str) -> Non
 
 def _acheckout_branch_with_sdk(
     *,
-    sandbox: DaytonaSandbox,
+    sandbox: Sandbox,
     workspace_path: str,
     ref: str,
 ) -> bool:
@@ -358,7 +347,7 @@ def _extract_sdk_branch_names(branches: Any) -> set[str]:
 
 def _aforce_checkout_ref(
     *,
-    sandbox: DaytonaSandbox,
+    sandbox: Sandbox,
     workspace_path: str,
     ref: str,
     detached: bool,
@@ -430,7 +419,7 @@ def _aforce_checkout_ref(
 
 def _agit_ref_probe(
     *,
-    sandbox: DaytonaSandbox,
+    sandbox: Sandbox,
     workspace_path: str,
     ref: str,
     verify_arg: str = "rev-parse",
@@ -447,7 +436,7 @@ def _agit_ref_probe(
 
 def _aexec_git_command(
     *,
-    sandbox: DaytonaSandbox,
+    sandbox: Sandbox,
     workspace_path: str,
     args: tuple[str, ...],
     check: bool = True,
@@ -463,7 +452,7 @@ def _aexec_git_command(
 
 def _aexec_sandbox_command(
     *,
-    sandbox: DaytonaSandbox,
+    sandbox: Sandbox,
     command: str,
     phase: str,
     error_prefix: str,
@@ -493,24 +482,11 @@ def _sandbox_exec_exit_code(result: Any) -> int:
 
 
 def _sandbox_exec_output(result: Any) -> str:
-    return str(
-        getattr(result, "stderr", "")
-        or getattr(result, "result", "")
-        or getattr(getattr(result, "artifacts", None), "stdout", "")
-        or getattr(result, "stdout", "")
-        or getattr(result, "output", "")
-        or "sandbox command failed"
-    )
+    return str(result.result or (result.artifacts.stdout if result.artifacts else "") or "sandbox command failed")
 
 
 def _sandbox_exec_stdout(result: Any) -> str:
-    return str(
-        getattr(result, "stdout", "")
-        or getattr(result, "result", "")
-        or getattr(getattr(result, "artifacts", None), "stdout", "")
-        or getattr(result, "output", "")
-        or ""
-    )
+    return str(result.result or (result.artifacts.stdout if result.artifacts else "") or "")
 
 
 # =========================================================================
@@ -631,7 +607,7 @@ def _build_capped_repo_tarball(root: Path) -> bytes | None:
     return data
 
 
-def _amount_local_repo_tree(*, sandbox: DaytonaSandbox, workspace_path: str) -> bool:
+def _amount_local_repo_tree(*, sandbox: Sandbox, workspace_path: str) -> bool:
     """Mount the local repo source tree into the sandbox workspace.
 
     Returns ``True`` if the tree was mounted, ``False`` otherwise (including
@@ -661,7 +637,7 @@ def _amount_local_repo_tree(*, sandbox: DaytonaSandbox, workspace_path: str) -> 
             return False
         # Clean up the tarball — it is transient.
         with contextlib.suppress(Exception):
-            sandbox.process.exec(f"rm -f {remote_tar}")
+            sandbox.fs.delete_file(remote_tar)
         logger.info(
             "local_repo_mount: mounted %s into %s (%d bytes)",
             root,

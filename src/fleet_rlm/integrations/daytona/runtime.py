@@ -9,7 +9,7 @@ import re
 import threading
 import time as _ws_time
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fleet_rlm.utils.async_compat import _run_async_compat, _run_sync_in_thread
 
@@ -91,6 +91,9 @@ from .workspace_manager import (
     areconcile_workspace_session as _areconcile_workspace_session_helper,
 )
 
+if TYPE_CHECKING:
+    from daytona import AsyncDaytona, Daytona
+
 logger = logging.getLogger(__name__)
 
 _GENERATED_SANDBOX_NAME_RE = re.compile(r"^fleet-rlm-\d{8}-\d{6}(?:-[0-9a-f]{8})?$")
@@ -147,8 +150,8 @@ class DaytonaSandboxRuntime:
     def __init__(self, *, config: ResolvedDaytonaConfig | None = None) -> None:
         resolved = config or resolve_daytona_config()
         self._resolved_config = resolved
-        self._client: Any | None = None
-        self._async_client: Any | None = None
+        self._client: Daytona | None = None
+        self._async_client: AsyncDaytona | None = None
         self._client_lock = threading.Lock()
         self._closed = False
 
@@ -165,8 +168,8 @@ class DaytonaSandboxRuntime:
         """Return the cached AsyncDaytona client for the native-async hot path.
 
         AsyncDaytona provides async ``create``/``get``/``delete``/``list``/
-        ``close`` but no ``snapshot``/``volume`` sub-clients, so those stay on
-        the sync client (behind ``asyncio.to_thread``).
+        ``close`` as well as ``snapshot``/``volume`` sub-clients
+        (``AsyncSnapshotService``, ``AsyncVolumeService``).
         """
         with self._client_lock:
             if self._closed:

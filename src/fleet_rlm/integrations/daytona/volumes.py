@@ -61,50 +61,24 @@ def seed_system_skills(mounted_root: str) -> None:
         logger.warning("seed_system_skills: skill seeding failed (non-fatal): %s", exc)
 
 
-def _result_detail(result: Any) -> str:
-    return str(
-        getattr(result, "stderr", "")
-        or getattr(result, "result", "")
-        or getattr(getattr(result, "artifacts", None), "stdout", "")
-        or getattr(result, "output", "")
-        or ""
+def _run_remote_python(sandbox: Sandbox, code: str, *, error_prefix: str) -> None:
+    """Run a small administrative Python snippet inside the Daytona sandbox."""
+    from .session_runtime import _run_admin_code as _run_code
+
+    _run_code(
+        sandbox=sandbox,
+        code=code,
+        phase="sandbox_create",
+        error_prefix=error_prefix,
     )
 
 
-def _run_remote_python(sandbox: DaytonaSandbox, code: str, *, error_prefix: str) -> None:
-    """Run a small administrative Python snippet inside the Daytona sandbox."""
-
-    try:
-        try:
-            from daytona.common.process import CodeRunParams
-
-            kwargs: dict[str, Any] = {"params": CodeRunParams()}
-        except ImportError:
-            kwargs = {}
-        result = _run_async_compat(sandbox.process.code_run, code, **kwargs)
-    except Exception as exc:
-        raise DaytonaDiagnosticError(
-            f"{error_prefix}: {exc}",
-            category="sandbox_create_clone_error",
-            phase="sandbox_create",
-        ) from exc
-
-    exit_code = int(getattr(result, "exit_code", 0) or 0)
-    if exit_code:
-        detail = _result_detail(result) or f"process exited with status {exit_code}"
-        raise DaytonaDiagnosticError(
-            f"{error_prefix}: {detail}",
-            category="sandbox_create_clone_error",
-            phase="sandbox_create",
-        )
-
-
-def _init_remote_memory_db(sandbox: DaytonaSandbox, mounted_root: str) -> None:
+def _init_remote_memory_db(sandbox: Sandbox, mounted_root: str) -> None:
     code = memory_db_bootstrap_script(mounted_root)
     _run_remote_python(sandbox, code, error_prefix="Daytona memory DB init failure")
 
 
-def seed_remote_system_skills(sandbox: DaytonaSandbox, mounted_root: str) -> None:
+def seed_remote_system_skills(sandbox: Sandbox, mounted_root: str) -> None:
     """Seed bundled scaffold skills into a remote Daytona volume."""
 
     dest_dir = PurePosixPath(mounted_root) / "skills" / "system"
@@ -126,7 +100,7 @@ def seed_remote_system_skills(sandbox: DaytonaSandbox, mounted_root: str) -> Non
 
 
 if TYPE_CHECKING:
-    from .protocols import DaytonaClient, DaytonaSandbox
+    from daytona import Daytona, Sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +202,7 @@ def raise_if_volume_error(
 
 
 def await_volume_ready(
-    client: DaytonaClient,
+    client: Daytona,
     volume_name: str,
     volume: Any,
     *,
@@ -290,7 +264,7 @@ def await_volume_ready(
 
 def ensure_daytona_volume_layout(
     *,
-    sandbox: DaytonaSandbox,
+    sandbox: Sandbox,
     mounted_root: str = str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
 ) -> None:
     """Ensure canonical durable directories exist on a mounted Daytona volume."""
@@ -353,7 +327,7 @@ def ensure_daytona_volume_layout(
 
 async def aensure_daytona_volume_layout(
     *,
-    sandbox: DaytonaSandbox,
+    sandbox: Sandbox,
     mounted_root: str = str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
 ) -> None:
     """Async wrapper — runs blocking volume layout setup in a thread."""
@@ -419,53 +393,13 @@ def _serialize_daytona_volume(volume: Any) -> dict[str, Any]:
 
 
 def list_daytona_volumes(*, limit: int = 100) -> list[dict[str, Any]]:
-    """List Daytona persistent volumes with pagination support.
+    """List Daytona persistent volumes.
 
-    Probes for cursor-based pagination (Daytona SDK 0.180+) at runtime; falls
-    back to page/limit pagination for older runners, then to an unbounded
-    single call. ``page``-based pagination is deprecated once cursors land.
+    The installed SDK ``VolumeService.list()`` takes no parameters and
+    returns ``list[Volume]``.
     """
     client = _build_daytona_client(resolve_daytona_config())
     try:
-        import inspect as _inspect
-
-        list_sig = _inspect.signature(client.volume.list)
-        supports_cursor = "cursor" in list_sig.parameters
-        supports_page = "page" in list_sig.parameters
-
-        if supports_cursor:
-            all_volumes: list[Any] = []
-            cursor: str | None = None
-            while True:
-                kwargs: dict[str, Any] = {"limit": limit}
-                if cursor is not None:
-                    kwargs["cursor"] = cursor
-                result = client.volume.list(**kwargs)
-                items = getattr(result, "items", result) if result else []
-                if not items:
-                    break
-                all_volumes.extend(items)
-                next_cursor = getattr(result, "next_cursor", None) or getattr(result, "cursor", None)
-                if not next_cursor or len(items) < limit:
-                    break
-                cursor = next_cursor
-            volumes = all_volumes
-        elif supports_page:
-            all_volumes = []
-            page = 1
-            while True:
-                result = client.volume.list(page=page, limit=limit)
-                items = getattr(result, "items", result) if result else []
-                if not items:
-                    break
-                all_volumes.extend(items)
-                if len(items) < limit:
-                    break
-                page += 1
-            volumes = all_volumes
-        else:
-            volumes = client.volume.list()
-    except TypeError:
         volumes = client.volume.list()
     finally:
         with suppress(Exception):

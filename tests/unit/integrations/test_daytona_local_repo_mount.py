@@ -16,16 +16,20 @@ from fleet_rlm.integrations.daytona._repo import (
 
 
 class _FakeSandbox:
-    """Captures fs.upload_file and process.exec calls."""
+    """Captures fs.upload_file/delete_file and process.exec calls."""
 
     def __init__(self) -> None:
         self.uploads: list[tuple[bytes, str]] = []
+        self.deletes: list[str] = []
         self.execs: list[str] = []
-        self.fs = SimpleNamespace(upload_file=self._upload)
+        self.fs = SimpleNamespace(upload_file=self._upload, delete_file=self._delete)
         self.process = SimpleNamespace(exec=self._exec)
 
     def _upload(self, data: bytes, path: str) -> None:
         self.uploads.append((data, path))
+
+    def _delete(self, path: str, **kwargs: object) -> None:
+        self.deletes.append(path)
 
     def _exec(self, cmd: str) -> SimpleNamespace:
         self.execs.append(cmd)
@@ -59,7 +63,7 @@ def test_amount_local_repo_tree_uploads_and_extracts(monkeypatch: pytest.MonkeyP
         "tar xzf" in c and "/ws/daytona-workspace/_repo.tar.gz" in c and "-C /ws/daytona-workspace" in c
         for c in sandbox.execs
     )
-    assert any(c.startswith("rm -f") for c in sandbox.execs)
+    assert sandbox.deletes == ["/ws/daytona-workspace/_repo.tar.gz"]
     # The tarball actually contains the source tree.
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
         names = tar.getnames()

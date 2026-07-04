@@ -23,7 +23,7 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from threading import Lock, Thread
-from typing import AbstractSet, Any, Callable
+from typing import TYPE_CHECKING, AbstractSet, Any, Callable
 
 from dspy.primitives import CodeInterpreterError
 
@@ -34,6 +34,9 @@ from .models import (
     _DAYTONA_SANDBOX_NATIVE_TOOL_NAMES,
     _UNSUPPORTED_RECURSIVE_SANDBOX_CALLBACKS,
 )
+
+if TYPE_CHECKING:
+    from daytona import Sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -428,7 +431,7 @@ class DaytonaToolBridge:
     def __init__(
         self,
         *,
-        sandbox: Any,
+        sandbox: Sandbox,
         context: Any,
         max_concurrent_tool_calls: int = 32,
         tool_claim_lease_seconds: float = 60.0,
@@ -480,13 +483,9 @@ class DaytonaToolBridge:
         )
         # sha256 integrity check — verify the uploaded file matches what we sent.
         expected_sha = hashlib.sha256(server_code.encode("utf-8")).hexdigest()
-        verify_cmd = (
-            f'python -c "'
-            f"import hashlib; "
-            f"print(hashlib.sha256(open('{_BROKER_SERVER_PATH}','rb').read()).hexdigest())"
-            f'"'
+        verify_resp = self.sandbox.process.code_run(
+            "import hashlib; print(hashlib.sha256(open('/home/daytona/broker_server.py','rb').read()).hexdigest())"
         )
-        verify_resp = self.sandbox.process.exec(verify_cmd)
         actual_sha = (verify_resp.result or "").strip()
         if actual_sha != expected_sha:
             raise DaytonaDiagnosticError(

@@ -17,7 +17,7 @@ from .models import ContextSource
 from .volumes import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
 
 if TYPE_CHECKING:
-    from .protocols import DaytonaSandbox
+    from daytona import Sandbox
 
 
 # ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 def _run_admin_code(
     *,
-    sandbox: DaytonaSandbox,
+    sandbox: Sandbox,
     code: str,
     phase: str,
     error_prefix: str,
@@ -47,13 +47,11 @@ def _run_admin_code(
             phase=phase,
         ) from exc
 
-    exit_code = getattr(result, "exit_code", 0)
+    exit_code = int(getattr(result, "exit_code", 0) or 0)
     if exit_code:
         detail = str(
-            getattr(result, "stderr", "")
-            or getattr(result, "result", "")
-            or getattr(getattr(result, "artifacts", None), "stdout", "")
-            or getattr(result, "output", "")
+            result.result
+            or (result.artifacts.stdout if result.artifacts else "")
             or f"process exited with status {exit_code}"
         )
         raise DaytonaDiagnosticError(
@@ -62,18 +60,12 @@ def _run_admin_code(
             phase=phase,
         )
 
-    return str(
-        getattr(result, "stdout", "")
-        or getattr(result, "result", "")
-        or getattr(getattr(result, "artifacts", None), "stdout", "")
-        or getattr(result, "output", "")
-        or ""
-    )
+    return str(result.result or (result.artifacts.stdout if result.artifacts else "") or "")
 
 
 async def _arun_admin_code(
     *,
-    sandbox: DaytonaSandbox,
+    sandbox: Sandbox,
     code: str,
     phase: str,
     error_prefix: str,
@@ -96,7 +88,7 @@ async def _arun_admin_code(
 class DaytonaSandboxSession:
     """Concrete Daytona workspace session backed by a sandbox and interpreter context."""
 
-    sandbox: Any
+    sandbox: Sandbox
     repo_url: str | None
     ref: str | None
     volume_name: str | None
@@ -327,7 +319,7 @@ class DaytonaSandboxSession:
         project_path: str | None = None,
     ) -> Any:
         return self.sandbox.create_lsp_server(
-            language,
+            language,  # ty: ignore
             project_path or self.workspace_path,
         )
 

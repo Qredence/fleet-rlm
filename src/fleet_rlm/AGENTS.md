@@ -167,7 +167,7 @@ Runtime ownership:
   `dspy.ReAct` subclass), `runtime/modules/escalating.py` (`EscalatingFleetModule`, the
   default CoT→ReAct→RLM router), and `runtime/agent/runtime.py` (AgentRuntime)
 - Keep the public Daytona interpreter facade in `integrations/daytona/interpreter.py`; durable workspace/session behavior lives in `workspace_manager.py`, code execution and bridge state live in `sandbox_executor.py`, and recursive child policy/delegation lives in `isolation.py`.
-- Keep Daytona collaborator boundaries typed with small internal Protocols. Use Pydantic v2 for validated configuration/state boundary models such as `WorkspaceConfig`, but keep hot execution-path payloads and bridge result carriers as dataclasses/functions.
+- Prefer direct `daytona` SDK type imports (`from daytona import Sandbox, Daytona`) over shadow Protocols. Fleet wrappers exist only for product policy, diagnostics, session state, and the RLM host-callback bridge. Use Pydantic v2 for validated configuration/state boundary models such as `WorkspaceConfig`, but keep hot execution-path payloads and bridge result carriers as dataclasses/functions.
 - Keep runtime orchestration and shared chat/runtime behavior under `runtime/agent/*` and `runtime/execution/*`
 - Keep content-oriented helpers under `runtime/content/*`
 - Keep DSPy evaluation and optimization helpers under `quality/*`

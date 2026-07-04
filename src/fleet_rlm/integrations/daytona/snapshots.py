@@ -27,7 +27,7 @@ from .errors import DaytonaDiagnosticError
 from .models import SandboxSpec
 
 if TYPE_CHECKING:
-    from .protocols import DaytonaSandbox
+    from daytona import Sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ _VNC_DESKTOP_DEPS = "xvfb xfce4 xfce4-terminal x11vnc novnc dbus-x11"
 
 
 def _experimental_call(
-    sandbox: DaytonaSandbox,
+    sandbox: Sandbox,
     method_name: str,
     *args: Any,
     category: str = "sandbox_experimental_error",
