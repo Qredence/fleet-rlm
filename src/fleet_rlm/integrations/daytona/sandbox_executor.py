@@ -887,40 +887,6 @@ def _owner_broker_start_error(
     return None
 
 
-def _inject_broker_failure_stubs(
-    session: DaytonaSandboxSession,
-    context: Any,
-    tools: dict[str, Any],
-    *,
-    error: str,
-) -> None:
-    """Inject stub functions for each bridged tool so the REPL agent gets an
-    informative RuntimeError instead of a bare NameError when the broker failed.
-    Best-effort: any injection error is silently suppressed.
-    """
-    if not tools:
-        return
-    # Redact credential-bearing values before embedding the error string into
-    # sandbox-side code; broker start failures can include preview URLs, env
-    # values, or upstream SDK messages that may carry secrets.
-    from .errors import sandbox_safe_error
-
-    short_error = sandbox_safe_error(Exception(error))[:200].replace("'", "\\'")
-    lines = [
-        f"def {name}(*_a, **_kw):"
-        f" raise RuntimeError('Tool {name!r} unavailable: broker failed to start. {short_error}')"
-        for name in tools
-        if name.isidentifier()
-    ]
-    if not lines:
-        return
-    stub_code = "\n".join(lines)
-    try:
-        session.sandbox.code_interpreter.run_code(stub_code, context=context)
-    except Exception:
-        pass  # best-effort
-
-
 def run_prepared_execution(
     owner: DaytonaExecutionOwner,
     *,
@@ -948,7 +914,6 @@ def run_prepared_execution(
             if "Broker server failed to start" in str(exc):
                 owner._bridge_start_error = str(exc)
                 _remember_broker_start_error(session, str(exc))
-                _inject_broker_failure_stubs(session, context, tools, error=str(exc))
             raise
         owner._bridge_start_error = None
         _clear_broker_start_error(session)

@@ -8,10 +8,13 @@ Uses the synchronous Daytona SDK directly — no async compatibility layer.
 
 from __future__ import annotations
 
+import ast
+import hashlib
 import inspect
 import json
 import keyword
 import logging
+import secrets
 import time
 import urllib.error
 import urllib.request
@@ -24,6 +27,7 @@ from typing import Any, Callable
 from dspy.primitives import CodeInterpreterError
 
 from .async_compat import _run_sync_in_thread
+from .errors import DaytonaDiagnosticError
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +44,7 @@ _BROKER_SERVER_CODE = """
 Uses only Python stdlib — no third-party dependencies required.
 \"\"\"
 
+import hmac
 import json
 import threading
 import time
@@ -52,6 +57,7 @@ _lock = threading.Lock()
 _pending_requests: dict = {}
 _results: dict = {}
 _RESULT_TTL_S = 300.0  # orphan results older than this are swept
+_BROKER_SECRET = __BROKER_SECRET__
 
 
 def _sweep_stale_results(now):
@@ -131,6 +137,12 @@ class _BrokerHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+
+        if path == "/tool_call" or path.startswith("/result/"):
+            header_secret = self.headers.get("X-Broker-Secret", "")
+            if not hmac.compare_digest(header_secret, _BROKER_SECRET):
+                _send_json(self, {"error": "unauthorized"}, 401)
+                return
 
         if path == "/tool_call":
             data = _read_json(self)
@@ -222,7 +234,7 @@ def {tool_name}({signature}):
     req = _urllib_request.Request(
         "http://localhost:{broker_port}/tool_call",
         data=payload,
-        headers={{"Content-Type": "application/json"}},
+        headers={{"Content-Type": "application/json", "X-Broker-Secret": "{broker_secret}"}},
         method="POST",
     )
     with _urllib_request.urlopen(req, timeout=130) as resp:
@@ -242,10 +254,25 @@ def {tool_name}({signature}):
 """.strip()
 
 
+def _default_survives_repr(default: Any) -> bool:
+    """Return True if the default's repr can be round-tripped through ``ast.literal_eval``.
+
+    Non-repr-safe defaults (e.g. ``object()``) cannot be embedded in generated
+    wrapper source code and must be converted to keyword-only parameters.
+    """
+    try:
+        restored = ast.literal_eval(repr(default))
+        # Use structural equality; NaN etc. will fail here (desired).
+        return restored == default
+    except (ValueError, SyntaxError, TypeError):
+        return False
+
+
 def generate_tool_wrapper(
     *,
     tool_name: str,
     tool_func: Callable[..., Any],
+    broker_secret: str = "",
 ) -> str:
     """Generate a Python function wrapper that calls the host broker via HTTP."""
     signature = inspect.signature(tool_func)
@@ -262,6 +289,8 @@ def generate_tool_wrapper(
     def _format_param(param: inspect.Parameter) -> str:
         if param.default is inspect.Parameter.empty:
             return param.name
+        if not _default_survives_repr(param.default):
+            return param.name
         return f"{param.name}={repr(param.default)}"
 
     for index, param in enumerate(params):
@@ -272,10 +301,18 @@ def generate_tool_wrapper(
                 sig_parts.append("/")
             continue
         if param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD:
-            sig_parts.append(_format_param(param))
             if param.default is inspect.Parameter.empty:
+                sig_parts.append(param.name)
                 args_list.append(param.name)
+            elif _default_survives_repr(param.default):
+                sig_parts.append(_format_param(param))
+                kwargs_parts.append(f'"{param.name}": {param.name}')
             else:
+                # Non-repr-safe default → keyword-only, no default in signature
+                if not added_kw_only_separator:
+                    sig_parts.append("*")
+                    added_kw_only_separator = True
+                sig_parts.append(param.name)
                 kwargs_parts.append(f'"{param.name}": {param.name}')
             continue
         if param.kind == inspect.Parameter.VAR_POSITIONAL:
@@ -302,6 +339,7 @@ def generate_tool_wrapper(
         args_list=", ".join(args_list),
         kwargs_dict=", ".join(kwargs_parts),
         broker_port=_BROKER_PORT,
+        broker_secret=broker_secret,
     )
 
 
@@ -409,6 +447,7 @@ class DaytonaToolBridge:
         self.broker_health_timeout = float(broker_health_timeout)
         self.broker_tool_call_timeout = float(broker_tool_call_timeout)
         self.broker_start_retries = int(broker_start_retries)
+        self._broker_secret: str | None = None
         self._broker_url: str | None = None
         self._broker_token: str | None = None
         self._broker_session_id: str | None = None
@@ -423,14 +462,32 @@ class DaytonaToolBridge:
     def ensure_started(self) -> None:
         if self._broker_url is not None:
             return
+        if self._broker_secret is None:
+            self._broker_secret = secrets.token_urlsafe(32)
         server_code = _BROKER_SERVER_CODE.replace(
             "__DAYTONA_TOOL_CALL_TIMEOUT_S__",
             repr(self.broker_tool_call_timeout),
-        )
+        ).replace("__BROKER_SECRET__", repr(self._broker_secret))
         self.sandbox.fs.upload_file(
             server_code.encode("utf-8"),
             _BROKER_SERVER_PATH,
         )
+        # sha256 integrity check — verify the uploaded file matches what we sent.
+        expected_sha = hashlib.sha256(server_code.encode("utf-8")).hexdigest()
+        verify_cmd = (
+            f'python -c "'
+            f"import hashlib; "
+            f"print(hashlib.sha256(open('{_BROKER_SERVER_PATH}','rb').read()).hexdigest())"
+            f'"'
+        )
+        verify_resp = self.sandbox.process.exec(verify_cmd)
+        actual_sha = (verify_resp.result or "").strip()
+        if actual_sha != expected_sha:
+            raise DaytonaDiagnosticError(
+                f"Broker asset integrity check failed: expected={expected_sha}, actual={actual_sha}",
+                category="broker_asset_integrity",
+                phase="broker_start",
+            )
         from daytona import SessionExecuteRequest
 
         last_error: Exception | None = None
@@ -645,7 +702,11 @@ class DaytonaToolBridge:
         tool_name: str,
         tool_func: Callable[..., Any],
     ) -> str:
-        return generate_tool_wrapper(tool_name=tool_name, tool_func=tool_func)
+        return generate_tool_wrapper(
+            tool_name=tool_name,
+            tool_func=tool_func,
+            broker_secret=self._broker_secret or "",
+        )
 
     def _code_thread_join_timeout(self, timeout: int) -> float:
         return min(max(float(timeout), 1.0), 5.0)
