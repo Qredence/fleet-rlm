@@ -11,8 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
 from fleet_rlm.runtime.tools._marker import tool_fn
+from fleet_rlm.utils.async_compat import _run_async_compat
 
 # ---------------------------------------------------------------------------
 # Tool context

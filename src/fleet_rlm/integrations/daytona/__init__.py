@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     )
     from .interpreter import DaytonaInterpreter
     from .log_stream import LogStreamParser, SandboxEvent, SandboxEventCategory
-    from .memory_db import ainit_memory_db, init_memory_db
     from .models import (
         ContextSource,
         SandboxLmRuntimeConfig,
@@ -29,8 +28,9 @@ if TYPE_CHECKING:
         DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
         DaytonaSandboxRuntime,
         DaytonaSandboxSession,
+        bootstrap_snapshot,
     )
-    from .sdk_ops import bootstrap_snapshot
+    from .volumes import ainit_memory_db, init_memory_db
 
 __all__ = [
     "ainit_memory_db",
@@ -111,15 +111,15 @@ _IMPORT_MAP: dict[str, tuple[str, str]] = {
         "VolumeNotReadyError",
     ),
     "ainit_memory_db": (
-        "fleet_rlm.integrations.daytona.memory_db",
+        "fleet_rlm.integrations.daytona.volumes",
         "ainit_memory_db",
     ),
     "init_memory_db": (
-        "fleet_rlm.integrations.daytona.memory_db",
+        "fleet_rlm.integrations.daytona.volumes",
         "init_memory_db",
     ),
     "bootstrap_snapshot": (
-        "fleet_rlm.integrations.daytona.sdk_ops",
+        "fleet_rlm.integrations.daytona.runtime",
         "bootstrap_snapshot",
     ),
     "resolve_daytona_config": (

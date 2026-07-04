@@ -10,9 +10,9 @@ from fastapi import HTTPException
 
 from fleet_rlm.integrations.daytona import config as _daytona_config
 from fleet_rlm.integrations.daytona import runtime as _daytona_runtime
-from fleet_rlm.integrations.daytona.async_compat import _run_sync_in_thread
 from fleet_rlm.integrations.daytona.concurrency import release_sandbox_slot
 from fleet_rlm.integrations.observability.sanitization import redact_sensitive
+from fleet_rlm.utils.async_compat import _run_sync_in_thread
 from fleet_rlm.utils.sandbox_ownership import (
     SANDBOX_OWNER_LABEL,
     sandbox_owner_matches,

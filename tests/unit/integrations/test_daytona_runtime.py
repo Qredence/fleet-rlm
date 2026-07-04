@@ -418,7 +418,7 @@ def test_daytona_interpreter_applies_delegate_timeout_and_broker_settings(dayton
 
 
 def test_daytona_volume_layout_matches_phase_one_skeleton() -> None:
-    from fleet_rlm.integrations.daytona.sdk_ops import ensure_daytona_volume_layout
+    from fleet_rlm.integrations.daytona.volumes import ensure_daytona_volume_layout
 
     created: list[str] = []
     code_runs: list[str] = []
@@ -474,7 +474,7 @@ def test_daytona_volume_browser_allows_durable_phase_roots() -> None:
 def test_daytona_volume_browser_reports_all_canonical_roots(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
-    from fleet_rlm.integrations.daytona import file_browser
+    import fleet_rlm.integrations.daytona.volumes as file_browser
     from fleet_rlm.integrations.daytona.volumes import VFS_CANONICAL_ROOTS
 
     class _Sandbox:
@@ -497,7 +497,7 @@ def test_daytona_volume_browser_reports_all_canonical_roots(monkeypatch: pytest.
 def test_daytona_volume_browser_filters_root_to_canonical_roots(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
-    from fleet_rlm.integrations.daytona import file_browser
+    import fleet_rlm.integrations.daytona.volumes as file_browser
 
     class _Sandbox:
         def __init__(self) -> None:
@@ -589,8 +589,7 @@ def test_resolve_snapshot_for_skills_returns_browser_snapshot() -> None:
 def test_bind_interpreter_tool_generates_valid_store_evidence_wrapper() -> None:
     import ast
 
-    from fleet_rlm.integrations.daytona.bridge import generate_tool_wrapper
-    from fleet_rlm.integrations.daytona.bridge_callbacks import _bind_interpreter_tool
+    from fleet_rlm.integrations.daytona.bridge import _bind_interpreter_tool, generate_tool_wrapper
     from fleet_rlm.integrations.daytona.isolation import store_evidence
 
     interpreter = MagicMock()

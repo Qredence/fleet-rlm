@@ -8,7 +8,7 @@ from dspy.primitives import CodeInterpreterError
 
 
 def test_bridge_tools_can_disable_semantic_callbacks() -> None:
-    from fleet_rlm.integrations.daytona.bridge_callbacks import bridge_tools
+    from fleet_rlm.integrations.daytona.bridge import bridge_tools
 
     interpreter = SimpleNamespace(
         _tools={"list_files": lambda path=".": [], "sandbox_search_files": lambda path, pattern: []},

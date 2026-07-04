@@ -12,12 +12,12 @@ from typing import Any, Awaitable, NoReturn, cast
 
 from fastapi import HTTPException
 
-from fleet_rlm.integrations.daytona.sdk_ops import (
+from fleet_rlm.integrations.daytona.volumes import (
+    VFS_CANONICAL_ROOTS,
     alist_daytona_volume_tree,
     alist_daytona_volumes,
     aread_daytona_volume_file_text,
 )
-from fleet_rlm.integrations.daytona.volumes import VFS_CANONICAL_ROOTS
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
 from ..auth import NormalizedIdentity

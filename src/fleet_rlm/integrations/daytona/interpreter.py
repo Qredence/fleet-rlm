@@ -38,8 +38,8 @@ from fleet_rlm.runtime.execution.interpreter_support import (
 )
 from fleet_rlm.runtime.execution.llm_query import LLMQueryMixin
 
-from .bridge import DaytonaToolBridge
-from .bridge_callbacks import (
+from .bridge import (
+    DaytonaToolBridge,
     bridge_tools,
     invoke_tool,
     reject_unsupported_recursive_callbacks,
@@ -62,9 +62,9 @@ from .models import (
 from .runtime import (
     DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
     DaytonaSandboxRuntime,
+    get_sandbox_id_from_interpreter,
 )
 from .sandbox_executor import SandboxExecutor
-from .sdk_ops import get_sandbox_id_from_interpreter
 from .session_runtime import DaytonaSandboxSession
 from .workspace_manager import _UNSET, WorkspaceManager
 

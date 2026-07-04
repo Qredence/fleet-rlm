@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.integrations.daytona.bridge_callbacks import invoke_tool
+from fleet_rlm.integrations.daytona.bridge import invoke_tool
 from fleet_rlm.integrations.daytona.errors import redact_error_message, sandbox_safe_error
 
 

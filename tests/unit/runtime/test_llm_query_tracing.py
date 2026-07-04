@@ -237,7 +237,7 @@ def test_llm_query_batched_prepends_context(monkeypatch) -> None:
 
 def test_invoke_tool_forwards_context_for_llm_query(monkeypatch) -> None:
     """``bridge_callbacks.invoke_tool`` forwards ``context`` for ``llm_query``."""
-    from fleet_rlm.integrations.daytona.bridge_callbacks import invoke_tool
+    from fleet_rlm.integrations.daytona.bridge import invoke_tool
 
     seen: list[tuple[str, str]] = []
 

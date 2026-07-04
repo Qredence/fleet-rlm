@@ -15,13 +15,13 @@ from typing import Any
 
 import dspy
 
-from fleet_rlm.integrations.daytona.async_compat import _run_async_compat
 from fleet_rlm.runtime.agent import runtime_helpers as rh
 from fleet_rlm.runtime.agent import runtime_mcp, runtime_streaming
 from fleet_rlm.runtime.agent.runtime_history import maybe_refresh_summary
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventContext
 from fleet_rlm.runtime.tools import discover_tools
 from fleet_rlm.runtime.tools.binding import bind_runtime_tools, execute_sandbox_tool
+from fleet_rlm.utils.async_compat import _run_async_compat
 
 logger = logging.getLogger(__name__)
 

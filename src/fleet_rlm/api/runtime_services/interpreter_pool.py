@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fleet_rlm.integrations.daytona.sdk_ops import get_sandbox_id_from_interpreter
+from fleet_rlm.integrations.daytona.runtime import get_sandbox_id_from_interpreter
 from fleet_rlm.integrations.observability.mlflow_context import (
     mlflow_child_span,
     set_mlflow_span_outputs,

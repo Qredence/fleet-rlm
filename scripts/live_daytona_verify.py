@@ -34,7 +34,7 @@ from fleet_rlm.api.runtime_services.session_paths import (
 from fleet_rlm.integrations.daytona.config import resolve_daytona_config
 from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
 from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxRuntime
-from fleet_rlm.integrations.daytona.sdk_ops import ensure_daytona_volume_layout
+from fleet_rlm.integrations.daytona.volumes import ensure_daytona_volume_layout
 
 TEST_SESSION_ID = f"live-verify-{uuid.uuid4().hex[:8]}"
 VOLUME_NAME = f"live-verify-vol-{uuid.uuid4().hex[:8]}"

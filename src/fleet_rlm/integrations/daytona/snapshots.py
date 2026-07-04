@@ -10,7 +10,8 @@ import time as _time
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
-from .async_compat import _run_sync_in_thread
+from fleet_rlm.utils.async_compat import _run_sync_in_thread
+
 from .config import ResolvedDaytonaConfig, resolve_daytona_config
 from .config import (
     build_daytona_client as _build_daytona_client,

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from fleet_rlm.integrations.daytona.memory_db import MEMORY_SCHEMA_VERSION, init_memory_db, memory_db_bootstrap_script
+from fleet_rlm.integrations.daytona.volumes import MEMORY_SCHEMA_VERSION, init_memory_db, memory_db_bootstrap_script
 
 
 def test_creates_core_db(tmp_path: Path) -> None:
@@ -98,7 +98,7 @@ def test_migrates_existing_db_with_rows_idempotently(tmp_path: Path) -> None:
 
 
 def test_host_init_migrates_staged_temp_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.integrations.daytona import memory_db
+    import fleet_rlm.integrations.daytona.volumes as memory_db
 
     memories = tmp_path / "memories"
     memories.mkdir()

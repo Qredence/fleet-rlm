@@ -9,11 +9,12 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from .async_compat import _run_async_compat, _run_sync_in_thread
+from fleet_rlm.utils.async_compat import _run_async_compat, _run_sync_in_thread
+
 from .concurrency import release_sandbox_slot_for
 from .diagnostics import DaytonaDiagnosticError
 from .models import ContextSource
-from .sdk_ops import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
+from .volumes import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
 
 if TYPE_CHECKING:
     from .protocols import DaytonaSandbox

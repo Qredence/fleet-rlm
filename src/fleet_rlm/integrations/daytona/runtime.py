@@ -7,10 +7,12 @@ import inspect
 import logging
 import re
 import threading
+import time as _ws_time
 from dataclasses import replace
 from typing import Any
 
-from .async_compat import _run_async_compat, _run_sync_in_thread
+from fleet_rlm.utils.async_compat import _run_async_compat, _run_sync_in_thread
+
 from .concurrency import (
     acquire_sandbox_slot,
     attach_slot_release_handler,
@@ -42,46 +44,50 @@ from .models import (
 from .models import (
     merge_sandbox_labels as _merge_sandbox_labels_helper,
 )
-from .sdk_ops import (
-    DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
+from .session_runtime import DaytonaSandboxSession
+from .snapshots import (
     DEFAULT_SNAPSHOT_NAME,
     DEFAULT_SNAPSHOT_PACKAGES,
-    acreate_snapshot,
-    aget_snapshot,
-    alist_snapshots,
-    aresolve_sandbox_spec_snapshot,
-    aresolve_snapshot,
+    bootstrap_snapshot,
 )
-from .sdk_ops import (
-    acreate_sandbox_snapshot as _acreate_sandbox_snapshot_helper,
+from .snapshots import (
+    create_sandbox_snapshot as _acreate_sandbox_snapshot_helper,
 )
-from .sdk_ops import (
-    afork_sandbox as _afork_sandbox,
+from .snapshots import (
+    create_snapshot as acreate_snapshot,
 )
-from .sdk_ops import (
-    aget_sandbox as _aget_sandbox_helper,
-)
-from .sdk_ops import (
-    aresume_workspace_session as _aresume_workspace_session,
-)
-from .sdk_ops import (
-    await_volume_ready as _await_volume_ready,
-)
-from .sdk_ops import (
+from .snapshots import (
     fallback_to_declarative_image as _fallback_to_declarative_image,
 )
-from .sdk_ops import (
+from .snapshots import (
+    get_snapshot as aget_snapshot,
+)
+from .snapshots import (
+    list_snapshots as alist_snapshots,
+)
+from .snapshots import (
     resolve_default_snapshot as _resolve_default_snapshot,
 )
-from .session_runtime import DaytonaSandboxSession
-from .workspace_runtime import (
+from .snapshots import (
+    resolve_sandbox_spec_snapshot as aresolve_sandbox_spec_snapshot,
+)
+from .snapshots import (
+    resolve_snapshot as aresolve_snapshot,
+)
+from .volumes import (
+    DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
+)
+from .volumes import (
+    await_volume_ready as _await_volume_ready,
+)
+from .workspace_manager import (
     WorkspaceSessionCreateRequest,
     WorkspaceSessionReconcileRequest,
 )
-from .workspace_runtime import (
+from .workspace_manager import (
     acreate_workspace_session as _acreate_workspace_session_helper,
 )
-from .workspace_runtime import (
+from .workspace_manager import (
     areconcile_workspace_session as _areconcile_workspace_session_helper,
 )
 
@@ -798,6 +804,149 @@ class DaytonaSandboxRuntime:
 
 
 # ---------------------------------------------------------------------------
+# Sandbox lifecycle helpers (merged from sdk_ops.py)
+# ---------------------------------------------------------------------------
+
+
+def _experimental_call(
+    sandbox: Any,
+    method_name: str,
+    *args: Any,
+    category: str = "sandbox_experimental_error",
+    phase: str = "sandbox_experimental",
+    **kwargs: Any,
+) -> Any:
+    """Safely invoke an experimental Daytona SDK method on *sandbox*."""
+    try:
+        method = getattr(sandbox, method_name)
+        return method(*args, **kwargs)
+    except Exception as exc:
+        raise DaytonaDiagnosticError(
+            f"Daytona {method_name} failure: {exc}",
+            category=category,
+            phase=phase,
+        ) from exc
+
+
+def get_sandbox(
+    *,
+    runtime: Any,
+    sandbox_id: str,
+    recover: bool = True,
+) -> Any:
+    """Get an existing sandbox by ID, recovering from archive if needed."""
+    try:
+        client = runtime._get_client()
+        sandbox = client.get(sandbox_id)
+        if recover:
+            state = getattr(sandbox, "state", None)
+            state_value = getattr(state, "value", str(state or ""))
+            if str(state_value).lower() in ("archived", "stopped"):
+                sandbox.recover(timeout=60)
+        return sandbox
+    except Exception as exc:
+        raise DaytonaDiagnosticError(
+            f"Daytona sandbox resume failure: {_format_daytona_sdk_error(exc)}",
+            category="sandbox_resume_error",
+            phase="sandbox_resume",
+        ) from exc
+
+
+def resume_workspace_session(
+    *,
+    runtime: Any,
+    sandbox_id: str,
+    repo_url: str | None,
+    ref: str | None,
+    volume_name: str | None = None,
+    workspace_path: str,
+    context_sources: list[Any] | None = None,
+    context_id: str | None = None,
+) -> Any:
+    resumed_started = _ws_time.perf_counter()
+    sandbox = get_sandbox(
+        runtime=runtime,
+        sandbox_id=sandbox_id,
+    )
+    session = runtime._build_workspace_session(
+        sandbox=sandbox,
+        repo_url=repo_url,
+        resolved_ref=ref,
+        volume_name=volume_name,
+        workspace_path=workspace_path,
+        context_sources=list(context_sources or []),
+        timings={"sandbox_resume": int((_ws_time.perf_counter() - resumed_started) * 1000)},
+        context_id=context_id,
+    )
+    if volume_name:
+        from .volumes import ensure_daytona_volume_layout
+
+        ensure_daytona_volume_layout(
+            sandbox=sandbox,
+            mounted_root=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
+        )
+    return session
+
+
+def fork_sandbox(
+    *,
+    runtime: Any,
+    session: Any,
+    name: str | None = None,
+    timeout: float = 60.0,
+) -> Any:
+    """Fork a sandbox session, creating a copy-on-write clone."""
+    from .concurrency import (
+        acquire_sandbox_slot,
+        attach_slot_release_handler,
+        release_sandbox_slot,
+    )
+
+    slot_acquired = False
+    try:
+        _run_async_compat(acquire_sandbox_slot, timeout=60.0)
+        slot_acquired = True
+        forked = _experimental_call(
+            session.sandbox,
+            "_experimental_fork",
+            name=name,
+            timeout=timeout,
+            category="sandbox_fork_error",
+            phase="sandbox_fork",
+        )
+        attach_slot_release_handler(forked)
+        return runtime._build_workspace_session(
+            sandbox=forked,
+            repo_url=session.repo_url,
+            resolved_ref=session.ref,
+            volume_name=session.volume_name,
+            workspace_path=session.workspace_path,
+            context_sources=list(session.context_sources),
+            timings={"sandbox_fork": 0},
+        )
+    except Exception:
+        if slot_acquired:
+            release_sandbox_slot()
+        raise
+
+
+def get_sandbox_id_from_interpreter(interpreter: Any) -> str:
+    """Extract the Daytona sandbox ID from a DaytonaInterpreter or session instance."""
+    return (
+        getattr(interpreter, "_persisted_sandbox_id", None)
+        or getattr(getattr(interpreter, "session", None), "sandbox_id", None)
+        or getattr(interpreter, "sandbox_id", "")
+        or ""
+    )
+
+
+# Used internally by DaytonaSandboxRuntime for the aliased helper references
+_aget_sandbox_helper = get_sandbox
+_aresume_workspace_session = resume_workspace_session
+_afork_sandbox = fork_sandbox
+
+
+# ---------------------------------------------------------------------------
 # Public exports
 # ---------------------------------------------------------------------------
 
@@ -812,5 +961,7 @@ __all__ = [
     "aget_snapshot",
     "alist_snapshots",
     "aresolve_snapshot",
+    "bootstrap_snapshot",
+    "get_sandbox_id_from_interpreter",
     "resolve_snapshot_for_skills",
 ]

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.integrations.daytona._local_repo_mount import (
+from fleet_rlm.integrations.daytona._repo import (
     _build_repo_tarball,
     amount_local_repo_tree,
 )

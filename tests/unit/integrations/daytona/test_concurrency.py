@@ -191,7 +191,7 @@ class _FakeRuntime:
 def test_fork_sandbox_acquires_slot_and_attaches_handler() -> None:
     """C2: fork_sandbox must acquire a slot and attach the release handler so
     forked children are visible to FLEET_MAX_CONCURRENT_SANDBOXES."""
-    from fleet_rlm.integrations.daytona.sdk_ops import fork_sandbox
+    from fleet_rlm.integrations.daytona.runtime import fork_sandbox
 
     parent = _FakeForkableSandbox()
     session = _FakeSession(parent)
@@ -212,7 +212,7 @@ def test_fork_sandbox_acquires_slot_and_attaches_handler() -> None:
 
 def test_fork_sandbox_releases_slot_on_failure() -> None:
     """C2: if the fork itself raises, the acquired slot must be returned."""
-    from fleet_rlm.integrations.daytona.sdk_ops import fork_sandbox
+    from fleet_rlm.integrations.daytona.runtime import fork_sandbox
 
     parent = _FakeForkableSandbox()
 
@@ -232,7 +232,7 @@ def test_fork_sandbox_releases_slot_on_failure() -> None:
 
 def test_forked_sandbox_releases_slot_on_delete() -> None:
     """C2: deleting the forked sandbox must release the slot exactly once."""
-    from fleet_rlm.integrations.daytona.sdk_ops import fork_sandbox
+    from fleet_rlm.integrations.daytona.runtime import fork_sandbox
 
     parent = _FakeForkableSandbox()
     session = _FakeSession(parent)

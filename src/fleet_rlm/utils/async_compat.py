@@ -13,13 +13,7 @@ T = TypeVar("T")
 
 
 class _BackgroundAsyncRunner:
-    """Run awaitables on a persistent background event loop.
-
-    Sync compatibility shims may be invoked from threads that already own a
-    running event loop (for example notebook or websocket request threads).
-    ``asyncio.run`` cannot be nested there, so we keep a single daemon thread
-    with its own loop and dispatch coroutines onto it.
-    """
+    """Run awaitables on a persistent background event loop."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -119,22 +113,15 @@ async def _run_sync_in_thread(fn: Callable[..., T], /, *args: Any, **kwargs: Any
 
 
 @overload
-def _run_async_compat(fn: Callable[..., Awaitable[T]], /, *args: Any, **kwargs: Any) -> T:
-    pass
+def _run_async_compat(fn: Callable[..., Awaitable[T]], /, *args: Any, **kwargs: Any) -> T: ...
 
 
 @overload
-def _run_async_compat(fn: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
-    pass
+def _run_async_compat(fn: Callable[..., T], /, *args: Any, **kwargs: Any) -> T: ...
 
 
 def _run_async_compat(fn: Callable[..., T | Awaitable[T]], /, *args: Any, **kwargs: Any) -> T:
-    """Run an async Daytona compatibility wrapper from synchronous callers.
-
-    If no loop is running in this thread, use ``asyncio.run``. If a loop is
-    already running, execute the coroutine on a short-lived background thread
-    so sync compatibility APIs stay usable from notebook/websocket contexts.
-    """
+    """Run an async Daytona compatibility wrapper from synchronous callers."""
     result = fn(*args, **kwargs)
     if not inspect.isawaitable(result):
         return cast(T, result)

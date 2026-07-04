@@ -24,14 +24,14 @@ from typing import Any, Literal, Protocol, cast
 from fleet_rlm.runtime.content.ingestion import read_document_content
 from fleet_rlm.runtime.execution.interpreter_protocol import ExecutionProfile
 from fleet_rlm.runtime.execution.interpreter_support import initialize_sub_rlm_state
+from fleet_rlm.utils.async_compat import _run_async_compat
 from fleet_rlm.utils.paths import is_local_path
 
-from .async_compat import _run_async_compat
 from .errors import DaytonaDiagnosticError, sandbox_safe_error
 from .models import ContextSource, SandboxSpec
 from .runtime import DaytonaSandboxRuntime
-from .sdk_ops import ensure_remote_directory as _ensure_remote_directory
 from .session_runtime import DaytonaSandboxSession, _run_admin_code
+from .volumes import ensure_remote_directory as _ensure_remote_directory
 
 logger = logging.getLogger(__name__)
 

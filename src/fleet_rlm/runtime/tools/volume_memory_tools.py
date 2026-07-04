@@ -17,7 +17,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from fleet_rlm.integrations.daytona.memory_db import configure_memory_connection, init_memory_db
+from fleet_rlm.integrations.daytona.volumes import configure_memory_connection, init_memory_db
 from fleet_rlm.runtime.tools._marker import tool_fn
 
 logger = logging.getLogger(__name__)

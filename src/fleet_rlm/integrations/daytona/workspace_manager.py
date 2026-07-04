@@ -2,22 +2,43 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
+import time as _ws_time
 from collections.abc import Callable
+from contextlib import suppress as _suppress
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from fleet_rlm.utils.async_compat import _await_if_needed, _run_async_compat
 from fleet_rlm.utils.paths import dedupe_paths
 
-from .async_compat import _await_if_needed, _run_async_compat
+from ._repo import (
+    _abuild_workspace_path,
+    _aclone_repo,
+    _aensure_workspace_root,
+    _areconcile_repo_checkout,
+    _aresolve_clone_ref,
+    amount_local_repo_tree,
+)
 from .concurrency import (
     reap_paused_sandboxes,
     register_paused_sandbox,
     should_pause_root_session,
 )
 from .models import ReconfigureOutcome, SandboxSpec, WorkspaceConfig, normalized_context_sources
-from .runtime import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH, DaytonaSandboxRuntime
 from .session_runtime import DaytonaSandboxSession
+from .volumes import (
+    DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH,
+)
+from .volumes import (
+    aensure_daytona_volume_layout as _aensure_daytona_volume_layout,
+)
+
+if TYPE_CHECKING:
+    from .runtime import DaytonaSandboxRuntime
 
 _UNSET = object()
 
@@ -500,13 +521,18 @@ class WorkspaceManager:
 
     def _ensure_runtime_available(self: Any) -> None:
         runtime = self.runtime
-        if not self._owns_runtime or not isinstance(runtime, DaytonaSandboxRuntime):
+        if not self._owns_runtime:
+            return
+        # Lazy import to avoid circular dependency
+        from .runtime import DaytonaSandboxRuntime as _DaytonaSandboxRuntime
+
+        if not isinstance(runtime, _DaytonaSandboxRuntime):
             return
         if not self._runtime_closed:
             return
         if self._runtime_config is None:
             raise RuntimeError("Owned Daytona runtime cannot be recreated without config")
-        self.runtime = DaytonaSandboxRuntime(config=self._runtime_config)
+        self.runtime = _DaytonaSandboxRuntime(config=self._runtime_config)
         self._runtime_closed = False
 
     def _reset_execution_state(self) -> None:
@@ -831,4 +857,201 @@ class WorkspaceManager:
     runtime_metadata = current_runtime_metadata
 
 
-__all__ = ["WorkspaceManager"]
+__all__ = [
+    "WorkspaceManager",
+    "WorkspaceSessionCreateRequest",
+    "WorkspaceSessionReconcileRequest",
+    "acreate_workspace_session",
+    "areconcile_workspace_session",
+    "create_workspace_session",
+    "reconcile_workspace_session",
+]
+
+
+# =========================================================================
+# Workspace session orchestration (merged from workspace_runtime.py)
+# =========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Shared validator helper
+# ---------------------------------------------------------------------------
+
+
+def _normalize_optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+# ---------------------------------------------------------------------------
+# Workspace session orchestration
+# ---------------------------------------------------------------------------
+
+
+class _WorkspaceRequestBase(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    repo_url: str | None = None
+    ref: str | None = None
+    context_paths: list[str] = Field(default_factory=list)
+
+    @field_validator("repo_url", "ref", mode="before")
+    @classmethod
+    def _normalize_optional_text_field(cls, value: Any) -> str | None:
+        return _normalize_optional_text(value)
+
+    @field_validator("context_paths", mode="before")
+    @classmethod
+    def _normalize_context_paths(cls, value: Any) -> list[str]:
+        if value is None or value == "":
+            return []
+        if isinstance(value, (str, bytes)):
+            items = [value]
+        else:
+            try:
+                items = list(value)
+            except TypeError:
+                items = [value]
+        normalized: list[str] = []
+        for item in items:
+            text = _normalize_optional_text(item)
+            if text is not None:
+                normalized.append(text)
+        return normalized
+
+
+class WorkspaceSessionCreateRequest(_WorkspaceRequestBase):
+    """Validated request payload for Daytona workspace creation."""
+
+    volume_name: str | None = None
+    spec: SandboxSpec | None = None
+
+    @field_validator("volume_name", mode="before")
+    @classmethod
+    def _normalize_volume_name(cls, value: Any) -> str | None:
+        return _normalize_optional_text(value)
+
+
+class WorkspaceSessionReconcileRequest(_WorkspaceRequestBase):
+    """Validated request payload for Daytona workspace reconciliation."""
+
+
+async def acreate_workspace_session(
+    *,
+    runtime: Any,
+    request: WorkspaceSessionCreateRequest,
+) -> DaytonaSandboxSession:
+    """Create a fully prepared workspace session inside a Daytona sandbox."""
+    from .isolation import _astage_context_paths
+
+    timings = {"sandbox_create": 0, "repo_clone": 0, "context_stage": 0}
+    sandbox: Any | None = None
+    resolved_spec = request.spec or runtime.build_sandbox_spec(volume_name=request.volume_name)
+    try:
+        create_started = _ws_time.perf_counter()
+        sandbox = await runtime.acreate_sandbox(spec=resolved_spec)
+        timings["sandbox_create"] = int((_ws_time.perf_counter() - create_started) * 1000)
+
+        effective_volume = resolved_spec.volume_name or request.volume_name
+        if effective_volume:
+            await _aensure_daytona_volume_layout(
+                sandbox=sandbox,
+                mounted_root=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
+            )
+
+        workspace_path = _abuild_workspace_path(sandbox, request.repo_url)
+        resolved_ref = _aresolve_clone_ref(request.repo_url, request.ref) if request.repo_url else request.ref
+        if request.repo_url:
+            clone_started = _ws_time.perf_counter()
+            _aclone_repo(
+                sandbox=sandbox,
+                repo_url=request.repo_url,
+                ref=resolved_ref,
+                workspace_path=workspace_path,
+            )
+            timings["repo_clone"] = int((_ws_time.perf_counter() - clone_started) * 1000)
+        else:
+            _aensure_workspace_root(
+                sandbox=sandbox,
+                workspace_path=workspace_path,
+            )
+            # Local-dev mode (no repo_url): mount the host repo source tree so
+            # the agent's filesystem ops (os.listdir("src/fleet_rlm/"), etc.)
+            # succeed instead of dead-ending on the lossy snapshot. No-op in
+            # cloud (cwd isn't a project root) and never breaks session creation.
+            mount_started = _ws_time.perf_counter()
+            await asyncio.to_thread(amount_local_repo_tree, sandbox=sandbox, workspace_path=workspace_path)
+            timings["local_repo_mount"] = int((_ws_time.perf_counter() - mount_started) * 1000)
+
+        context_started = _ws_time.perf_counter()
+        context_sources = _astage_context_paths(
+            sandbox=sandbox,
+            workspace_path=workspace_path,
+            context_paths=request.context_paths or None,
+        )
+        timings["context_stage"] = int((_ws_time.perf_counter() - context_started) * 1000)
+
+        return runtime._build_workspace_session(
+            sandbox=sandbox,
+            repo_url=request.repo_url,
+            resolved_ref=resolved_ref,
+            volume_name=effective_volume,
+            workspace_path=workspace_path,
+            context_sources=context_sources,
+            timings=timings,
+        )
+    except Exception:
+        if sandbox is not None:
+            with _suppress(Exception):
+                sandbox.delete()
+        raise
+
+
+# Backward-compat alias (sync wrapper for async function)
+def create_workspace_session(
+    *,
+    runtime: Any,
+    request: WorkspaceSessionCreateRequest,
+) -> DaytonaSandboxSession:
+    return _run_async_compat(acreate_workspace_session, runtime=runtime, request=request)
+
+
+def areconcile_workspace_session(
+    *,
+    session: DaytonaSandboxSession,
+    request: WorkspaceSessionReconcileRequest,
+) -> DaytonaSandboxSession:
+    """Reconcile an existing workspace session to new repo/context inputs."""
+    from .isolation import _astage_context_paths
+
+    workspace_started = _ws_time.perf_counter()
+    workspace_path = _abuild_workspace_path(session.sandbox, request.repo_url)
+    resolved_ref = _aresolve_clone_ref(request.repo_url, request.ref) if request.repo_url else request.ref
+    _areconcile_repo_checkout(
+        sandbox=session.sandbox,
+        repo_url=request.repo_url,
+        ref=resolved_ref,
+        workspace_path=workspace_path,
+    )
+    session.phase_timings_ms["workspace_reconcile"] = int((_ws_time.perf_counter() - workspace_started) * 1000)
+
+    context_started = _ws_time.perf_counter()
+    context_sources = _astage_context_paths(
+        sandbox=session.sandbox,
+        workspace_path=workspace_path,
+        context_paths=request.context_paths or None,
+        reset_existing=True,
+    )
+    session.phase_timings_ms["context_stage"] = int((_ws_time.perf_counter() - context_started) * 1000)
+    session.repo_url = request.repo_url
+    session.ref = resolved_ref
+    session.workspace_path = workspace_path
+    session.context_sources = context_sources
+    session.bind_current_async_owner()
+    return session
+
+
+# Backward-compat alias
+reconcile_workspace_session = areconcile_workspace_session
