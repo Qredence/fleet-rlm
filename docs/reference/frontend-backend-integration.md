@@ -91,26 +91,24 @@ Important rules:
 - Query-string `session_id` is intentionally not part of this route.
 - `resolve_hitl` is the command currently used by the workspace HITL flow.
 
-Common event kinds on this stream:
+Common frontend-facing event/source categories on this stream:
 
-- `assistant_token`
-- `reasoning_step`
-- `trajectory_step`
-- `status`
-- `warning`
-- `tool_call`
-- `tool_result`
-- `mlflow_span`
-- `plan_update`
-- `rlm_executing`
-- `memory_update`
-- `hitl_request`
-- `hitl_resolved`
-- `command_ack`
-- `command_reject`
-- `final`
-- `cancelled`
-- `error`
+- assistant text tokens
+- reasoning and status updates
+- tool call and tool result updates
+- sandbox execution and sandbox activity updates
+- recursive RLM delegation updates
+- MLflow span updates
+- turn input summaries
+- clarification and HITL command updates
+- final, cancelled, and error terminal frames
+
+The backend source of truth is `RuntimeEvent` in `runtime/events.py`, projected
+by `api/events/project_chat.py` into websocket frames. Older labels such as
+`reasoning_step` or `trajectory_step` may appear only as compatibility labels
+inside projected payloads or historical docs; new frontend behavior should
+route by the normalized envelope, `payload.source_type`, and structured
+payload fields.
 
 ### `/api/v1/ws/execution/events`
 
@@ -178,6 +176,28 @@ as stable when present:
 - `trajectory_index`
 - `rlm_limits`
 
+Event and log streaming is part of the product UX contract. Backend events
+that describe sandbox lifecycle, process logs, bridge callbacks, volume/file
+operations, memory access, runtime diagnostics, or artifacts should carry
+correlation identifiers when available:
+
+- `run_id`
+- `session_id`
+- `sandbox_id`
+- `child_sandbox_id`
+- `process_session_id`
+- `command_id`
+- `tool_call_id`
+- `artifact_id`
+- `memory_key`
+- `actor_id`
+- `parent_id`
+
+Secrets, provider credentials, preview tokens, API keys, and raw environment
+values must be redacted before websocket emission. Frontend code should render
+redacted values as redacted, not attempt to reconstruct or expose hidden
+details from auxiliary payload fields.
+
 ### Transcript Stream
 
 `/api/v1/ws/execution` feeds the live transcript.
@@ -211,6 +231,12 @@ The adapter stack is:
 2. `backend-chat-event-adapter.ts` turns chat frames into transcript rows.
 3. `backend-artifact-event-adapter.ts` turns execution steps into artifact rows.
 4. `chat-display-items.ts` groups rows into assistant turns.
+
+Future additive event/source types should preserve the existing websocket frame
+shape. The preferred direction is to add structured payloads for sandbox
+lifecycle, process logs, volume/file events, memory events, bridge callbacks,
+runtime diagnostics, and durable artifact references rather than creating a
+new transport.
 
 ### Workbench Hydration
 
@@ -252,6 +278,12 @@ rows and artifact summaries already available in workspace state.
 `GET /api/v1/runtime/volume/file` for Daytona-backed browsing, inline preview,
 and the resizable tree/preview split. `/app/volumes` remains the full-page
 durable volume browser.
+
+Durable artifacts should be rendered from volume-backed references, not from
+transient sandbox workspace paths. Markdown/report artifacts should eventually
+show compact inline previews in chat and a full rendered/raw preview in the
+workspace sidepanel, backed by the same durable volume file APIs used by the
+Volume tab.
 
 ## Session Contract
 

@@ -122,8 +122,20 @@ Key files:
 - `quality/module_registry.py` and `quality/optimization_runner.py` own offline optimization
 - `quality/eval/` (M-C) contains `trace_record.py`, `judges.py`, `metrics.py`, `prompts/`, `evaluate.py`, `report.py`
 - `integrations/daytona/interpreter.py` is the public Daytona interpreter facade
-- `integrations/daytona/workspace_manager.py`, `sandbox_executor.py`, and `isolation.py` own workspace/session state, sandbox execution, and recursive child/evidence/context policy behind that facade
-- `integrations/daytona/runtime.py`, `workspace_manager.py`, `_repo.py`, `session_runtime.py`, and `volumes.py` own workspace bootstrap, repo/session reconciliation, Daytona SDK lifecycle helpers, and durable volume operations
+- `integrations/daytona/runtime.py` owns Daytona SDK client construction, sandbox creation/resume/fork, snapshot/image selection, volume mounting, and sandbox concurrency slot accounting
+- `integrations/daytona/workspace_manager.py` owns workspace config, session lifecycle, persisted Daytona state, runtime metadata, workspace reconciliation, and session import/export
+- `integrations/daytona/session_runtime.py` owns the live sandbox session object, code-interpreter context lifecycle, file helpers, lifecycle operations, and metadata refresh
+- `integrations/daytona/sandbox_executor.py` owns code sanitization, injected sandbox helpers, direct and bridged execution, stdout/stderr capture, callback handoff, and result finalization
+- `integrations/daytona/bridge.py` owns the host-callback broker for LLM callbacks, recursive child calls, custom tools, evidence helpers, and `SUBMIT(...)`
+- `integrations/daytona/isolation.py` owns recursive child policy/delegation, child sandbox isolation, host-mediated evidence persistence, and local context staging
+- `integrations/daytona/volumes.py` owns volume readiness, mounted-root layout, volume browsing, memory DB bootstrap, seeded skills, and low-level volume file operations
+- `integrations/daytona/_repo.py` owns git ref resolution, repo checkout/reconcile, and local context staging helpers
+- `integrations/daytona/config.py` owns Daytona config resolution, lazy SDK imports, env loading, and SDK error classification
+- `integrations/daytona/models.py` owns sandbox specs, workspace config, staged-context records, smoke results, chat/session normalization contracts, and durable state DTOs
+- `integrations/daytona/snapshots.py` owns reusable Daytona snapshot/image bootstrap support
+- `integrations/daytona/concurrency.py` owns sandbox slot limits, usage stats, and slot release accounting
+- `integrations/daytona/diagnostics.py` owns structured Daytona diagnostics and smoke validation
+- `integrations/daytona/log_stream.py` owns raw sandbox log classification; it is not a complete Daytona process-log streaming adapter yet
 
 See also: [dspy-daytona-interpreter-boundary.md](./dspy-daytona-interpreter-boundary.md)
 

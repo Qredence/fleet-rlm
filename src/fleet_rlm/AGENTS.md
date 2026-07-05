@@ -211,7 +211,21 @@ Websocket/runtime contract rules:
   transcript and artifact summaries when trace storage is unavailable.
 - Keep interpreter-originated REPL execution steps wired through `execution_event_callback` and preserve any previously installed callback when bridging hooks
 - Do not reintroduce Daytona-only workbench hydration through chat-final payload scraping
-- Daytona-backed chat should emit live canonical `trajectory_step`, `reasoning_step`, `status`, `warning`, `tool_call`, and `tool_result` events during execution
+- Daytona-backed chat should emit live canonical `RuntimeEvent` values from
+  `runtime/events.py`, projected through `api/events/project_chat.py`, for
+  reasoning, status, warning, tool call/result, sandbox execution, delegation,
+  MLflow spans, turn inputs, completion, and errors.
+- Treat sandbox logs, bridge callbacks, volume/file operations, memory access,
+  runtime diagnostics, and artifact creation as product UX infrastructure.
+  When those details are emitted to the frontend, keep payloads correlated by
+  run/session/sandbox/child sandbox/process/command/tool/artifact/memory ids
+  where available.
+- Redact secrets, tokens, provider credentials, and raw environment values
+  before websocket emission, MLflow metadata, durable logs, or artifact
+  metadata.
+- Markdown and report artifacts should eventually be emitted as durable
+  artifact references so chat can show inline previews and the workspace
+  sidepanel can render the durable file after sandbox deletion.
 - When Daytona falls back after a controlled failure, preserve the answer but mark the turn as degraded in final payloads and MLflow metadata
 - Prefer websocket-first streaming; do not replace workspace/chat streams with SSE without a clear product need
 
@@ -219,11 +233,27 @@ Daytona-specific boundaries:
 
 - Keep Daytona-specific behavior under `integrations/daytona/*`
 - Prefer Daytona SDK services directly for sandbox lifecycle, git, filesystem, preview/LSP, and code-interpreter operations; Fleet wrappers should exist only for product policy, diagnostics, session state, ownership labels, volume layout, context staging, manifests, and the RLM host-callback bridge.
+- Direct Daytona SDK usage belongs inside the Daytona adapter. Higher-level
+  runtime, API, and frontend code should use Fleet-RLM abstractions such as
+  `DaytonaInterpreter`, `DaytonaSandboxRuntime`, `DaytonaSandboxSession`,
+  runtime events, runtime services, and generated API clients. Lazy Daytona
+  imports/config wrappers are intentional unless a concrete simplification
+  proves they no longer protect import time, optional setup, diagnostics, or
+  tests.
 - Keep recursive child sandbox policy, concrete child delegation hooks, host-mediated evidence persistence, and context staging in `integrations/daytona/isolation.py` until one of those responsibilities becomes large enough to justify a real split.
 - Keep Daytona RLM bridge callback dispatch in `integrations/daytona/bridge.py`; bridge-owned callback names must continue to route through Fleet interpreter methods before custom tools.
 - Keep Daytona client construction, config resolution, and SDK error classification in `integrations/daytona/config.py`
 - Keep sandbox spec building, payload/session normalization, workspace config models, and diagnostic result models in `integrations/daytona/models.py`.
-- Keep volume readiness, mount context managers, inventory, browsing, snapshot management, and low-level volume operations in `integrations/daytona/volumes.py`; accept SDK enum-style states such as `VolumeState.READY` in addition to raw tokens like `ready`.
+- Keep volume readiness, mount context managers, inventory, browsing, memory DB
+  bootstrap, seeded skills, and low-level volume operations in
+  `integrations/daytona/volumes.py`; accept SDK enum-style states such as
+  `VolumeState.READY` in addition to raw tokens like `ready`.
+- Keep reusable Daytona snapshot/image bootstrap support in
+  `integrations/daytona/snapshots.py`.
+- Keep sandbox slot limits, usage stats, and release accounting in
+  `integrations/daytona/concurrency.py`.
+- Keep raw sandbox log classification in `integrations/daytona/log_stream.py`;
+  it is a classifier, not a full product event/log streaming adapter yet.
 - Keep workspace path helpers and workspace session orchestration in `integrations/daytona/workspace_manager.py`; keep git ref resolution, repo checkout, and local-context staging in `integrations/daytona/_repo.py`. Use SDK `git.clone`, `git.status`, `git.pull`, `git.branches`, and `git.checkout_branch` where they preserve behavior, and allow named `sandbox.process.exec` fallbacks only for remote URL mismatch, non-git workspace replacement, exact forced remote reset, and detached commit checkout semantics not exposed by the SDK.
 - Keep `DaytonaSandboxSession` dataclass and admin code-execution helpers in `integrations/daytona/session_runtime.py`; public `a*` methods must stay awaitable while sync compatibility methods remain available for notebooks and tests.
 - Keep resume/fork diagnostics in `integrations/daytona/runtime.py` and `integrations/daytona/session_runtime.py`; do not add new thin lifecycle wrappers for SDK methods that can be called directly from `DaytonaSandboxSession` or `DaytonaSandboxRuntime`.
@@ -234,7 +264,10 @@ Daytona-specific boundaries:
 - Treat `DaytonaSandboxRuntime` and `DaytonaSandboxSession` as the canonical internal async contract
 - Keep Daytona SDK lifecycle helpers and runtime factory in `integrations/daytona/runtime.py`
 - When Daytona volume readiness times out or fails, include both the raw SDK state and the normalized canonical state in diagnostics where they differ
-- Keep the durable mounted-volume roots aligned to `/home/daytona/memory/{memory,artifacts,buffers,meta}`
+- Keep the durable mounted-volume roots aligned to the current
+  `/home/daytona/memory` layout: `memory/`, `memories/`, `knowledge/`,
+  `skills/`, `sessions/`, `logs/`, `artifacts/`, `buffers/`, `uploads/`, and
+  `meta/`.
 - Keep recursive RLM child creation centralized through `integrations/daytona/isolation.py::build_delegate_child`, re-exported by `integrations/daytona/interpreter.py`; both host `delegate_to_rlm()` and sandbox `sub_rlm()` / `sub_rlm_batched()` must use it.
 - Default recursive isolation is `RLM_CHILD_ISOLATION_MODE=auto`: fork no-volume parents, use clean child sandboxes with `meta/rlm-children/...` volume subpaths for volume-mounted parents, and delete child sandboxes after every recursive task. `context` mode is a local/debug opt-out only.
 - Dispatch bridged `llm_query*` and `sub_rlm*` callbacks through Daytona interpreter methods so recursion depth and `rlm_max_llm_calls` remain shared across recursive children.
@@ -242,6 +275,10 @@ Daytona-specific boundaries:
 - Restore session manifests as replacement state: default core memory plus persisted memory, loaded document paths, conversation history, and Daytona interpreter state. Do not merge stale session-local memory into a new identity.
 - Do not auto-promote child sandbox files or artifacts into the parent; recursive child results return through the RLM answer.
 - Treat the live Daytona workspace as transient repo/execution state with no implicit workspace-to-volume sync
+- Transcript persistence is not durable memory. Reusable memory must be written
+  through explicit memory/volume paths, durable artifacts must be promoted to
+  volume storage before sandbox deletion, and transient interpreter/workspace
+  state must not be described as durable.
 - Keep `rlm_query` as the shared agent-level recursive entrypoint; `rlm_query_batched` remains Daytona-only
 - Daytona idle lifecycle is timer-driven:
   - `auto_stop_interval=30`
@@ -267,6 +304,20 @@ Common mistakes to avoid:
 - Reintroducing parallel Daytona chat/runtime orchestrators outside the shared recursive runtime
 - Hand-editing packaged UI build output or generated OpenAPI artifacts
 - Treating Volumes or `/ready` semantics differently from the implemented contract
+
+Required references before future edits:
+
+- Use the local Daytona skill before changing Daytona sandbox, volume,
+  filesystem, lifecycle, or SDK integration code.
+- Use the codebase-design skill before changing module ownership, seams, or
+  adapter shape.
+- Use the code-review skill when reviewing or landing broad branch changes.
+- Use the FastAPI skill/docs before touching route, dependency, response model,
+  websocket, or lifespan behavior.
+- Use DSPy docs before changing RLM/ReAct/module construction or runtime
+  contracts.
+- Use the shadcn skill before changing frontend shadcn/ui component
+  composition or styling primitives.
 
 ## Phase 7: RLM Recursion and History Management
 

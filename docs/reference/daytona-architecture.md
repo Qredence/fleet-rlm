@@ -1,6 +1,6 @@
 # Daytona Runtime Architecture
 
-This note records the current Daytona integration boundary for `fleet-rlm-dspy`.
+This note records the current Daytona integration boundary for `fleet-rlm`.
 Daytona is now the sandbox/interpreter backend for the shared ReAct + `dspy.RLM`
 runtime, not a separate chat/runtime orchestration system.
 
@@ -22,6 +22,7 @@ The current implementation treats these Daytona docs as the normative baseline:
 ## What Is Directly Based On Daytona Docs
 
 - Daytona clients are created through the official Python SDK entrypoints:
+  - `from daytona import Daytona`
   - `from daytona import AsyncDaytona`
   - `from daytona import DaytonaConfig`
 - Sandbox bootstrap and resume use the native Daytona SDK surface directly:
@@ -58,22 +59,31 @@ The current implementation treats these Daytona docs as the normative baseline:
   Daytona workspace/session metadata needed by the workbench runtime.
 - The Daytona provider now exposes its canonical implementation modules directly
   at the provider root:
-  - `interpreter.py` is the public `DaytonaInterpreter` facade used by `dspy.RLM`, runtime services, and callers
-  - `workspace_manager.py` owns workspace config, session lifecycle, persisted Daytona state, runtime metadata, and session import/export
-  - `sandbox_executor.py` owns code execution, code sanitization, bridge/setup state, tool callback dispatch, and result finalization
-  - `isolation.py` owns recursive child policy/delegation, host-mediated evidence persistence, and local context staging
-  - `models.py` owns sandbox specs, workspace config, staged-context records, smoke results, and chat/session normalization contracts
-  - `runtime.py` owns the runtime facade around workspace bootstrap and session creation
-  - `session_runtime.py` owns the session object, sync/async code-interpreter helpers, lifecycle operations, and metadata refresh
-  - `workspace_manager.py` owns workspace paths, persisted Daytona state, session reconciliation, and import/export
-  - `_repo.py` owns git ref resolution, repo checkout, and local context staging helpers
-  - `volumes.py` owns volume readiness, mounted-root layout, browsing, memory DB bootstrap, and lower-level volume operations
-  - `bridge.py` owns the minimal host-callback broker used for `llm_query`, `llm_query_batched`, custom tools, and `SUBMIT(...)`
-  - `diagnostics.py` owns structured Daytona diagnostics and smoke validation
-- Daytona collaborator boundaries are intentionally typed with small internal
-  Protocols rather than mixin-style dynamic forwarding. Pydantic v2 is used for
-  normalized configuration/state inputs such as `WorkspaceConfig`; hot
-  execution-path carriers such as `DaytonaExecutionResponse` remain lightweight
+  - `interpreter.py` is the public `DaytonaInterpreter` facade used by `dspy.RLM`, runtime services, notebooks, tests, and callers.
+  - `runtime.py` owns Daytona SDK client construction, sandbox creation/resume/fork, snapshot/image selection, volume mounting, and sandbox concurrency slot accounting.
+  - `workspace_manager.py` owns workspace config, session lifecycle, persisted Daytona state, runtime metadata, workspace reconciliation, and session import/export.
+  - `session_runtime.py` owns the live sandbox session object, code-interpreter context lifecycle, file helpers, delete/archive/recover operations, and metadata refresh.
+  - `sandbox_executor.py` owns code sanitization, injected sandbox helpers, direct and bridged execution, callback handoff, stdout/stderr capture, and result finalization.
+  - `bridge.py` owns the host-callback broker used for `llm_query`, `llm_query_batched`, `sub_rlm`, `sub_rlm_batched`, custom tools, evidence helpers, and `SUBMIT(...)`.
+  - `isolation.py` owns recursive child policy/delegation, child sandbox isolation, host-mediated evidence persistence, and local context staging.
+  - `volumes.py` owns volume readiness, mounted-root layout, volume browsing, memory DB bootstrap, seeded skills, and lower-level volume file operations.
+  - `_repo.py` owns git ref resolution, repo checkout/reconcile, and local context staging helpers.
+  - `config.py` owns Daytona config resolution, lazy SDK imports, env loading, and SDK error classification.
+  - `models.py` owns sandbox specs, workspace config, staged-context records, smoke results, chat/session normalization contracts, and durable state DTOs.
+  - `snapshots.py` owns reusable Daytona snapshot/image bootstrap support.
+  - `concurrency.py` owns sandbox slot limits, usage stats, and slot release accounting.
+  - `diagnostics.py` owns structured Daytona diagnostics and smoke validation.
+  - `log_stream.py` owns raw sandbox log classification; it is not yet a complete Daytona process-log streaming adapter.
+- Daytona adapter modules may import the Daytona SDK directly. Higher-level
+  runtime, API, and frontend code should use Fleet-RLM interfaces such as
+  `DaytonaInterpreter`, `DaytonaSandboxRuntime`, `DaytonaSandboxSession`, and
+  runtime event DTOs so config, diagnostics, lifecycle policy, redaction, and
+  durable-state rules stay centralized.
+- Lazy Daytona imports and config wrappers are intentional unless a concrete
+  simplification proves they no longer protect import time, optional setup,
+  diagnostics, or testability. Pydantic v2 is used for normalized
+  configuration/state inputs such as `WorkspaceConfig`; hot execution-path
+  carriers such as `DaytonaExecutionResponse` remain lightweight
   dataclasses/functions.
 - Recursive `rlm_query*` helpers are intentionally not sandbox callbacks in Daytona. Sandbox-authored code should use `llm_query` / `llm_query_batched`, while agent-level recursion remains outside the bridge.
 - The Fleet-facing provider contract is async-first:
@@ -104,13 +114,31 @@ for a chat session:
 - one persistent Daytona code-interpreter context reused across warm turns
 - repo/ref/context changes reconcile in place inside that sandbox
 - the mounted Daytona volume remains the canonical durable target for
-  `memory/`, `artifacts/`, `buffers/`, and `meta/`
+  `memory/`, `memories/`, `knowledge/`, `skills/`, `sessions/`, `logs/`,
+  `artifacts/`, `buffers/`, `uploads/`, and `meta/`
 
 The runtime deliberately separates:
 
-- sandbox identity: the long-lived Daytona sandbox and mounted volume
+- sandbox identity: the isolated Daytona compute environment
+- root session: the long-lived Fleet-RLM runtime binding to a root sandbox,
+  code-interpreter context, workspace path, optional mounted volume, and
+  session metadata
+- child/delegated session: a bounded recursive run that uses a separate child
+  sandbox by default and returns synthesized results to the parent
 - workspace configuration: repo checkout, ref selection, staged
-  `.fleet-rlm/context` inputs, and helper setup inside that sandbox
+  `.fleet-rlm/context` inputs, and helper setup inside a sandbox
+- code-interpreter context: persistent Python state inside a live sandbox; it
+  is useful operational state, not durable storage
+- volume: mounted Daytona storage that survives sandbox deletion when writes
+  are explicitly promoted into the durable roots
+- memory: reusable facts, preferences, and learned state stored on the durable
+  volume, not merely transcript text
+- artifact: a durable generated output such as Markdown, reports, JSON, or
+  files that should remain inspectable after sandbox deletion
+- skill: a reusable runtime instruction or callable capability loaded from
+  scaffolded or volume-backed skill roots
+- log/event: live and persisted observability records used by chat, sidepanel,
+  diagnostics, and future trace-based learning
 
 Repo, ref, or staged-context changes are no longer treated as automatic reasons
 to delete the root sandbox. Instead, the runtime:
@@ -134,6 +162,18 @@ This is the intended foundation for deeper `dspy.RLM` analysis flows: warm
 turns continue in the same sandbox, durable outputs accumulate on the mounted
 volume, and resumed sessions become a first-class continuity path instead of a
 best-effort fallback.
+
+Root and child lifecycle rules are different by design:
+
+- root sandboxes can pause, resume, archive, or delete depending on configured
+  policy, explicit user action, provider state, and session compatibility
+- child sandboxes remain delete-after-task by default to bound cost and prevent
+  accidental state leakage across recursive work
+- important child outputs must be returned through the RLM result or promoted
+  to durable volume storage before the child sandbox is deleted
+- transient workspace files, interpreter globals, process buffers, and running
+  processes must not be treated as durable state unless a tool explicitly saves
+  them to the mounted volume or another durable store
 
 ## Project-Specific Extensions
 
@@ -165,7 +205,7 @@ RLM contract the shared runtime still needs:
 
 In practice the provider is intentionally hybrid:
 
-- direct async Daytona SDK for client, sandbox, volume, filesystem, preview, process-session, and code-interpreter operations
+- direct Daytona SDK usage for client, sandbox, volume, filesystem, preview, process-session, and code-interpreter operations inside the Daytona adapter
 - a minimal guide-style broker bridge for host callbacks only
 
 ## Workspace Volume Contract
@@ -198,10 +238,33 @@ persistence layers:
   - this state persists across multiple `run_code(...)` calls while that context remains alive
 - Durable mounted-volume storage:
   - the mounted volume root is `/home/daytona/memory`
-  - canonical durable directories under it are `memory/`, `artifacts/`, `buffers/`, and `meta/`
-  - session manifests and workspace provenance belong under `meta/workspaces/...`
+  - canonical durable directories under it are `memory/`, `memories/`,
+    `knowledge/`, `skills/`, `sessions/`, `logs/`, `artifacts/`, `buffers/`,
+    `uploads/`, and `meta/`
+  - session manifests belong under `sessions/<session_id>/conversation.json`
   - workspace repos, staged context, package installs, caches, and scratch files are not durable by default
   - files survive context reset, sandbox restart, or session resume only when they are explicitly promoted into those durable directories
+
+Transcript persistence is necessary but not enough for long-running and
+self-improving RLM workflows. Saved turns can restore conversation continuity,
+but reusable agent behavior should come from explicit durable memory, selected
+skills, persisted knowledge, trace/evaluation records, durable logs, and
+artifact lineage. The volume-backed `remember` / `recall` tools provide a
+manual operational memory path today; future automatic recall or memory
+consolidation must keep scopes, provenance, and child-write policy explicit.
+
+Markdown and report artifacts should be treated as durable product outputs.
+The current volume browser can preview Markdown files; future chat and
+sidepanel work should emit artifact events that reference durable volume paths
+so generated reports can be shown inline in chat and rendered in the sidepanel
+after the originating sandbox is gone.
+
+Event and log streaming is product UX infrastructure, not just debug output.
+Events emitted to the frontend should carry correlation identifiers when
+available, including run, session, sandbox, child sandbox, process, command,
+tool, artifact, memory, actor, and parent event ids. Secrets, tokens,
+environment values, and provider credentials must be redacted before frontend
+emission or durable log persistence.
 
 ## Workspace vs. Volume vs. Context
 
@@ -223,5 +286,19 @@ interface:
 
 ## Intentional Clean-Break Imports
 
-- Deleted module paths such as `state.py`, `smoke.py`, and `snapshots.py` are intentionally unsupported.
-- The canonical import path for the smoke result type is `fleet_rlm.integrations.daytona.types.DaytonaSmokeResult`.
+- Deleted legacy module paths such as `workspace_runtime.py`, `sdk_ops.py`,
+  `bridge_callbacks.py`, `state.py`, `smoke.py`, and
+  `integrations/daytona/async_compat.py` are intentionally unsupported.
+- Snapshot support now lives in `integrations/daytona/snapshots.py`; do not
+  treat that module as a deleted legacy path.
+- The canonical import path for the smoke result type is
+  `fleet_rlm.integrations.daytona.models.DaytonaSmokeResult`.
+
+## Required References For Future Edits
+
+Before changing Daytona integration code, use the local Daytona skill and this
+document. Before changing module seams or ownership, use the codebase-design
+skill. Before reviewing or landing broad changes, use the code-review skill.
+When edits touch FastAPI routes, DSPy/RLM behavior, or shadcn/frontend UI, also
+consult the corresponding FastAPI, DSPy, and shadcn docs or skills before
+modifying code.
