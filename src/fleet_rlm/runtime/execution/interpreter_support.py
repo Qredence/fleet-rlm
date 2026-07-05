@@ -41,6 +41,7 @@ def initialize_llm_query_state(
     target._llm_call_lock = threading.Lock()
     target._sub_lm_executor = None
     target._sub_lm_executor_lock = threading.Lock()
+    target._sub_lm_auth_failed = False
     # Cached bounded stock dspy.LM wrapping the sub-LM (built lazily by _get_bounded_sub_lm).
     target._bounded_sub_lm = None
     target._bounded_sub_lm_base = None

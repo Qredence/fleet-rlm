@@ -80,7 +80,7 @@ Files most likely to cause breakage when modified — review changes carefully:
 | Fast confidence | `make test-fast` | Unit + contracts parallel, integration serial |
 | Quality gate | `make quality-gate` | Lint + format + types + tests + docs + frontend |
 | Runtime/WS focus | `uv run pytest -q tests/unit/api/test_auth.py tests/unit/api/test_chat_persistence.py tests/unit/api/test_events.py tests/unit/api/test_ws_session_restore.py tests/unit/api/test_ws_turn_setup.py tests/unit/runtime/test_escalating_module.py` | WebSocket session lifecycle, auth, event streaming |
-| Daytona focus | `uv run pytest -q tests/unit/integrations/test_daytona_config.py tests/unit/integrations/test_daytona_concurrency.py tests/unit/integrations/test_daytona_runtime.py tests/unit/integrations/test_memory_db.py tests/unit/integrations/test_volume_seed_skills.py tests/unit/runtime/test_volume_memory_tools.py tests/unit/runtime/test_phase3_tools.py` | Sandbox creation, volumes, memory persistence |
+| Daytona focus | `uv run pytest -q tests/unit/integrations/daytona tests/unit/integrations/test_daytona_runtime.py tests/unit/integrations/test_daytona_sandbox_executor.py tests/unit/integrations/test_memory_db.py tests/unit/integrations/test_volume_seed_skills.py tests/unit/runtime/test_volume_memory_tools.py tests/unit/runtime/test_phase3_tools.py` | Sandbox creation, volumes, memory persistence |
 | MLflow/observability | `uv run pytest -q tests/unit/quality/test_module_registry.py tests/unit/quality/test_optimization_runner.py tests/unit/quality/test_workspace_metrics.py tests/unit/api/test_bootstrap_observability.py tests/unit/integrations/test_observability.py` | Tracing, metrics logging, experiment tracking |
 
 ---

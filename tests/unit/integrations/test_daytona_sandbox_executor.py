@@ -59,6 +59,23 @@ def test_daytona_repl_setup_keeps_native_file_helpers_fast_and_flexible(tmp_path
     assert sandbox_globals["context"]["metadata"]["sandbox_staged_paths"] == [".fleet-rlm/context/ctx/snapshot.md"]
 
 
+def test_daytona_repl_setup_exposes_fast_package_listing(tmp_path) -> None:
+    from fleet_rlm.integrations.daytona.sandbox_executor import _base_setup_code
+
+    workspace = tmp_path / "workspace"
+    memory = tmp_path / "memory"
+    workspace.mkdir()
+    memory.mkdir()
+
+    sandbox_globals: dict[str, Any] = {}
+    exec(_base_setup_code(workspace_path=str(workspace), volume_mount_path=str(memory)), sandbox_globals)
+
+    packages = sandbox_globals["list_packages"]()
+    assert isinstance(packages, list)
+    assert packages
+    assert {"name", "version"} <= packages[0].keys()
+
+
 def test_broker_start_failure_latches_and_blocks_immediate_retry() -> None:
     from fleet_rlm.integrations.daytona.sandbox_executor import (
         _BROKER_START_FAILURES,

@@ -476,3 +476,25 @@ def test_execute_iteration_strips_fences_and_continues_loop(monkeypatch: pytest.
     assert isinstance(result, REPLHistory), (
         f"non-terminal action should return REPLHistory to continue the loop, got {type(result).__name__}"
     )
+
+
+def test_execute_iteration_syntax_precheck_skips_repl(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Syntax errors should be routed through normal result processing without a REPL call."""
+    _patch_mlflow(monkeypatch)
+    rlm, _events = _make_rlm(max_iterations=3)
+    monkeypatch.setattr(_StreamingRLM, "_get_action_lm_config", lambda self: (None, {}))
+
+    rlm.generate_action._inner = MagicMock(return_value=dspy.Prediction(reasoning="broken", code="print('unterminated"))
+    rlm._process_execution_result = MagicMock(return_value=dspy.Prediction(response="handled"))
+
+    from dspy.primitives.repl_types import REPLHistory
+
+    repl = _FakeRepl(result="should-not-run")
+    history = REPLHistory(max_output_chars=1500)
+    result = rlm._execute_iteration(repl, [_FakeVariable("x", "1")], history, 0, {}, ["response"])
+
+    assert getattr(result, "response", None) == "handled"
+    assert repl.executed == []
+    process_args = rlm._process_execution_result.call_args.args
+    assert process_args[1] == "print('unterminated"
+    assert process_args[2].startswith("[SyntaxError]")

@@ -291,6 +291,42 @@ def test_mlflow_callback_sets_lm_span_token_usage(monkeypatch: pytest.MonkeyPatc
     assert captured_attributes["mlflow.chat.outputTokens"] == 5
 
 
+def test_mlflow_callback_sets_usage_on_captured_lm_span(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.integrations.observability import mlflow_runtime
+
+    captured_attributes: dict[str, object] = {}
+
+    class FakeSpan:
+        def set_attributes(self, attributes: dict[str, object]) -> None:
+            captured_attributes.update(attributes)
+
+    span = FakeSpan()
+    fake_mlflow = SimpleNamespace(get_current_active_span=lambda: span)
+    monkeypatch.setattr(mlflow_runtime, "_import_mlflow", lambda: fake_mlflow)
+
+    callback = mlflow_runtime.FleetMlflowTraceCallback()
+    callback.on_lm_start(
+        "call-1",
+        SimpleNamespace(model="openai/gpt-test", provider="openai", model_type="chat"),
+        {},
+    )
+    callback.on_lm_end(
+        "call-1",
+        {"usage": {"prompt_tokens": 10, "completion_tokens": 7}, "choices": [{"text": "done"}]},
+        None,
+    )
+
+    assert captured_attributes["mlflow.chat.model"] == "openai/gpt-test"
+    assert captured_attributes["mlflow.chat.provider"] == "openai"
+    assert captured_attributes["mlflow.chat.modelType"] == "chat"
+    assert captured_attributes["mlflow.chat.tokenUsage"] == {
+        "input_tokens": 10,
+        "output_tokens": 7,
+        "total_tokens": 17,
+    }
+    assert callback._lm_spans == {}
+
+
 def test_posthog_config_from_env_and_configure_analytics_is_idempotent(
     clean_runtime_env: pytest.MonkeyPatch,
     monkeypatch: pytest.MonkeyPatch,

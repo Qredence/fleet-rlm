@@ -440,8 +440,10 @@ curl https://<assigned-host>/ready
 # => {"ready": true, "planner": "ready", "database": "ready", ...}
 
 curl https://<assigned-host>/docs
-# => Swagger UI HTML
+# => Not Found unless FLEET_RLM_EXPOSE_DOCS=true
 ```
+
+In local development, API docs are enabled by default. In staging and production, `/docs`, `/redoc`, `/scalar`, and `/openapi.json` are disabled unless `FLEET_RLM_EXPOSE_DOCS=true` is set deliberately for a controlled diagnostic window.
 
 Scaling note: FastAPI Cloud scales to zero. The first request after idling will pay startup cost — `/health` responds immediately (the LLM warmup is scheduled as a background task), but `/ready` may briefly return `false` while the planner LM initializes.
 

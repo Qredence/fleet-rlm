@@ -91,7 +91,7 @@ graph LR
 | `api/routers/ws/*` | `api/runtime_services/*` | Runtime orchestration, execution events, and startup/repl bridging |
 | `api/runtime_services/settings.py` | `integrations/config/*` | Runtime settings mutation and env/config synchronization |
 | `api/runtime_services/diagnostics.py` | `integrations/config/*`, `integrations/daytona/*` | Runtime diagnostics, status, and provider connectivity tests |
-| `api/runtime_services/volumes.py` | `integrations/daytona/file_browser.py`, `integrations/daytona/sdk_ops.py` | Volume browsing |
+| `api/runtime_services/volumes.py` | `integrations/daytona/volumes.py` | Volume browsing |
 | `api/events/*` | `runtime/execution/streaming_events.py`, frontend workspace stores | Event shaping for passive execution subscriptions and workbench hydration |
 
 ## Integration Packages
@@ -103,7 +103,7 @@ graph LR
 | `integrations/local_store.py` | Local sidecar persistence | session history, turn transcripts, optimization-run tracking |
 
 | `integrations/observability/` | Telemetry and tracing | `posthog_callback.py`, `mlflow_runtime.py`, `mlflow_traces.py`, `trace_context.py` |
-| `integrations/daytona/` | Daytona execution and workspace substrate | `interpreter.py`, `workspace_manager.py`, `sandbox_executor.py`, `isolation.py`, `models.py`, `runtime.py`, `workspace_runtime.py`, `session_runtime.py`, `sdk_ops.py`, `file_browser.py`, `config.py`, `diagnostics.py`, `errors.py`, `bridge.py` |
+| `integrations/daytona/` | Daytona execution and workspace substrate | `interpreter.py`, `workspace_manager.py`, `sandbox_executor.py`, `isolation.py`, `models.py`, `runtime.py`, `session_runtime.py`, `volumes.py`, `_repo.py`, `config.py`, `diagnostics.py`, `errors.py`, `bridge.py`, `concurrency.py`, `snapshots.py`, `log_stream.py` |
 | `quality/` | DSPy evaluation and optimization | `dspy_evaluation.py`, `optimization_runner.py`, `mlflow_evaluation.py`, `workspace_metrics.py`, `scorers.py` |
 
 ## Verification

@@ -64,8 +64,10 @@ The current implementation treats these Daytona docs as the normative baseline:
   - `isolation.py` owns recursive child policy/delegation, host-mediated evidence persistence, and local context staging
   - `models.py` owns sandbox specs, workspace config, staged-context records, smoke results, and chat/session normalization contracts
   - `runtime.py` owns the runtime facade around workspace bootstrap and session creation
-  - `workspace_runtime.py` owns workspace path, repo checkout, and session reconciliation helpers
-  - `sdk_ops.py` owns volume, snapshot, lifecycle, and lower-level Daytona SDK helpers
+  - `session_runtime.py` owns the session object, sync/async code-interpreter helpers, lifecycle operations, and metadata refresh
+  - `workspace_manager.py` owns workspace paths, persisted Daytona state, session reconciliation, and import/export
+  - `_repo.py` owns git ref resolution, repo checkout, and local context staging helpers
+  - `volumes.py` owns volume readiness, mounted-root layout, browsing, memory DB bootstrap, and lower-level volume operations
   - `bridge.py` owns the minimal host-callback broker used for `llm_query`, `llm_query_batched`, custom tools, and `SUBMIT(...)`
   - `diagnostics.py` owns structured Daytona diagnostics and smoke validation
 - Daytona collaborator boundaries are intentionally typed with small internal

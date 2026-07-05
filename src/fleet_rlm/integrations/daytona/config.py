@@ -41,9 +41,7 @@ def _load_env_sources() -> dict[str, str]:
 
     # Precedence: .env < .env.local < real environment variables.
     # Real env always wins in every environment (12-factor); .env files are
-    # dev conveniences that supply defaults, not overrides. The previous
-    # branch inverted this in local mode (letting .env clobber stale shell
-    # exports), which produced "works on my machine" bugs.
+    # dev conveniences that supply defaults, not overrides.
     merged: dict[str, str] = dict(file_values)
     merged.update({str(key): str(value) for key, value in os.environ.items()})
     return merged

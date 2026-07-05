@@ -123,7 +123,7 @@ Key files:
 - `quality/eval/` (M-C) contains `trace_record.py`, `judges.py`, `metrics.py`, `prompts/`, `evaluate.py`, `report.py`
 - `integrations/daytona/interpreter.py` is the public Daytona interpreter facade
 - `integrations/daytona/workspace_manager.py`, `sandbox_executor.py`, and `isolation.py` own workspace/session state, sandbox execution, and recursive child/evidence/context policy behind that facade
-- `integrations/daytona/runtime.py`, `workspace_runtime.py`, and `sdk_ops.py` own workspace bootstrap, repo/session reconciliation, and Daytona SDK runtime helpers
+- `integrations/daytona/runtime.py`, `workspace_manager.py`, `_repo.py`, `session_runtime.py`, and `volumes.py` own workspace bootstrap, repo/session reconciliation, Daytona SDK lifecycle helpers, and durable volume operations
 
 See also: [dspy-daytona-interpreter-boundary.md](./dspy-daytona-interpreter-boundary.md)
 

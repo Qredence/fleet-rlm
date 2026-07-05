@@ -51,7 +51,7 @@ Active top-level areas under `src/fleet_rlm/`:
   - `runtime/modules/` hosts native `dspy.RLM` factories, module registry definitions, the `RecursiveWorkspaceModule` thin orchestrator (`workspace.py`), and its per-phase `dspy.Module`s (`workspace_phases.py`); large inputs cross into the sandbox as `dspy.SandboxSerializable` models from `runtime/sandbox_types.py` (no variable-mode wrapper)
   - `runtime/tools/rlm_delegate.py` owns `delegate_to_rlm` / `delegate_to_rlm_batched` plus host-side trajectory persistence into `external_traces`
 - `integrations/`: config, database, observability, and external-system integrations
-  - `integrations/daytona/isolation.py` exposes host-mediated `store_evidence` / `fetch_evidence` / `list_evidence` to sandbox code via `bridge_callbacks.py`; `DATABASE_URL` is never exposed to the sandbox
+  - `integrations/daytona/isolation.py` exposes host-mediated `store_evidence` / `fetch_evidence` / `list_evidence` through `integrations/daytona/bridge.py`; `DATABASE_URL` is never exposed to the sandbox
   - `integrations/database/repository_chat.py::store_rlm_trace` persists RLM child trajectories to `external_traces`
 - `ui/`: packaged built frontend assets for installed distributions
 - `utils/`: shared helpers
@@ -220,19 +220,19 @@ Daytona-specific boundaries:
 - Keep Daytona-specific behavior under `integrations/daytona/*`
 - Prefer Daytona SDK services directly for sandbox lifecycle, git, filesystem, preview/LSP, and code-interpreter operations; Fleet wrappers should exist only for product policy, diagnostics, session state, ownership labels, volume layout, context staging, manifests, and the RLM host-callback bridge.
 - Keep recursive child sandbox policy, concrete child delegation hooks, host-mediated evidence persistence, and context staging in `integrations/daytona/isolation.py` until one of those responsibilities becomes large enough to justify a real split.
-- Keep Daytona RLM bridge callback dispatch in `integrations/daytona/bridge_callbacks.py`; bridge-owned callback names must continue to route through Fleet interpreter methods before custom tools.
+- Keep Daytona RLM bridge callback dispatch in `integrations/daytona/bridge.py`; bridge-owned callback names must continue to route through Fleet interpreter methods before custom tools.
 - Keep Daytona client construction, config resolution, and SDK error classification in `integrations/daytona/config.py`
 - Keep sandbox spec building, payload/session normalization, workspace config models, and diagnostic result models in `integrations/daytona/models.py`.
-- Keep volume readiness, mount context managers, inventory, browsing, snapshot management, and low-level SDK operations in `integrations/daytona/sdk_ops.py`; accept SDK enum-style states such as `VolumeState.READY` in addition to raw tokens like `ready`
-- Keep workspace path helpers, git ref resolution, repo checkout, and workspace session orchestration in `integrations/daytona/workspace_runtime.py`; use SDK `git.clone`, `git.status`, `git.pull`, `git.branches`, and `git.checkout_branch` where they preserve behavior, and allow named `sandbox.process.exec` fallbacks only for remote URL mismatch, non-git workspace replacement, exact forced remote reset, and detached commit checkout semantics not exposed by the SDK.
+- Keep volume readiness, mount context managers, inventory, browsing, snapshot management, and low-level volume operations in `integrations/daytona/volumes.py`; accept SDK enum-style states such as `VolumeState.READY` in addition to raw tokens like `ready`.
+- Keep workspace path helpers and workspace session orchestration in `integrations/daytona/workspace_manager.py`; keep git ref resolution, repo checkout, and local-context staging in `integrations/daytona/_repo.py`. Use SDK `git.clone`, `git.status`, `git.pull`, `git.branches`, and `git.checkout_branch` where they preserve behavior, and allow named `sandbox.process.exec` fallbacks only for remote URL mismatch, non-git workspace replacement, exact forced remote reset, and detached commit checkout semantics not exposed by the SDK.
 - Keep `DaytonaSandboxSession` dataclass and admin code-execution helpers in `integrations/daytona/session_runtime.py`; public `a*` methods must stay awaitable while sync compatibility methods remain available for notebooks and tests.
-- Keep resume/fork diagnostics in `integrations/daytona/sdk_ops.py`; do not add new thin lifecycle wrappers for SDK methods that can be called directly from `DaytonaSandboxSession` or `DaytonaSandboxRuntime`.
+- Keep resume/fork diagnostics in `integrations/daytona/runtime.py` and `integrations/daytona/session_runtime.py`; do not add new thin lifecycle wrappers for SDK methods that can be called directly from `DaytonaSandboxSession` or `DaytonaSandboxRuntime`.
 - Keep structured diagnostic errors and phase-to-category mapping in `integrations/daytona/diagnostics.py`
-- Keep the async/sync bridge helpers in `integrations/daytona/async_compat.py`; sync callers should use `asyncio.run` when no loop is active and a short-lived background thread bridge when one is already running
+- Keep the async/sync bridge helpers in `fleet_rlm.utils.async_compat`; sync callers should use `asyncio.run` when no loop is active and a short-lived background thread bridge when one is already running
 - Keep async Neon/Postgres persistence under `integrations/database/*` with the concrete `FleetRepository` as the canonical repo boundary
 - Keep the lightweight SQLite sidecar for local sessions/history/optimization in `integrations/local_store.py`
 - Treat `DaytonaSandboxRuntime` and `DaytonaSandboxSession` as the canonical internal async contract
-- Keep Daytona SDK lifecycle helpers in `integrations/daytona/sdk_ops.py` and runtime factory in `integrations/daytona/runtime.py`
+- Keep Daytona SDK lifecycle helpers and runtime factory in `integrations/daytona/runtime.py`
 - When Daytona volume readiness times out or fails, include both the raw SDK state and the normalized canonical state in diagnostics where they differ
 - Keep the durable mounted-volume roots aligned to `/home/daytona/memory/{memory,artifacts,buffers,meta}`
 - Keep recursive RLM child creation centralized through `integrations/daytona/isolation.py::build_delegate_child`, re-exported by `integrations/daytona/interpreter.py`; both host `delegate_to_rlm()` and sandbox `sub_rlm()` / `sub_rlm_batched()` must use it.

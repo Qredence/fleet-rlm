@@ -801,6 +801,19 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                 code = action_result.code
                 result = f"[Error] {e}"
                 return self._process_execution_result(action_result, code, result, history, output_field_names)
+
+            # Syntax pre-check: validate Python syntax before sending to REPL.
+            # Catches unterminated strings, missing brackets, etc. without wasting
+            # a REPL round-trip (~1-2s per failed execution).
+            try:
+                import ast
+
+                ast.parse(code)
+            except SyntaxError as e:
+                result = f"[SyntaxError] {e.msg} (line {e.lineno or '?'})"
+                logger.debug("REPL syntax pre-check failed: %s", result)
+                return self._process_execution_result(action_result, code, result, history, output_field_names)
+
             result = self._execute_code(repl, code, input_args)
             return self._process_execution_result(action_result, code, result, history, output_field_names)
 
@@ -957,15 +970,34 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                 "code": _bounded_value(code),
             },
         ) as span:
+            # Timing breakdown: measure wall-clock time for the REPL execution
+            # to identify whether the bottleneck is network latency (sandbox API
+            # round-trip) or actual code execution time inside the sandbox.
+            import time
+
+            _repl_start = time.monotonic()
             result = super()._execute_code(repl, code, input_args)
+            _repl_total_ms = int((time.monotonic() - _repl_start) * 1000)
+
             failed = isinstance(result, str) and result.startswith("[Error]")
             set_mlflow_span_outputs(
                 span,
                 {
                     "status": "error" if failed else "ok",
                     "result": _bounded_value(result),
+                    "execution_time_ms": _repl_total_ms,
+                    "code_chars": len(code),
+                    "result_chars": len(result) if isinstance(result, str) else 0,
                 },
             )
+            # Set timing attribute on the span for the trace viewer.
+            if span is not None:
+                set_attr = getattr(span, "set_attribute", None)
+                if callable(set_attr):
+                    try:
+                        set_attr("fleet_rlm.repl_execution_ms", _repl_total_ms)
+                    except Exception:
+                        logger.debug("Failed to set repl_execution_ms attribute", exc_info=True)
             if failed and span is not None:
                 set_status = getattr(span, "set_status", None)
                 if callable(set_status):

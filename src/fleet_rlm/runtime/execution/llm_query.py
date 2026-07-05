@@ -154,6 +154,7 @@ class LLMQueryMixin:
     _llm_call_lock: threading.Lock
     _sub_lm_executor: ThreadPoolExecutor | None
     _sub_lm_executor_lock: threading.Lock
+    _sub_lm_auth_failed: bool  # Fail-fast flag for 401/Unauthorized errors
 
     def build_delegate_child(self, *, remaining_llm_budget: int) -> Any:
         """Create a child interpreter — implemented by the host class."""
@@ -204,6 +205,13 @@ class LLMQueryMixin:
         Raises:
             RuntimeError: If no LM is configured or if the call times out.
         """
+        # Fail-fast: if a previous call got 401 Unauthorized, don't retry.
+        if getattr(self, "_sub_lm_auth_failed", False):
+            raise RuntimeError(
+                "Sub-LM authentication previously failed (401 Unauthorized). "
+                "llm_query is disabled for this session. Check DSPY_DELEGATE_LM_API_KEY."
+            )
+
         temp_target_lm = self.sub_lm if self.sub_lm is not None else dspy.settings.lm
         config_overrides = self._get_sub_lm_config(temp_target_lm) if temp_target_lm is not None else {}
         bounded = bool(config_overrides)
@@ -276,6 +284,13 @@ class LLMQueryMixin:
                     f"LLM call timed out after {self.llm_call_timeout}s. "
                     "Consider increasing llm_call_timeout or checking API connectivity."
                 ) from exc
+            except Exception as exc:
+                # Fail-fast on 401 Unauthorized: set flag to prevent retry storms.
+                exc_str = str(exc).lower()
+                if "401" in exc_str or "unauthorized" in exc_str:
+                    self._sub_lm_auth_failed = True
+                    logger.warning("Sub-LM auth failed (401 Unauthorized). Disabling llm_query for this session.")
+                raise
 
     def llm_query(self, prompt: str, context: str = "") -> str:
         """Query a sub-LLM for semantic analysis.

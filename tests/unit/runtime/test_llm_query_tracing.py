@@ -5,6 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 
 def _patch_mlflow(monkeypatch) -> list[dict[str, Any]]:
     """Patch ``mlflow_child_span`` with a capturing FakeSpan; return capture list."""
@@ -148,10 +150,53 @@ def _make_host(sub_lm: Any, *, timeout: int = 10) -> Any:
             self._llm_call_lock = threading.Lock()
             self._sub_lm_executor = ThreadPoolExecutor(max_workers=2)
             self._sub_lm_executor_lock = threading.Lock()
+            self._sub_lm_auth_failed = False
             self._bounded_sub_lm = None
             self._bounded_sub_lm_base = None
 
     return Host()
+
+
+def test_initialize_llm_query_state_resets_auth_failure_flag() -> None:
+    from fleet_rlm.runtime.execution.interpreter_support import initialize_llm_query_state
+
+    host = SimpleNamespace(_sub_lm_auth_failed=True)
+
+    initialize_llm_query_state(
+        host,
+        sub_lm=None,
+        max_llm_calls=2,
+        llm_call_timeout=5,
+    )
+
+    assert host._sub_lm_auth_failed is False
+
+
+def test_llm_query_auth_failure_disables_session(monkeypatch) -> None:
+    _patch_mlflow(monkeypatch)
+
+    class UnauthorizedLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, prompt: str, **kwargs: Any) -> list[dict[str, str]]:
+            _ = prompt, kwargs
+            self.calls += 1
+            raise RuntimeError("401 Unauthorized")
+
+    lm = UnauthorizedLM()
+    host = _make_host(lm)
+    try:
+        with pytest.raises(RuntimeError, match="401 Unauthorized"):
+            host.llm_query("first")
+        with pytest.raises(RuntimeError, match="previously failed"):
+            host.llm_query("second")
+    finally:
+        if host._sub_lm_executor is not None:
+            host._sub_lm_executor.shutdown(wait=False)
+
+    assert host._sub_lm_auth_failed is True
+    assert lm.calls == 1
 
 
 def test_query_sub_lm_wraps_sub_lm_in_bounded_lm(monkeypatch) -> None:

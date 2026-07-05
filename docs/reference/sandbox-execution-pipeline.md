@@ -379,7 +379,7 @@ The host and sandbox synchronize at 9 critical points:
 
 **Mechanism**: `__FINAL_OUTPUT__` sentinel markers in stdout
 
-**Contract**: The marker string is a shared constant (`_FINAL_OUTPUT_MARKER` in `_sandbox_constants.py`), used identically by both the injected `SUBMIT()` function (sandbox-side) and `extract_final_artifact()` (host-side).
+**Contract**: The marker string is a shared constant (`_FINAL_OUTPUT_MARKER` in `integrations/daytona/models.py`), used identically by both the injected `SUBMIT()` function (sandbox-side) and `extract_final_artifact()` (host-side).
 
 **Purpose**: Primary structured result channel. Without `SUBMIT`, the host only sees raw stdout/stderr text.
 

@@ -325,7 +325,7 @@ class PostgresLlmProfileStore(LlmProfileStore):
         return LlmProfileBundle(profiles=profiles, role_bindings=bindings)
 
     async def list_profiles(self) -> list[LlmProviderProfileRecord]:
-        async with self._db_manager.session() as session:
+        async with self._db_manager.session() as session, session.begin():
             await self._set_request_context(session)
             rows = (
                 (
@@ -341,7 +341,7 @@ class PostgresLlmProfileStore(LlmProfileStore):
             return [_profile_record_from_row(row) for row in rows]
 
     async def get_profile(self, profile_id: UUID) -> LlmProviderProfileRecord | None:
-        async with self._db_manager.session() as session:
+        async with self._db_manager.session() as session, session.begin():
             await self._set_request_context(session)
             row = (
                 await session.execute(
@@ -438,7 +438,22 @@ class PostgresLlmProfileStore(LlmProfileStore):
                 binding.model_id = ""
 
     async def list_role_bindings(self) -> list[LlmRoleBindingRecord]:
-        async with self._db_manager.session() as session:
+        async with self._db_manager.session() as session, session.begin():
+            await self._set_request_context(session)
+            rows = (
+                (
+                    await session.execute(
+                        select(LlmRoleBinding).where(self._owner_filter(LlmRoleBinding)).order_by(LlmRoleBinding.role)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            existing_roles = {row.role for row in rows}
+            if len(existing_roles) >= len(ROLE_NAMES):
+                return [_binding_record_from_row(row) for row in rows]
+
+        async with self._db_manager.session() as session, session.begin():
             await self._set_request_context(session)
             await self._ensure_default_bindings(session)
             rows = (

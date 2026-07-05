@@ -214,6 +214,7 @@ def get_mlflow_experiment_id() -> str | None:
 
 def initialize_mlflow(config: MlflowConfig | None = None) -> bool:
     """Best-effort idempotent MLflow initialization for DSPy runtimes."""
+    os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "10")
     resolved = config or MlflowConfig.from_env()
     identity = _mlflow_identity(resolved)
 
@@ -452,18 +453,19 @@ def _set_span_error_description(exception: Exception) -> None:
         logger.debug("Failed to update MLflow span status", exc_info=True)
 
 
-def _set_active_span_token_usage(input_tokens: int | None, output_tokens: int | None) -> None:
+def _set_span_token_usage(
+    span: Any,
+    input_tokens: int | None,
+    output_tokens: int | None,
+) -> None:
+    """Set token usage attributes on a specific span.
+
+    Args:
+        span: The span object to set attributes on (can be LiveSpan or MLflow span wrapper).
+        input_tokens: Number of input/prompt tokens.
+        output_tokens: Number of output/completion tokens.
+    """
     if input_tokens is None and output_tokens is None:
-        return
-    mlflow = _import_mlflow()
-    if mlflow is None:
-        return
-    try:
-        span = mlflow.get_current_active_span()
-    except Exception:
-        logger.debug("Failed to inspect current MLflow span for token usage", exc_info=True)
-        return
-    if span is None:
         return
 
     usage: dict[str, int] = {}
@@ -514,8 +516,32 @@ def _set_active_span_token_usage(input_tokens: int | None, output_tokens: int | 
             return
 
 
+def _set_active_span_token_usage(input_tokens: int | None, output_tokens: int | None) -> None:
+    """Legacy wrapper that uses get_current_active_span. Kept for compatibility."""
+    if input_tokens is None and output_tokens is None:
+        return
+    mlflow = _import_mlflow()
+    if mlflow is None:
+        return
+    try:
+        span = mlflow.get_current_active_span()
+    except Exception:
+        logger.debug("Failed to inspect current MLflow span for token usage", exc_info=True)
+        return
+    if span is None:
+        return
+    _set_span_token_usage(span, input_tokens, output_tokens)
+
+
 class FleetMlflowTraceCallback(BaseCallback):
     """DSPy callback that propagates per-request context into MLflow traces."""
+
+    def __init__(self) -> None:
+        # Track LM spans by call_id so we can set attributes on them in on_lm_end.
+        # The span created by DSPy autolog is a child of the current active span,
+        # so we can't use mlflow.get_current_active_span() in on_lm_end (it returns
+        # the parent, not the LM span).
+        self._lm_spans: dict[str, Any] = {}
 
     def on_module_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
         _ = (call_id, instance, inputs)
@@ -538,13 +564,49 @@ class FleetMlflowTraceCallback(BaseCallback):
         _ = (call_id, instance, inputs)
         update_current_mlflow_trace()
 
+        # Capture the LM span created by DSPy autolog so we can set attributes
+        # on it in on_lm_end. The span is already active when this callback fires.
+        mlflow = _import_mlflow()
+        if mlflow is not None:
+            try:
+                span = mlflow.get_current_active_span()
+                if span is not None:
+                    self._lm_spans[call_id] = span
+
+                    # Set model and provider metadata on the LM span.
+                    # These come from the DSPy LM instance which wraps litellm.
+                    model_name = getattr(instance, "model", None)
+                    provider = getattr(instance, "provider", None)
+
+                    # Also check for model_type (responses vs chat vs text)
+                    model_type = getattr(instance, "model_type", None)
+
+                    attributes: dict[str, str] = {}
+                    if model_name:
+                        attributes["mlflow.chat.model"] = str(model_name)
+                    if provider:
+                        attributes["mlflow.chat.provider"] = str(provider)
+                    if model_type:
+                        attributes["mlflow.chat.modelType"] = str(model_type)
+
+                    if attributes:
+                        try:
+                            # Try to set on the span wrapper first
+                            if hasattr(span, "set_attributes"):
+                                span.set_attributes(attributes)
+                            elif hasattr(span, "_span") and hasattr(span._span, "set_attributes"):
+                                span._span.set_attributes(attributes)
+                        except Exception:
+                            logger.debug("Failed to set LM span model/provider attributes", exc_info=True)
+            except Exception:
+                logger.debug("Failed to capture LM span reference", exc_info=True)
+
     def on_lm_end(
         self,
         call_id: str,
         outputs: dict[str, Any] | None,
         exception: Exception | None = None,
     ) -> None:
-        _ = call_id
         if exception is not None:
             _set_span_error_description(exception)
         preview: str | None = None
@@ -558,7 +620,16 @@ class FleetMlflowTraceCallback(BaseCallback):
                     )
         # Accumulate token usage on the per-request context.
         input_tokens, output_tokens = _extract_token_usage(outputs)
-        _set_active_span_token_usage(input_tokens, output_tokens)
+
+        # Set token usage on the LM span. Prefer the span reference captured
+        # in on_lm_start; fall back to get_current_active_span for backwards
+        # compatibility (e.g. when on_lm_start was not called).
+        span = self._lm_spans.pop(call_id, None)
+        if span is not None and (input_tokens is not None or output_tokens is not None):
+            _set_span_token_usage(span, input_tokens, output_tokens)
+        elif input_tokens is not None or output_tokens is not None:
+            _set_active_span_token_usage(input_tokens, output_tokens)
+
         ctx = current_request_context()
         if ctx is not None:
             if input_tokens is not None:

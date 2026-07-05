@@ -375,6 +375,18 @@ def workspace_append(path: str, content: str) -> str:
         _os.close(fd)
     return full
 
+# list_packages: fast package listing using importlib.metadata (no subprocess).
+# Use this instead of subprocess.run(['pip', 'list']) which takes 30+ seconds.
+def list_packages() -> list[dict[str, str]]:
+    from importlib.metadata import distributions
+    packages: list[dict[str, str]] = []
+    for dist in distributions():
+        name = dist.metadata.get("Name") or getattr(dist, "name", "")
+        version = dist.metadata.get("Version") or getattr(dist, "version", "")
+        if name:
+            packages.append({{"name": str(name), "version": str(version)}})
+    return packages
+
 class _FleetFinalOutput(Exception):
     def __init__(self, value):
         self.value = value

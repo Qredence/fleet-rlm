@@ -10,7 +10,7 @@ from fleet_rlm.integrations.daytona.config import _load_env_sources
 
 
 def test_os_env_wins_over_env_file_in_local(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """In local mode, real env vars must win over .env (was inverted before)."""
+    """In local mode, real env vars must win over .env."""
     env_file = tmp_path / ".env"
     env_file.write_text("DAYTONA_API_KEY=from-file\nDAYTONA_API_URL=from-file-url\n")
 
@@ -51,7 +51,7 @@ def test_env_local_wins_over_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
 
 def test_os_env_wins_in_non_local(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """In non-local, os.environ also wins (behavior is now uniform)."""
+    """In non-local, os.environ also wins (uniform 12-factor behavior)."""
     env_file = tmp_path / ".env"
     env_file.write_text("DAYTONA_API_KEY=from-file\n")
 
