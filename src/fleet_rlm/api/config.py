@@ -82,7 +82,7 @@ class AppConfig(BaseSettings):
     react_max_iters: int = 15
     deep_react_max_iters: int = 35
     enable_adaptive_iters: bool = True
-    rlm_max_iterations: int = 30
+    rlm_max_iterations: int = 15
     rlm_max_llm_calls: int = 50
     rlm_action_max_tokens: int = Field(default=2048, alias="FLEET_RLM_ACTION_MAX_TOKENS")
     rlm_max_depth: int = 2

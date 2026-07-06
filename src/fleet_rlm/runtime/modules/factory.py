@@ -2,7 +2,7 @@
 
 Performance-improvement flags (all env-configurable, default safe):
 
-- ``FLEET_RLM_SUMMARY_ITERATION_THRESHOLD`` (default 20) — if the RLM loop
+- ``FLEET_RLM_SUMMARY_ITERATION_THRESHOLD`` (default 10) — if the RLM loop
   reaches this iteration index without receiving a ``SUBMIT``, the base RLM
   wrapper injects a "summarize and SUBMIT now" directive into ``repl_history``
   so the agent stops exploring and produces a final answer instead of burning
@@ -29,7 +29,6 @@ import logging
 import os
 import threading
 import time
-from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -102,6 +101,7 @@ VARIABLE_MODE_THRESHOLD = 32_000
 VARIABLE_MODE_MAX_OUTPUT_CHARS = _env_int("FLEET_RLM_VARIABLE_MODE_MAX_OUTPUT_CHARS", 10_000)
 RLM_ACTION_HISTORY_RECENT_ENTRIES = 4
 RLM_ACTION_HISTORY_MAX_ENTRIES = 8
+RLM_ACTION_HISTORY_FORMAT_CHARS = _env_int("FLEET_RLM_ACTION_HISTORY_FORMAT_CHARS", 8_000)
 RLM_ACTION_HISTORY_OUTPUT_CHARS = 1_500
 RLM_ACTION_HISTORY_CODE_CHARS = 1_200
 RLM_ACTION_HISTORY_REASONING_CHARS = 600
@@ -121,7 +121,7 @@ _COMPRESSED_TOOL_DOCS_ENABLED = os.environ.get("FLEET_RLM_COMPRESSED_TOOL_DOCS",
 # If the RLM loop reaches this iteration index without receiving a ``SUBMIT``,
 # inject a "summarize and SUBMIT now" directive into ``repl_history`` so the
 # agent produces a final answer instead of burning the full budget.
-_SUMMARY_ITERATION_THRESHOLD = _env_int("FLEET_RLM_SUMMARY_ITERATION_THRESHOLD", 20)
+_SUMMARY_ITERATION_THRESHOLD = _env_int("FLEET_RLM_SUMMARY_ITERATION_THRESHOLD", 10)
 
 # ── P1: Context pre-processing ─────────────────────────────────────────────
 # When a WorkspaceContext ``document_text`` exceeds this many characters, a
@@ -178,7 +178,11 @@ def _compact_text(value: Any, *, max_chars: int) -> str:
 def _compact_repl_history_for_action(history: Any) -> Any:
     """Return a compact prompt-only REPL history for action generation."""
     entries = list(getattr(history, "entries", []) or [])
-    if len(entries) <= RLM_ACTION_HISTORY_MAX_ENTRIES:
+    try:
+        formatted_chars = len(history.format())
+    except Exception:
+        formatted_chars = 0
+    if len(entries) <= RLM_ACTION_HISTORY_MAX_ENTRIES and formatted_chars <= RLM_ACTION_HISTORY_FORMAT_CHARS:
         return history
 
     from dspy.primitives.repl_types import REPLEntry, REPLHistory
@@ -191,13 +195,15 @@ def _compact_repl_history_for_action(history: Any) -> Any:
         output = _compact_text(getattr(entry, "output", ""), max_chars=320).replace("\n", "\\n")
         summary_lines.append(f"step {index}: code={code!r}; output={output!r}")
 
-    compact_entries = [
-        REPLEntry(
-            reasoning=f"Compressed {len(older)} earlier REPL steps for action prompt budget.",
-            code="# Earlier REPL steps were compressed for this action-generation prompt.",
-            output="\n".join(summary_lines),
+    compact_entries = []
+    if older:
+        compact_entries.append(
+            REPLEntry(
+                reasoning=f"Compressed {len(older)} earlier REPL steps for action prompt budget.",
+                code="# Earlier REPL steps were compressed for this action-generation prompt.",
+                output="\n".join(summary_lines),
+            )
         )
-    ]
     compact_entries.extend(
         REPLEntry(
             reasoning=_compact_text(getattr(entry, "reasoning", ""), max_chars=RLM_ACTION_HISTORY_REASONING_CHARS),
@@ -338,7 +344,7 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         # could not recover. Bounded so a persistently glitching model escalates
         # to EscalatingFleetModule instead of burning max_iterations.
         self._consecutive_parse_errors = 0
-        self._max_consecutive_parse_errors = _env_int("FLEET_RLM_MAX_CONSECUTIVE_PARSE_ERRORS", 3)
+        self._max_consecutive_parse_errors = _env_int("FLEET_RLM_MAX_CONSECUTIVE_PARSE_ERRORS", 1)
         # Per-instance cache (NOT class-level) so two RLM instances with the
         # same variable names but different content do not share cached data.
         # Cleared at the start of each forward() call to prevent stale data
@@ -392,17 +398,15 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         return "\n".join(lines)
 
     def _structured_action_context(self) -> Any:
-        """RLM action generation runs under DSPy's default adapter (ChatAdapter).
+        """RLM action generation runs under one strict ChatAdapter call.
 
-        ChatAdapter automatically falls back to JSONAdapter on parse failure
-        (``dspy/adapters/chat_adapter.py:46,68,87-94``); forcing JSONAdapter as
-        the primary caused a marker mismatch with qwen3.x output (which emits
-        ``[[ ## reasoning ## ]]`` / ``[[ ## code ## ]]``) and required a
-        hand-rolled salvage cascade — both removed in this change. Returning a
-        no-op context lets DSPy's default adapter resolution (configured via
-        ``DSPY_STRUCTURED_OUTPUT_ADAPTER``) take effect.
+        DSPy's default ``ChatAdapter`` can fall back to ``JSONAdapter`` by
+        making a second LM call when marker parsing fails. In the RLM action
+        loop that is expensive: parseable completions with slightly malformed
+        marker placement should be recovered locally, not regenerated by a
+        second adapter prompt.
         """
-        return nullcontext()
+        return dspy.settings.context(adapter=dspy.ChatAdapter(use_json_adapter_fallback=False))
 
     def _record_iteration_token_usage(self, iteration: int) -> None:
         """Extract per-iteration token usage from dspy LM history and record as MLflow span attr."""
@@ -506,6 +510,75 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         """
         return _truncate(completion)
 
+    @staticmethod
+    def _normalize_action_completion_markers(completion: str, signature: type[dspy.Signature]) -> str:
+        """Put output-field markers on their own lines for strict ChatAdapter parsing.
+
+        Reasoning models sometimes emit near-ChatAdapter format with tiny marker
+        drift such as ``[[ ## code ##]]`` or a reasoning marker followed by a
+        Python fence without the ``code`` marker. Normalize those trace-observed
+        variants before handing the text back to DSPy's strict parser.
+        """
+        import re
+
+        marker_names = [*signature.output_fields.keys(), "completed"]
+        marker_alt = "|".join(re.escape(name) for name in marker_names)
+        pattern = re.compile(r"\[\[\s*##\s*(" + marker_alt + r")\s*##\s*\]\]")
+        output_marker = re.compile(
+            r"\[\[\s*##\s*(" + "|".join(re.escape(name) for name in signature.output_fields) + r")\s*##\s*\]\]"
+        )
+        text = completion.strip()
+        if not output_marker.search(text):
+            return text
+
+        code_marker = re.compile(r"\[\[\s*##\s*code\s*##\s*\]\]")
+        reasoning_marker = re.compile(r"\[\[\s*##\s*reasoning\s*##\s*\]\]")
+        reasoning_match = reasoning_marker.search(text)
+        if reasoning_match and "code" in signature.output_fields and not code_marker.search(text):
+            fence = re.search(r"```(?:python|py)?\s*\n", text[reasoning_match.end() :], re.IGNORECASE)
+            if fence:
+                insert_at = reasoning_match.end() + fence.start()
+                text = text[:insert_at].rstrip() + "\n\n[[ ## code ## ]]\n" + text[insert_at:].lstrip()
+
+        if not pattern.search(text):
+            return text
+
+        pieces: list[str] = []
+        cursor = 0
+        for match in pattern.finditer(text):
+            pieces.append(text[cursor : match.start()])
+            if match.start() > 0 and text[match.start() - 1] != "\n":
+                pieces.append("\n")
+            pieces.append(f"[[ ## {match.group(1)} ## ]]")
+            cursor = match.end()
+        pieces.append(text[cursor:])
+        return "".join(pieces).strip()
+
+    @classmethod
+    def _recover_action_prediction_from_parse_error(
+        cls,
+        exc: Exception,
+        signature: type[dspy.Signature],
+    ) -> dspy.Prediction | None:
+        """Recover a parseable action completion without spending another LM call."""
+        completion = cls._extract_completion_from_parse_error(exc)
+        if not completion or cls._is_degenerate_response(completion):
+            return None
+
+        normalized = cls._normalize_action_completion_markers(completion, signature)
+        adapters = (
+            dspy.ChatAdapter(use_json_adapter_fallback=False),
+            dspy.JSONAdapter(),
+        )
+        for adapter in adapters:
+            try:
+                fields = adapter.parse(signature, normalized)
+            except Exception:
+                continue
+            if fields.keys() == signature.output_fields.keys():
+                return dspy.Prediction(**fields)
+        return None
+
     def _execute_iteration(self, *args: Any, **kwargs: Any) -> Any:
         """Override base RLM iteration to bound action-gen and respect the loop contract.
 
@@ -608,6 +681,13 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         timeout = self.action_timeout
         original_generate_action = self.generate_action
         base_lm, config_overrides = self._get_action_lm_config()
+        action_lm = base_lm if base_lm is not None else getattr(_dspy.settings, "lm", None)
+        action_lm_source = (
+            "delegate_small_lm" if base_lm is not None else "dspy_settings_lm" if action_lm is not None else "missing"
+        )
+        action_lm_model = str(getattr(action_lm, "model", "?")) if action_lm is not None else "?"
+        action_token_key = "max_output_tokens" if "max_output_tokens" in config_overrides else "max_tokens"
+        action_effective_max_tokens = config_overrides.get(action_token_key)
 
         # Emit iteration-start event for real-time progress in the frontend
         self._emit_step(
@@ -626,7 +706,7 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         def _run_action(**kw: Any) -> Any:
             if config_overrides:
                 existing_config = kw.get("config", {})
-                kw["config"] = {**config_overrides, **existing_config}
+                kw["config"] = {**existing_config, **config_overrides}
             if base_lm is not None:
                 with _dspy.settings.context(lm=base_lm):
                     return original_generate_action(**kw)
@@ -641,6 +721,16 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                 "fleet_rlm.rlm_action_timeout_s": str(timeout),
                 "fleet_rlm.execution_origin": "dspy_rlm_execute_iteration",
                 "fleet_rlm.rlm_bounded_lm": str(bool(config_overrides)),
+                "fleet_rlm.rlm_max_iterations": str(getattr(self, "max_iterations", "")),
+                "fleet_rlm.rlm_max_llm_calls": str(getattr(self, "max_llm_calls", "")),
+                "fleet_rlm.rlm_max_output_chars": str(getattr(self, "max_output_chars", "")),
+                "fleet_rlm.rlm_action_max_tokens": str(
+                    self.action_max_tokens or _env_int("FLEET_RLM_ACTION_MAX_TOKENS", 2048)
+                ),
+                "fleet_rlm.rlm_action_effective_token_key": action_token_key,
+                "fleet_rlm.rlm_action_effective_max_tokens": str(action_effective_max_tokens or ""),
+                "fleet_rlm.rlm_action_lm_source": action_lm_source,
+                "fleet_rlm.rlm_action_lm_model": action_lm_model,
             },
         ) as span:
             # Emit progress event BEFORE blocking LLM call so the user sees feedback
@@ -672,66 +762,95 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                     }
                 )
             except Exception as exc:
-                self._emit_step(
-                    {
-                        "phase": "rlm_action_gen",
-                        "iteration": iteration,
-                        "status": "failed",
-                        "text": f"Action generation failed: {exc}",
-                        "source_type": "rlm_progress",
-                        "error": str(exc),
-                    }
-                )
                 if self._is_parse_error(exc):
-                    # ChatAdapter (now the primary adapter) already ran its
-                    # native JSONAdapter fallback internally
-                    # (``dspy/adapters/chat_adapter.py:46,68,87-94``). If parsing
-                    # still fails there is no completion worth salvaging
-                    # in-process; respect the loop contract (like the timeout
-                    # path): append a [ParseError] REPL entry, return the
-                    # updated history so the loop continues and dspy's
-                    # ``_extract_fallback`` can salvage, and escalate only after
-                    # the consecutive-parse-error cap fires.
-                    self._consecutive_parse_errors += 1
-                    logger.warning(
-                        "RLM action generation parse error (iteration %s, consecutive: %s): %s",
-                        iteration,
-                        self._consecutive_parse_errors,
+                    recovered_action = self._recover_action_prediction_from_parse_error(
                         exc,
+                        self.generate_action.signature,
                     )
-                    if self._consecutive_parse_errors >= self._max_consecutive_parse_errors:
-                        # Persistently glitching model: stop burning iterations
-                        # and escalate to EscalatingFleetModule.
+                    if recovered_action is not None:
+                        action_result = recovered_action
+                        action_succeeded = True
+                        self._consecutive_timeouts = 0
+                        self._consecutive_parse_errors = 0
+                        emit_action = getattr(self.generate_action, "_emit_action", None)
+                        if callable(emit_action):
+                            emit_action(recovered_action, iteration)
                         set_mlflow_span_outputs(
                             span,
                             {
-                                "status": "parse_error_capped",
+                                "status": "parse_recovered",
                                 "iteration": iteration,
-                                "consecutive_parse_errors": self._consecutive_parse_errors,
+                                "recovered_without_retry": True,
                             },
                         )
-                        raise _dspy.LMError(
-                            f"RLM action generation parse errors exceeded cap "
-                            f"({self._consecutive_parse_errors}) at iteration {iteration}; escalating."
+                        self._emit_step(
+                            {
+                                "phase": "rlm_action_gen",
+                                "iteration": iteration,
+                                "status": "completed",
+                                "text": f"Action recovered from parse error in {time.time() - _start_time:.1f}s",
+                                "source_type": "rlm_progress",
+                                "duration_s": time.time() - _start_time,
+                                "recovered_from_parse_error": True,
+                            }
                         )
-                    # Safely format the parse error to prevent REPL history pollution.
-                    err_msg = format_parse_error_output(exc)
+                    else:
+                        self._emit_step(
+                            {
+                                "phase": "rlm_action_gen",
+                                "iteration": iteration,
+                                "status": "failed",
+                                "text": f"Action generation failed: {exc}",
+                                "source_type": "rlm_progress",
+                                "error": str(exc),
+                            }
+                        )
+                        # The strict ChatAdapter pass failed and the raw
+                        # completion was not locally recoverable. Respect the
+                        # loop contract: append a [ParseError] REPL entry,
+                        # return the updated history so the loop continues, and
+                        # escalate only after the consecutive-parse-error cap
+                        # fires.
+                        self._consecutive_parse_errors += 1
+                        logger.warning(
+                            "RLM action generation parse error (iteration %s, consecutive: %s): %s",
+                            iteration,
+                            self._consecutive_parse_errors,
+                            exc,
+                        )
+                        if self._consecutive_parse_errors >= self._max_consecutive_parse_errors:
+                            # Persistently glitching model: stop burning iterations
+                            # and escalate to EscalatingFleetModule.
+                            set_mlflow_span_outputs(
+                                span,
+                                {
+                                    "status": "parse_error_capped",
+                                    "iteration": iteration,
+                                    "consecutive_parse_errors": self._consecutive_parse_errors,
+                                },
+                            )
+                            raise _dspy.LMError(
+                                f"RLM action generation parse errors exceeded cap "
+                                f"({self._consecutive_parse_errors}) at iteration {iteration}; escalating."
+                            )
+                        # Safely format the parse error to prevent REPL history pollution.
+                        err_msg = format_parse_error_output(exc)
 
-                    cur_history = self._resolve_repl_history(args, kwargs)
-                    new_history = self._append_repl_entry(
-                        cur_history,
-                        reasoning="Previous response could not be parsed.",
-                        code="# [Parse Error] The adapter could not parse the previous response.",
-                        output=err_msg,
-                    )
-                    if new_history is not None and "repl_history" in kwargs:
-                        kwargs["repl_history"] = new_history
-                    set_mlflow_span_outputs(
-                        span,
-                        {"status": "parse_error", "iteration": iteration},
-                    )
-                    # Contract: return a REPLHistory so the loop continues.
-                    return new_history if new_history is not None else cur_history
+                        cur_history = self._resolve_repl_history(args, kwargs)
+                        new_history = self._append_repl_entry(
+                            cur_history,
+                            reasoning="Previous response could not be parsed.",
+                            code="# [Parse Error] The adapter could not parse the previous response.",
+                            output=err_msg,
+                        )
+                        if new_history is not None and "repl_history" in kwargs:
+                            kwargs["repl_history"] = new_history
+                        set_mlflow_span_outputs(
+                            span,
+                            {"status": "parse_error", "iteration": iteration},
+                        )
+                        # Contract: return a REPLHistory so the loop continues.
+                        return new_history if new_history is not None else cur_history
                 elif isinstance(exc, _dspy.LMError):
                     # Real timeout/transport error from the bounded BaseLM (or the
                     # global LM if no bounded LM could be built). Respect the loop
@@ -739,6 +858,16 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                     # repl_history so the loop continues and dspy's
                     # _extract_fallback can salvage; raise only after repeated
                     # failures. Never return None (would corrupt ``history = result``).
+                    self._emit_step(
+                        {
+                            "phase": "rlm_action_gen",
+                            "iteration": iteration,
+                            "status": "failed",
+                            "text": f"Action generation failed: {exc}",
+                            "source_type": "rlm_progress",
+                            "error": str(exc),
+                        }
+                    )
                     self._consecutive_timeouts += 1
                     logger.warning(
                         "RLM action generation failed (%s) (iteration %s, consecutive: %s)",
@@ -767,6 +896,16 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                     # Contract: return a REPLHistory so the loop continues.
                     return new_history if new_history is not None else cur_history
                 else:
+                    self._emit_step(
+                        {
+                            "phase": "rlm_action_gen",
+                            "iteration": iteration,
+                            "status": "failed",
+                            "text": f"Action generation failed: {exc}",
+                            "source_type": "rlm_progress",
+                            "error": str(exc),
+                        }
+                    )
                     raise
 
             # --- Record per-iteration token usage ---
@@ -780,6 +919,13 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                         "status": "ok" if action_succeeded else "error",
                         "iteration": iteration,
                         "timeout_s": timeout,
+                        "action_lm_source": action_lm_source,
+                        "action_lm_model": action_lm_model,
+                        "effective_token_key": action_token_key,
+                        "effective_max_tokens": action_effective_max_tokens,
+                        "max_iterations": getattr(self, "max_iterations", None),
+                        "max_llm_calls": getattr(self, "max_llm_calls", None),
+                        "max_output_chars": getattr(self, "max_output_chars", None),
                     },
                 )
 
@@ -1282,13 +1428,8 @@ class _NoCallbackRLM(_StreamingRLM):
         return {}
 
     def _repl_only_context(self) -> Any:
-        """No-op adapter context for the REPL-only RLM path.
-
-        Lets the DSPy-default ChatAdapter (with native JSONAdapter fallback,
-        ``dspy/adapters/chat_adapter.py:46,68,87-94``) handle structured output
-        instead of forcing ``JSONAdapter`` as primary.
-        """
-        return nullcontext()
+        """Use the same strict action adapter policy while semantic callbacks are disabled."""
+        return self._structured_action_context()
 
     def forward(self, **input_args: Any) -> dspy.Prediction:
         interpreter = getattr(self, "_interpreter", None)

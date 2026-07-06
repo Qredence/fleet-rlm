@@ -181,6 +181,77 @@ def test_execute_iteration_reconstructs_kwargs_and_does_not_raise_typeerror(monk
     assert isinstance(result, dspy.Prediction)
 
 
+def test_execute_iteration_action_config_overrides_profile_max_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fleet's action-generation cap must win over profile/global LM defaults.
+
+    Regression coverage for ``tr-08e3d5a8950bb569839ecd3e144b11c1``: the trace
+    recorded ``fleet_rlm.rlm_action_max_tokens=2048`` but every provider-facing
+    ``LM.__call__`` span still carried ``max_tokens=128000``. If an existing
+    DSPy config contains a profile-level max token value, ``_execute_iteration``
+    must overlay the action cap last.
+    """
+    captured_spans: list[dict[str, Any]] = []
+
+    class _CapturingSpan(_FakeSpan):
+        def __init__(self, name, span_type=None, attributes=None):
+            super().__init__(name, span_type, attributes)
+            captured_spans.append(self.record)
+
+    monkeypatch.setattr(
+        mlflow_context,
+        "mlflow_child_span",
+        lambda name, span_type=None, attributes=None, inputs=None: _CapturingSpan(name, span_type, attributes),
+    )
+    monkeypatch.setattr(
+        mlflow_context,
+        "set_mlflow_span_outputs",
+        lambda span, outputs: span.record.__setitem__("outputs", outputs) if span is not None else None,
+    )
+
+    rlm, _events = _make_rlm(max_iterations=3)
+    monkeypatch.setattr(
+        _StreamingRLM,
+        "_get_action_lm_config",
+        lambda self: (None, {"max_tokens": 2048, "temperature": 0.0, "timeout": 90.0}),
+    )
+
+    captured_kwargs: dict[str, Any] = {}
+
+    class FakeInner:
+        def __call__(self, **kwargs: Any) -> dspy.Prediction:
+            captured_kwargs.update(kwargs)
+            return dspy.Prediction(reasoning="ok", code="SUBMIT(response='done')")
+
+    rlm.generate_action._inner = FakeInner()
+
+    from dspy.primitives.code_interpreter import FinalOutput
+    from dspy.primitives.repl_types import REPLHistory
+
+    history = REPLHistory(max_output_chars=1500)
+    repl = _FakeRepl(result=FinalOutput({"response": "done"}))
+
+    result = rlm._execute_iteration(
+        repl,
+        [_FakeVariable("user_request", "hello")],
+        history,
+        0,
+        {},
+        ["response"],
+        variables_info=["user_request = hello"],
+        repl_history=history,
+        iteration="1/3",
+        config={"max_tokens": 128000, "temperature": 0.7},
+    )
+
+    assert isinstance(result, dspy.Prediction)
+    assert captured_kwargs["config"]["max_tokens"] == 2048
+    assert captured_kwargs["config"]["temperature"] == 0.0
+    assert captured_kwargs["config"]["timeout"] == 90.0
+    action_span = next(record for record in captured_spans if record["name"] == "fleet_rlm.rlm_action_generation")
+    assert action_span["attributes"]["fleet_rlm.rlm_action_effective_max_tokens"] == "2048"
+    assert action_span["outputs"]["effective_max_tokens"] == 2048
+
+
 def test_execute_iteration_without_reconstruction_would_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Sanity check: calling the inner predictor with empty kwargs does NOT
     deliver the required ``variables_info`` / ``repl_history`` / ``iteration``

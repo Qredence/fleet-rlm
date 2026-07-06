@@ -39,11 +39,19 @@ def _load_env_sources() -> dict[str, str]:
             if key and value is not None:
                 file_values[str(key)] = str(value)
 
-    # Precedence: .env < .env.local < real environment variables.
-    # Real env always wins in every environment (12-factor); .env files are
-    # dev conveniences that supply defaults, not overrides.
-    merged: dict[str, str] = dict(file_values)
-    merged.update({str(key): str(value) for key, value in os.environ.items()})
+    # Precedence depends on APP_ENV:
+    #   local (default): .env > .env.local > real env — so your .env
+    #     intentionally overrides a stale shell export.
+    #   production/staging: real env > .env.local > .env — standard
+    #     12-factor: .env files supply defaults, real env wins.
+    app_env = os.getenv("APP_ENV", "local").strip().lower()
+    real_env: dict[str, str] = {str(k): str(v) for k, v in os.environ.items()}
+    if app_env == "local":
+        merged: dict[str, str] = dict(real_env)
+        merged.update(file_values)
+    else:
+        merged = dict(file_values)
+        merged.update(real_env)
     return merged
 
 

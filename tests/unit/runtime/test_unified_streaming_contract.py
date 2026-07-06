@@ -109,6 +109,57 @@ async def test_direct_turn_emits_text_and_done_without_tools(
 
 
 @pytest.mark.asyncio
+async def test_direct_turn_records_agent_execution_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _disable_runtime_tool_discovery(monkeypatch)
+    from fleet_rlm.integrations.observability import mlflow_context
+    from fleet_rlm.runtime.agent.runtime import AgentRuntime
+
+    captured: list[dict[str, Any]] = []
+
+    class _FakeSpan:
+        def __init__(self, name: str, span_type: str | None = None, attributes: dict[str, Any] | None = None):
+            self.record = {
+                "name": name,
+                "span_type": span_type,
+                "attributes": attributes or {},
+                "outputs": {},
+            }
+            captured.append(self.record)
+
+        def __enter__(self) -> "_FakeSpan":
+            return self
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        mlflow_context,
+        "mlflow_child_span",
+        lambda name, span_type="CHAIN", attributes=None, inputs=None: _FakeSpan(name, span_type, attributes),
+    )
+    monkeypatch.setattr(
+        mlflow_context,
+        "set_mlflow_span_outputs",
+        lambda span, outputs: span.record.__setitem__("outputs", outputs or {}) if span is not None else None,
+    )
+
+    rt = AgentRuntime(use_escalation=False)
+    rt.agent = _ScriptedAgent(dspy.Prediction(response="Direct answer."))
+
+    events = [event async for event in rt.aiter_chat_turn_stream("hi")]
+
+    assert events[-1].kind == "done"
+    span = next(record for record in captured if record["name"] == "fleet_rlm.agent_turn_execute")
+    assert span["span_type"] == "CHAIN"
+    assert span["attributes"]["fleet_rlm.agent_class"] == "_ScriptedAgent"
+    assert span["outputs"]["status"] == "ok"
+    assert span["outputs"]["stream_listener_count"] == 0
+    assert span["outputs"]["duration_ms"] >= 0
+
+
+@pytest.mark.asyncio
 async def test_cancel_before_turn_emits_cancelled_done(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

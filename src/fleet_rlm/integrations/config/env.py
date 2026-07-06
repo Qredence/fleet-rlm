@@ -100,7 +100,7 @@ class LlmConfig(BaseModel):
         description="LLM sampling temperature.",
     )
     rlm_max_iterations: int = Field(
-        default=30,
+        default=15,
         description="Maximum total RLM iterations across delegation.",
     )
     guardrail_mode: Literal["off", "warn", "strict"] = Field(
@@ -222,7 +222,7 @@ class AgentConfig(BaseModel):
         description="LLM sampling temperature.",
     )
     rlm_max_iterations: int = Field(
-        default=30,
+        default=15,
         description="Maximum total RLM iterations across delegation.",
     )
     guardrail_mode: Literal["off", "warn", "strict"] = Field(

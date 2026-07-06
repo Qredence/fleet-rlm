@@ -96,3 +96,9 @@ def test_resolve_daytona_lm_runtime_config_uses_small_model_contract(
     assert config.delegate_model == "openai/gpt-4.1-mini"
     assert config.delegate_api_key == "planner-key"
     assert config.delegate_api_base == "https://litellm.example"
+
+
+def test_daytona_package_exports_lm_runtime_config_resolver() -> None:
+    from fleet_rlm.integrations.daytona import resolve_daytona_lm_runtime_config
+
+    assert callable(resolve_daytona_lm_runtime_config)

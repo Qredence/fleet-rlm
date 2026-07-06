@@ -128,43 +128,88 @@ async def _execute_turn(
     ``dspy.streamify``; everything else falls back to a plain async (or
     thread-offloaded sync) forward pass.
     """
-    program = runtime.agent
-    args = runtime._escalation_call_args(message)
-    listeners = _response_stream_listeners(program)
-
-    if not listeners:
-        async_call = getattr(program, "aforward", None)
-        if callable(async_call):
-            return await async_call(**args)
-        return await asyncio.to_thread(program, **args)
-
-    # ty infers streamify's return as Awaitable; it is a callable returning
-    # an async generator, so widen to Any for the call below.
-    stream: Any = dspy.streamify(
-        program,
-        stream_listeners=listeners,
-        include_final_prediction_in_output_stream=True,
-        is_async_program=True,
+    from fleet_rlm.integrations.observability.mlflow_context import (
+        mlflow_child_span,
+        set_mlflow_span_outputs,
     )
-    prediction: Any = None
-    async for chunk in stream(**args):
-        if isinstance(chunk, StreamResponse):
-            if chunk.signature_field_name == "response" and chunk.chunk:
-                event = RuntimeEvent(
-                    kind=RuntimeEventKind.TEXT,
-                    text=str(chunk.chunk),
-                    payload={"streamed": True, "predict_name": chunk.predict_name},
-                )
-                emit(event)
-        elif isinstance(chunk, StatusMessage):
-            text = str(getattr(chunk, "message", "") or "").strip()
-            if text:
-                emit(RuntimeEvent.status(text, payload={"phase": "module_status"}))
-        elif isinstance(chunk, dspy.Prediction):
-            prediction = chunk
-    if prediction is None:
-        raise RuntimeError("Streaming turn ended without a final prediction.")
-    return prediction
+
+    started = _time.monotonic()
+    program = runtime.agent
+    with mlflow_child_span(
+        "fleet_rlm.agent_turn_execute",
+        span_type="CHAIN",
+        attributes={
+            "fleet_rlm.execution_origin": "runtime_streaming_execute_turn",
+            "fleet_rlm.agent_class": type(program).__name__,
+            "fleet_rlm.message_chars": str(len(message)),
+        },
+        inputs={"message_preview": message[:512]},
+    ) as span:
+        args = runtime._escalation_call_args(message)
+        listeners = _response_stream_listeners(program)
+        set_mlflow_span_outputs(
+            span,
+            {
+                "status": "started",
+                "stream_listener_count": len(listeners),
+                "call_arg_keys": sorted(str(key) for key in args),
+            },
+        )
+
+        if not listeners:
+            async_call = getattr(program, "aforward", None)
+            if callable(async_call):
+                result = await async_call(**args)
+            else:
+                result = await asyncio.to_thread(program, **args)
+            set_mlflow_span_outputs(
+                span,
+                {
+                    "status": "ok",
+                    "stream_listener_count": 0,
+                    "duration_ms": int((_time.monotonic() - started) * 1000),
+                },
+            )
+            return result
+
+        # ty infers streamify's return as Awaitable; it is a callable returning
+        # an async generator, so widen to Any for the call below.
+        stream: Any = dspy.streamify(
+            program,
+            stream_listeners=listeners,
+            include_final_prediction_in_output_stream=True,
+            is_async_program=True,
+        )
+        prediction: Any = None
+        streamed_chunks = 0
+        async for chunk in stream(**args):
+            if isinstance(chunk, StreamResponse):
+                if chunk.signature_field_name == "response" and chunk.chunk:
+                    streamed_chunks += 1
+                    event = RuntimeEvent(
+                        kind=RuntimeEventKind.TEXT,
+                        text=str(chunk.chunk),
+                        payload={"streamed": True, "predict_name": chunk.predict_name},
+                    )
+                    emit(event)
+            elif isinstance(chunk, StatusMessage):
+                text = str(getattr(chunk, "message", "") or "").strip()
+                if text:
+                    emit(RuntimeEvent.status(text, payload={"phase": "module_status"}))
+            elif isinstance(chunk, dspy.Prediction):
+                prediction = chunk
+        if prediction is None:
+            raise RuntimeError("Streaming turn ended without a final prediction.")
+        set_mlflow_span_outputs(
+            span,
+            {
+                "status": "ok",
+                "stream_listener_count": len(listeners),
+                "streamed_chunk_count": streamed_chunks,
+                "duration_ms": int((_time.monotonic() - started) * 1000),
+            },
+        )
+        return prediction
 
 
 async def _await_turn_with_live_progress(

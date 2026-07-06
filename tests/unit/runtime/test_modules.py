@@ -178,11 +178,12 @@ def test_streaming_rlm_records_real_repl_execution_span(monkeypatch) -> None:
     assert captured[0]["outputs"]["result"] == "hello"
 
 
-def test_streaming_rlm_uses_default_adapter_without_disabling_semantic_callbacks(monkeypatch) -> None:
-    """``_structured_action_context`` returns a no-op context so the primary
-    adapter is DSPy's default (``ChatAdapter`` with its native
-    ``JSONAdapter`` fallback — see ``dspy/adapters/chat_adapter.py:46,68,87-94``),
-    NOT a forced ``JSONAdapter`` override. Semantic callbacks stay enabled.
+def test_streaming_rlm_uses_strict_chat_adapter_without_disabling_semantic_callbacks(monkeypatch) -> None:
+    """Action generation uses one strict ChatAdapter call.
+
+    Parseable raw completions are recovered locally by ``_StreamingRLM`` instead
+    of letting DSPy's ChatAdapter fallback spend a second JSONAdapter LM call.
+    Semantic callbacks stay enabled.
     """
     import dspy
 
@@ -218,9 +219,8 @@ def test_streaming_rlm_uses_default_adapter_without_disabling_semantic_callbacks
 
     assert result.response == "done"
     assert observed["semantic_callbacks_enabled_during_call"] is True
-    # No JSONAdapter override is forced anymore; DSPy's default adapter
-    # resolution (ChatAdapter → JSONAdapter fallback) applies at parse time.
-    assert observed["adapter_during_call"] is None or isinstance(observed["adapter_during_call"], dspy.ChatAdapter)
+    assert isinstance(observed["adapter_during_call"], dspy.ChatAdapter)
+    assert observed["adapter_during_call"].use_json_adapter_fallback is False
     assert interpreter.semantic_callbacks_enabled is True
 
 
@@ -292,6 +292,45 @@ def test_streaming_rlm_compacts_repl_history_for_action_prompt() -> None:
     assert len(compact_history.format()) < len(history.format())
 
 
+def test_streaming_rlm_compacts_large_short_repl_history_for_action_prompt() -> None:
+    import dspy
+    from dspy.primitives.repl_types import REPLHistory
+
+    from fleet_rlm.runtime.agent.signatures import RLMTurnSignature
+    from fleet_rlm.runtime.modules.factory import create_runtime_rlm
+
+    history = REPLHistory()
+    for index in range(2):
+        history = history.append(
+            reasoning=f"reasoning {index}\n" + ("reasoning detail\n" * 500),
+            code=f"print('step {index}')\n" + ("x = 1\n" * 900),
+            output=f"output {index}\n" + ("large output\n" * 900),
+        )
+
+    observed: dict[str, Any] = {}
+    rlm = create_runtime_rlm(
+        signature=RLMTurnSignature,
+        interpreter=SimpleNamespace(),
+        max_iterations=2,
+        max_llm_calls=3,
+        verbose=False,
+    )
+
+    class FakeInner:
+        def __call__(self, **kwargs: Any) -> dspy.Prediction:
+            observed.update(kwargs)
+            return dspy.Prediction(reasoning="bounded", code="SUBMIT(response='ok')")
+
+    rlm.generate_action._inner = FakeInner()
+    rlm.generate_action(variables_info=[], repl_history=history, iteration="1/2")
+
+    compact_history = observed["repl_history"]
+    assert len(history.entries) == 2
+    assert len(compact_history.entries) == 2
+    assert len(compact_history.format()) < len(history.format())
+    assert len(compact_history.format()) <= 8_000
+
+
 def test_no_callback_rlm_scopes_disabled_semantic_callbacks(monkeypatch) -> None:
     import dspy
 
@@ -328,9 +367,8 @@ def test_no_callback_rlm_scopes_disabled_semantic_callbacks(monkeypatch) -> None
 
     assert result.response == "done"
     assert observed["semantic_callbacks_enabled_during_call"] is False
-    # No JSONAdapter override is forced anymore; DSPy's default adapter
-    # resolution (ChatAdapter → JSONAdapter fallback) applies at parse time.
-    assert observed["adapter_during_call"] is None or isinstance(observed["adapter_during_call"], dspy.ChatAdapter)
+    assert isinstance(observed["adapter_during_call"], dspy.ChatAdapter)
+    assert observed["adapter_during_call"].use_json_adapter_fallback is False
     assert interpreter.semantic_callbacks_enabled is True
 
 

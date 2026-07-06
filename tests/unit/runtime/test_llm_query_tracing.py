@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any
 
+import dspy
 import pytest
 
 
@@ -151,6 +153,7 @@ def _make_host(sub_lm: Any, *, timeout: int = 10) -> Any:
             self._sub_lm_executor = ThreadPoolExecutor(max_workers=2)
             self._sub_lm_executor_lock = threading.Lock()
             self._sub_lm_auth_failed = False
+            self._sub_lm_auth_error = None
             self._bounded_sub_lm = None
             self._bounded_sub_lm_base = None
 
@@ -170,24 +173,65 @@ def test_initialize_llm_query_state_resets_auth_failure_flag() -> None:
     )
 
     assert host._sub_lm_auth_failed is False
+    assert host._sub_lm_auth_error is None
+
+
+def test_llm_query_succeeds_with_configured_fake_lm(monkeypatch) -> None:
+    _patch_mlflow(monkeypatch)
+
+    lm = _RecordingLM()
+    host = _make_host(lm)
+    try:
+        result = host.llm_query("summarize this")
+    finally:
+        if host._sub_lm_executor is not None:
+            host._sub_lm_executor.shutdown(wait=False)
+
+    assert result == "ok:summarize this"
+    assert lm.calls == ["summarize this"]
+    assert host._llm_call_count == 1
+
+
+def test_llm_query_without_configured_lm_has_actionable_error(monkeypatch) -> None:
+    captured = _patch_mlflow(monkeypatch)
+
+    host = _make_host(None)
+    try:
+        with dspy.context(lm=None):
+            with pytest.raises(RuntimeError) as exc_info:
+                host.llm_query("summarize this")
+    finally:
+        if host._sub_lm_executor is not None:
+            host._sub_lm_executor.shutdown(wait=False)
+
+    message = str(exc_info.value)
+    assert "No LM configured for llm_query" in message
+    assert "active delegate LLM profile" in message
+    assert "DSPY_DELEGATE_LM_MODEL" in message
+    assert "DSPY_LLM_API_KEY" in message
+    assert host._llm_call_count == 0
+    assert captured[-1]["attributes"]["fleet_rlm.auth_preflight_result"] == "missing_lm"
+    assert captured[-1]["outputs"]["error_kind"] == "missing_lm"
 
 
 def test_llm_query_auth_failure_disables_session(monkeypatch) -> None:
-    _patch_mlflow(monkeypatch)
+    captured = _patch_mlflow(monkeypatch)
 
     class UnauthorizedLM:
+        model = "bad-profile-model"
+
         def __init__(self) -> None:
             self.calls = 0
 
         def __call__(self, prompt: str, **kwargs: Any) -> list[dict[str, str]]:
             _ = prompt, kwargs
             self.calls += 1
-            raise RuntimeError("401 Unauthorized")
+            raise RuntimeError("401 Unauthorized sk-secret-token")
 
     lm = UnauthorizedLM()
     host = _make_host(lm)
     try:
-        with pytest.raises(RuntimeError, match="401 Unauthorized"):
+        with pytest.raises(RuntimeError, match="Sub-LM authentication failed"):
             host.llm_query("first")
         with pytest.raises(RuntimeError, match="previously failed"):
             host.llm_query("second")
@@ -196,7 +240,18 @@ def test_llm_query_auth_failure_disables_session(monkeypatch) -> None:
             host._sub_lm_executor.shutdown(wait=False)
 
     assert host._sub_lm_auth_failed is True
+    assert host._sub_lm_auth_error is not None
     assert lm.calls == 1
+    first_outputs = captured[0]["outputs"]
+    assert first_outputs["error_kind"] == "auth_failure"
+    assert first_outputs["auth_failure"] is True
+    assert first_outputs["provider_status"] == "401"
+    assert "sk-secret-token" not in first_outputs["provider_error"]
+    assert "***REDACTED***" in first_outputs["provider_error"]
+    second_outputs = captured[1]["outputs"]
+    assert second_outputs["error_kind"] == "auth_fail_fast"
+    assert second_outputs["skipped_calls_due_to_auth_fail_fast"] == 1
+    assert host._llm_call_count == 1
 
 
 def test_query_sub_lm_wraps_sub_lm_in_bounded_lm(monkeypatch) -> None:
@@ -278,6 +333,68 @@ def test_llm_query_batched_prepends_context(monkeypatch) -> None:
 
     assert rec.calls == ["CTX\n\na", "CTX\n\nb"], f"got {rec.calls!r}"
     assert results == ["ok:CTX\n\na", "ok:CTX\n\nb"]
+
+
+def test_llm_query_batched_short_circuits_existing_auth_failure(monkeypatch) -> None:
+    captured = _patch_mlflow(monkeypatch)
+
+    rec = _RecordingLM()
+    host = _make_host(rec)
+    host._sub_lm_auth_failed = True
+    host._sub_lm_auth_error = "RuntimeError provider_status=401: unauthorized"
+    try:
+        with pytest.raises(RuntimeError, match="previously failed"):
+            host.llm_query_batched(["a", "b", "c"])
+    finally:
+        if host._sub_lm_executor is not None:
+            host._sub_lm_executor.shutdown(wait=False)
+
+    assert rec.calls == []
+    assert host._llm_call_count == 0
+    batch_record = next(record for record in captured if record["name"] == "fleet_rlm.llm_query_batched")
+    assert batch_record["attributes"]["fleet_rlm.auth_preflight_result"] == "auth_fail_fast"
+    assert batch_record["outputs"]["skipped_calls_due_to_auth_fail_fast"] == 3
+
+
+def test_llm_query_batched_auth_failure_stops_launching_remaining_prompts(monkeypatch) -> None:
+    captured = _patch_mlflow(monkeypatch)
+
+    class FirstPromptUnauthorizedLM:
+        model = "bad-profile-model"
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+            self.lock = threading.Lock()
+
+        def __call__(self, prompt: str, **kwargs: Any) -> list[dict[str, str]]:
+            _ = kwargs
+            with self.lock:
+                self.calls.append(prompt)
+            if prompt == "auth":
+                raise RuntimeError("HTTP Error 401: Unauthorized token=sk-batch-secret")
+            time.sleep(0.05)
+            return [{"text": f"ok:{prompt}"}]
+
+    lm = FirstPromptUnauthorizedLM()
+    host = _make_host(lm)
+    host.max_llm_calls = 10
+    prompts = ["auth", "b", "c", "d", "e", "f"]
+    try:
+        with pytest.raises(RuntimeError, match="llm_query_batched failed"):
+            host.llm_query_batched(prompts)
+    finally:
+        if host._sub_lm_executor is not None:
+            host._sub_lm_executor.shutdown(wait=False)
+
+    assert host._sub_lm_auth_failed is True
+    assert len(lm.calls) < len(prompts)
+    assert "e" not in lm.calls or "f" not in lm.calls
+    batch_record = next(record for record in captured if record["name"] == "fleet_rlm.llm_query_batched")
+    batch_outputs = batch_record["outputs"]
+    assert batch_outputs["auth_failure"] is True
+    assert batch_outputs["skipped_calls_due_to_auth_fail_fast"] >= 1
+    assert batch_outputs["submitted_count"] < len(prompts)
+    assert host._llm_call_count == batch_outputs["submitted_count"]
 
 
 def test_invoke_tool_forwards_context_for_llm_query(monkeypatch) -> None:

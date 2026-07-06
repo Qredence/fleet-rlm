@@ -39,8 +39,8 @@ DEFAULT_SNAPSHOT_PACKAGES: list[str] = [
     "pydantic",
 ]
 
-DEFAULT_SNAPSHOT_NAME = "fleet-rlm-base"
-DEFAULT_SNAPSHOT_BASE_IMAGE = "python:3.12-slim"
+DEFAULT_SNAPSHOT_NAME = "fleet-rlm-01"
+DEFAULT_SNAPSHOT_BASE_IMAGE = "3.13.9-slim"
 _VALID_PACKAGE_SPEC_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-\[\],<>=!~]*$")
 
 

@@ -47,6 +47,7 @@ def _env_int(name: str, default: int) -> int:
 # from within sub_rlm_batched threads, so they must not share the same pool.
 _LLM_BATCH_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="llm_batch")
 _SUB_RLM_BATCH_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="sub_rlm_batch")
+_LLM_QUERY_BATCH_WINDOW = max(1, min(8, _env_int("FLEET_RLM_LLM_QUERY_BATCH_WINDOW", 4)))
 
 # Phase 7: child conversation snapshot configuration
 _CHILD_HISTORY_MAX_TURNS = 2
@@ -155,6 +156,7 @@ class LLMQueryMixin:
     _sub_lm_executor: ThreadPoolExecutor | None
     _sub_lm_executor_lock: threading.Lock
     _sub_lm_auth_failed: bool  # Fail-fast flag for 401/Unauthorized errors
+    _sub_lm_auth_error: str | None
 
     def build_delegate_child(self, *, remaining_llm_budget: int) -> Any:
         """Create a child interpreter — implemented by the host class."""
@@ -193,7 +195,127 @@ class LLMQueryMixin:
                 )
             self._llm_call_count += n
 
-    def _query_sub_lm(self, prompt: str) -> str:
+    def _decrement_llm_calls(self, n: int) -> None:
+        """Release previously reserved LLM-call budget for skipped work."""
+        if n <= 0:
+            return
+        with self._llm_call_lock:
+            self._llm_call_count = max(0, self._llm_call_count - n)
+
+    def _resolve_llm_query_target(self) -> tuple[Any | None, str, str]:
+        """Resolve the LM used by ``llm_query*`` without mutating DSPy state."""
+        if self.sub_lm is not None:
+            target = self.sub_lm
+            source = "sub_lm"
+        else:
+            target = dspy.settings.lm
+            source = "dspy_settings_lm" if target is not None else "missing"
+        model = str(getattr(target, "model", "?")) if target is not None else "?"
+        return target, source, model
+
+    def _missing_lm_error(self, *, tool_name: str) -> RuntimeError:
+        return RuntimeError(
+            f"No LM configured for {tool_name}. Configure an active delegate LLM profile, "
+            "pass sub_lm to the active interpreter, or set DSPY_DELEGATE_LM_MODEL plus "
+            "DSPY_DELEGATE_LM_API_KEY. If no delegate is configured, ensure the planner "
+            "LM is available through the active LLM profile or DSPY_LM_MODEL plus "
+            "DSPY_LLM_API_KEY/DSPY_LM_API_KEY."
+        )
+
+    def _llm_auth_fail_fast_error(self, *, tool_name: str) -> RuntimeError:
+        previous = getattr(self, "_sub_lm_auth_error", None)
+        suffix = f" Previous provider error: {previous}" if previous else ""
+        return RuntimeError(
+            f"Sub-LM authentication previously failed; {tool_name} is disabled for this session. "
+            "Check the active delegate LLM profile, delegate API key, provider/model mapping, "
+            "or DSPY_DELEGATE_LM_MODEL/DSPY_DELEGATE_LM_API_KEY. If Fleet-RLM is using the "
+            "planner fallback, check the active planner profile or DSPY_LM_MODEL and "
+            f"DSPY_LLM_API_KEY/DSPY_LM_API_KEY.{suffix}"
+        )
+
+    def _raise_if_sub_lm_auth_failed(self, *, tool_name: str) -> None:
+        if getattr(self, "_sub_lm_auth_failed", False):
+            raise self._llm_auth_fail_fast_error(tool_name=tool_name)
+
+    def _provider_error_detail(self, exc: BaseException) -> dict[str, str]:
+        raw = _redact_sensitive(str(exc))
+        if len(raw) > 1_000:
+            raw = f"{raw[:1_000]}...[truncated]"
+        lower = raw.lower()
+        status = "401" if "401" in lower else "unauthorized" if "unauthorized" in lower else "unknown"
+        return {
+            "error_class": type(exc).__name__,
+            "provider_status": status,
+            "message": raw,
+        }
+
+    def _is_auth_failure(self, exc: BaseException) -> bool:
+        detail = self._provider_error_detail(exc)
+        return detail["provider_status"] in {"401", "unauthorized"}
+
+    def _mark_sub_lm_auth_failed(self, exc: BaseException) -> dict[str, str]:
+        detail = self._provider_error_detail(exc)
+        self._sub_lm_auth_failed = True
+        self._sub_lm_auth_error = (
+            f"{detail['error_class']} provider_status={detail['provider_status']}: {detail['message']}"
+        )
+        logger.warning(
+            "Sub-LM auth failed; disabling llm_query for this session. error_class=%s provider_status=%s",
+            detail["error_class"],
+            detail["provider_status"],
+        )
+        return detail
+
+    def _record_blocked_llm_query_span(
+        self,
+        *,
+        tool_name: str,
+        prompt_count: int,
+        skipped_calls: int,
+        reason: str,
+        target_source: str,
+        target_model: str,
+    ) -> None:
+        from fleet_rlm.integrations.observability.mlflow_context import (
+            mlflow_child_span,
+            set_mlflow_span_outputs,
+        )
+
+        with mlflow_child_span(
+            f"fleet_rlm.{tool_name}",
+            span_type="CHAIN" if tool_name.endswith("_batched") else "LLM",
+            attributes={
+                "fleet_rlm.tool_name": tool_name,
+                "fleet_rlm.llm_query_target_source": target_source,
+                "fleet_rlm.sub_lm_model": target_model,
+                "fleet_rlm.auth_preflight_result": reason,
+                "fleet_rlm.auth_fail_fast_state": str(getattr(self, "_sub_lm_auth_failed", False)).lower(),
+                "fleet_rlm.batch_prompt_count": str(prompt_count),
+                "fleet_rlm.skipped_calls_due_to_auth_fail_fast": str(skipped_calls),
+            },
+            inputs={"prompt_count": prompt_count},
+        ) as span:
+            set_mlflow_span_outputs(
+                span,
+                {
+                    "status": "error",
+                    "error_kind": reason,
+                    "skipped_calls_due_to_auth_fail_fast": skipped_calls,
+                },
+            )
+            if span is not None:
+                set_status = getattr(span, "set_status", None)
+                if callable(set_status):
+                    set_status("ERROR")
+
+    def _query_sub_lm(
+        self,
+        prompt: str,
+        *,
+        target_lm: Any | None = None,
+        target_source: str | None = None,
+        target_model: str | None = None,
+    ) -> str:
         """Query the sub-LM with a prompt string.
 
         Args:
@@ -206,16 +328,17 @@ class LLMQueryMixin:
             RuntimeError: If no LM is configured or if the call times out.
         """
         # Fail-fast: if a previous call got 401 Unauthorized, don't retry.
-        if getattr(self, "_sub_lm_auth_failed", False):
-            raise RuntimeError(
-                "Sub-LM authentication previously failed (401 Unauthorized). "
-                "llm_query is disabled for this session. Check DSPY_DELEGATE_LM_API_KEY."
-            )
+        self._raise_if_sub_lm_auth_failed(tool_name="llm_query")
 
-        temp_target_lm = self.sub_lm if self.sub_lm is not None else dspy.settings.lm
+        if target_lm is None or target_source is None or target_model is None:
+            target_lm, target_source, target_model = self._resolve_llm_query_target()
+        if target_lm is None:
+            raise self._missing_lm_error(tool_name="llm_query")
+
+        temp_target_lm = target_lm
         config_overrides = self._get_sub_lm_config(temp_target_lm) if temp_target_lm is not None else {}
         bounded = bool(config_overrides)
-        sub_lm_model = str(getattr(temp_target_lm, "model", "?")) if temp_target_lm is not None else "?"
+        sub_lm_model = target_model
 
         from fleet_rlm.integrations.observability.mlflow_context import (
             _bounded_value,
@@ -223,10 +346,8 @@ class LLMQueryMixin:
             set_mlflow_span_outputs,
         )
 
-        # Resolve target_lm in parent thread to inherit thread-locals safely
-        resolved_lm = self.sub_lm if self.sub_lm is not None else dspy.settings.lm
-        if resolved_lm is None:
-            raise RuntimeError("No LM configured. Use dspy.configure(lm=...) or pass sub_lm to the active interpreter.")
+        # Resolve target_lm in parent thread to inherit thread-locals safely.
+        resolved_lm = target_lm
 
         # Execute LM call with timeout to prevent hangs.
         def _execute_lm(lm: Any) -> str:
@@ -256,6 +377,9 @@ class LLMQueryMixin:
                 "fleet_rlm.llm_call_timeout_s": str(self.llm_call_timeout),
                 "fleet_rlm.bounded": str(bounded),
                 "fleet_rlm.sub_lm_model": sub_lm_model,
+                "fleet_rlm.llm_query_target_source": target_source,
+                "fleet_rlm.auth_preflight_result": "ok",
+                "fleet_rlm.auth_fail_fast_state": str(getattr(self, "_sub_lm_auth_failed", False)).lower(),
             },
             inputs={"prompt_chars": len(prompt), "prompt_preview": _bounded_value(prompt, limit=1_000)},
         ) as span:
@@ -280,16 +404,46 @@ class LLMQueryMixin:
                     set_status = getattr(span, "set_status", None)
                     if callable(set_status):
                         set_status("ERROR")
+                    set_mlflow_span_outputs(
+                        span,
+                        {
+                            "status": "error",
+                            "error_kind": "timeout",
+                            "auth_failure": False,
+                        },
+                    )
                 raise RuntimeError(
                     f"LLM call timed out after {self.llm_call_timeout}s. "
                     "Consider increasing llm_call_timeout or checking API connectivity."
                 ) from exc
             except Exception as exc:
                 # Fail-fast on 401 Unauthorized: set flag to prevent retry storms.
-                exc_str = str(exc).lower()
-                if "401" in exc_str or "unauthorized" in exc_str:
-                    self._sub_lm_auth_failed = True
-                    logger.warning("Sub-LM auth failed (401 Unauthorized). Disabling llm_query for this session.")
+                detail = self._provider_error_detail(exc)
+                auth_failure = self._is_auth_failure(exc)
+                if auth_failure:
+                    detail = self._mark_sub_lm_auth_failed(exc)
+                if span is not None:
+                    set_status = getattr(span, "set_status", None)
+                    if callable(set_status):
+                        set_status("ERROR")
+                    set_mlflow_span_outputs(
+                        span,
+                        {
+                            "status": "error",
+                            "error_kind": "auth_failure" if auth_failure else "provider_error",
+                            "auth_failure": auth_failure,
+                            "provider_error_class": detail["error_class"],
+                            "provider_status": detail["provider_status"],
+                            "provider_error": detail["message"],
+                        },
+                    )
+                if auth_failure:
+                    raise RuntimeError(
+                        "Sub-LM authentication failed while executing llm_query. "
+                        "Check the active delegate LLM profile/API key/provider mapping or "
+                        "DSPY_DELEGATE_LM_MODEL/DSPY_DELEGATE_LM_API_KEY. "
+                        f"Provider error: {detail['error_class']}: {detail['message']}"
+                    ) from exc
                 raise
 
     def llm_query(self, prompt: str, context: str = "") -> str:
@@ -319,9 +473,35 @@ class LLMQueryMixin:
         """
         if not prompt:
             raise ValueError("prompt cannot be empty")
+        target_lm, target_source, target_model = self._resolve_llm_query_target()
+        if getattr(self, "_sub_lm_auth_failed", False):
+            self._record_blocked_llm_query_span(
+                tool_name="llm_query",
+                prompt_count=1,
+                skipped_calls=1,
+                reason="auth_fail_fast",
+                target_source=target_source,
+                target_model=target_model,
+            )
+            raise self._llm_auth_fail_fast_error(tool_name="llm_query")
+        if target_lm is None:
+            self._record_blocked_llm_query_span(
+                tool_name="llm_query",
+                prompt_count=1,
+                skipped_calls=1,
+                reason="missing_lm",
+                target_source=target_source,
+                target_model=target_model,
+            )
+            raise self._missing_lm_error(tool_name="llm_query")
         self._check_and_increment_llm_calls(1)
         full_prompt = f"{context}\n\n{prompt}" if context else prompt
-        return self._query_sub_lm(full_prompt)
+        return self._query_sub_lm(
+            full_prompt,
+            target_lm=target_lm,
+            target_source=target_source,
+            target_model=target_model,
+        )
 
     def llm_query_batched(self, prompts: list[str], context: str = "") -> list[str]:
         """Query the sub-LLM with multiple prompts concurrently.
@@ -349,6 +529,27 @@ class LLMQueryMixin:
         """
         if not prompts:
             return []
+        target_lm, target_source, target_model = self._resolve_llm_query_target()
+        if getattr(self, "_sub_lm_auth_failed", False):
+            self._record_blocked_llm_query_span(
+                tool_name="llm_query_batched",
+                prompt_count=len(prompts),
+                skipped_calls=len(prompts),
+                reason="auth_fail_fast",
+                target_source=target_source,
+                target_model=target_model,
+            )
+            raise self._llm_auth_fail_fast_error(tool_name="llm_query_batched")
+        if target_lm is None:
+            self._record_blocked_llm_query_span(
+                tool_name="llm_query_batched",
+                prompt_count=len(prompts),
+                skipped_calls=len(prompts),
+                reason="missing_lm",
+                target_source=target_source,
+                target_model=target_model,
+            )
+            raise self._missing_lm_error(tool_name="llm_query_batched")
         self._check_and_increment_llm_calls(len(prompts))
         if context:
             prompts = [f"{context}\n\n{p}" if p else p for p in prompts]
@@ -360,6 +561,8 @@ class LLMQueryMixin:
 
         results: dict[int, str] = {}
         errors: list[tuple[int, Exception]] = []
+        submitted_count = 0
+        skipped_due_to_auth = 0
 
         with mlflow_child_span(
             "fleet_rlm.llm_query_batched",
@@ -367,23 +570,53 @@ class LLMQueryMixin:
             attributes={
                 "fleet_rlm.tool_name": "llm_query_batched",
                 "fleet_rlm.prompt_count": str(len(prompts)),
+                "fleet_rlm.batch_prompt_count": str(len(prompts)),
+                "fleet_rlm.llm_query_target_source": target_source,
+                "fleet_rlm.sub_lm_model": target_model,
+                "fleet_rlm.auth_preflight_result": "ok",
+                "fleet_rlm.auth_fail_fast_state": str(getattr(self, "_sub_lm_auth_failed", False)).lower(),
             },
             inputs={"prompt_count": len(prompts), "prompt_chars": [len(prompt) for prompt in prompts]},
         ) as span:
-            future_to_idx = {
-                # Copy a fresh context per task. Reusing one Context object
-                # across concurrent threads can raise:
-                # "RuntimeError: cannot enter context ... is already entered".
-                _LLM_BATCH_EXECUTOR.submit(contextvars.copy_context().run, self._query_sub_lm, p): i
-                for i, p in enumerate(prompts)
-            }
-            for future in as_completed(future_to_idx):
-                idx = int(future_to_idx[future])
+            future_to_idx: dict[Any, int] = {}
+            next_idx = 0
+            auth_failure_seen = False
+
+            def _submit_until_window() -> None:
+                nonlocal next_idx, submitted_count
+                while next_idx < len(prompts) and len(future_to_idx) < _LLM_QUERY_BATCH_WINDOW:
+                    prompt = prompts[next_idx]
+                    future = _LLM_BATCH_EXECUTOR.submit(
+                        contextvars.copy_context().run,
+                        self._query_sub_lm,
+                        prompt,
+                        target_lm=target_lm,
+                        target_source=target_source,
+                        target_model=target_model,
+                    )
+                    future_to_idx[future] = next_idx
+                    submitted_count += 1
+                    next_idx += 1
+
+            _submit_until_window()
+            while future_to_idx:
+                future = next(as_completed(tuple(future_to_idx)))
+                idx = int(future_to_idx.pop(future))
                 try:
                     value = future.result()
                     results[idx] = value if isinstance(value, str) else str(value)
                 except Exception as exc:
                     errors.append((idx, exc))
+                    if self._is_auth_failure(exc) or getattr(self, "_sub_lm_auth_failed", False):
+                        auth_failure_seen = True
+                        for pending in future_to_idx:
+                            pending.cancel()
+                        future_to_idx.clear()
+                        skipped_due_to_auth = max(0, len(prompts) - submitted_count)
+                        self._decrement_llm_calls(skipped_due_to_auth)
+                        break
+                if not auth_failure_seen:
+                    _submit_until_window()
 
             set_mlflow_span_outputs(
                 span,
@@ -391,6 +624,10 @@ class LLMQueryMixin:
                     "status": "error" if errors else "ok",
                     "response_count": len(results),
                     "error_count": len(errors),
+                    "batch_prompt_count": len(prompts),
+                    "submitted_count": submitted_count,
+                    "skipped_calls_due_to_auth_fail_fast": skipped_due_to_auth,
+                    "auth_failure": auth_failure_seen,
                 },
             )
             if errors and span is not None:

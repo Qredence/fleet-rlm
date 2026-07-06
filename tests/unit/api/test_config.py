@@ -16,6 +16,7 @@ def test_app_config_defaults_and_computed_lists(clean_runtime_env):
     assert defaults.expose_docs is True
     assert defaults.expose_root is True
     assert defaults.agent_max_output_chars == 5000
+    assert defaults.rlm_max_iterations == 15
     assert defaults.rlm_action_max_tokens == 2048
 
     cfg = config_module.AppConfig(

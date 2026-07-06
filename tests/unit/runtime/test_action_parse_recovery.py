@@ -7,13 +7,15 @@ triggered a corrective regeneration that also failed, cascading into a full
 RLM re-run + reduced-budget retry + ChainOfThought fallback (~363s, 17 wasted
 LLM calls).
 
-The fix realigned the primary adapter to ``dspy.ChatAdapter`` (DSPy's default,
-with its native automatic ``JSONAdapter`` fallback — see
-``dspy/adapters/chat_adapter.py:46,68,87-94``). The hand-rolled salvage cascade
+The fix realigned the primary adapter to a strict ``dspy.ChatAdapter`` pass. The
+raw completion is recovered locally when it is parseable as ChatAdapter fields
+or JSON, avoiding DSPy's automatic second ``JSONAdapter`` LM call on action
+parse failures. The old hand-rolled salvage cascade
 (``_salvage_with_chat_adapter`` / ``_salvage_with_regex`` / ``_regex_salvage``)
-was removed entirely; only the orthogonal prompt/cost-shaping guards
+stays removed; only prompt/cost-shaping guards
 (``_extract_completion_from_parse_error`` / ``_is_degenerate_response`` /
-``_truncate_completion``) and the consecutive-parse-error cap remain.
+``_truncate_completion``), local action recovery, and the consecutive-parse-error
+cap remain.
 """
 
 from __future__ import annotations
@@ -44,6 +46,32 @@ The manifest shows a single large file. Let me inspect document_text first.
 ```python
 print("Document length:", len(context['document_text']))
 ```"""
+
+_INLINE_CHATADAPTER_COMPLETION = """[[ ## reasoning ## ]]
+I found the manifest. Next I will inspect the indexed sections.[[ ## code ## ]]
+```python
+print(context_index["sections"][:3])
+```
+[[ ## completed ## ]]"""
+
+_TIGHT_CODE_MARKER_COMPLETION = """[[ ## reasoning ## ]]
+I need to inspect the package map without printing the whole document.
+
+[[ ## code ##]]
+```python
+print(context_index["sections"][11])
+```
+[[ ## completed ##]]"""
+
+_MISSING_CODE_MARKER_COMPLETION = """[[ ## reasoning ## ]]
+I found the relevant section offsets. I will inspect only the Package Map.
+```python
+pkg_map = context["document_text"][84572:86032]
+print(pkg_map[:2000])
+```
+[[ ## completed ## ]]"""
+
+_JSON_ACTION_COMPLETION = '{"reasoning": "Use the precomputed index.", "code": "print(context_index.keys())"}'
 
 
 # Reconstruct the exception message format DSPy embeds inside an
@@ -98,6 +126,60 @@ class TestExtractCompletion:
         assert extracted == "via attribute"
 
 
+class TestActionPredictionRecovery:
+    """Recover parseable action completions locally instead of spending a second LM call."""
+
+    def test_recovers_inline_chatadapter_field_markers(self) -> None:
+        exc = Exception(_parse_error_message(_INLINE_CHATADAPTER_COMPLETION))
+
+        prediction = _StreamingRLM._recover_action_prediction_from_parse_error(exc, _ActionSig)
+
+        assert prediction is not None
+        assert prediction.reasoning.startswith("I found the manifest")
+        assert 'context_index["sections"]' in prediction.code
+        assert "[[ ## completed ## ]]" not in prediction.code
+
+    def test_recovers_tight_closing_marker_variant(self) -> None:
+        """Trace regression: model emitted ``[[ ## code ##]]`` without the
+        whitespace DSPy's strict marker regex expects."""
+
+        exc = Exception(_parse_error_message(_TIGHT_CODE_MARKER_COMPLETION))
+
+        prediction = _StreamingRLM._recover_action_prediction_from_parse_error(exc, _ActionSig)
+
+        assert prediction is not None
+        assert prediction.reasoning.startswith("I need to inspect the package map")
+        assert 'context_index["sections"][11]' in prediction.code
+
+    def test_recovers_reasoning_then_python_fence_without_code_marker(self) -> None:
+        """Trace regression: a reasoning block followed directly by a Python
+        fence is still an executable RLM action and should not burn an iteration."""
+
+        exc = Exception(_parse_error_message(_MISSING_CODE_MARKER_COMPLETION))
+
+        prediction = _StreamingRLM._recover_action_prediction_from_parse_error(exc, _ActionSig)
+
+        assert prediction is not None
+        assert prediction.reasoning.startswith("I found the relevant section offsets")
+        assert 'context["document_text"]' in prediction.code
+
+    def test_recovers_json_action_completion(self) -> None:
+        exc = Exception(_parse_error_message(_JSON_ACTION_COMPLETION))
+
+        prediction = _StreamingRLM._recover_action_prediction_from_parse_error(exc, _ActionSig)
+
+        assert prediction is not None
+        assert prediction.reasoning == "Use the precomputed index."
+        assert prediction.code == "print(context_index.keys())"
+
+    def test_returns_none_for_unstructured_completion(self) -> None:
+        exc = Exception(_parse_error_message("I will inspect the manifest."))
+
+        prediction = _StreamingRLM._recover_action_prediction_from_parse_error(exc, _ActionSig)
+
+        assert prediction is None
+
+
 class TestIsDegenerateResponse:
     """``_is_degenerate_response`` routes unsalvageable outputs away from
     downstream prompt-shaping guards (NOT adapter salvage — that path is gone)."""
@@ -137,7 +219,7 @@ def _bare_rlm() -> _StreamingRLM:
     # __init__ is skipped (it builds a full dspy.RLM); set the counters the cap
     # test relies on directly.
     rlm._consecutive_parse_errors = 0
-    rlm._max_consecutive_parse_errors = 3
+    rlm._max_consecutive_parse_errors = 1
     return rlm
 
 
@@ -153,7 +235,7 @@ class TestConsecutiveParseErrorCap:
     def test_default_counters_zero(self) -> None:
         rlm = _bare_rlm()
         assert rlm._consecutive_parse_errors == 0
-        assert rlm._max_consecutive_parse_errors == 3
+        assert rlm._max_consecutive_parse_errors == 1
 
     def test_cap_is_env_configurable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("FLEET_RLM_MAX_CONSECUTIVE_PARSE_ERRORS", "5")
@@ -161,7 +243,7 @@ class TestConsecutiveParseErrorCap:
         # re-read the env directly to confirm the wiring.
         from fleet_rlm.runtime.modules.factory import _env_int
 
-        assert _env_int("FLEET_RLM_MAX_CONSECUTIVE_PARSE_ERRORS", 3) == 5
+        assert _env_int("FLEET_RLM_MAX_CONSECUTIVE_PARSE_ERRORS", 1) == 5
 
 
 class TestEnsureDspyPatched:

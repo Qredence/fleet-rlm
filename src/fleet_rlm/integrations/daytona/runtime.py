@@ -276,7 +276,7 @@ class DaytonaSandboxRuntime:
         builder object (e.g. ``Image.debian_slim().pip_install(...)``).
 
         When neither ``image`` nor ``snapshot`` is provided, the spec
-        defaults to the ``fleet-rlm-base`` snapshot so that sandboxes
+        defaults to the ``fleet-rlm-01`` snapshot so that sandboxes
         start with pre-installed core packages (dspy, numpy, pandas,
         httpx, pydantic).  If the snapshot has not been created yet, the
         runtime falls back to a declarative image build at sandbox

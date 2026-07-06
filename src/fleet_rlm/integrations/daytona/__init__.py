@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from .config import (
         ResolvedDaytonaConfig,
         resolve_daytona_config,
+        resolve_daytona_lm_runtime_config,
     )
     from .diagnostics import run_daytona_smoke
     from .errors import (
@@ -52,6 +53,7 @@ __all__ = [
     "VolumeNotReadyError",
     "bootstrap_snapshot",
     "resolve_daytona_config",
+    "resolve_daytona_lm_runtime_config",
     "run_daytona_smoke",
 ]
 
@@ -125,6 +127,10 @@ _IMPORT_MAP: dict[str, tuple[str, str]] = {
     "resolve_daytona_config": (
         "fleet_rlm.integrations.daytona.config",
         "resolve_daytona_config",
+    ),
+    "resolve_daytona_lm_runtime_config": (
+        "fleet_rlm.integrations.daytona.config",
+        "resolve_daytona_lm_runtime_config",
     ),
     "run_daytona_smoke": (
         "fleet_rlm.integrations.daytona.diagnostics",

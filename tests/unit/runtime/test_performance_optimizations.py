@@ -7,11 +7,11 @@ Tests cover:
 4. REPL output cache
 
 Note: the hand-rolled salvage cascade (_regex_salvage, _salvage_with_chat_adapter,
-_salvage_with_regex, _CHATADAPTER_SALVAGE_ENABLED, _REGEX_SALVAGE_ENABLED) was
-removed once the primary adapter was realigned to ``dspy.ChatAdapter`` (DSPy's
-native ``ChatAdapter`` → ``JSONAdapter`` fallback subsumes it). The orthogonal
-``_truncate_completion`` / ``_is_degenerate_response`` / ``_extract_completion_from_parse_error``
-helpers remain and are covered below.
+_salvage_with_regex, _CHATADAPTER_SALVAGE_ENABLED, _REGEX_SALVAGE_ENABLED) stays
+removed. Action generation now uses one strict ``dspy.ChatAdapter`` pass and
+recovers parseable raw completions locally instead of spending a second fallback
+LM call. The orthogonal ``_truncate_completion`` / ``_is_degenerate_response`` /
+``_extract_completion_from_parse_error`` helpers remain and are covered below.
 """
 
 from __future__ import annotations

@@ -253,12 +253,22 @@ async def _run_prepared_stream(
         await stream_body()
         return
 
+    from fleet_rlm.integrations.observability.mlflow_context import (
+        mlflow_child_span,
+        set_mlflow_span_outputs,
+    )
     from fleet_rlm.integrations.observability.mlflow_runtime import (
         mlflow_request_context,
     )
 
     with mlflow_request_context(mlflow_trace_context):
-        await stream_body()
+        with mlflow_child_span(
+            "fleet_rlm.ws_stream_body",
+            span_type="CHAIN",
+            attributes={"fleet_rlm.execution_origin": "ws_turn_runner"},
+        ) as span:
+            await stream_body()
+            set_mlflow_span_outputs(span, {"status": "ok"})
 
 
 async def _stream_agent_events(

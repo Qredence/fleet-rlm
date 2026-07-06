@@ -1,4 +1,4 @@
-"""C5: env precedence — os.environ always wins over .env files."""
+"""C5: env precedence — APP_ENV-aware: .env wins local, os.environ wins prod."""
 
 from __future__ import annotations
 
@@ -9,8 +9,9 @@ import pytest
 from fleet_rlm.integrations.daytona.config import _load_env_sources
 
 
-def test_os_env_wins_over_env_file_in_local(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """In local mode, real env vars must win over .env."""
+def test_env_file_wins_over_os_environ_in_local(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """In local mode, .env file values override real env vars so a local .env
+    can intentionally override a stale shell export."""
     env_file = tmp_path / ".env"
     env_file.write_text("DAYTONA_API_KEY=from-file\nDAYTONA_API_URL=from-file-url\n")
 
@@ -24,8 +25,8 @@ def test_os_env_wins_over_env_file_in_local(tmp_path: Path, monkeypatch: pytest.
 
     sources = _load_env_sources()
 
-    assert sources["DAYTONA_API_KEY"] == "from-shell"
-    assert sources["DAYTONA_API_URL"] == "from-shell-url"
+    assert sources["DAYTONA_API_KEY"] == "from-file"
+    assert sources["DAYTONA_API_URL"] == "from-file-url"
 
 
 def test_env_local_wins_over_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
