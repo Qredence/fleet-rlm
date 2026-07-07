@@ -19,6 +19,12 @@
       "skillPath": "agent-evaluation/SKILL.md",
       "computedHash": "0ac67c153099baadc1103ed61e2da742596b9287821349ae7f140248e5ed4073"
     },
+    "ai-sdk": {
+      "source": "vercel/ai",
+      "sourceType": "github",
+      "skillPath": "skills/use-ai-sdk/SKILL.md",
+      "computedHash": "0883204d11b055e968dee697c5858e68064c27dfd4deb6310212895daa65c5ad"
+    },
     "analyzing-mlflow-session": {
       "source": "mlflow/skills",
       "sourceType": "github",
@@ -48,6 +54,12 @@
       "sourceType": "github",
       "skillPath": "skills/in-progress/loop-me/SKILL.md",
       "computedHash": "b3306d9b5af2e9ed341ec290ea97898205f27fb3131b16b8535549b8c90343f8"
+    },
+    "migrate-ai-sdk-v6-to-v7": {
+      "source": "vercel/ai",
+      "sourceType": "github",
+      "skillPath": "skills/migrate-ai-sdk-v6-to-v7/SKILL.md",
+      "computedHash": "92a68769c5a82e6bd35cb8fe13537a80f6341742306d6a23c52afb6c1f7b5ab9"
     },
     "shadcn": {
       "source": "shadcn/ui",

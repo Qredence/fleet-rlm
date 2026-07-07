@@ -181,9 +181,7 @@ async def stream_agent_turn(
                     try:
                         runtime_event = await anext(stream)
                     except StopAsyncIteration:
-                        set_mlflow_span_outputs(
-                            span, {"status": "ok", "event_count": event_count, "stream_done": True}
-                        )
+                        set_mlflow_span_outputs(span, {"status": "ok", "event_count": event_count, "stream_done": True})
                         break
                     event_count += 1
                     set_mlflow_span_outputs(

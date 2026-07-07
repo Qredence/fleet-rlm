@@ -2276,10 +2276,13 @@ paths:
         required: true
       responses:
         "200":
-          description: Successful Response
+          description: "SSE streaming response. Returns a Server-Sent Events stream
+            with Content-Type: text/event-stream and x-vercel-ai-ui-message-stream:
+            v1 header."
           content:
             application/json:
               schema: {}
+            text/event-stream: {}
         "422":
           description: Validation Error
           content:

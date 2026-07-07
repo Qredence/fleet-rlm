@@ -14,9 +14,7 @@ class ChatMessage(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    role: Literal["user", "assistant", "system", "tool"] = Field(
-        description="Message role in the conversation."
-    )
+    role: Literal["user", "assistant", "system", "tool"] = Field(description="Message role in the conversation.")
     content: str | None = Field(
         default=None,
         description="Message text content. May be None when parts are provided.",

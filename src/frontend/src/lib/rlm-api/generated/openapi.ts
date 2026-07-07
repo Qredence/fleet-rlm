@@ -5939,10 +5939,11 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description SSE streaming response. Returns a Server-Sent Events stream with Content-Type: text/event-stream and x-vercel-ai-ui-message-stream: v1 header. */
       200: {
         content: {
           "application/json": unknown;
+          "text/event-stream": unknown;
         };
       };
       /** @description Validation Error */

@@ -78,9 +78,7 @@ def test_chat_request_validates_well_formed_body():
     """Well-formed body validates with correct field values and None defaults."""
     chat = _chat()
 
-    request = chat.ChatRequest.model_validate(
-        {"messages": [{"role": "user", "content": "hello"}]}
-    )
+    request = chat.ChatRequest.model_validate({"messages": [{"role": "user", "content": "hello"}]})
 
     assert len(request.messages) == 1
     assert request.messages[0].role == "user"
@@ -120,18 +118,14 @@ def test_chat_request_rejects_unknown_fields():
     chat = _chat()
 
     with pytest.raises(ValidationError, match="bogus"):
-        chat.ChatRequest.model_validate(
-            {"messages": [{"role": "user", "content": "hi"}], "bogus": 1}
-        )
+        chat.ChatRequest.model_validate({"messages": [{"role": "user", "content": "hi"}], "bogus": 1})
 
 
 def test_chat_request_messages_only_valid():
     """Messages-only ChatRequest validates with all control fields None."""
     chat = _chat()
 
-    request = chat.ChatRequest.model_validate(
-        {"messages": [{"role": "user", "content": "test"}]}
-    )
+    request = chat.ChatRequest.model_validate({"messages": [{"role": "user", "content": "test"}]})
 
     assert len(request.messages) == 1
     assert request.messages[0].content == "test"
@@ -179,9 +173,7 @@ def test_chat_request_extra_forbid_on_unknown_message_field():
     chat = _chat()
 
     with pytest.raises(ValidationError):
-        chat.ChatMessage.model_validate(
-            {"role": "user", "content": "hi", "unknown_field": "x"}
-        )
+        chat.ChatMessage.model_validate({"role": "user", "content": "hi", "unknown_field": "x"})
 
 
 def test_chat_request_with_control_fields():
@@ -250,13 +242,7 @@ def test_chat_request_extra_forbid_on_chat_message_unknown_field():
     chat = _chat()
 
     with pytest.raises(ValidationError):
-        chat.ChatRequest.model_validate(
-            {
-                "messages": [
-                    {"role": "user", "content": "hi", "invalid_field": True}
-                ]
-            }
-        )
+        chat.ChatRequest.model_validate({"messages": [{"role": "user", "content": "hi", "invalid_field": True}]})
 
 
 def test_chat_request_rejects_null_messages():

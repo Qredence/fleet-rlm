@@ -166,21 +166,9 @@ async def project_sse(
             lines.extend(_flush_text())
             lines.extend(_flush_reasoning())
 
-            tool_name = (
-                event.tool.tool_name
-                if event.tool
-                else payload.get("tool_name", "")
-            )
-            tool_input = (
-                event.tool.tool_args
-                if event.tool and event.tool.tool_args
-                else payload.get("tool_args", {})
-            )
-            step_index = (
-                event.tool.step_index
-                if event.tool
-                else payload.get("step_index")
-            )
+            tool_name = event.tool.tool_name if event.tool else payload.get("tool_name", "")
+            tool_input = event.tool.tool_args if event.tool and event.tool.tool_args else payload.get("tool_args", {})
+            step_index = event.tool.step_index if event.tool else payload.get("step_index")
 
             tool_call_id = _gen_tool_call_id()
             if step_index is not None:
@@ -189,17 +177,23 @@ async def project_sse(
                 tool_call_ids_ordered.append(tool_call_id)
 
             lines.append(
-                _make_part("tool-input-start", {
-                    "toolCallId": tool_call_id,
-                    "toolName": tool_name,
-                })
+                _make_part(
+                    "tool-input-start",
+                    {
+                        "toolCallId": tool_call_id,
+                        "toolName": tool_name,
+                    },
+                )
             )
             lines.append(
-                _make_part("tool-input-available", {
-                    "toolCallId": tool_call_id,
-                    "toolName": tool_name,
-                    "input": tool_input,
-                })
+                _make_part(
+                    "tool-input-available",
+                    {
+                        "toolCallId": tool_call_id,
+                        "toolName": tool_name,
+                        "input": tool_input,
+                    },
+                )
             )
 
         # ── TOOL_RESULT ───────────────────────────────────────────────────
@@ -207,21 +201,9 @@ async def project_sse(
             lines.extend(_flush_text())
             lines.extend(_flush_reasoning())
 
-            tool_name = (
-                event.tool.tool_name
-                if event.tool
-                else payload.get("tool_name", "")
-            )
-            tool_output = (
-                event.tool.tool_output
-                if event.tool
-                else payload.get("tool_output")
-            )
-            step_index = (
-                event.tool.step_index
-                if event.tool
-                else payload.get("step_index")
-            )
+            tool_name = event.tool.tool_name if event.tool else payload.get("tool_name", "")
+            tool_output = event.tool.tool_output if event.tool else payload.get("tool_output")
+            step_index = event.tool.step_index if event.tool else payload.get("step_index")
 
             # Resolve toolCallId: match by step_index, then fallback to ordered.
             tool_call_id = ""
@@ -233,11 +215,14 @@ async def project_sse(
                 tool_call_id = _gen_tool_call_id()
 
             lines.append(
-                _make_part("tool-output-available", {
-                    "toolCallId": tool_call_id,
-                    "toolName": tool_name,
-                    "output": tool_output,
-                })
+                _make_part(
+                    "tool-output-available",
+                    {
+                        "toolCallId": tool_call_id,
+                        "toolName": tool_name,
+                        "output": tool_output,
+                    },
+                )
             )
 
         # ── TURN_STARTED ──────────────────────────────────────────────────
@@ -268,18 +253,25 @@ async def project_sse(
         # ── TURN_INPUTS ───────────────────────────────────────────────────
         elif kind == RuntimeEventKind.TURN_INPUTS:
             lines.append(
-                _make_part("data-turn-inputs", {
-                    "rows": payload.get("rows", []),
-                })
+                _make_part(
+                    "data-turn-inputs",
+                    {
+                        "rows": payload.get("rows", []),
+                    },
+                )
             )
 
         # ── SANDBOX_EXEC ──────────────────────────────────────────────────
         elif kind == RuntimeEventKind.SANDBOX_EXEC:
             sandbox_fields: dict[str, Any] = {}
             for key in (
-                "sandbox_id", "command", "code_preview",
-                "stdout_preview", "stderr_preview",
-                "exit_code", "duration_ms",
+                "sandbox_id",
+                "command",
+                "code_preview",
+                "stdout_preview",
+                "stderr_preview",
+                "exit_code",
+                "duration_ms",
             ):
                 val = payload.get(key)
                 if val is not None:
@@ -312,27 +304,36 @@ async def project_sse(
         # ── STATUS ────────────────────────────────────────────────────────
         elif kind == RuntimeEventKind.STATUS:
             lines.append(
-                _make_part("data-status", {
-                    "text": event.text,
-                    **(payload if payload else {}),
-                })
+                _make_part(
+                    "data-status",
+                    {
+                        "text": event.text,
+                        **(payload if payload else {}),
+                    },
+                )
             )
 
         # ── WARNING ───────────────────────────────────────────────────────
         elif kind == RuntimeEventKind.WARNING:
             lines.append(
-                _make_part("data-warning", {
-                    "text": event.text,
-                })
+                _make_part(
+                    "data-warning",
+                    {
+                        "text": event.text,
+                    },
+                )
             )
 
         # ── CLARIFICATION ─────────────────────────────────────────────────
         elif kind == RuntimeEventKind.CLARIFICATION:
             lines.append(
-                _make_part("data-clarification", {
-                    "question": payload.get("question", event.text),
-                    "options": payload.get("options", []),
-                })
+                _make_part(
+                    "data-clarification",
+                    {
+                        "question": payload.get("question", event.text),
+                        "options": payload.get("options", []),
+                    },
+                )
             )
 
         # ── DONE ──────────────────────────────────────────────────────────
@@ -354,9 +355,12 @@ async def project_sse(
             lines.extend(_flush_text())
             lines.extend(_flush_reasoning())
             lines.append(
-                _make_part("error", {
-                    "text": event.text,
-                })
+                _make_part(
+                    "error",
+                    {
+                        "text": event.text,
+                    },
+                )
             )
             for line in lines:
                 yield line

@@ -30,8 +30,7 @@ class TestSignatureNoWebSocket:
         sig = inspect.signature(prepare_chat_runtime)
         param_names = set(sig.parameters.keys())
         assert "websocket" not in param_names, (
-            f"prepare_chat_runtime should not accept 'websocket' parameter, "
-            f"got: {param_names}"
+            f"prepare_chat_runtime should not accept 'websocket' parameter, got: {param_names}"
         )
 
     def test_signature_excludes_websocket_positional(self) -> None:
@@ -39,8 +38,7 @@ class TestSignatureNoWebSocket:
         sig = inspect.signature(prepare_chat_runtime)
         for name, param in sig.parameters.items():
             assert param.kind == inspect.Parameter.KEYWORD_ONLY, (
-                f"Parameter '{name}' should be keyword-only, "
-                f"got kind={param.kind}"
+                f"Parameter '{name}' should be keyword-only, got kind={param.kind}"
             )
 
     def test_passing_websocket_raises_type_error(self) -> None:
@@ -80,8 +78,7 @@ class TestPreparedChatRuntimeFields:
     def test_prepared_chat_runtime_has_required_fields(self) -> None:
         actual = {f.name for f in fields(PreparedChatRuntime)}
         assert actual == self.EXPECTED_FIELDS, (
-            f"PreparedChatRuntime fields mismatch. "
-            f"Expected {self.EXPECTED_FIELDS}, got {actual}"
+            f"PreparedChatRuntime fields mismatch. Expected {self.EXPECTED_FIELDS}, got {actual}"
         )
 
     def test_prepared_chat_runtime_is_dataclass_with_slots(self) -> None:
@@ -153,6 +150,7 @@ class TestTransportNeutralErrorHandling:
     async def test_error_callbacks_do_not_receive_websocket(self) -> None:
         """Verify that send_error and close_websocket callback signatures
         do not include a websocket parameter — they are transport-neutral."""
+
         # Verify the callbacks we defined match transport-neutral signatures
         async def send_error(*, code: str, message: str) -> bool:
             return True
@@ -174,12 +172,8 @@ class TestTransportNeutralErrorHandling:
         # Check parameter annotations
         for name, param in sig.parameters.items():
             annotation_str = str(param.annotation).lower() if param.annotation is not inspect.Parameter.empty else ""
-            assert "websocket" not in annotation_str, (
-                f"Parameter '{name}' has WebSocket annotation: {param.annotation}"
-            )
-            assert "request" not in annotation_str, (
-                f"Parameter '{name}' has Request annotation: {param.annotation}"
-            )
+            assert "websocket" not in annotation_str, f"Parameter '{name}' has WebSocket annotation: {param.annotation}"
+            assert "request" not in annotation_str, f"Parameter '{name}' has Request annotation: {param.annotation}"
 
 
 # ---------------------------------------------------------------------------
@@ -213,13 +207,9 @@ class TestWSPathNoWebSocketArg:
 
         ws_sig = inspect.signature(_prepare_chat_runtime)
         ws_params = set(ws_sig.parameters.keys())
-        assert "websocket" in ws_params, (
-            "WS wrapper _prepare_chat_runtime should still accept websocket"
-        )
+        assert "websocket" in ws_params, "WS wrapper _prepare_chat_runtime should still accept websocket"
 
         # Verify the service function no longer accepts websocket
         service_sig = inspect.signature(prepare_chat_runtime)
         service_params = set(service_sig.parameters.keys())
-        assert "websocket" not in service_params, (
-            "Service function prepare_chat_runtime should NOT accept websocket"
-        )
+        assert "websocket" not in service_params, "Service function prepare_chat_runtime should NOT accept websocket"

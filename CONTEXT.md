@@ -71,3 +71,36 @@ A product-facing observability record for sandbox execution, process output,
 bridge callbacks, volume/file activity, memory access, diagnostics, or runtime
 progress.
 _Avoid_: transcript message, artifact
+
+**Execution Mode**:
+The explicit per-turn contract a caller chooses for a chat turn, either
+`simple` (one lightweight DSPy response, no tools/sandbox/recursion) or `rlm`
+(Daytona-backed recursive execution with the full tool surface). The caller's
+choice is honored with no auto-escalation.
+_Avoid_: auto, route, escalation, tools_only, rlm_only (legacy aliases)
+
+**RLMAgent**:
+The first-class agent that owns the `rlm` execution path: it binds a Daytona
+interpreter, selects among the standard/workspace/url-document RLM variants,
+runs the retry/fallback resilience, and spawns sub-agents via `rlm_query()`.
+_Avoid_: EscalatingFleetModule, FleetAgent, dispatcher
+
+**ChatExecutionContext**:
+The transport-neutral dataclass that carries prepared runtime dependencies,
+identity, resolved session ids, a cancel flag, and per-turn `TurnControls`
+into `stream_turn()`. Both the websocket and SSE transports build one from
+their transport-specific inputs.
+_Avoid_: WebSocket, request, SSE context
+
+**TurnControls**:
+The per-request control fields isolated inside `ChatExecutionContext`
+(execution_mode, repo_url, repo_ref, context_paths, batch_concurrency,
+docs_path, trace, trace_mode, selected_skill_ids). Distinct from prepared
+runtime dependencies because they vary per message.
+_Avoid_: options, params, flags
+
+**RuntimeEvent**:
+The transport-neutral event model yielded by `AgentRuntime.aiter_chat_turn_stream()`
+and `stream_turn()`. Both transports project it to their wire format (WS
+frames via `project_chat()`, SSE via the AI SDK UIMessage projector).
+_Avoid_: frame, message, part

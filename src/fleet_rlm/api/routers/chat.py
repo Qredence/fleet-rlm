@@ -157,7 +157,17 @@ def _status_for_prepare_code(code: str) -> int:
     return mapping.get(code, 500)
 
 
-@router.post("")
+@router.post(
+    "",
+    response_model=None,
+    responses={
+        200: {
+            "description": "SSE streaming response. Returns a Server-Sent Events stream with "
+            "Content-Type: text/event-stream and x-vercel-ai-ui-message-stream: v1 header.",
+            "content": {"text/event-stream": {}},
+        },
+    },
+)
 async def chat_completion(
     request: Request,
     body: ChatRequest,

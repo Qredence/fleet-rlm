@@ -211,9 +211,7 @@ class TestStreamTurnIsAsyncGenerator:
         from pathlib import Path
 
         repo_root = Path(__file__).resolve().parents[3]
-        source_path = (
-            repo_root / "src" / "fleet_rlm" / "api" / "runtime_services" / "stream_turn.py"
-        )
+        source_path = repo_root / "src" / "fleet_rlm" / "api" / "runtime_services" / "stream_turn.py"
         source_text = source_path.read_text("utf-8")
 
         forbidden = [
@@ -223,9 +221,7 @@ class TestStreamTurnIsAsyncGenerator:
             "starlette.requests",
         ]
         for pattern in forbidden:
-            assert pattern not in source_text, (
-                f"stream_turn.py must not import {pattern}"
-            )
+            assert pattern not in source_text, f"stream_turn.py must not import {pattern}"
 
     def test_no_import_time_side_effects(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Importing stream_turn triggers no network access."""
@@ -264,9 +260,7 @@ class TestYieldsRuntimeEvent:
 
         assert len(events) >= 1
         for event in events:
-            assert isinstance(event, RuntimeEvent), (
-                f"Expected RuntimeEvent, got {type(event)}: {event}"
-            )
+            assert isinstance(event, RuntimeEvent), f"Expected RuntimeEvent, got {type(event)}: {event}"
 
     @pytest.mark.asyncio
     async def test_no_bare_dicts_or_tuples(
@@ -387,7 +381,16 @@ class TestThreadsTurnControls:
 
         assert agent.captured_kwargs is not None
         # execution_mode is handled by set_execution_mode, not kwargs.
-        for key in ("repo_url", "repo_ref", "context_paths", "batch_concurrency", "docs_path", "trace", "trace_mode", "selected_skill_ids"):
+        for key in (
+            "repo_url",
+            "repo_ref",
+            "context_paths",
+            "batch_concurrency",
+            "docs_path",
+            "trace",
+            "trace_mode",
+            "selected_skill_ids",
+        ):
             expected = getattr(controls, key)
             if expected is not None:
                 assert key in agent.captured_kwargs, (
@@ -518,9 +521,7 @@ class TestSessionRestoration:
         from fleet_rlm.api.auth.types import NormalizedIdentity
 
         session_state = {"history_turns": 3, "conversation": ["hi", "hello"]}
-        store = _SessionRestoringStore(
-            session_record={"session": {"state": session_state}}
-        )
+        store = _SessionRestoringStore(session_record={"session": {"state": session_state}})
 
         prepared = PreparedChatRuntime(
             cfg=sample_prepared.cfg,
@@ -573,9 +574,7 @@ class TestSessionRestoration:
         from fleet_rlm.api.auth.types import NormalizedIdentity
 
         manifest_state = {"restored_from": "manifest"}
-        store = _SessionRestoringStore(
-            session_record={"manifest": {"state": manifest_state}}
-        )
+        store = _SessionRestoringStore(session_record={"manifest": {"state": manifest_state}})
 
         prepared = PreparedChatRuntime(
             cfg=sample_prepared.cfg,
@@ -680,9 +679,7 @@ class TestTerminalEvents:
 
         assert len(events) >= 1
         last = events[-1]
-        assert last.kind.is_terminal(), (
-            f"Last event kind {last.kind} is not terminal"
-        )
+        assert last.kind.is_terminal(), f"Last event kind {last.kind} is not terminal"
 
     @pytest.mark.asyncio
     async def test_done_is_terminal(self) -> None:

@@ -75,12 +75,8 @@ def make_context(
         prepared=sample_prepared,
         identity=sample_identity,
         session_id="test-session",
-        canonical_workspace_id=sanitize_id(
-            sample_identity.tenant_claim, "default"
-        ),
-        canonical_user_id=sanitize_id(
-            sample_identity.user_claim, "anonymous"
-        ),
+        canonical_workspace_id=sanitize_id(sample_identity.tenant_claim, "default"),
+        canonical_user_id=sanitize_id(sample_identity.user_claim, "anonymous"),
         owner_tenant_claim=sample_identity.tenant_claim,
         owner_user_claim=sample_identity.user_claim,
         cancel_flag=sample_cancel_flag,
@@ -393,6 +389,7 @@ class TestNoImportSideEffects:
 
     def test_import_no_network(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Monkeypatch socket.socket to prove no network call at import."""
+
         def _fail(*args: object, **kwargs: object) -> None:
             raise RuntimeError("unexpected socket call during import")
 
@@ -410,10 +407,7 @@ class TestNoImportSideEffects:
     def test_import_does_not_trigger_transport_modules(self) -> None:
         """Importing chat_context doesn't pull in fastapi.WebSocket or Request."""
         # Clear any cached import state
-        mod_names_before = {
-            k for k in sys.modules
-            if "websocket" in k.lower() or "request" in k.lower()
-        }
+        mod_names_before = {k for k in sys.modules if "websocket" in k.lower() or "request" in k.lower()}
 
         import importlib
 
@@ -421,16 +415,11 @@ class TestNoImportSideEffects:
 
         importlib.reload(chat_context)
 
-        mod_names_after = {
-            k for k in sys.modules
-            if "websocket" in k.lower() or "request" in k.lower()
-        }
+        mod_names_after = {k for k in sys.modules if "websocket" in k.lower() or "request" in k.lower()}
 
         # No new websocket/request modules should have been introduced
         new_wreckers = mod_names_after - mod_names_before
-        assert not new_wreckers, (
-            f"Importing chat_context pulled in transport modules: {new_wreckers}"
-        )
+        assert not new_wreckers, f"Importing chat_context pulled in transport modules: {new_wreckers}"
 
 
 # ---------------------------------------------------------------------------
@@ -451,22 +440,13 @@ class TestNoTransportImportsInSource:
     @staticmethod
     def _read_source() -> str:
         repo_root = Path(__file__).resolve().parents[3]
-        chat_context_path = (
-            repo_root
-            / "src"
-            / "fleet_rlm"
-            / "api"
-            / "runtime_services"
-            / "chat_context.py"
-        )
+        chat_context_path = repo_root / "src" / "fleet_rlm" / "api" / "runtime_services" / "chat_context.py"
         return chat_context_path.read_text("utf-8")
 
     def test_no_websocket_import(self) -> None:
         source_text = self._read_source()
         for pattern in self.FORBIDDEN_PATTERNS:
-            assert pattern not in source_text, (
-                f"chat_context.py must not import {pattern}"
-            )
+            assert pattern not in source_text, f"chat_context.py must not import {pattern}"
 
 
 # ---------------------------------------------------------------------------
