@@ -4,6 +4,9 @@ Covers validation assertions:
   VAL-REF-001, VAL-REF-002, VAL-REF-003, VAL-REF-004,
   VAL-REF-024, VAL-REF-025, VAL-REF-026, VAL-REF-027,
   VAL-REF-028, VAL-REF-029, VAL-REF-031, VAL-REF-034
+
+Phase 2A additions:
+  VAL-CONTROLS-001 through VAL-CONTROLS-015
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ import pytest
 from fleet_rlm.api.auth.types import NormalizedIdentity
 from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext, TurnControls
 from fleet_rlm.api.runtime_services.chat_runtime import PreparedChatRuntime
+from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
 from fleet_rlm.utils.identity import sanitize_id
 
 # ---------------------------------------------------------------------------
@@ -101,6 +105,7 @@ CHAT_EXECUTION_CONTEXT_FIELDS = {
 }
 
 TURN_CONTROLS_FIELDS = {
+    "execution_backend",
     "execution_mode",
     "repo_url",
     "repo_ref",
@@ -132,6 +137,7 @@ class TestTurnControls:
 
     def test_defaults_are_none_or_empty_list(self) -> None:
         ctrl = TurnControls()
+        assert ctrl.execution_backend is None
         assert ctrl.execution_mode is None
         assert ctrl.repo_url is None
         assert ctrl.repo_ref is None
@@ -185,8 +191,178 @@ class TestTurnControls:
 
 
 # ---------------------------------------------------------------------------
-# VAL-REF-001 — ChatExecutionContext field presence, slots, construction
+# Phase 2A — VAL-CONTROLS-001 through VAL-CONTROLS-015
+# TurnControls.execution_backend field
 # ---------------------------------------------------------------------------
+
+
+class TestTurnControlsExecutionBackend:
+    """Phase 2A: TurnControls.execution_backend field assertions."""
+
+    # VAL-CONTROLS-001: TurnControls has execution_backend field
+    def test_has_execution_backend_field(self) -> None:
+        field_names = {f.name for f in fields(TurnControls)}
+        assert "execution_backend" in field_names, f"execution_backend not found in TurnControls fields: {field_names}"
+
+    # VAL-CONTROLS-002: execution_backend type annotation is ExecutionBackend | None
+    def test_execution_backend_type_annotation(self) -> None:
+        import typing
+
+        hints = typing.get_type_hints(TurnControls)
+        annotation = hints.get("execution_backend")
+        assert annotation is not None, "execution_backend has no type hint"
+        expected = ExecutionBackend | None
+        assert annotation == expected, f"Expected {expected}, got {annotation}"
+
+    # VAL-CONTROLS-003: execution_backend defaults to None
+    def test_execution_backend_defaults_to_none(self) -> None:
+        tc = TurnControls()
+        assert tc.execution_backend is None
+
+    # VAL-CONTROLS-004: TurnControls retains slots=True (no __dict__ on instances)
+    def test_slots_no_dict_after_adding_execution_backend(self) -> None:
+        tc = TurnControls()
+        assert not hasattr(tc, "__dict__")
+        with pytest.raises(AttributeError):
+            tc.bogus = 1  # type: ignore[attr-defined]
+
+    # VAL-CONTROLS-005: Field accepts ExecutionBackend.legacy_agent_runtime
+    def test_accepts_legacy_agent_runtime(self) -> None:
+        tc = TurnControls(execution_backend=ExecutionBackend.legacy_agent_runtime)
+        assert tc.execution_backend is ExecutionBackend.legacy_agent_runtime
+
+    # VAL-CONTROLS-006: Field accepts ExecutionBackend.direct_rlm
+    def test_accepts_direct_rlm(self) -> None:
+        tc = TurnControls(execution_backend=ExecutionBackend.direct_rlm)
+        assert tc.execution_backend is ExecutionBackend.direct_rlm
+
+    # VAL-CONTROLS-007: No runtime type validation (plain dataclass)
+    def test_no_runtime_type_validation(self) -> None:
+        # Plain dataclass — any value is accepted without raising.
+        tc = TurnControls(execution_backend="foo")  # type: ignore[arg-type]
+        assert tc.execution_backend == "foo"
+
+    # VAL-CONTROLS-008: Existing ws/stream_events.py construction site remains valid
+    def test_ws_construction_site_remains_valid(self) -> None:
+        """Replicate the TurnControls(...) kwargs from ws/stream_events.py."""
+        tc = TurnControls(
+            execution_mode="auto",
+            repo_url="https://example.com/repo.git",
+            repo_ref="main",
+            context_paths=["src/"],
+            batch_concurrency=3,
+            docs_path="./docs",
+            trace=True,
+            trace_mode="mlflow",
+            selected_skill_ids=["s1"],
+        )
+        # All fields accessible with expected values
+        assert tc.execution_mode == "auto"
+        assert tc.repo_url == "https://example.com/repo.git"
+        assert tc.repo_ref == "main"
+        assert tc.context_paths == ["src/"]
+        assert tc.batch_concurrency == 3
+        assert tc.docs_path == "./docs"
+        assert tc.trace is True
+        assert tc.trace_mode == "mlflow"
+        assert tc.selected_skill_ids == ["s1"]
+        # New field defaults to None without being passed
+        assert tc.execution_backend is None
+
+    # VAL-CONTROLS-009: Existing routers/chat.py construction site remains valid
+    def test_sse_construction_site_remains_valid(self) -> None:
+        """Replicate the TurnControls(...) kwargs from routers/chat.py."""
+        tc = TurnControls(
+            execution_mode="auto",
+            repo_url="https://example.com/repo.git",
+            repo_ref="main",
+            context_paths=["src/"],
+            batch_concurrency=3,
+            docs_path="./docs",
+            trace=True,
+            trace_mode="mlflow",
+            selected_skill_ids=["s1"],
+        )
+        assert tc.execution_mode == "auto"
+        assert tc.repo_url == "https://example.com/repo.git"
+        assert tc.repo_ref == "main"
+        assert tc.context_paths == ["src/"]
+        assert tc.batch_concurrency == 3
+        assert tc.docs_path == "./docs"
+        assert tc.trace is True
+        assert tc.trace_mode == "mlflow"
+        assert tc.selected_skill_ids == ["s1"]
+        assert tc.execution_backend is None
+
+    # VAL-CONTROLS-010: ChatExecutionContext is unchanged
+    def test_chat_execution_context_no_execution_backend(self) -> None:
+        assert "execution_backend" not in {f.name for f in fields(ChatExecutionContext)}
+
+    # VAL-CONTROLS-011: Existing keyword construction still works
+    def test_existing_keyword_construction_works(self) -> None:
+        tc = TurnControls(
+            execution_mode="simple",
+            repo_url="https://example.com/repo.git",
+            repo_ref="main",
+            context_paths=["a", "b"],
+            batch_concurrency=2,
+            docs_path="/docs",
+            trace=True,
+            trace_mode="full",
+            selected_skill_ids=["s1", "s2"],
+        )
+        assert tc.execution_mode == "simple"
+        assert tc.repo_url == "https://example.com/repo.git"
+        assert tc.repo_ref == "main"
+        assert tc.context_paths == ["a", "b"]
+        assert tc.batch_concurrency == 2
+        assert tc.docs_path == "/docs"
+        assert tc.trace is True
+        assert tc.trace_mode == "full"
+        assert tc.selected_skill_ids == ["s1", "s2"]
+
+    # VAL-CONTROLS-012: execution_backend is importable from chat_context module
+    def test_execution_backend_accessible_on_instance(self) -> None:
+        tc = TurnControls(execution_backend=ExecutionBackend.legacy_agent_runtime)
+        assert tc.execution_backend is ExecutionBackend.legacy_agent_runtime
+
+    # VAL-CONTROLS-013: __all__ export list unchanged for TurnControls
+    def test_all_exports_turn_controls_and_chat_execution_context(self) -> None:
+        import fleet_rlm.api.runtime_services.chat_context as chat_context_mod
+
+        assert "TurnControls" in chat_context_mod.__all__
+        assert "ChatExecutionContext" in chat_context_mod.__all__
+        assert len(chat_context_mod.__all__) == 2
+
+    # VAL-CONTROLS-014: Existing TurnControls fields are preserved
+    def test_existing_fields_preserved(self) -> None:
+        field_names = {f.name for f in fields(TurnControls)}
+        pre_existing = {
+            "execution_mode",
+            "repo_url",
+            "repo_ref",
+            "context_paths",
+            "batch_concurrency",
+            "docs_path",
+            "trace",
+            "trace_mode",
+            "selected_skill_ids",
+        }
+        # New field is added
+        assert "execution_backend" in field_names
+        # All pre-existing fields still present
+        assert pre_existing.issubset(field_names), f"Missing pre-existing fields: {pre_existing - field_names}"
+
+    # VAL-CONTROLS-015: Default factory fields still use field(default_factory=list)
+    def test_default_factory_fields_are_isolated(self) -> None:
+        tc1 = TurnControls()
+        tc2 = TurnControls()
+        assert tc1.context_paths is not tc2.context_paths
+        assert tc1.selected_skill_ids is not tc2.selected_skill_ids
+        tc1.context_paths.append("only-in-tc1")
+        tc1.selected_skill_ids.append("only-skill-tc1")
+        assert len(tc2.context_paths) == 0
+        assert len(tc2.selected_skill_ids) == 0
 
 
 class TestChatExecutionContext:

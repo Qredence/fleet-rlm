@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from fleet_rlm.api.auth.types import NormalizedIdentity
 from fleet_rlm.api.runtime_services.chat_runtime import PreparedChatRuntime
+from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
 
 
 @dataclass(slots=True)
@@ -25,6 +26,7 @@ class TurnControls:
     ``field(default_factory=list)``.
     """
 
+    execution_backend: ExecutionBackend | None = None
     execution_mode: str | None = None
     repo_url: str | None = None
     repo_ref: str | None = None
