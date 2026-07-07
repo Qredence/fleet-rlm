@@ -24,6 +24,14 @@ Read these after you've seen the product:
 - **[Wiring Analysis](explanation/wiring-analysis.md)**
 - **[Releasing to PyPI](how-to-guides/releasing.md)** — automated and manual release flow
 
+## Architecture Decision Records
+
+- [ADR-0001: Explicit Execution Modes](adr/0001-explicit-execution-modes.md)
+- [ADR-0002: RLM Agent Class](adr/0002-rlm-agent-class.md)
+- [ADR-0003: API Chat AI SDK UIMessage Stream](adr/0003-api-chat-ai-sdk-uimessage-stream.md)
+- [ADR-0004: Chat Execution Context Seam](adr/0004-chat-execution-context-seam.md)
+- [ADR-0005: Execution Backend Seam](adr/0005-execution-backend-seam.md)
+
 ## Current Product Surfaces
 
 - [Workbench](explanation/product-spec.md)
