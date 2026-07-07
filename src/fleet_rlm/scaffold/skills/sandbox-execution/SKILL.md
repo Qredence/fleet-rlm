@@ -13,7 +13,7 @@ description: "Execute Python in Daytona sandboxes with durable volume persistenc
 | `repo_url` | None | Repo to stage into sandbox |
 | `repo_ref` | None | Branch/commit for staging |
 | `context_paths` | None | Specific paths to stage |
-| `max_llm_calls` | 50 | Semantic LLM budget |
+| `max_llm_calls` | 50 | Semantic sub-LM call-count budget |
 | `llm_call_timeout` | 60 | Per LLM call timeout |
 | `async_execute` | True | Use async execution path |
 | `max_recursion_depth` | 2 | Delegation depth limit |

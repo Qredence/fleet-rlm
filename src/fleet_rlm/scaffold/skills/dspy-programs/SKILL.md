@@ -114,7 +114,7 @@ finally:
 - `signature`: The DSPy signature class (not a string).
 - `interpreter`: A started `DaytonaInterpreter` instance.
 - `max_iterations`: Maximum code-execution loops (default: 20).
-- `max_llm_calls`: Budget cap for LLM invocations (default: 30).
+- `max_llm_calls`: Semantic sub-LM call-count cap for `llm_query*` invocations (default: 30).
 - `verbose`: Emit step-by-step execution logs.
 
 ---
