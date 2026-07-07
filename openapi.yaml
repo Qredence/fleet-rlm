@@ -2245,6 +2245,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/chat:
+    post:
+      tags:
+      - chat
+      summary: Chat Completion
+      description: 'Handle ``POST /api/chat`` SSE streaming chat completion.
+
+
+        Authenticates via ``require_http_identity`` (HTTPBearer → NormalizedIdentity),
+
+        builds a ``ChatExecutionContext`` from the request and identity, calls
+
+        ``stream_turn()``, and projects via ``project_sse()`` over a
+
+        ``StreamingResponse(media_type="text/event-stream")``.
+
+
+        Cancellation is driven by ``request.is_disconnected()`` flipping
+
+        ``cancel_flag["cancelled"]``; the runtime''s ``cancel_check`` polls the
+
+        same flag.'
+      operationId: chat_completion_api_chat_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
 components:
   schemas:
     AuthMeResponse:
@@ -2306,6 +2349,121 @@ components:
       required:
       - file
       title: Body_upload_dataset_api_v1_optimization_datasets_post
+    ChatMessage:
+      properties:
+        role:
+          type: string
+          enum:
+          - user
+          - assistant
+          - system
+          - tool
+          title: Role
+          description: Message role in the conversation.
+        content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content
+          description: Message text content. May be None when parts are provided.
+        parts:
+          anyOf:
+          - items:
+              additionalProperties: true
+              type: object
+            type: array
+          - type: 'null'
+          title: Parts
+          description: AI SDK UIMessage parts for structured content.
+      additionalProperties: false
+      type: object
+      required:
+      - role
+      title: ChatMessage
+      description: A single message in the AI SDK UIMessage format.
+    ChatRequest:
+      properties:
+        messages:
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+          type: array
+          minItems: 1
+          title: Messages
+          description: Conversation messages. Must have at least one message.
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Session Id
+          description: Optional session identifier for restoring an existing session.
+        execution_mode:
+          anyOf:
+          - type: string
+            enum:
+            - auto
+            - rlm_only
+            - tools_only
+          - type: 'null'
+          title: Execution Mode
+          description: Per-turn execution mode hint. Accepts legacy values (auto/rlm_only/tools_only).
+        repo_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Repo Url
+          description: Repository URL to attach to runs.
+        repo_ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Repo Ref
+          description: Optional branch, tag, or commit to checkout.
+        context_paths:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Context Paths
+          description: Optional repository paths to prioritize as context.
+        batch_concurrency:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Batch Concurrency
+          description: Optional concurrency hint for batched repository work.
+        docs_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Docs Path
+          description: Optional local documentation path to preload before execution.
+        trace:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Trace
+          description: Whether trace-oriented streaming events should be emitted.
+        trace_mode:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Trace Mode
+          description: Optional trace verbosity override.
+        selected_skill_ids:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Selected Skill Ids
+          description: Optional list of skill IDs to select for this turn.
+      additionalProperties: false
+      type: object
+      required:
+      - messages
+      title: ChatRequest
+      description: Request body for the /api/chat SSE endpoint.
     DatasetDetailResponse:
       properties:
         id:

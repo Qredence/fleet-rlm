@@ -362,6 +362,22 @@ export interface paths {
      */
     get: operations["get_evaluation_api_v1_evaluations__run_id__get"];
   };
+  "/api/chat": {
+    /**
+     * Chat Completion
+     * @description Handle ``POST /api/chat`` SSE streaming chat completion.
+     *
+     * Authenticates via ``require_http_identity`` (HTTPBearer → NormalizedIdentity),
+     * builds a ``ChatExecutionContext`` from the request and identity, calls
+     * ``stream_turn()``, and projects via ``project_sse()`` over a
+     * ``StreamingResponse(media_type="text/event-stream")``.
+     *
+     * Cancellation is driven by ``request.is_disconnected()`` flipping
+     * ``cancel_flag["cancelled"]``; the runtime's ``cancel_check`` polls the
+     * same flag.
+     */
+    post: operations["chat_completion_api_chat_post"];
+  };
 }
 
 export type webhooks = Record<string, never>;
@@ -416,6 +432,93 @@ export interface components {
        * @description Optional module slug used to validate required dataset keys.
        */
       module_slug?: string | null;
+    };
+    /**
+     * ChatMessage
+     * @description A single message in the AI SDK UIMessage format.
+     */
+    ChatMessage: {
+      /**
+       * Role
+       * @description Message role in the conversation.
+       * @enum {string}
+       */
+      role: "user" | "assistant" | "system" | "tool";
+      /**
+       * Content
+       * @description Message text content. May be None when parts are provided.
+       */
+      content?: string | null;
+      /**
+       * Parts
+       * @description AI SDK UIMessage parts for structured content.
+       */
+      parts?:
+        | {
+            [key: string]: unknown;
+          }[]
+        | null;
+    };
+    /**
+     * ChatRequest
+     * @description Request body for the /api/chat SSE endpoint.
+     */
+    ChatRequest: {
+      /**
+       * Messages
+       * @description Conversation messages. Must have at least one message.
+       */
+      messages: components["schemas"]["ChatMessage"][];
+      /**
+       * Session Id
+       * @description Optional session identifier for restoring an existing session.
+       */
+      session_id?: string | null;
+      /**
+       * Execution Mode
+       * @description Per-turn execution mode hint. Accepts legacy values (auto/rlm_only/tools_only).
+       */
+      execution_mode?: ("auto" | "rlm_only" | "tools_only") | null;
+      /**
+       * Repo Url
+       * @description Repository URL to attach to runs.
+       */
+      repo_url?: string | null;
+      /**
+       * Repo Ref
+       * @description Optional branch, tag, or commit to checkout.
+       */
+      repo_ref?: string | null;
+      /**
+       * Context Paths
+       * @description Optional repository paths to prioritize as context.
+       */
+      context_paths?: string[] | null;
+      /**
+       * Batch Concurrency
+       * @description Optional concurrency hint for batched repository work.
+       */
+      batch_concurrency?: number | null;
+      /**
+       * Docs Path
+       * @description Optional local documentation path to preload before execution.
+       */
+      docs_path?: string | null;
+      /**
+       * Trace
+       * @description Whether trace-oriented streaming events should be emitted.
+       */
+      trace?: boolean | null;
+      /**
+       * Trace Mode
+       * @description Optional trace verbosity override.
+       */
+      trace_mode?: string | null;
+      /**
+       * Selected Skill Ids
+       * @description Optional list of skill IDs to select for this turn.
+       */
+      selected_skill_ids?: string[] | null;
     };
     /**
      * DatasetDetailResponse
@@ -5807,6 +5910,40 @@ export interface operations {
       /** @description Evaluation run not found. */
       404: {
         content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Chat Completion
+   * @description Handle ``POST /api/chat`` SSE streaming chat completion.
+   *
+   * Authenticates via ``require_http_identity`` (HTTPBearer → NormalizedIdentity),
+   * builds a ``ChatExecutionContext`` from the request and identity, calls
+   * ``stream_turn()``, and projects via ``project_sse()`` over a
+   * ``StreamingResponse(media_type="text/event-stream")``.
+   *
+   * Cancellation is driven by ``request.is_disconnected()`` flipping
+   * ``cancel_flag["cancelled"]``; the runtime's ``cancel_check`` polls the
+   * same flag.
+   */
+  chat_completion_api_chat_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ChatRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
       };
       /** @description Validation Error */
       422: {

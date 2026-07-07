@@ -25,6 +25,7 @@ from .middleware import add_middlewares
 from .openapi import annotate_validation_error_schemas
 from .routers import (
     auth,
+    chat,
     health,
     info,
     optimization,
@@ -39,7 +40,7 @@ from .spa import mount_frontend_routes
 
 
 def _register_api_routes(app: FastAPI) -> None:
-    """Register health and /api/v1 route groups on app.
+    """Register health, /api/chat, and /api/v1 route groups on app.
 
     Must be called before ``mount_spa`` so the SPA catch-all does not
     shadow API or docs paths.
@@ -47,6 +48,9 @@ def _register_api_routes(app: FastAPI) -> None:
     Inclusion order is intentional — FastAPI resolves routes in registration
     order, so changing this list can alter matching behaviour for overlapping
     paths.
+
+    The chat router is included **after** the api_v1 block so its
+    ``/api/chat`` prefix cannot shadow existing ``/api/v1/*`` routes.
     """
     app.include_router(health.router)
 
@@ -67,6 +71,10 @@ def _register_api_routes(app: FastAPI) -> None:
 
     api_v1.include_router(evaluations.router)
     app.include_router(api_v1)
+
+    # POST /api/chat at app root (NOT /api/v1/chat) — include AFTER api_v1
+    # so it cannot shadow existing /api/v1/* routes.
+    app.include_router(chat.router)
 
 
 def create_app(*, config: AppConfig | None = None) -> FastAPI:
