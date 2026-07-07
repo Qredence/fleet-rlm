@@ -19,7 +19,9 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
+from fleet_rlm.api.config import AppConfig
 from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext
+from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
 from fleet_rlm.runtime.events import RuntimeEvent
 
 logger = logging.getLogger(__name__)
@@ -108,6 +110,19 @@ async def _restore_session(
         await agent.areset(clear_sandbox_buffers=True)
 
 
+def _resolve_backend(ctx: ChatExecutionContext) -> ExecutionBackend:
+    """Resolve which execution backend to dispatch to for this turn.
+
+    Priority:
+    1. ``ctx.controls.execution_backend`` (per-request override) if not ``None``
+    2. ``AppConfig.execution_backend`` (process default, defaults to
+       ``ExecutionBackend.legacy_agent_runtime``)
+    """
+    if ctx.controls.execution_backend is not None:
+        return ctx.controls.execution_backend
+    return AppConfig().execution_backend
+
+
 async def stream_turn(
     ctx: ChatExecutionContext,
     message: str,
@@ -118,6 +133,15 @@ async def stream_turn(
     build a ``ChatExecutionContext`` and call this function — they do **not**
     call ``AgentRuntime.aiter_chat_turn_stream`` directly.
 
+    The execution backend is resolved once at the top of the function:
+    ``ctx.controls.execution_backend`` if not ``None``, else
+    ``AppConfig.execution_backend``.  Currently supported backends:
+
+    * ``ExecutionBackend.legacy_agent_runtime`` — the Phase 1
+      ``AgentRuntime.aiter_chat_turn_stream`` path, unchanged.
+    * ``ExecutionBackend.direct_rlm`` — stub that raises
+      ``NotImplementedError`` before any agent method is called.
+
     Args:
         ctx: Transport-neutral context (prepared runtime, identity, session
             ids, cancel flag, per-turn controls).
@@ -127,34 +151,49 @@ async def stream_turn(
         ``RuntimeEvent`` objects from the underlying agent runtime.
 
     Raises:
+        NotImplementedError: When the ``direct_rlm`` backend is selected.
+        ValueError: When an unrecognised backend value is encountered.
         StopAsyncIteration: When the turn stream completes.
     """
-    # The transport layer is expected to replace planner_lm with an AgentRuntime
-    # (or compatible object) that has set_execution_mode and aiter_chat_turn_stream.
-    agent: Any = ctx.prepared.planner_lm
+    # Resolve which execution backend to use for this turn (stable once set).
+    backend = _resolve_backend(ctx)
 
-    # Apply execution mode if specified.
-    if ctx.controls.execution_mode is not None:
-        agent.set_execution_mode(ctx.controls.execution_mode)
+    if backend is ExecutionBackend.legacy_agent_runtime:
+        # ── Phase 1 path: unchanged ──
+        # The transport layer is expected to replace planner_lm with an
+        # AgentRuntime (or compatible object) that has set_execution_mode
+        # and aiter_chat_turn_stream.
+        agent: Any = ctx.prepared.planner_lm
 
-    # Restore session if a session_id was provided.
-    await _restore_session(ctx, agent)
+        # Apply execution mode if specified.
+        if ctx.controls.execution_mode is not None:
+            agent.set_execution_mode(ctx.controls.execution_mode)
 
-    # Build kwargs and delegate to the runtime.
-    kwargs = _build_stream_kwargs(ctx, message)
-    stream = agent.aiter_chat_turn_stream(**kwargs)
+        # Restore session if a session_id was provided.
+        await _restore_session(ctx, agent)
 
-    try:
-        async for event in stream:
-            yield event
-    finally:
-        aclose = getattr(stream, "aclose", None)
-        if callable(aclose):
-            await aclose()
+        # Build kwargs and delegate to the runtime.
+        kwargs = _build_stream_kwargs(ctx, message)
+        stream = agent.aiter_chat_turn_stream(**kwargs)
+
+        try:
+            async for event in stream:
+                yield event
+        finally:
+            aclose = getattr(stream, "aclose", None)
+            if callable(aclose):
+                await aclose()
+
+    elif backend is ExecutionBackend.direct_rlm:
+        raise NotImplementedError("direct_rlm execution backend is not yet implemented")
+
+    else:
+        raise ValueError(f"Unknown execution backend: {backend!r}")
 
 
 __all__ = [
     "stream_turn",
     "_build_stream_kwargs",
     "_restore_session",
+    "_resolve_backend",
 ]
