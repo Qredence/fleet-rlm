@@ -35,6 +35,7 @@ async def _chat_message_loop(
     session: _ChatSessionState,
     local_persist: LocalPersistFn,
     initial_message: WSMessage | None = None,
+    identity: object | None = None,
 ) -> None:
     await _ExecutionConnectionLoop(
         websocket=websocket,
@@ -46,6 +47,7 @@ async def _chat_message_loop(
         session=session,
         local_persist=local_persist,
         initial_message=initial_message,
+        identity=identity,
     ).run()
 
 

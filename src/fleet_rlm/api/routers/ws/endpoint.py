@@ -282,6 +282,7 @@ class _ExecutionWebSocketConnection:
                             session=session,
                             local_persist=local_persist,
                             initial_message=initial_msg,
+                            identity=self.identity,
                         )
                     finally:
                         await emitter.disconnect(self.websocket)

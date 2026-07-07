@@ -364,6 +364,14 @@ async def _stream_agent_events(
     analytics_enabled: bool | None,
     persist_session_state: LocalPersistFn,
     execution_emitter: ExecutionEventEmitter,
+    # Transport-neutral context (optional — set when refactored path is active)
+    runtime: Any | None = None,
+    identity: Any | None = None,
+    cancel_flag: dict[str, bool] | None = None,
+    owner_tenant_claim: str | None = None,
+    owner_user_claim: str | None = None,
+    selected_skill_ids: list[str] | None = None,
+    trace_mode: str | None = None,
 ) -> None:
     from ...runtime_services.chat_persistence import build_workspace_task_request
 
@@ -371,6 +379,16 @@ async def _stream_agent_events(
         agent=agent,
         prepared_turn=prepared_turn,
         cancel_check=cancel_check,
+        prepared_runtime=runtime,
+        identity=identity,
+        session_id=(orchestration_session.session_id if orchestration_session is not None else None),
+        canonical_workspace_id=(orchestration_session.workspace_id if orchestration_session is not None else None),
+        canonical_user_id=(orchestration_session.user_id if orchestration_session is not None else None),
+        owner_tenant_claim=owner_tenant_claim,
+        owner_user_claim=owner_user_claim,
+        cancel_flag=cancel_flag,
+        selected_skill_ids=selected_skill_ids,
+        trace_mode=trace_mode,
     )
 
     bridge_started = False
@@ -427,6 +445,14 @@ async def run_streaming_turn(
     interpreter: object | None,
     persist_session_state: LocalPersistFn,
     execution_emitter: ExecutionEventEmitter,
+    # Transport-neutral context (optional — set when refactored path is active)
+    runtime: Any | None = None,
+    identity: Any | None = None,
+    cancel_flag: dict[str, bool] | None = None,
+    owner_tenant_claim: str | None = None,
+    owner_user_claim: str | None = None,
+    selected_skill_ids: list[str] | None = None,
+    trace_mode: str | None = None,
 ) -> str | None:
     """Execute one streaming turn, emitting events and persisting lifecycle steps."""
     lifecycle = prepared_turn.lifecycle
@@ -481,6 +507,13 @@ async def run_streaming_turn(
                 analytics_enabled=prepared_turn.analytics_enabled,
                 persist_session_state=persist_session_state,
                 execution_emitter=execution_emitter,
+                runtime=runtime,
+                identity=identity,
+                cancel_flag=cancel_flag,
+                owner_tenant_claim=owner_tenant_claim,
+                owner_user_claim=owner_user_claim,
+                selected_skill_ids=selected_skill_ids,
+                trace_mode=trace_mode,
             )
 
         await _run_prepared_stream(

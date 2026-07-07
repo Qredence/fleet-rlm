@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -253,6 +254,7 @@ async def _process_chat_message(
     user_id: str,
     sess_id: str,
     execution_emitter: ExecutionEventEmitter,
+    identity: object | None = None,
 ) -> str | None:
     """Process one ``message`` payload and return the loaded docs path."""
     prepared_turn = await prepare_chat_message_turn(
@@ -281,6 +283,12 @@ async def _process_chat_message(
     )
     session.orchestration_session = orchestration_session
 
+    # Build per-turn controls from WSMessage fields for TurnControls threading.
+    # Note: selected_skill_ids is not a WSMessage field; it defaults to empty list.
+    turn_controls_kwargs: dict[str, Any] = {}
+    if msg.trace_mode is not None:
+        turn_controls_kwargs["trace_mode"] = msg.trace_mode
+
     return await run_streaming_turn(
         websocket=websocket,
         agent=agent,
@@ -290,6 +298,12 @@ async def _process_chat_message(
         interpreter=interpreter,
         persist_session_state=local_persist,
         execution_emitter=execution_emitter,
+        runtime=runtime,
+        identity=identity,
+        cancel_flag=session.cancel_flag,
+        owner_tenant_claim=session.owner_tenant_claim,
+        owner_user_claim=session.owner_user_claim,
+        **turn_controls_kwargs,
     )
 
 
@@ -303,6 +317,7 @@ async def _background_execution_task(
     user_id: str,
     sess_id: str,
     execution_emitter: ExecutionEventEmitter,
+    identity: object | None = None,
 ) -> str | None:
     """Run execution in the background with its own agent context."""
     from ...runtime_services.chat_runtime import build_chat_agent_context
@@ -369,6 +384,7 @@ async def _background_execution_task(
                 user_id=user_id,
                 sess_id=sess_id,
                 execution_emitter=execution_emitter,
+                identity=identity,
             )
     except Exception:
         logger.exception("Background websocket execution task failed")
@@ -390,6 +406,7 @@ class _ExecutionConnectionLoop:
         session: _ChatSessionState,
         local_persist: LocalPersistFn,
         initial_message: WSMessage | None = None,
+        identity: object | None = None,
     ) -> None:
         self.websocket = websocket
         self.session_cache = session_cache
@@ -400,6 +417,7 @@ class _ExecutionConnectionLoop:
         self.session = session
         self.local_persist = local_persist
         self.execution_emitter = diagnostics_deps.events_event_emitter
+        self.identity = identity
         self.stream_task: asyncio.Task[str | None] | asyncio.Task[None] | None = None
         self.pending_receive_task: asyncio.Task[object] | None = None
         self.pending_message = initial_message
@@ -511,6 +529,7 @@ class _ExecutionConnectionLoop:
                         user_id=user_id,
                         sess_id=sess_id,
                         execution_emitter=self.execution_emitter,
+                        identity=self.identity,
                     )
                 )
         except (asyncio.CancelledError, WebSocketDisconnect):

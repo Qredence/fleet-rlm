@@ -9,6 +9,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from fleet_rlm.api.events.project_chat import project_chat
+from fleet_rlm.api.runtime_services.chat_context import (
+    ChatExecutionContext,
+    TurnControls,
+)
+from fleet_rlm.api.runtime_services.stream_turn import stream_turn
 from fleet_rlm.runtime.events import RuntimeEvent
 
 logger = logging.getLogger(__name__)
@@ -30,6 +35,17 @@ class WorkspaceTaskRequest:
     workspace_id: str | None = None
     cancel_check: Callable[[], bool] | None = None
     prepare: Callable[[], Any] | None = None
+    # Transport-neutral context fields (set when refactored path is active)
+    prepared_runtime: Any | None = None
+    identity: Any | None = None
+    session_id: str | None = None
+    canonical_workspace_id: str | None = None
+    canonical_user_id: str | None = None
+    owner_tenant_claim: str | None = None
+    owner_user_claim: str | None = None
+    cancel_flag: dict[str, bool] | None = None
+    selected_skill_ids: list[str] | None = None
+    trace_mode: str | None = None
 
 
 def build_stream_event_dict(
@@ -112,7 +128,13 @@ def _safe_stream_span(name: str, *, attributes: dict[str, Any] | None = None):
 async def stream_agent_turn(
     request: WorkspaceTaskRequest,
 ) -> AsyncIterator[RuntimeEvent]:
-    """Stream one workspace task directly through the agent without HITL wrapper."""
+    """Stream one workspace task through the agent.
+
+    When ``request.prepared_runtime`` is set (production path), builds a
+    ``ChatExecutionContext`` and delegates to the transport-neutral
+    ``stream_turn()``.  Falls back to the direct ``aiter_chat_turn_stream``
+    path when context fields are unavailable (legacy/test path).
+    """
     from fleet_rlm.integrations.observability.mlflow_context import set_mlflow_span_outputs
 
     if request.execution_mode is not None:
@@ -125,6 +147,61 @@ async def stream_agent_turn(
             await request.prepare()
             set_mlflow_span_outputs(span, {"status": "ok"})
 
+    # ── Refactored path: build ChatExecutionContext and delegate to stream_turn() ──
+    if request.prepared_runtime is not None:
+        ctx = ChatExecutionContext(
+            prepared=request.prepared_runtime,
+            identity=request.identity,  # type: ignore
+            session_id=request.session_id,
+            canonical_workspace_id=request.canonical_workspace_id,
+            canonical_user_id=request.canonical_user_id,
+            owner_tenant_claim=request.owner_tenant_claim,
+            owner_user_claim=request.owner_user_claim,
+            cancel_flag=request.cancel_flag or {"cancelled": False},
+            controls=TurnControls(
+                execution_mode=request.execution_mode,
+                repo_url=request.repo_url,
+                repo_ref=request.repo_ref,
+                context_paths=list(request.context_paths) if request.context_paths else [],
+                batch_concurrency=request.batch_concurrency,
+                docs_path=request.docs_path,
+                trace=request.trace,
+                trace_mode=request.trace_mode,
+                selected_skill_ids=list(request.selected_skill_ids) if request.selected_skill_ids else [],
+            ),
+        )
+        event_count = 0
+        stream = stream_turn(ctx, request.message)
+        try:
+            while True:
+                with _safe_stream_span(
+                    "fleet_rlm.ws_agent_stream",
+                    attributes={"fleet_rlm.execution_origin": "stream_agent_turn"},
+                ) as span:
+                    try:
+                        runtime_event = await anext(stream)
+                    except StopAsyncIteration:
+                        set_mlflow_span_outputs(
+                            span, {"status": "ok", "event_count": event_count, "stream_done": True}
+                        )
+                        break
+                    event_count += 1
+                    set_mlflow_span_outputs(
+                        span,
+                        {
+                            "status": "ok",
+                            "event_count": event_count,
+                            "runtime_event_kind": runtime_event.kind.value,
+                        },
+                    )
+                yield runtime_event
+        finally:
+            aclose = getattr(stream, "aclose", None)
+            if callable(aclose):
+                await aclose()
+        return
+
+    # ── Legacy path (used by tests without context fields) ──
     stream = request.agent.aiter_chat_turn_stream(**_build_agent_stream_kwargs(request))
     event_count = 0
     try:

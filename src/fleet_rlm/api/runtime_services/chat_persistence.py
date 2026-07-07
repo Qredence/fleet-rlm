@@ -184,8 +184,23 @@ def build_workspace_task_request(
     agent: Any,
     prepared_turn: Any,
     cancel_check: Callable[[], bool],
+    prepared_runtime: Any | None = None,
+    identity: Any | None = None,
+    session_id: str | None = None,
+    canonical_workspace_id: str | None = None,
+    canonical_user_id: str | None = None,
+    owner_tenant_claim: str | None = None,
+    owner_user_claim: str | None = None,
+    cancel_flag: dict[str, bool] | None = None,
+    selected_skill_ids: list[str] | None = None,
+    trace_mode: str | None = None,
 ) -> Any:
-    """Build the worker request for one websocket message turn."""
+    """Build the worker request for one websocket message turn.
+
+    When *prepared_runtime* is provided, the worker request includes
+    transport-neutral context fields so ``stream_agent_turn`` can build a
+    ``ChatExecutionContext`` and delegate to ``stream_turn()``.
+    """
     return SimpleNamespace(
         agent=agent,
         message=prepared_turn.message,
@@ -199,6 +214,17 @@ def build_workspace_task_request(
         workspace_id=prepared_turn.workspace_id,
         cancel_check=cancel_check,
         prepare=prepared_turn.prepare_worker,
+        # Transport-neutral context (set when refactored path is active)
+        prepared_runtime=prepared_runtime,
+        identity=identity,
+        session_id=session_id,
+        canonical_workspace_id=canonical_workspace_id,
+        canonical_user_id=canonical_user_id,
+        owner_tenant_claim=owner_tenant_claim,
+        owner_user_claim=owner_user_claim,
+        cancel_flag=cancel_flag,
+        selected_skill_ids=selected_skill_ids,
+        trace_mode=trace_mode,
     )
 
 
