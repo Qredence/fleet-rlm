@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import uuid
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ from fleet_rlm.integrations.database import (
     RunStep,
     select_database_url,
 )
+from fleet_rlm.integrations.observability.config import MlflowConfig
 
 _DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 _DEFAULT_WORKSPACE_ID = "default"
@@ -109,7 +111,7 @@ def _verify_mlflow_trace_exists(trace_id: str) -> None:
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001").strip()
     env = {**os.environ, "MLFLOW_TRACKING_URI": tracking_uri}
     result = subprocess.run(
-        ["uv", "run", "mlflow", "traces", "get", "--trace-id", trace_id, "--output", "json"],
+        ["uv", "run", "mlflow", "traces", "get", "--trace-id", trace_id],
         cwd=repo_root,
         env=env,
         capture_output=True,
@@ -214,8 +216,6 @@ async def _persist_artifact_via_command(
             "content": "QRE-301 artifact persistence probe",
             "append": False,
         },
-        "workspace_id": workspace_id,
-        "user_id": user_id,
         "session_id": session_id,
     }
     await chat_ws.send(json.dumps(command_message))
@@ -229,8 +229,6 @@ async def _persist_artifact_via_command(
     # Trigger a local persist pass after command side effects.
     cancel_msg = {
         "type": "cancel",
-        "workspace_id": workspace_id,
-        "user_id": user_id,
         "session_id": session_id,
     }
     await chat_ws.send(json.dumps(cancel_msg))
@@ -377,7 +375,7 @@ async def _run_validation(args: argparse.Namespace) -> ValidationResult:
     }
     ws_headers = list(headers.items())
 
-    async with httpx.AsyncClient(base_url=args.server_url, timeout=30.0) as client:
+    async with httpx.AsyncClient(base_url=args.server_url, timeout=30.0, headers=headers) as client:
         await _assert_ready_and_runtime_status(client, output_dir)
 
         chat_ws_url = _make_ws_url(args.server_url, "/api/v1/ws/execution")
@@ -404,8 +402,6 @@ async def _run_validation(args: argparse.Namespace) -> ValidationResult:
                             "content": args.prompt,
                             "docs_path": args.docs_path,
                             "trace": True,
-                            "workspace_id": args.workspace_id,
-                            "user_id": args.user_id,
                             "session_id": session_id,
                         }
                     )
