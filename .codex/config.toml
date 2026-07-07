@@ -1,4 +1,5 @@
 approval_policy = "never"
+sandbox_mode = "workspace-write"
 [features]
 hooks = true
 multi_agent = true
@@ -91,3 +92,6 @@ nickname_candidates = ["Daytona", "Sandbox"]
 description = "AGENTS.md, PLANS.md, docs, README, and durable workflow documentation consistency."
 config_file = "agents/docs-maintainer.toml"
 nickname_candidates = ["Docs", "Maintainer"]
+
+[sandbox_workspace_write]
+network_access = true
