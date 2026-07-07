@@ -90,7 +90,12 @@ endpoint is ``/api/chat`` (not ``/api/v1/chat``). This matches the AI SDK
 - Fleet control fields: ``session_id``, ``execution_mode``, ``repo_url``,
   ``repo_ref``, ``context_paths``, ``batch_concurrency``, ``docs_path``,
   ``trace``, ``trace_mode``, ``selected_skill_ids``
-- Uses ``extra="forbid"`` (matching ``WSMessage`` policy)
+- **``execution_backend`` is NOT accepted from clients.** Phase 2A is
+  server-side only — the backend is controlled through
+  ``AppConfig.execution_backend`` (env variable ``EXECUTION_BACKEND``) and
+  internal ``TurnControls.execution_backend`` override. ``ChatRequest``
+  uses ``extra="forbid"`` (matching ``WSMessage`` policy), so clients that
+  send ``execution_backend`` will receive a ``422 ValidationError``.
 - Legacy ``execution_mode`` values (``auto``/``rlm_only``/``tools_only``)
   accepted without error (collapsed in Phase 2)
 
@@ -116,6 +121,7 @@ imports. No import-time side effects.
 ```python
 @dataclass(slots=True)
 class TurnControls:
+    execution_backend: ExecutionBackend | None = None
     execution_mode: str | None = None
     repo_url: str | None = None
     repo_ref: str | None = None
@@ -154,11 +160,17 @@ async def stream_turn(
 ) -> AsyncIterator[RuntimeEvent]:
 ```
 
-- Delegates to ``AgentRuntime.aiter_chat_turn_stream()`` with a
-  ``cancel_check`` reading ``ctx.cancel_flag.get("cancelled", False)``
-- Threads non-``None`` ``TurnControls`` fields as kwargs
-- Calls ``agent.set_execution_mode()`` when
-  ``ctx.controls.execution_mode`` is not ``None``
+- Resolves the execution backend at the top of the function (per-request
+  ``TurnControls.execution_backend`` if not ``None``, else
+  ``AppConfig.execution_backend``)
+- ``legacy_agent_runtime`` (default): delegates to
+  ``AgentRuntime.aiter_chat_turn_stream()`` with a ``cancel_check`` reading
+  ``ctx.cancel_flag.get("cancelled", False)``; threads non-``None``
+  ``TurnControls`` fields as kwargs; calls ``agent.set_execution_mode()``
+  when ``ctx.controls.execution_mode`` is not ``None``
+- ``direct_rlm``: raises ``NotImplementedError`` **before** any agent
+  method, session restore, or stream call — it is a stub only, **not
+  implemented** in Phase 2A
 - No ``WebSocket``/``Request`` imports
 - Session restoration via ``ctx.session_id``
 
@@ -279,6 +291,36 @@ changes**. The Daytona interpreter provides sandbox execution, volume
 filesystem, workspace staging, and skill/resource access.
 
 ---
+
+## Phase 2A: ExecutionBackend Seam
+
+Phase 2A introduces an ``ExecutionBackend`` selector behind ``stream_turn()``.
+All changes are **server-side only** — no schema, OpenAPI, or frontend changes.
+
+**Config field:** ``AppConfig.execution_backend`` (``api/config.py``) is a
+server-configuration field typed as ``ExecutionBackend``, defaulting to
+``legacy_agent_runtime``, and readable via the ``EXECUTION_BACKEND``
+environment variable.
+
+**Per-request override:** ``TurnControls.execution_backend``
+(``api/runtime_services/chat_context.py``) is an optional override that, when
+not ``None``, wins over the config default.
+
+**Dispatch:** Inside ``stream_turn()``, the resolved backend selects the
+execution path via ``if/elif``. ``legacy_agent_runtime`` runs the unchanged
+Phase 1 path. ``direct_rlm`` raises ``NotImplementedError`` before any agent
+method — it is a **stub only, not implemented** in Phase 2A.
+
+**Resolution order:**
+1. ``ctx.controls.execution_backend`` (per-request override, if not ``None``)
+2. ``AppConfig.execution_backend`` (process default from env / config)
+3. ``ExecutionBackend.legacy_agent_runtime`` (hardcoded config-field default)
+
+**``execution_backend`` is orthogonal to ``execution_mode``.** ``ExecutionBackend``
+selects *which runtime*; ``ExecutionMode`` selects *how the legacy runtime
+behaves*.
+
+See ``docs/adr/0005-execution-backend-seam.md`` for the full design rationale.
 
 ## Package Rules
 

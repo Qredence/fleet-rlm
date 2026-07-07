@@ -406,10 +406,39 @@ Both the SSE endpoint and the existing WebSocket endpoint
 ``ChatExecutionContext`` from its inputs and calls the single
 ``stream_turn()`` function.
 
+### Phase 2A: ExecutionBackend Seam
+
+Phase 2A introduces an ``ExecutionBackend`` selector and dispatch point
+behind ``stream_turn()``, adding the ability to choose which runtime backend
+executes a turn — while keeping the transport, schema, OpenAPI, and frontend
+unchanged.
+
+**Key points:**
+
+- **Server-side only.** ``execution_backend`` is **not** accepted from
+  ``ChatRequest`` or frontend clients. It is controlled solely by server
+  configuration (``AppConfig.execution_backend``, env variable
+  ``EXECUTION_BACKEND``) and internal per-turn overrides
+  (``TurnControls.execution_backend``).
+- **Default is ``legacy_agent_runtime``.** Every existing Phase 1 call path
+  resolves to this backend, preserving 100% of Phase 1 behavior.
+- **``direct_rlm`` is a stub.** It raises ``NotImplementedError("direct_rlm
+  execution backend is not yet implemented")`` before any agent method or
+  session restoration is invoked. It is **not implemented** in Phase 2A.
+- **Resolution order.** Inside ``stream_turn()``:
+  1. ``ctx.controls.execution_backend`` if not ``None`` (per-request override)
+  2. ``AppConfig.execution_backend`` (process default from env / config)
+- **``execution_backend`` is orthogonal to ``execution_mode``.**
+  ``ExecutionBackend`` selects *which runtime*; ``ExecutionMode`` selects
+  *how the legacy runtime behaves*.
+
+See ``docs/adr/0005-execution-backend-seam.md`` for the full design rationale.
+
 .. code-block:: python
 
     @dataclass(slots=True)
     class TurnControls:
+        execution_backend: ExecutionBackend | None = None
         execution_mode: str | None = None
         repo_url: str | None = None
         repo_ref: str | None = None
@@ -438,9 +467,14 @@ Both the SSE endpoint and the existing WebSocket endpoint
     ) -> AsyncIterator[RuntimeEvent]:
         ...
 
-``stream_turn()`` delegates to ``AgentRuntime.aiter_chat_turn_stream()``
-with a ``cancel_check`` reading ``ctx.cancel_flag`` and threads
-non-``None`` ``TurnControls`` fields as kwargs.
+``stream_turn()`` resolves the execution backend once at the top (per-request
+``TurnControls.execution_backend`` if not ``None``, else ``AppConfig.execution_backend``)
+and dispatches via ``if/elif``. The default backend ``legacy_agent_runtime``
+delegates to ``AgentRuntime.aiter_chat_turn_stream()`` with a ``cancel_check``
+reading ``ctx.cancel_flag`` and threads non-``None`` ``TurnControls`` fields
+as kwargs. The second backend ``direct_rlm`` is a stub that raises
+``NotImplementedError`` before any agent method is called — it is **not
+implemented** in Phase 2A.
 
 ### RuntimeEventKind → AI SDK UIMessage v1 Part Mapping
 
