@@ -73,11 +73,11 @@ class LlmConfig(BaseModel):
     )
     max_tokens: int = Field(
         default=64000,
-        description="Maximum token budget for planner model calls.",
+        description="Maximum output tokens per planner model response.",
     )
     delegate_max_tokens: int = Field(
         default=64000,
-        description="Maximum token budget for delegate model calls.",
+        description="Maximum output tokens per delegate model response.",
     )
     api_base: str | None = Field(
         default=None,
@@ -260,7 +260,7 @@ class RlmSettings(BaseModel):
     )
     max_llm_calls: int = Field(
         default=50,
-        description="Maximum LLM calls per task.",
+        description="Maximum semantic sub-LM calls per RLM task.",
     )
     max_output_chars: int = Field(
         default=5000,
@@ -268,7 +268,7 @@ class RlmSettings(BaseModel):
     )
     action_max_tokens: int = Field(
         default=2048,
-        description="Maximum model tokens for each RLM action-generation call.",
+        description="Maximum output tokens for each RLM action-generation call.",
     )
     action_timeout: int = Field(
         default=90,
@@ -280,7 +280,7 @@ class RlmSettings(BaseModel):
     )
     url_document_max_llm_calls: int = Field(
         default=30,
-        description="Maximum LLM calls for URL-document RLM analysis.",
+        description="Maximum semantic sub-LM calls for URL-document RLM analysis.",
     )
     delegate_max_calls_per_turn: int = Field(
         default=8,
