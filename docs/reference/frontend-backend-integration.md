@@ -4,9 +4,10 @@ This document captures the current integration contract between the frontend
 SPA and the backend API.
 
 The important rule is simple: the frontend talks to the backend through a
-small REST surface, a conversational websocket, and a separate passive
-execution subscription websocket. There is no SSE path in the current frontend
-contract.
+small REST surface, a conversational websocket, a separate passive
+execution subscription websocket, and an AI SDK UIMessage v1 SSE streaming
+endpoint at ``POST /api/chat``. The SSE endpoint exists for future frontend
+use and is backend-complete in Phase 1; the frontend does not yet consume it.
 
 ## Supported Product Surfaces
 
@@ -313,3 +314,214 @@ The settings feature treats these operations as current:
 - refresh runtime status
 
 The runtime and LLM Provider Profile forms use the backend settings and provider profiles APIs.
+
+## SSE Streaming: POST /api/chat
+
+Phase 1 adds an AI SDK UIMessage v1 SSE streaming endpoint at ``POST /api/chat``
+as a transport boundary over the existing DSPy runtime. See
+`ADR-0003 <../adr/0003-api-chat-ai-sdk-uimessage-stream.md>`_ (SSE protocol)
+and `ADR-0004 <../adr/0004-chat-execution-context-seam.md>`_ (transport
+seam) for the full design rationale.
+
+### Route Details
+
+- **Path:** ``/api/chat`` (mounted at app root, *not* ``/api/v1/chat``)
+- **Method:** ``POST`` only (``GET``/``PUT``/``DELETE``/``PATCH`` return ``405
+  Method Not Allowed``)
+- **Content-Type accepted:** ``application/json``
+- **Content-Type returned:** ``text/event-stream``
+- **Protocol marker:** ``x-vercel-ai-ui-message-stream: v1``
+- **Transfer encoding:** chunked (no ``Content-Length``)
+- **Auth:** ``require_http_identity`` (HTTPBearer → ``NormalizedIdentity``);
+  local-mode bypass via ``auth_required=false`` returns
+  ``build_unauthenticated_identity(cfg)``
+- **Cancellation:** ``await request.is_disconnected()`` flips
+  ``cancel_flag["cancelled"]``; runtime ``cancel_check`` polls the same flag
+
+### ChatRequest (Request Body)
+
+The endpoint accepts a ``ChatRequest`` JSON body (defined in
+``src/fleet_rlm/api/schemas/chat.py``). ``ChatRequest`` uses
+``extra="forbid"`` (matching the existing ``WSMessage`` policy) and requires
+at least one message.
+
+**``ChatRequest`` fields:**
+
+.. code-block:: python
+
+    class ChatMessage(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+        role: Literal["user", "assistant", "system", "tool"]
+        content: str | None = None
+        parts: list[dict] | None = None
+
+    class ChatRequest(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+        messages: list[ChatMessage]        # min_length=1
+        # Optional fleet control fields:
+        session_id: str | None = None
+        execution_mode: str | None = None  # Legacy: auto/rlm_only/tools_only
+        repo_url: str | None = None
+        repo_ref: str | None = None
+        context_paths: list[str] | None = None
+        batch_concurrency: int | None = None
+        docs_path: str | None = None
+        trace: bool | None = None
+        trace_mode: str | None = None
+        selected_skill_ids: list[str] | None = None
+
+The endpoint extracts the latest ``role: "user"`` message from
+``messages`` (scanning backwards) to feed the turn. If the user message
+has ``content=None`` but ``parts`` with a ``type: "text"`` entry, the text
+is extracted from parts (AI SDK UIMessage shape).
+
+### SSE Wire Format
+
+Each SSE event line is ``data: {json}\n\n``, terminated by a blank line.
+The stream ends with ``data: [DONE]\n\n``.
+
+.. code-block:: text
+
+    Content-Type: text/event-stream
+    x-vercel-ai-ui-message-stream: v1
+
+    data: {"type":"start","messageId":"..."}\n\n
+    data: {"type":"start-step"}\n\n
+    data: {"type":"data-agent","selected_skills":[...],"available_tools":[...]}\n\n
+    data: {"type":"text-start"}\n\n
+    data: {"type":"text-delta","delta":"Hello"}\n\n
+    data: {"type":"text-end"}\n\n
+    data: {"type":"finish-step"}\n\n
+    data: {"type":"finish"}\n\n
+    data: [DONE]\n\n
+
+### Transport / Runtime Seam
+
+Both the SSE endpoint and the existing WebSocket endpoint
+(``/api/v1/ws/execution``) share a transport-neutral seam defined by
+``ChatExecutionContext`` and ``stream_turn()`` (in
+``src/fleet_rlm/api/runtime_services/``). Each transport builds a
+``ChatExecutionContext`` from its inputs and calls the single
+``stream_turn()`` function.
+
+.. code-block:: python
+
+    @dataclass(slots=True)
+    class TurnControls:
+        execution_mode: str | None = None
+        repo_url: str | None = None
+        repo_ref: str | None = None
+        context_paths: list[str] = field(default_factory=list)
+        batch_concurrency: int | None = None
+        docs_path: str | None = None
+        trace: bool | None = None
+        trace_mode: str | None = None
+        selected_skill_ids: list[str] = field(default_factory=list)
+
+    @dataclass(slots=True)
+    class ChatExecutionContext:
+        prepared: PreparedChatRuntime
+        identity: NormalizedIdentity
+        session_id: str | None
+        canonical_workspace_id: str | None
+        canonical_user_id: str | None
+        owner_tenant_claim: str | None
+        owner_user_claim: str | None
+        cancel_flag: dict[str, bool]
+        controls: TurnControls
+
+    async def stream_turn(
+        ctx: ChatExecutionContext,
+        message: str,
+    ) -> AsyncIterator[RuntimeEvent]:
+        ...
+
+``stream_turn()`` delegates to ``AgentRuntime.aiter_chat_turn_stream()``
+with a ``cancel_check`` reading ``ctx.cancel_flag`` and threads
+non-``None`` ``TurnControls`` fields as kwargs.
+
+### RuntimeEventKind → AI SDK UIMessage v1 Part Mapping
+
+The SSE projector (``project_sse()`` in
+``src/fleet_rlm/api/events/project_sse.py``) maps all 14
+``RuntimeEventKind`` values to AI SDK UIMessage v1 parts. Terminal events
+(``DONE``, ``ERROR``, cancellation) emit ``[DONE]`` as the final line.
+
+.. list-table::
+    :header-rows: 1
+
+    * - RuntimeEventKind
+      - AI SDK v1 part(s)
+    * - ``TEXT``
+      - ``text-start`` / ``text-delta`` / ``text-end``
+    * - ``REASONING``
+      - ``reasoning-start`` / ``reasoning-delta`` / ``reasoning-end``
+    * - ``TOOL_CALL``
+      - ``tool-input-start`` / ``tool-input-available``
+    * - ``TOOL_RESULT``
+      - ``tool-output-available``
+    * - ``TURN_STARTED``
+      - ``start`` (messageId) / ``start-step`` / ``data-agent``
+    * - ``TURN_INPUTS``
+      - ``data-turn-inputs``
+    * - ``SANDBOX_EXEC``
+      - ``data-sandbox-exec``
+    * - ``RLM_DELEGATE``
+      - ``data-rlm-delegate``
+    * - ``MLFLOW_SPAN``
+      - ``data-span``
+    * - ``STATUS``
+      - ``data-status``
+    * - ``WARNING``
+      - ``data-warning``
+    * - ``CLARIFICATION``
+      - ``data-clarification``
+    * - ``DONE``
+      - ``finish-step`` / ``finish`` / ``[DONE]``
+    * - ``ERROR``
+      - ``error`` / ``[DONE]``
+    * - client disconnect / cancel
+      - ``abort`` / ``[DONE]``
+
+Additional ``data-*`` parts are projected from payload fields alongside the
+primary mapping (never suppressing it):
+
+- ``data-artifact`` — generated file artifact (title, content_type, path)
+- ``data-task`` — task progress
+- ``data-performance`` — trace performance summary
+- ``data-suggestion`` — suggested next actions
+
+No kind is silently dropped. ``TEXT`` and ``REASONING`` use start/delta/end
+wrappers. ``tool-input-delta`` is not emitted in Phase 1.
+
+### Implementation Modules
+
+| Component | Module | Responsibility |
+|---|---|---|
+| ``ChatRequest`` / ``ChatMessage`` | ``api/schemas/chat.py`` | Pydantic request models |
+| ``ChatExecutionContext`` / ``TurnControls`` | ``api/runtime_services/chat_context.py`` | Transport-neutral context |
+| ``stream_turn()`` | ``api/runtime_services/stream_turn.py`` | Transport-neutral turn stream |
+| ``project_sse()`` | ``api/events/project_sse.py`` | ``RuntimeEvent`` → SSE lines |
+| ``POST /api/chat`` handler | ``api/routers/chat.py`` | SSE endpoint, auth, cancellation |
+| Route registration | ``api/main.py`` | ``app.include_router(chat.router)`` (after ``api_v1``) |
+
+### Session Contract
+
+- ``session_id`` absent → new session created, id surfaced in ``data-agent``.
+- ``session_id`` present → existing session restored (if found); non-existent
+  id creates a new session with that id (pinned behavior).
+- Each ``POST`` is non-idempotent: two identical requests create distinct runs
+  with distinct ``messageId`` values. No ``Idempotency-Key`` header supported
+  in Phase 1.
+
+### Relationship to WebSocket Endpoint
+
+The SSE endpoint is a parallel transport that shares the same runtime seam.
+The existing WebSocket endpoint (``/api/v1/ws/execution``) and its
+``project_chat()`` frame projection remain entirely unchanged — same
+behavior, same frame schema version 3, same projection. The two transports
+differ *only* in how they project the underlying ``RuntimeEvent`` stream:
+WebSocket uses ``project_chat()`` (custom WS frames), SSE uses
+``project_sse()`` (AI SDK v1 parts).
