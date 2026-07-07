@@ -11,8 +11,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol, cast
 
-from fastapi import WebSocket
-
 from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.integrations.llm_profiles.resolver import build_lm_kwargs_from_resolved, resolve_active_role_configs
@@ -241,25 +239,23 @@ async def _resolve_persisted_identity(
 
 async def prepare_chat_runtime(
     *,
-    websocket: WebSocket,
     config_deps: ConfigDeps,
     lm_deps: LmDeps,
     persistence_deps: PersistenceDeps,
     diagnostics_deps: DiagnosticsDeps,
     identity: NormalizedIdentity,
-    send_error,
-    close_websocket,
+    send_error: Callable[..., Awaitable[bool]],
+    close_websocket: Callable[..., Awaitable[None]],
 ) -> PreparedChatRuntime | None:
     cfg = config_deps.config
     try:
         planner_lm, delegate_lm = await _ensure_runtime_models(lm_deps, config_deps, diagnostics_deps)
     except Exception as exc:
         if await send_error(
-            websocket,
             code="planner_initialization_failed",
             message=f"Planner initialization failed: {exc}",
         ):
-            await close_websocket(websocket, code=1011)
+            await close_websocket(code=1011)
         return None
 
     repository = persistence_deps.repository
@@ -282,19 +278,17 @@ async def prepare_chat_runtime(
             )
         except AuthError as exc:
             if await send_error(
-                websocket,
                 code="tenant_forbidden" if exc.status_code == 403 else "auth_failed",
                 message=exc.message,
             ):
-                await close_websocket(websocket, code=1008)
+                await close_websocket(code=1008)
             return None
     elif persistence_required:
         if await send_error(
-            websocket,
             code="durable_state_unavailable",
             message="Database repository is required but unavailable",
         ):
-            await close_websocket(websocket, code=1011)
+            await close_websocket(code=1011)
         return None
     else:
         # Local-store mode: derive a synthetic identity from the HTTP claims
@@ -315,11 +309,10 @@ async def prepare_chat_runtime(
 
     if planner_lm is None:
         if await send_error(
-            websocket,
             code="planner_missing",
             message=("Planner LM not configured. Check DSPY_LM_MODEL and DSPY_LLM_API_KEY env vars."),
         ):
-            await close_websocket(websocket)
+            await close_websocket()
         return None
 
     return PreparedChatRuntime(

@@ -76,25 +76,26 @@ async def _prepare_chat_runtime(
     identity: NormalizedIdentity,
 ) -> _PreparedChatRuntime | None:
     async def _send_error(
-        target: WebSocket,
         *,
         code: str,
         message: str,
     ) -> bool:
         return await _try_send_json(
-            target,
+            websocket,
             _error_envelope(code=code, message=message),
         )
 
+    async def _close_ws(*, code: int = 1000) -> None:
+        await _close_websocket_safely(websocket, code=code)
+
     return await _prepare_chat_runtime_service(
-        websocket=websocket,
         config_deps=config_deps,
         lm_deps=lm_deps,
         persistence_deps=persistence_deps,
         diagnostics_deps=diagnostics_deps,
         identity=identity,
         send_error=_send_error,
-        close_websocket=_close_websocket_safely,
+        close_websocket=_close_ws,
     )
 
 
