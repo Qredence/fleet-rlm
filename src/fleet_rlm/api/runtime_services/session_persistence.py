@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import logging
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from fleet_rlm.api.runtime_services.stream_failures import PersistenceRequiredError
@@ -22,6 +23,56 @@ from fleet_rlm.utils.time import now_iso
 from ..dependencies import SessionCacheDeps
 
 logger = logging.getLogger(__name__)
+
+
+async def _with_session_persist_span(
+    name: str,
+    operation: Callable[[], Any],
+    *,
+    attributes: dict[str, Any] | None = None,
+) -> Any:
+    from fleet_rlm.integrations.observability.mlflow_context import (
+        mlflow_child_span,
+        set_mlflow_span_outputs,
+    )
+
+    manager = None
+    span = None
+    try:
+        manager = mlflow_child_span(
+            name,
+            span_type="CHAIN",
+            attributes={
+                "fleet_rlm.execution_origin": "session_persistence",
+                **(attributes or {}),
+            },
+        )
+        span = manager.__enter__()
+    except Exception:
+        logger.debug("MLflow session persistence span skipped: %s", name, exc_info=True)
+        manager = None
+
+    try:
+        result = operation()
+        if inspect.isawaitable(result):
+            result = await result
+        set_mlflow_span_outputs(span, {"status": "ok"})
+        return result
+    except BaseException as exc:
+        if manager is not None:
+            try:
+                manager.__exit__(type(exc), exc, exc.__traceback__)
+            except Exception:
+                logger.debug("MLflow session persistence span exit skipped after error: %s", name, exc_info=True)
+            finally:
+                manager = None
+        raise
+    finally:
+        if manager is not None:
+            try:
+                manager.__exit__(None, None, None)
+            except Exception:
+                logger.debug("MLflow session persistence span exit skipped: %s", name, exc_info=True)
 
 
 def ensure_manifest_shape(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -366,7 +417,10 @@ async def persist_session_state(
         if release_idle_session:
             from fleet_rlm.api.runtime_services.session_manifest import release_idle_daytona_session
 
-            await release_idle_daytona_session(agent)
+            await _with_session_persist_span(
+                "fleet_rlm.session_release_idle_daytona",
+                lambda: release_idle_daytona_session(agent),
+            )
 
 
 async def _persist_session_state_impl(
@@ -388,7 +442,10 @@ async def _persist_session_state_impl(
     """Persist current session state to in-memory cache, volume, and DB."""
     if session_record is None:
         return
-    exported_state = agent.export_session_state()
+    exported_state = await _with_session_persist_span(
+        "fleet_rlm.session_export_state",
+        agent.export_session_state,
+    )
     manifest = session_record.get("manifest")
     if not isinstance(manifest, dict):
         manifest = {}
@@ -417,10 +474,17 @@ async def _persist_session_state_impl(
         if not allow_volume_session_create:
             existing_session = await _aget_daytona_session(agent, allow_create=False)
         if allow_volume_session_create or existing_session is not None:
-            remote_manifest = await load_manifest_from_volume(
-                agent,
-                active_manifest_path,
-                allow_session_create=allow_volume_session_create,
+            remote_manifest = await _with_session_persist_span(
+                "fleet_rlm.session_volume_manifest_load",
+                lambda: load_manifest_from_volume(
+                    agent,
+                    active_manifest_path,
+                    allow_session_create=allow_volume_session_create,
+                ),
+                attributes={
+                    "fleet_rlm.active_manifest_path": active_manifest_path,
+                    "fleet_rlm.allow_volume_session_create": str(allow_volume_session_create).lower(),
+                },
             )
             remote_rev_raw = remote_manifest.get("rev", 0)
             remote_rev_candidate = remote_rev_raw if isinstance(remote_rev_raw, (int, float, str)) else 0
@@ -437,11 +501,18 @@ async def _persist_session_state_impl(
                     raise PersistenceRequiredError("manifest_conflict", message)
                 logger.warning(message)
             else:
-                saved_path = await save_manifest_to_volume(
-                    agent,
-                    active_manifest_path,
-                    manifest,
-                    allow_session_create=allow_volume_session_create,
+                saved_path = await _with_session_persist_span(
+                    "fleet_rlm.session_volume_manifest_save",
+                    lambda: save_manifest_to_volume(
+                        agent,
+                        active_manifest_path,
+                        manifest,
+                        allow_session_create=allow_volume_session_create,
+                    ),
+                    attributes={
+                        "fleet_rlm.active_manifest_path": active_manifest_path,
+                        "fleet_rlm.manifest_rev": str(manifest.get("rev", "")),
+                    },
                 )
                 if saved_path is None:
                     message = f"Failed to save session manifest to volume (path={active_manifest_path})"
@@ -462,32 +533,48 @@ async def _persist_session_state_impl(
     if include_volume_save and persistence is not None:
         sess_id = str(session_record.get("session_id") or "")
         if sess_id:
-            await _persist_manifest_to_local_store(
-                persistence=persistence,
-                sess_id=sess_id,
-                manifest=manifest,
+            await _with_session_persist_span(
+                "fleet_rlm.session_local_manifest_persist",
+                lambda: _persist_manifest_to_local_store(
+                    persistence=persistence,
+                    sess_id=sess_id,
+                    manifest=manifest,
+                ),
+                attributes={"fleet_rlm.session_id": sess_id},
             )
-            await _persist_local_turns_from_exported_state(
-                persistence=persistence,
-                session_record=session_record,
-                exported_state=exported_state,
-                identity_rows=identity_rows,
+            await _with_session_persist_span(
+                "fleet_rlm.session_local_turns_persist",
+                lambda: _persist_local_turns_from_exported_state(
+                    persistence=persistence,
+                    session_record=session_record,
+                    exported_state=exported_state,
+                    identity_rows=identity_rows,
+                ),
+                attributes={"fleet_rlm.session_id": sess_id},
             )
 
-    await _persist_repository_turns_from_exported_state(
-        repository=repository,
-        session_record=session_record,
-        exported_state=exported_state,
-        identity_rows=identity_rows,
-        persistence_required=persistence_required,
+    await _with_session_persist_span(
+        "fleet_rlm.session_repository_turns_persist",
+        lambda: _persist_repository_turns_from_exported_state(
+            repository=repository,
+            session_record=session_record,
+            exported_state=exported_state,
+            identity_rows=identity_rows,
+            persistence_required=persistence_required,
+        ),
+        attributes={"fleet_rlm.repository_configured": str(repository is not None).lower()},
     )
 
-    await persist_memory_item_if_needed(
-        repository=repository,
-        identity_rows=identity_rows,
-        active_run_db_id=active_run_db_id,
-        latest_user_message=latest_user_message,
-        persistence_required=persistence_required,
+    await _with_session_persist_span(
+        "fleet_rlm.session_memory_persist",
+        lambda: persist_memory_item_if_needed(
+            repository=repository,
+            identity_rows=identity_rows,
+            active_run_db_id=active_run_db_id,
+            latest_user_message=latest_user_message,
+            persistence_required=persistence_required,
+        ),
+        attributes={"fleet_rlm.has_latest_user_message": str(bool(latest_user_message)).lower()},
     )
 
 
@@ -527,7 +614,10 @@ def build_local_persist_fn(
             if release_idle_session:
                 from fleet_rlm.api.runtime_services.session_manifest import release_idle_daytona_session
 
-                await release_idle_daytona_session(agent)
+                await _with_session_persist_span(
+                    "fleet_rlm.session_release_idle_daytona",
+                    lambda: release_idle_daytona_session(agent),
+                )
 
     return local_persist
 

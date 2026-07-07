@@ -6,7 +6,9 @@ Encapsulates run lifecycle operations: DB persistence and event emission.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from fleet_rlm.api.events import (
@@ -254,6 +256,57 @@ class ExecutionLifecycleManager:
     async def emit_step(self, step: ExecutionStep) -> None:
         await self.execution_emitter.emit(self._build_event("execution_step", step=step))
 
+    async def _with_lifecycle_span(
+        self,
+        name: str,
+        operation: Callable[[], Any],
+        *,
+        attributes: dict[str, Any] | None = None,
+    ) -> Any:
+        from fleet_rlm.integrations.observability.mlflow_context import (
+            mlflow_child_span,
+            set_mlflow_span_outputs,
+        )
+
+        manager = None
+        span = None
+        try:
+            manager = mlflow_child_span(
+                name,
+                span_type="CHAIN",
+                attributes={
+                    "fleet_rlm.execution_origin": "execution_lifecycle",
+                    "fleet_rlm.run_id": self.run_id,
+                    **(attributes or {}),
+                },
+            )
+            span = manager.__enter__()
+        except Exception:
+            logger.debug("MLflow lifecycle span skipped: %s", name, exc_info=True)
+            manager = None
+
+        try:
+            result = operation()
+            if inspect.isawaitable(result):
+                result = await result
+            set_mlflow_span_outputs(span, {"status": "ok"})
+            return result
+        except BaseException as exc:
+            if manager is not None:
+                try:
+                    manager.__exit__(type(exc), exc, exc.__traceback__)
+                except Exception:
+                    logger.debug("MLflow lifecycle span exit skipped after error: %s", name, exc_info=True)
+                finally:
+                    manager = None
+            raise
+        finally:
+            if manager is not None:
+                try:
+                    manager.__exit__(None, None, None)
+                except Exception:
+                    logger.debug("MLflow lifecycle span exit skipped: %s", name, exc_info=True)
+
     async def complete_run(
         self,
         status: RunStatus,
@@ -264,7 +317,11 @@ class ExecutionLifecycleManager:
     ) -> None:
         if self.run_completed:
             return
-        await self._stop_persist_worker()
+        await self._with_lifecycle_span(
+            "fleet_rlm.lifecycle_persist_worker_drain",
+            self._stop_persist_worker,
+            attributes={"fleet_rlm.strict_persistence": str(self.strict_persistence).lower()},
+        )
 
         effective_status = status
         effective_error = dict(error_json or {})
@@ -280,11 +337,18 @@ class ExecutionLifecycleManager:
             assert self.identity_rows is not None
             assert self.active_run_db_id is not None
             try:
-                await self.repository.update_run_status(
-                    tenant_id=self.identity_rows.tenant_id,
-                    run_id=self.active_run_db_id,
-                    status=effective_status,
-                    error_json=effective_error or None,
+                await self._with_lifecycle_span(
+                    "fleet_rlm.lifecycle_update_run_status",
+                    lambda: self.repository.update_run_status(
+                        tenant_id=self.identity_rows.tenant_id,
+                        run_id=self.active_run_db_id,
+                        status=effective_status,
+                        error_json=effective_error or None,
+                    ),
+                    attributes={
+                        "fleet_rlm.run_status": str(effective_status.value),
+                        "fleet_rlm.has_error_json": str(bool(effective_error)).lower(),
+                    },
                 )
             except Exception as exc:
                 if self.strict_persistence:
@@ -293,7 +357,11 @@ class ExecutionLifecycleManager:
                         f"Failed to persist run status: {exc}",
                     ) from exc
                 logger.warning("Failed to persist run status: %s", _sanitize_for_log(exc))
-        await self.execution_emitter.emit(self._build_event("execution_completed", step=step, summary=summary))
+        await self._with_lifecycle_span(
+            "fleet_rlm.lifecycle_emit_completed",
+            lambda: self.execution_emitter.emit(self._build_event("execution_completed", step=step, summary=summary)),
+            attributes={"fleet_rlm.has_summary": str(bool(summary)).lower()},
+        )
         self.run_completed = True
 
 
