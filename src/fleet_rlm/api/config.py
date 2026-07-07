@@ -22,6 +22,7 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
 from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
 
 DEFAULT_SERVER_VOLUME_NAME = "rlm-volume-dspy"
@@ -115,6 +116,10 @@ class AppConfig(BaseSettings):
     ws_enforce_react_interlocutor: bool = True
     ws_default_execution_profile: str = "ROOT_INTERLOCUTOR"
     sandbox_provider: Literal["daytona"] = "daytona"
+    execution_backend: ExecutionBackend = Field(
+        default=ExecutionBackend.legacy_agent_runtime,
+        alias="EXECUTION_BACKEND",
+    )
 
     # Model fields read from DSPY_* env vars
     agent_model: str | None = Field(default=None, alias="DSPY_LM_MODEL")

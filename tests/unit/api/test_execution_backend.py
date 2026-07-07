@@ -10,7 +10,6 @@ from enum import StrEnum
 from fleet_rlm.api.runtime_services import execution_backend
 from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
 
-
 # ---------------------------------------------------------------------------
 # VAL-ENUM-001: Exactly two members
 # ---------------------------------------------------------------------------
@@ -67,9 +66,7 @@ def test_execution_backend_importable():
     # re-import explicitly to make the assertion self-documenting.
     import importlib
 
-    mod = importlib.import_module(
-        "fleet_rlm.api.runtime_services.execution_backend"
-    )
+    mod = importlib.import_module("fleet_rlm.api.runtime_services.execution_backend")
     assert hasattr(mod, "ExecutionBackend")
     assert mod.ExecutionBackend is ExecutionBackend
 
@@ -83,12 +80,8 @@ def test_execution_backend_docstring_orthogonality():
     """The enum docstring must mention 'ExecutionMode' and 'orthogonal'."""
     doc = ExecutionBackend.__doc__
     assert doc is not None, "ExecutionBackend must have a docstring"
-    assert "ExecutionMode" in doc, (
-        f"Docstring must mention ExecutionMode. Got:\n{doc}"
-    )
-    assert "orthogonal" in doc.lower() or "orthogonal" in doc, (
-        f"Docstring must contain 'orthogonal'. Got:\n{doc}"
-    )
+    assert "ExecutionMode" in doc, f"Docstring must mention ExecutionMode. Got:\n{doc}"
+    assert "orthogonal" in doc.lower() or "orthogonal" in doc, f"Docstring must contain 'orthogonal'. Got:\n{doc}"
 
 
 # ---------------------------------------------------------------------------
@@ -146,12 +139,6 @@ def test_execution_backend_hashable():
 def test_execution_backend_is_strenum():
     """ExecutionBackend must be a subclass of StrEnum, and members must be
     instances of str."""
-    assert issubclass(ExecutionBackend, StrEnum), (
-        "ExecutionBackend must inherit from StrEnum"
-    )
-    assert isinstance(ExecutionBackend.legacy_agent_runtime, str), (
-        "Members must be instances of str"
-    )
-    assert isinstance(ExecutionBackend.direct_rlm, str), (
-        "Members must be instances of str"
-    )
+    assert issubclass(ExecutionBackend, StrEnum), "ExecutionBackend must inherit from StrEnum"
+    assert isinstance(ExecutionBackend.legacy_agent_runtime, str), "Members must be instances of str"
+    assert isinstance(ExecutionBackend.direct_rlm, str), "Members must be instances of str"

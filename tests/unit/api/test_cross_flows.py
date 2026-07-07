@@ -130,9 +130,7 @@ def _assert_sse_ok(response: Any) -> None:
 class TestCross001_FullSSEFlow:  # noqa: N801
     """Full SSE flow: POST /api/chat → ChatExecutionContext → stream_turn → project_sse → [DONE]."""
 
-    def test_full_sse_flow_returns_200_and_sse_headers(
-        self, chat_sse_client: TestClient
-    ) -> None:
+    def test_full_sse_flow_returns_200_and_sse_headers(self, chat_sse_client: TestClient) -> None:
         """POST /api/chat returns 200, text/event-stream, x-vercel-ai-ui-message-stream: v1."""
         response = chat_sse_client.post("/api/chat", json=DEFAULT_BODY)
         _assert_sse_ok(response)
@@ -140,9 +138,7 @@ class TestCross001_FullSSEFlow:  # noqa: N801
             "Expected x-vercel-ai-ui-message-stream: v1 header"
         )
 
-    def test_full_sse_flow_produces_data_lines_and_done(
-        self, chat_sse_client: TestClient
-    ) -> None:
+    def test_full_sse_flow_produces_data_lines_and_done(self, chat_sse_client: TestClient) -> None:
         """Stream contains data: lines and terminates with [DONE]."""
         response = chat_sse_client.post("/api/chat", json=DEFAULT_BODY)
         parts = _parse_sse_body(response.text)
@@ -150,13 +146,17 @@ class TestCross001_FullSSEFlow:  # noqa: N801
         assert parts[-1] == "[DONE]", "Stream must terminate with [DONE]"
         # Verify at least one recognised AI SDK v1 part type.
         v1_types = {
-            "start", "start-step", "text-start", "text-delta", "text-end",
-            "finish-step", "finish", "data-agent",
+            "start",
+            "start-step",
+            "text-start",
+            "text-delta",
+            "text-end",
+            "finish-step",
+            "finish",
+            "data-agent",
         }
         json_parts = [p for p in parts if isinstance(p, dict) and "type" in p]
-        assert any(p["type"] in v1_types for p in json_parts), (
-            "No recognised AI SDK v1 part in stream"
-        )
+        assert any(p["type"] in v1_types for p in json_parts), "No recognised AI SDK v1 part in stream"
 
     def test_full_sse_flow_context_is_built_with_identity(
         self, no_db_app, monkeypatch, stub_identity: NormalizedIdentity
@@ -177,9 +177,7 @@ class TestCross001_FullSSEFlow:  # noqa: N801
         assert isinstance(ctx, ChatExecutionContext)
         assert ctx.identity is stub_identity, "Context must carry the authenticated identity"
 
-    def test_full_sse_flow_emits_finish_then_done(
-        self, chat_sse_client: TestClient
-    ) -> None:
+    def test_full_sse_flow_emits_finish_then_done(self, chat_sse_client: TestClient) -> None:
         """Normal completion emits finish-step, finish, then [DONE]."""
         response = chat_sse_client.post("/api/chat", json=DEFAULT_BODY)
         parts = _parse_sse_body(response.text)
@@ -191,9 +189,7 @@ class TestCross001_FullSSEFlow:  # noqa: N801
         assert finish_step_idx < finish_idx, "finish-step must precede finish"
         assert parts[-1] == "[DONE]", "Expected final [DONE]"
 
-    def test_full_sse_flow_text_wrapped_in_start_end(
-        self, chat_sse_client: TestClient
-    ) -> None:
+    def test_full_sse_flow_text_wrapped_in_start_end(self, chat_sse_client: TestClient) -> None:
         """Text deltas wrapped in text-start/text-end."""
         response = chat_sse_client.post("/api/chat", json=DEFAULT_BODY)
         parts = _parse_sse_body(response.text)
@@ -301,17 +297,13 @@ class TestCross002_TransportEquivalence:  # noqa: N801
         # ── Assertion: both produce same kind sequence ──
         sse_kinds = [e.kind for e in sse_events]
         ws_kinds = [e.kind for e in ws_events]
-        assert sse_kinds == ws_kinds, (
-            f"Transport equivalence violated: SSE kinds {sse_kinds} != WS kinds {ws_kinds}"
-        )
+        assert sse_kinds == ws_kinds, f"Transport equivalence violated: SSE kinds {sse_kinds} != WS kinds {ws_kinds}"
 
         # ── Assertion: the underlying runtime method receives cancel_check ──
         assert fake_agent._cancel_check is not None
         assert fake_agent._cancel_check() is False  # no cancellation
 
-    def test_transport_equivalence_cancel_flag_shared(
-        self, no_db_app, monkeypatch
-    ) -> None:
+    def test_transport_equivalence_cancel_flag_shared(self, no_db_app, monkeypatch) -> None:
         """Both transports share the same cancel_flag reference pattern.
 
         Verifies that the cancel_flag dict is shared between the caller and
@@ -355,9 +347,7 @@ class TestCross002_TransportEquivalence:  # noqa: N801
 class TestCross003_ErrorMidStream:  # noqa: N801
     """Error mid-stream emits error + [DONE] with HTTP 200."""
 
-    def test_error_mid_stream_returns_200_with_error_and_done(
-        self, no_db_app, monkeypatch
-    ) -> None:
+    def test_error_mid_stream_returns_200_with_error_and_done(self, no_db_app, monkeypatch) -> None:
         """When runtime yields ERROR mid-stream, returns 200 with error part and [DONE]."""
         chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
         monkeypatch.setattr(
@@ -389,9 +379,7 @@ class TestCross003_ErrorMidStream:  # noqa: N801
         text_deltas = [p for p in parts if isinstance(p, dict) and p.get("type") == "text-delta"]
         assert text_deltas, "Expected text-delta before error"
 
-    def test_error_before_first_byte_returns_non_200(
-        self, no_db_app, monkeypatch
-    ) -> None:
+    def test_error_before_first_byte_returns_non_200(self, no_db_app, monkeypatch) -> None:
         """Error before SSE starts returns 4xx/5xx JSON, not SSE."""
         # This is tested via auth failures: missing auth returns 401 before SSE.
         from fleet_rlm.api.config import AppConfig
@@ -420,9 +408,7 @@ class TestCross003_ErrorMidStream:  # noqa: N801
 
         assert response.status_code in (401, 503), f"Expected 401/503, got {response.status_code}"
         content_type = response.headers.get("content-type", "")
-        assert "text/event-stream" not in content_type, (
-            "Should not return SSE for pre-stream error"
-        )
+        assert "text/event-stream" not in content_type, "Should not return SSE for pre-stream error"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -433,14 +419,10 @@ class TestCross003_ErrorMidStream:  # noqa: N801
 class TestCross004_ClientDisconnect:  # noqa: N801
     """Client disconnect flips cancel_flag, runtime aborts, abort + [DONE]."""
 
-    def test_cancel_flag_flipped_by_disconnect(
-        self, no_db_app, monkeypatch
-    ) -> None:
+    def test_cancel_flag_flipped_by_disconnect(self, no_db_app, monkeypatch) -> None:
         """When cancel_flag is set, the projector emits abort + [DONE]."""
 
-        async def _stream_with_cancel(
-            ctx: ChatExecutionContext, message: str
-        ) -> AsyncIterator[RuntimeEvent]:
+        async def _stream_with_cancel(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
             # Share the test cancel_flag with the context.
             ctx.cancel_flag["cancelled"] = False
             yield _make_started_event()
@@ -502,9 +484,7 @@ class TestCross004_ClientDisconnect:  # noqa: N801
         cancel_flag["cancelled"] = True
         ctx = captured.get("ctx")
         assert ctx is not None
-        assert ctx.cancel_flag["cancelled"] is True, (
-            "Mutation must be visible through ChatExecutionContext reference"
-        )
+        assert ctx.cancel_flag["cancelled"] is True, "Mutation must be visible through ChatExecutionContext reference"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -515,9 +495,7 @@ class TestCross004_ClientDisconnect:  # noqa: N801
 class TestCross005_AuthToRuntime:  # noqa: N801
     """Auth flows from Bearer to NormalizedIdentity to ChatExecutionContext to BYOK."""
 
-    def test_identity_flows_to_context(
-        self, no_db_app, monkeypatch, stub_identity: NormalizedIdentity
-    ) -> None:
+    def test_identity_flows_to_context(self, no_db_app, monkeypatch, stub_identity: NormalizedIdentity) -> None:
         """Authenticated identity flows to ChatExecutionContext."""
         captured: dict[str, Any] = {}
 
@@ -531,15 +509,11 @@ class TestCross005_AuthToRuntime:  # noqa: N801
 
         ctx = captured.get("ctx")
         assert ctx is not None
-        assert ctx.identity is stub_identity, (
-            "Context identity must match the dependency-override identity"
-        )
+        assert ctx.identity is stub_identity, "Context identity must match the dependency-override identity"
         assert ctx.owner_tenant_claim == stub_identity.tenant_claim
         assert ctx.owner_user_claim == stub_identity.user_claim
 
-    def test_identity_fields_derive_from_auth(
-        self, no_db_app, monkeypatch
-    ) -> None:
+    def test_identity_fields_derive_from_auth(self, no_db_app, monkeypatch) -> None:
         """canonical ids derive from identity claims via sanitize_id."""
         tenant_id = "test-tenant-456"
         user_id = "test-user-789"
@@ -598,9 +572,7 @@ class TestCross006_SessionContinuity:  # noqa: N801
         assert ctx is not None
         assert ctx.session_id == session_id, "session_id must flow to ChatExecutionContext"
 
-    def test_session_id_restores_canonical_ids(
-        self, no_db_app, monkeypatch, stub_identity: NormalizedIdentity
-    ) -> None:
+    def test_session_id_restores_canonical_ids(self, no_db_app, monkeypatch, stub_identity: NormalizedIdentity) -> None:
         """Two requests with same session_id produce consistent canonical ids."""
         captured_first: dict[str, Any] = {}
         captured_second: dict[str, Any] = {}
@@ -648,10 +620,9 @@ class TestCross006_SessionContinuity:  # noqa: N801
 class TestCross007_FirstVisit:  # noqa: N801
     """No session_id creates a new session surfaced in data-agent."""
 
-    def test_no_session_id_creates_new_session_in_data_agent(
-        self, no_db_app, monkeypatch
-    ) -> None:
+    def test_no_session_id_creates_new_session_in_data_agent(self, no_db_app, monkeypatch) -> None:
         """Request without session_id produces data-agent with a session_id."""
+
         # Use a stub that sets a session_id in the TURN_STARTED payload.
         async def _stub_with_session(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
             ctx.session_id = "auto-generated-sess-001"
@@ -683,9 +654,7 @@ class TestCross007_FirstVisit:  # noqa: N801
         assert "session_id" in da, "data-agent must carry a session_id"
         assert da["session_id"], "session_id must be non-empty"
 
-    def test_new_session_restorable_on_second_request(
-        self, no_db_app, monkeypatch
-    ) -> None:
+    def test_new_session_restorable_on_second_request(self, no_db_app, monkeypatch) -> None:
         """A session surfaced by first request can be restored on second request."""
         captured_first: dict[str, Any] = {}
         captured_second: dict[str, Any] = {}

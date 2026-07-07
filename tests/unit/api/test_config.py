@@ -177,3 +177,336 @@ def test_validate_startup_or_raise_rejects_auth_mode_dev_in_hosted_env(clean_run
 
     with pytest.raises(ValueError, match="AUTH_MODE=dev is not allowed when APP_ENV is staging/production"):
         cfg.validate_startup_or_raise()
+
+
+# ---------------------------------------------------------------------------
+# VAL-CONFIG-001: Field exists on AppConfig
+# ---------------------------------------------------------------------------
+
+
+def test_appconfig_has_execution_backend_field(clean_runtime_env):
+    """AppConfig must declare a field named execution_backend typed as ExecutionBackend."""
+    import importlib
+
+    config_module = importlib.import_module("fleet_rlm.api.config")
+
+    fields = config_module.AppConfig.model_fields
+    assert "execution_backend" in fields, f"execution_backend not in model_fields: {list(fields.keys())}"
+
+
+# ---------------------------------------------------------------------------
+# VAL-CONFIG-002: Default value is ExecutionBackend.legacy_agent_runtime
+# ---------------------------------------------------------------------------
+
+
+def test_appconfig_execution_backend_default(clean_runtime_env, monkeypatch):
+    """Instantiating AppConfig() with no EXECUTION_BACKEND must yield the default."""
+    import importlib
+
+    from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
+
+    monkeypatch.delenv("EXECUTION_BACKEND", raising=False)
+
+    config_module = importlib.import_module("fleet_rlm.api.config")
+    cfg = config_module.AppConfig()
+
+    assert cfg.execution_backend is ExecutionBackend.legacy_agent_runtime, (
+        f"Expected legacy_agent_runtime, got {cfg.execution_backend}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# VAL-CONFIG-003: Env var EXECUTION_BACKEND overrides the default
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("env_value", "expected"),
+    [
+        ("direct_rlm", "direct_rlm"),
+        ("legacy_agent_runtime", "legacy_agent_runtime"),
+    ],
+)
+def test_appconfig_execution_backend_env_override(
+    clean_runtime_env,
+    monkeypatch,
+    env_value,
+    expected,
+):
+    """Setting EXECUTION_BACKEND env var must parse into the correct enum member."""
+    import importlib
+
+    from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
+
+    monkeypatch.setenv("EXECUTION_BACKEND", env_value)
+
+    config_module = importlib.import_module("fleet_rlm.api.config")
+    cfg = config_module.AppConfig()
+
+    expected_member = getattr(ExecutionBackend, expected)
+    assert cfg.execution_backend is expected_member, f"Expected {expected_member}, got {cfg.execution_backend}"
+
+
+# ---------------------------------------------------------------------------
+# VAL-CONFIG-004: Invalid env value raises ValidationError
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    [
+        "foo",
+        "",
+        " ",
+        "unknown_backend",
+    ],
+)
+def test_appconfig_execution_backend_invalid_env_raises(
+    clean_runtime_env,
+    monkeypatch,
+    invalid_value,
+):
+    """An invalid EXECUTION_BACKEND value must raise pydantic.ValidationError."""
+    import importlib
+
+    from pydantic import ValidationError
+
+    monkeypatch.setenv("EXECUTION_BACKEND", invalid_value)
+
+    config_module = importlib.import_module("fleet_rlm.api.config")
+
+    with pytest.raises(ValidationError) as excinfo:
+        config_module.AppConfig()
+
+    # The error must mention the field (either by alias EXECUTION_BACKEND or by name execution_backend)
+    errors = excinfo.value.errors()
+    assert any(
+        "execution_backend" in str(err.get("loc", ())) or "EXECUTION_BACKEND" in str(err.get("loc", ()))
+        for err in errors
+    ), f"ValidationError must mention execution_backend. Errors: {errors}"
+
+
+# ---------------------------------------------------------------------------
+# VAL-CONFIG-005: Field alias is EXECUTION_BACKEND
+# ---------------------------------------------------------------------------
+
+
+def test_appconfig_execution_backend_alias(clean_runtime_env):
+    """The field must have alias='EXECUTION_BACKEND' and accept construction via alias."""
+    import importlib
+
+    from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
+
+    config_module = importlib.import_module("fleet_rlm.api.config")
+
+    # Check alias declaration
+    field_info = config_module.AppConfig.model_fields["execution_backend"]
+    assert field_info.alias == "EXECUTION_BACKEND", f"Expected alias 'EXECUTION_BACKEND', got {field_info.alias!r}"
+
+    # Construction via alias keyword must work
+    cfg = config_module.AppConfig(EXECUTION_BACKEND="direct_rlm")  # type: ignore[call-arg]
+    assert cfg.execution_backend is ExecutionBackend.direct_rlm, f"Expected direct_rlm, got {cfg.execution_backend}"
+
+
+# ---------------------------------------------------------------------------
+# VAL-CONFIG-006: Field is readable via attribute access
+# ---------------------------------------------------------------------------
+
+
+def test_appconfig_execution_backend_attribute_access(clean_runtime_env, monkeypatch):
+    """After construction, config.execution_backend must return an ExecutionBackend member."""
+    import importlib
+
+    from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
+
+    monkeypatch.delenv("EXECUTION_BACKEND", raising=False)
+
+    config_module = importlib.import_module("fleet_rlm.api.config")
+    cfg = config_module.AppConfig()
+
+    assert isinstance(cfg.execution_backend, ExecutionBackend), (
+        f"Expected ExecutionBackend instance, got {type(cfg.execution_backend)}"
+    )
+    # Verify plain dot access works
+    _ = cfg.execution_backend
+
+
+# ---------------------------------------------------------------------------
+# VAL-CONFIG-007: Field does not alter existing AppConfig behavior
+# ---------------------------------------------------------------------------
+
+
+def test_appconfig_execution_backend_no_regression_on_existing_fields(
+    clean_runtime_env,
+    monkeypatch,
+):
+    """Adding execution_backend must not change defaults of pre-existing fields."""
+    import importlib
+
+    monkeypatch.delenv("EXECUTION_BACKEND", raising=False)
+
+    config_module = importlib.import_module("fleet_rlm.api.config")
+
+    cfg = config_module.AppConfig()
+    assert cfg.app_env == "local"
+    assert cfg.rlm_child_isolation_mode == "auto"
+    assert cfg.sandbox_provider == "daytona"
+
+
+# ---------------------------------------------------------------------------
+# VAL-CONFIG-008: model_validator does not strip or rewrite execution_backend
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("env", ["local", "staging", "production"])
+def test_appconfig_execution_backend_not_env_aware(
+    clean_runtime_env,
+    monkeypatch,
+    env,
+):
+    """execution_backend must always resolve to the default regardless of app_env."""
+    import importlib
+
+    from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
+
+    monkeypatch.setenv("APP_ENV", env)
+    monkeypatch.delenv("EXECUTION_BACKEND", raising=False)
+
+    config_module = importlib.import_module("fleet_rlm.api.config")
+    cfg = config_module.AppConfig()
+
+    assert cfg.execution_backend is ExecutionBackend.legacy_agent_runtime, (
+        f"With APP_ENV={env}, expected legacy_agent_runtime, got {cfg.execution_backend}"
+    )
+
+    # Also verify env override still works regardless of app_env
+    monkeypatch.setenv("EXECUTION_BACKEND", "direct_rlm")
+    cfg2 = config_module.AppConfig()
+    assert cfg2.execution_backend is ExecutionBackend.direct_rlm, (
+        f"With APP_ENV={env} and EXECUTION_BACKEND=direct_rlm, expected direct_rlm, got {cfg2.execution_backend}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# VAL-CONFIG-009: Field type annotation is ExecutionBackend, not a string literal
+# ---------------------------------------------------------------------------
+
+
+def test_appconfig_execution_backend_annotation_is_enum(clean_runtime_env):
+    """The annotation stored on the field must be ExecutionBackend, not str or Literal."""
+    import importlib
+
+    from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
+
+    config_module = importlib.import_module("fleet_rlm.api.config")
+
+    field_info = config_module.AppConfig.model_fields["execution_backend"]
+    annotation = field_info.annotation
+
+    assert annotation is ExecutionBackend, f"Expected annotation to be ExecutionBackend, got {annotation}"
+
+
+# ---------------------------------------------------------------------------
+# VAL-CONFIG-010: Field round-trips through model_dump and model_validate
+# ---------------------------------------------------------------------------
+
+
+def test_appconfig_execution_backend_roundtrip(clean_runtime_env):
+    """model_validate with string value must produce correct member, and
+    model_dump must serialize it back to the string."""
+    import importlib
+
+    from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
+
+    config_module = importlib.import_module("fleet_rlm.api.config")
+
+    # Round-trip via model_validate and model_dump
+    instance = config_module.AppConfig.model_validate({"execution_backend": "direct_rlm"})
+    assert instance.execution_backend is ExecutionBackend.direct_rlm, (
+        f"Expected direct_rlm, got {instance.execution_backend}"
+    )
+
+    dump = instance.model_dump()
+    assert dump["execution_backend"] == "direct_rlm", f"Expected 'direct_rlm' string, got {dump['execution_backend']!r}"
+
+    # Also test round-trip for the default value
+    default_instance = config_module.AppConfig.model_validate({})
+    assert default_instance.execution_backend is ExecutionBackend.legacy_agent_runtime
+    default_dump = default_instance.model_dump()
+    assert default_dump["execution_backend"] == "legacy_agent_runtime"
+
+
+# ---------------------------------------------------------------------------
+# VAL-CONFIG-011: EXECUTION_BACKEND parsing is exact and case-sensitive
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    [
+        "DIRECT_RLM",
+        "Direct_Rlm",
+        "Legacy_Agent_Runtime",
+        " legacy_agent_runtime",
+        "legacy_agent_runtime ",
+        " direct_rlm ",
+        "LEGACY_AGENT_RUNTIME",
+    ],
+)
+def test_appconfig_execution_backend_is_exact_case_sensitive(
+    clean_runtime_env,
+    monkeypatch,
+    invalid_value,
+):
+    """Case variants and whitespace-padded values must raise ValidationError."""
+    import importlib
+
+    from pydantic import ValidationError
+
+    monkeypatch.setenv("EXECUTION_BACKEND", invalid_value)
+
+    config_module = importlib.import_module("fleet_rlm.api.config")
+
+    with pytest.raises(ValidationError) as excinfo:
+        config_module.AppConfig()
+
+    # The error must mention the field (either by alias EXECUTION_BACKEND or by name execution_backend)
+    errors = excinfo.value.errors()
+    assert any(
+        "execution_backend" in str(err.get("loc", ())) or "EXECUTION_BACKEND" in str(err.get("loc", ()))
+        for err in errors
+    ), f"ValidationError must mention execution_backend/EXECUTION_BACKEND. Errors: {errors}"
+
+
+# ---------------------------------------------------------------------------
+# VAL-CONFIG-012: JSON-mode model_dump serializes execution_backend as a string
+# ---------------------------------------------------------------------------
+
+
+def test_appconfig_execution_backend_json_dump_is_string(
+    clean_runtime_env,
+    monkeypatch,
+):
+    """model_dump(mode='json') must serialize the enum as its canonical string value."""
+    import importlib
+
+    from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
+
+    config_module = importlib.import_module("fleet_rlm.api.config")
+
+    # Default config
+    monkeypatch.delenv("EXECUTION_BACKEND", raising=False)
+    default_cfg = config_module.AppConfig()
+    assert default_cfg.execution_backend is ExecutionBackend.legacy_agent_runtime
+    json_dump = default_cfg.model_dump(mode="json")
+    assert json_dump["execution_backend"] == "legacy_agent_runtime", (
+        f"Expected 'legacy_agent_runtime', got {json_dump['execution_backend']!r}"
+    )
+
+    # Direct RLM config via alias
+    direct_cfg = config_module.AppConfig(EXECUTION_BACKEND="direct_rlm")  # type: ignore[call-arg]
+    assert direct_cfg.execution_backend is ExecutionBackend.direct_rlm
+    json_dump2 = direct_cfg.model_dump(mode="json")
+    assert json_dump2["execution_backend"] == "direct_rlm", (
+        f"Expected 'direct_rlm', got {json_dump2['execution_backend']!r}"
+    )
