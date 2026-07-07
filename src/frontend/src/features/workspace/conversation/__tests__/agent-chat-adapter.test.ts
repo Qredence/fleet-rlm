@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { toAgentChatMessages } from "@/features/workspace/conversation/agent-chat-adapter";
+import { applyWsFrameToMessages } from "@/lib/workspace/backend-chat-event-adapter";
 import type { ChatMessage } from "@/lib/workspace/workspace-types";
+import type { WsServerMessage } from "@/lib/rlm-api";
 
 function adapter(messages: ChatMessage[]) {
   return toAgentChatMessages(messages, {
@@ -187,6 +189,32 @@ describe("toAgentChatMessages", () => {
       state: "input-streaming",
       input: { thought: "Still thinking...", label: "Planner" },
       output: undefined,
+    });
+  });
+
+  it("maps backend reasoning frames into Agent Elements ThinkingTool parts", () => {
+    const frame: WsServerMessage = {
+      type: "event",
+      data: {
+        kind: "execution_step",
+        text: "Recovered action reasoning",
+        payload: {
+          source_type: "reasoning",
+          reasoning_label: "RLM action",
+        },
+      },
+    };
+
+    const applied = applyWsFrameToMessages([], frame);
+    const messages = adapter(applied.messages);
+
+    expect(messages[0]?.parts[0]).toMatchObject({
+      type: "tool-Thinking",
+      state: "input-streaming",
+      input: {
+        thought: "Recovered action reasoning",
+        label: "RLM action",
+      },
     });
   });
 

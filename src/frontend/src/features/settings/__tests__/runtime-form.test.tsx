@@ -68,7 +68,7 @@ vi.mock("@/features/settings/use-runtime-settings", () => ({
               {
                 key: "DSPY_LM_MAX_TOKENS",
                 label: "Planner max tokens",
-                description: "Maximum token budget per planner response.",
+                description: "Maximum output tokens per planner response.",
                 value: "64000",
                 masked_value: "64000",
                 secret: false,
