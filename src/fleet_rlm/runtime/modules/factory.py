@@ -542,6 +542,12 @@ class _StreamingRLM(_DSPY_RLM_BASE):
             r"\[\[\s*##\s*(" + "|".join(re.escape(name) for name in signature.output_fields) + r")\s*##\s*\]\]"
         )
         text = completion.strip()
+        # OpenAI-compatible reasoning models can concatenate provider-side
+        # thinking sentinels directly against DSPy markers, e.g.
+        # ``</mm:think>[[ ## code ## ]]``.  DSPy's strict marker parser then
+        # treats the marker as part of the preceding field.  Normalize that
+        # boundary before any local recovery attempt.
+        text = re.sub(r"(</(?:mm:)?think>)\s*(?=\[\[\s*##)", r"\1\n", text, flags=re.IGNORECASE)
         if not output_marker.search(text):
             return text
 
@@ -567,6 +573,25 @@ class _StreamingRLM(_DSPY_RLM_BASE):
             cursor = match.end()
         pieces.append(text[cursor:])
         return "".join(pieces).strip()
+
+    @staticmethod
+    def _extract_marker_field_text(completion: str, field_name: str) -> str:
+        """Extract a bounded DSPy marker field from a malformed completion."""
+        import re
+
+        text = str(completion or "").strip()
+        if not text:
+            return ""
+        marker = re.compile(r"\[\[\s*##\s*(?P<name>[a-zA-Z_][\w]*)\s*##\s*\]\]", re.IGNORECASE)
+        matches = list(marker.finditer(text))
+        for index, match in enumerate(matches):
+            if match.group("name").lower() != field_name.lower():
+                continue
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+            value = text[match.end() : end].strip()
+            value = re.sub(r"</?(?:mm:)?think>", "", value, flags=re.IGNORECASE).strip()
+            return value[:2000]
+        return ""
 
     @staticmethod
     def _recover_trace_shaped_action_completion(
@@ -602,6 +627,7 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         reasoning = text[: fence.start()].strip()
         marker = re.compile(r"\[\[\s*##\s*(?:reasoning|code|completed)\s*##\s*\]\]", re.IGNORECASE)
         reasoning = marker.sub("", reasoning).strip()
+        reasoning = re.sub(r"</?(?:mm:)?think>", "", reasoning, flags=re.IGNORECASE).strip()
         if not reasoning:
             reasoning = "Recovered executable Python action from a malformed trace-shaped completion."
         return dspy.Prediction(reasoning=reasoning, code=code)
@@ -624,11 +650,7 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         )
         parsed_fields: list[str] = []
         if parsed_match is not None:
-            parsed_fields = [
-                item.strip()
-                for item in parsed_match.group("fields").split(",")
-                if item.strip()
-            ]
+            parsed_fields = [item.strip() for item in parsed_match.group("fields").split(",") if item.strip()]
         return {
             "iteration": iteration,
             "parse_error_expected_fields": sorted(str(name) for name in signature.output_fields),
@@ -648,14 +670,15 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         if not completion:
             return None
 
-        trace_recovered = cls._recover_trace_shaped_action_completion(completion, signature)
+        normalized = cls._normalize_action_completion_markers(completion, signature)
+
+        trace_recovered = cls._recover_trace_shaped_action_completion(normalized, signature)
         if trace_recovered is not None:
             return trace_recovered
 
-        if cls._is_degenerate_response(completion):
+        if cls._is_degenerate_response(normalized):
             return None
 
-        normalized = cls._normalize_action_completion_markers(completion, signature)
         adapters = (
             dspy.ChatAdapter(use_json_adapter_fallback=False),
             dspy.JSONAdapter(),
@@ -852,18 +875,23 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                 action_succeeded = True
                 self._consecutive_timeouts = 0
                 self._consecutive_parse_errors = 0
+                _action_duration_s = time.time() - _start_time
                 self._emit_step(
                     {
                         "phase": "rlm_action_gen",
                         "iteration": iteration,
                         "status": "completed",
-                        "text": f"Action generated in {time.time() - _start_time:.1f}s",
+                        "text": f"Action generated in {_action_duration_s:.1f}s",
                         "source_type": "rlm_progress",
-                        "duration_s": time.time() - _start_time,
+                        "duration_s": _action_duration_s,
                     }
                 )
             except Exception as exc:
                 if self._is_parse_error(exc):
+                    raw_completion = self._extract_completion_from_parse_error(exc)
+                    parsed_reasoning = (
+                        self._extract_marker_field_text(raw_completion, "reasoning") if raw_completion else ""
+                    )
                     recovered_action = self._recover_action_prediction_from_parse_error(
                         exc,
                         self.generate_action.signature,
@@ -902,6 +930,15 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                             }
                         )
                     else:
+                        if parsed_reasoning:
+                            self._emit_step(
+                                {
+                                    "phase": "rlm_reasoning",
+                                    "iteration": iteration,
+                                    "reasoning": parsed_reasoning,
+                                    "parse_error": True,
+                                }
+                            )
                         self._emit_step(
                             {
                                 "phase": "rlm_action_gen",
@@ -1034,6 +1071,7 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                         "max_iterations": getattr(self, "max_iterations", None),
                         "max_llm_calls": getattr(self, "max_llm_calls", None),
                         "max_output_chars": getattr(self, "max_output_chars", None),
+                        "action_duration_ms": int((time.time() - _start_time) * 1000),
                     },
                 )
 
@@ -1209,7 +1247,34 @@ class _StreamingRLM(_DSPY_RLM_BASE):
             cache_key = hashlib.sha256(code.encode("utf-8")).hexdigest()
             if cache_key in self._repl_output_cache and "SUBMIT" not in code:
                 logger.debug("REPL output cache hit for code hash %s (iteration %s)", cache_key[:8], iteration)
-                return self._repl_output_cache[cache_key]
+                cached_result = self._repl_output_cache[cache_key]
+                with mlflow_child_span(
+                    "fleet_rlm.rlm_repl_execute",
+                    span_type="TOOL",
+                    attributes={
+                        "fleet_rlm.tool_name": "repl_execute",
+                        "fleet_rlm.rlm_iteration": str(iteration),
+                        "fleet_rlm.execution_origin": "dspy_rlm_execute_code",
+                        "fleet_rlm.repl_cache_hit": "true",
+                        "fleet_rlm.repl_cache_key_prefix": cache_key[:12],
+                        "fleet_rlm.variable_names": json.dumps(
+                            sorted(str(key) for key in input_args), ensure_ascii=False
+                        ),
+                    },
+                    inputs={"code": _bounded_value(code)},
+                ) as span:
+                    set_mlflow_span_outputs(
+                        span,
+                        {
+                            "status": "ok",
+                            "cache_hit": True,
+                            "result": _bounded_value(cached_result),
+                            "execution_time_ms": 0,
+                            "code_chars": len(code),
+                            "result_chars": len(cached_result) if isinstance(cached_result, str) else 0,
+                        },
+                    )
+                return cached_result
 
         with mlflow_child_span(
             "fleet_rlm.rlm_repl_execute",
@@ -1219,6 +1284,7 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                 "fleet_rlm.rlm_iteration": str(iteration),
                 "fleet_rlm.execution_origin": "dspy_rlm_execute_code",
                 "fleet_rlm.variable_names": json.dumps(sorted(str(key) for key in input_args), ensure_ascii=False),
+                "fleet_rlm.repl_cache_hit": "false",
             },
             inputs={
                 "code": _bounded_value(code),

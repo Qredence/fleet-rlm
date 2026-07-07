@@ -105,7 +105,7 @@ def extract_inline_context_payload(
         shortened = (
             f"{instruction}\n\n"
             "[Staged inline context]\n"
-            "The full CONTEXT block is available as context[\"document_text\"] in the RLM REPL. "
+            'The full CONTEXT block is available as context["document_text"] in the RLM REPL. '
             "Inspect it with Python, use focused llm_query calls only when needed, and submit the final answer."
         )
         return InlineContextPayload(
@@ -123,7 +123,7 @@ def extract_inline_context_payload(
     shortened = (
         "[Staged inline context]\n"
         "The full user request was too large for repeated action prompts and has been staged as "
-        "context[\"document_text\"] in the RLM REPL. Inspect that variable with Python to recover the "
+        'context["document_text"] in the RLM REPL. Inspect that variable with Python to recover the '
         "task, data, constraints, and output format before answering."
     )
     return InlineContextPayload(
@@ -426,9 +426,7 @@ def load_large_context_rlm_kwargs(
         inline_text = str(turn_context.inline_context_text)
         existing_text = str(kwargs.get("document_text") or "")
         if existing_text.strip():
-            kwargs["document_text"] = (
-                f"{existing_text}\n\n--- STAGED INLINE CONTEXT ---\n\n{inline_text}"
-            )
+            kwargs["document_text"] = f"{existing_text}\n\n--- STAGED INLINE CONTEXT ---\n\n{inline_text}"
         else:
             kwargs["document_text"] = inline_text
         source_metadata.update(dict(turn_context.inline_context_metadata))

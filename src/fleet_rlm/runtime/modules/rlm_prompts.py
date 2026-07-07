@@ -17,6 +17,10 @@ from fleet_rlm.runtime.task_intent import implies_quote_retrieval, quote_retriev
 
 _URL_REPL_ONLY_ENV = "FLEET_RLM_URL_REPL_ONLY"
 _REVIEW_DRAFT_PATTERN = re.compile(r"\b(review|draft|write[- ]?up|critique|findings)\b", re.IGNORECASE)
+_RLM_BUDGET_SEMANTICS_PATTERN = re.compile(
+    r"\b(max_llm_calls|llm_query|llm_query_batched|dspy\.?rlm|sub[- ]?lm|delegate model calls?)\b",
+    re.IGNORECASE,
+)
 
 
 def url_repl_only_enabled() -> bool:
@@ -42,6 +46,13 @@ def build_rlm_core_context(
             "Early stop for review/draft tasks: once a complete review, findings list, or final draft exists "
             "in a REPL variable or output, call SUBMIT(response=...) immediately. Do not regenerate the same "
             "draft, print full history, or continue into another large action-generation attempt."
+        )
+    if _RLM_BUDGET_SEMANTICS_PATTERN.search(user_request):
+        sections.append(
+            "DSPy/RLM budget terminology rule: `max_llm_calls` is a semantic call-count cap for "
+            "`llm_query` and `llm_query_batched` calls in one RLM execution. It is not a token budget "
+            "and does not configure delegate token usage. Apply this distinction consistently in the "
+            "answer body and any Sources / Why-this rationale."
         )
     if url_document_mode and url_repl_only_enabled():
         sections.append(

@@ -89,6 +89,15 @@ _EVIDENCE_MARKER_PATTERN = re.compile(
     r"(/|\\|\.py\b|\.ts\b|\.tsx\b|\.md\b|src/|tests?/|pyproject\.toml|package\.json|AGENTS\.md)",
     re.IGNORECASE,
 )
+_RLM_BUDGET_QUESTION_PATTERN = re.compile(
+    r"\b(max_llm_calls|llm_query|llm_query_batched|dspy\.?rlm|sub[- ]?lm|delegate model calls?)\b",
+    re.IGNORECASE,
+)
+_BAD_MAX_LLM_TOKEN_CLAIM_PATTERN = re.compile(
+    r"(max_llm_calls.{0,160}(token budget|token limit|max(?:imum)? tokens?)|"
+    r"(token budget|token limit|max(?:imum)? tokens?).{0,160}max_llm_calls)",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _run_with_timeout(fn: Callable[..., Any], *, timeout: int) -> Any:
@@ -166,6 +175,14 @@ def _is_rlm_parse_error(exc: Exception) -> bool:
     )
 
 
+def _is_rlm_action_parse_cap_error(exc: Exception) -> bool:
+    """Return True when the inner RLM action loop already exhausted parse recovery."""
+    msg = str(exc).lower()
+    return (
+        "rlm action generation parse errors exceeded cap" in msg or "action generation parse errors exceeded cap" in msg
+    )
+
+
 def _fallback_parse_error_prediction(
     *,
     selected_skills: list[str] | None,
@@ -222,13 +239,63 @@ def _prediction_set(prediction: dspy.Prediction, key: str, value: Any) -> None:
     try:
         prediction[key] = value
     except Exception:
+        pass
+    try:
         object.__setattr__(prediction, key, value)
+    except Exception:
+        pass
 
 
 def _prediction_get(prediction: Any, key: str) -> Any:
     if isinstance(prediction, dict):
         return prediction.get(key)
     return getattr(prediction, key, None)
+
+
+def _prediction_answer_text(prediction: Any) -> str:
+    for key in ("response", "answer"):
+        value = _prediction_get(prediction, key)
+        if value:
+            return str(value)
+    return str(prediction or "")
+
+
+def _corrected_rlm_budget_semantics_response() -> str:
+    return (
+        "`max_llm_calls` does not control a token budget in DSPy RLM. It controls the maximum "
+        "number of sub-LM calls allowed during one RLM execution: one `llm_query(...)` counts as "
+        "one call, and each prompt passed to `llm_query_batched([...])` counts as one call.\n\n"
+        "DSPy RLM's documented control here is the call-count ceiling, not a delegate token-budget "
+        "knob. Choose `max_llm_calls` based on how many semantic sub-queries the task should be "
+        "allowed to make, balancing cost and latency.\n\n"
+        "Sources: DSPy RLM API Reference and DSPy RLM deep-dive documentation. These sources "
+        "describe `max_llm_calls` as a sub-LM call-count cap, not as a token budget."
+    )
+
+
+def _apply_rlm_budget_semantics_guard(result: dspy.Prediction, *, user_request: str) -> dspy.Prediction:
+    """Correct the narrow but recurring `max_llm_calls` token-budget conflation."""
+    request = str(user_request or "")
+    if not _RLM_BUDGET_QUESTION_PATTERN.search(request):
+        return result
+    answer_text = _prediction_answer_text(result)
+    if not _BAD_MAX_LLM_TOKEN_CLAIM_PATTERN.search(answer_text):
+        return result
+
+    corrected = _corrected_rlm_budget_semantics_response()
+    _prediction_set(result, "response", corrected)
+    _prediction_set(result, "answer", corrected)
+    _prediction_set(result, "runtime_degraded", True)
+    _prediction_set(result, "runtime_failure_category", "rlm_budget_semantics_guard")
+    _prediction_set(result, "runtime_failure_phase", "escalating_final_response_guard")
+    _prediction_set(result, "runtime_fallback_used", False)
+    _prediction_set(
+        result,
+        "runtime_warning",
+        "`max_llm_calls` was corrected from token-budget wording to call-count wording.",
+    )
+    _prediction_set(result, "budget_semantics_guard_status", "corrected")
+    return result
 
 
 def _requires_grounded_repo_analysis(user_request: str, *, large_context_mode: bool) -> bool:
@@ -731,7 +798,7 @@ class EscalatingFleetModule(dspy.Module):
                 execution_mode,
                 prep.routing_decision,
             )
-            return self._run_rlm(
+            prediction = self._run_rlm(
                 user_request=user_request,
                 core_memory=prep.core_memory,
                 history=prep.history,
@@ -742,6 +809,7 @@ class EscalatingFleetModule(dspy.Module):
                 source_url=prep.source_url,
                 turn_context=turn_context,
             )
+            return _apply_rlm_budget_semantics_guard(prediction, user_request=user_request)
 
         route = self._route_turn(
             user_request=user_request,
@@ -751,15 +819,16 @@ class EscalatingFleetModule(dspy.Module):
 
         if route == "tools":
             logger.debug("EscalatingFleetModule: router chose ReAct tool loop")
-            return self._run_react(
+            prediction = self._run_react(
                 user_request=user_request,
                 core_memory=prep.core_memory,
                 history=prep.history,
                 selected_skills=prep.selected_skills,
             )
+            return _apply_rlm_budget_semantics_guard(prediction, user_request=user_request)
         if route == "rlm":
             logger.debug("EscalatingFleetModule: router chose RLM path")
-            return self._run_rlm(
+            prediction = self._run_rlm(
                 user_request=user_request,
                 core_memory=prep.core_memory,
                 history=prep.history,
@@ -770,6 +839,7 @@ class EscalatingFleetModule(dspy.Module):
                 source_url=None,
                 turn_context=turn_context,
             )
+            return _apply_rlm_budget_semantics_guard(prediction, user_request=user_request)
 
         # CoT path: emit 3 turn-input rows before responding
         cot_rows = [
@@ -800,7 +870,7 @@ class EscalatingFleetModule(dspy.Module):
             history=prep.history,
         )
         _prediction_set(prediction, "selected_skills", prep.selected_skills)
-        return prediction
+        return _apply_rlm_budget_semantics_guard(prediction, user_request=user_request)
 
     async def aforward(
         self,
@@ -835,7 +905,7 @@ class EscalatingFleetModule(dspy.Module):
         )
 
         if prep.should_route_rlm:
-            return await _to_thread_unstreamed(
+            prediction = await _to_thread_unstreamed(
                 self._run_rlm,
                 user_request=user_request,
                 core_memory=prep.core_memory,
@@ -847,6 +917,7 @@ class EscalatingFleetModule(dspy.Module):
                 source_url=prep.source_url,
                 turn_context=turn_context,
             )
+            return _apply_rlm_budget_semantics_guard(prediction, user_request=user_request)
 
         route = await _to_thread_unstreamed(
             self._route_turn,
@@ -857,15 +928,16 @@ class EscalatingFleetModule(dspy.Module):
 
         if route == "tools":
             logger.debug("EscalatingFleetModule: router chose ReAct tool loop (async)")
-            return await self._arun_react(
+            prediction = await self._arun_react(
                 user_request=user_request,
                 core_memory=prep.core_memory,
                 history=prep.history,
                 selected_skills=prep.selected_skills,
             )
+            return _apply_rlm_budget_semantics_guard(prediction, user_request=user_request)
         if route == "rlm":
             logger.debug("EscalatingFleetModule: router chose RLM path (async)")
-            return await _to_thread_unstreamed(
+            prediction = await _to_thread_unstreamed(
                 self._run_rlm,
                 user_request=user_request,
                 core_memory=prep.core_memory,
@@ -877,6 +949,7 @@ class EscalatingFleetModule(dspy.Module):
                 source_url=None,
                 turn_context=turn_context,
             )
+            return _apply_rlm_budget_semantics_guard(prediction, user_request=user_request)
 
         # CoT path (async): emit 3 turn-input rows before responding
         cot_rows = [
@@ -907,7 +980,7 @@ class EscalatingFleetModule(dspy.Module):
             history=prep.history,
         )
         _prediction_set(prediction, "selected_skills", prep.selected_skills)
-        return prediction
+        return _apply_rlm_budget_semantics_guard(prediction, user_request=user_request)
 
     def _react_fallback(
         self,
@@ -1075,12 +1148,13 @@ class EscalatingFleetModule(dspy.Module):
         staged_inline_context = bool(getattr(turn_context, "inline_context_text", "") or "")
         if self._rlm is None:
             if staged_inline_context:
-                return self._staged_context_rlm_failure(
+                prediction = self._staged_context_rlm_failure(
                     selected_skills=selected_skills,
                     routing_decision=routing_decision,
                     source_url=source_url,
                     reason="RLM was unavailable for a staged long-context request.",
                 )
+                return _apply_rlm_budget_semantics_guard(prediction, user_request=user_request)
             # CoT fallback from RLM path: emit 3 turn-input rows
             cot_fallback_rows = [
                 TurnInputRow(
@@ -1109,7 +1183,7 @@ class EscalatingFleetModule(dspy.Module):
                 history=history,
             )
             _prediction_set(prediction, "selected_skills", selected_skills or [])
-            return prediction
+            return _apply_rlm_budget_semantics_guard(prediction, user_request=user_request)
         _emit_turn_milestone(
             self._interpreter,
             phase="rlm_start",
@@ -1365,32 +1439,38 @@ class EscalatingFleetModule(dspy.Module):
             _prediction_set(result, "routing_decision", routing_decision)
             if source_url:
                 _prediction_set(result, "source_url", source_url)
-            return result
+            return _apply_rlm_budget_semantics_guard(result, user_request=user_request)
         except Exception as exc:
             # Check if this is a parse error that we can retry
             if _is_rlm_parse_error(exc):
-                logger.warning(
-                    "EscalatingFleetModule: RLM parse error (%s), retrying with corrective instruction",
-                    exc,
-                )
-                try:
-                    # Retry once with corrective instruction
-                    corrective_memory = f"{core_memory}\n\n[IMPORTANT: Please provide your response as valid JSON with 'reasoning' and 'answer' fields.]"
-                    retry_kwargs = {**call_kwargs, "core_memory": corrective_memory}
-                    result = _run_with_timeout(
-                        lambda: rlm(**retry_kwargs),
-                        timeout=self._fallback_timeout,
-                    )
-                    _prediction_set(result, "selected_skills", selected_skills or [])
-                    _prediction_set(result, "routing_decision", routing_decision)
-                    if source_url:
-                        _prediction_set(result, "source_url", source_url)
-                    return result
-                except Exception as retry_exc:
+                if _is_rlm_action_parse_cap_error(exc):
                     logger.warning(
-                        "EscalatingFleetModule: RLM retry also failed (%s), falling back to ChainOfThought",
-                        retry_exc,
+                        "EscalatingFleetModule: RLM action parse-error cap reached; "
+                        "skipping full RLM retry and falling back"
                     )
+                else:
+                    logger.warning(
+                        "EscalatingFleetModule: RLM parse error (%s), retrying with corrective instruction",
+                        exc,
+                    )
+                    try:
+                        # Retry once with corrective instruction
+                        corrective_memory = f"{core_memory}\n\n[IMPORTANT: Please provide your response as valid JSON with 'reasoning' and 'answer' fields.]"
+                        retry_kwargs = {**call_kwargs, "core_memory": corrective_memory}
+                        result = _run_with_timeout(
+                            lambda: rlm(**retry_kwargs),
+                            timeout=self._fallback_timeout,
+                        )
+                        _prediction_set(result, "selected_skills", selected_skills or [])
+                        _prediction_set(result, "routing_decision", routing_decision)
+                        if source_url:
+                            _prediction_set(result, "source_url", source_url)
+                        return _apply_rlm_budget_semantics_guard(result, user_request=user_request)
+                    except Exception as retry_exc:
+                        logger.warning(
+                            "EscalatingFleetModule: RLM retry also failed (%s), falling back to ChainOfThought",
+                            retry_exc,
+                        )
             else:
                 # Non-parse exception (e.g. repeated action-gen timeouts raised
                 # as dspy.LMError). Warn + retry once with a reduced budget
@@ -1433,7 +1513,7 @@ class EscalatingFleetModule(dspy.Module):
                     _prediction_set(result, "runtime_fallback_used", True)
                     if source_url:
                         _prediction_set(result, "source_url", source_url)
-                    return result
+                    return _apply_rlm_budget_semantics_guard(result, user_request=user_request)
                 except Exception as retry_exc:
                     logger.warning(
                         "EscalatingFleetModule: RLM reduced-budget retry also failed (%s), falling back to ChainOfThought",
@@ -1442,7 +1522,7 @@ class EscalatingFleetModule(dspy.Module):
 
             logger.warning("EscalatingFleetModule: RLM path failed (%s), falling back to ChainOfThought", exc)
             if staged_inline_context:
-                return self._staged_context_rlm_failure(
+                prediction = self._staged_context_rlm_failure(
                     selected_skills=selected_skills,
                     routing_decision=routing_decision,
                     source_url=source_url,
@@ -1451,6 +1531,7 @@ class EscalatingFleetModule(dspy.Module):
                         "reinjecting the full inline payload."
                     ),
                 )
+                return _apply_rlm_budget_semantics_guard(prediction, user_request=user_request)
             # Cap the fallback responder with stateless config overrides (per-IO
             # timeout, qwen thinking off) so it can't run unbounded on the planner.
             from fleet_rlm.runtime.config import build_lm_config
@@ -1506,7 +1587,7 @@ class EscalatingFleetModule(dspy.Module):
                 fallback["routing_decision"] = routing_decision
                 if source_url:
                     fallback["source_url"] = source_url
-                return fallback
+                return _apply_rlm_budget_semantics_guard(fallback, user_request=user_request)
             except Exception as fallback_exc:
                 if not _is_rlm_parse_error(fallback_exc):
                     raise
@@ -1546,13 +1627,14 @@ class EscalatingFleetModule(dspy.Module):
                         "EscalatingFleetModule: fallback respond retry also failed (%s); returning degraded payload",
                         retry_exc,
                     )
-                    return _fallback_parse_error_prediction(
+                    fallback = _fallback_parse_error_prediction(
                         selected_skills=selected_skills,
                         routing_decision=routing_decision,
                         source_url=source_url,
                         initial_exc=fallback_exc,
                         retry_exc=retry_exc,
                     )
+                    return _apply_rlm_budget_semantics_guard(fallback, user_request=user_request)
             fallback["degraded"] = True
             fallback["warning"] = _RLM_FALLBACK_WARNING
             fallback["runtime_degraded"] = True
@@ -1564,7 +1646,7 @@ class EscalatingFleetModule(dspy.Module):
             fallback["routing_decision"] = routing_decision
             if source_url:
                 fallback["source_url"] = source_url
-            return fallback
+            return _apply_rlm_budget_semantics_guard(fallback, user_request=user_request)
 
 
 __all__ = [

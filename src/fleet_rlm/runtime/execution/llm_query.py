@@ -49,6 +49,7 @@ _LLM_BATCH_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="llm_
 _SUB_RLM_BATCH_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="sub_rlm_batch")
 _LLM_QUERY_BATCH_WINDOW = max(1, min(8, _env_int("FLEET_RLM_LLM_QUERY_BATCH_WINDOW", 4)))
 
+
 # Phase 7: child conversation snapshot configuration
 _CHILD_HISTORY_MAX_TURNS = 2
 _CHILD_HISTORY_MAX_CHARS = 2000
@@ -378,6 +379,9 @@ class LLMQueryMixin:
                 "fleet_rlm.bounded": str(bounded),
                 "fleet_rlm.sub_lm_model": sub_lm_model,
                 "fleet_rlm.llm_query_target_source": target_source,
+                "fleet_rlm.max_llm_calls": str(getattr(self, "max_llm_calls", "")),
+                "fleet_rlm.llm_call_count": str(getattr(self, "_llm_call_count", "")),
+                "fleet_rlm.llm_calls_remaining": str(max(0, self.max_llm_calls - self._llm_call_count)),
                 "fleet_rlm.auth_preflight_result": "ok",
                 "fleet_rlm.auth_fail_fast_state": str(getattr(self, "_sub_lm_auth_failed", False)).lower(),
             },
@@ -573,6 +577,9 @@ class LLMQueryMixin:
                 "fleet_rlm.batch_prompt_count": str(len(prompts)),
                 "fleet_rlm.llm_query_target_source": target_source,
                 "fleet_rlm.sub_lm_model": target_model,
+                "fleet_rlm.max_llm_calls": str(getattr(self, "max_llm_calls", "")),
+                "fleet_rlm.llm_call_count": str(getattr(self, "_llm_call_count", "")),
+                "fleet_rlm.llm_calls_remaining": str(max(0, self.max_llm_calls - self._llm_call_count)),
                 "fleet_rlm.auth_preflight_result": "ok",
                 "fleet_rlm.auth_fail_fast_state": str(getattr(self, "_sub_lm_auth_failed", False)).lower(),
             },
