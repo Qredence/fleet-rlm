@@ -227,6 +227,43 @@ class TestEscalatingFleetModule:
         assert "llm_query and llm_query_batched are disabled" in prompt
         assert "synthesize from Python inspection" in prompt
 
+    def test_budget_semantics_prompt_distinguishes_calls_from_tokens(self) -> None:
+        prompt = build_rlm_core_context(
+            user_request="What controls max_llm_calls in DSPy RLM?",
+            compressed_history="",
+            core_memory="",
+        )
+
+        assert "`max_llm_calls` is a semantic call-count cap" in prompt
+        assert "It is not a token budget" in prompt
+        assert "Sources / Why-this rationale" in prompt
+        assert "max_tokens" not in prompt
+
+    def test_budget_semantics_guard_corrects_bad_source_rationale(self) -> None:
+        module = _make_module()
+        _stub_route(module, route="direct")
+        _stub_respond(
+            module,
+            response=(
+                "Set `max_llm_calls=100`.\n\n"
+                "Sources\n"
+                "Why this? The document says the maximum token budget is controlled by "
+                "the max_llm_calls parameter."
+            ),
+        )
+
+        prediction = module.forward(
+            user_request="What controls the maximum token budget for delegate model calls in DSPy RLM?",
+            history=dspy.History(messages=[]),
+        )
+
+        response = str(getattr(prediction, "response", ""))
+        assert "`max_llm_calls` does not control a token budget" in response
+        assert "one `llm_query(...)` counts as one call" in response
+        assert "max_tokens" not in response
+        assert "maximum token budget is controlled by the max_llm_calls" not in response
+        assert prediction.get("budget_semantics_guard_status") == "corrected"
+
     def test_escalating_module_passes_max_output_chars_to_rlm_wrappers(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -888,6 +925,14 @@ class TestLargeContextRouting:
 
 
 class TestRLMParseDiagnostics:
+    def test_rlm_action_parse_cap_error_is_classified(self) -> None:
+        from fleet_rlm.runtime.modules.escalating import _is_rlm_action_parse_cap_error
+
+        assert _is_rlm_action_parse_cap_error(
+            RuntimeError("RLM action generation parse errors exceeded cap (1) at iteration 12; escalating.")
+        )
+        assert not _is_rlm_action_parse_cap_error(RuntimeError("AdapterParseError: malformed JSON"))
+
     @staticmethod
     def _parse_error_message(completion: str) -> str:
         return (
@@ -992,11 +1037,38 @@ print(context["document_text"][:100])
         assert "fleet_rlm.variables_info_chars" in action_attrs
         assert "fleet_rlm.repl_history_chars" in action_attrs
 
+    def test_parse_recovery_handles_reasoning_sentinel_glued_to_code_marker(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        completion = """[[ ## reasoning ## ]]
+I need to inspect the manifest.</mm:think>[[ ## code ## ]]
+```python
+print("ok")
+```
+
+[[ ## completed ## ]]
+"""
+        span_outputs: list[dict[str, Any]] = []
+        span, set_outputs = self._recording_span(span_outputs)
+        monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span", span)
+        monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_context.set_mlflow_span_outputs", set_outputs)
+        rlm = self._bare_streaming_rlm(completion=completion)
+
+        result = rlm._execute_iteration(None, [], None, 0, {}, [])
+
+        assert isinstance(result, dspy.Prediction)
+        assert result.reasoning == "I need to inspect the manifest."
+        assert result.code == 'print("ok")'
+        assert any(output.get("status") == "parse_recovered" for output in span_outputs)
+
     def test_unrecoverable_parse_status_payload_omits_raw_completion(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        completion = "I will inspect the manifest."
+        completion = """[[ ## reasoning ## ]]
+I will inspect the manifest.
+"""
         span_outputs: list[dict[str, Any]] = []
         span, set_outputs = self._recording_span(span_outputs)
         monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span", span)
@@ -1008,6 +1080,12 @@ print(context["document_text"][:100])
         result = rlm._execute_iteration(None, [], "history", 0, {}, [])
 
         assert isinstance(result, dict)
+        assert any(
+            item.get("phase") == "rlm_reasoning"
+            and item.get("reasoning") == "I will inspect the manifest."
+            and item.get("parse_error") is True
+            for item in rlm._emit_step_payloads
+        )
         payload = next(
             item
             for item in rlm._emit_step_payloads

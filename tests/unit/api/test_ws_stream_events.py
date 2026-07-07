@@ -57,7 +57,9 @@ async def test_stream_agent_turn_spans_prepare_and_agent_stream_without_crossing
 ) -> None:
     recorder = _RecordingSpans()
     monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span", recorder.span)
-    monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_context.set_mlflow_span_outputs", recorder.set_outputs)
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.mlflow_context.set_mlflow_span_outputs", recorder.set_outputs
+    )
     prepared: list[str] = []
 
     async def prepare() -> None:
@@ -93,7 +95,9 @@ async def test_stream_agent_turn_ignores_mlflow_span_exit_failure(monkeypatch: p
     recorder = _RecordingSpans()
     recorder.fail_exit = True
     monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span", recorder.span)
-    monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_context.set_mlflow_span_outputs", recorder.set_outputs)
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.mlflow_context.set_mlflow_span_outputs", recorder.set_outputs
+    )
     agent = _StreamingAgent(recorder)
     request = WorkspaceTaskRequest(agent=agent, message="hello")
 

@@ -134,6 +134,9 @@ def test_llm_query_records_provider_wait_span(monkeypatch) -> None:
     assert captured[0]["name"] == "fleet_rlm.llm_query"
     assert captured[0]["span_type"] == "LLM"
     assert captured[0]["attributes"]["fleet_rlm.tool_name"] == "llm_query"
+    assert captured[0]["attributes"]["fleet_rlm.max_llm_calls"] == "3"
+    assert captured[0]["attributes"]["fleet_rlm.llm_call_count"] == "1"
+    assert captured[0]["attributes"]["fleet_rlm.llm_calls_remaining"] == "2"
     assert captured[0]["inputs"]["prompt_chars"] == len("summarize this")
     assert captured[0]["outputs"]["status"] == "ok"
     assert captured[0]["outputs"]["response_chars"] == len("answer: summarize this")
@@ -321,7 +324,7 @@ def test_llm_query_prepends_context_and_preserves_single_arg(monkeypatch) -> Non
 
 def test_llm_query_batched_prepends_context(monkeypatch) -> None:
     """``llm_query_batched(prompts, context=...)`` prepends context to every prompt."""
-    _patch_mlflow(monkeypatch)
+    captured = _patch_mlflow(monkeypatch)
 
     rec = _RecordingLM()
     host = _make_host(rec)
@@ -333,6 +336,10 @@ def test_llm_query_batched_prepends_context(monkeypatch) -> None:
 
     assert rec.calls == ["CTX\n\na", "CTX\n\nb"], f"got {rec.calls!r}"
     assert results == ["ok:CTX\n\na", "ok:CTX\n\nb"]
+    batch_record = next(record for record in captured if record["name"] == "fleet_rlm.llm_query_batched")
+    assert batch_record["attributes"]["fleet_rlm.max_llm_calls"] == "5"
+    assert batch_record["attributes"]["fleet_rlm.llm_call_count"] == "2"
+    assert batch_record["attributes"]["fleet_rlm.llm_calls_remaining"] == "3"
 
 
 def test_llm_query_batched_short_circuits_existing_auth_failure(monkeypatch) -> None:

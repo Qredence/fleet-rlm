@@ -57,14 +57,14 @@ const runtimeSettingCategories = [
       [
         "DSPY_DELEGATE_LM_MAX_TOKENS",
         "Delegate max tokens",
-        "Maximum token budget for delegate model calls.",
+        "Maximum output tokens per delegate model response.",
       ],
       [
         "DSPY_LM_API_BASE",
         "Provider API base",
         "Optional custom API base URL for LiteLLM-compatible providers.",
       ],
-      ["DSPY_LM_MAX_TOKENS", "Planner max tokens", "Maximum token budget for planner responses."],
+      ["DSPY_LM_MAX_TOKENS", "Planner max tokens", "Maximum output tokens per planner response."],
       [
         "DSPY_ADAPTER",
         "DSPy adapter",

@@ -23,6 +23,7 @@ progress events and MLflow spans report the correct iteration number.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -475,6 +476,42 @@ class _FakeRepl:
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         self.executed.append(code)
         return self._result
+
+
+def test_execute_code_records_repl_cache_hit_span(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured_spans: list[dict[str, Any]] = []
+
+    class _CapturingSpan(_FakeSpan):
+        def __init__(self, name: str, span_type: str | None = None, attributes: dict[str, Any] | None = None) -> None:
+            super().__init__(name, span_type, attributes)
+            captured_spans.append(self.record)
+
+    monkeypatch.setattr(
+        mlflow_context,
+        "mlflow_child_span",
+        lambda name, span_type=None, attributes=None, inputs=None: _CapturingSpan(name, span_type, attributes),
+    )
+    monkeypatch.setattr(
+        mlflow_context,
+        "set_mlflow_span_outputs",
+        lambda span, outputs: span.record.__setitem__("outputs", outputs) if span is not None else None,
+    )
+
+    rlm = _make_streaming_rlm_bypass_init()
+    rlm._repl_output_cache = {}
+    code = "print('cached')"
+    cache_key = hashlib.sha256(code.encode("utf-8")).hexdigest()
+    rlm._repl_output_cache[cache_key] = "cached result"
+    repl = _FakeRepl(result="fresh result")
+
+    result = rlm._execute_code(repl, code, {"x": 1})
+
+    assert result == "cached result"
+    assert repl.executed == []
+    repl_span = next(span for span in captured_spans if span["name"] == "fleet_rlm.rlm_repl_execute")
+    assert repl_span["attributes"]["fleet_rlm.repl_cache_hit"] == "true"
+    assert repl_span["outputs"]["cache_hit"] is True
+    assert repl_span["outputs"]["execution_time_ms"] == 0
 
 
 def test_execute_iteration_runs_code_and_builds_trajectory(monkeypatch: pytest.MonkeyPatch) -> None:

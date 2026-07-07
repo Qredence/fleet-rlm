@@ -119,7 +119,7 @@ def test_extract_inline_context_payload_prefers_context_delimiter() -> None:
     assert payload is not None
     assert payload.text.startswith("CONTEXT:")
     assert "Count labels" in payload.shortened_user_request
-    assert "context[\"document_text\"]" in payload.shortened_user_request
+    assert 'context["document_text"]' in payload.shortened_user_request
     assert "alpha\nalpha\nalpha" not in payload.shortened_user_request
     assert payload.metadata["inline_context_staged"] == "true"
     assert payload.metadata["inline_context_extraction_kind"] == "context_delimiter"

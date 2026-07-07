@@ -142,7 +142,9 @@ async def test_stream_agent_events_records_websocket_child_spans(monkeypatch: py
     persist_calls: list[dict[str, Any]] = []
 
     monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span", recorder.span)
-    monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_context.set_mlflow_span_outputs", recorder.set_outputs)
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.mlflow_context.set_mlflow_span_outputs", recorder.set_outputs
+    )
 
     async def fake_stream_agent_turn(worker_request: Any):
         assert worker_request.message == "hello"
@@ -191,6 +193,8 @@ async def test_stream_agent_events_records_websocket_child_spans(monkeypatch: py
         "fleet_rlm.ws_frame_emit",
         "fleet_rlm.ws_terminal_persist",
         "fleet_rlm.ws_lifecycle_complete",
+        "fleet_rlm.lifecycle_persist_worker_drain",
+        "fleet_rlm.lifecycle_emit_completed",
         "fleet_rlm.ws_repl_bridge_stop",
     }.issubset(set(recorder.names))
     assert recorder.names.count("fleet_rlm.ws_frame_emit") == 2
@@ -206,7 +210,9 @@ async def test_stream_agent_events_ignores_mlflow_span_exit_failure(monkeypatch:
     bridge = _FakeBridge()
 
     monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span", recorder.span)
-    monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_context.set_mlflow_span_outputs", recorder.set_outputs)
+    monkeypatch.setattr(
+        "fleet_rlm.integrations.observability.mlflow_context.set_mlflow_span_outputs", recorder.set_outputs
+    )
 
     async def fake_stream_agent_turn(worker_request: Any):
         _ = worker_request
