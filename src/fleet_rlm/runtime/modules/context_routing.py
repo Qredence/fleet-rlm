@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +36,15 @@ _EXTRACTABLE_CONTEXT_SUFFIXES = frozenset(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class InlineContextPayload:
+    """Oversized inline payload staged out of the action prompt."""
+
+    text: str
+    shortened_user_request: str
+    metadata: dict[str, str]
+
+
 def large_context_threshold_chars() -> int:
     raw = os.environ.get("FLEET_RLM_LARGE_CONTEXT_THRESHOLD", "")
     try:
@@ -46,6 +57,85 @@ def large_context_threshold_chars() -> int:
             VARIABLE_MODE_THRESHOLD,
         )
     return VARIABLE_MODE_THRESHOLD
+
+
+def _metadata_for_inline_payload(
+    *,
+    extraction_kind: str,
+    original_user_request: str,
+    staged_text: str,
+    shortened_user_request: str,
+    delimiter: str | None = None,
+) -> dict[str, str]:
+    metadata = {
+        "inline_context_staged": "true",
+        "inline_context_extraction_kind": extraction_kind,
+        "original_user_request_chars": str(len(original_user_request or "")),
+        "staged_document_chars": str(len(staged_text or "")),
+        "short_user_request_chars": str(len(shortened_user_request or "")),
+    }
+    if delimiter:
+        metadata["inline_context_delimiter"] = delimiter
+    return metadata
+
+
+def extract_inline_context_payload(
+    user_request: str,
+    *,
+    threshold_chars: int,
+) -> InlineContextPayload | None:
+    """Extract an oversized pasted payload from ``user_request`` for RLM staging.
+
+    The RLM action prompt should carry the task and a pointer to staged data, not
+    repeat an 80k+ character paste on every iteration. A ``CONTEXT:`` section is
+    treated as the safest split point. If no delimiter exists but the request is
+    still over threshold, stage the whole request and ask the RLM to inspect it
+    from ``context["document_text"]``.
+    """
+    request = str(user_request or "")
+    if len(request) < threshold_chars:
+        return None
+
+    match = re.search(r"(?im)^([ \t]*(?:#{1,6}[ \t]*)?context[ \t]*:)", request)
+    if match is not None:
+        staged_text = request[match.start() :].strip()
+        instruction = request[: match.start()].strip()
+        if not instruction:
+            instruction = "Use the staged inline context to answer the user's request."
+        shortened = (
+            f"{instruction}\n\n"
+            "[Staged inline context]\n"
+            "The full CONTEXT block is available as context[\"document_text\"] in the RLM REPL. "
+            "Inspect it with Python, use focused llm_query calls only when needed, and submit the final answer."
+        )
+        return InlineContextPayload(
+            text=staged_text,
+            shortened_user_request=shortened,
+            metadata=_metadata_for_inline_payload(
+                extraction_kind="context_delimiter",
+                original_user_request=request,
+                staged_text=staged_text,
+                shortened_user_request=shortened,
+                delimiter=match.group(1).strip(),
+            ),
+        )
+
+    shortened = (
+        "[Staged inline context]\n"
+        "The full user request was too large for repeated action prompts and has been staged as "
+        "context[\"document_text\"] in the RLM REPL. Inspect that variable with Python to recover the "
+        "task, data, constraints, and output format before answering."
+    )
+    return InlineContextPayload(
+        text=request,
+        shortened_user_request=shortened,
+        metadata=_metadata_for_inline_payload(
+            extraction_kind="full_request",
+            original_user_request=request,
+            staged_text=request,
+            shortened_user_request=shortened,
+        ),
+    )
 
 
 def _path_char_estimate(path: str) -> int:
@@ -206,6 +296,9 @@ def build_turn_context(
         context_paths=effective_paths,
         loaded_document_paths=extra_loaded_paths or None,
     )
+    inline_payload = extract_inline_context_payload(user_request, threshold_chars=threshold)
+    if inline_payload is not None:
+        sources.append(f"inline_context:{len(inline_payload.text)}")
     return TurnContext(
         docs_path=(docs_path or "").strip() or None,
         context_paths=effective_paths,
@@ -214,6 +307,9 @@ def build_turn_context(
         estimated_chars=estimated,
         threshold_chars=threshold,
         context_sources=sources,
+        inline_context_text=inline_payload.text if inline_payload is not None else "",
+        shortened_user_request=inline_payload.shortened_user_request if inline_payload is not None else None,
+        inline_context_metadata=inline_payload.metadata if inline_payload is not None else {},
     )
 
 
@@ -326,6 +422,21 @@ def load_large_context_rlm_kwargs(
                 ".fleet-rlm/context/manifest.json and open each staged_path .extracted.txt file."
             )
 
+    if turn_context.inline_context_text:
+        inline_text = str(turn_context.inline_context_text)
+        existing_text = str(kwargs.get("document_text") or "")
+        if existing_text.strip():
+            kwargs["document_text"] = (
+                f"{existing_text}\n\n--- STAGED INLINE CONTEXT ---\n\n{inline_text}"
+            )
+        else:
+            kwargs["document_text"] = inline_text
+        source_metadata.update(dict(turn_context.inline_context_metadata))
+        manifest["inline_context_payload"] = str(len(inline_text))
+        kwargs["context_manifest"] = manifest
+        if turn_context.shortened_user_request:
+            kwargs["shortened_user_request"] = turn_context.shortened_user_request
+
     if source_metadata:
         kwargs["source_metadata"] = source_metadata
 
@@ -337,6 +448,7 @@ __all__ = [
     "build_turn_context",
     "build_turn_context_for_agent",
     "estimate_turn_context_chars",
+    "extract_inline_context_payload",
     "interpreter_session_context_paths",
     "large_context_threshold_chars",
     "load_large_context_rlm_kwargs",

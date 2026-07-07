@@ -18,5 +18,10 @@ Paths in this map are relative to `src/fleet_rlm/`.
 | `integrations/daytona/volumes.py` | Durable volume operations |
 | `quality/optimization_runner.py` | GEPA optimization pipeline |
 | `quality/module_registry.py` | Registered optimizable DSPy modules |
-| `api/routers/ws/endpoint.py` | WebSocket /ws/{session_id} handler |
-| `api/routers/ws/stream.py` | Live chat streaming loop |
+| `api/routers/ws/endpoint.py` | WebSocket `/api/v1/ws/execution` handler |
+| `api/routers/ws/connection_loop.py` | WebSocket receive/send coordination and command loop |
+| `api/routers/ws/stream_loop.py` | Runtime stream fan-out for one chat turn |
+| `api/routers/ws/stream_events.py` | Chat stream event projection to websocket messages |
+| `api/routers/ws/stream_summary.py` | Runtime stream summary and final payload assembly |
+| `api/routers/ws/turn_runner.py` | Per-turn runtime execution and cancellation handling |
+| `api/routers/ws/turn_setup.py` | Request normalization, context paths, and auth/session setup |

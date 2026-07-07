@@ -119,7 +119,7 @@ function traceRows(
 }
 
 describe("applyWsFrameToMessages", () => {
-  it("appends a backend error system message and closes open reasoning", () => {
+  it("appends a structured backend error trace and closes open reasoning", () => {
     const initial: ChatMessage[] = [
       {
         id: "r1",
@@ -140,7 +140,13 @@ describe("applyWsFrameToMessages", () => {
 
     expect(terminal).toBe(true);
     expect(errored).toBe(true);
-    expect(messages.some((m) => m.type === "system")).toBe(true);
+    expect(messages.some((m) => m.type === "system")).toBe(false);
+    const errorTrace = findFirstPart(messages, (part) => part.kind === "status_note");
+    expect(errorTrace).toMatchObject({
+      kind: "status_note",
+      text: "Something went wrong",
+      tone: "error",
+    });
     const reasoning = messages.find((m) => m.type === "reasoning");
     expect(reasoning?.reasoningData?.isThinking).toBe(false);
   });

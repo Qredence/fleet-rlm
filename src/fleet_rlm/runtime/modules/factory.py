@@ -165,6 +165,18 @@ _COMPRESSED_TOOLS_INTRO = (
 )
 
 
+def _looks_like_echo_back_completion(completion: str) -> bool:
+    """Return True for long model echo-back payloads masquerading as actions."""
+    stripped = str(completion or "").strip()
+    if not stripped:
+        return False
+    truncated = _truncate(stripped)
+    if truncated == stripped:
+        return False
+    echo_markers = ("Variable: `", "«««", "Total length:", "Description:")
+    return sum(1 for marker in echo_markers if marker in truncated) >= 3
+
+
 def _compact_text(value: Any, *, max_chars: int) -> str:
     text = str(value or "")
     if len(text) <= max_chars:
@@ -467,6 +479,8 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         return any(
             marker in msg
             for marker in (
+                "adapterparseerror",
+                "failed to parse the lm response",
                 "json",
                 "json.decode",
                 "json parse",
@@ -554,6 +568,75 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         pieces.append(text[cursor:])
         return "".join(pieces).strip()
 
+    @staticmethod
+    def _recover_trace_shaped_action_completion(
+        completion: str,
+        signature: type[dspy.Signature],
+    ) -> dspy.Prediction | None:
+        """Recover trace-shaped action output with exactly one fenced Python block."""
+        import ast
+        import re
+
+        field_names = set(signature.output_fields.keys())
+        if field_names != {"reasoning", "code"}:
+            return None
+
+        text = str(completion or "").strip()
+        if _looks_like_echo_back_completion(text):
+            return None
+        if text.count("```") != 2:
+            return None
+
+        fence = re.search(r"```(?:python|py)?[ \t]*\n(?P<code>.*?)\n```", text, re.IGNORECASE | re.DOTALL)
+        if fence is None:
+            return None
+
+        code = fence.group("code").strip()
+        if not code:
+            return None
+        try:
+            ast.parse(code)
+        except SyntaxError:
+            return None
+
+        reasoning = text[: fence.start()].strip()
+        marker = re.compile(r"\[\[\s*##\s*(?:reasoning|code|completed)\s*##\s*\]\]", re.IGNORECASE)
+        reasoning = marker.sub("", reasoning).strip()
+        if not reasoning:
+            reasoning = "Recovered executable Python action from a malformed trace-shaped completion."
+        return dspy.Prediction(reasoning=reasoning, code=code)
+
+    @staticmethod
+    def _parse_error_diagnostics(
+        exc: Exception,
+        signature: type[dspy.Signature],
+        *,
+        recovered: bool,
+        iteration: int,
+    ) -> dict[str, Any]:
+        """Return bounded parse-error metadata safe for websocket payloads."""
+        import re
+
+        message = str(exc)
+        parsed_match = re.search(
+            r"Actual output fields parsed from the LM response:\s*\[(?P<fields>[^\]]*)\]",
+            message,
+        )
+        parsed_fields: list[str] = []
+        if parsed_match is not None:
+            parsed_fields = [
+                item.strip()
+                for item in parsed_match.group("fields").split(",")
+                if item.strip()
+            ]
+        return {
+            "iteration": iteration,
+            "parse_error_expected_fields": sorted(str(name) for name in signature.output_fields),
+            "parse_error_parsed_fields": parsed_fields,
+            "parse_recovery_status": "recovered" if recovered else "unrecoverable",
+            "recovered_without_retry": recovered,
+        }
+
     @classmethod
     def _recover_action_prediction_from_parse_error(
         cls,
@@ -562,7 +645,14 @@ class _StreamingRLM(_DSPY_RLM_BASE):
     ) -> dspy.Prediction | None:
         """Recover a parseable action completion without spending another LM call."""
         completion = cls._extract_completion_from_parse_error(exc)
-        if not completion or cls._is_degenerate_response(completion):
+        if not completion:
+            return None
+
+        trace_recovered = cls._recover_trace_shaped_action_completion(completion, signature)
+        if trace_recovered is not None:
+            return trace_recovered
+
+        if cls._is_degenerate_response(completion):
             return None
 
         normalized = cls._normalize_action_completion_markers(completion, signature)
@@ -577,6 +667,9 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                 continue
             if fields.keys() == signature.output_fields.keys():
                 return dspy.Prediction(**fields)
+        trace_recovered = cls._recover_trace_shaped_action_completion(normalized, signature)
+        if trace_recovered is not None:
+            return trace_recovered
         return None
 
     def _execute_iteration(self, *args: Any, **kwargs: Any) -> Any:
@@ -688,6 +781,12 @@ class _StreamingRLM(_DSPY_RLM_BASE):
         action_lm_model = str(getattr(action_lm, "model", "?")) if action_lm is not None else "?"
         action_token_key = "max_output_tokens" if "max_output_tokens" in config_overrides else "max_tokens"
         action_effective_max_tokens = config_overrides.get(action_token_key)
+        variables_info_chars = sum(len(str(item)) for item in (kwargs.get("variables_info") or []))
+        repl_history_value = kwargs.get("repl_history")
+        try:
+            repl_history_chars = len(str(repl_history_value.format())) if repl_history_value is not None else 0
+        except Exception:
+            repl_history_chars = len(str(repl_history_value or ""))
 
         # Emit iteration-start event for real-time progress in the frontend
         self._emit_step(
@@ -731,6 +830,8 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                 "fleet_rlm.rlm_action_effective_max_tokens": str(action_effective_max_tokens or ""),
                 "fleet_rlm.rlm_action_lm_source": action_lm_source,
                 "fleet_rlm.rlm_action_lm_model": action_lm_model,
+                "fleet_rlm.variables_info_chars": str(variables_info_chars),
+                "fleet_rlm.repl_history_chars": str(repl_history_chars),
             },
         ) as span:
             # Emit progress event BEFORE blocking LLM call so the user sees feedback
@@ -767,6 +868,12 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                         exc,
                         self.generate_action.signature,
                     )
+                    diagnostics = self._parse_error_diagnostics(
+                        exc,
+                        self.generate_action.signature,
+                        recovered=recovered_action is not None,
+                        iteration=iteration,
+                    )
                     if recovered_action is not None:
                         action_result = recovered_action
                         action_succeeded = True
@@ -779,8 +886,7 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                             span,
                             {
                                 "status": "parse_recovered",
-                                "iteration": iteration,
-                                "recovered_without_retry": True,
+                                **diagnostics,
                             },
                         )
                         self._emit_step(
@@ -792,6 +898,7 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                                 "source_type": "rlm_progress",
                                 "duration_s": time.time() - _start_time,
                                 "recovered_from_parse_error": True,
+                                **diagnostics,
                             }
                         )
                     else:
@@ -800,9 +907,10 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                                 "phase": "rlm_action_gen",
                                 "iteration": iteration,
                                 "status": "failed",
-                                "text": f"Action generation failed: {exc}",
+                                "text": "Action generation failed: adapter parse error",
                                 "source_type": "rlm_progress",
-                                "error": str(exc),
+                                "error_type": type(exc).__name__,
+                                **diagnostics,
                             }
                         )
                         # The strict ChatAdapter pass failed and the raw
@@ -825,7 +933,7 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                                 span,
                                 {
                                     "status": "parse_error_capped",
-                                    "iteration": iteration,
+                                    **diagnostics,
                                     "consecutive_parse_errors": self._consecutive_parse_errors,
                                 },
                             )
@@ -847,7 +955,7 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                             kwargs["repl_history"] = new_history
                         set_mlflow_span_outputs(
                             span,
-                            {"status": "parse_error", "iteration": iteration},
+                            {"status": "parse_error", **diagnostics},
                         )
                         # Contract: return a REPLHistory so the loop continues.
                         return new_history if new_history is not None else cur_history
@@ -863,9 +971,9 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                             "phase": "rlm_action_gen",
                             "iteration": iteration,
                             "status": "failed",
-                            "text": f"Action generation failed: {exc}",
+                            "text": "Action generation failed: model call error",
                             "source_type": "rlm_progress",
-                            "error": str(exc),
+                            "error_type": type(exc).__name__,
                         }
                     )
                     self._consecutive_timeouts += 1
@@ -901,9 +1009,9 @@ class _StreamingRLM(_DSPY_RLM_BASE):
                             "phase": "rlm_action_gen",
                             "iteration": iteration,
                             "status": "failed",
-                            "text": f"Action generation failed: {exc}",
+                            "text": "Action generation failed: unexpected runtime error",
                             "source_type": "rlm_progress",
-                            "error": str(exc),
+                            "error_type": type(exc).__name__,
                         }
                     )
                     raise

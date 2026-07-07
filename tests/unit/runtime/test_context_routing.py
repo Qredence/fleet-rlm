@@ -10,6 +10,7 @@ from fleet_rlm.runtime.agent.turn_context import TurnContext
 from fleet_rlm.runtime.modules.context_routing import (
     build_turn_context,
     estimate_turn_context_chars,
+    extract_inline_context_payload,
     load_large_context_rlm_kwargs,
     resolve_effective_context_paths,
     should_auto_route_large_context,
@@ -108,3 +109,30 @@ def test_load_large_context_kwargs_staging_hint_without_extractable_single_file(
     kwargs = load_large_context_rlm_kwargs(turn_context)
     assert "document_text" not in kwargs
     assert "context_staging_hint" in kwargs["source_metadata"]
+
+
+def test_extract_inline_context_payload_prefers_context_delimiter() -> None:
+    request = "Count labels and report totals.\n\nCONTEXT:\n" + ("alpha\n" * VARIABLE_MODE_THRESHOLD)
+
+    payload = extract_inline_context_payload(request, threshold_chars=VARIABLE_MODE_THRESHOLD)
+
+    assert payload is not None
+    assert payload.text.startswith("CONTEXT:")
+    assert "Count labels" in payload.shortened_user_request
+    assert "context[\"document_text\"]" in payload.shortened_user_request
+    assert "alpha\nalpha\nalpha" not in payload.shortened_user_request
+    assert payload.metadata["inline_context_staged"] == "true"
+    assert payload.metadata["inline_context_extraction_kind"] == "context_delimiter"
+
+
+def test_load_large_context_kwargs_stages_oversized_inline_request() -> None:
+    request = "Classify entries.\n\nCONTEXT:\n" + ("row: accepted\n" * VARIABLE_MODE_THRESHOLD)
+    turn_context = build_turn_context(user_request=request)
+
+    kwargs = load_large_context_rlm_kwargs(turn_context)
+
+    assert kwargs["document_text"].startswith("CONTEXT:")
+    assert kwargs["shortened_user_request"] == turn_context.shortened_user_request
+    assert kwargs["source_metadata"]["inline_context_staged"] == "true"
+    assert kwargs["source_metadata"]["original_user_request_chars"] == str(len(request))
+    assert kwargs["context_manifest"]["inline_context_payload"] == str(len(turn_context.inline_context_text))

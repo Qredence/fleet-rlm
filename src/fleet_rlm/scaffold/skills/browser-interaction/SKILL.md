@@ -12,10 +12,20 @@ Use when plain `fetch` / `urllib` returns empty or incomplete HTML (SPAs, dynami
 | Approach | Use when |
 |----------|----------|
 | Python `urllib` / `requests` | Static HTML, APIs, raw text downloads |
-| `document_text` REPL variable | fleet-rlm already fetched the URL into RLM |
+| `document` REPL variable | fleet-rlm already fetched the URL into RLM |
 | Playwright (browser snapshot) | Client-rendered pages, need visible text or screenshots |
 
 fleet-rlm selects a **browser-capable Daytona snapshot** when this skill is active.
+
+When fleet-rlm has already fetched a URL, inspect the bounded document variable:
+
+```python
+print(document["source_url"])
+print(document["text"][:4000])
+print(document["metadata"])
+```
+
+Use `document["text"]` excerpts for follow-up analysis. Do not pass the full document text to `llm_query`.
 
 ## Playwright patterns (sandbox)
 

@@ -283,7 +283,16 @@ function applyCanonicalExecutionCompleted(
   if (status === "failed" || status === "error") {
     let next = finishReasoning(messages);
     next = finalizeTraceParts(next);
-    next = appendSystem(next, `Backend error: ${text || "Unknown server error."}`);
+    next = appendTracePart(
+      next,
+      {
+        kind: "status_note",
+        text: text || "Backend error.",
+        tone: "error",
+        toolName: "runtime_error",
+      },
+      text || "Backend error.",
+    );
     return { messages: next, terminal: true, errored: true };
   }
 
@@ -792,7 +801,18 @@ export function applyWsFrameToMessages(
   _queryClient?: QueryClient,
 ): ApplyFrameResult {
   if (frame.type === "error") {
-    const next = finalizeTraceParts(appendSystem(messages, `Backend error: ${frame.message}`));
+    const next = finalizeTraceParts(
+      appendTracePart(
+        messages,
+        {
+          kind: "status_note",
+          text: frame.message || "Backend error.",
+          tone: "error",
+          toolName: "runtime_error",
+        },
+        frame.message || "Backend error.",
+      ),
+    );
     return { messages: finishReasoning(next), terminal: true, errored: true };
   }
 

@@ -17,6 +17,9 @@ class TurnContext:
     estimated_chars: int = 0
     threshold_chars: int = 0
     context_sources: list[str] = field(default_factory=list)
+    inline_context_text: str = ""
+    shortened_user_request: str | None = None
+    inline_context_metadata: dict[str, str] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -27,6 +30,9 @@ class TurnContext:
             "estimated_chars": self.estimated_chars,
             "threshold_chars": self.threshold_chars,
             "context_sources": list(self.context_sources),
+            "inline_context_text": self.inline_context_text,
+            "shortened_user_request": self.shortened_user_request,
+            "inline_context_metadata": dict(self.inline_context_metadata),
         }
 
 

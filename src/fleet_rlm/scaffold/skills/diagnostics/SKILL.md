@@ -64,9 +64,14 @@ Files most likely to cause breakage when modified — review changes carefully:
 
 | File | Responsibility |
 |------|---------------|
-| `api/routers/ws/stream.py` | Live chat streaming loop |
+| `api/routers/ws/endpoint.py` | WebSocket `/api/v1/ws/execution` route registration |
+| `api/routers/ws/connection_loop.py` | WebSocket receive/send coordination and command loop |
+| `api/routers/ws/stream_loop.py` | Runtime stream fan-out for one chat turn |
+| `api/routers/ws/stream_events.py` | Chat stream event projection to websocket messages |
+| `api/routers/ws/stream_summary.py` | Runtime stream summary and final payload assembly |
+| `api/routers/ws/turn_runner.py` | Per-turn runtime execution and cancellation handling |
+| `api/routers/ws/turn_setup.py` | Request normalization, context paths, and auth/session setup |
 | `api/routers/ws/commands.py` | Command dispatch (run, stop, history) |
-| `api/routers/ws/turn_lifecycle.py` | Run/turn lifecycle state machine |
 | `api/runtime_services/settings.py` | Settings routes (read/write config) |
 | `api/runtime_services/diagnostics.py` | Status and diagnostics endpoints |
 | `runtime/execution/streaming_events.py` | Streaming event construction and serialization |

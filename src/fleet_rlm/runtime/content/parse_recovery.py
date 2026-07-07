@@ -54,9 +54,85 @@ def extract_completion_from_parse_error(exc: Exception) -> str | None:
     / degenerate-output guard.
     """
     raw = getattr(exc, "lm_response", None)
+    reasoning_content = extract_reasoning_content_from_lm_response(raw)
+    if reasoning_content:
+        return reasoning_content
+    visible_text = _extract_visible_text_from_lm_response(raw)
+    if visible_text:
+        return visible_text
     if isinstance(raw, str) and raw.strip():
         return raw.strip()
-    return _scrape_message(str(exc))
+    scraped = _scrape_message(str(exc))
+    reasoning_content = extract_reasoning_content_from_lm_response(scraped)
+    if reasoning_content:
+        return reasoning_content
+    visible_text = _extract_visible_text_from_lm_response(scraped)
+    if visible_text:
+        return visible_text
+    return scraped
+
+
+def extract_reasoning_content_from_parse_error(exc: Exception | BaseException) -> str | None:
+    """Extract provider-side reasoning from an adapter parse error payload.
+
+    Some OpenAI-compatible reasoning providers return an object-shaped payload
+    like ``{"text": "", "reasoning_content": "..."}``. DSPy correctly raises
+    an adapter parse error because no user-facing output field is present, but
+    the reasoning payload can still contain a recoverable RLM action. Keep this
+    extraction local and explicit so the app can recover actions or synthesize a
+    safe degraded response without exposing the raw wrapper to users.
+    """
+    raw = getattr(exc, "lm_response", None)
+    reasoning_content = extract_reasoning_content_from_lm_response(raw)
+    if reasoning_content:
+        return reasoning_content
+    scraped = _scrape_message(str(exc))
+    return extract_reasoning_content_from_lm_response(scraped)
+
+
+def extract_reasoning_content_from_lm_response(value: Any) -> str | None:
+    """Return ``reasoning_content`` from provider dict/repr payloads.
+
+    The helper intentionally accepts both an actual dict and the string repr
+    that DSPy embeds into ``AdapterParseError.lm_response``.
+    """
+    payload = value
+    if isinstance(value, str):
+        if "reasoning_content" not in value:
+            return None
+        try:
+            import ast
+
+            payload = ast.literal_eval(value.strip())
+        except (SyntaxError, ValueError):
+            return None
+    if not isinstance(payload, dict):
+        return None
+
+    reasoning = payload.get("reasoning_content")
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        return None
+    text = payload.get("text")
+    if isinstance(text, str) and text.strip():
+        return None
+    return reasoning.strip()
+
+
+def _extract_visible_text_from_lm_response(value: Any) -> str | None:
+    payload = value
+    if isinstance(value, str):
+        if "'text'" not in value and '"text"' not in value:
+            return None
+        try:
+            import ast
+
+            payload = ast.literal_eval(value.strip())
+        except (SyntaxError, ValueError):
+            return None
+    if not isinstance(payload, dict):
+        return None
+    text = payload.get("text")
+    return text.strip() if isinstance(text, str) and text.strip() else None
 
 
 def _scrape_message(msg: str) -> str | None:

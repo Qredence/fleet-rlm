@@ -22,6 +22,7 @@ Each ADR follows this structure:
 | [001](./001-rlm-runtime-architecture.md) | RLM Runtime Architecture | Accepted |
 | [003](./003-neon-postgres-rls-persistence.md) | Neon/Postgres with RLS for Persistence | Accepted |
 | [004](./004-dual-auth-modes.md) | Dual Authentication Modes (Dev/Entra) | Accepted |
+| [005](./005-staged-inline-context-for-rlm.md) | Staged Inline Context for RLM | Accepted |
 
 ## Creating a New ADR
 

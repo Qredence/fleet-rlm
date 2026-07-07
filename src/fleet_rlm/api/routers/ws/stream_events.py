@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
 from fleet_rlm.api.events.project_chat import project_chat
 from fleet_rlm.runtime.events import RuntimeEvent
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -71,16 +75,83 @@ def _build_agent_stream_kwargs(request: WorkspaceTaskRequest) -> dict[str, Any]:
     return kwargs
 
 
+@contextmanager
+def _safe_stream_span(name: str, *, attributes: dict[str, Any] | None = None):
+    from fleet_rlm.integrations.observability.mlflow_context import mlflow_child_span
+
+    manager = None
+    span = None
+    try:
+        manager = mlflow_child_span(
+            name,
+            span_type="CHAIN",
+            attributes=attributes or {"fleet_rlm.execution_origin": "stream_agent_turn"},
+        )
+        span = manager.__enter__()
+    except Exception:
+        logger.debug("MLflow websocket stream span skipped: %s", name, exc_info=True)
+        manager = None
+
+    try:
+        yield span
+    except BaseException as exc:
+        if manager is not None:
+            try:
+                manager.__exit__(type(exc), exc, exc.__traceback__)
+            except Exception:
+                logger.debug("MLflow websocket stream span exit skipped after error: %s", name, exc_info=True)
+        raise
+    else:
+        if manager is not None:
+            try:
+                manager.__exit__(None, None, None)
+            except Exception:
+                logger.debug("MLflow websocket stream span exit skipped: %s", name, exc_info=True)
+
+
 async def stream_agent_turn(
     request: WorkspaceTaskRequest,
 ) -> AsyncIterator[RuntimeEvent]:
     """Stream one workspace task directly through the agent without HITL wrapper."""
+    from fleet_rlm.integrations.observability.mlflow_context import set_mlflow_span_outputs
+
     if request.execution_mode is not None:
         request.agent.set_execution_mode(request.execution_mode)
     if request.prepare is not None:
-        await request.prepare()
-    async for runtime_event in request.agent.aiter_chat_turn_stream(**_build_agent_stream_kwargs(request)):
-        yield runtime_event
+        with _safe_stream_span(
+            "fleet_rlm.ws_prepare_worker",
+            attributes={"fleet_rlm.execution_origin": "stream_agent_turn"},
+        ) as span:
+            await request.prepare()
+            set_mlflow_span_outputs(span, {"status": "ok"})
+
+    stream = request.agent.aiter_chat_turn_stream(**_build_agent_stream_kwargs(request))
+    event_count = 0
+    try:
+        while True:
+            with _safe_stream_span(
+                "fleet_rlm.ws_agent_stream",
+                attributes={"fleet_rlm.execution_origin": "stream_agent_turn"},
+            ) as span:
+                try:
+                    runtime_event = await anext(stream)
+                except StopAsyncIteration:
+                    set_mlflow_span_outputs(span, {"status": "ok", "event_count": event_count, "stream_done": True})
+                    break
+                event_count += 1
+                set_mlflow_span_outputs(
+                    span,
+                    {
+                        "status": "ok",
+                        "event_count": event_count,
+                        "runtime_event_kind": runtime_event.kind.value,
+                    },
+                )
+            yield runtime_event
+    finally:
+        aclose = getattr(stream, "aclose", None)
+        if callable(aclose):
+            await aclose()
 
 
 __all__ = [

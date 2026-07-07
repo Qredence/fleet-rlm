@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from contextlib import contextmanager
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -55,6 +56,17 @@ from .turn_setup import PreparedStreamingTurn
 logger = logging.getLogger(__name__)
 
 
+def _safe_websocket_error_text(exc: BaseException) -> str:
+    """Return a websocket-safe error summary without raw LM payloads."""
+    message = str(exc)
+    lower = message.lower()
+    if "failed to parse the lm response" in lower or "adapterparseerror" in lower:
+        return "Adapter parse failed while reading the model response."
+    if "lm response:" in lower or "reasoning_content" in lower:
+        return f"{type(exc).__name__}: model response could not be rendered safely."
+    return message
+
+
 def _terminal_run_status(event: RuntimeEvent) -> RunStatus:
     """Return the authoritative terminal run status for one event."""
     if event.kind == RuntimeEventKind.DONE and (isinstance(event.payload, dict) and event.payload.get("cancelled")):
@@ -85,21 +97,30 @@ async def handle_terminal_stream_event(
 
     if event.kind == RuntimeEventKind.DONE:
         try:
-            await persist_session_state(include_volume_save=True, release_idle_session=True)
+            await _with_ws_span(
+                "fleet_rlm.ws_terminal_persist",
+                lambda: persist_session_state(include_volume_save=True, release_idle_session=True),
+            )
         except Exception:
             logger.debug(
                 "Failed to persist session state before final event; continuing",
                 exc_info=True,
             )
-        await lifecycle.complete_run(
-            _terminal_run_status(event),
-            step=step,
-            summary=summary,
+        await _with_ws_span(
+            "fleet_rlm.ws_lifecycle_complete",
+            lambda: lifecycle.complete_run(
+                _terminal_run_status(event),
+                step=step,
+                summary=summary,
+            ),
         )
         return
 
     try:
-        await persist_session_state(include_volume_save=True, release_idle_session=True)
+        await _with_ws_span(
+            "fleet_rlm.ws_terminal_persist",
+            lambda: persist_session_state(include_volume_save=True, release_idle_session=True),
+        )
     except Exception:
         logger.debug(
             "Failed to persist session state after %s event; completing run anyway",
@@ -110,11 +131,14 @@ async def handle_terminal_stream_event(
     error_json: dict[str, Any] | None = (
         {"error": event.text, "kind": event.kind.value} if event.kind == RuntimeEventKind.ERROR else None
     )
-    await lifecycle.complete_run(
-        _terminal_run_status(event),
-        step=step,
-        error_json=error_json,
-        summary=summary,
+    await _with_ws_span(
+        "fleet_rlm.ws_lifecycle_complete",
+        lambda: lifecycle.complete_run(
+            _terminal_run_status(event),
+            step=step,
+            error_json=error_json,
+            summary=summary,
+        ),
     )
 
 
@@ -140,18 +164,20 @@ async def handle_stream_error(
         },
     )
     if websocket is not None:
+        safe_message = _safe_websocket_error_text(exc)
         await _try_send_json(
             websocket,
             _error_envelope(
                 code=error_code,
-                message=f"Streaming error: {exc}",
+                message=f"Streaming error: {safe_message}",
                 details={"error_type": type(exc).__name__},
             ),
         )
     if lifecycle.run_completed:
         return
 
-    error_text = f"Streaming error: {exc}"
+    safe_message = _safe_websocket_error_text(exc)
+    error_text = f"Streaming error: {safe_message}"
     error_payload = {
         "error_type": type(exc).__name__,
         "error_code": error_code,
@@ -168,7 +194,7 @@ async def handle_stream_error(
         RunStatus.FAILED,
         step=error_step,
         error_json={
-            "error": str(exc),
+            "error": safe_message,
             "error_type": type(exc).__name__,
             "code": error_code,
         },
@@ -271,6 +297,60 @@ async def _run_prepared_stream(
             set_mlflow_span_outputs(span, {"status": "ok"})
 
 
+@contextmanager
+def _safe_ws_span(name: str, *, attributes: dict[str, Any] | None = None):
+    from fleet_rlm.integrations.observability.mlflow_context import mlflow_child_span
+
+    manager = None
+    span = None
+    try:
+        manager = mlflow_child_span(
+            name,
+            span_type="CHAIN",
+            attributes={"fleet_rlm.execution_origin": "ws_turn_runner", **(attributes or {})},
+        )
+        span = manager.__enter__()
+    except Exception:
+        logger.debug("MLflow websocket span skipped: %s", name, exc_info=True)
+        manager = None
+
+    try:
+        yield span
+    except BaseException as exc:
+        if manager is not None:
+            try:
+                manager.__exit__(type(exc), exc, exc.__traceback__)
+            except Exception:
+                logger.debug("MLflow websocket span exit skipped after error: %s", name, exc_info=True)
+        raise
+    else:
+        if manager is not None:
+            try:
+                manager.__exit__(None, None, None)
+            except Exception:
+                logger.debug("MLflow websocket span exit skipped: %s", name, exc_info=True)
+
+
+async def _with_ws_span(
+    name: str,
+    operation: Callable[[], Any],
+    *,
+    attributes: dict[str, Any] | None = None,
+) -> Any:
+    import inspect
+
+    from fleet_rlm.integrations.observability.mlflow_context import (
+        set_mlflow_span_outputs,
+    )
+
+    with _safe_ws_span(name, attributes=attributes) as span:
+        result = operation()
+        if inspect.isawaitable(result):
+            result = await result
+        set_mlflow_span_outputs(span, {"status": "ok"})
+        return result
+
+
 async def _stream_agent_events(
     *,
     websocket: WebSocket | None,
@@ -296,25 +376,39 @@ async def _stream_agent_events(
     bridge_started = False
     try:
         if hosted_repl_bridge is not None:
-            hosted_repl_bridge.start()
+            await _with_ws_span("fleet_rlm.ws_repl_bridge_start", hosted_repl_bridge.start)
             bridge_started = True
 
         with runtime_telemetry_enabled_context(analytics_enabled):
-            async for worker_event in stream_agent_turn(worker_request):
-                await _emit_stream_event(
-                    websocket=websocket,
-                    lifecycle=lifecycle,
-                    step_builder=step_builder,
-                    event=worker_event,
-                    orchestration_session=orchestration_session,
-                    persist_session_state=persist_session_state,
-                    request_message=prepared_turn.message,
-                    execution_emitter=execution_emitter,
-                )
+            from fleet_rlm.integrations.observability.mlflow_context import (
+                set_mlflow_span_outputs,
+            )
+
+            with _safe_ws_span(
+                "fleet_rlm.ws_stream_iteration",
+            ) as span:
+                event_count = 0
+                async for worker_event in stream_agent_turn(worker_request):
+                    event_count += 1
+                    await _with_ws_span(
+                        "fleet_rlm.ws_frame_emit",
+                        lambda worker_event=worker_event: _emit_stream_event(
+                            websocket=websocket,
+                            lifecycle=lifecycle,
+                            step_builder=step_builder,
+                            event=worker_event,
+                            orchestration_session=orchestration_session,
+                            persist_session_state=persist_session_state,
+                            request_message=prepared_turn.message,
+                            execution_emitter=execution_emitter,
+                        ),
+                        attributes={"fleet_rlm.runtime_event_kind": worker_event.kind.value},
+                    )
+                set_mlflow_span_outputs(span, {"status": "ok", "event_count": event_count})
     finally:
         if hosted_repl_bridge is not None and bridge_started:
             try:
-                await hosted_repl_bridge.stop()
+                await _with_ws_span("fleet_rlm.ws_repl_bridge_stop", hosted_repl_bridge.stop)
             except Exception:
                 logger.warning("Failed to stop hosted REPL bridge during stream cleanup.", exc_info=True)
 

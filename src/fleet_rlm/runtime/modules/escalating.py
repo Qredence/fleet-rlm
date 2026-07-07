@@ -20,6 +20,7 @@ import concurrent.futures
 import contextvars
 import logging
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -35,6 +36,7 @@ from fleet_rlm.runtime.agent.signatures import (
     RouteTurnSignature,
 )
 from fleet_rlm.runtime.agent.turn_context import TurnContext
+from fleet_rlm.runtime.content.parse_recovery import extract_reasoning_content_from_parse_error
 from fleet_rlm.runtime.events import RuntimeEvent, TurnInputRow
 from fleet_rlm.runtime.modules.factory import (
     VARIABLE_MODE_MAX_OUTPUT_CHARS,
@@ -75,6 +77,18 @@ _URL_DOCUMENT_MAX_LLM_CALLS = _env_int("FLEET_RLM_URL_DOCUMENT_MAX_LLM_CALLS", 3
 # full ChainOfThought response. Prevents a degraded model from holding a turn
 # for tens of minutes via litellm/tenacity retries.
 _FALLBACK_TIMEOUT = _env_int("FLEET_RLM_FALLBACK_TIMEOUT", 90)
+_FALLBACK_PARSE_RETRY_TIMEOUT = _env_int("FLEET_RLM_FALLBACK_PARSE_RETRY_TIMEOUT", 30)
+_REPO_ANALYSIS_PATTERN = re.compile(
+    r"\b("
+    r"repo|repository|codebase|backend|frontend|src/|files?|structure|architecture|"
+    r"how it works?|complexity|refactor|module|package"
+    r")\b",
+    re.IGNORECASE,
+)
+_EVIDENCE_MARKER_PATTERN = re.compile(
+    r"(/|\\|\.py\b|\.ts\b|\.tsx\b|\.md\b|src/|tests?/|pyproject\.toml|package\.json|AGENTS\.md)",
+    re.IGNORECASE,
+)
 
 
 def _run_with_timeout(fn: Callable[..., Any], *, timeout: int) -> Any:
@@ -152,6 +166,44 @@ def _is_rlm_parse_error(exc: Exception) -> bool:
     )
 
 
+def _fallback_parse_error_prediction(
+    *,
+    selected_skills: list[str] | None,
+    routing_decision: str,
+    source_url: str | None,
+    initial_exc: Exception,
+    retry_exc: Exception | None = None,
+) -> dspy.Prediction:
+    """Return a safe terminal payload when fallback response parsing fails."""
+    reasoning_content = extract_reasoning_content_from_parse_error(retry_exc or initial_exc)
+    response = (
+        "I could not render a final response because the model returned internal reasoning "
+        "without a user-facing answer after the RLM path had already failed. I stopped "
+        "instead of fabricating an analysis from incomplete output.\n\n"
+        "Try again with a narrower request, or target a specific directory/file so the RLM "
+        "loop can complete within the available parser and latency budget."
+    )
+    prediction = dspy.Prediction(
+        reasoning="Fallback response parser failed after RLM escalation.",
+        response=response,
+    )
+    prediction["degraded"] = True
+    prediction["warning"] = _RLM_FALLBACK_WARNING
+    prediction["runtime_degraded"] = True
+    prediction["runtime_failure_category"] = "rlm_fallback_parse_error"
+    prediction["runtime_failure_phase"] = "escalating_rlm_fallback_parse"
+    prediction["runtime_fallback_used"] = True
+    prediction["runtime_warning"] = (
+        "RLM escalation failed and the fallback model returned empty text with reasoning content."
+    )
+    prediction["selected_skills"] = selected_skills or []
+    prediction["routing_decision"] = routing_decision
+    prediction["fallback_reasoning_content_chars"] = len(reasoning_content or "")
+    if source_url:
+        prediction["source_url"] = source_url
+    return prediction
+
+
 def _is_malformed_rlm_result(result: Any) -> bool:
     """Check if RLM result is a known malformed non-JSON-object pattern."""
     if isinstance(result, str):
@@ -171,6 +223,77 @@ def _prediction_set(prediction: dspy.Prediction, key: str, value: Any) -> None:
         prediction[key] = value
     except Exception:
         object.__setattr__(prediction, key, value)
+
+
+def _prediction_get(prediction: Any, key: str) -> Any:
+    if isinstance(prediction, dict):
+        return prediction.get(key)
+    return getattr(prediction, key, None)
+
+
+def _requires_grounded_repo_analysis(user_request: str, *, large_context_mode: bool) -> bool:
+    return bool(large_context_mode and _REPO_ANALYSIS_PATTERN.search(str(user_request or "")))
+
+
+def _trajectory_grounding_evidence_count(result: Any) -> int:
+    """Count non-terminal trajectory steps that show actual context/tool inspection."""
+    trajectory = _prediction_get(result, "trajectory") or []
+    if isinstance(trajectory, dict):
+        steps = list(trajectory.values())
+    elif isinstance(trajectory, list):
+        steps = trajectory
+    else:
+        return 0
+
+    count = 0
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        tool_name = str(step.get("tool_name") or step.get("tool") or "").strip().lower()
+        if tool_name and tool_name != "finish":
+            count += 1
+            continue
+        blob = " ".join(str(step.get(key) or "") for key in ("code", "input", "output", "observation", "thought"))
+        if _EVIDENCE_MARKER_PATTERN.search(blob):
+            count += 1
+    return count
+
+
+def _apply_grounding_guard(
+    result: dspy.Prediction,
+    *,
+    user_request: str,
+    large_context_mode: bool,
+) -> tuple[dspy.Prediction, dict[str, Any]]:
+    """Prevent confident repo/codebase analysis when no real evidence was inspected."""
+    grounding_required = _requires_grounded_repo_analysis(user_request, large_context_mode=large_context_mode)
+    evidence_count = _trajectory_grounding_evidence_count(result)
+    guard_status = "not_required"
+    if grounding_required:
+        guard_status = "passed" if evidence_count > 0 else "blocked"
+    metadata = {
+        "grounding_required": grounding_required,
+        "grounding_evidence_count": evidence_count,
+        "grounding_guard_status": guard_status,
+    }
+    if guard_status != "blocked":
+        return result, metadata
+
+    response = (
+        "I could not provide a grounded codebase analysis because the RLM run did not produce "
+        "evidence that it inspected actual repository files, manifests, or tool outputs. I will "
+        "not infer a fictional architecture. Please retry with accessible staged files or a "
+        "narrower request so the sandbox can inspect concrete paths before answering."
+    )
+    _prediction_set(result, "response", response)
+    _prediction_set(result, "runtime_degraded", True)
+    _prediction_set(result, "runtime_failure_category", "grounding_evidence_missing")
+    _prediction_set(result, "runtime_failure_phase", "escalating_rlm_grounding_guard")
+    _prediction_set(result, "runtime_fallback_used", False)
+    _prediction_set(
+        result, "runtime_warning", "Grounded repo/codebase analysis was blocked because no file evidence was inspected."
+    )
+    return result, metadata
 
 
 def _history_turn_text(message: Any) -> str:
@@ -907,6 +1030,35 @@ class EscalatingFleetModule(dspy.Module):
             )
             return self._react_fallback(fallback, selected_skills=selected_skills)
 
+    def _staged_context_rlm_failure(
+        self,
+        *,
+        selected_skills: list[str] | None,
+        routing_decision: str,
+        source_url: str | None,
+        reason: str,
+    ) -> dspy.Prediction:
+        prediction = dspy.Prediction(
+            reasoning="",
+            response=(
+                "I could not complete the staged long-context RLM run. The full inline payload was kept "
+                "out of the fallback prompt to avoid repeating the oversized context. Try again, or split "
+                "the pasted context into a smaller focused request."
+            ),
+        )
+        prediction["degraded"] = True
+        prediction["warning"] = _RLM_FALLBACK_WARNING
+        prediction["runtime_degraded"] = True
+        prediction["runtime_failure_category"] = "rlm_staged_context_failure"
+        prediction["runtime_failure_phase"] = "escalating_rlm"
+        prediction["runtime_fallback_used"] = False
+        prediction["runtime_warning"] = reason
+        prediction["selected_skills"] = selected_skills or []
+        prediction["routing_decision"] = routing_decision
+        if source_url:
+            prediction["source_url"] = source_url
+        return prediction
+
     def _run_rlm(
         self,
         *,
@@ -920,7 +1072,15 @@ class EscalatingFleetModule(dspy.Module):
         source_url: str | None = None,
         turn_context: TurnContext | None = None,
     ) -> dspy.Prediction:
+        staged_inline_context = bool(getattr(turn_context, "inline_context_text", "") or "")
         if self._rlm is None:
+            if staged_inline_context:
+                return self._staged_context_rlm_failure(
+                    selected_skills=selected_skills,
+                    routing_decision=routing_decision,
+                    source_url=source_url,
+                    reason="RLM was unavailable for a staged long-context request.",
+                )
             # CoT fallback from RLM path: emit 3 turn-input rows
             cot_fallback_rows = [
                 TurnInputRow(
@@ -970,15 +1130,22 @@ class EscalatingFleetModule(dspy.Module):
         large_context_mode = (
             routing_decision == "large_context_rlm" and turn_context is not None and self._workspace_rlm is not None
         )
+        large_kwargs: dict[str, Any] = {}
+        effective_user_request = user_request
+        if large_context_mode:
+            from fleet_rlm.runtime.modules.context_routing import load_large_context_rlm_kwargs
+
+            large_kwargs = load_large_context_rlm_kwargs(turn_context, interpreter=self._interpreter)
+            effective_user_request = str(large_kwargs.get("shortened_user_request") or user_request)
         core_context = build_rlm_core_context(
-            user_request=user_request,
+            user_request=effective_user_request,
             compressed_history=context,
             core_memory=core_memory,
             url_document_mode=url_document_mode,
             large_context_mode=large_context_mode,
         )
         call_kwargs: dict[str, Any] = {
-            "user_request": user_request,
+            "user_request": effective_user_request,
             "core_memory": core_context,
             "history": history,
             "active_skills": active_skills or ActiveSkills(selected=selected_skills or []),
@@ -1021,9 +1188,6 @@ class EscalatingFleetModule(dspy.Module):
             )
             rlm = self._url_document_rlm
         elif large_context_mode:
-            from fleet_rlm.runtime.modules.context_routing import load_large_context_rlm_kwargs
-
-            large_kwargs = load_large_context_rlm_kwargs(turn_context, interpreter=self._interpreter)
             estimated = getattr(turn_context, "estimated_chars", 0)
             _emit_turn_milestone(
                 self._interpreter,
@@ -1045,8 +1209,8 @@ class EscalatingFleetModule(dspy.Module):
             TurnInputRow(
                 label="Request",
                 kind="request",
-                value=user_request,
-                preview=_preview_text(user_request),
+                value=call_kwargs.get("user_request"),
+                preview=_preview_text(call_kwargs.get("user_request")),
             ),
             TurnInputRow(
                 label="Active skills",
@@ -1104,6 +1268,16 @@ class EscalatingFleetModule(dspy.Module):
                     "fleet_rlm.routing_decision": routing_decision,
                     "fleet_rlm.rlm_url_document_mode": str(url_document_mode).lower(),
                     "fleet_rlm.rlm_large_context_mode": str(large_context_mode).lower(),
+                    "fleet_rlm.inline_context_staged": str(staged_inline_context).lower(),
+                    "fleet_rlm.original_user_request_chars": str(
+                        (large_kwargs.get("source_metadata") or {}).get("original_user_request_chars")
+                        or len(user_request or "")
+                    ),
+                    "fleet_rlm.short_user_request_chars": str(len(effective_user_request or "")),
+                    "fleet_rlm.staged_document_chars": str(
+                        (large_kwargs.get("source_metadata") or {}).get("staged_document_chars")
+                        or len(str(large_kwargs.get("document_text") or ""))
+                    ),
                     "fleet_rlm.selected_skills": ",".join(selected_skills or []),
                     "fleet_rlm.active_skills_variable": str(active_skills is not None).lower(),
                     "fleet_rlm.rlm_action_max_tokens": str(getattr(rlm, "action_max_tokens", "") or ""),
@@ -1143,11 +1317,28 @@ class EscalatingFleetModule(dspy.Module):
                     )
 
                 has_trajectory = getattr(result, "trajectory", None) is not None
+                result, grounding_metadata = _apply_grounding_guard(
+                    result,
+                    user_request=user_request,
+                    large_context_mode=large_context_mode,
+                )
+                for attr_key, attr_value in {
+                    "fleet_rlm.grounding_required": str(grounding_metadata["grounding_required"]).lower(),
+                    "fleet_rlm.grounding_evidence_count": str(grounding_metadata["grounding_evidence_count"]),
+                    "fleet_rlm.grounding_guard_status": str(grounding_metadata["grounding_guard_status"]),
+                }.items():
+                    try:
+                        set_attribute = getattr(span, "set_attribute", None)
+                        if callable(set_attribute):
+                            set_attribute(attr_key, attr_value)
+                    except Exception:
+                        logger.debug("Unable to set grounding span attribute %s", attr_key, exc_info=True)
                 set_mlflow_span_outputs(
                     span,
                     {
                         "routing_decision": routing_decision,
                         "has_trajectory": has_trajectory,
+                        **grounding_metadata,
                     },
                 )
                 if not has_trajectory:
@@ -1250,6 +1441,16 @@ class EscalatingFleetModule(dspy.Module):
                     )
 
             logger.warning("EscalatingFleetModule: RLM path failed (%s), falling back to ChainOfThought", exc)
+            if staged_inline_context:
+                return self._staged_context_rlm_failure(
+                    selected_skills=selected_skills,
+                    routing_decision=routing_decision,
+                    source_url=source_url,
+                    reason=(
+                        "Staged long-context RLM failed after retry; generic fallback skipped to avoid "
+                        "reinjecting the full inline payload."
+                    ),
+                )
             # Cap the fallback responder with stateless config overrides (per-IO
             # timeout, qwen thinking off) so it can't run unbounded on the planner.
             from fleet_rlm.runtime.config import build_lm_config
@@ -1306,6 +1507,52 @@ class EscalatingFleetModule(dspy.Module):
                 if source_url:
                     fallback["source_url"] = source_url
                 return fallback
+            except Exception as fallback_exc:
+                if not _is_rlm_parse_error(fallback_exc):
+                    raise
+                logger.warning(
+                    "EscalatingFleetModule: fallback respond parse failed (%s), retrying with ChatAdapter",
+                    fallback_exc,
+                )
+                retry_timeout = max(5, min(self._fallback_timeout, _FALLBACK_PARSE_RETRY_TIMEOUT))
+                retry_core_memory = (
+                    f"{core_memory}\n\n"
+                    "[FALLBACK RESPONSE RECOVERY]\n"
+                    "The previous fallback model call returned internal reasoning but no user-facing "
+                    "response. Produce a concise final answer in the `response` field. Do not leave "
+                    "the response empty, and do not emit only hidden reasoning."
+                )
+
+                def _respond_retry() -> Any:
+                    retry_config = build_lm_config(
+                        base_lm,
+                        max_tokens=1024,
+                        temperature=0.0,
+                        timeout=float(retry_timeout),
+                    )
+                    kw = {"config": retry_config} if retry_config else {}
+                    with dspy.context(adapter=dspy.ChatAdapter(use_json_adapter_fallback=False)):
+                        return self.respond(
+                            user_request=user_request,
+                            core_memory=retry_core_memory,
+                            history=history,
+                            **kw,
+                        )
+
+                try:
+                    fallback = _run_with_timeout(_respond_retry, timeout=retry_timeout)
+                except Exception as retry_exc:
+                    logger.warning(
+                        "EscalatingFleetModule: fallback respond retry also failed (%s); returning degraded payload",
+                        retry_exc,
+                    )
+                    return _fallback_parse_error_prediction(
+                        selected_skills=selected_skills,
+                        routing_decision=routing_decision,
+                        source_url=source_url,
+                        initial_exc=fallback_exc,
+                        retry_exc=retry_exc,
+                    )
             fallback["degraded"] = True
             fallback["warning"] = _RLM_FALLBACK_WARNING
             fallback["runtime_degraded"] = True

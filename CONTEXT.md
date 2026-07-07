@@ -50,6 +50,22 @@ A reusable runtime instruction or callable capability discovered from packaged
 or volume-backed skill roots.
 _Avoid_: memory, artifact
 
+**Inline Context Payload**:
+A large pasted block embedded directly in a user chat message, such as a
+`CONTEXT:` section or full copied document.
+_Avoid_: prompt context, model memory
+
+**Staged Context**:
+Large input data moved out of repeated action prompts and into RLM REPL
+variables, typically `context["document_text"]`, `context["manifest"]`, and
+`context["metadata"]`.
+_Avoid_: hidden prompt, assistant scratchpad
+
+**Shortened User Request**:
+The prompt-facing instruction retained after an inline context payload is
+staged. It names the task and tells the RLM where to inspect the full data.
+_Avoid_: summary of the document, lossy context
+
 **Log Event**:
 A product-facing observability record for sandbox execution, process output,
 bridge callbacks, volume/file activity, memory access, diagnostics, or runtime

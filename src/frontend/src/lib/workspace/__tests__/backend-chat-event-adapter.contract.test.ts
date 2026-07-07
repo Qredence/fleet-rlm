@@ -96,11 +96,10 @@ describe("backend chat event adapter contract", () => {
     const afterReasoning = applyWsFrameToMessages([], reasoningFrame);
     expect(afterReasoning.messages).toHaveLength(1);
     expect(afterReasoning.messages[0]?.type).toBe("trace");
-    // P2-5: reasoning source_type now routes to compact status traces
-    // instead of full reasoning blocks in the main chat.
     expect(afterReasoning.messages[0]?.renderParts?.[0]).toMatchObject({
-      kind: "status_note",
-      text: "I should inspect the repo layout first.",
+      kind: "reasoning",
+      parts: [{ text: "I should inspect the repo layout first." }],
+      isStreaming: true,
     });
 
     const toolCallFrame: WsServerMessage = {
@@ -123,8 +122,7 @@ describe("backend chat event adapter contract", () => {
     const afterToolCall = applyWsFrameToMessages(afterReasoning.messages, toolCallFrame);
     const traceAfterTool = afterToolCall.messages.find((message) => message.type === "trace");
     expect(traceAfterTool?.renderParts).toHaveLength(2);
-    // P2-5: reasoning is now rendered as status_note
-    expect(traceAfterTool?.renderParts?.[0]?.kind).toBe("status_note");
+    expect(traceAfterTool?.renderParts?.[0]?.kind).toBe("reasoning");
     expect(traceAfterTool?.renderParts?.[1]?.kind).toBe("tool");
 
     const toolResultFrame: WsServerMessage = {
@@ -147,9 +145,8 @@ describe("backend chat event adapter contract", () => {
     const afterToolResult = applyWsFrameToMessages(afterToolCall.messages, toolResultFrame);
     const traceAfterResult = afterToolResult.messages.find((message) => message.type === "trace");
     expect(traceAfterResult?.renderParts).toHaveLength(3);
-    // P2-5: reasoning now renders as status_note
     expect(traceAfterResult?.renderParts?.map((part) => part.kind)).toEqual([
-      "status_note",
+      "reasoning",
       "tool",
       "tool",
     ]);
@@ -243,10 +240,66 @@ describe("backend chat event adapter contract", () => {
 
     const result = applyWsFrameToMessages(afterReasoning.messages, completionFrame);
     const trace = result.messages.find((message) => message.type === "trace");
-    // P2-5: reasoning now routes to status_note, not reasoning kind.
-    // Status notes don't have isStreaming — they're always complete.
-    const reasoningPart = trace?.renderParts?.find((part) => part.kind === "status_note");
-    expect(reasoningPart).toBeDefined();
+    const reasoningPart = trace?.renderParts?.find((part) => part.kind === "reasoning");
+    expect(reasoningPart).toMatchObject({
+      kind: "reasoning",
+      isStreaming: false,
+      parts: [{ text: "Planning response." }],
+    });
+  });
+
+  it("keeps parse-error reasoning in ThinkingTool-compatible parts and sanitizes failed completion", () => {
+    const reasoningFrame: WsServerMessage = {
+      type: "event",
+      data: {
+        kind: "execution_step",
+        text: "The model reasoned about needing repository evidence.",
+        payload: {
+          source_type: "reasoning",
+          adapter_parse_error: true,
+          reasoning_label: "Model reasoning",
+        },
+        timestamp: new Date().toISOString(),
+        version: 3,
+        event_id: "evt-parse-reasoning",
+      },
+    };
+    const completionFrame: WsServerMessage = {
+      type: "event",
+      data: {
+        kind: "execution_completed",
+        text: "Adapter parse failed while reading the model response.",
+        payload: {
+          status: "failed",
+          error_type: "AdapterParseError",
+          runtime_failure_category: "adapter_parse_error",
+        },
+        timestamp: new Date().toISOString(),
+        version: 3,
+        event_id: "evt-parse-failed",
+      },
+    };
+
+    const afterReasoning = applyWsFrameToMessages([], reasoningFrame);
+    const result = applyWsFrameToMessages(afterReasoning.messages, completionFrame);
+    const trace = result.messages.find((message) => message.type === "trace");
+    const textDump = JSON.stringify(result.messages);
+
+    expect(result.terminal).toBe(true);
+    expect(result.errored).toBe(true);
+    expect(trace?.renderParts?.map((part) => part.kind)).toEqual(["reasoning", "status_note"]);
+    expect(trace?.renderParts?.[0]).toMatchObject({
+      kind: "reasoning",
+      label: "Model reasoning",
+      parts: [{ text: "The model reasoned about needing repository evidence." }],
+    });
+    expect(trace?.renderParts?.[1]).toMatchObject({
+      kind: "status_note",
+      tone: "error",
+      text: "Adapter parse failed while reading the model response.",
+    });
+    expect(textDump).not.toContain("LM Response");
+    expect(textDump).not.toContain("reasoning_content");
   });
 
   it("renders canonical execution completion events", () => {

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import dspy
 import pytest
+from dspy.utils.exceptions import AdapterParseError
 
 from fleet_rlm.runtime.factory import ESCALATING_RUNTIME_ENV_VAR, build_chat_agent
 from fleet_rlm.runtime.modules.escalating import EscalatingFleetModule
@@ -42,6 +43,19 @@ def _stub_route(module: EscalatingFleetModule, *, route: str = "direct") -> None
 def _stub_summarize(module: EscalatingFleetModule, *, summary: str = "summary") -> None:
     pred = _FakePrediction(summary=summary)
     module.summarize = MagicMock(return_value=pred)
+
+
+class _ResponseSig(dspy.Signature):
+    reasoning: str = dspy.OutputField()
+    response: str = dspy.OutputField()
+
+
+def _make_empty_text_response_parse_error(reasoning_content: str = "internal reasoning") -> AdapterParseError:
+    return AdapterParseError(
+        adapter_name="JSONAdapter",
+        signature=_ResponseSig,
+        lm_response=repr({"text": "", "reasoning_content": reasoning_content}),
+    )
 
 
 def test_enrich_with_skills_uses_scaffold_when_volume_unmounted() -> None:
@@ -665,6 +679,28 @@ class TestAgentRuntimeEscalationFlag:
 
 
 class TestLargeContextRouting:
+    @staticmethod
+    def _noop_span() -> Any:
+        import contextlib
+
+        @contextlib.contextmanager
+        def _span(*args: Any, **kwargs: Any):
+            yield object()
+
+        return _span
+
+    @staticmethod
+    def _recording_span(records: list[tuple[str, dict[str, Any]]]) -> Any:
+        import contextlib
+
+        @contextlib.contextmanager
+        def _span(name: str, *args: Any, **kwargs: Any):
+            _ = args
+            records.append((name, dict(kwargs.get("attributes") or {})))
+            yield object()
+
+        return _span
+
     def test_preview_routing_large_context_when_turn_context_exceeds_threshold(self, tmp_path) -> None:
         from fleet_rlm.runtime.agent.turn_context import TurnContext
         from fleet_rlm.runtime.modules.factory import VARIABLE_MODE_THRESHOLD
@@ -683,6 +719,307 @@ class TestLargeContextRouting:
         )
         assert preview["routing_decision"] == "large_context_rlm"
         assert preview["estimated_chars"] >= VARIABLE_MODE_THRESHOLD
+
+    def test_large_inline_context_uses_short_request_and_workspace_context(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from unittest.mock import patch
+
+        from fleet_rlm.runtime.modules.context_routing import build_turn_context
+        from fleet_rlm.runtime.modules.factory import VARIABLE_MODE_THRESHOLD
+
+        module = _make_module(interpreter=None)
+        module._rlm = MagicMock()
+        module._workspace_rlm = MagicMock(return_value=_FakePrediction(response="workspace answer"))
+        _stub_respond(module, response="should not reach")
+        _stub_summarize(module)
+        request = "Count the statuses.\n\nCONTEXT:\n" + ("status: done\n" * VARIABLE_MODE_THRESHOLD)
+        turn_context = build_turn_context(user_request=request)
+        span_records: list[tuple[str, dict[str, Any]]] = []
+
+        with patch(
+            "fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span",
+            self._recording_span(span_records),
+        ):
+            result = module._run_rlm(
+                user_request=request,
+                core_memory="",
+                history=dspy.History(messages=[]),
+                conversation_summary="",
+                routing_decision="large_context_rlm",
+                turn_context=turn_context,
+            )
+
+        module._workspace_rlm.assert_called_once()
+        call_kwargs = module._workspace_rlm.call_args.kwargs
+        assert len(call_kwargs["user_request"]) < len(request) // 10
+        assert 'context["document_text"]' in call_kwargs["user_request"]
+        assert request not in call_kwargs["core_memory"]
+        assert call_kwargs["context"].document_text.startswith("CONTEXT:")
+        assert call_kwargs["context"].metadata["inline_context_staged"] == "true"
+        assert getattr(result, "response", None) == "workspace answer"
+        module.respond.assert_not_called()
+        rlm_run_attrs = next(attrs for name, attrs in span_records if name == "fleet_rlm.rlm_run")
+        assert rlm_run_attrs["fleet_rlm.inline_context_staged"] == "true"
+        assert int(rlm_run_attrs["fleet_rlm.original_user_request_chars"]) == len(request)
+        assert int(rlm_run_attrs["fleet_rlm.short_user_request_chars"]) == len(call_kwargs["user_request"])
+        assert int(rlm_run_attrs["fleet_rlm.staged_document_chars"]) == len(call_kwargs["context"].document_text)
+
+    def test_staged_inline_context_failure_skips_cot_fallback(self) -> None:
+        from unittest.mock import patch
+
+        from fleet_rlm.runtime.modules.context_routing import build_turn_context
+        from fleet_rlm.runtime.modules.factory import VARIABLE_MODE_THRESHOLD
+
+        module = _make_module(interpreter=None)
+        module._fallback_timeout = 5
+        module._rlm = MagicMock()
+        module._workspace_rlm = MagicMock(side_effect=RuntimeError("boom"))
+        module.respond = MagicMock(return_value=_FakePrediction(response="should not reach"))
+        _stub_summarize(module)
+        request = "Summarize.\n\nCONTEXT:\n" + ("large payload\n" * VARIABLE_MODE_THRESHOLD)
+        turn_context = build_turn_context(user_request=request)
+
+        with patch(
+            "fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span",
+            self._noop_span(),
+        ):
+            result = module._run_rlm(
+                user_request=request,
+                core_memory="",
+                history=dspy.History(messages=[]),
+                conversation_summary="",
+                routing_decision="large_context_rlm",
+                turn_context=turn_context,
+            )
+
+        assert result["runtime_failure_category"] == "rlm_staged_context_failure"
+        assert result["runtime_fallback_used"] is False
+        assert "fallback skipped" in result["runtime_warning"]
+        module.respond.assert_not_called()
+
+    def test_large_context_repo_analysis_without_evidence_is_blocked(self) -> None:
+        from unittest.mock import patch
+
+        from fleet_rlm.runtime.modules.context_routing import build_turn_context
+        from fleet_rlm.runtime.modules.factory import VARIABLE_MODE_THRESHOLD
+
+        module = _make_module(interpreter=None)
+        module._rlm = MagicMock()
+        module._workspace_rlm = MagicMock(
+            return_value=_FakePrediction(
+                response=(
+                    "Fleet-RLM Backend Deep Analysis\n\n"
+                    "The backend likely follows a modular architecture typical of agent frameworks."
+                ),
+                trajectory=[],
+            )
+        )
+        _stub_respond(module, response="should not reach")
+        _stub_summarize(module)
+        request = "Analyze the backend structure and files.\n\nCONTEXT:\n" + (
+            "# placeholder context\n" * VARIABLE_MODE_THRESHOLD
+        )
+        turn_context = build_turn_context(user_request=request)
+
+        with patch(
+            "fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span",
+            self._noop_span(),
+        ):
+            result = module._run_rlm(
+                user_request=request,
+                core_memory="",
+                history=dspy.History(messages=[]),
+                conversation_summary="",
+                routing_decision="large_context_rlm",
+                turn_context=turn_context,
+            )
+
+        assert result["runtime_degraded"] is True
+        assert result["runtime_failure_category"] == "grounding_evidence_missing"
+        assert result["runtime_fallback_used"] is False
+        assert "did not produce evidence" in result["response"]
+        assert "likely follows" not in result["response"]
+        module.respond.assert_not_called()
+
+    def test_large_context_repo_analysis_with_file_evidence_passes(self) -> None:
+        from unittest.mock import patch
+
+        from fleet_rlm.runtime.modules.context_routing import build_turn_context
+        from fleet_rlm.runtime.modules.factory import VARIABLE_MODE_THRESHOLD
+
+        module = _make_module(interpreter=None)
+        evidence_prediction = _FakePrediction(
+            response="Verified finding from src/fleet_rlm/runtime/modules/escalating.py.",
+            trajectory=[
+                {
+                    "index": 0,
+                    "tool_name": "repl_execute",
+                    "code": "print(context['manifest'])",
+                    "observation": "src/fleet_rlm/runtime/modules/escalating.py",
+                }
+            ],
+        )
+        module._rlm = MagicMock()
+        module._workspace_rlm = MagicMock(return_value=evidence_prediction)
+        _stub_respond(module, response="should not reach")
+        _stub_summarize(module)
+        request = "Analyze the backend structure and files.\n\nCONTEXT:\n" + (
+            "src/fleet_rlm/runtime/modules/escalating.py\n" * VARIABLE_MODE_THRESHOLD
+        )
+        turn_context = build_turn_context(user_request=request)
+
+        with patch(
+            "fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span",
+            self._noop_span(),
+        ):
+            result = module._run_rlm(
+                user_request=request,
+                core_memory="",
+                history=dspy.History(messages=[]),
+                conversation_summary="",
+                routing_decision="large_context_rlm",
+                turn_context=turn_context,
+            )
+
+        assert result["response"] == "Verified finding from src/fleet_rlm/runtime/modules/escalating.py."
+        assert result.get("runtime_failure_category") != "grounding_evidence_missing"
+        module.respond.assert_not_called()
+
+
+class TestRLMParseDiagnostics:
+    @staticmethod
+    def _parse_error_message(completion: str) -> str:
+        return (
+            "AdapterParseError: "
+            "Adapter ChatAdapter failed to parse the LM response. \n\n"
+            f"LM Response: {completion}\n\n"
+            "Expected to find output fields in the LM response: [reasoning, code] \n\n"
+            "Actual output fields parsed from the LM response: [reasoning] \n\n"
+        )
+
+    @staticmethod
+    def _recording_span(outputs: list[dict[str, Any]]) -> Any:
+        import contextlib
+
+        @contextlib.contextmanager
+        def _span(name: str, *args: Any, **kwargs: Any):
+            _ = args
+            outputs.append({"span_name": name, "attributes": dict(kwargs.get("attributes") or {})})
+            yield object()
+
+        def _set_outputs(_span_obj: object, payload: dict[str, Any]) -> None:
+            outputs.append(payload)
+
+        return _span, _set_outputs
+
+    @staticmethod
+    def _bare_streaming_rlm(*, completion: str) -> Any:
+        from typing import ClassVar
+
+        from fleet_rlm.runtime.modules.factory import _StreamingRLM
+
+        class _ActionSig(dspy.Signature):
+            reasoning: str = dspy.OutputField()
+            code: str = dspy.OutputField()
+            instructions: ClassVar[str] = "Produce reasoning and code."
+
+        class _GenerateAction:
+            signature = _ActionSig
+            current_iteration = 0
+
+            def __call__(self, **kwargs: Any) -> dspy.Prediction:
+                _ = kwargs
+                raise Exception(TestRLMParseDiagnostics._parse_error_message(completion))
+
+            def _emit_action(self, action: dspy.Prediction, iteration: int) -> None:
+                _ = action, iteration
+
+        rlm = object.__new__(_StreamingRLM)
+        rlm.generate_action = _GenerateAction()
+        rlm.max_iterations = 6
+        rlm.max_llm_calls = 50
+        rlm.max_output_chars = 5000
+        rlm.action_timeout = 30
+        rlm.action_max_tokens = 2048
+        rlm._consecutive_timeouts = 0
+        rlm._max_consecutive_timeouts = 2
+        rlm._consecutive_parse_errors = 0
+        rlm._max_consecutive_parse_errors = 2
+        rlm._summary_directive_injected = False
+        rlm._get_action_lm_config = lambda: (None, {})
+        rlm._record_iteration_token_usage = lambda iteration: None
+        rlm._execute_code = lambda repl, code, input_args: "ok"
+        rlm._process_execution_result = lambda action, code, result, history, output_fields: action
+        rlm._emit_step_payloads = []
+        rlm._emit_step = lambda payload: rlm._emit_step_payloads.append(payload)
+        return rlm
+
+    def test_parse_recovery_emits_structured_sanitized_status_payload(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        completion = """I should inspect the staged context.
+
+```python
+print(context["document_text"][:100])
+```
+"""
+        span_outputs: list[dict[str, Any]] = []
+        span, set_outputs = self._recording_span(span_outputs)
+        monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span", span)
+        monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_context.set_mlflow_span_outputs", set_outputs)
+        rlm = self._bare_streaming_rlm(completion=completion)
+
+        result = rlm._execute_iteration(None, [], None, 0, {}, [])
+
+        assert isinstance(result, dspy.Prediction)
+        payload = next(
+            item
+            for item in rlm._emit_step_payloads
+            if item.get("phase") == "rlm_action_gen" and item.get("parse_recovery_status") == "recovered"
+        )
+        assert payload["recovered_without_retry"] is True
+        assert payload["parse_error_expected_fields"] == ["code", "reasoning"]
+        assert payload["parse_error_parsed_fields"] == ["reasoning"]
+        assert "LM Response:" not in str(payload)
+        assert any(output.get("status") == "parse_recovered" for output in span_outputs)
+        action_attrs = next(
+            output["attributes"]
+            for output in span_outputs
+            if output.get("span_name") == "fleet_rlm.rlm_action_generation"
+        )
+        assert "fleet_rlm.variables_info_chars" in action_attrs
+        assert "fleet_rlm.repl_history_chars" in action_attrs
+
+    def test_unrecoverable_parse_status_payload_omits_raw_completion(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        completion = "I will inspect the manifest."
+        span_outputs: list[dict[str, Any]] = []
+        span, set_outputs = self._recording_span(span_outputs)
+        monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span", span)
+        monkeypatch.setattr("fleet_rlm.integrations.observability.mlflow_context.set_mlflow_span_outputs", set_outputs)
+        rlm = self._bare_streaming_rlm(completion=completion)
+        rlm._resolve_repl_history = lambda args, kwargs: "history"
+        rlm._append_repl_entry = lambda history, **kwargs: {"history": history, **kwargs}
+
+        result = rlm._execute_iteration(None, [], "history", 0, {}, [])
+
+        assert isinstance(result, dict)
+        payload = next(
+            item
+            for item in rlm._emit_step_payloads
+            if item.get("phase") == "rlm_action_gen" and item.get("status") == "failed"
+        )
+        assert payload["text"] == "Action generation failed: adapter parse error"
+        assert payload["parse_recovery_status"] == "unrecoverable"
+        assert payload["recovered_without_retry"] is False
+        assert payload["parse_error_expected_fields"] == ["code", "reasoning"]
+        assert "LM Response:" not in str(payload)
+        assert completion not in str(payload)
+        assert any(output.get("status") == "parse_error" for output in span_outputs)
 
 
 class TestBuildChatAgentRuntimeDefault:
@@ -827,6 +1164,79 @@ class TestFallbackTimeout:
         assert result["runtime_fallback_used"] is True
         assert result["runtime_failure_category"] == "rlm_fallback"
         assert result.get("response") == "fallback answer"
+
+    def test_fallback_response_parse_error_retries_with_chat_adapter(self) -> None:
+        """Issue-run regression: fallback CoT parse failure should retry once
+        instead of escaping as the final user-visible response."""
+        from unittest.mock import patch
+
+        module = _make_module(interpreter=None)
+        module._fallback_timeout = 5
+
+        def _always_parse_error(**_: Any) -> Any:
+            raise Exception("could not parse JSON: LM Response: [1]")
+
+        module._rlm = MagicMock(side_effect=_always_parse_error)
+        module.respond = MagicMock(
+            side_effect=[
+                _make_empty_text_response_parse_error("thinking but no rendered response"),
+                _FakePrediction(response="recovered fallback answer"),
+            ]
+        )
+        _stub_summarize(module)
+
+        with patch(
+            "fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span",
+            self._noop_span(),
+        ):
+            result = module._run_rlm(
+                user_request="What is the answer?",
+                core_memory="",
+                history=dspy.History(messages=[]),
+                conversation_summary="",
+            )
+
+        assert module.respond.call_count == 2
+        assert result["degraded"] is True
+        assert result["runtime_fallback_used"] is True
+        assert result["runtime_failure_category"] == "rlm_fallback"
+        assert result.get("response") == "recovered fallback answer"
+
+    def test_fallback_response_parse_error_returns_safe_degraded_payload_after_retry_failure(self) -> None:
+        from unittest.mock import patch
+
+        module = _make_module(interpreter=None)
+        module._fallback_timeout = 5
+
+        def _always_parse_error(**_: Any) -> Any:
+            raise Exception("could not parse JSON: LM Response: [1]")
+
+        module._rlm = MagicMock(side_effect=_always_parse_error)
+        module.respond = MagicMock(
+            side_effect=[
+                _make_empty_text_response_parse_error("private reasoning one"),
+                _make_empty_text_response_parse_error("private reasoning two"),
+            ]
+        )
+        _stub_summarize(module)
+
+        with patch(
+            "fleet_rlm.integrations.observability.mlflow_context.mlflow_child_span",
+            self._noop_span(),
+        ):
+            result = module._run_rlm(
+                user_request="What is the answer?",
+                core_memory="",
+                history=dspy.History(messages=[]),
+                conversation_summary="",
+            )
+
+        assert module.respond.call_count == 2
+        assert result["runtime_failure_category"] == "rlm_fallback_parse_error"
+        assert result["runtime_fallback_used"] is True
+        assert result["fallback_reasoning_content_chars"] > 0
+        assert "private reasoning" not in result["response"]
+        assert "could not render a final response" in result["response"]
 
     def test_non_parse_failure_retries_with_reduced_budget(self) -> None:
         """A non-parse RLM failure (e.g. dspy.LMError from repeated action-gen

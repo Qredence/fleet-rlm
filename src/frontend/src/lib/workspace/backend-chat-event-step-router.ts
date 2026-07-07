@@ -206,14 +206,9 @@ export function routeExecutionStepBySourceType(
       );
     }
     case "reasoning": {
-      // P2-5: Route RLM reasoning to a compact status trace instead of
-      // displaying full internal monologue in the chat. The full reasoning
-      // is still available in the trajectory tab.
-      const truncated = trimmed.length > 200 ? trimmed.slice(0, 200) + "..." : trimmed;
-      return deps.appendStatusTrace(messages, truncated || "Reasoning", "neutral", {
-        ...mergedPayload,
-        source_type: "rlm_progress",
-      });
+      return trimmed
+        ? deps.appendOrExtendReasoningEvent(messages, trimmed, "live", mergedPayload)
+        : messages;
     }
     case "text":
       return trimmed ? deps.appendAssistantToken(messages, trimmed) : messages;

@@ -82,3 +82,32 @@ async def test_unified_stream_drains_relay_events_before_replay(monkeypatch: pyt
     reasoning_texts = [event.text for event in events if event.kind == RuntimeEventKind.REASONING]
     assert "live step during turn" in reasoning_texts
     assert reasoning_texts.count("live step during turn") == 1
+
+
+@pytest.mark.asyncio
+async def test_adapter_parse_error_reasoning_content_streams_as_reasoning_and_error_is_sanitized() -> None:
+    runtime = _RuntimeStub()
+    raw_reasoning = "The model should inspect real repository evidence before answering."
+
+    async def _failing_turn(**kwargs: Any) -> dspy.Prediction:
+        _ = kwargs
+        raise RuntimeError(
+            "Adapter JSONAdapter failed to parse the LM response.\n\n"
+            f"LM Response: {{'text': '', 'reasoning_content': {raw_reasoning!r}}}\n\n"
+            "Expected to find output fields in the LM response: [reasoning, response]"
+        )
+
+    runtime.agent.aforward = _failing_turn  # type: ignore[method-assign]
+
+    events = [event async for event in aiter_chat_turn_stream(runtime, message="hello", cancel_check=None)]
+
+    reasoning_events = [event for event in events if event.kind == RuntimeEventKind.REASONING]
+    error_events = [event for event in events if event.kind == RuntimeEventKind.ERROR]
+    serialized = "\n".join([event.text + " " + str(event.payload) for event in events])
+
+    assert [event.text for event in reasoning_events] == [raw_reasoning]
+    assert reasoning_events[0].payload["adapter_parse_error"] is True
+    assert len(error_events) == 1
+    assert error_events[0].text == "Adapter parse failed while reading the model response."
+    assert "LM Response" not in serialized
+    assert "reasoning_content" not in serialized

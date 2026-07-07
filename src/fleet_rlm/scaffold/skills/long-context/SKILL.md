@@ -12,17 +12,18 @@ Official references:
 
 ## Core pattern (variable space vs token space)
 
-`dspy.RLM` stores large inputs as **REPL variables** (`document_text`, `context_paths`, `history`, …). The model sees only metadata (name, type, length, preview) and explores with Python:
+`dspy.RLM` stores large inputs as **REPL variables**. fleet-rlm passes staged workspace data as a `context` object with `context["document_text"]`, `context["manifest"]`, and `context["metadata"]`. The model sees only metadata (name, type, length, preview) and explores with Python:
 
-1. `print(document_text[:2000])` or `print(len(document_text))` to peek.
-2. Use slices, `re`, or `open(path)` on `context_paths` to locate relevant sections.
+1. `print(context["document_text"][:2000])` or `print(len(context["document_text"]))` to peek.
+2. Use slices, `re`, and `context["manifest"]` to locate relevant sections.
 3. Call `llm_query(snippet)` or `llm_query_batched([...])` on focused excerpts — never the full document.
-4. Finish with `SUBMIT(answer=...)`.
+4. Finish with `SUBMIT(response=...)`.
 
 ## fleet-rlm auto-routing
 
 - `execution_mode=auto` routes to `large_context_rlm` when estimated context ≥ `FLEET_RLM_LARGE_CONTEXT_THRESHOLD` (default 32_000 chars).
-- Staged sandbox paths arrive as `context_paths` REPL variables with `context_manifest` metadata.
+- Staged workspace data arrives as `context["document_text"]`, `context["manifest"]`, and `context["metadata"]`.
+- If `context["metadata"]["sandbox_staged_paths"]` is present, use those sandbox paths only. Do not open host paths from `context["manifest"]`.
 - Optional `sub_rlm(text)` delegates to an isolated child sandbox for heavy map-reduce (see `delegation` skill).
 
 ## Optional pre-chunking
@@ -46,5 +47,5 @@ Chunking complements `dspy.RLM`; it does not replace REPL inspection.
 When the user asks for a verbatim quote or speaker attribution:
 
 - Return exactly one quote block in `SUBMIT` — not a numbered list of quotes.
-- Locate the speaker in `document_text` with Python search, then slice the typographic quote span verbatim.
-- Do not paraphrase, substitute heading text, or open host `context_paths` in the sandbox.
+- Locate the speaker in `context["document_text"]` with Python search, then slice the typographic quote span verbatim.
+- Do not paraphrase, substitute heading text, or open host paths from `context["manifest"]` in the sandbox.

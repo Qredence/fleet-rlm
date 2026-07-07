@@ -27,6 +27,7 @@ from dspy.streaming import StatusMessage, StreamListener, StreamResponse
 
 from fleet_rlm.runtime.agent import runtime_helpers as rh
 from fleet_rlm.runtime.agent.runtime_history import maybe_refresh_summary
+from fleet_rlm.runtime.content.parse_recovery import extract_reasoning_content_from_parse_error
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 from fleet_rlm.runtime.execution.streaming_events import _normalize_trajectory
 
@@ -85,6 +86,22 @@ def _streaming_error(exc: BaseException) -> BaseException:
     while isinstance(exc, BaseExceptionGroup) and len(exc.exceptions) == 1:
         exc = exc.exceptions[0]
     return exc
+
+
+def _adapter_error_reasoning_content(exc: BaseException) -> str:
+    """Extract provider reasoning from adapter payloads without exposing wrappers."""
+    return extract_reasoning_content_from_parse_error(exc) or ""
+
+
+def _safe_streaming_error_text(exc: BaseException) -> str:
+    """Return a websocket-safe error summary for runtime exceptions."""
+    message = str(exc)
+    lower = message.lower()
+    if "failed to parse the lm response" in lower or "adapterparseerror" in lower:
+        return "Adapter parse failed while reading the model response."
+    if "lm response:" in lower or "reasoning_content" in lower:
+        return f"{type(exc).__name__}: model response could not be rendered safely."
+    return message
 
 
 def _response_stream_listeners(program: Any) -> list[StreamListener]:
@@ -334,10 +351,28 @@ async def _await_turn_with_live_progress(
     except asyncio.CancelledError:
         raise
     except Exception as exc:
+        safe_exc = _streaming_error(exc)
+        reasoning_content = _adapter_error_reasoning_content(safe_exc)
+        if reasoning_content:
+            reasoning_event = RuntimeEvent.reasoning(reasoning_content)
+            reasoning_event.payload.update(
+                {
+                    "reasoning_label": "Model reasoning",
+                    "source_type": "reasoning",
+                    "adapter_parse_error": True,
+                }
+            )
+            yield reasoning_event
         yield RuntimeEvent(
             kind=RuntimeEventKind.ERROR,
-            text=str(_streaming_error(exc)),
-            payload={"history_turns": runtime.history_turns()},
+            text=_safe_streaming_error_text(safe_exc),
+            payload={
+                "history_turns": runtime.history_turns(),
+                "error_type": type(safe_exc).__name__,
+                "runtime_failure_category": "adapter_parse_error"
+                if "parse" in _safe_streaming_error_text(safe_exc).lower()
+                else "runtime_error",
+            },
         )
         return
     finally:

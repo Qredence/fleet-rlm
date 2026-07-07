@@ -48,6 +48,21 @@ def build_rlm_core_context(
             "llm_query and llm_query_batched are disabled in this URL-document path; "
             "synthesize from Python inspection of the document variable."
         )
+    if large_context_mode:
+        sections.append(
+            'Staged long-context workflow: inspect context["document_text"], context["manifest"], and '
+            'context["metadata"] with Python before answering. For counting, aggregation, extraction, or '
+            "classification tasks, parse and count deterministically in Python whenever labels or patterns are "
+            "available. Use llm_query only on focused snippets or compact summaries, never on the full staged "
+            "payload. Once the result is computed, call SUBMIT(response=...) exactly once."
+        )
+        sections.append(
+            "Grounding rule for repository/codebase analysis: do not describe a backend, frontend, package, "
+            "module, file structure, or architecture as fact until you have inspected concrete evidence from "
+            'context["manifest"], context["document_text"], staged files, or tool outputs. If evidence is '
+            "missing or inaccessible, say that plainly and do not fill gaps from typical project patterns. "
+            "When you infer, label it explicitly as an inference and separate it from verified findings."
+        )
     if large_context_mode and implies_quote_retrieval(user_request):
         sections.append(quote_retrieval_repl_guidance())
     if compressed_history:
