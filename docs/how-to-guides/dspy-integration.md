@@ -218,7 +218,7 @@ rlm = create_runtime_rlm(
     signature=SummarizeLongDocument,
     interpreter=interpreter,
     max_iterations=30,     # Max reasoning iterations
-    max_llm_calls=50,      # Max LLM calls within RLM
+    max_llm_calls=50,      # Max semantic sub-LM calls via llm_query*
     verbose=True,          # Print debug information
 )
 
@@ -440,7 +440,7 @@ Delegate configuration:
 | `delegate_max_calls_per_turn`      | Max delegate calls per chat turn                               |
 | `delegate_result_truncation_chars` | Truncate delegate results longer than this                     |
 | `rlm_max_iterations`               | Max iterations for delegate RLM                                |
-| `rlm_max_llm_calls`                | Max LLM calls for delegate RLM                                 |
+| `rlm_max_llm_calls`                | Max semantic sub-LM calls for delegate RLM                     |
 | `RLM_CHILD_ISOLATION_MODE`         | Backend isolation policy for delegate and nested child RLMs    |
 | `RLM_CHILD_FORK_FALLBACK`          | Fork failure behavior in no-volume `auto` isolation            |
 
@@ -513,14 +513,14 @@ uv run python scripts/mlflow_cli.py optimize \
 
 1. **Use the registry**: `build_runtime_module()` ensures consistency
 2. **Configure timeouts appropriately**: Long documents need more time
-3. **Set max_llm_calls**: Prevent runaway costs in recursive scenarios
+3. **Set max_llm_calls**: Prevent runaway semantic sub-LM calls in recursive scenarios
 4. **Share interpreters**: Reuse interpreters across related operations
 
 ### Execution
 
 1. **Use async APIs**: `acall()` for async execution
 2. **Handle streaming**: Process incremental output for long-running tasks
-3. **Check budgets**: Monitor `max_llm_calls` consumption
+3. **Check call counts**: Monitor `max_llm_calls` consumption
 4. **Enable tracing**: MLflow traces help debug and optimize
 
 ### Integration with Chat Agents

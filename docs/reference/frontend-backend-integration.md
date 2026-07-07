@@ -151,7 +151,8 @@ intermediate printed output bounded. The server runtime settings feed the chat
 agent's RLM wrappers directly:
 
 - `rlm_max_iterations` -> `dspy.RLM(max_iterations=...)`
-- `rlm_max_llm_calls` -> `dspy.RLM(max_llm_calls=...)`
+- `rlm_max_llm_calls` -> `dspy.RLM(max_llm_calls=...)`; this is a
+  semantic sub-LM call-count cap for `llm_query*`, not a token budget.
 - `agent_max_output_chars` -> `dspy.RLM(max_output_chars=...)`; defaults to 5000
   characters per REPL step so repeated sandbox iterations do not fold large
   file or diff dumps back into every follow-up prompt.
