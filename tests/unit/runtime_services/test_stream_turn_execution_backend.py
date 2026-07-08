@@ -163,7 +163,7 @@ class TestDispatch001_ControlsWins:  # noqa: N801
         self,
         sample_prepared: PreparedChatRuntime,
     ) -> None:
-        """Controls says direct_rlm, config says legacy → NotImplementedError (controls wins)."""
+        """Controls says direct_rlm, config says legacy → DirectRLMRunner path (controls wins)."""
         ctx = ChatExecutionContext(
             prepared=sample_prepared,
             identity=NormalizedIdentity(tenant_claim="t", user_claim="u"),
@@ -177,11 +177,10 @@ class TestDispatch001_ControlsWins:  # noqa: N801
         )
         agent = ctx.prepared.planner_lm
 
-        with pytest.raises(NotImplementedError, match="direct_rlm execution backend is not yet implemented"):
-            async for _ in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
-                pass
+        events = [e async for e in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi")]
 
-        # Verify no agent method was called.
+        assert events[0].kind == RuntimeEventKind.STATUS
+        assert events[-1].kind == RuntimeEventKind.ERROR
         assert agent.calls == []
 
     @pytest.mark.asyncio
@@ -221,7 +220,7 @@ class TestDispatch002_FallsBackToConfig:  # noqa: N801
         monkeypatch: pytest.MonkeyPatch,
         sample_prepared: PreparedChatRuntime,
     ) -> None:
-        """Controls is None, config is direct_rlm → NotImplementedError."""
+        """Controls is None, config is direct_rlm → DirectRLMRunner path."""
         monkeypatch.setenv("EXECUTION_BACKEND", "direct_rlm")
 
         ctx = ChatExecutionContext(
@@ -237,10 +236,10 @@ class TestDispatch002_FallsBackToConfig:  # noqa: N801
         )
         agent = ctx.prepared.planner_lm
 
-        with pytest.raises(NotImplementedError, match="direct_rlm execution backend is not yet implemented"):
-            async for _ in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
-                pass
+        events = [e async for e in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi")]
 
+        assert events[0].kind == RuntimeEventKind.STATUS
+        assert events[-1].kind == RuntimeEventKind.ERROR
         assert agent.calls == []
 
 
@@ -550,15 +549,15 @@ class TestDispatch006_SessionRestore:  # noqa: N801
         assert stub_agent.aimport_session_state_calls == []
 
 
-class TestDispatch007_DirectRlmRaisesNotImplementedError:  # noqa: N801
-    """VAL-DISPATCH-007: direct_rlm raises NotImplementedError."""
+class TestDispatch007_DirectRlmYieldsStructuredEvents:  # noqa: N801
+    """VAL-DISPATCH-007: direct_rlm yields status + terminal error events."""
 
     @pytest.mark.asyncio
-    async def test_direct_rlm_raises_not_implemented_error(
+    async def test_direct_rlm_yields_status_and_error(
         self,
         sample_prepared: PreparedChatRuntime,
     ) -> None:
-        """direct_rlm raises NotImplementedError, yielding zero events."""
+        """direct_rlm yields RuntimeEvent objects without touching the legacy agent."""
         ctx = ChatExecutionContext(
             prepared=sample_prepared,
             identity=NormalizedIdentity(tenant_claim="t", user_claim="u"),
@@ -570,24 +569,22 @@ class TestDispatch007_DirectRlmRaisesNotImplementedError:  # noqa: N801
             cancel_flag={"cancelled": False},
             controls=TurnControls(execution_backend=ExecutionBackend.direct_rlm),
         )
-        events: list[RuntimeEvent] = []
+        events = [event async for event in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi")]
 
-        with pytest.raises(NotImplementedError):
-            async for event in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
-                events.append(event)
-
-        assert len(events) == 0, "No events should be yielded before NotImplementedError"
+        assert [event.kind for event in events] == [RuntimeEventKind.STATUS, RuntimeEventKind.ERROR]
 
 
-class TestDispatch008_ExactErrorMessage:  # noqa: N801
-    """VAL-DISPATCH-008: NotImplementedError message is exact."""
+class TestDispatch008_StructuredErrorPayload:  # noqa: N801
+    """VAL-DISPATCH-008: direct_rlm terminal error payload is structured."""
 
     @pytest.mark.asyncio
-    async def test_exact_error_message(
+    async def test_structured_error_payload(
         self,
         sample_prepared: PreparedChatRuntime,
     ) -> None:
-        """Error message is exactly 'direct_rlm execution backend is not yet implemented'."""
+        """Terminal ERROR carries direct_rlm code/message metadata."""
+        from fleet_rlm.rlm.errors import DIRECT_RLM_NOT_IMPLEMENTED
+
         ctx = ChatExecutionContext(
             prepared=sample_prepared,
             identity=NormalizedIdentity(tenant_claim="t", user_claim="u"),
@@ -600,22 +597,24 @@ class TestDispatch008_ExactErrorMessage:  # noqa: N801
             controls=TurnControls(execution_backend=ExecutionBackend.direct_rlm),
         )
 
-        with pytest.raises(NotImplementedError) as exc_info:
-            async for _ in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
-                pass
+        events = [event async for event in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi")]
+        error_event = events[-1]
 
-        assert str(exc_info.value) == "direct_rlm execution backend is not yet implemented"
+        assert error_event.kind == RuntimeEventKind.ERROR
+        assert error_event.text == DIRECT_RLM_NOT_IMPLEMENTED.message
+        assert error_event.payload["code"] == DIRECT_RLM_NOT_IMPLEMENTED.code
+        assert error_event.payload["execution_backend"] == "direct_rlm"
 
 
-class TestDispatch009_RaiseBeforeSetExecutionMode:  # noqa: N801
-    """VAL-DISPATCH-009: direct_rlm raises BEFORE set_execution_mode."""
+class TestDispatch009_SkipsSetExecutionMode:  # noqa: N801
+    """VAL-DISPATCH-009: direct_rlm skips legacy set_execution_mode."""
 
     @pytest.mark.asyncio
     async def test_raises_before_set_execution_mode(
         self,
         sample_prepared: PreparedChatRuntime,
     ) -> None:
-        """Even with execution_mode set, direct_rlm raises before set_execution_mode."""
+        """Even with execution_mode set, direct_rlm never calls set_execution_mode."""
         ctx = ChatExecutionContext(
             prepared=sample_prepared,
             identity=NormalizedIdentity(tenant_claim="t", user_claim="u"),
@@ -633,22 +632,21 @@ class TestDispatch009_RaiseBeforeSetExecutionMode:  # noqa: N801
         agent = ctx.prepared.planner_lm
         assert isinstance(agent, StubAgent)
 
-        with pytest.raises(NotImplementedError):
-            async for _ in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
-                pass
+        events = [event async for event in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi")]
 
+        assert events[-1].kind == RuntimeEventKind.ERROR
         assert "set_execution_mode" not in [c[0] for c in agent.calls]
 
 
-class TestDispatch010_RaiseBeforeRestoreSession:  # noqa: N801
-    """VAL-DISPATCH-010: direct_rlm raises BEFORE _restore_session."""
+class TestDispatch010_SkipsRestoreSession:  # noqa: N801
+    """VAL-DISPATCH-010: direct_rlm skips legacy _restore_session."""
 
     @pytest.mark.asyncio
     async def test_raises_before_restore_session(
         self,
         sample_prepared: PreparedChatRuntime,
     ) -> None:
-        """Even with session_id, direct_rlm raises before aimport_session_state."""
+        """Even with session_id, direct_rlm never calls aimport_session_state."""
         session_state = {"history_turns": 3}
         store = SessionRestoringStore(session_record={"session": {"state": session_state}})
 
@@ -675,23 +673,22 @@ class TestDispatch010_RaiseBeforeRestoreSession:  # noqa: N801
         agent = ctx.prepared.planner_lm
         assert isinstance(agent, StubAgent)
 
-        with pytest.raises(NotImplementedError):
-            async for _ in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
-                pass
+        events = [event async for event in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi")]
 
+        assert events[-1].kind == RuntimeEventKind.ERROR
         assert "aimport_session_state" not in [c[0] for c in agent.calls]
         assert "areset" not in [c[0] for c in agent.calls]
 
 
-class TestDispatch011_RaiseBeforeAiterChatTurnStream:  # noqa: N801
-    """VAL-DISPATCH-011: direct_rlm raises BEFORE aiter_chat_turn_stream."""
+class TestDispatch011_SkipsAiterChatTurnStream:  # noqa: N801
+    """VAL-DISPATCH-011: direct_rlm skips legacy aiter_chat_turn_stream."""
 
     @pytest.mark.asyncio
     async def test_raises_before_aiter_chat_turn_stream(
         self,
         sample_prepared: PreparedChatRuntime,
     ) -> None:
-        """direct_rlm raises before aiter_chat_turn_stream is called."""
+        """direct_rlm never calls aiter_chat_turn_stream."""
         ctx = ChatExecutionContext(
             prepared=sample_prepared,
             identity=NormalizedIdentity(tenant_claim="t", user_claim="u"),
@@ -706,23 +703,21 @@ class TestDispatch011_RaiseBeforeAiterChatTurnStream:  # noqa: N801
         agent = ctx.prepared.planner_lm
         assert isinstance(agent, StubAgent)
 
-        with pytest.raises(NotImplementedError):
-            async for _ in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
-                pass
+        events = [event async for event in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi")]
 
+        assert events[-1].kind == RuntimeEventKind.ERROR
         assert "aiter_chat_turn_stream" not in [c[0] for c in agent.calls]
 
 
-class TestDispatch012_RaiseBeforeAnyAgentMethod:  # noqa: N801
-    """VAL-DISPATCH-012: direct_rlm raises BEFORE ANY agent method is called.
-    This is the strong form: the agent must be untouched."""
+class TestDispatch012_AgentUntouched:  # noqa: N801
+    """VAL-DISPATCH-012: direct_rlm leaves the legacy agent untouched."""
 
     @pytest.mark.asyncio
     async def test_agent_untouched(
         self,
         sample_prepared: PreparedChatRuntime,
     ) -> None:
-        """direct_rlm raises before any agent method is called - agent.calls is empty."""
+        """direct_rlm never calls any agent method - agent.calls stays empty."""
 
         class _RecordingStub:
             """Stub that records every call."""
@@ -772,10 +767,9 @@ class TestDispatch012_RaiseBeforeAnyAgentMethod:  # noqa: N801
             ),
         )
 
-        with pytest.raises(NotImplementedError):
-            async for _ in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
-                pass
+        events = [event async for event in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi")]
 
+        assert events[-1].kind == RuntimeEventKind.ERROR
         assert recording_agent.calls == [], f"Agent calls should be empty, got: {recording_agent.calls}"
 
 

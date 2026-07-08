@@ -141,8 +141,9 @@ async def stream_turn(
 
     * ``ExecutionBackend.legacy_agent_runtime`` — the Phase 1
       ``AgentRuntime.aiter_chat_turn_stream`` path, unchanged.
-    * ``ExecutionBackend.direct_rlm`` — stub that raises
-      ``NotImplementedError`` before any agent method is called.
+    * ``ExecutionBackend.direct_rlm`` — dispatches to ``DirectRLMRunner``,
+      which emits RuntimeEvent-compatible status/error events. Phase 2B
+      skeleton only; does not call ``dspy.RLM`` yet.
 
     Args:
         ctx: Transport-neutral context (prepared runtime, identity, session
@@ -156,7 +157,6 @@ async def stream_turn(
 
     Raises:
         TypeError: When the legacy backend receives a non-AgentRuntime object.
-        NotImplementedError: When the ``direct_rlm`` backend is selected.
         ValueError: When an unrecognised backend value is encountered.
         StopAsyncIteration: When the turn stream completes.
     """
@@ -197,7 +197,15 @@ async def stream_turn(
                 await aclose()
 
     elif backend is ExecutionBackend.direct_rlm:
-        raise NotImplementedError("direct_rlm execution backend is not yet implemented")
+        from fleet_rlm.rlm.runner import DirectRLMRunner
+
+        runner = DirectRLMRunner()
+        async for event in runner.stream(
+            ctx=ctx,
+            message=message,
+            cancel_check=lambda: ctx.cancel_flag.get("cancelled", False),
+        ):
+            yield event
 
     else:
         raise ValueError(f"Unknown execution backend: {backend!r}")
