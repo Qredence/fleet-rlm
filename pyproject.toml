@@ -95,7 +95,7 @@ dev = [
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.5.0",
     "ruff>=0.15.20",
-    "ty>=0.0.50",
+    "ty>=0.0.57",
 ]
 server = [
     "alembic>=1.18.5,<2",
