@@ -4,6 +4,12 @@ from pathlib import Path
 
 import pytest
 
+from fleet_rlm.skills.errors import (
+    SkillNotVisibleError,
+    SkillResourceNotFoundError,
+    SkillResourcePathError,
+    SkillValidationError,
+)
 from fleet_rlm.skills.loader import load_resource, load_skill_bundle
 from fleet_rlm.skills.schemas import SkillRuntimeContext, SkillVisibilityPolicy
 
@@ -28,15 +34,16 @@ def test_load_resource_reads_scaffold_reference() -> None:
 
 
 def test_load_resource_rejects_traversal() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(SkillResourcePathError) as exc_info:
         load_resource("rlm", "../SKILL.md", SkillRuntimeContext())
+    assert exc_info.value.code == "traversal"
 
 
 def test_load_resource_rejects_invisible_skill() -> None:
     context = SkillRuntimeContext(
         visibility=SkillVisibilityPolicy(excluded_skill_ids=["rlm"]),
     )
-    with pytest.raises(ValueError, match="not visible"):
+    with pytest.raises(SkillNotVisibleError):
         load_resource("rlm", "references/architecture.md", context)
 
 
@@ -63,5 +70,17 @@ def test_load_resource_rejects_legacy_flat_skill_resources(tmp_path: Path) -> No
         description="Legacy flat markdown skill.",
     )
     context = SkillRuntimeContext(volume_mount_path=str(tmp_path))
-    with pytest.raises(ValueError, match="no resource directory"):
+    with pytest.raises(SkillValidationError) as exc_info:
         load_resource("legacy-flat", "references/note.md", context)
+    assert exc_info.value.code == "legacy_flat_no_resources"
+
+
+def test_load_resource_raises_not_found_for_missing_file(tmp_path: Path) -> None:
+    volume = tmp_path / "memory"
+    skill_dir = volume / "skills" / "user" / "alpha-route"
+    skill_dir.mkdir(parents=True)
+    _write_skill_md(skill_dir / "SKILL.md", name="alpha-route", description="Alpha route skill.")
+    context = SkillRuntimeContext(volume_mount_path=str(volume))
+
+    with pytest.raises(SkillResourceNotFoundError):
+        load_resource("alpha-route", "references/missing.md", context)

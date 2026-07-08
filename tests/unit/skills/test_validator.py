@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from fleet_rlm.skills.errors import SkillValidationError
 from fleet_rlm.skills.schemas import (
     SkillMetadata,
     SkillPermissionMode,
@@ -17,11 +20,9 @@ from fleet_rlm.skills.validator import (
 
 
 def test_safe_skill_name_rejects_traversal() -> None:
-    try:
+    with pytest.raises(SkillValidationError) as exc_info:
         safe_skill_name("../escape")
-        raise AssertionError("expected ValueError")
-    except ValueError:
-        pass
+    assert exc_info.value.code == "invalid_skill_name"
 
 
 def test_validate_skill_metadata_accepts_kebab_case_directory_match() -> None:

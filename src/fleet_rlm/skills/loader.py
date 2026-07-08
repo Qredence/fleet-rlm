@@ -17,10 +17,12 @@ from fleet_rlm.skills.catalog import (
     scaffold_catalog_mtime,
 )
 from fleet_rlm.skills.errors import (
-    InvalidResourcePathError,
+    SkillError,
     SkillNotFoundError,
     SkillNotVisibleError,
-    SkillResourceUnavailableError,
+    SkillResourceNotFoundError,
+    SkillResourcePathError,
+    SkillValidationError,
 )
 from fleet_rlm.skills.paths import skills_root
 from fleet_rlm.skills.permissions import is_skill_visible
@@ -33,7 +35,7 @@ from fleet_rlm.skills.schemas import (
     SkillScope,
     SkillVisibilityPolicy,
 )
-from fleet_rlm.skills.validator import safe_skill_name, validate_resource_path
+from fleet_rlm.skills.validator import require_valid_resource_path, safe_skill_name
 
 
 def default_skill_runtime_context(
@@ -99,13 +101,13 @@ def _load_skill_impl_uncached(
     ctx = context or default_skill_runtime_context(volume_mount_path=volume_mount_path)
     try:
         normalized = safe_skill_name(name)
-    except ValueError as exc:
+    except SkillValidationError as exc:
         return LoadSkillOutput(status="error", name=name, error=str(exc))
     try:
         bundle = load_skill_bundle(normalized, ctx)
     except SkillNotFoundError as exc:
         return LoadSkillOutput(status="not_found", name=normalized, error=str(exc))
-    except ValueError as exc:
+    except SkillError as exc:
         return LoadSkillOutput(status="error", name=normalized, error=str(exc))
     scope = bundle.metadata.scope.value
     source = bundle.metadata.source
@@ -135,7 +137,7 @@ def load_skill_impl(
     if root is not None:
         try:
             normalized = safe_skill_name(name)
-        except ValueError:
+        except SkillValidationError:
             normalized = name
         mtimes: list[str] = []
         for scope in ("user", "system"):
@@ -206,10 +208,7 @@ def load_skill_bundle(name: str, context: SkillRuntimeContext) -> SkillBundle:
 
 
 def load_resource(name: str, resource_path: str, context: SkillRuntimeContext) -> str:
-    path_validation = validate_resource_path(resource_path)
-    if not path_validation.valid:
-        issue = path_validation.issues[0]
-        raise InvalidResourcePathError(issue.message, code=issue.code)
+    require_valid_resource_path(resource_path)
 
     metadata = resolve_skill_metadata(name, context)
     if metadata is None:
@@ -217,8 +216,8 @@ def load_resource(name: str, resource_path: str, context: SkillRuntimeContext) -
     if not is_skill_visible(metadata.name, metadata.scope, context.visibility):
         raise SkillNotVisibleError(name)
     if not metadata.directory_style:
-        raise SkillResourceUnavailableError(
-            f"Skill '{name}' has no resource directory (legacy flat skill).",
+        raise SkillValidationError(
+            "Legacy flat skills do not expose resource directories.",
             code="legacy_flat_no_resources",
         )
 
@@ -239,16 +238,16 @@ def load_resource(name: str, resource_path: str, context: SkillRuntimeContext) -
                 continue
             target = entry / resource_path
             if not target.is_file():
-                raise SkillResourceUnavailableError(f"Resource not found: {resource_path}")
+                raise SkillResourceNotFoundError()
             return target.read_text(encoding="utf-8")
         raise SkillNotFoundError(name)
 
     target = (skill_dir / resource_path).resolve()
     resolved_root = skill_dir.resolve()
     if not target.is_relative_to(resolved_root):
-        raise InvalidResourcePathError("Resource path escapes skill root.", code="traversal")
+        raise SkillResourcePathError("Resource path escapes skill root.", code="traversal")
     if not target.is_file():
-        raise SkillResourceUnavailableError(f"Resource not found: {resource_path}")
+        raise SkillResourceNotFoundError()
     return target.read_text(encoding="utf-8")
 
 

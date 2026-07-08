@@ -305,6 +305,32 @@ def test_read_resource_returns_one_visible_resource_body(client: TestClient, tmp
     }
 
 
+def test_get_missing_skill_returns_sanitized_404(client: TestClient) -> None:
+    response = client.get("/api/v1/skills/definitely-missing-skill")
+
+    assert response.status_code == 404
+    payload = response.json()
+    assert payload["code"] == "skill_not_found"
+    assert payload["message"] == "Skill not found or inaccessible."
+    assert "definitely-missing-skill" not in response.text
+
+
+def test_read_resource_missing_file_returns_sanitized_404(client: TestClient, tmp_path: Path) -> None:
+    volume = tmp_path / "memory"
+    _write_directory_skill(volume, "alpha-route", "Zephyr alpha routing support.")
+
+    response = client.get(
+        "/api/v1/skills/alpha-route/resources/references/missing.md",
+        params={"volume_mount_path": str(volume)},
+    )
+
+    assert response.status_code == 404
+    payload = response.json()
+    assert payload["code"] == "skill_not_found"
+    assert payload["message"] == "Skill not found or inaccessible."
+    assert "missing.md" not in response.text
+
+
 def test_hidden_skill_returns_sanitized_404(client: TestClient, tmp_path: Path) -> None:
     volume = tmp_path / "memory"
     _write_directory_skill(volume, "alpha-route", "Zephyr alpha routing support.")

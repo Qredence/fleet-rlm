@@ -6,7 +6,7 @@ import re
 from typing import Literal
 from urllib.parse import unquote
 
-from fleet_rlm.skills.errors import InvalidSkillNameError
+from fleet_rlm.skills.errors import SkillResourcePathError, SkillValidationError
 from fleet_rlm.skills.schemas import (
     SkillMetadata,
     SkillResource,
@@ -18,24 +18,34 @@ _KEBAB_CASE_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _APPROVED_RESOURCE_ROOTS = frozenset({"references", "scripts", "assets", "templates"})
 _MAX_SKILL_MD_BYTES = 50 * 1024
 _VAGUE_DESCRIPTION_MAX_LEN = 10
-_GENERIC_DESCRIPTIONS = frozenset(
-    {
-        "skill",
-        "a skill",
-        "bundled fleet-rlm skill",
-        "todo",
-        "tbd",
-        "description",
-    }
-)
+_GENERIC_DESCRIPTIONS = frozenset({
+    "skill",
+    "a skill",
+    "bundled fleet-rlm skill",
+    "todo",
+    "tbd",
+    "description",
+})
 
 
 def safe_skill_name(name: str) -> str:
     """Normalize and validate a skill basename (no path components)."""
     normalized = name.strip().removesuffix(".md")
     if not normalized or "/" in normalized or "\\" in normalized or ".." in normalized:
-        raise InvalidSkillNameError()
+        raise SkillValidationError(
+            "Skill name must be a simple markdown basename.",
+            code="invalid_skill_name",
+        )
     return normalized
+
+
+def require_valid_resource_path(path: str) -> None:
+    """Raise ``SkillResourcePathError`` when a resource path fails validation."""
+    result = validate_resource_path(path)
+    if result.valid:
+        return
+    issue = result.issues[0]
+    raise SkillResourcePathError(issue.message, code=issue.code)
 
 
 def _issue(
@@ -221,6 +231,7 @@ def validate_skill_bundle(
 
 
 __all__ = [
+    "require_valid_resource_path",
     "safe_skill_name",
     "validate_resource_path",
     "validate_skill_bundle",

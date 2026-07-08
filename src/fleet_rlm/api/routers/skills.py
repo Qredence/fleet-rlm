@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from fleet_rlm.skills.catalog import parse_skill_frontmatter
 from fleet_rlm.skills.errors import (
-    InvalidResourcePathError,
-    InvalidSkillNameError,
     SkillError,
     SkillNotFoundError,
     SkillNotVisibleError,
+    SkillResourceNotFoundError,
+    SkillResourcePathError,
+    SkillValidationError,
 )
 from fleet_rlm.skills.loader import load_resource, load_skill_bundle
 from fleet_rlm.skills.repository import list_visible
@@ -252,26 +253,22 @@ def _bad_request(message: str, *, code: str = "invalid_skill_request") -> HTTPEx
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": code, "message": message})
 
 
-def _raise_skill_http_error(exc: SkillError) -> None:
-    if isinstance(exc, InvalidSkillNameError):
-        raise _bad_request("Invalid skill name.", code=exc.code) from exc
-    if isinstance(exc, InvalidResourcePathError):
+def _raise_skill_http_error(exc: SkillError) -> NoReturn:
+    if isinstance(exc, SkillValidationError):
+        message = "Invalid skill name." if exc.code == "invalid_skill_name" else "Invalid skill request."
+        raise _bad_request(message, code=exc.code) from exc
+    if isinstance(exc, SkillResourcePathError):
         raise _bad_request("Invalid resource path.", code="invalid_resource_path") from exc
-    if isinstance(exc, SkillNotFoundError | SkillNotVisibleError):
+    if isinstance(exc, SkillNotFoundError | SkillNotVisibleError | SkillResourceNotFoundError):
         raise _not_found() from exc
     raise _bad_request("Invalid skill request.", code=exc.code) from exc
 
 
 def _load_visible_bundle(name: str, context: SkillRuntimeContext) -> SkillBundle:
     try:
-        normalized = safe_skill_name(name)
-    except InvalidSkillNameError as exc:
-        raise _bad_request("Invalid skill name.", code=exc.code) from exc
-    try:
-        return load_skill_bundle(normalized, context)
+        return load_skill_bundle(safe_skill_name(name), context)
     except SkillError as exc:
         _raise_skill_http_error(exc)
-        raise AssertionError("unreachable skill error mapping") from exc
 
 
 @router.get(
@@ -460,9 +457,6 @@ async def read_skill_resource(
 ) -> SkillResourceContentResponse:
     """Read a single safe resource body for one visible skill."""
     _ = identity
-    path_validation = validate_resource_path(resource_path)
-    if not path_validation.valid:
-        raise _bad_request("Invalid resource path.", code="invalid_resource_path")
     context = _context_from_query(
         volume_mount_path=volume_mount_path,
         visible_scopes=visible_scopes,
@@ -471,13 +465,9 @@ async def read_skill_resource(
     )
     try:
         normalized = safe_skill_name(name)
-    except InvalidSkillNameError as exc:
-        raise _bad_request("Invalid skill name.", code=exc.code) from exc
-    try:
         content = load_resource(normalized, resource_path, context)
     except SkillError as exc:
         _raise_skill_http_error(exc)
-        raise AssertionError("unreachable skill error mapping") from exc
     return SkillResourceContentResponse(name=normalized, path=resource_path, content=content)
 
 

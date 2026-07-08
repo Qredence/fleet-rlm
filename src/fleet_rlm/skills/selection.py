@@ -11,6 +11,7 @@ import dspy
 
 from fleet_rlm.runtime.task_intent import has_url, has_url_document_intent
 from fleet_rlm.skills.active import ActiveSkills
+from fleet_rlm.skills.errors import SkillError
 from fleet_rlm.skills.loader import load_skill_bundle, load_skill_impl
 from fleet_rlm.skills.repository import AVAILABLE_SKILLS, list_visible
 from fleet_rlm.skills.schemas import SkillCatalogEntry, SkillResource, SkillRuntimeContext, SkillScope, SkillTrustLevel
@@ -387,7 +388,7 @@ class SkillSelectionModule(dspy.Module):
             if context is not None:
                 try:
                     bundle = load_skill_bundle(name, context)
-                except ValueError:
+                except SkillError:
                     continue
                 if not bundle.instructions:
                     continue
