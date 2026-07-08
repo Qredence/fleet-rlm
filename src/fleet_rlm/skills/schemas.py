@@ -91,10 +91,10 @@ class SkillRuntimeContext(BaseModel):
 
 
 class SkillValidationIssue(BaseModel):
-    severity: Literal["error", "warning"]
-    code: str
-    message: str
-    path: str | None = None
+    severity: Literal["error", "warning"] = Field(description="Validation issue severity.")
+    code: str = Field(description="Stable machine-readable validation issue code.")
+    message: str = Field(description="Human-readable validation issue message.")
+    path: str | None = Field(default=None, description="Optional resource path related to the issue.")
 
 
 class SkillValidationResult(BaseModel):

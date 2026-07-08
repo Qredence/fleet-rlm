@@ -26,6 +26,7 @@ def build_api_router() -> APIRouter:
         runtime,
         sandboxes,
         sessions,
+        skills,
         traces,
         ws,
     )
@@ -38,6 +39,7 @@ def build_api_router() -> APIRouter:
         ws.router,
         sessions.router,
         runtime.router,
+        skills.router,
         sandboxes.router,
         runs.router,
         optimization.router,

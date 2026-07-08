@@ -176,6 +176,55 @@ export interface paths {
      */
     get: operations["get_volumes_api_v1_runtime_volumes_get"];
   };
+  "/api/v1/skills": {
+    /**
+     * List visible skills
+     * @description Return visible skill metadata only.
+     */
+    get: operations["list_skills_api_v1_skills_get"];
+  };
+  "/api/v1/skills/{name}": {
+    /**
+     * Get visible skill metadata
+     * @description Return metadata and resource inventory for one visible skill.
+     */
+    get: operations["get_skill_api_v1_skills__name__get"];
+  };
+  "/api/v1/skills/select": {
+    /**
+     * Select visible skills
+     * @description Run read-only skill selection against visible catalog candidates.
+     */
+    post: operations["select_skills_api_v1_skills_select_post"];
+  };
+  "/api/v1/skills/load": {
+    /**
+     * Load visible skill bundles
+     * @description Load SKILL.md instructions and resource inventory for visible skills.
+     */
+    post: operations["load_skills_api_v1_skills_load_post"];
+  };
+  "/api/v1/skills/validate": {
+    /**
+     * Validate skill metadata or visible bundles
+     * @description Validate provided metadata, resource paths, or a known visible skill bundle.
+     */
+    post: operations["validate_skill_api_v1_skills_validate_post"];
+  };
+  "/api/v1/skills/{name}/resources": {
+    /**
+     * List visible skill resources
+     * @description Return resource inventory for one visible skill without reading bodies.
+     */
+    get: operations["list_skill_resources_api_v1_skills__name__resources_get"];
+  };
+  "/api/v1/skills/{name}/resources/{resource_path}": {
+    /**
+     * Read one visible skill resource
+     * @description Read a single safe resource body for one visible skill.
+     */
+    get: operations["read_skill_resource_api_v1_skills__name__resources__resource_path__get"];
+  };
   "/api/v1/runtime/llm-profiles": {
     /** List Llm Profiles */
     get: operations["list_llm_profiles_api_v1_runtime_llm_profiles_get"];
@@ -369,8 +418,8 @@ export interface paths {
      *
      * Authenticates via ``require_http_identity`` (HTTPBearer → NormalizedIdentity),
      * builds a ``ChatExecutionContext`` from the request and identity, calls
-     * ``stream_turn()``, and projects via ``project_sse()`` over a
-     * ``StreamingResponse(media_type="text/event-stream")``.
+     * ``stream_turn()``, and projects via ``project_sse()`` over an
+     * ``EventSourceResponse``.
      *
      * Cancellation is driven by ``request.is_disconnected()`` flipping
      * ``cancel_flag["cancelled"]``; the runtime's ``cancel_check`` polls the
@@ -3449,6 +3498,369 @@ export interface components {
       largest_output_span?: components["schemas"]["SessionTracePerformanceSpanSummary"] | null;
     };
     /**
+     * SkillBundleResponse
+     * @description Loaded visible skill bundle.
+     */
+    SkillBundleResponse: {
+      /** @description Safe skill metadata. */
+      skill: components["schemas"]["SkillCatalogItem"];
+      /**
+       * Instructions
+       * @description SKILL.md markdown instructions.
+       */
+      instructions: string;
+      /**
+       * Resources
+       * @description Safe resource inventory.
+       */
+      resources?: components["schemas"]["SkillResourceItem"][];
+    };
+    /**
+     * SkillCatalogItem
+     * @description Safe skill metadata exposed through the API.
+     */
+    SkillCatalogItem: {
+      /**
+       * Name
+       * @description Skill id.
+       */
+      name: string;
+      /**
+       * Description
+       * @description Skill description.
+       */
+      description: string;
+      /** @description Skill scope. */
+      scope: components["schemas"]["SkillScope"];
+      /** @description Skill trust level. */
+      trust_level: components["schemas"]["SkillTrustLevel"];
+      /**
+       * Source
+       * @description Safe source label without filesystem paths.
+       */
+      source: string;
+      /**
+       * Resource Count
+       * @description Number of inventoried resources.
+       * @default 0
+       */
+      resource_count?: number;
+    };
+    /**
+     * SkillDetailResponse
+     * @description Response for one visible skill.
+     */
+    SkillDetailResponse: {
+      /** @description Safe skill metadata. */
+      skill: components["schemas"]["SkillCatalogItem"];
+      /**
+       * Resources
+       * @description Safe resource inventory.
+       */
+      resources?: components["schemas"]["SkillResourceItem"][];
+    };
+    /**
+     * SkillListResponse
+     * @description Response for visible skill catalog listing.
+     */
+    SkillListResponse: {
+      /**
+       * Skills
+       * @description Visible skill metadata entries.
+       */
+      skills?: components["schemas"]["SkillCatalogItem"][];
+    };
+    /**
+     * SkillLoadRequest
+     * @description Request body for loading visible skill bundles.
+     */
+    SkillLoadRequest: {
+      /**
+       * Volume Mount Path
+       * @description Optional runtime volume mount path.
+       */
+      volume_mount_path?: string | null;
+      /** @description Optional visibility policy. */
+      visibility?: components["schemas"]["SkillVisibilityPolicyInput"] | null;
+      /**
+       * Selected Skill Ids
+       * @description Explicit skill ids to prioritize.
+       */
+      selected_skill_ids?: string[];
+      /**
+       * Max Active Skills
+       * @description Maximum active skills to select.
+       */
+      max_active_skills?: number | null;
+      /**
+       * Names
+       * @description Skill ids to load.
+       */
+      names: string[];
+    };
+    /**
+     * SkillLoadResponse
+     * @description Response for loading one or more visible skill bundles.
+     */
+    SkillLoadResponse: {
+      /**
+       * Bundles
+       * @description Loaded visible skill bundles.
+       */
+      bundles?: components["schemas"]["SkillBundleResponse"][];
+    };
+    /**
+     * SkillResourceContentResponse
+     * @description Response body for one safe skill resource.
+     */
+    SkillResourceContentResponse: {
+      /**
+       * Name
+       * @description Skill id.
+       */
+      name: string;
+      /**
+       * Path
+       * @description Skill-relative resource path.
+       */
+      path: string;
+      /**
+       * Content
+       * @description UTF-8 resource content.
+       */
+      content: string;
+    };
+    /**
+     * SkillResourceItem
+     * @description Safe resource inventory entry.
+     */
+    SkillResourceItem: {
+      /** @description Resource kind. */
+      kind: components["schemas"]["SkillResourceKind"];
+      /**
+       * Path
+       * @description Skill-relative resource path.
+       */
+      path: string;
+      /**
+       * Description
+       * @description Optional resource description.
+       */
+      description?: string | null;
+    };
+    /**
+     * SkillResourceKind
+     * @enum {string}
+     */
+    SkillResourceKind: "reference" | "script" | "asset" | "template";
+    /**
+     * SkillScope
+     * @enum {string}
+     */
+    SkillScope: "session" | "user" | "project" | "org" | "system" | "scaffold";
+    /**
+     * SkillSelectRequest
+     * @description Request body for read-only skill selection.
+     */
+    SkillSelectRequest: {
+      /**
+       * Volume Mount Path
+       * @description Optional runtime volume mount path.
+       */
+      volume_mount_path?: string | null;
+      /** @description Optional visibility policy. */
+      visibility?: components["schemas"]["SkillVisibilityPolicyInput"] | null;
+      /**
+       * Selected Skill Ids
+       * @description Explicit skill ids to prioritize.
+       */
+      selected_skill_ids?: string[];
+      /**
+       * Max Active Skills
+       * @description Maximum active skills to select.
+       */
+      max_active_skills?: number | null;
+      /**
+       * User Request
+       * @description User request to route against visible skills.
+       */
+      user_request: string;
+      /**
+       * Core Memory
+       * @description Optional recent context for bounded selector disambiguation.
+       * @default
+       */
+      core_memory?: string;
+      /**
+       * Execution Mode
+       * @description Runtime execution mode hint.
+       * @default auto
+       */
+      execution_mode?: string;
+      /**
+       * Routing Decision
+       * @description Optional routing decision hint.
+       */
+      routing_decision?: string | null;
+      /**
+       * Is First Turn
+       * @description Whether the request is for the first turn.
+       * @default false
+       */
+      is_first_turn?: boolean;
+    };
+    /**
+     * SkillSelectionResponse
+     * @description Read-only skill selection result.
+     */
+    SkillSelectionResponse: {
+      /**
+       * Selected Skills
+       * @description Selected visible skill ids.
+       */
+      selected_skills?: string[];
+      /**
+       * Skill Context
+       * @description Short active-skill summary.
+       * @default
+       */
+      skill_context?: string;
+      /**
+       * Catalog
+       * @description Selected skill descriptions by id.
+       */
+      catalog?: {
+        [key: string]: string;
+      };
+      /**
+       * Sources
+       * @description Selected skill source labels by id.
+       */
+      sources?: {
+        [key: string]: string;
+      };
+      /**
+       * Warnings
+       * @description Safe selection warnings.
+       */
+      warnings?: string[];
+    };
+    /**
+     * SkillTrustLevel
+     * @enum {string}
+     */
+    SkillTrustLevel: "trusted" | "community";
+    /**
+     * SkillValidateRequest
+     * @description Request body for read-only skill validation.
+     */
+    SkillValidateRequest: {
+      /**
+       * Volume Mount Path
+       * @description Optional runtime volume mount path.
+       */
+      volume_mount_path?: string | null;
+      /** @description Optional visibility policy. */
+      visibility?: components["schemas"]["SkillVisibilityPolicyInput"] | null;
+      /**
+       * Selected Skill Ids
+       * @description Explicit skill ids to prioritize.
+       */
+      selected_skill_ids?: string[];
+      /**
+       * Max Active Skills
+       * @description Maximum active skills to select.
+       */
+      max_active_skills?: number | null;
+      /**
+       * Name
+       * @description Known skill id or metadata name to validate.
+       */
+      name?: string | null;
+      /**
+       * Description
+       * @description Metadata description to validate.
+       */
+      description?: string | null;
+      /**
+       * Directory Name
+       * @description Optional directory name to compare with name.
+       */
+      directory_name?: string | null;
+      /**
+       * Resource Paths
+       * @description Skill-relative resource paths to validate.
+       */
+      resource_paths?: string[];
+      /**
+       * Raw Markdown
+       * @description Optional SKILL.md markdown used for bundle validation.
+       * @default
+       */
+      raw_markdown?: string;
+    };
+    /**
+     * SkillValidateResponse
+     * @description Validation result for skill metadata, bundles, or resource paths.
+     */
+    SkillValidateResponse: {
+      /**
+       * Valid
+       * @description Whether validation found no error-severity issues.
+       */
+      valid: boolean;
+      /**
+       * Issues
+       * @description Validation issues.
+       */
+      issues?: components["schemas"]["SkillValidationIssue"][];
+    };
+    /** SkillValidationIssue */
+    SkillValidationIssue: {
+      /**
+       * Severity
+       * @description Validation issue severity.
+       * @enum {string}
+       */
+      severity: "error" | "warning";
+      /**
+       * Code
+       * @description Stable machine-readable validation issue code.
+       */
+      code: string;
+      /**
+       * Message
+       * @description Human-readable validation issue message.
+       */
+      message: string;
+      /**
+       * Path
+       * @description Optional resource path related to the issue.
+       */
+      path?: string | null;
+    };
+    /**
+     * SkillVisibilityPolicyInput
+     * @description Optional visibility overrides for read-only skill inspection.
+     */
+    SkillVisibilityPolicyInput: {
+      /**
+       * Visible Scopes
+       * @description Skill scopes visible to this request. Defaults to all scopes.
+       */
+      visible_scopes?: components["schemas"]["SkillScope"][] | null;
+      /**
+       * Excluded Skill Ids
+       * @description Skill ids to hide.
+       */
+      excluded_skill_ids?: string[];
+      /**
+       * Included Skill Ids
+       * @description Optional allowlist of visible skill ids.
+       */
+      included_skill_ids?: string[] | null;
+    };
+    /**
      * TraceFeedbackRequest
      * @description Feedback payload for annotating an MLflow trace.
      */
@@ -4836,6 +5248,335 @@ export interface operations {
       };
     };
   };
+  /**
+   * List visible skills
+   * @description Return visible skill metadata only.
+   */
+  list_skills_api_v1_skills_get: {
+    parameters: {
+      query?: {
+        /** @description Optional runtime volume mount path. */
+        volume_mount_path?: string | null;
+        /** @description Visible skill scopes. */
+        visible_scopes?: components["schemas"]["SkillScope"][] | null;
+        /** @description Skill ids to hide. */
+        excluded_skill_ids?: string[] | null;
+        /** @description Optional visible skill allowlist. */
+        included_skill_ids?: string[] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillListResponse"];
+        };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Get visible skill metadata
+   * @description Return metadata and resource inventory for one visible skill.
+   */
+  get_skill_api_v1_skills__name__get: {
+    parameters: {
+      query?: {
+        /** @description Optional runtime volume mount path. */
+        volume_mount_path?: string | null;
+        /** @description Visible skill scopes. */
+        visible_scopes?: components["schemas"]["SkillScope"][] | null;
+        /** @description Skill ids to hide. */
+        excluded_skill_ids?: string[] | null;
+        /** @description Optional visible skill allowlist. */
+        included_skill_ids?: string[] | null;
+      };
+      path: {
+        /** @description Skill id. */
+        name: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillDetailResponse"];
+        };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Select visible skills
+   * @description Run read-only skill selection against visible catalog candidates.
+   */
+  select_skills_api_v1_skills_select_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillSelectRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillSelectionResponse"];
+        };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Load visible skill bundles
+   * @description Load SKILL.md instructions and resource inventory for visible skills.
+   */
+  load_skills_api_v1_skills_load_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillLoadRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillLoadResponse"];
+        };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Validate skill metadata or visible bundles
+   * @description Validate provided metadata, resource paths, or a known visible skill bundle.
+   */
+  validate_skill_api_v1_skills_validate_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillValidateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillValidateResponse"];
+        };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * List visible skill resources
+   * @description Return resource inventory for one visible skill without reading bodies.
+   */
+  list_skill_resources_api_v1_skills__name__resources_get: {
+    parameters: {
+      query?: {
+        /** @description Optional runtime volume mount path. */
+        volume_mount_path?: string | null;
+        /** @description Visible skill scopes. */
+        visible_scopes?: components["schemas"]["SkillScope"][] | null;
+        /** @description Skill ids to hide. */
+        excluded_skill_ids?: string[] | null;
+        /** @description Optional visible skill allowlist. */
+        included_skill_ids?: string[] | null;
+      };
+      path: {
+        /** @description Skill id. */
+        name: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillDetailResponse"];
+        };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Read one visible skill resource
+   * @description Read a single safe resource body for one visible skill.
+   */
+  read_skill_resource_api_v1_skills__name__resources__resource_path__get: {
+    parameters: {
+      query?: {
+        /** @description Optional runtime volume mount path. */
+        volume_mount_path?: string | null;
+        /** @description Visible skill scopes. */
+        visible_scopes?: components["schemas"]["SkillScope"][] | null;
+        /** @description Skill ids to hide. */
+        excluded_skill_ids?: string[] | null;
+        /** @description Optional visible skill allowlist. */
+        included_skill_ids?: string[] | null;
+      };
+      path: {
+        /** @description Skill id. */
+        name: string;
+        /** @description Skill-relative resource path. */
+        resource_path: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillResourceContentResponse"];
+        };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
   /** List Llm Profiles */
   list_llm_profiles_api_v1_runtime_llm_profiles_get: {
     responses: {
@@ -5925,8 +6666,8 @@ export interface operations {
    *
    * Authenticates via ``require_http_identity`` (HTTPBearer → NormalizedIdentity),
    * builds a ``ChatExecutionContext`` from the request and identity, calls
-   * ``stream_turn()``, and projects via ``project_sse()`` over a
-   * ``StreamingResponse(media_type="text/event-stream")``.
+   * ``stream_turn()``, and projects via ``project_sse()`` over an
+   * ``EventSourceResponse``.
    *
    * Cancellation is driven by ``request.is_disconnected()`` flipping
    * ``cancel_flag["cancelled"]``; the runtime's ``cancel_check`` polls the
@@ -5942,7 +6683,6 @@ export interface operations {
       /** @description SSE streaming response. Returns a Server-Sent Events stream with Content-Type: text/event-stream and x-vercel-ai-ui-message-stream: v1 header. */
       200: {
         content: {
-          "application/json": unknown;
           "text/event-stream": unknown;
         };
       };

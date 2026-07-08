@@ -1071,6 +1071,463 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/skills:
+    get:
+      tags:
+      - skills
+      summary: List visible skills
+      description: Return visible skill metadata only.
+      operationId: list_skills_api_v1_skills_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: volume_mount_path
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Optional runtime volume mount path.
+          title: Volume Mount Path
+        description: Optional runtime volume mount path.
+      - name: visible_scopes
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              $ref: '#/components/schemas/SkillScope'
+          - type: 'null'
+          description: Visible skill scopes.
+          title: Visible Scopes
+        description: Visible skill scopes.
+      - name: excluded_skill_ids
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          description: Skill ids to hide.
+          title: Excluded Skill Ids
+        description: Skill ids to hide.
+      - name: included_skill_ids
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          description: Optional visible skill allowlist.
+          title: Included Skill Ids
+        description: Optional visible skill allowlist.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillListResponse'
+        '400':
+          description: The request contains invalid skill or resource input.
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Skill not found or inaccessible.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/skills/{name}:
+    get:
+      tags:
+      - skills
+      summary: Get visible skill metadata
+      description: Return metadata and resource inventory for one visible skill.
+      operationId: get_skill_api_v1_skills__name__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Skill id.
+          title: Name
+        description: Skill id.
+      - name: volume_mount_path
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Optional runtime volume mount path.
+          title: Volume Mount Path
+        description: Optional runtime volume mount path.
+      - name: visible_scopes
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              $ref: '#/components/schemas/SkillScope'
+          - type: 'null'
+          description: Visible skill scopes.
+          title: Visible Scopes
+        description: Visible skill scopes.
+      - name: excluded_skill_ids
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          description: Skill ids to hide.
+          title: Excluded Skill Ids
+        description: Skill ids to hide.
+      - name: included_skill_ids
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          description: Optional visible skill allowlist.
+          title: Included Skill Ids
+        description: Optional visible skill allowlist.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillDetailResponse'
+        '400':
+          description: The request contains invalid skill or resource input.
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Skill not found or inaccessible.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/skills/select:
+    post:
+      tags:
+      - skills
+      summary: Select visible skills
+      description: Run read-only skill selection against visible catalog candidates.
+      operationId: select_skills_api_v1_skills_select_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillSelectRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillSelectionResponse'
+        '400':
+          description: The request contains invalid skill or resource input.
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Skill not found or inaccessible.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/v1/skills/load:
+    post:
+      tags:
+      - skills
+      summary: Load visible skill bundles
+      description: Load SKILL.md instructions and resource inventory for visible skills.
+      operationId: load_skills_api_v1_skills_load_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillLoadRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillLoadResponse'
+        '400':
+          description: The request contains invalid skill or resource input.
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Skill not found or inaccessible.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/v1/skills/validate:
+    post:
+      tags:
+      - skills
+      summary: Validate skill metadata or visible bundles
+      description: Validate provided metadata, resource paths, or a known visible
+        skill bundle.
+      operationId: validate_skill_api_v1_skills_validate_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillValidateRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillValidateResponse'
+        '400':
+          description: The request contains invalid skill or resource input.
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Skill not found or inaccessible.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/v1/skills/{name}/resources:
+    get:
+      tags:
+      - skills
+      summary: List visible skill resources
+      description: Return resource inventory for one visible skill without reading
+        bodies.
+      operationId: list_skill_resources_api_v1_skills__name__resources_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Skill id.
+          title: Name
+        description: Skill id.
+      - name: volume_mount_path
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Optional runtime volume mount path.
+          title: Volume Mount Path
+        description: Optional runtime volume mount path.
+      - name: visible_scopes
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              $ref: '#/components/schemas/SkillScope'
+          - type: 'null'
+          description: Visible skill scopes.
+          title: Visible Scopes
+        description: Visible skill scopes.
+      - name: excluded_skill_ids
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          description: Skill ids to hide.
+          title: Excluded Skill Ids
+        description: Skill ids to hide.
+      - name: included_skill_ids
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          description: Optional visible skill allowlist.
+          title: Included Skill Ids
+        description: Optional visible skill allowlist.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillDetailResponse'
+        '400':
+          description: The request contains invalid skill or resource input.
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Skill not found or inaccessible.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/skills/{name}/resources/{resource_path}:
+    get:
+      tags:
+      - skills
+      summary: Read one visible skill resource
+      description: Read a single safe resource body for one visible skill.
+      operationId: read_skill_resource_api_v1_skills__name__resources__resource_path__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Skill id.
+          title: Name
+        description: Skill id.
+      - name: resource_path
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Skill-relative resource path.
+          title: Resource Path
+        description: Skill-relative resource path.
+      - name: volume_mount_path
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Optional runtime volume mount path.
+          title: Volume Mount Path
+        description: Optional runtime volume mount path.
+      - name: visible_scopes
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              $ref: '#/components/schemas/SkillScope'
+          - type: 'null'
+          description: Visible skill scopes.
+          title: Visible Scopes
+        description: Visible skill scopes.
+      - name: excluded_skill_ids
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          description: Skill ids to hide.
+          title: Excluded Skill Ids
+        description: Skill ids to hide.
+      - name: included_skill_ids
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          description: Optional visible skill allowlist.
+          title: Included Skill Ids
+        description: Optional visible skill allowlist.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillResourceContentResponse'
+        '400':
+          description: The request contains invalid skill or resource input.
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '404':
+          description: Skill not found or inaccessible.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/runtime/llm-profiles:
     get:
       tags:
@@ -2257,9 +2714,9 @@ paths:
 
         builds a ``ChatExecutionContext`` from the request and identity, calls
 
-        ``stream_turn()``, and projects via ``project_sse()`` over a
+        ``stream_turn()``, and projects via ``project_sse()`` over an
 
-        ``StreamingResponse(media_type="text/event-stream")``.
+        ``EventSourceResponse``.
 
 
         Cancellation is driven by ``request.is_disconnected()`` flipping
@@ -2280,9 +2737,19 @@ paths:
             with Content-Type: text/event-stream and x-vercel-ai-ui-message-stream:
             v1 header.'
           content:
-            application/json:
-              schema: {}
-            text/event-stream: {}
+            text/event-stream:
+              itemSchema:
+                type: object
+                properties:
+                  data:
+                    type: string
+                  event:
+                    type: string
+                  id:
+                    type: string
+                  retry:
+                    type: integer
+                    minimum: 0
         '422':
           description: Validation Error
           content:
@@ -5666,6 +6133,439 @@ components:
       type: object
       title: SessionTracePerformanceSummary
       description: Performance and token summary derived from raw MLflow trace spans.
+    SkillBundleResponse:
+      properties:
+        skill:
+          $ref: '#/components/schemas/SkillCatalogItem'
+          description: Safe skill metadata.
+        instructions:
+          type: string
+          title: Instructions
+          description: SKILL.md markdown instructions.
+        resources:
+          items:
+            $ref: '#/components/schemas/SkillResourceItem'
+          type: array
+          title: Resources
+          description: Safe resource inventory.
+      additionalProperties: false
+      type: object
+      required:
+      - skill
+      - instructions
+      title: SkillBundleResponse
+      description: Loaded visible skill bundle.
+    SkillCatalogItem:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Skill id.
+        description:
+          type: string
+          title: Description
+          description: Skill description.
+        scope:
+          $ref: '#/components/schemas/SkillScope'
+          description: Skill scope.
+        trust_level:
+          $ref: '#/components/schemas/SkillTrustLevel'
+          description: Skill trust level.
+        source:
+          type: string
+          title: Source
+          description: Safe source label without filesystem paths.
+        resource_count:
+          type: integer
+          title: Resource Count
+          description: Number of inventoried resources.
+          default: 0
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - description
+      - scope
+      - trust_level
+      - source
+      title: SkillCatalogItem
+      description: Safe skill metadata exposed through the API.
+    SkillDetailResponse:
+      properties:
+        skill:
+          $ref: '#/components/schemas/SkillCatalogItem'
+          description: Safe skill metadata.
+        resources:
+          items:
+            $ref: '#/components/schemas/SkillResourceItem'
+          type: array
+          title: Resources
+          description: Safe resource inventory.
+      additionalProperties: false
+      type: object
+      required:
+      - skill
+      title: SkillDetailResponse
+      description: Response for one visible skill.
+    SkillListResponse:
+      properties:
+        skills:
+          items:
+            $ref: '#/components/schemas/SkillCatalogItem'
+          type: array
+          title: Skills
+          description: Visible skill metadata entries.
+      additionalProperties: false
+      type: object
+      title: SkillListResponse
+      description: Response for visible skill catalog listing.
+    SkillLoadRequest:
+      properties:
+        volume_mount_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Volume Mount Path
+          description: Optional runtime volume mount path.
+        visibility:
+          anyOf:
+          - $ref: '#/components/schemas/SkillVisibilityPolicyInput'
+          - type: 'null'
+          description: Optional visibility policy.
+        selected_skill_ids:
+          items:
+            type: string
+          type: array
+          title: Selected Skill Ids
+          description: Explicit skill ids to prioritize.
+        max_active_skills:
+          anyOf:
+          - type: integer
+            maximum: 20.0
+            minimum: 1.0
+          - type: 'null'
+          title: Max Active Skills
+          description: Maximum active skills to select.
+        names:
+          items:
+            type: string
+          type: array
+          title: Names
+          description: Skill ids to load.
+      additionalProperties: false
+      type: object
+      required:
+      - names
+      title: SkillLoadRequest
+      description: Request body for loading visible skill bundles.
+    SkillLoadResponse:
+      properties:
+        bundles:
+          items:
+            $ref: '#/components/schemas/SkillBundleResponse'
+          type: array
+          title: Bundles
+          description: Loaded visible skill bundles.
+      additionalProperties: false
+      type: object
+      title: SkillLoadResponse
+      description: Response for loading one or more visible skill bundles.
+    SkillResourceContentResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Skill id.
+        path:
+          type: string
+          title: Path
+          description: Skill-relative resource path.
+        content:
+          type: string
+          title: Content
+          description: UTF-8 resource content.
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - path
+      - content
+      title: SkillResourceContentResponse
+      description: Response body for one safe skill resource.
+    SkillResourceItem:
+      properties:
+        kind:
+          $ref: '#/components/schemas/SkillResourceKind'
+          description: Resource kind.
+        path:
+          type: string
+          title: Path
+          description: Skill-relative resource path.
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+          description: Optional resource description.
+      additionalProperties: false
+      type: object
+      required:
+      - kind
+      - path
+      title: SkillResourceItem
+      description: Safe resource inventory entry.
+    SkillResourceKind:
+      type: string
+      enum:
+      - reference
+      - script
+      - asset
+      - template
+      title: SkillResourceKind
+    SkillScope:
+      type: string
+      enum:
+      - session
+      - user
+      - project
+      - org
+      - system
+      - scaffold
+      title: SkillScope
+    SkillSelectRequest:
+      properties:
+        volume_mount_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Volume Mount Path
+          description: Optional runtime volume mount path.
+        visibility:
+          anyOf:
+          - $ref: '#/components/schemas/SkillVisibilityPolicyInput'
+          - type: 'null'
+          description: Optional visibility policy.
+        selected_skill_ids:
+          items:
+            type: string
+          type: array
+          title: Selected Skill Ids
+          description: Explicit skill ids to prioritize.
+        max_active_skills:
+          anyOf:
+          - type: integer
+            maximum: 20.0
+            minimum: 1.0
+          - type: 'null'
+          title: Max Active Skills
+          description: Maximum active skills to select.
+        user_request:
+          type: string
+          title: User Request
+          description: User request to route against visible skills.
+        core_memory:
+          type: string
+          title: Core Memory
+          description: Optional recent context for bounded selector disambiguation.
+          default: ''
+        execution_mode:
+          type: string
+          title: Execution Mode
+          description: Runtime execution mode hint.
+          default: auto
+        routing_decision:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Routing Decision
+          description: Optional routing decision hint.
+        is_first_turn:
+          type: boolean
+          title: Is First Turn
+          description: Whether the request is for the first turn.
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - user_request
+      title: SkillSelectRequest
+      description: Request body for read-only skill selection.
+    SkillSelectionResponse:
+      properties:
+        selected_skills:
+          items:
+            type: string
+          type: array
+          title: Selected Skills
+          description: Selected visible skill ids.
+        skill_context:
+          type: string
+          title: Skill Context
+          description: Short active-skill summary.
+          default: ''
+        catalog:
+          additionalProperties:
+            type: string
+          type: object
+          title: Catalog
+          description: Selected skill descriptions by id.
+        sources:
+          additionalProperties:
+            type: string
+          type: object
+          title: Sources
+          description: Selected skill source labels by id.
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+          description: Safe selection warnings.
+      additionalProperties: false
+      type: object
+      title: SkillSelectionResponse
+      description: Read-only skill selection result.
+    SkillTrustLevel:
+      type: string
+      enum:
+      - trusted
+      - community
+      title: SkillTrustLevel
+    SkillValidateRequest:
+      properties:
+        volume_mount_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Volume Mount Path
+          description: Optional runtime volume mount path.
+        visibility:
+          anyOf:
+          - $ref: '#/components/schemas/SkillVisibilityPolicyInput'
+          - type: 'null'
+          description: Optional visibility policy.
+        selected_skill_ids:
+          items:
+            type: string
+          type: array
+          title: Selected Skill Ids
+          description: Explicit skill ids to prioritize.
+        max_active_skills:
+          anyOf:
+          - type: integer
+            maximum: 20.0
+            minimum: 1.0
+          - type: 'null'
+          title: Max Active Skills
+          description: Maximum active skills to select.
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+          description: Known skill id or metadata name to validate.
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+          description: Metadata description to validate.
+        directory_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Directory Name
+          description: Optional directory name to compare with name.
+        resource_paths:
+          items:
+            type: string
+          type: array
+          title: Resource Paths
+          description: Skill-relative resource paths to validate.
+        raw_markdown:
+          type: string
+          title: Raw Markdown
+          description: Optional SKILL.md markdown used for bundle validation.
+          default: ''
+      additionalProperties: false
+      type: object
+      title: SkillValidateRequest
+      description: Request body for read-only skill validation.
+    SkillValidateResponse:
+      properties:
+        valid:
+          type: boolean
+          title: Valid
+          description: Whether validation found no error-severity issues.
+        issues:
+          items:
+            $ref: '#/components/schemas/SkillValidationIssue'
+          type: array
+          title: Issues
+          description: Validation issues.
+      additionalProperties: false
+      type: object
+      required:
+      - valid
+      title: SkillValidateResponse
+      description: Validation result for skill metadata, bundles, or resource paths.
+    SkillValidationIssue:
+      properties:
+        severity:
+          type: string
+          enum:
+          - error
+          - warning
+          title: Severity
+          description: Validation issue severity.
+        code:
+          type: string
+          title: Code
+          description: Stable machine-readable validation issue code.
+        message:
+          type: string
+          title: Message
+          description: Human-readable validation issue message.
+        path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Path
+          description: Optional resource path related to the issue.
+      type: object
+      required:
+      - severity
+      - code
+      - message
+      title: SkillValidationIssue
+    SkillVisibilityPolicyInput:
+      properties:
+        visible_scopes:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/SkillScope'
+            type: array
+          - type: 'null'
+          title: Visible Scopes
+          description: Skill scopes visible to this request. Defaults to all scopes.
+        excluded_skill_ids:
+          items:
+            type: string
+          type: array
+          title: Excluded Skill Ids
+          description: Skill ids to hide.
+        included_skill_ids:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Included Skill Ids
+          description: Optional allowlist of visible skill ids.
+      additionalProperties: false
+      type: object
+      title: SkillVisibilityPolicyInput
+      description: Optional visibility overrides for read-only skill inspection.
     TraceFeedbackRequest:
       properties:
         trace_id:

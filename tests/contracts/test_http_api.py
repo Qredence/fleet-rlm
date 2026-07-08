@@ -10,13 +10,14 @@ CANONICAL_PATHS = {
     "/api/v1/auth/me",
     "/api/v1/auth/ws-ticket",
     "/api/v1/sessions/state",
+    "/api/v1/skills",
+    "/api/v1/skills/select",
     "/api/v1/traces/feedback",
     "/api/v1/ws/execution",
     "/api/v1/ws/execution/events",
 }
 RETIRED_PREFIXES = (
     "/api/v1/taxonomy",
-    "/api/v1/skills",
     "/api/v1/memory",
     "/api/v1/analytics",
 )

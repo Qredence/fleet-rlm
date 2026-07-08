@@ -420,7 +420,8 @@ _build_delegate_child_policy = build_delegate_child
 class ChildWorkspace(Protocol):
     """Workspace surface needed to derive parent sessions for children."""
 
-    session: DaytonaSandboxSession | None
+    @property
+    def session(self) -> DaytonaSandboxSession | None: ...
 
 
 class ChildDelegateOwner(Protocol):

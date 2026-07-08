@@ -16,6 +16,12 @@ from fleet_rlm.skills.catalog import (
     resolve_skill_metadata,
     scaffold_catalog_mtime,
 )
+from fleet_rlm.skills.errors import (
+    InvalidResourcePathError,
+    SkillNotFoundError,
+    SkillNotVisibleError,
+    SkillResourceUnavailableError,
+)
 from fleet_rlm.skills.paths import skills_root
 from fleet_rlm.skills.permissions import is_skill_visible
 from fleet_rlm.skills.schemas import (
@@ -97,11 +103,10 @@ def _load_skill_impl_uncached(
         return LoadSkillOutput(status="error", name=name, error=str(exc))
     try:
         bundle = load_skill_bundle(normalized, ctx)
+    except SkillNotFoundError as exc:
+        return LoadSkillOutput(status="not_found", name=normalized, error=str(exc))
     except ValueError as exc:
-        message = str(exc)
-        if "not found" in message.lower():
-            return LoadSkillOutput(status="not_found", name=normalized, error=message)
-        return LoadSkillOutput(status="error", name=normalized, error=message)
+        return LoadSkillOutput(status="error", name=normalized, error=str(exc))
     scope = bundle.metadata.scope.value
     source = bundle.metadata.source
     path = source.split(":", 1)[-1] if ":" in source else source
@@ -190,9 +195,9 @@ def _read_skill_instructions(metadata: SkillMetadata, *, context: SkillRuntimeCo
 def load_skill_bundle(name: str, context: SkillRuntimeContext) -> SkillBundle:
     metadata = resolve_skill_metadata(name, context)
     if metadata is None:
-        raise ValueError(f"Skill not found: {name}")
+        raise SkillNotFoundError(name)
     if not is_skill_visible(metadata.name, metadata.scope, context.visibility):
-        raise ValueError(f"Skill is not visible: {name}")
+        raise SkillNotVisibleError(name)
 
     instructions = _read_skill_instructions(metadata, context=context)
     skill_dir = resolve_skill_directory(metadata, context)
@@ -203,19 +208,23 @@ def load_skill_bundle(name: str, context: SkillRuntimeContext) -> SkillBundle:
 def load_resource(name: str, resource_path: str, context: SkillRuntimeContext) -> str:
     path_validation = validate_resource_path(resource_path)
     if not path_validation.valid:
-        raise ValueError(path_validation.issues[0].message)
+        issue = path_validation.issues[0]
+        raise InvalidResourcePathError(issue.message, code=issue.code)
 
     metadata = resolve_skill_metadata(name, context)
     if metadata is None:
-        raise ValueError(f"Skill not found: {name}")
+        raise SkillNotFoundError(name)
     if not is_skill_visible(metadata.name, metadata.scope, context.visibility):
-        raise ValueError(f"Skill is not visible: {name}")
+        raise SkillNotVisibleError(name)
     if not metadata.directory_style:
-        raise ValueError(f"Skill '{name}' has no resource directory (legacy flat skill).")
+        raise SkillResourceUnavailableError(
+            f"Skill '{name}' has no resource directory (legacy flat skill).",
+            code="legacy_flat_no_resources",
+        )
 
     skill_dir = resolve_skill_directory(metadata, context)
     if skill_dir is None:
-        raise ValueError(f"Skill directory not found for: {name}")
+        raise SkillNotFoundError(name)
 
     if metadata.scope == SkillScope.SCAFFOLD:
         import importlib.resources
@@ -230,16 +239,16 @@ def load_resource(name: str, resource_path: str, context: SkillRuntimeContext) -
                 continue
             target = entry / resource_path
             if not target.is_file():
-                raise ValueError(f"Resource not found: {resource_path}")
+                raise SkillResourceUnavailableError(f"Resource not found: {resource_path}")
             return target.read_text(encoding="utf-8")
-        raise ValueError(f"Skill directory not found for: {name}")
+        raise SkillNotFoundError(name)
 
     target = (skill_dir / resource_path).resolve()
     resolved_root = skill_dir.resolve()
     if not target.is_relative_to(resolved_root):
-        raise ValueError("Resource path escapes skill root.")
+        raise InvalidResourcePathError("Resource path escapes skill root.", code="traversal")
     if not target.is_file():
-        raise ValueError(f"Resource not found: {resource_path}")
+        raise SkillResourceUnavailableError(f"Resource not found: {resource_path}")
     return target.read_text(encoding="utf-8")
 
 

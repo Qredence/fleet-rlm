@@ -6,6 +6,7 @@ import re
 from typing import Literal
 from urllib.parse import unquote
 
+from fleet_rlm.skills.errors import InvalidSkillNameError
 from fleet_rlm.skills.schemas import (
     SkillMetadata,
     SkillResource,
@@ -33,7 +34,7 @@ def safe_skill_name(name: str) -> str:
     """Normalize and validate a skill basename (no path components)."""
     normalized = name.strip().removesuffix(".md")
     if not normalized or "/" in normalized or "\\" in normalized or ".." in normalized:
-        raise ValueError("Skill name must be a simple markdown basename.")
+        raise InvalidSkillNameError()
     return normalized
 
 
