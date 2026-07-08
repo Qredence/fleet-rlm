@@ -7,7 +7,7 @@ PYTEST := uv run --no-sync pytest
 	install install-dev install-all \
 	dev format format-check lint typecheck \
 	test test-fast test-unit test-integration test-e2e \
-	check quality-gate check-release check-docs check-duplicates check-security check-deps check-frontend check-codebase-tree api-check api-sync \
+	check quality-gate check-release check-docs check-duplicates check-security check-deps check-frontend check-codebase-tree api-check api-sync plans-canvas-sync plans-canvas-check \
 	build build-ui build-release release release-check \
 	clean cli mlflow precommit-install precommit-run precommit \
 	sync sync-dev sync-all metadata-check docs-check security-check dependency-check frontend-check sync-ui release-artifacts cli-help mlflow-server mlflow-upgrade \
@@ -43,6 +43,8 @@ help:
 	@echo "  make check-codebase-tree - Enforce import boundaries defined in codebase map"
 	@echo "  make api-check        - Validate OpenAPI artifacts and frontend API sync"
 	@echo "  make api-sync         - Regenerate OpenAPI and frontend API artifacts"
+	@echo "  make plans-canvas-sync - Regenerate plans-roadmap canvas phase data from PLANS.md"
+	@echo "  make plans-canvas-check - Fail if plans-roadmap canvas drifted from PLANS.md"
 	@echo ""
 	@echo "Build & release:"
 	@echo "  make build            - Build Python distributions"
@@ -160,6 +162,12 @@ api-sync:
 	@if [ -f src/frontend/package.json ]; then \
 		cd src/frontend && pnpm run api:sync; \
 	fi
+
+plans-canvas-sync:
+	uv run python scripts/sync_plans_canvas.py
+
+plans-canvas-check:
+	uv run python scripts/sync_plans_canvas.py --check
 
 build:
 	rm -rf dist build
