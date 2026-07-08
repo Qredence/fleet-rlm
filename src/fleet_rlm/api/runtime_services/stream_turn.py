@@ -142,8 +142,8 @@ async def stream_turn(
     * ``ExecutionBackend.legacy_agent_runtime`` — the Phase 1
       ``AgentRuntime.aiter_chat_turn_stream`` path, unchanged.
     * ``ExecutionBackend.direct_rlm`` — dispatches to ``DirectRLMRunner``,
-      which emits RuntimeEvent-compatible status/error events. Phase 2B
-      skeleton only; does not call ``dspy.RLM`` yet.
+      which runs one ``RLMTurnSignature`` turn through the acquired Daytona
+      interpreter when opted in via config or ``TurnControls``.
 
     Args:
         ctx: Transport-neutral context (prepared runtime, identity, session
@@ -203,6 +203,7 @@ async def stream_turn(
         async for event in runner.stream(
             ctx=ctx,
             message=message,
+            agent_runtime=agent_runtime,
             cancel_check=lambda: ctx.cancel_flag.get("cancelled", False),
         ):
             yield event

@@ -26,6 +26,7 @@ from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext, Tu
 from fleet_rlm.api.runtime_services.chat_runtime import PreparedChatRuntime
 from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
 from fleet_rlm.api.runtime_services.stream_turn import stream_turn
+from fleet_rlm.rlm.errors import MISSING_INTERPRETER
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 from tests.unit.runtime_services._module_isolation import (
     isolated_module_reload,
@@ -582,8 +583,7 @@ class TestDispatch008_StructuredErrorPayload:  # noqa: N801
         self,
         sample_prepared: PreparedChatRuntime,
     ) -> None:
-        """Terminal ERROR carries direct_rlm code/message metadata."""
-        from fleet_rlm.rlm.errors import DIRECT_RLM_NOT_IMPLEMENTED
+        """Terminal ERROR carries missing-interpreter metadata when no Daytona interpreter is attached."""
 
         ctx = ChatExecutionContext(
             prepared=sample_prepared,
@@ -601,8 +601,7 @@ class TestDispatch008_StructuredErrorPayload:  # noqa: N801
         error_event = events[-1]
 
         assert error_event.kind == RuntimeEventKind.ERROR
-        assert error_event.text == DIRECT_RLM_NOT_IMPLEMENTED.message
-        assert error_event.payload["code"] == DIRECT_RLM_NOT_IMPLEMENTED.code
+        assert error_event.payload["code"] == MISSING_INTERPRETER.code
         assert error_event.payload["execution_backend"] == "direct_rlm"
 
 

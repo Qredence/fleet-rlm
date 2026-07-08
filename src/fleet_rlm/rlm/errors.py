@@ -26,6 +26,16 @@ MISSING_PLANNER_LM = DirectRLMErrorDetail(
     message="Direct RLM execution requires a configured planner LM.",
 )
 
+MISSING_INTERPRETER = DirectRLMErrorDetail(
+    code="missing_interpreter",
+    message="Direct RLM execution requires an acquired Daytona interpreter.",
+)
+
+RLM_EXECUTION_FAILED = DirectRLMErrorDetail(
+    code="rlm_execution_failed",
+    message="Direct RLM execution failed.",
+)
+
 TURN_CANCELLED = DirectRLMErrorDetail(
     code="turn_cancelled",
     message="Turn cancelled before direct RLM execution could start.",
@@ -44,22 +54,27 @@ def direct_rlm_status_event(text: str, *, phase: str = "direct_rlm_start") -> Ru
     )
 
 
-def direct_rlm_error_event(detail: DirectRLMErrorDetail) -> RuntimeEvent:
+def direct_rlm_error_event(detail: DirectRLMErrorDetail, *, error: str | None = None) -> RuntimeEvent:
     """Emit a terminal ERROR event with structured direct-RLM metadata."""
+    payload: dict[str, object] = {
+        "code": detail.code,
+        "execution_backend": "direct_rlm",
+        "recoverable": detail.recoverable,
+    }
+    if error:
+        payload["error"] = error
     return RuntimeEvent(
         kind=RuntimeEventKind.ERROR,
-        text=detail.message,
-        payload={
-            "code": detail.code,
-            "execution_backend": "direct_rlm",
-            "recoverable": detail.recoverable,
-        },
+        text=detail.message if error is None else f"{detail.message} ({error})",
+        payload=payload,
     )
 
 
 __all__ = [
     "DIRECT_RLM_NOT_IMPLEMENTED",
+    "MISSING_INTERPRETER",
     "MISSING_PLANNER_LM",
+    "RLM_EXECUTION_FAILED",
     "TURN_CANCELLED",
     "DirectRLMErrorDetail",
     "direct_rlm_error_event",
