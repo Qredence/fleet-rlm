@@ -7,29 +7,78 @@
 
 ## 1. SPA Asset Serving
 
-The FastAPI app factory in `src/fleet_rlm/api/main.py` resolves the built
-frontend via `_resolve_ui_dist_dir()`, which checks two candidate paths in
-order:
+The FastAPI app factory in `src/fleet_rlm/api/main.py` calls
+`mount_frontend_routes()` from `src/fleet_rlm/api/spa.py` after API routers
+are registered. That helper resolves the built frontend via
+`resolve_ui_dist_dir()`, which checks two candidate paths in order:
 
 | Priority | Path | When used |
 |----------|------|-----------|
-| 1 | `<repo_root>/src/frontend/dist` | Source checkouts (`fleet web` during development) |
+| 1 | `<repo_root>/src/frontend/dist` (or `dist/client` when present) | Source checkouts (`fleet web` during development) |
 | 2 | `src/fleet_rlm/ui/dist` | Packaged/installed distributions |
 
-The first existing directory wins. If neither exists, the SPA is not mounted
-and the API runs headless.
+In source checkouts, only `src/frontend/dist` is considered so `fleet web` does
+not serve stale packaged assets from `fleet_rlm/ui/dist`. The resolver requires
+a served entrypoint (`index.html` at the dist root or under `dist/client`).
 
-When a `ui_dir` is found, `_mount_spa(app, ui_dir)` does three things:
+### Mount paths
 
-1. **`/assets`** — mounts `ui_dir/assets` as a `StaticFiles` directory (hashed
-   JS/CSS bundles produced by Vite).
-2. **`/branding`** — mounts `ui_dir/branding` as a `StaticFiles` directory
-   (logos, favicons).
-3. **`/{full_path:path}`** — a catch-all GET route that returns
-   `ui_dir/index.html` for every non-API path, enabling client-side routing.
+`mount_frontend_routes()` branches on `AppConfig.serve_ui` (env:
+`FLEET_RLM_SERVE_UI`):
 
-Because `_mount_spa` is called **after** `_register_api_routes`, the API
-routes (`/health`, `/api/v1/*`) take precedence over the SPA catch-all.
+| Condition | Behavior |
+|-----------|----------|
+| `serve_ui=true` and `resolve_ui_dist_dir()` finds a build | `mount_spa(app, ui_dir)` |
+| `serve_ui=true` and no build is found | `mount_ui_unavailable_root(app)` |
+| `serve_ui=false` and `expose_root=true` | `mount_api_only_root(app)` — JSON banner at `/` |
+| `serve_ui=false` and `expose_root=false` | No root route (typical API-only cloud deploys) |
+
+When a `ui_dir` is found, `mount_spa()` delegates to FastAPI's native
+`app.frontend("/", directory=ui_dir)`. That registers low-priority static and
+SPA fallback routes: API path operations are matched first, and frontend files
+are served only when no normal route matches. Hashed bundles under `assets/`,
+branding files, and client-side routes (for example `/app/workspace`) are all
+handled through the frontend build directory without separate manual
+`StaticFiles` mounts or a custom catch-all handler.
+
+Because `mount_frontend_routes()` runs **after** `_register_api_routes()`, API
+routes such as `/health`, `/ready`, `/api/v1/*`, and `POST /api/chat` take
+precedence over the frontend fallback.
+
+### Missing-build and error responses
+
+There are two distinct behaviors depending on *when* the UI entrypoint is
+missing:
+
+1. **No UI build at startup** — `resolve_ui_dist_dir()` returns `None`, so
+   `mount_ui_unavailable_root()` registers `GET /` only. That route returns
+   **503** with `ui_unavailable_payload()` JSON (for example
+   `"UI build not found."` plus a `pnpm run build` / `pnpm run dev` hint in
+   source checkouts). Deep client-side paths such as `/app/workspace` are not
+   registered and return **404**. `/health` and `/ready` are unaffected.
+
+2. **UI mounted successfully, then `index.html` disappears at runtime** — a rare
+   edge case (deleted entrypoint, corrupted deploy artifact, or volume issue).
+   `app.frontend()` treats the missing static resource as **404**
+   `{"detail":"Not Found"}`. This is intentional: the normal missing-build path
+   still uses the helpful **503** at `/`; only the post-mount static-resource
+   loss case returns 404.
+
+```text
+No dist at startup:
+  GET /              → 503  {"error":"UI build not found.", "hint":"..."}
+  GET /app/workspace → 404  (no SPA fallback registered)
+  GET /health        → 200  (API route)
+
+Dist mounted, index.html deleted after startup:
+  GET /              → 404  {"detail":"Not Found"}
+  GET /app/workspace → 404  {"detail":"Not Found"}
+  GET /health        → 200  (API route)
+```
+
+For API-only deployments, set `FLEET_RLM_SERVE_UI=false` so `/` serves the
+JSON banner (when `FLEET_RLM_EXPOSE_ROOT=true`) instead of a UI-unavailable
+503. See `docs/how-to-guides/deploying-server.md` for cloud deploy guidance.
 
 ---
 
