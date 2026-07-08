@@ -228,7 +228,10 @@ async def _prepare_chat_event_stream(
             detail=public_prepare_error_detail(code=e.code, message=e.message),
         )
     except Exception as exc:
-        logger.debug("Error preparing SSE runtime: %s", exc, exc_info=True)
+        # Unexpected (non-_SSEPrepareError) prepare failure: log full details
+        # server-side at ERROR level (visible under default logging config)
+        # while the client only ever sees the sanitized detail below.
+        logger.exception("Error preparing SSE runtime: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=public_prepare_error_detail(),
@@ -247,7 +250,9 @@ async def _prepare_chat_event_stream(
     try:
         agent_context = await build_chat_agent_context(runtime, pool=interpreter_pool_deps.pool)
     except Exception as exc:
-        logger.debug("Error building agent context: %s", exc, exc_info=True)
+        # Same rationale as above: build_chat_agent_context() failures (e.g.
+        # Daytona/interpreter-pool acquisition) must stay visible server-side.
+        logger.exception("Error building agent context: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=public_prepare_error_detail(),
