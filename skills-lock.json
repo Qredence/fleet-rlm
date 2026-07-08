@@ -37,6 +37,12 @@
       "skillPath": "analyze-mlflow-trace/SKILL.md",
       "computedHash": "a814876da3e16e91aac7c593ff4f15336d24df324632195476f209e0131a9cf9"
     },
+    "code-review": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/code-review/SKILL.md",
+      "computedHash": "4a17d9d3e0fc87ae48544d371a820fac5a4a78f4c05e7e6b3229094fbf8a7e26"
+    },
     "codebase-design": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -48,6 +54,12 @@
       "sourceType": "github",
       "skillPath": "skills/productivity/grilling/SKILL.md",
       "computedHash": "ef685a6fa0bbe73b05bbd8dc1ec97258191587f07c6aa7dbc9006675ceb8f90f"
+    },
+    "implement": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/implement/SKILL.md",
+      "computedHash": "0d51255cab5cf937b8fe41252f00213706e0175ca9607fc00409d29562b5b839"
     },
     "loop-me": {
       "source": "mattpocock/skills",
@@ -65,6 +77,24 @@
       "source": "shadcn/ui",
       "sourceType": "github",
       "computedHash": "507f011a70e8b3ae242bdc0bb5b39fd91a1d4049a0f3c281991ccf84973d591c"
+    },
+    "to-spec": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/to-spec/SKILL.md",
+      "computedHash": "c5d294a88d00942a38dc589299423e35ea07157cf29eed21434378edb5cfafa4"
+    },
+    "to-tickets": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/to-tickets/SKILL.md",
+      "computedHash": "931fb4385e1f3e29bf2ae482166a86d5876e9e6c740609f3de09a6de8f2ba318"
+    },
+    "wayfinder": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/wayfinder/SKILL.md",
+      "computedHash": "3eb72cd9abdfaa00e10fa69f0b4410ff8639a6cf4eb9e5d187b289c3aa9be2fc"
     },
     "writing-great-skills": {
       "source": "mattpocock/skills",
