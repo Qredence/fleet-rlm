@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol, cast
 
+from fleet_rlm.api.runtime_services.chat_prepare_errors import CHAT_RUNTIME_PREPARE_FAILED_MESSAGE
 from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.integrations.llm_profiles.resolver import build_lm_kwargs_from_resolved, resolve_active_role_configs
@@ -250,10 +251,11 @@ async def prepare_chat_runtime(
     cfg = config_deps.config
     try:
         planner_lm, delegate_lm = await _ensure_runtime_models(lm_deps, config_deps, diagnostics_deps)
-    except Exception as exc:
+    except Exception:
+        logger.exception("Planner initialization failed")
         if await send_error(
             code="planner_initialization_failed",
-            message=f"Planner initialization failed: {exc}",
+            message=CHAT_RUNTIME_PREPARE_FAILED_MESSAGE,
         ):
             await close_websocket(code=1011)
         return None

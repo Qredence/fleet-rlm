@@ -19,9 +19,45 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.auth.types import NormalizedIdentity
 from fleet_rlm.api.dependencies import require_http_identity
 from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext
+from fleet_rlm.api.runtime_services.chat_runtime import PreparedChatRuntime
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+class _FakeChatAgent:
+    """Minimal agent used to keep /api/chat tests off Daytona/LLM runtime."""
+
+    def __init__(self) -> None:
+        self.execution_mode: str | None = None
+
+    def set_execution_mode(self, mode: str) -> None:
+        self.execution_mode = mode
+
+    async def aiter_chat_turn_stream(self, **kwargs: Any) -> AsyncIterator[RuntimeEvent]:
+        yield _make_started_event()
+        yield _make_text_event(f"agent saw {kwargs.get('message', '')}")
+        yield _make_done_event()
+
+
+class _FakeChatAgentContext:
+    def __init__(self, agent: _FakeChatAgent) -> None:
+        self.agent = agent
+        self.entered = False
+        self.exited = False
+
+    async def __aenter__(self) -> _FakeChatAgent:
+        self.entered = True
+        return self.agent
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object | None,
+    ) -> bool:
+        self.exited = True
+        return False
 
 
 class _FakePrepareError(Exception):
@@ -124,6 +160,45 @@ def stub_identity() -> NormalizedIdentity:
     )
 
 
+@pytest.fixture(autouse=True)
+def stub_chat_agent_context(monkeypatch) -> list[_FakeChatAgentContext]:
+    contexts: list[_FakeChatAgentContext] = []
+    chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
+
+    async def _build_context(runtime: object, pool: Any = None) -> _FakeChatAgentContext:
+        _ = runtime
+        context = _FakeChatAgentContext(_FakeChatAgent())
+        contexts.append(context)
+        return context
+
+    monkeypatch.setattr(chat_module, "build_chat_agent_context", _build_context)
+    return contexts
+
+
+@pytest.fixture(autouse=True)
+def stub_prepare_chat_runtime(monkeypatch) -> list[PreparedChatRuntime]:
+    chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
+    runtimes: list[PreparedChatRuntime] = []
+
+    async def _prepare_runtime(**kwargs: Any) -> PreparedChatRuntime:
+        config_deps = kwargs["config_deps"]
+        persistence_deps = kwargs["persistence_deps"]
+        runtime = PreparedChatRuntime(
+            cfg=config_deps.config,
+            planner_lm=object(),
+            delegate_lm=None,
+            repository=None,
+            persistence=persistence_deps.local_store,
+            persistence_required=False,
+            identity_rows=None,
+        )
+        runtimes.append(runtime)
+        return runtime
+
+    monkeypatch.setattr(chat_module, "prepare_chat_runtime", _prepare_runtime)
+    return runtimes
+
+
 def _stub_identity_dependency(stub_identity: NormalizedIdentity):
     """Return a callable that returns the stub identity (for dependency overrides)."""
     return lambda: stub_identity
@@ -132,7 +207,7 @@ def _stub_identity_dependency(stub_identity: NormalizedIdentity):
 def _stub_stream_turn(events: list[RuntimeEvent]):
     """Return a callable *stream_turn* stub yielding the given *events*."""
 
-    async def _stub(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+    async def _stub(*, ctx: ChatExecutionContext, agent_runtime: object, message: str) -> AsyncIterator[RuntimeEvent]:
         for ev in events:
             yield ev
 
@@ -142,7 +217,7 @@ def _stub_stream_turn(events: list[RuntimeEvent]):
 def _stub_stream_turn_error(error: Exception):
     """Return a callable *stream_turn* stub that raises *error*."""
 
-    async def _stub(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+    async def _stub(*, ctx: ChatExecutionContext, agent_runtime: object, message: str) -> AsyncIterator[RuntimeEvent]:
         raise error
 
     return _stub
@@ -276,6 +351,27 @@ class Test_SSE_001_BasicStream:  # noqa: N801
         # Each data: line is followed by a blank line (the HTTP chunk separator
         # in SSE format is \n\n after each data: line)
         assert "[DONE]" in response.text
+
+    def test_val_sse_064_real_stream_turn_uses_agent_context(
+        self,
+        no_db_app,
+        stub_chat_agent_context: list[_FakeChatAgentContext],
+        stub_prepare_chat_runtime: list[PreparedChatRuntime],
+        stub_identity: NormalizedIdentity,
+    ) -> None:
+        """The route builds an agent context before invoking the real stream_turn."""
+        no_db_app.dependency_overrides[require_http_identity] = _stub_identity_dependency(stub_identity)
+
+        with TestClient(no_db_app) as client:
+            response = client.post("/api/chat", json=DEFAULT_BODY)
+
+        _assert_sse_ok(response)
+        assert stub_chat_agent_context
+        assert stub_chat_agent_context[0].entered is True
+        assert stub_chat_agent_context[0].exited is True
+        assert stub_prepare_chat_runtime
+        assert stub_prepare_chat_runtime[0].planner_lm is not stub_chat_agent_context[0].agent
+        assert "agent saw hello" in response.text
 
     def test_val_sse_007_stream_terminates_with_done(self, chat_client: TestClient) -> None:
         """SSE body ends with data: [DONE]."""
@@ -557,6 +653,7 @@ class Test_SSE_016_Auth:  # noqa: N801
                 interpreter_pool_overflow_max=0,
                 cors_allowed_origins=["http://localhost:5173"],
                 secret_encryption_key="test-secret-key-for-tests",
+                neon_tenant_claim="tenant-1",
             )
         )
 
@@ -593,6 +690,7 @@ class Test_SSE_016_Auth:  # noqa: N801
                 interpreter_pool_overflow_max=0,
                 cors_allowed_origins=["http://localhost:5173"],
                 secret_encryption_key="test-secret-key-for-tests",
+                neon_tenant_claim="tenant-1",
             )
         )
 
@@ -700,7 +798,9 @@ class Test_SSE_026_UserMessageExtraction:  # noqa: N801
         """Scan backwards for last user message when last is assistant."""
         captured_messages: list[str] = []
 
-        async def _capture_stream_turn(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+        async def _capture_stream_turn(
+            *, ctx: ChatExecutionContext, agent_runtime: object, message: str
+        ) -> AsyncIterator[RuntimeEvent]:
             captured_messages.append(message)
             for ev in [_make_started_event(), _make_text_event("response"), _make_done_event()]:
                 yield ev
@@ -736,7 +836,9 @@ class Test_SSE_026_UserMessageExtraction:  # noqa: N801
         """Last user message with parts and content=None extracts text."""
         captured_messages: list[str] = []
 
-        async def _capture_stream_turn(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+        async def _capture_stream_turn(
+            *, ctx: ChatExecutionContext, agent_runtime: object, message: str
+        ) -> AsyncIterator[RuntimeEvent]:
             captured_messages.append(message)
             for ev in [_make_started_event(), _make_text_event("ok"), _make_done_event()]:
                 yield ev
@@ -828,7 +930,9 @@ class Test_SSE_031_Cancellation:  # noqa: N801
 
         captured_cancel_flag: dict[str, bool] = {}
 
-        async def _stream_with_cancel_flag(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+        async def _stream_with_cancel_flag(
+            *, ctx: ChatExecutionContext, agent_runtime: object, message: str
+        ) -> AsyncIterator[RuntimeEvent]:
             nonlocal captured_cancel_flag
             captured_cancel_flag = ctx.cancel_flag
             # Yield chunks; cancel check would stop early if flag is flipped.
@@ -859,7 +963,9 @@ class Test_SSE_031_Cancellation:  # noqa: N801
     ) -> None:
         """Cancellation emits abort then [DONE]."""
 
-        async def _stream_and_cancel(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+        async def _stream_and_cancel(
+            *, ctx: ChatExecutionContext, agent_runtime: object, message: str
+        ) -> AsyncIterator[RuntimeEvent]:
             # Signal cancellation right away.
             ctx.cancel_flag["cancelled"] = True
             yield _make_started_event()
@@ -901,7 +1007,9 @@ class Test_SSE_033_ErrorHandling:  # noqa: N801
     ) -> None:
         """Unhandled exception closes cleanly with [DONE]."""
 
-        async def _broken_stream(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+        async def _broken_stream(
+            *, ctx: ChatExecutionContext, agent_runtime: object, message: str
+        ) -> AsyncIterator[RuntimeEvent]:
             raise _SentinelError("unexpected error")
 
         chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
@@ -921,7 +1029,9 @@ class Test_SSE_033_ErrorHandling:  # noqa: N801
     ) -> None:
         """stream_turn raises after headers: error + [DONE]."""
 
-        async def _raises_after_yield(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+        async def _raises_after_yield(
+            *, ctx: ChatExecutionContext, agent_runtime: object, message: str
+        ) -> AsyncIterator[RuntimeEvent]:
             yield _make_started_event()
             raise _SentinelError("fail after yield")
 
@@ -1053,7 +1163,9 @@ class Test_SSE_035_StreamCharacteristics:  # noqa: N801
         # Use a stub that generates fresh message IDs per call.
         call_count: list[int] = [0]
 
-        async def _dynamic_stream(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+        async def _dynamic_stream(
+            *, ctx: ChatExecutionContext, agent_runtime: object, message: str
+        ) -> AsyncIterator[RuntimeEvent]:
             call_count[0] += 1
             yield RuntimeEvent(
                 kind=RuntimeEventKind.TURN_STARTED,
@@ -1175,7 +1287,9 @@ class Test_SSE_044_Determinism:  # noqa: N801
         os.environ["FLEET_TEST_SENTINEL"] = sentinel
 
         # Trigger an error to ensure sentinel is not leaked in error output.
-        async def _error_stream(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+        async def _error_stream(
+            *, ctx: ChatExecutionContext, agent_runtime: object, message: str
+        ) -> AsyncIterator[RuntimeEvent]:
             raise RuntimeError(f"Error with {sentinel}")
 
         chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
@@ -1288,3 +1402,89 @@ def test_content_type_json_rejected_for_chat_request_with_text_plain(
         headers={"Content-Type": "text/plain"},
     )
     assert response.status_code == 422
+
+
+def test_sse_uses_shared_interpreter_pool_for_agent_context(
+    no_db_app,
+    monkeypatch,
+    stub_identity,
+) -> None:
+    """POST /api/chat uses the shared interpreter pool from app state."""
+    no_db_app.dependency_overrides[require_http_identity] = _stub_identity_dependency(stub_identity)
+
+    captured_pool = []
+    chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
+
+    async def _spy_build_context(runtime: object, pool: Any = None) -> _FakeChatAgentContext:
+        captured_pool.append(pool)
+        return _FakeChatAgentContext(_FakeChatAgent())
+
+    monkeypatch.setattr(chat_module, "build_chat_agent_context", _spy_build_context)
+
+    with TestClient(no_db_app) as client:
+        response = client.post("/api/chat", json=DEFAULT_BODY)
+
+    _assert_sse_ok(response)
+    assert len(captured_pool) == 1
+    assert captured_pool[0] is no_db_app.state.interpreter_pool_deps.pool
+
+
+def test_sse_prepare_failure_does_not_leak_exception_detail(
+    no_db_app,
+    monkeypatch,
+    stub_identity,
+    caplog,
+) -> None:
+    """SSE prepare failure does not leak raw exception strings to the client."""
+    import logging
+
+    no_db_app.dependency_overrides[require_http_identity] = _stub_identity_dependency(stub_identity)
+
+    chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
+
+    async def _broken_prepare_runtime(**kwargs: Any) -> Any:
+        raise RuntimeError("SENTINEL-PREPARE-LEAK-XYZ")
+
+    monkeypatch.setattr(chat_module, "prepare_chat_runtime", _broken_prepare_runtime)
+
+    with caplog.at_level(logging.DEBUG):
+        with TestClient(no_db_app, raise_server_exceptions=False) as client:
+            response = client.post("/api/chat", json=DEFAULT_BODY)
+
+    assert response.status_code == 500
+    assert "SENTINEL-PREPARE-LEAK-XYZ" not in response.text
+    # The exception handler converts the HTTPException detail to ApiErrorResponse
+    assert "chat_runtime_prepare_failed" in response.text
+    assert "Failed to prepare chat runtime." in response.text
+    assert any("SENTINEL-PREPARE-LEAK-XYZ" in record.message for record in caplog.records)
+
+
+def test_sse_build_agent_context_failure_does_not_leak_exception_detail(
+    no_db_app,
+    monkeypatch,
+    stub_identity,
+    stub_prepare_chat_runtime,
+    caplog,
+) -> None:
+    """SSE build_chat_agent_context failure does not leak raw exception strings to the client."""
+    import logging
+
+    no_db_app.dependency_overrides[require_http_identity] = _stub_identity_dependency(stub_identity)
+
+    chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
+
+    async def _broken_build_context(runtime: object, pool: Any = None) -> Any:
+        raise RuntimeError("SENTINEL-BUILD-CONTEXT-LEAK-XYZ")
+
+    monkeypatch.setattr(chat_module, "build_chat_agent_context", _broken_build_context)
+
+    with caplog.at_level(logging.DEBUG):
+        with TestClient(no_db_app, raise_server_exceptions=False) as client:
+            response = client.post("/api/chat", json=DEFAULT_BODY)
+
+    assert response.status_code == 500
+    assert "SENTINEL-BUILD-CONTEXT-LEAK-XYZ" not in response.text
+    # The exception handler converts the HTTPException detail to ApiErrorResponse
+    assert "chat_runtime_prepare_failed" in response.text
+    assert "Failed to prepare chat runtime." in response.text
+    assert any("SENTINEL-BUILD-CONTEXT-LEAK-XYZ" in record.message for record in caplog.records)

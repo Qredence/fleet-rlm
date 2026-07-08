@@ -462,7 +462,9 @@ See ``docs/adr/0005-execution-backend-seam.md`` for the full design rationale.
         controls: TurnControls
 
     async def stream_turn(
+        *,
         ctx: ChatExecutionContext,
+        agent_runtime: AgentRuntime,
         message: str,
     ) -> AsyncIterator[RuntimeEvent]:
         ...
@@ -470,9 +472,15 @@ See ``docs/adr/0005-execution-backend-seam.md`` for the full design rationale.
 ``stream_turn()`` resolves the execution backend once at the top (per-request
 ``TurnControls.execution_backend`` if not ``None``, else ``AppConfig.execution_backend``)
 and dispatches via ``if/elif``. The default backend ``legacy_agent_runtime``
-delegates to ``AgentRuntime.aiter_chat_turn_stream()`` with a ``cancel_check``
-reading ``ctx.cancel_flag`` and threads non-``None`` ``TurnControls`` fields
-as kwargs. The second backend ``direct_rlm`` is a stub that raises
+delegates to the explicit ``agent_runtime.aiter_chat_turn_stream()`` with a
+``cancel_check`` reading ``ctx.cancel_flag`` and an explicit allowlist of
+legacy runtime kwargs: ``trace``, ``docs_path``, ``repo_url``, ``repo_ref``,
+``context_paths``, and ``batch_concurrency``. ``trace_mode`` is accepted by the
+transport/context layer but is not currently forwarded to the legacy
+``AgentRuntime.aiter_chat_turn_stream()``; future direct runtime
+implementations may consume it explicitly. ``ctx.prepared.planner_lm`` remains
+the DSPy planner LM and is not the AgentRuntime. The second backend
+``direct_rlm`` is a stub that raises
 ``NotImplementedError`` before any agent method is called — it is **not
 implemented** in Phase 2A.
 

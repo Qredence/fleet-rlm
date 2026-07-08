@@ -65,6 +65,16 @@ class _FakeAgent:
         yield RuntimeEvent(kind=RuntimeEventKind.DONE, text="done", payload={"history_turns": 1})
 
 
+class _FakePlannerLM:
+    """Planner LM stand-in that must not be used as the AgentRuntime."""
+
+    def __init__(self) -> None:
+        self.execution_mode: str | None = None
+
+    def set_execution_mode(self, mode: str) -> None:
+        self.execution_mode = mode
+
+
 # ── project_chat golden tests ────────────────────────────────────────────────
 
 
@@ -258,10 +268,13 @@ async def test_stream_agent_turn_builds_context_and_delegates_to_stream_turn() -
     from fleet_rlm.api.routers.ws.stream_events import WorkspaceTaskRequest, stream_agent_turn
 
     runtime = _FakePreparedRuntime()
+    planner_lm = _FakePlannerLM()
+    agent_runtime = _FakeAgent()
+    runtime.planner_lm = planner_lm
     identity = _FakeIdentity()
 
     request = WorkspaceTaskRequest(
-        agent=runtime.planner_lm,
+        agent=agent_runtime,
         message="hello world",
         execution_mode="rlm",
         trace=True,
@@ -293,8 +306,9 @@ async def test_stream_agent_turn_builds_context_and_delegates_to_stream_turn() -
     assert events[0].text == "hello"
     assert events[1].kind == RuntimeEventKind.DONE
 
-    # Verify execution mode was set on agent via stream_turn
-    assert runtime.planner_lm.execution_mode == "rlm"
+    # Verify execution mode was set on the AgentRuntime, not the planner LM.
+    assert agent_runtime.execution_mode == "rlm"
+    assert planner_lm.execution_mode is None
 
 
 @pytest.mark.asyncio

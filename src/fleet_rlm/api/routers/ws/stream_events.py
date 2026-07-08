@@ -171,7 +171,7 @@ async def stream_agent_turn(
             ),
         )
         event_count = 0
-        stream = stream_turn(ctx, request.message)
+        stream = stream_turn(ctx=ctx, agent_runtime=request.agent, message=request.message)
         try:
             while True:
                 with _safe_stream_span(

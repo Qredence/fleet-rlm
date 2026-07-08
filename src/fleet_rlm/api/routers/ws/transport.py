@@ -25,6 +25,7 @@ from ...dependencies import (
     build_unauthenticated_identity,
     get_ws_ticket_deps_from_websocket,
 )
+from ...runtime_services.chat_prepare_errors import public_prepare_error_envelope
 from ...runtime_services.run_lifecycle import ExecutionLifecycleManager
 from ...runtime_services.stream_failures import classify_stream_failure
 from ...schemas import WSMessage
@@ -225,11 +226,7 @@ def resolve_session_identity(
 
 def chat_startup_error_payload(exc: Exception) -> dict[str, object]:
     """Build a stable websocket error envelope for startup failures."""
-    error_code = classify_stream_failure(exc)
-    message = f"Server error: {str(exc)}"
-    return _error_envelope(
-        code=error_code,
-        message=message,
+    return public_prepare_error_envelope(
         details={"error_type": type(exc).__name__},
     )
 

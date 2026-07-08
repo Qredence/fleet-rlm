@@ -52,6 +52,8 @@ def _http_error_code(status_code: int) -> str:
 
 def _http_exception_message(exc: HTTPException | StarletteHTTPException) -> str:
     detail = exc.detail
+    if isinstance(detail, dict) and "message" in detail:
+        return str(detail["message"])
     if isinstance(detail, str) and detail.strip():
         return detail
     return "HTTP request failed."
@@ -86,11 +88,14 @@ async def http_exception_handler(request: Request, exc: Exception) -> JSONRespon
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     headers = exc.headers if isinstance(exc, HTTPException | StarletteHTTPException) else None
+    code = _http_error_code(exc.status_code)
+    if isinstance(exc.detail, dict) and "code" in exc.detail:
+        code = str(exc.detail["code"])
     return build_error_response(
-        code=_http_error_code(exc.status_code),
+        code=code,
         message=_http_exception_message(exc),
         status_code=exc.status_code,
-        detail=exc.detail if not isinstance(exc.detail, str) else None,
+        detail=exc.detail if not isinstance(exc.detail, str) and not isinstance(exc.detail, dict) else None,
         headers=headers,
     )
 

@@ -1,8 +1,8 @@
 """POST /api/chat SSE endpoint for AI SDK UIMessage v1 streaming.
 
 Mounted at app root (``/api/chat``) via ``main.py``, NOT inside the
-``api_v1`` prefix.  Uses ``StreamingResponse(media_type="text/event-stream")``
-with ``x-vercel-ai-ui-message-stream: v1`` header.
+``api_v1`` prefix. Uses FastAPI's native ``EventSourceResponse`` with
+``x-vercel-ai-ui-message-stream: v1`` header.
 """
 
 from __future__ import annotations
@@ -10,22 +10,26 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from inspect import isawaitable
+from typing import Annotated, Any
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
-from starlette import status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from fleet_rlm.api.dependencies import (
     ConfigDepsDep,
     DiagnosticsDepsDep,
     HTTPIdentityDep,
+    InterpreterPoolDepsDep,
     LmDepsDep,
     PersistenceDepsDep,
 )
 from fleet_rlm.api.events.project_sse import project_sse
 from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext, TurnControls
-from fleet_rlm.api.runtime_services.chat_runtime import prepare_chat_runtime
+from fleet_rlm.api.runtime_services.chat_prepare_errors import public_prepare_error_detail
+from fleet_rlm.api.runtime_services.chat_runtime import build_chat_agent_context, prepare_chat_runtime
 from fleet_rlm.api.runtime_services.stream_turn import stream_turn
 from fleet_rlm.api.schemas.chat import ChatMessage, ChatRequest
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
@@ -119,30 +123,52 @@ async def _ensure_turn_preamble(
 
 async def _build_and_stream(
     ctx: ChatExecutionContext,
+    agent_runtime: object,
     user_message: str,
     request: Request,
     cancel_flag: dict[str, bool],
-) -> AsyncIterator[str]:
+) -> AsyncIterator[ServerSentEvent]:
     """Run ``stream_turn`` + ``project_sse`` with cancellation awareness.
 
-    Yields SSE ``data:`` lines.  Catches exceptions after headers have been
+    Yields SSE events. Catches exceptions after headers have been
     committed (HTTP 200 sent) and emits ``error`` + ``[DONE]`` to produce a
     well-formed terminal.
     """
     try:
-        event_iter = _ensure_turn_preamble(stream_turn(ctx, user_message))
+        event_iter = _ensure_turn_preamble(_runtime_event_stream(ctx, agent_runtime, user_message))
         async for line in project_sse(event_iter, cancel_flag=cancel_flag):
             if await request.is_disconnected():
                 cancel_flag["cancelled"] = True
-            yield line
+            yield _server_sent_event_from_data_line(line)
     except _SSEPrepareError:
         # Raised by _sse_send_error — caught earlier; this path is defensive.
         raise
     except Exception as exc:
         # Error after headers already committed — emit error + [DONE].
         logger.debug("Error during SSE streaming: %s", exc, exc_info=True)
-        yield f"data: {json.dumps({'type': 'error', 'text': str(exc)})}\n\n"
-        yield "data: [DONE]\n\n"
+        yield ServerSentEvent(raw_data=json.dumps({"type": "error", "text": "Stream failed"}))
+        yield ServerSentEvent(raw_data="[DONE]")
+
+
+async def _runtime_event_stream(
+    ctx: ChatExecutionContext,
+    agent_runtime: object,
+    user_message: str,
+) -> AsyncIterator[RuntimeEvent]:
+    """Normalize ``stream_turn`` outputs to an async iterator of runtime events."""
+    event_stream: Any = stream_turn(ctx=ctx, agent_runtime=agent_runtime, message=user_message)
+    if isawaitable(event_stream):
+        event_stream = await event_stream
+    async for event in event_stream:
+        yield event
+
+
+def _server_sent_event_from_data_line(line: str) -> ServerSentEvent:
+    """Convert an existing ``data:`` wire line into FastAPI's SSE event type."""
+    stripped = line.rstrip("\n")
+    if stripped.startswith("data: "):
+        return ServerSentEvent(raw_data=stripped.removeprefix("data: "))
+    return ServerSentEvent(raw_data=stripped)
 
 
 def _status_for_prepare_code(code: str) -> int:
@@ -157,37 +183,23 @@ def _status_for_prepare_code(code: str) -> int:
     return mapping.get(code, 500)
 
 
-@router.post(
-    "",
-    response_model=None,
-    responses={
-        200: {
-            "description": "SSE streaming response. Returns a Server-Sent Events stream with "
-            "Content-Type: text/event-stream and x-vercel-ai-ui-message-stream: v1 header.",
-            "content": {"text/event-stream": {}},
-        },
-    },
-)
-async def chat_completion(
+@dataclass(slots=True)
+class _PreparedChatStream:
+    events: AsyncIterator[ServerSentEvent]
+
+
+async def _prepare_chat_event_stream(
     request: Request,
+    response: Response,
     body: ChatRequest,
     identity: HTTPIdentityDep,
     config_deps: ConfigDepsDep,
     lm_deps: LmDepsDep,
     persistence_deps: PersistenceDepsDep,
     diagnostics_deps: DiagnosticsDepsDep,
-) -> StreamingResponse:
-    """Handle ``POST /api/chat`` SSE streaming chat completion.
-
-    Authenticates via ``require_http_identity`` (HTTPBearer → NormalizedIdentity),
-    builds a ``ChatExecutionContext`` from the request and identity, calls
-    ``stream_turn()``, and projects via ``project_sse()`` over a
-    ``StreamingResponse(media_type="text/event-stream")``.
-
-    Cancellation is driven by ``request.is_disconnected()`` flipping
-    ``cancel_flag["cancelled"]``; the runtime's ``cancel_check`` polls the
-    same flag.
-    """
+    interpreter_pool_deps: InterpreterPoolDepsDep,
+) -> _PreparedChatStream:
+    """Resolve all pre-stream dependencies before FastAPI opens the SSE response."""
     # ── 1. Extract the latest user message ────────────────────────────
     user_message = _extract_latest_user_message(body.messages)
     if user_message is None:
@@ -213,54 +225,97 @@ async def chat_completion(
         status_code = _status_for_prepare_code(e.code)
         raise HTTPException(
             status_code=status_code,
-            detail={"code": e.code, "message": e.message},
+            detail=public_prepare_error_detail(code=e.code, message=e.message),
         )
+    except Exception as exc:
+        logger.debug("Error preparing SSE runtime: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=public_prepare_error_detail(),
+        ) from exc
 
     if runtime is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Runtime preparation returned no result",
+            detail=public_prepare_error_detail(),
         )
 
     # ── 3. Build ChatExecutionContext ─────────────────────────────────
     cfg = config_deps.config
     cancel_flag: dict[str, bool] = {"cancelled": False}
 
-    ctx = ChatExecutionContext(
-        prepared=runtime,
-        identity=identity,
-        session_id=body.session_id,
-        canonical_workspace_id=_sanitize_id(
-            identity.tenant_claim,
-            cfg.ws_default_workspace_id,
-        ),
-        canonical_user_id=_sanitize_id(
-            identity.user_claim,
-            cfg.ws_default_user_id,
-        ),
-        owner_tenant_claim=identity.tenant_claim,
-        owner_user_claim=identity.user_claim,
-        cancel_flag=cancel_flag,
-        controls=TurnControls(
-            execution_mode=body.execution_mode,
-            repo_url=body.repo_url,
-            repo_ref=body.repo_ref,
-            context_paths=body.context_paths or [],
-            batch_concurrency=body.batch_concurrency,
-            docs_path=body.docs_path,
-            trace=body.trace,
-            trace_mode=body.trace_mode,
-            selected_skill_ids=body.selected_skill_ids or [],
-        ),
-    )
+    try:
+        agent_context = await build_chat_agent_context(runtime, pool=interpreter_pool_deps.pool)
+    except Exception as exc:
+        logger.debug("Error building agent context: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=public_prepare_error_detail(),
+        ) from exc
 
-    # ── 4. Return streaming response ──────────────────────────────────
-    return StreamingResponse(
-        _build_and_stream(ctx, user_message, request, cancel_flag),
-        media_type="text/event-stream",
-        headers={
-            "x-vercel-ai-ui-message-stream": "v1",
-            "Cache-Control": "no-cache",
-            "x-accel-buffering": "no",
+    async def _event_stream() -> AsyncIterator[ServerSentEvent]:
+        async with agent_context as agent:
+            ctx = ChatExecutionContext(
+                prepared=runtime,
+                identity=identity,
+                session_id=body.session_id,
+                canonical_workspace_id=_sanitize_id(
+                    identity.tenant_claim,
+                    cfg.ws_default_workspace_id,
+                ),
+                canonical_user_id=_sanitize_id(
+                    identity.user_claim,
+                    cfg.ws_default_user_id,
+                ),
+                owner_tenant_claim=identity.tenant_claim,
+                owner_user_claim=identity.user_claim,
+                cancel_flag=cancel_flag,
+                controls=TurnControls(
+                    execution_mode=body.execution_mode,
+                    repo_url=body.repo_url,
+                    repo_ref=body.repo_ref,
+                    context_paths=body.context_paths or [],
+                    batch_concurrency=body.batch_concurrency,
+                    docs_path=body.docs_path,
+                    trace=body.trace,
+                    trace_mode=body.trace_mode,
+                    selected_skill_ids=body.selected_skill_ids or [],
+                ),
+            )
+            async for event in _build_and_stream(ctx, agent, user_message, request, cancel_flag):
+                yield event
+
+    response.headers["x-vercel-ai-ui-message-stream"] = "v1"
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["x-accel-buffering"] = "no"
+    return _PreparedChatStream(events=_event_stream())
+
+
+ChatEventStreamDep = Annotated[_PreparedChatStream, Depends(_prepare_chat_event_stream)]
+
+
+@router.post(
+    "",
+    response_class=EventSourceResponse,
+    responses={
+        200: {
+            "description": "SSE streaming response. Returns a Server-Sent Events stream with "
+            "Content-Type: text/event-stream and x-vercel-ai-ui-message-stream: v1 header.",
+            "content": {"text/event-stream": {}},
         },
-    )
+    },
+)
+async def chat_completion(prepared_stream: ChatEventStreamDep) -> AsyncIterator[ServerSentEvent]:
+    """Handle ``POST /api/chat`` SSE streaming chat completion.
+
+    Authenticates via ``require_http_identity`` (HTTPBearer → NormalizedIdentity),
+    builds a ``ChatExecutionContext`` from the request and identity, calls
+    ``stream_turn()``, and projects via ``project_sse()`` over an
+    ``EventSourceResponse``.
+
+    Cancellation is driven by ``request.is_disconnected()`` flipping
+    ``cancel_flag["cancelled"]``; the runtime's ``cancel_check`` polls the
+    same flag.
+    """
+    async for event in prepared_stream.events:
+        yield event

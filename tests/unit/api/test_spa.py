@@ -124,6 +124,50 @@ def test_ui_unavailable_payload_mentions_dev_server(monkeypatch: pytest.MonkeyPa
     assert ":5173" in payload["hint"]
 
 
+def test_mount_spa_serves_client_route_without_shadowing_api(tmp_path: Path) -> None:
+    ui_root = tmp_path / "dist" / "client"
+    ui_root.mkdir(parents=True)
+    (ui_root / "index.html").write_text("<html>fresh</html>", encoding="utf-8")
+
+    app = FastAPI()
+
+    @app.get("/api/health")
+    async def api_health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    spa.mount_spa(app, ui_root)
+    client = TestClient(app)
+
+    api_response = client.get("/api/health")
+    assert api_response.status_code == 200
+    assert api_response.json() == {"status": "ok"}
+
+    app_response = client.get("/app/workspace")
+    assert app_response.status_code == 200
+    assert "fresh" in app_response.text
+
+
+def test_mount_spa_serves_static_asset(tmp_path: Path) -> None:
+    ui_root = tmp_path / "dist" / "client"
+    assets_root = ui_root / "assets"
+    assets_root.mkdir(parents=True)
+    (ui_root / "index.html").write_text("<html>fresh</html>", encoding="utf-8")
+    (assets_root / "app.js").write_text("console.log('ok')", encoding="utf-8")
+
+    app = FastAPI()
+
+    @app.get("/api/health")
+    async def api_health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    spa.mount_spa(app, ui_root)
+
+    response = TestClient(app).get("/assets/app.js")
+
+    assert response.status_code == 200
+    assert "console.log" in response.text
+
+
 def test_mount_spa_handles_entrypoint_deleted_after_startup(tmp_path: Path) -> None:
     ui_root = tmp_path / "dist" / "client"
     ui_root.mkdir(parents=True)
@@ -141,8 +185,4 @@ def test_mount_spa_handles_entrypoint_deleted_after_startup(tmp_path: Path) -> N
 
     response = TestClient(app).get("/app/workspace")
 
-    assert response.status_code == 503
-    assert response.json()["error"] in {
-        "UI build not found.",
-        "Packaged UI assets are missing from this installation.",
-    }
+    assert response.status_code == 404

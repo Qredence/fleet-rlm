@@ -155,7 +155,9 @@ generator:
 
 ```python
 async def stream_turn(
+    *,
     ctx: ChatExecutionContext,
+    agent_runtime: AgentRuntime,
     message: str,
 ) -> AsyncIterator[RuntimeEvent]:
 ```
@@ -163,11 +165,17 @@ async def stream_turn(
 - Resolves the execution backend at the top of the function (per-request
   ``TurnControls.execution_backend`` if not ``None``, else
   ``AppConfig.execution_backend``)
-- ``legacy_agent_runtime`` (default): delegates to
-  ``AgentRuntime.aiter_chat_turn_stream()`` with a ``cancel_check`` reading
-  ``ctx.cancel_flag.get("cancelled", False)``; threads non-``None``
-  ``TurnControls`` fields as kwargs; calls ``agent.set_execution_mode()``
-  when ``ctx.controls.execution_mode`` is not ``None``
+- ``legacy_agent_runtime`` (default): delegates to the explicit
+  ``agent_runtime.aiter_chat_turn_stream()`` with a ``cancel_check`` reading
+  ``ctx.cancel_flag.get("cancelled", False)``; threads only the supported
+  legacy runtime kwargs (``trace``, ``docs_path``, ``repo_url``, ``repo_ref``,
+  ``context_paths``, ``batch_concurrency``); calls
+  ``agent_runtime.set_execution_mode()`` when ``ctx.controls.execution_mode``
+  is not ``None``. ``ctx.prepared.planner_lm`` remains the DSPy planner LM and
+  must not be treated as the AgentRuntime.
+- ``trace_mode`` and ``selected_skill_ids`` stay accepted on transport/context
+  models but are not legacy ``AgentRuntime.aiter_chat_turn_stream()`` kwargs.
+  Future direct runtime backends may consume them explicitly.
 - ``direct_rlm``: raises ``NotImplementedError`` **before** any agent
   method, session restore, or stream call — it is a stub only, **not
   implemented** in Phase 2A
@@ -308,8 +316,10 @@ not ``None``, wins over the config default.
 
 **Dispatch:** Inside ``stream_turn()``, the resolved backend selects the
 execution path via ``if/elif``. ``legacy_agent_runtime`` runs the unchanged
-Phase 1 path. ``direct_rlm`` raises ``NotImplementedError`` before any agent
-method — it is a **stub only, not implemented** in Phase 2A.
+Phase 1 path against the explicit ``agent_runtime`` argument and raises
+``TypeError`` if that object is not AgentRuntime-like. ``direct_rlm`` raises
+``NotImplementedError`` before any agent method — it is a **stub only, not
+implemented** in Phase 2A.
 
 **Resolution order:**
 1. ``ctx.controls.execution_backend`` (per-request override, if not ``None``)

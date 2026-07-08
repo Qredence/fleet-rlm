@@ -75,7 +75,7 @@ Simple `if/elif` inside `stream_turn()`:
 backend = ctx.controls.execution_backend or _resolve_config_backend()
 
 if backend is ExecutionBackend.legacy_agent_runtime:
-    # unchanged Phase 1 path: agent.aiter_chat_turn_stream(**kwargs)
+    # unchanged Phase 1 path: agent_runtime.aiter_chat_turn_stream(**kwargs)
 elif backend is ExecutionBackend.direct_rlm:
     raise NotImplementedError(
         "direct_rlm execution backend is not yet implemented"
@@ -87,6 +87,20 @@ else:
 No registry, no strategy ABC, no `BackendRunner` protocol — the `if/elif` is
 the smallest change that establishes the seam. A registry/protocol can be
 extracted in Phase 2B when the second real backend lands.
+
+The legacy branch receives the context-managed AgentRuntime-like object
+explicitly via `stream_turn(*, ctx, agent_runtime, message)`. It must not read
+`ctx.prepared.planner_lm` as the runtime; `planner_lm` remains the prepared
+DSPy LM dependency. If `agent_runtime` does not expose
+`aiter_chat_turn_stream`, the legacy branch raises a clear `TypeError` before
+calling `set_execution_mode()` or mutating runtime state.
+
+The legacy branch forwards an explicit allowlist of kwargs supported by
+`AgentRuntime.aiter_chat_turn_stream()` (`message`, `cancel_check`, `trace`,
+`docs_path`, `repo_url`, `repo_ref`, `context_paths`, `batch_concurrency`).
+`trace_mode` and `selected_skill_ids` remain transport/context controls and are
+not legacy runtime kwargs. Future direct-RLM/runtime implementations may
+consume them explicitly.
 
 ### 5. `ChatRequest` unchanged
 
@@ -123,6 +137,10 @@ before any runtime state is mutated.
 - `stream_turn()` with `legacy_agent_runtime` produces byte-identical
   `RuntimeEvent` sequences as Phase 1 (regression test against the existing
   fixture-based stubs).
+- `stream_turn()` with `legacy_agent_runtime` rejects a DSPy LM / wrong object
+  with a clear `TypeError` before calling `set_execution_mode()`.
+- `stream_turn()` with `legacy_agent_runtime` does not forward context-only
+  controls such as `trace_mode` to `AgentRuntime.aiter_chat_turn_stream()`.
 - `stream_turn()` with `direct_rlm` raises `NotImplementedError` with a clear
   message, before mutating any agent/runtime state.
 - Per-request `TurnControls.execution_backend` override wins over

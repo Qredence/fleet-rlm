@@ -115,6 +115,52 @@ class _MidStreamCancellingAgent(_StubAgent):
             )
 
 
+class _StrictLegacyAgent:
+    """AgentRuntime-like fake that rejects unsupported kwargs by signature."""
+
+    def __init__(self) -> None:
+        self.execution_mode: str | None = None
+        self.captured_kwargs: dict[str, Any] | None = None
+
+    def set_execution_mode(self, mode: str) -> None:
+        self.execution_mode = mode
+
+    async def aiter_chat_turn_stream(
+        self,
+        message: str,
+        trace: bool = True,
+        cancel_check: Any | None = None,
+        *,
+        docs_path: str | None = None,
+        repo_url: str | None = None,
+        repo_ref: str | None = None,
+        context_paths: list[str] | None = None,
+        batch_concurrency: int | None = None,
+    ) -> AsyncIterator[RuntimeEvent]:
+        self.captured_kwargs = {
+            "message": message,
+            "trace": trace,
+            "cancel_check": cancel_check,
+            "docs_path": docs_path,
+            "repo_url": repo_url,
+            "repo_ref": repo_ref,
+            "context_paths": context_paths,
+            "batch_concurrency": batch_concurrency,
+        }
+        yield RuntimeEvent(kind=RuntimeEventKind.DONE, text="done", payload={"history_turns": 1})
+
+
+class LM:
+    """Wrong-object stand-in matching the observed DSPy LM class name."""
+
+    def __init__(self) -> None:
+        self.set_execution_mode_called = False
+
+    def set_execution_mode(self, mode: str) -> None:
+        _ = mode
+        self.set_execution_mode_called = True
+
+
 # ---------------------------------------------------------------------------
 # Stub repository / persistence for session restoration
 # ---------------------------------------------------------------------------
@@ -149,7 +195,12 @@ def stub_agent() -> _StubAgent:
 
 @pytest.fixture
 def sample_prepared(stub_agent: _StubAgent) -> PreparedChatRuntime:
-    """Minimal PreparedChatRuntime whose planner_lm IS the stub agent."""
+    """Minimal PreparedChatRuntime for stream_turn tests.
+
+    Most legacy-path unit tests pass ``planner_lm`` as ``agent_runtime``
+    explicitly to avoid repeating a separate runtime fixture in every case.
+    Production callers must pass their context-managed AgentRuntime instead.
+    """
     from types import SimpleNamespace
 
     cfg = SimpleNamespace(
@@ -158,7 +209,7 @@ def sample_prepared(stub_agent: _StubAgent) -> PreparedChatRuntime:
     )
     return PreparedChatRuntime(
         cfg=cfg,  # type: ignore[arg-type]
-        planner_lm=stub_agent,  # In production, transport layer sets this to AgentRuntime
+        planner_lm=stub_agent,
         delegate_lm=None,
         repository=object(),
         persistence=None,
@@ -213,12 +264,15 @@ class TestStreamTurnIsAsyncGenerator:
         assert inspect.isasyncgenfunction(stream_turn)
 
     def test_callable_without_websocket_request(self) -> None:
-        """stream_turn signature is (ctx, message) only — no WebSocket/Request."""
+        """stream_turn signature is keyword-only and transport-free."""
         import inspect
 
         sig = inspect.signature(stream_turn)
-        param_names = list(sig.parameters.keys())
-        assert param_names == ["ctx", "message"]
+        params = sig.parameters
+        assert list(params.keys()) == ["ctx", "agent_runtime", "message"]
+        assert params["ctx"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert params["agent_runtime"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert params["message"].kind is inspect.Parameter.KEYWORD_ONLY
 
     def test_no_transport_imports_in_source(self) -> None:
         """stream_turn module does not import WebSocket or Request."""
@@ -269,7 +323,9 @@ class TestYieldsRuntimeEvent:
     ) -> None:
         """Every yielded item is a RuntimeEvent instance."""
         events: list[RuntimeEvent] = []
-        async for event in stream_turn(sample_context, "hello"):
+        async for event in stream_turn(
+            ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+        ):
             events.append(event)
 
         assert len(events) >= 1
@@ -282,7 +338,9 @@ class TestYieldsRuntimeEvent:
         sample_context: ChatExecutionContext,
     ) -> None:
         """No bare dict/tuple/str yielded — only RuntimeEvent."""
-        async for event in stream_turn(sample_context, "hello"):
+        async for event in stream_turn(
+            ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+        ):
             assert isinstance(event, RuntimeEvent)
 
 
@@ -302,7 +360,12 @@ class TestDelegatesToRuntime:
         stub_agent: _StubAgent,
     ) -> None:
         """stream_turn delegates to agent.aiter_chat_turn_stream once."""
-        events = [e async for e in stream_turn(sample_context, "hello")]
+        events = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
 
         assert stub_agent.captured_kwargs is not None
         assert stub_agent.captured_kwargs["message"] == "hello"
@@ -315,7 +378,12 @@ class TestDelegatesToRuntime:
         stub_agent: _StubAgent,
     ) -> None:
         """The cancel_check lambda returns ctx.cancel_flag.get('cancelled', False)."""
-        events = [e async for e in stream_turn(sample_context, "hello")]
+        events = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
 
         assert stub_agent.captured_kwargs is not None
         cancel_check = stub_agent.captured_kwargs["cancel_check"]
@@ -341,7 +409,12 @@ class TestDelegatesToRuntime:
         agent = sample_context.prepared.planner_lm
         assert isinstance(agent, _StubAgent)
 
-        [e async for e in stream_turn(sample_context, "hello")]
+        [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
 
         assert agent.captured_kwargs is not None
         cancel_check = agent.captured_kwargs["cancel_check"]
@@ -354,14 +427,14 @@ class TestDelegatesToRuntime:
 
 
 class TestThreadsTurnControls:
-    """VAL-REF-009: Non-None TurnControls fields thread into aiter_chat_turn_stream kwargs."""
+    """VAL-REF-009: Supported TurnControls fields thread into legacy runtime kwargs."""
 
     @pytest.mark.asyncio
     async def test_all_fields_threaded_when_set(
         self,
         sample_prepared: PreparedChatRuntime,
     ) -> None:
-        """All non-None TurnControls fields appear in kwargs."""
+        """Supported non-None TurnControls fields appear in kwargs."""
         from fleet_rlm.api.auth.types import NormalizedIdentity
 
         controls = TurnControls(
@@ -391,7 +464,7 @@ class TestThreadsTurnControls:
         agent = ctx.prepared.planner_lm
         assert isinstance(agent, _StubAgent)
 
-        _ = [e async for e in stream_turn(ctx, "hello")]
+        _ = [e async for e in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hello")]
 
         assert agent.captured_kwargs is not None
         # execution_mode is handled by set_execution_mode, not kwargs.
@@ -402,8 +475,6 @@ class TestThreadsTurnControls:
             "batch_concurrency",
             "docs_path",
             "trace",
-            "trace_mode",
-            "selected_skill_ids",
         ):
             expected = getattr(controls, key)
             if expected is not None:
@@ -415,6 +486,10 @@ class TestThreadsTurnControls:
                     assert list(actual) == expected
                 else:
                     assert actual == expected
+        assert controls.trace_mode == "full"
+        assert controls.selected_skill_ids == ["skill-a", "skill-b"]
+        assert "trace_mode" not in agent.captured_kwargs
+        assert "selected_skill_ids" not in agent.captured_kwargs
 
     @pytest.mark.asyncio
     async def test_none_fields_not_forwarded(
@@ -423,7 +498,12 @@ class TestThreadsTurnControls:
         stub_agent: _StubAgent,
     ) -> None:
         """None/empty fields are not forwarded as non-None."""
-        _ = [e async for e in stream_turn(sample_context, "hello")]
+        _ = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
 
         assert stub_agent.captured_kwargs is not None
         # TurnControls fields that are None should not be in kwargs.
@@ -442,7 +522,12 @@ class TestThreadsTurnControls:
     ) -> None:
         """context_paths is copied (list()) so original isn't mutated."""
         sample_context.controls.context_paths = ["src/", "lib/"]
-        _ = [e async for e in stream_turn(sample_context, "hello")]
+        _ = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
 
         assert stub_agent.captured_kwargs is not None
         assert stub_agent.captured_kwargs["context_paths"] == ["src/", "lib/"]
@@ -452,20 +537,26 @@ class TestThreadsTurnControls:
         assert stub_agent.captured_kwargs["context_paths"] == ["src/", "lib/"]
 
     @pytest.mark.asyncio
-    async def test_selected_skill_ids_copied(
+    async def test_context_only_controls_not_forwarded_to_legacy_runtime(
         self,
         sample_context: ChatExecutionContext,
         stub_agent: _StubAgent,
     ) -> None:
-        """selected_skill_ids is copied so original isn't mutated."""
+        """trace_mode and selected_skill_ids remain context-only for legacy runtime."""
+        sample_context.controls.trace_mode = "full"
         sample_context.controls.selected_skill_ids = ["skill-a"]
-        _ = [e async for e in stream_turn(sample_context, "hello")]
+        _ = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
 
         assert stub_agent.captured_kwargs is not None
-        assert stub_agent.captured_kwargs["selected_skill_ids"] == ["skill-a"]
-
-        sample_context.controls.selected_skill_ids.append("skill-b")
-        assert stub_agent.captured_kwargs["selected_skill_ids"] == ["skill-a"]
+        assert sample_context.controls.trace_mode == "full"
+        assert sample_context.controls.selected_skill_ids == ["skill-a"]
+        assert "trace_mode" not in stub_agent.captured_kwargs
+        assert "selected_skill_ids" not in stub_agent.captured_kwargs
 
 
 # ---------------------------------------------------------------------------
@@ -499,7 +590,7 @@ class TestSetsExecutionMode:
         agent = ctx.prepared.planner_lm
         assert isinstance(agent, _StubAgent)
 
-        _ = [e async for e in stream_turn(ctx, "hello")]
+        _ = [e async for e in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hello")]
 
         assert agent.set_execution_mode_calls == ["simple"]
         assert agent.execution_mode == "simple"
@@ -513,7 +604,12 @@ class TestSetsExecutionMode:
         """set_execution_mode not called when execution_mode is None."""
         assert sample_context.controls.execution_mode is None
 
-        _ = [e async for e in stream_turn(sample_context, "hello")]
+        _ = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
 
         assert stub_agent.set_execution_mode_calls == []
 
@@ -561,7 +657,7 @@ class TestSessionRestoration:
         agent = ctx.prepared.planner_lm
         assert isinstance(agent, _StubAgent)
 
-        _ = [e async for e in stream_turn(ctx, "hello")]
+        _ = [e async for e in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hello")]
 
         assert len(agent.aimport_session_state_calls) == 1
         assert agent.aimport_session_state_calls[0] == session_state
@@ -575,7 +671,12 @@ class TestSessionRestoration:
         """None session_id does not trigger session restoration."""
         assert sample_context.session_id is None
 
-        _ = [e async for e in stream_turn(sample_context, "hello")]
+        _ = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
 
         assert stub_agent.aimport_session_state_calls == []
 
@@ -613,7 +714,7 @@ class TestSessionRestoration:
         agent = ctx.prepared.planner_lm
         assert isinstance(agent, _StubAgent)
 
-        _ = [e async for e in stream_turn(ctx, "hello")]
+        _ = [e async for e in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hello")]
 
         assert len(agent.aimport_session_state_calls) == 1
         assert agent.aimport_session_state_calls[0] == manifest_state
@@ -631,7 +732,12 @@ class TestSessionRestoration:
         sample_context.prepared.persistence = None
         sample_context.prepared.repository = None
 
-        _ = [e async for e in stream_turn(sample_context, "hello")]
+        _ = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
 
         assert stub_agent.aimport_session_state_calls == []
 
@@ -652,9 +758,19 @@ class TestPreparedRuntimeShared:
     ) -> None:
         """Multiple stream_turn calls with same prepared reuse it."""
         # First turn
-        _ = [e async for e in stream_turn(sample_context, "turn1")]
+        _ = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="turn1"
+            )
+        ]
         # Second turn
-        _ = [e async for e in stream_turn(sample_context, "turn2")]
+        _ = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="turn2"
+            )
+        ]
 
         # The prepared runtime is the same object.
         # (stream_turn does not rebuild LMs/repository/persistence)
@@ -668,7 +784,12 @@ class TestPreparedRuntimeShared:
     ) -> None:
         """The agent (planner_lm) is the same across calls."""
         agent1 = sample_context.prepared.planner_lm
-        _ = [e async for e in stream_turn(sample_context, "turn1")]
+        _ = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="turn1"
+            )
+        ]
         agent2 = sample_context.prepared.planner_lm
 
         assert agent1 is agent2
@@ -689,7 +810,12 @@ class TestTerminalEvents:
         sample_context: ChatExecutionContext,
     ) -> None:
         """The last event yielded has kind.is_terminal() True."""
-        events = [e async for e in stream_turn(sample_context, "hello")]
+        events = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
 
         assert len(events) >= 1
         last = events[-1]
@@ -760,7 +886,7 @@ class TestCancelFlagRespected:
         )
 
         events: list[RuntimeEvent] = []
-        async for event in stream_turn(ctx, "hello"):
+        async for event in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hello"):
             events.append(event)
             if len(events) >= 1:
                 # Set cancel flag after first event.
@@ -777,7 +903,12 @@ class TestCancelFlagRespected:
         stub_agent: _StubAgent,
     ) -> None:
         """The cancel_check passed to the agent reads ctx.cancel_flag."""
-        _ = [e async for e in stream_turn(sample_context, "hello")]
+        _ = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
 
         assert stub_agent.captured_kwargs is not None
         cancel_check = stub_agent.captured_kwargs["cancel_check"]
@@ -832,7 +963,7 @@ class TestCancelBeforeFirstEvent:
         )
 
         events: list[RuntimeEvent] = []
-        async for event in stream_turn(ctx, "hello"):
+        async for event in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hello"):
             events.append(event)
 
         # ≤1 terminal event — the runtime yields a single DONE when cancelled.
@@ -871,7 +1002,7 @@ class TestCancelBeforeFirstEvent:
             controls=TurnControls(),
         )
 
-        events = [e async for e in stream_turn(ctx, "hello")]
+        events = [e async for e in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hello")]
 
         # No content events (like TEXT, STATUS, TOOL_CALL).
         for event in events:
@@ -959,17 +1090,19 @@ class TestBuildStreamKwargs:
         kwargs = _build_stream_kwargs(sample_context, "test")
         assert kwargs["batch_concurrency"] == 3
 
-    def test_trace_mode_field(self, sample_context: ChatExecutionContext) -> None:
-        """trace_mode is in kwargs when set."""
+    def test_trace_mode_field_stays_context_only(self, sample_context: ChatExecutionContext) -> None:
+        """trace_mode remains on controls but is not a legacy runtime kwarg."""
         sample_context.controls.trace_mode = "full"
         kwargs = _build_stream_kwargs(sample_context, "test")
-        assert kwargs["trace_mode"] == "full"
+        assert sample_context.controls.trace_mode == "full"
+        assert "trace_mode" not in kwargs
 
-    def test_selected_skill_ids_field(self, sample_context: ChatExecutionContext) -> None:
-        """selected_skill_ids is in kwargs when non-empty."""
+    def test_selected_skill_ids_field_stays_context_only(self, sample_context: ChatExecutionContext) -> None:
+        """selected_skill_ids remains on controls but is not a legacy runtime kwarg."""
         sample_context.controls.selected_skill_ids = ["skill-a"]
         kwargs = _build_stream_kwargs(sample_context, "test")
-        assert kwargs["selected_skill_ids"] == ["skill-a"]
+        assert sample_context.controls.selected_skill_ids == ["skill-a"]
+        assert "selected_skill_ids" not in kwargs
 
     def test_selected_skill_ids_empty_not_in_kwargs(
         self,
@@ -1011,7 +1144,7 @@ class TestDispatch001_ControlsWins:  # noqa: N801
         agent = ctx.prepared.planner_lm
 
         with pytest.raises(NotImplementedError, match="direct_rlm execution backend is not yet implemented"):
-            async for _ in stream_turn(ctx, "hi"):
+            async for _ in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
                 pass
 
         # Verify no agent method was called.
@@ -1038,7 +1171,7 @@ class TestDispatch001_ControlsWins:  # noqa: N801
         )
         agent = ctx.prepared.planner_lm
 
-        events = [e async for e in stream_turn(ctx, "hello")]
+        events = [e async for e in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hello")]
 
         # Legacy path: events were yielded, aiter_chat_turn_stream was called.
         assert len(events) > 0
@@ -1075,7 +1208,7 @@ class TestDispatch002_FallsBackToConfig:  # noqa: N801
         agent = ctx.prepared.planner_lm
 
         with pytest.raises(NotImplementedError, match="direct_rlm execution backend is not yet implemented"):
-            async for _ in stream_turn(ctx, "hi"):
+            async for _ in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
                 pass
 
         assert agent.calls == []
@@ -1091,13 +1224,36 @@ class TestDispatch003_BothUnsetToLegacy:  # noqa: N801
         sample_context: ChatExecutionContext,
     ) -> None:
         """Default controls + default config → legacy path runs normally."""
-        events = [e async for e in stream_turn(sample_context, "hello")]
+        events = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
         assert len(events) > 0
         # No dispatch-related exceptions.
         for event in events:
             assert isinstance(event, RuntimeEvent)
         # Last event is terminal.
         assert events[-1].kind.is_terminal()
+
+    @pytest.mark.asyncio
+    async def test_legacy_path_rejects_lm_object_before_mutation(
+        self,
+        sample_context: ChatExecutionContext,
+    ) -> None:
+        """Regression: DSPy LM objects must not be treated as AgentRuntime."""
+        wrong_runtime = LM()
+        sample_context.controls.execution_mode = "rlm"
+
+        with pytest.raises(
+            TypeError,
+            match="legacy_agent_runtime backend expected AgentRuntime-like object, got LM",
+        ):
+            async for _ in stream_turn(ctx=sample_context, agent_runtime=wrong_runtime, message="hello"):
+                pass
+
+        assert wrong_runtime.set_execution_mode_called is False
 
 
 class TestDispatch004_KwargsIdenticalToPhase1:  # noqa: N801
@@ -1111,7 +1267,12 @@ class TestDispatch004_KwargsIdenticalToPhase1:  # noqa: N801
         stub_agent: _StubAgent,
     ) -> None:
         """kwargs include message and cancel_check (Phase 1 invariants)."""
-        _ = [e async for e in stream_turn(sample_context, "hello")]
+        _ = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
         assert stub_agent.captured_kwargs is not None
         assert stub_agent.captured_kwargs["message"] == "hello"
         assert callable(stub_agent.captured_kwargs["cancel_check"])
@@ -1123,7 +1284,12 @@ class TestDispatch004_KwargsIdenticalToPhase1:  # noqa: N801
         stub_agent: _StubAgent,
     ) -> None:
         """cancel_check returns False when not cancelled, True when cancelled."""
-        _ = [e async for e in stream_turn(sample_context, "hello")]
+        _ = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
         assert stub_agent.captured_kwargs is not None
         cancel_check = stub_agent.captured_kwargs["cancel_check"]
         assert cancel_check() is False
@@ -1135,7 +1301,7 @@ class TestDispatch004_KwargsIdenticalToPhase1:  # noqa: N801
         self,
         sample_prepared: PreparedChatRuntime,
     ) -> None:
-        """All non-None TurnControls fields appear in kwargs identically to Phase 1."""
+        """Supported non-None TurnControls fields appear in legacy kwargs."""
         from fleet_rlm.api.auth.types import NormalizedIdentity
 
         controls = TurnControls(
@@ -1163,7 +1329,7 @@ class TestDispatch004_KwargsIdenticalToPhase1:  # noqa: N801
         agent = ctx.prepared.planner_lm
         assert isinstance(agent, _StubAgent)
 
-        _ = [e async for e in stream_turn(ctx, "hello")]
+        _ = [e async for e in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hello")]
         assert agent.captured_kwargs is not None
         for key in (
             "repo_url",
@@ -1172,8 +1338,6 @@ class TestDispatch004_KwargsIdenticalToPhase1:  # noqa: N801
             "batch_concurrency",
             "docs_path",
             "trace",
-            "trace_mode",
-            "selected_skill_ids",
         ):
             expected = getattr(controls, key)
             if expected is not None:
@@ -1183,6 +1347,53 @@ class TestDispatch004_KwargsIdenticalToPhase1:  # noqa: N801
                     assert list(actual) == expected
                 else:
                     assert actual == expected
+        assert controls.trace_mode == "full"
+        assert controls.selected_skill_ids == ["skill-a", "skill-b"]
+        assert "trace_mode" not in agent.captured_kwargs
+        assert "selected_skill_ids" not in agent.captured_kwargs
+
+    @pytest.mark.asyncio
+    async def test_trace_mode_does_not_break_strict_legacy_runtime(
+        self,
+        sample_prepared: PreparedChatRuntime,
+    ) -> None:
+        """trace_mode is not passed to strict AgentRuntime signatures."""
+        from fleet_rlm.api.auth.types import NormalizedIdentity
+
+        agent = _StrictLegacyAgent()
+        prepared = PreparedChatRuntime(
+            cfg=sample_prepared.cfg,
+            planner_lm=agent,
+            delegate_lm=sample_prepared.delegate_lm,
+            repository=object(),
+            persistence=None,
+            persistence_required=False,
+            identity_rows=None,
+        )
+        ctx = ChatExecutionContext(
+            prepared=prepared,
+            identity=NormalizedIdentity(tenant_claim="t", user_claim="u", email="t@t.com"),
+            session_id=None,
+            canonical_workspace_id="w",
+            canonical_user_id="u",
+            owner_tenant_claim="t",
+            owner_user_claim="u",
+            cancel_flag={"cancelled": False},
+            controls=TurnControls(
+                trace=True,
+                trace_mode="verbose",
+                selected_skill_ids=["skill-a"],
+                docs_path="./docs",
+            ),
+        )
+
+        events = [e async for e in stream_turn(ctx=ctx, agent_runtime=agent, message="hello")]
+
+        assert events[-1].kind is RuntimeEventKind.DONE
+        assert agent.captured_kwargs is not None
+        assert agent.captured_kwargs["message"] == "hello"
+        assert agent.captured_kwargs["trace"] is True
+        assert agent.captured_kwargs["docs_path"] == "./docs"
 
 
 class TestDispatch005_SetExecutionMode:  # noqa: N801
@@ -1211,7 +1422,7 @@ class TestDispatch005_SetExecutionMode:  # noqa: N801
         agent = ctx.prepared.planner_lm
         assert isinstance(agent, _StubAgent)
 
-        _ = [e async for e in stream_turn(ctx, "hello")]
+        _ = [e async for e in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hello")]
         assert agent.set_execution_mode_calls == ["auto"]
 
     @pytest.mark.asyncio
@@ -1222,7 +1433,12 @@ class TestDispatch005_SetExecutionMode:  # noqa: N801
     ) -> None:
         """set_execution_mode not called when execution_mode is None."""
         assert sample_context.controls.execution_mode is None
-        _ = [e async for e in stream_turn(sample_context, "hello")]
+        _ = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
         assert stub_agent.set_execution_mode_calls == []
 
     @pytest.mark.asyncio
@@ -1247,7 +1463,7 @@ class TestDispatch005_SetExecutionMode:  # noqa: N801
         agent = ctx.prepared.planner_lm
         assert isinstance(agent, _StubAgent)
 
-        _ = [e async for e in stream_turn(ctx, "hello")]
+        _ = [e async for e in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hello")]
         # set_execution_mode should be called before aiter_chat_turn_stream
         # We can verify ordering by checking the calls list.
         set_mode_index = next(i for i, c in enumerate(agent.set_execution_mode_calls) if c == "auto")
@@ -1293,7 +1509,7 @@ class TestDispatch006_SessionRestore:  # noqa: N801
         agent = ctx.prepared.planner_lm
         assert isinstance(agent, _StubAgent)
 
-        _ = [e async for e in stream_turn(ctx, "hello")]
+        _ = [e async for e in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hello")]
         assert len(agent.aimport_session_state_calls) == 1
         assert agent.aimport_session_state_calls[0] == session_state
 
@@ -1305,7 +1521,12 @@ class TestDispatch006_SessionRestore:  # noqa: N801
     ) -> None:
         """None session_id does not trigger session restoration."""
         assert sample_context.session_id is None
-        _ = [e async for e in stream_turn(sample_context, "hello")]
+        _ = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
         assert stub_agent.aimport_session_state_calls == []
 
 
@@ -1334,7 +1555,7 @@ class TestDispatch007_DirectRlmRaisesNotImplementedError:  # noqa: N801
         events: list[RuntimeEvent] = []
 
         with pytest.raises(NotImplementedError):
-            async for event in stream_turn(ctx, "hi"):
+            async for event in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
                 events.append(event)
 
         assert len(events) == 0, "No events should be yielded before NotImplementedError"
@@ -1364,7 +1585,7 @@ class TestDispatch008_ExactErrorMessage:  # noqa: N801
         )
 
         with pytest.raises(NotImplementedError) as exc_info:
-            async for _ in stream_turn(ctx, "hi"):
+            async for _ in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
                 pass
 
         assert str(exc_info.value) == "direct_rlm execution backend is not yet implemented"
@@ -1399,7 +1620,7 @@ class TestDispatch009_RaiseBeforeSetExecutionMode:  # noqa: N801
         assert isinstance(agent, _StubAgent)
 
         with pytest.raises(NotImplementedError):
-            async for _ in stream_turn(ctx, "hi"):
+            async for _ in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
                 pass
 
         assert "set_execution_mode" not in [c[0] for c in agent.calls]
@@ -1443,7 +1664,7 @@ class TestDispatch010_RaiseBeforeRestoreSession:  # noqa: N801
         assert isinstance(agent, _StubAgent)
 
         with pytest.raises(NotImplementedError):
-            async for _ in stream_turn(ctx, "hi"):
+            async for _ in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
                 pass
 
         assert "aimport_session_state" not in [c[0] for c in agent.calls]
@@ -1476,7 +1697,7 @@ class TestDispatch011_RaiseBeforeAiterChatTurnStream:  # noqa: N801
         assert isinstance(agent, _StubAgent)
 
         with pytest.raises(NotImplementedError):
-            async for _ in stream_turn(ctx, "hi"):
+            async for _ in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
                 pass
 
         assert "aiter_chat_turn_stream" not in [c[0] for c in agent.calls]
@@ -1543,7 +1764,7 @@ class TestDispatch012_RaiseBeforeAnyAgentMethod:  # noqa: N801
         )
 
         with pytest.raises(NotImplementedError):
-            async for _ in stream_turn(ctx, "hi"):
+            async for _ in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
                 pass
 
         assert recording_agent.calls == [], f"Agent calls should be empty, got: {recording_agent.calls}"
@@ -1579,7 +1800,7 @@ class TestDispatch013_UnknownBackend:  # noqa: N801
         )
 
         with pytest.raises(ValueError) as exc_info:
-            async for _ in stream_turn(ctx, "hi"):
+            async for _ in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi"):
                 pass
 
         assert "unknown execution backend" in str(exc_info.value).lower()
@@ -1649,7 +1870,7 @@ class TestDispatch014_StableForTurn:  # noqa: N801
         )
 
         events: list[RuntimeEvent] = []
-        async for event in stream_turn(ctx, "hello"):
+        async for event in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hello"):
             events.append(event)
             # After first event, mutate the controls to try and switch backend.
             if len(events) == 1:
@@ -1847,7 +2068,12 @@ class TestRegress001_IdenticalEventSequence:  # noqa: N801
         sample_context: ChatExecutionContext,
     ) -> None:
         """The event kind sequence matches the Phase 1 baseline fixture."""
-        events = [e async for e in stream_turn(sample_context, "hello")]
+        events = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
 
         # The stub agent yields: [STATUS("working"), DONE].
         assert len(events) >= 2
@@ -1915,7 +2141,7 @@ class TestRegress001_IdenticalEventSequence:  # noqa: N801
             controls=TurnControls(),
         )
 
-        events = [e async for e in stream_turn(ctx, "hello")]
+        events = [e async for e in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hello")]
         actual_kinds = [e.kind for e in events]
 
         assert actual_kinds == expected_kinds, f"Expected kinds {expected_kinds}, got {actual_kinds}"
@@ -1936,7 +2162,12 @@ class TestRegress004_StreamAclose:  # noqa: N801
         sample_context: ChatExecutionContext,
     ) -> None:
         """Stream completes normally without error."""
-        events = [e async for e in stream_turn(sample_context, "hello")]
+        events = [
+            e
+            async for e in stream_turn(
+                ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+            )
+        ]
         assert len(events) > 0
 
     @pytest.mark.asyncio
@@ -1946,7 +2177,12 @@ class TestRegress004_StreamAclose:  # noqa: N801
     ) -> None:
         """Stream without aclose does not raise AttributeError."""
         try:
-            _ = [e async for e in stream_turn(sample_context, "hello")]
+            _ = [
+                e
+                async for e in stream_turn(
+                    ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+                )
+            ]
         except AttributeError:
             pytest.fail("stream_turn raised AttributeError when stream has no aclose")
 
@@ -1966,7 +2202,12 @@ class TestRegress007_NoNewExceptions:  # noqa: N801
     ) -> None:
         """Default legacy path does not raise NotImplementedError or ValueError."""
         try:
-            events = [e async for e in stream_turn(sample_context, "hello")]
+            events = [
+                e
+                async for e in stream_turn(
+                    ctx=sample_context, agent_runtime=sample_context.prepared.planner_lm, message="hello"
+                )
+            ]
             assert len(events) > 0
         except (NotImplementedError, ValueError) as exc:
             pytest.fail(f"Legacy path raised unexpected exception: {exc}")

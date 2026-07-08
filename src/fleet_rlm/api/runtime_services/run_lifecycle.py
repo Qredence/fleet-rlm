@@ -336,12 +336,15 @@ class ExecutionLifecycleManager:
             assert self.repository is not None
             assert self.identity_rows is not None
             assert self.active_run_db_id is not None
+            repository = self.repository
+            identity_rows = self.identity_rows
+            active_run_db_id = self.active_run_db_id
             try:
                 await self._with_lifecycle_span(
                     "fleet_rlm.lifecycle_update_run_status",
-                    lambda: self.repository.update_run_status(
-                        tenant_id=self.identity_rows.tenant_id,
-                        run_id=self.active_run_db_id,
+                    lambda: repository.update_run_status(
+                        tenant_id=identity_rows.tenant_id,
+                        run_id=active_run_db_id,
                         status=effective_status,
                         error_json=effective_error or None,
                     ),

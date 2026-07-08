@@ -21,7 +21,9 @@ from their transport-specific inputs and pass it to one shared function:
 
 ```python
 async def stream_turn(
+    *,
     ctx: ChatExecutionContext,
+    agent_runtime: AgentRuntime,
     message: str,
 ) -> AsyncIterator[RuntimeEvent]:
     ...
@@ -74,9 +76,16 @@ request/message and must not be confused with prepared runtime dependencies.
 
 ## Consequences
 
-- `stream_turn(ctx, message)` is the single runtime entry point shared by both
-  transports; the WS path's `stream_agent_turn()` is refactored to delegate to
-  it.
+- `stream_turn(*, ctx, agent_runtime, message)` is the single runtime entry
+  point shared by both transports; the WS path's `stream_agent_turn()` is
+  refactored to delegate to it.
+- `PreparedChatRuntime.planner_lm` remains the prepared DSPy planner model; it
+  is not the AgentRuntime. Transports pass the context-managed AgentRuntime-like
+  object explicitly as `agent_runtime`.
+- `trace_mode` and `selected_skill_ids` remain accepted at the transport and
+  `TurnControls` layer, but the legacy AgentRuntime backend forwards only the
+  kwargs supported by `AgentRuntime.aiter_chat_turn_stream()`. Future direct
+  runtime backends may consume those context-only controls explicitly.
 - `prepare_chat_runtime()` loses its `WebSocket` parameter and returns
   `PreparedChatRuntime` from transport-neutral inputs; both transports wrap it
   into a `ChatExecutionContext`.

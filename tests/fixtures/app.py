@@ -35,9 +35,12 @@ def no_db_app(monkeypatch):
         return
 
     async def _minimal_startup(state):
+        from fleet_rlm.api.dependencies import InterpreterPoolDeps
         from fleet_rlm.integrations.local_store import LocalStore
 
         state.persistence_deps.local_store = LocalStore()
+        if not getattr(state, "interpreter_pool_deps", None) or state.interpreter_pool_deps.pool is None:
+            state.interpreter_pool_deps = InterpreterPoolDeps(pool=object())
 
     async def _noop_shutdown(_state):
         return

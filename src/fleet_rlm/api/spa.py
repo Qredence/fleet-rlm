@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 from importlib import import_module
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 
 def _resolve_ui_web_root(candidate: Path) -> Path | None:
@@ -72,39 +70,6 @@ def resolve_ui_dist_dir() -> Path | None:
     return _resolve_ui_web_root(ui_package_root / "dist")
 
 
-def _collect_reserved_top_level_paths(app: FastAPI) -> tuple[set[str], set[str]]:
-    """Return (reserved_paths, reserved_prefixes) derived from mounted routes.
-
-    Used by the SPA catch-all to avoid serving index.html for paths that
-    correspond to real API, docs, or static-mount routes. Building this at
-    mount time (rather than hardcoding) means new routers automatically
-    become non-SPA paths.
-    """
-    reserved_paths: set[str] = set()
-    reserved_prefixes: set[str] = set()
-
-    for raw_path in _iter_route_paths(app.routes):
-        if not raw_path or raw_path == "/":
-            continue
-        # Skip the SPA catch-all itself, once it has been registered.
-        if raw_path == "/{full_path:path}":
-            continue
-
-        stripped = raw_path.lstrip("/")
-        # Paths with a dynamic segment (e.g. "/api/v1/sessions/{session_id}")
-        # become a prefix rule for their static leading segment.
-        first_segment = stripped.split("/", 1)[0]
-        if "{" in first_segment:
-            continue
-        if "{" in stripped:
-            reserved_prefixes.add(f"{first_segment}/")
-            continue
-        reserved_paths.add(stripped)
-        reserved_prefixes.add(f"{first_segment}/")
-
-    return reserved_paths, reserved_prefixes
-
-
 def _join_route_path(prefix: str, path: str) -> str:
     joined = f"{prefix.rstrip('/')}/{path.lstrip('/')}"
     return joined if joined.startswith("/") else f"/{joined}"
@@ -127,63 +92,17 @@ def _iter_route_paths(routes: Any, *, prefix: str = ""):
 
 
 def mount_spa(app: FastAPI, ui_dir: Path) -> None:
-    """Mount built frontend assets and SPA fallback route.
+    """Mount built frontend assets using FastAPI's native frontend helper.
 
-    MUST be called after all API routers are registered on ``app``. The
-    reserved-path set used by the catch-all is derived from ``app.routes`` at
-    mount time.
+    MUST be called after all API routers are registered on ``app`` so normal
+    routes are matched before the low-priority frontend fallback.
     """
     # Safety: catching a misordered call early, before it masks real bugs.
     if not any(path.startswith("/api/") for path in _iter_route_paths(app.routes)):
         msg = "mount_spa must be called after API routes are registered"
         raise RuntimeError(msg)
 
-    assets_dir = ui_dir / "assets"
-    if assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-    branding_dir = ui_dir / "branding"
-    if branding_dir.exists():
-        app.mount("/branding", StaticFiles(directory=str(branding_dir)), name="branding")
-
-    ui_root = ui_dir.resolve()
-    index_path = ui_root / "index.html"
-
-    reserved_paths, reserved_prefixes = _collect_reserved_top_level_paths(app)
-
-    def resolve_ui_file(full_path: str) -> Path | None:
-        requested_path = (ui_root / full_path).resolve(strict=False)
-        try:
-            requested_path.relative_to(ui_root)
-        except ValueError:
-            return None
-        return requested_path if requested_path.is_file() else None
-
-    def should_serve_spa_index(full_path: str) -> bool:
-        normalized_path = full_path.strip("/")
-        if normalized_path == "":
-            return True
-        if normalized_path in reserved_paths:
-            return False
-        for prefix in reserved_prefixes:
-            if normalized_path.startswith(prefix):
-                return False
-        # Only serve the SPA index for extensionless paths (client-side routes).
-        return Path(normalized_path).suffix == ""
-
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def serve_spa(full_path: str):
-        requested_file = await asyncio.to_thread(resolve_ui_file, full_path)
-        if requested_file is not None:
-            return FileResponse(requested_file)
-
-        index_exists = await asyncio.to_thread(index_path.is_file)
-        if index_exists and should_serve_spa_index(full_path):
-            return FileResponse(index_path)
-
-        if index_exists:
-            raise HTTPException(status_code=404, detail="Not Found")
-
-        return JSONResponse(ui_unavailable_payload(), status_code=503)
+    app.frontend("/", directory=ui_dir)
 
 
 def ui_unavailable_payload() -> dict[str, str]:

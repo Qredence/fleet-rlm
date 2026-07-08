@@ -20,9 +20,36 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.auth.types import NormalizedIdentity
 from fleet_rlm.api.dependencies import require_http_identity
 from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext
+from fleet_rlm.api.runtime_services.chat_runtime import PreparedChatRuntime
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+class _FakeChatAgent:
+    def set_execution_mode(self, mode: str) -> None:
+        self.execution_mode = mode
+
+    async def aiter_chat_turn_stream(self, **kwargs: Any) -> AsyncIterator[RuntimeEvent]:
+        yield _make_started_event()
+        yield _make_text_event(str(kwargs.get("message", "")))
+        yield _make_done_event()
+
+
+class _FakeChatAgentContext:
+    def __init__(self) -> None:
+        self.agent = _FakeChatAgent()
+
+    async def __aenter__(self) -> _FakeChatAgent:
+        return self.agent
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object | None,
+    ) -> bool:
+        return False
 
 
 def _make_started_event(payload: dict[str, Any] | None = None) -> RuntimeEvent:
@@ -83,11 +110,46 @@ def _stub_identity_dependency(identity: NormalizedIdentity):
 def _stub_stream_turn(events: list[RuntimeEvent]):
     """Return a callable *stream_turn* stub yielding the given *events*."""
 
-    async def _stub(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+    async def _stub(*, ctx: ChatExecutionContext, agent_runtime: object, message: str) -> AsyncIterator[RuntimeEvent]:
         for ev in events:
             yield ev
 
     return _stub
+
+
+@pytest.fixture(autouse=True)
+def stub_chat_agent_context(monkeypatch) -> None:
+    chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
+
+    async def _build_context(runtime: object, pool: Any = None) -> _FakeChatAgentContext:
+        _ = runtime
+        return _FakeChatAgentContext()
+
+    monkeypatch.setattr(chat_module, "build_chat_agent_context", _build_context)
+
+
+@pytest.fixture(autouse=True)
+def stub_prepare_chat_runtime(monkeypatch) -> list[PreparedChatRuntime]:
+    chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
+    runtimes: list[PreparedChatRuntime] = []
+
+    async def _prepare_runtime(**kwargs: Any) -> PreparedChatRuntime:
+        config_deps = kwargs["config_deps"]
+        persistence_deps = kwargs["persistence_deps"]
+        runtime = PreparedChatRuntime(
+            cfg=config_deps.config,
+            planner_lm=object(),
+            delegate_lm=None,
+            repository=None,
+            persistence=persistence_deps.local_store,
+            persistence_required=False,
+            identity_rows=None,
+        )
+        runtimes.append(runtime)
+        return runtime
+
+    monkeypatch.setattr(chat_module, "prepare_chat_runtime", _prepare_runtime)
+    return runtimes
 
 
 def _spy_stream_turn(captured: dict[str, Any]):
@@ -97,8 +159,9 @@ def _spy_stream_turn(captured: dict[str, Any]):
     assertions.
     """
 
-    async def _spy(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+    async def _spy(*, ctx: ChatExecutionContext, agent_runtime: object, message: str) -> AsyncIterator[RuntimeEvent]:
         captured["ctx"] = ctx
+        captured["agent_runtime"] = agent_runtime
         captured["message"] = message
         for ev in [
             _make_started_event(),
@@ -159,9 +222,13 @@ class TestCross001_FullSSEFlow:  # noqa: N801
         assert any(p["type"] in v1_types for p in json_parts), "No recognised AI SDK v1 part in stream"
 
     def test_full_sse_flow_context_is_built_with_identity(
-        self, no_db_app, monkeypatch, stub_identity: NormalizedIdentity
+        self,
+        no_db_app,
+        monkeypatch,
+        stub_identity: NormalizedIdentity,
+        stub_prepare_chat_runtime: list[PreparedChatRuntime],
     ) -> None:
-        """ChatExecutionContext is built with the authenticated identity."""
+        """ChatExecutionContext uses identity while agent_runtime stays explicit."""
         captured: dict[str, Any] = {}
 
         chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
@@ -176,6 +243,8 @@ class TestCross001_FullSSEFlow:  # noqa: N801
         assert ctx is not None, "stream_turn must be called with a ChatExecutionContext"
         assert isinstance(ctx, ChatExecutionContext)
         assert ctx.identity is stub_identity, "Context must carry the authenticated identity"
+        assert stub_prepare_chat_runtime
+        assert captured.get("agent_runtime") is not stub_prepare_chat_runtime[0].planner_lm
 
     def test_full_sse_flow_emits_finish_then_done(self, chat_sse_client: TestClient) -> None:
         """Normal completion emits finish-step, finish, then [DONE]."""
@@ -287,11 +356,13 @@ class TestCross002_TransportEquivalence:  # noqa: N801
         ctx_ws.prepared.planner_lm = fake_agent
 
         sse_events: list[RuntimeEvent] = []
-        async for event in stream_turn(ctx_sse, "hello from sse"):
+        async for event in stream_turn(
+            ctx=ctx_sse, agent_runtime=ctx_sse.prepared.planner_lm, message="hello from sse"
+        ):
             sse_events.append(event)
 
         ws_events: list[RuntimeEvent] = []
-        async for event in stream_turn(ctx_ws, "hello from ws"):
+        async for event in stream_turn(ctx=ctx_ws, agent_runtime=ctx_ws.prepared.planner_lm, message="hello from ws"):
             ws_events.append(event)
 
         # ── Assertion: both produce same kind sequence ──
@@ -311,7 +382,9 @@ class TestCross002_TransportEquivalence:  # noqa: N801
         """
         captured_ctx: dict[str, Any] = {}
 
-        async def _capture_ctx(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+        async def _capture_ctx(
+            *, ctx: ChatExecutionContext, agent_runtime: object, message: str
+        ) -> AsyncIterator[RuntimeEvent]:
             captured_ctx["ctx"] = ctx
             for ev in [
                 _make_started_event(),
@@ -399,6 +472,7 @@ class TestCross003_ErrorMidStream:  # noqa: N801
                 interpreter_pool_overflow_max=0,
                 cors_allowed_origins=["http://localhost:5173"],
                 secret_encryption_key="test-secret-key-for-tests",
+                neon_tenant_claim="tenant-1",
             )
         )
 
@@ -422,7 +496,9 @@ class TestCross004_ClientDisconnect:  # noqa: N801
     def test_cancel_flag_flipped_by_disconnect(self, no_db_app, monkeypatch) -> None:
         """When cancel_flag is set, the projector emits abort + [DONE]."""
 
-        async def _stream_with_cancel(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+        async def _stream_with_cancel(
+            *, ctx: ChatExecutionContext, agent_runtime: object, message: str
+        ) -> AsyncIterator[RuntimeEvent]:
             # Share the test cancel_flag with the context.
             ctx.cancel_flag["cancelled"] = False
             yield _make_started_event()
@@ -456,7 +532,9 @@ class TestCross004_ClientDisconnect:  # noqa: N801
         """cancel_flag is a mutable dict shared between SSE handler and stream_turn."""
         captured: dict[str, Any] = {}
 
-        async def _capture_ctx(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+        async def _capture_ctx(
+            *, ctx: ChatExecutionContext, agent_runtime: object, message: str
+        ) -> AsyncIterator[RuntimeEvent]:
             captured["cancel_flag"] = ctx.cancel_flag
             captured["ctx"] = ctx
             for ev in [
@@ -624,7 +702,9 @@ class TestCross007_FirstVisit:  # noqa: N801
         """Request without session_id produces data-agent with a session_id."""
 
         # Use a stub that sets a session_id in the TURN_STARTED payload.
-        async def _stub_with_session(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+        async def _stub_with_session(
+            *, ctx: ChatExecutionContext, agent_runtime: object, message: str
+        ) -> AsyncIterator[RuntimeEvent]:
             ctx.session_id = "auto-generated-sess-001"
             yield RuntimeEvent(
                 kind=RuntimeEventKind.TURN_STARTED,
@@ -660,7 +740,9 @@ class TestCross007_FirstVisit:  # noqa: N801
         captured_second: dict[str, Any] = {}
         generated_session_id = "sess-first-visit-restorable"
 
-        async def _stub_first(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+        async def _stub_first(
+            *, ctx: ChatExecutionContext, agent_runtime: object, message: str
+        ) -> AsyncIterator[RuntimeEvent]:
             captured_first["ctx"] = ctx
             captured_first["message"] = message
             # The ctx.session_id is None because no session_id was sent.
@@ -680,7 +762,9 @@ class TestCross007_FirstVisit:  # noqa: N801
             yield _make_text_event("first response")
             yield _make_done_event()
 
-        async def _stub_second(ctx: ChatExecutionContext, message: str) -> AsyncIterator[RuntimeEvent]:
+        async def _stub_second(
+            *, ctx: ChatExecutionContext, agent_runtime: object, message: str
+        ) -> AsyncIterator[RuntimeEvent]:
             captured_second["ctx"] = ctx
             captured_second["message"] = message
             yield RuntimeEvent(

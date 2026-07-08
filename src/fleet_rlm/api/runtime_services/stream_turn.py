@@ -5,10 +5,11 @@ Extracts ``stream_turn()`` from the WS-coupled ``stream_agent_turn()`` in
 Both the WebSocket and SSE transports use ``stream_turn()`` to produce a stream
 of ``RuntimeEvent`` objects from a ``ChatExecutionContext`` and a user message.
 
-``stream_turn()`` calls ``AgentRuntime.aiter_chat_turn_stream()`` with a
-``cancel_check`` that reads ``ctx.cancel_flag``.  It threads non-``None``
-``TurnControls`` fields as kwargs and calls ``agent.set_execution_mode()``
-when ``controls.execution_mode`` is not ``None``.
+``stream_turn()`` calls the explicitly supplied
+``AgentRuntime.aiter_chat_turn_stream()`` with a ``cancel_check`` that reads
+``ctx.cancel_flag``. It threads only the supported legacy runtime controls as
+kwargs and calls ``agent_runtime.set_execution_mode()`` when
+``controls.execution_mode`` is not ``None``.
 
 No import-time side effects.  No ``WebSocket``/``Request`` imports.
 """
@@ -33,7 +34,9 @@ def _build_stream_kwargs(
 ) -> dict[str, Any]:
     """Build kwargs dict for ``AgentRuntime.aiter_chat_turn_stream``.
 
-    Reads ``ctx.controls`` and threads non-``None`` fields as kwargs.
+    Uses the legacy AgentRuntime allowlist only. Context-only controls such as
+    ``trace_mode`` and ``selected_skill_ids`` stay on ``TurnControls`` for
+    transports/future backends but are not accepted by the legacy runtime.
     The ``cancel_check`` lambda reads ``ctx.cancel_flag`` on each invocation.
     """
     kwargs: dict[str, Any] = {
@@ -55,23 +58,19 @@ def _build_stream_kwargs(
         kwargs["context_paths"] = list(controls.context_paths)
     if controls.batch_concurrency is not None:
         kwargs["batch_concurrency"] = controls.batch_concurrency
-    if controls.trace_mode is not None:
-        kwargs["trace_mode"] = controls.trace_mode
-    if controls.selected_skill_ids:
-        kwargs["selected_skill_ids"] = list(controls.selected_skill_ids)
 
     return kwargs
 
 
 async def _restore_session(
     ctx: ChatExecutionContext,
-    agent: Any,
+    agent_runtime: Any,
 ) -> None:
     """Restore agent session state when ``ctx.session_id`` is not ``None``.
 
     Looks up the persisted session record from ``ctx.prepared.persistence``
     (or ``ctx.prepared.repository``) and calls ``agent.aimport_session_state()``
-    with the restored state.  Does nothing if ``ctx.session_id`` is ``None``
+    with the restored state. Does nothing if ``ctx.session_id`` is ``None``
     or if no persistence store is available.
     """
     if ctx.session_id is None:
@@ -104,10 +103,10 @@ async def _restore_session(
     if not restored_state and isinstance(manifest_data, dict):
         restored_state = manifest_data.get("state", {})
 
-    if restored_state and hasattr(agent, "aimport_session_state"):
-        await agent.aimport_session_state(restored_state)
-    elif hasattr(agent, "areset"):
-        await agent.areset(clear_sandbox_buffers=True)
+    if restored_state and hasattr(agent_runtime, "aimport_session_state"):
+        await agent_runtime.aimport_session_state(restored_state)
+    elif hasattr(agent_runtime, "areset"):
+        await agent_runtime.areset(clear_sandbox_buffers=True)
 
 
 def _resolve_backend(ctx: ChatExecutionContext) -> ExecutionBackend:
@@ -124,14 +123,17 @@ def _resolve_backend(ctx: ChatExecutionContext) -> ExecutionBackend:
 
 
 async def stream_turn(
+    *,
     ctx: ChatExecutionContext,
+    agent_runtime: Any,
     message: str,
 ) -> AsyncIterator[RuntimeEvent]:
     """Stream one chat turn through the agent, yielding ``RuntimeEvent`` objects.
 
     This is the transport-neutral seam.  Both the WebSocket and SSE transports
-    build a ``ChatExecutionContext`` and call this function — they do **not**
-    call ``AgentRuntime.aiter_chat_turn_stream`` directly.
+    build a ``ChatExecutionContext`` and pass the context-managed
+    AgentRuntime-like object explicitly — they do **not** call
+    ``AgentRuntime.aiter_chat_turn_stream`` directly.
 
     The execution backend is resolved once at the top of the function:
     ``ctx.controls.execution_backend`` if not ``None``, else
@@ -145,12 +147,15 @@ async def stream_turn(
     Args:
         ctx: Transport-neutral context (prepared runtime, identity, session
             ids, cancel flag, per-turn controls).
+        agent_runtime: AgentRuntime-like object for the legacy backend. This
+            must not be a DSPy ``LM``.
         message: The user's message to process.
 
     Yields:
         ``RuntimeEvent`` objects from the underlying agent runtime.
 
     Raises:
+        TypeError: When the legacy backend receives a non-AgentRuntime object.
         NotImplementedError: When the ``direct_rlm`` backend is selected.
         ValueError: When an unrecognised backend value is encountered.
         StopAsyncIteration: When the turn stream completes.
@@ -160,21 +165,28 @@ async def stream_turn(
 
     if backend is ExecutionBackend.legacy_agent_runtime:
         # ── Phase 1 path: unchanged ──
-        # The transport layer is expected to replace planner_lm with an
-        # AgentRuntime (or compatible object) that has set_execution_mode
-        # and aiter_chat_turn_stream.
-        agent: Any = ctx.prepared.planner_lm
+        aiter_chat_turn_stream = getattr(agent_runtime, "aiter_chat_turn_stream", None)
+        if not callable(aiter_chat_turn_stream):
+            raise TypeError(
+                f"legacy_agent_runtime backend expected AgentRuntime-like object, got {type(agent_runtime).__name__}"
+            )
 
         # Apply execution mode if specified.
         if ctx.controls.execution_mode is not None:
-            agent.set_execution_mode(ctx.controls.execution_mode)
+            set_execution_mode = getattr(agent_runtime, "set_execution_mode", None)
+            if not callable(set_execution_mode):
+                raise TypeError(
+                    "legacy_agent_runtime backend expected AgentRuntime-like object with set_execution_mode, "
+                    f"got {type(agent_runtime).__name__}"
+                )
+            set_execution_mode(ctx.controls.execution_mode)
 
         # Restore session if a session_id was provided.
-        await _restore_session(ctx, agent)
+        await _restore_session(ctx, agent_runtime)
 
         # Build kwargs and delegate to the runtime.
         kwargs = _build_stream_kwargs(ctx, message)
-        stream = agent.aiter_chat_turn_stream(**kwargs)
+        stream = aiter_chat_turn_stream(**kwargs)
 
         try:
             async for event in stream:
