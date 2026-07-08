@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from itertools import pairwise
 from typing import Any
 
 import dspy
@@ -12,7 +13,7 @@ from fleet_rlm.runtime.task_intent import has_url, has_url_document_intent
 from fleet_rlm.skills.active import ActiveSkills
 from fleet_rlm.skills.loader import load_skill_bundle, load_skill_impl
 from fleet_rlm.skills.repository import AVAILABLE_SKILLS, list_visible
-from fleet_rlm.skills.schemas import SkillResource, SkillRuntimeContext
+from fleet_rlm.skills.schemas import SkillCatalogEntry, SkillResource, SkillRuntimeContext, SkillScope, SkillTrustLevel
 from fleet_rlm.skills.signatures import SkillSelectionSignature
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,21 @@ _KEYWORD_OVERRIDES: dict[str, list[str]] = {
     ],
 }
 
+_CATALOG_KEYWORD_STOPWORDS: set[str] = {
+    "and",
+    "are",
+    "for",
+    "from",
+    "into",
+    "only",
+    "skill",
+    "skills",
+    "the",
+    "this",
+    "that",
+    "with",
+}
+
 
 def _build_keyword_map() -> dict[str, list[str]]:
     from fleet_rlm.skills.catalog import discover_scaffold_skills
@@ -129,18 +145,65 @@ def _build_keyword_map() -> dict[str, list[str]]:
 _KEYWORD_MAP: dict[str, list[str]] = _build_keyword_map()
 
 
-def _keyword_match(user_request: str) -> list[str]:
+def _fallback_catalog_entries() -> list[SkillCatalogEntry]:
+    return [
+        SkillCatalogEntry(
+            name=name,
+            description=description,
+            scope=SkillScope.SCAFFOLD,
+            trust_level=SkillTrustLevel.TRUSTED,
+            source=f"scaffold:{name}",
+        )
+        for name, description in AVAILABLE_SKILLS.items()
+    ]
+
+
+def _visible_catalog_entries(context: SkillRuntimeContext | None) -> list[SkillCatalogEntry]:
+    if context is not None:
+        return list_visible(context)
+    return _fallback_catalog_entries()
+
+
+def _catalog_keyword_terms(entry: SkillCatalogEntry, *, preserve_static: bool) -> list[str]:
+    if preserve_static:
+        return list(_KEYWORD_MAP.get(entry.name, []))
+
+    terms: list[str] = list(_KEYWORD_OVERRIDES.get(entry.name, []))
+    seen: set[str] = {term.lower() for term in terms}
+
+    def add(term: str) -> None:
+        normalized = term.strip().lower()
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        terms.append(term.strip())
+
+    add(entry.name.replace("-", " "))
+    if entry.name not in _KEYWORD_OVERRIDES:
+        words = re.findall(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", entry.description.lower())
+        filtered = [
+            word.replace("-", " ") for word in words if len(word) >= 4 and word not in _CATALOG_KEYWORD_STOPWORDS
+        ]
+        for word in filtered:
+            add(word)
+        for first, second in pairwise(filtered):
+            add(f"{first} {second}")
+    return terms
+
+
+def _keyword_match_entries(user_request: str, entries: list[SkillCatalogEntry], *, preserve_static: bool) -> list[str]:
     request_lower = user_request.lower()
     scores: dict[str, int] = {}
-    for skill_name, keywords in _KEYWORD_MAP.items():
+    for entry in entries:
         score = 0
+        keywords = _catalog_keyword_terms(entry, preserve_static=preserve_static)
         for kw in keywords:
             if kw.lower() in request_lower:
                 score += 1
-        if skill_name == "long-context" and has_url_document_intent(user_request):
+        if entry.name == "long-context" and has_url_document_intent(user_request):
             score += 2
         if score > 0:
-            scores[skill_name] = score
+            scores[entry.name] = score
 
     if not scores:
         return []
@@ -148,6 +211,10 @@ def _keyword_match(user_request: str) -> list[str]:
     max_score = max(scores.values())
     threshold = max(1, max_score - 1)
     return [name for name, score in scores.items() if score >= threshold]
+
+
+def _keyword_match(user_request: str) -> list[str]:
+    return _keyword_match_entries(user_request, _fallback_catalog_entries(), preserve_static=True)
 
 
 def _routing_skill_hints(
@@ -173,11 +240,13 @@ def _merge_skill_candidates(
     *,
     keyword_candidates: list[str],
     routing_hints: list[str],
+    visible_names: set[str] | None = None,
 ) -> list[str]:
     merged: list[str] = []
     seen: set[str] = set()
+    allowed_names = visible_names or set(AVAILABLE_SKILLS.keys())
     for name in [*routing_hints, *keyword_candidates]:
-        if name not in AVAILABLE_SKILLS or name in seen:
+        if name not in allowed_names or name in seen:
             continue
         seen.add(name)
         merged.append(name)
@@ -190,7 +259,10 @@ def select_skill_candidates(
     execution_mode: str = "auto",
     routing_decision: str | None = None,
     is_first_turn: bool = False,
+    context: SkillRuntimeContext | None = None,
 ) -> list[str]:
+    entries = _visible_catalog_entries(context)
+    visible_names = {entry.name for entry in entries}
     routing_hints = _routing_skill_hints(
         execution_mode=execution_mode,
         routing_decision=routing_decision,
@@ -198,8 +270,9 @@ def select_skill_candidates(
         user_request=user_request,
     )
     return _merge_skill_candidates(
-        keyword_candidates=_keyword_match(user_request),
+        keyword_candidates=_keyword_match_entries(user_request, entries, preserve_static=context is None),
         routing_hints=routing_hints,
+        visible_names=visible_names,
     )
 
 
@@ -209,12 +282,14 @@ def preview_skills_for_turn(
     execution_mode: str = "auto",
     routing_decision: str | None = None,
     is_first_turn: bool = False,
+    context: SkillRuntimeContext | None = None,
 ) -> list[str]:
     return select_skill_candidates(
         user_request,
         execution_mode=execution_mode,
         routing_decision=routing_decision,
         is_first_turn=is_first_turn,
+        context=context,
     )
 
 
@@ -242,10 +317,11 @@ class SkillSelectionModule(dspy.Module):
         self._max_skills = max_skills
         self._select_lm = lm
 
+    def _visible_skill_entries(self, context: SkillRuntimeContext | None) -> list[SkillCatalogEntry]:
+        return _visible_catalog_entries(context)
+
     def _visible_skill_names(self, context: SkillRuntimeContext | None) -> set[str]:
-        if context is not None:
-            return {entry.name for entry in list_visible(context)}
-        return set(AVAILABLE_SKILLS.keys())
+        return {entry.name for entry in self._visible_skill_entries(context)}
 
     def _resolve_candidates(
         self,
@@ -258,7 +334,8 @@ class SkillSelectionModule(dspy.Module):
         is_first_turn: bool,
         explicit_only: bool,
     ) -> list[str]:
-        visible_names = self._visible_skill_names(context)
+        visible_entries = self._visible_skill_entries(context)
+        visible_names = {entry.name for entry in visible_entries}
         explicit_source = selected_skill_ids
         if explicit_source is None and context is not None:
             explicit_source = list(context.selected_skill_ids)
@@ -284,7 +361,7 @@ class SkillSelectionModule(dspy.Module):
             is_first_turn=is_first_turn,
             user_request=user_request,
         )
-        keyword_candidates = _keyword_match(user_request)
+        keyword_candidates = _keyword_match_entries(user_request, visible_entries, preserve_static=context is None)
         for name in [*routing_hints, *keyword_candidates]:
             if name in visible_names and name not in seen:
                 seen.add(name)

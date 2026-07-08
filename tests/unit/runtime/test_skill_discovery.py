@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fleet_rlm.runtime.modules.skill_selection import (
     AVAILABLE_SKILLS,
     preview_skills_for_turn,
 )
 from fleet_rlm.runtime.tools.skill_tools import clear_skill_cache, discover_scaffold_skills
+from fleet_rlm.skills.schemas import SkillRuntimeContext
+
+
+def _write_directory_skill(volume: Path, name: str, description: str) -> None:
+    skill_dir = volume / "skills" / "user" / name
+    skill_dir.mkdir(parents=True)
+    skill_dir.joinpath("SKILL.md").write_text(
+        f'---\nname: {name}\ndescription: "{description}"\n---\n\n# {name}\n',
+        encoding="utf-8",
+    )
 
 
 def test_discover_scaffold_skills_includes_rlm_and_browser_interaction() -> None:
@@ -41,3 +53,15 @@ def test_preview_skills_for_turn_routing_hint_adds_long_context() -> None:
 def test_preview_skills_for_turn_first_turn_adds_rlm() -> None:
     skills = preview_skills_for_turn("Hello", is_first_turn=True)
     assert "rlm" in skills
+
+
+def test_preview_skills_for_turn_uses_visible_catalog_context(tmp_path: Path) -> None:
+    volume = tmp_path / "memory"
+    _write_directory_skill(volume, "alpha-route", "Zephyr alpha routing support.")
+
+    skills = preview_skills_for_turn(
+        "Use zephyr alpha routing",
+        context=SkillRuntimeContext(volume_mount_path=str(volume)),
+    )
+
+    assert skills == ["alpha-route"]

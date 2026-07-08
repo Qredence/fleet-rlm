@@ -115,6 +115,23 @@ def test_legacy_enrich_with_skills_loads_directory_style_volume_skill(tmp_path: 
     assert active_skills.sandbox_paths.get("dir-skill", "").endswith("/skills/user/dir-skill")
 
 
+def test_legacy_enrich_with_skills_auto_discovers_directory_style_volume_skill(tmp_path: Path) -> None:
+    volume = tmp_path / "memory"
+    _write_directory_skill(volume / "skills", "user", "alpha-route", "Zephyr alpha routing support.")
+    interpreter = SimpleNamespace(volume_mount_path=str(volume))
+    module = EscalatingFleetModule(interpreter=interpreter, tools=[])
+
+    _, selected, active_skills = module._enrich_with_skills(
+        "Use zephyr alpha routing",
+        "",
+    )
+
+    assert selected == ["alpha-route"]
+    assert active_skills.selected == ["alpha-route"]
+    assert active_skills.resources.get("alpha-route")
+    assert active_skills.sandbox_paths.get("alpha-route", "").endswith("/skills/user/alpha-route")
+
+
 def test_legacy_enrich_with_skills_drops_invisible_explicit_skill(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
