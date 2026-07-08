@@ -660,11 +660,19 @@ class EscalatingFleetModule(dspy.Module):
         execution_mode: str = "auto",
         routing_decision: str | None = None,
         is_first_turn: bool = False,
+        selected_skill_ids: list[str] | None = None,
     ) -> tuple[str, list[str], ActiveSkills]:
         """Select relevant skills and expose full instructions as RLM variables."""
+        from fleet_rlm.skills.schemas import SkillRuntimeContext
+
         volume_mount_path = self._resolve_skill_volume_mount_path()
         if volume_mount_path != self._skill_selector._volume_mount_path:
             self._skill_selector._volume_mount_path = volume_mount_path
+        explicit_ids = list(selected_skill_ids or [])
+        skill_context = SkillRuntimeContext(
+            volume_mount_path=volume_mount_path,
+            selected_skill_ids=explicit_ids,
+        )
         try:
             selection = self._skill_selector(
                 user_request=user_request,
@@ -672,6 +680,9 @@ class EscalatingFleetModule(dspy.Module):
                 execution_mode=execution_mode,
                 routing_decision=routing_decision,
                 is_first_turn=is_first_turn,
+                context=skill_context,
+                selected_skill_ids=explicit_ids or None,
+                explicit_only=bool(explicit_ids),
             )
             skill_context = str(getattr(selection, "skill_context", "") or "")
             selected = [str(item) for item in list(getattr(selection, "selected_skills", []) or [])]
@@ -696,6 +707,7 @@ class EscalatingFleetModule(dspy.Module):
         execution_mode: str,
         force_escalate: bool,
         turn_context: TurnContext | None,
+        selected_skill_ids: list[str] | None = None,
     ) -> _TurnPrep:
         if history is None:
             history = dspy.History(messages=[])
@@ -713,6 +725,7 @@ class EscalatingFleetModule(dspy.Module):
             execution_mode=execution_mode,
             routing_decision=routing_decision if should_route_rlm else None,
             is_first_turn=self._turn_count == 1,
+            selected_skill_ids=selected_skill_ids,
         )
         return _TurnPrep(
             history=history,
@@ -761,6 +774,7 @@ class EscalatingFleetModule(dspy.Module):
         force_escalate: bool = False,
         conversation_summary: str = "",
         turn_context: TurnContext | None = None,
+        selected_skill_ids: list[str] | None = None,
     ) -> dspy.Prediction:
         """Run one turn through the fleet program.
 
@@ -790,6 +804,7 @@ class EscalatingFleetModule(dspy.Module):
             execution_mode=execution_mode,
             force_escalate=force_escalate,
             turn_context=turn_context,
+            selected_skill_ids=selected_skill_ids,
         )
 
         if prep.should_route_rlm:
@@ -882,6 +897,7 @@ class EscalatingFleetModule(dspy.Module):
         force_escalate: bool = False,
         conversation_summary: str = "",
         turn_context: TurnContext | None = None,
+        selected_skill_ids: list[str] | None = None,
     ) -> dspy.Prediction:
         """Run one turn without blocking async callers.
 
@@ -902,6 +918,7 @@ class EscalatingFleetModule(dspy.Module):
             execution_mode=execution_mode,
             force_escalate=force_escalate,
             turn_context=turn_context,
+            selected_skill_ids=selected_skill_ids,
         )
 
         if prep.should_route_rlm:

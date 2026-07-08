@@ -55,6 +55,8 @@ def test_daytona_repl_setup_keeps_native_file_helpers_fast_and_flexible(tmp_path
         "catalog": {},
         "instructions": {},
         "sources": {},
+        "resources": {},
+        "sandbox_paths": {},
     }
     assert sandbox_globals["context"]["metadata"]["sandbox_staged_paths"] == [".fleet-rlm/context/ctx/snapshot.md"]
 

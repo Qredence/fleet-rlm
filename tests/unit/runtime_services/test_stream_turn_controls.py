@@ -88,7 +88,7 @@ class TestThreadsTurnControls:
         assert controls.trace_mode == "full"
         assert controls.selected_skill_ids == ["skill-a", "skill-b"]
         assert "trace_mode" not in agent.captured_kwargs
-        assert "selected_skill_ids" not in agent.captured_kwargs
+        assert agent.captured_kwargs["selected_skill_ids"] == ["skill-a", "skill-b"]
 
     @pytest.mark.asyncio
     async def test_none_fields_not_forwarded(
@@ -141,7 +141,7 @@ class TestThreadsTurnControls:
         sample_context: ChatExecutionContext,
         stub_agent: StubAgent,
     ) -> None:
-        """trace_mode and selected_skill_ids remain context-only for legacy runtime."""
+        """trace_mode remains context-only; selected_skill_ids forward when set."""
         sample_context.controls.trace_mode = "full"
         sample_context.controls.selected_skill_ids = ["skill-a"]
         _ = [
@@ -155,7 +155,7 @@ class TestThreadsTurnControls:
         assert sample_context.controls.trace_mode == "full"
         assert sample_context.controls.selected_skill_ids == ["skill-a"]
         assert "trace_mode" not in stub_agent.captured_kwargs
-        assert "selected_skill_ids" not in stub_agent.captured_kwargs
+        assert stub_agent.captured_kwargs["selected_skill_ids"] == ["skill-a"]
 
 
 # ---------------------------------------------------------------------------
@@ -297,12 +297,12 @@ class TestBuildStreamKwargs:
         assert sample_context.controls.trace_mode == "full"
         assert "trace_mode" not in kwargs
 
-    def test_selected_skill_ids_field_stays_context_only(self, sample_context: ChatExecutionContext) -> None:
-        """selected_skill_ids remains on controls but is not a legacy runtime kwarg."""
+    def test_selected_skill_ids_forwarded_when_set(self, sample_context: ChatExecutionContext) -> None:
+        """Non-empty selected_skill_ids are forwarded to legacy runtime kwargs."""
         sample_context.controls.selected_skill_ids = ["skill-a"]
         kwargs = _build_stream_kwargs(sample_context, "test")
         assert sample_context.controls.selected_skill_ids == ["skill-a"]
-        assert "selected_skill_ids" not in kwargs
+        assert kwargs["selected_skill_ids"] == ["skill-a"]
 
     def test_selected_skill_ids_empty_not_in_kwargs(
         self,

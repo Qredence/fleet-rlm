@@ -55,7 +55,7 @@ def test_skill_selection_caps_selected_skills_to_loaded_context() -> None:
     result = module(user_request="debug a broken sandbox dspy module")
 
     module.select.assert_called_once()
-    module._load_active_skills.assert_called_once_with(["diagnostics"])
+    module._load_active_skills.assert_called_once_with(["diagnostics"], context=None, max_skills=1)
     assert result.selected_skills == ["diagnostics"]
     assert "[Active Skills]" in result.skill_context
     assert "diagnostics: Debug runtime failures" in result.skill_context

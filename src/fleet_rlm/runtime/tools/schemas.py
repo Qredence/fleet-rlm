@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from fleet_rlm.skills.schemas import LoadSkillInput, LoadSkillOutput
+
 
 class WebSearchInput(BaseModel):
     query: str = Field(..., description="Search query string")
@@ -56,19 +58,6 @@ class SearchKnowledgeOutput(BaseModel):
     query: str
     results: list[KnowledgeResult]
     count: int
-    error: str | None = None
-
-
-class LoadSkillInput(BaseModel):
-    name: str = Field(..., description="Skill name (without .md extension)")
-
-
-class LoadSkillOutput(BaseModel):
-    status: str
-    name: str
-    scope: str | None = None
-    path: str | None = None
-    instructions: str = ""
     error: str | None = None
 
 

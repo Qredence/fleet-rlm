@@ -12,6 +12,7 @@ from typing import Literal, TypedDict
 import dspy
 
 from fleet_rlm.runtime.sandbox_types import ActiveSkills, LargeDocument, WorkspaceContext
+from fleet_rlm.skills.signatures import SkillSelectionSignature
 
 
 class GroundedCitation(TypedDict):
@@ -248,14 +249,6 @@ class ClarificationQuestionSignature(dspy.Signature):
     blocking_unknowns: list[str] = dspy.OutputField(desc="Unknowns that block safe execution")
     safe_default: str = dspy.OutputField(desc="Safe default behavior if unanswered")
     proceed_without_answer: bool = dspy.OutputField(desc="Whether execution can proceed safely without user response")
-
-
-class SkillSelectionSignature(dspy.Signature):
-    """Select 1-2 relevant skills from the available set given task context."""
-
-    context: str = dspy.InputField(desc="User request and recent conversation context")
-    available_skills: str = dspy.InputField(desc="Available skills with descriptions (one per line)")
-    skills: list[str] = dspy.OutputField(desc="1-2 skill names most relevant to the context")
 
 
 class RecursiveSubQuerySignature(dspy.Signature):

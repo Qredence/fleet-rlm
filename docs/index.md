@@ -20,6 +20,7 @@
 Read these after you've seen the product:
 
 - **[Architecture Overview](architecture.md)** — current layer ownership model.
+- **[MLflow / Trace Parity Audit](audits/mlflow-trace-parity.md)** — legacy vs `direct_rlm` observability gaps (read-only).
 - **[Agent Harness](agent-harness/README.md)** — repo-local harness engineering controls.
 - **[Wiring Analysis](explanation/wiring-analysis.md)**
 - **[Releasing to PyPI](how-to-guides/releasing.md)** — automated and manual release flow

@@ -109,12 +109,29 @@ consume them explicitly.
 server-side only: config default + `TurnControls` override set by the
 server, never by the client.
 
-### 6. `direct_rlm` is a stub
+### 6. `direct_rlm` evolution (Phase 2A stub → Phase 2D opt-in backend)
 
-`direct_rlm` exists only as the enum value plus a `raise
-NotImplementedError(...)` branch. It is a placeholder for the future
-direct-RLM backend (ADR-0002 territory). It must fail clearly and early —
-before any runtime state is mutated.
+At Phase 2A acceptance, `direct_rlm` existed only as the enum value plus a
+`raise NotImplementedError(...)` branch — a placeholder for the future
+direct-RLM backend (ADR-0002 territory) that failed clearly and early before
+any runtime state was mutated.
+
+Subsequent phases implemented the backend behind the same seam:
+
+| Phase | Status |
+|-------|--------|
+| 2A | Stub — `NotImplementedError` before any agent method |
+| 2B | `DirectRLMRunner` skeleton dispatch |
+| 2C | Opt-in golden path via `dspy.RLM` + pooled Daytona interpreter |
+| 2D | RuntimeEvent parity — `TURN_INPUTS`, trajectory replay, enriched `DONE` |
+
+**Current state (Phase 2D):** `legacy_agent_runtime` remains the default.
+`direct_rlm` dispatches to `DirectRLMRunner`, which runs one real RLM turn
+through the pooled interpreter and emits `STATUS`, `TURN_INPUTS`, trajectory
+replay (`REASONING`/`TOOL_*`), `TEXT`, structured `ERROR`, and enriched
+`DONE` (`schema_version`, `history_turns`, `trajectory`,
+`execution_backend`). `direct_rlm` is still opt-in (server-side
+`EXECUTION_BACKEND` only) and is not exposed on `ChatRequest`.
 
 ## Consequences
 
@@ -141,8 +158,10 @@ before any runtime state is mutated.
   with a clear `TypeError` before calling `set_execution_mode()`.
 - `stream_turn()` with `legacy_agent_runtime` does not forward context-only
   controls such as `trace_mode` to `AgentRuntime.aiter_chat_turn_stream()`.
-- `stream_turn()` with `direct_rlm` raises `NotImplementedError` with a clear
-  message, before mutating any agent/runtime state.
+- `stream_turn()` with `direct_rlm` dispatches to `DirectRLMRunner` (Phase 2B+)
+  and emits a `RuntimeEvent` stream including `TURN_INPUTS`, trajectory replay,
+  `TEXT`, structured `ERROR`, and enriched `DONE` (Phase 2D). Live streaming
+  relay and `MLFLOW_SPAN` parity remain deferred.
 - Per-request `TurnControls.execution_backend` override wins over
   `AppConfig.execution_backend`.
 - `ChatRequest` schema and OpenAPI artifacts are unchanged

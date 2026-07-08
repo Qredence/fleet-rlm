@@ -176,9 +176,12 @@ async def stream_turn(
 - ``trace_mode`` and ``selected_skill_ids`` stay accepted on transport/context
   models but are not legacy ``AgentRuntime.aiter_chat_turn_stream()`` kwargs.
   Future direct runtime backends may consume them explicitly.
-- ``direct_rlm``: raises ``NotImplementedError`` **before** any agent
-  method, session restore, or stream call — it is a stub only, **not
-  implemented** in Phase 2A
+- ``direct_rlm``: opt-in server-side backend (``EXECUTION_BACKEND=direct_rlm``).
+  Introduced as a stub in Phase 2A; dispatches to ``DirectRLMRunner`` as of
+  Phase 2B; runs an opt-in golden path through ``dspy.RLM`` and the pooled
+  Daytona interpreter as of Phase 2C; emits ``TURN_INPUTS``, trajectory replay
+  events, ``TEXT``, structured ``ERROR``, and enriched ``DONE`` metadata as of
+  Phase 2D. Not the default; not exposed on ``ChatRequest``.
 - No ``WebSocket``/``Request`` imports
 - Session restoration via ``ctx.session_id``
 
@@ -298,6 +301,30 @@ Daytona modules in ``integrations/daytona/`` are **off-limits for Phase 1
 changes**. The Daytona interpreter provides sandbox execution, volume
 filesystem, workspace staging, and skill/resource access.
 
+## Skills (`src/fleet_rlm/skills/`)
+
+Phase 3 package — canonical ownership:
+
+```text
+schemas.py      SkillScope, SkillMetadata, SkillBundle, SkillRuntimeContext, validation types
+active.py       ActiveSkills (SandboxSerializable REPL payload; resources/sandbox_paths)
+catalog.py      Scaffold + volume metadata discovery, scope precedence, resource inventory
+loader.py       load_skill (legacy), load_skill_bundle, load_resource
+repository.py   AVAILABLE_SKILLS snapshot, list_visible(context)
+selection.py    SkillSelectionModule with SkillRuntimeContext-aware explicit ID handling
+validator.py    safe_skill_name, validate_skill_metadata/resource_path/bundle
+permissions.py  SkillVisibilityPolicy helpers (is_skill_visible, default_permission_mode)
+sync.py         seed_system_skills into volume layout
+signatures.py   SkillSelectionSignature (DSPy)
+paths.py        skills_root volume helper
+```
+
+``SkillRuntimeContext`` is the entry point for context-aware catalog listing,
+bundle loading, and visibility-filtered selection. Legacy import paths remain via
+thin re-exports in ``runtime/tools/skill_tools.py``,
+``runtime/modules/skill_selection.py``, ``runtime/sandbox_types.ActiveSkills``,
+and ``runtime/agent/signatures.SkillSelectionSignature``.
+
 ---
 
 ## Phase 2A: ExecutionBackend Seam
@@ -317,9 +344,11 @@ not ``None``, wins over the config default.
 **Dispatch:** Inside ``stream_turn()``, the resolved backend selects the
 execution path via ``if/elif``. ``legacy_agent_runtime`` runs the unchanged
 Phase 1 path against the explicit ``agent_runtime`` argument and raises
-``TypeError`` if that object is not AgentRuntime-like. ``direct_rlm`` raises
-``NotImplementedError`` before any agent method — it is a **stub only, not
-implemented** in Phase 2A.
+``TypeError`` if that object is not AgentRuntime-like. ``direct_rlm`` dispatches
+to ``DirectRLMRunner`` (Phase 2B+), which runs one real RLM turn through the
+pooled Daytona interpreter and emits ``TURN_INPUTS``, trajectory replay,
+``TEXT``, structured ``ERROR``, and enriched ``DONE`` (Phase 2D). It is
+opt-in (``EXECUTION_BACKEND=direct_rlm``) and not exposed on ``ChatRequest``.
 
 **Resolution order:**
 1. ``ctx.controls.execution_backend`` (per-request override, if not ``None``)

@@ -34,10 +34,11 @@ def _build_stream_kwargs(
 ) -> dict[str, Any]:
     """Build kwargs dict for ``AgentRuntime.aiter_chat_turn_stream``.
 
-    Uses the legacy AgentRuntime allowlist only. Context-only controls such as
-    ``trace_mode`` and ``selected_skill_ids`` stay on ``TurnControls`` for
-    transports/future backends but are not accepted by the legacy runtime.
-    The ``cancel_check`` lambda reads ``ctx.cancel_flag`` on each invocation.
+    Uses the legacy AgentRuntime allowlist. Context-only controls such as
+    ``trace_mode`` stay on ``TurnControls`` for transports/future backends.
+    Explicit ``selected_skill_ids`` are forwarded to the legacy runtime when
+    non-empty. The ``cancel_check`` lambda reads ``ctx.cancel_flag`` on each
+    invocation.
     """
     kwargs: dict[str, Any] = {
         "message": message,
@@ -58,6 +59,8 @@ def _build_stream_kwargs(
         kwargs["context_paths"] = list(controls.context_paths)
     if controls.batch_concurrency is not None:
         kwargs["batch_concurrency"] = controls.batch_concurrency
+    if controls.selected_skill_ids:
+        kwargs["selected_skill_ids"] = list(controls.selected_skill_ids)
 
     return kwargs
 

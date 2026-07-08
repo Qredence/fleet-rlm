@@ -19,6 +19,7 @@ from fleet_rlm.runtime.modules.factory import (
 from fleet_rlm.runtime.modules.rlm_prompts import build_rlm_core_context
 from fleet_rlm.runtime.modules.skill_selection import SkillSelectionModule
 from fleet_rlm.runtime.sandbox_types import ActiveSkills
+from fleet_rlm.skills.schemas import SkillRuntimeContext
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +47,22 @@ def run_direct_rlm_turn(
     action_max_tokens = getattr(cfg, "rlm_action_max_tokens", None)
 
     volume_mount_path = getattr(interpreter, "volume_mount_path", None) or getattr(cfg, "volume_mount_path", None)
-    skill_module = SkillSelectionModule(volume_mount_path=volume_mount_path)
     selected_skill_ids = list(ctx.controls.selected_skill_ids or [])
-    active_skills = skill_module._load_active_skills(selected_skill_ids) if selected_skill_ids else ActiveSkills()
+    if selected_skill_ids:
+        skill_context = SkillRuntimeContext(
+            volume_mount_path=volume_mount_path,
+            selected_skill_ids=selected_skill_ids,
+        )
+        skill_module = SkillSelectionModule(volume_mount_path=volume_mount_path)
+        selection = skill_module(
+            user_request=message,
+            context=skill_context,
+            selected_skill_ids=selected_skill_ids,
+            explicit_only=True,
+        )
+        active_skills = selection.active_skills
+    else:
+        active_skills = ActiveSkills()
 
     core_memory = str(getattr(agent_runtime, "core_memory", "") or "")
     core_context = build_rlm_core_context(

@@ -158,6 +158,9 @@ class AgentRuntime:
         turn_context = getattr(self, "_turn_context", None)
         if turn_context is not None:
             args["turn_context"] = turn_context
+        selected = list(getattr(self, "_selected_skill_ids", None) or [])
+        if selected:
+            args["selected_skill_ids"] = selected
         return args
 
     def preview_routing(
@@ -402,6 +405,7 @@ class AgentRuntime:
         context_paths: list[str] | None = None,
         batch_concurrency: int | None = None,
         volume_name: str | None = None,
+        selected_skill_ids: list[str] | None = None,
     ) -> AsyncIterator[RuntimeEvent]:
         """Stream one chat turn through the agent, yielding events.
 
@@ -435,6 +439,7 @@ class AgentRuntime:
             loaded_document_paths=list(self.loaded_document_paths),
             session_context_paths=interpreter_session_context_paths(interpreter),
         )
+        self._selected_skill_ids = list(selected_skill_ids or [])
         try:
             async for event in runtime_streaming.aiter_chat_turn_stream(
                 self,
@@ -444,6 +449,7 @@ class AgentRuntime:
                 yield event
         finally:
             self._turn_context = None
+            self._selected_skill_ids = []
 
     # -----------------------------------------------------------------
     # Core memory API (accessible by tools)

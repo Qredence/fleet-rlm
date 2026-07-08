@@ -150,6 +150,7 @@ class ChatAgentProtocol(Protocol):
         context_paths: list[str] | None = None,
         batch_concurrency: int | None = None,
         volume_name: str | None = None,
+        selected_skill_ids: list[str] | None = None,
     ) -> AsyncIterator[RuntimeEvent]:
         pass
 

@@ -66,11 +66,11 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Always use the `zsh` terminal profile for CLI commands.
 - Secure production deployments strictly on Bring-Your-Own-Key (BYOK) model; never leak server-level secrets (like Gemini API keys or Daytona keys) to authenticated users.
 - Do not edit `.plan.md` or any attached implementation plans while executing a task, prioritizing marked-in-progress to-dos sequentially.
-- Support public clones and local development by enabling local instances to connect to the FastAPI Cloud hosted Neon Auth.
-- Always include direct absolute markdown links to `.canvas.tsx` files when creating or mentioning an IDE Canvas.
 - Prefer preserving Agent Elements design tokens (`--an-max-width`) rather than introducing arbitrary Tailwind classes for chat width adjustments.
-- Use `pnpm run check` in `src/frontend` to verify formats, types, lints, and unit tests in a single pass.
 - Prefer running Python scripts/commands using `uv run` over raw `python3` or `python` (aligned with user CLI tooling preferences).
+- Do not amend commits already pushed to remote; use narrow follow-up commits for fixes discovered after push.
+- Never use `DAYTONA_API_KEY` as the `Authorization: Bearer` token for Fleet-RLM API requests; authenticated clients must use Neon JWT. Daytona API keys are server-side credentials for Daytona Cloud only.
+- Sanitize client-facing prepare/startup errors; never expose raw `str(exc)`, stack traces, credentials, or Daytona/provider internals to API clients.
 - Avoid introducing direct `litellm` usage in application code; reach LLM providers through `dspy.LM` instead.
 - Prefer wire-protocol-named Literal unions (`openai_responses`, `openai_chat_completion`, `anthropic_messages`) over vendor-flavored or `_compatible`-suffixed provider-type enums, and keep LLM profiles flat (profile name, provider type, base endpoint, API key) rather than over-abstracting.
 - Cite ONLY DSPy (installed 3.3.0b1 source + dspy.ai docs) as the reference contract for LLM/runtime design; do NOT cite the `/daytona` or `daytona-signature` skill as authority for DSPy/RLM decisions.
@@ -78,16 +78,15 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 
 ## Learned Workspace Facts
 
-- Local development runs API on `:8000`, Vite dev server on `:5173`, and MLflow telemetry on `:5001` (Python 3.13+), standardizing streaming responses on `RuntimeEvent` (`runtime/events.py`) projected using `project_chat`.
-- The Daytona-backed recursive chat runtime runs via `dspy.RLM` with support for major LLM providers and OpenAI-compatible models.
+- Local development runs API on `:8000`, Vite dev server on `:5173`, and MLflow telemetry on `:5001` (Python 3.13+), standardizing streaming responses on `RuntimeEvent` (`runtime/events.py`) projected using `project_chat` (WebSocket) or `project_sse` (`POST /api/chat`).
+- Chat execution defaults to `legacy_agent_runtime` (`EXECUTION_BACKEND` env; `direct_rlm` is opt-in server-side only and not accepted on `ChatRequest`). Opt-in `direct_rlm` (Phase 2D, `59b76422`) emits `TURN_INPUTS` and enriches terminal `DONE` with `schema_version` and `history_turns`; live `TurnProgressRelay`/`MLFLOW_SPAN` parity remains deferred. Under `execution_mode=auto`, most turns route to direct/tools rather than `dspy.RLM`; use `rlm_only` to force RLM. `POST /api/chat` SSE and WebSocket execution share the same `InterpreterPoolDeps` interpreter-pool lifecycle.
+- `PLANS.md` is the canonical backend roadmap; do not maintain `PLANS_REORGANIZED.md` as a parallel plan.
+- Phase 3 Skills package lives at `src/fleet_rlm/skills/` (`ActiveSkills`, loader, selection, catalog, sync); preserve `SandboxSerializable` contract and legacy flat `skills/system`/`skills/user` paths.
+- Any `config.yaml` work requires `docs/config-audit.md` first (audit-first; `PLANS.md` Phase 7). Run MLflow/trace parity audit (`docs/audits/mlflow-trace-parity.md`) before observability implementation changes.
+- Daytona sandboxes use snapshot `fleet-rlm-01` by default (`fleet-rlm-browser` when browser skills are selected), mount persistent storage at `/home/daytona/memory`, and resolve volume name from `VOLUME_NAME` (server default `rlm-volume-dspy`).
 - Database schema drift checking (`alembic check`) requires importing all active SQLAlchemy models inside `migrations/env.py`.
-- Custom IDE Canvases (.canvas.tsx) are designed for standalone analytical outputs, supporting category colors: `gray`, `purple`, `green`, `yellow`, `pink`, `blue`, and `orange`.
 - The Agent Elements conversation column width is controlled via `--an-max-width` in `src/frontend/src/components/agent-elements/agent-ui.css` rather than raw Tailwind class overrides.
-- FastAPI Cloud's packaging and deployment rely on `.fastapicloudignore` (preceding `.gitignore`) which must explicitly allow the compiled Web UI build output directory (`!src/frontend/dist/` or `!src/frontend/dist/client`) to be served.
 - Authentication uses `@neondatabase/auth-ui` locked to Neon Project ID `old-bird-44339002` (`https://ep-broad-water-al4k5bh7.neonauth.c-3.eu-central-1.aws.neon.tech/neondb/auth`) with JWT EdDSA token verification, trusting origin `https://fleet-rlm.fastapicloud.dev`.
 - Tenant BYOK data is secured via Postgres RLS on `llm_provider_profiles` and Fernet encrypted via `FLEET_SECRET_ENCRYPTION_KEY` in `neon` auth mode, skipping empty/masked values to prevent key wipes.
-- Scratch or evaluation directories (`mlartifacts/`, `artifacts/`, `logs/`, `FINDINGS_REPORT.md`) are untracked by `.gitignore`. Codex hooks must be configured inline under `[hooks]` in `.codex/config.toml`, as `.codex/hooks.json` is deprecated.
 - The `daytona-signature` skill is OUTDATED; use the `/daytona` skill as the canonical reference for Daytona concerns. (For DSPy/RLM plan authority, cite only DSPy itself — see Learned User Preferences.)
-- The backend falls back to local SQLite store (`integrations/local_store.py`) if `DATABASE_URL` is unset, unless `DATABASE_REQUIRED=true` (staging/production). Local settings are patchable via `PATCH /api/v1/runtime/settings` (local-only).
-- To prevent cascading timeouts and state leakage in test suites: intercept/stub out external auth network calls like `NeonAuthProvider._fetch_jwks` returning empty keys, and reset global singletons/semaphores using aggressive `autouse` teardown fixtures.
 - Under DSPy 3.3.Xb (normalized LM API), any `BaseLM` or bounded LM must have its provider explicitly resolved (via prefix or `provider` kwargs). Prefer stock `dspy.LM` with stateless config overrides passed directly to predictors/LM calls (using `dspy.settings.context` if needed) over stateful `copy()` or custom wrappers to ensure thread/session safety.

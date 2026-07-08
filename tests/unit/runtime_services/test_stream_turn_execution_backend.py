@@ -61,6 +61,7 @@ class _StrictLegacyAgent:
         repo_ref: str | None = None,
         context_paths: list[str] | None = None,
         batch_concurrency: int | None = None,
+        selected_skill_ids: list[str] | None = None,
     ) -> AsyncIterator[RuntimeEvent]:
         self.captured_kwargs = {
             "message": message,
@@ -71,6 +72,7 @@ class _StrictLegacyAgent:
             "repo_ref": repo_ref,
             "context_paths": context_paths,
             "batch_concurrency": batch_concurrency,
+            "selected_skill_ids": selected_skill_ids,
         }
         yield RuntimeEvent(kind=RuntimeEventKind.DONE, text="done", payload={"history_turns": 1})
 
@@ -378,7 +380,7 @@ class TestDispatch004_KwargsIdenticalToPhase1:  # noqa: N801
         assert controls.trace_mode == "full"
         assert controls.selected_skill_ids == ["skill-a", "skill-b"]
         assert "trace_mode" not in agent.captured_kwargs
-        assert "selected_skill_ids" not in agent.captured_kwargs
+        assert agent.captured_kwargs["selected_skill_ids"] == ["skill-a", "skill-b"]
 
     @pytest.mark.asyncio
     async def test_trace_mode_does_not_break_strict_legacy_runtime(
@@ -420,6 +422,7 @@ class TestDispatch004_KwargsIdenticalToPhase1:  # noqa: N801
         assert agent.captured_kwargs["message"] == "hello"
         assert agent.captured_kwargs["trace"] is True
         assert agent.captured_kwargs["docs_path"] == "./docs"
+        assert agent.captured_kwargs["selected_skill_ids"] == ["skill-a"]
 
 
 class TestDispatch005_SetExecutionMode:  # noqa: N801

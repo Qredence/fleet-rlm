@@ -31,34 +31,16 @@ from .errors import DaytonaDiagnosticError, VolumeNotReadyError
 
 
 def _iter_scaffold_skill_markdown() -> Iterator[tuple[str, str]]:
-    from fleet_rlm.runtime.tools.skill_tools import iter_scaffold_skill_markdown
+    from fleet_rlm.skills.catalog import iter_scaffold_skill_markdown
 
     yield from iter_scaffold_skill_markdown()
 
 
 def seed_system_skills(mounted_root: str) -> None:
-    """Seed bundled scaffold skills into the volume's skills/system/ directory.
+    """Seed bundled scaffold skills into the volume's skills/system/ directory."""
+    from fleet_rlm.skills.sync import seed_system_skills as _seed_system_skills
 
-    Idempotent — skips any skill file that already exists.
-    Uses importlib.resources to read bundled SKILL.md files.
-    """
-    dest_dir = Path(mounted_root) / "skills" / "system"
-    if not dest_dir.exists():
-        logger.debug("seed_system_skills: skills/system not found, skipping seed")
-        return
-
-    try:
-        for skill_name, instructions in _iter_scaffold_skill_markdown():
-            try:
-                dest_file = dest_dir / f"{skill_name}.md"
-                if dest_file.exists():
-                    continue  # idempotent
-                dest_file.write_text(instructions, encoding="utf-8")
-                logger.debug("seed_system_skills: seeded %s", skill_name)
-            except Exception as exc:
-                logger.warning("seed_system_skills: skipped %s: %s", skill_name, exc)
-    except Exception as exc:
-        logger.warning("seed_system_skills: skill seeding failed (non-fatal): %s", exc)
+    _seed_system_skills(mounted_root)
 
 
 def _run_remote_python(sandbox: Sandbox, code: str, *, error_prefix: str) -> None:

@@ -1160,7 +1160,7 @@ def inject_variables(
 ) -> str:
     del owner
     fallback_assignments = [
-        "if 'active_skills' not in globals(): active_skills = {'selected': [], 'catalog': {}, 'instructions': {}, 'sources': {}}",
+        "if 'active_skills' not in globals(): active_skills = {'selected': [], 'catalog': {}, 'instructions': {}, 'sources': {}, 'resources': {}, 'sandbox_paths': {}}",
         "if 'context' not in globals() and 'get_workspace_context' in globals(): context = get_workspace_context()",
     ]
     if not variables:
