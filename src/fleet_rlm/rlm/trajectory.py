@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
+from fleet_rlm.runtime.events import EVENT_SCHEMA_VERSION, RuntimeEvent, RuntimeEventKind
 from fleet_rlm.runtime.execution.streaming_events import _normalize_trajectory
 
 
@@ -46,14 +46,21 @@ def iter_trajectory_runtime_events(trajectory_raw: Any) -> Iterator[RuntimeEvent
             yield result_event
 
 
-def build_direct_rlm_done_event(*, response: str, trajectory_raw: Any) -> RuntimeEvent:
+def build_direct_rlm_done_event(
+    *,
+    response: str,
+    trajectory_raw: Any,
+    history_turns: int = 0,
+) -> RuntimeEvent:
     """Terminal DONE payload for a completed direct-RLM turn."""
     trajectory = _normalize_trajectory(trajectory_raw)
     return RuntimeEvent(
         kind=RuntimeEventKind.DONE,
         text=response,
         payload={
+            "schema_version": EVENT_SCHEMA_VERSION,
             "trajectory": {"steps": trajectory},
+            "history_turns": history_turns,
             "execution_backend": "direct_rlm",
         },
     )

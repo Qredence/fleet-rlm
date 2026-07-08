@@ -19,6 +19,7 @@ from fleet_rlm.rlm.errors import (
     direct_rlm_status_event,
 )
 from fleet_rlm.rlm.execution import DirectRLMTurnExecutor, extract_direct_rlm_response, run_direct_rlm_turn
+from fleet_rlm.rlm.inputs import build_direct_rlm_turn_inputs, history_turn_count
 from fleet_rlm.rlm.trajectory import build_direct_rlm_done_event, iter_trajectory_runtime_events
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 
@@ -104,6 +105,8 @@ class DirectRLMRunner:
             yield direct_rlm_error_event(MISSING_INTERPRETER)
             return
 
+        yield RuntimeEvent.turn_inputs(build_direct_rlm_turn_inputs(ctx, message, agent_runtime))
+
         yield direct_rlm_status_event("Running direct RLM analysis", phase="direct_rlm_execute")
 
         try:
@@ -131,7 +134,11 @@ class DirectRLMRunner:
         if response:
             yield RuntimeEvent(kind=RuntimeEventKind.TEXT, text=response)
 
-        yield build_direct_rlm_done_event(response=response, trajectory_raw=trajectory_raw)
+        yield build_direct_rlm_done_event(
+            response=response,
+            trajectory_raw=trajectory_raw,
+            history_turns=history_turn_count(agent_runtime),
+        )
 
 
 def _missing_dependencies(ctx: ChatExecutionContext) -> DirectRLMErrorDetail | None:

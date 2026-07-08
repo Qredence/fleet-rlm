@@ -16,7 +16,7 @@ from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
 from fleet_rlm.api.runtime_services.stream_turn import stream_turn
 from fleet_rlm.rlm.errors import MISSING_INTERPRETER, MISSING_PLANNER_LM, TURN_CANCELLED
 from fleet_rlm.rlm.runner import DirectRLMRunner
-from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
+from fleet_rlm.runtime.events import EVENT_SCHEMA_VERSION, RuntimeEvent, RuntimeEventKind
 from tests.unit.runtime_services.fakes import StubAgent
 
 
@@ -160,10 +160,13 @@ class TestDirectRLMRunnerGoldenPath:
 
         kinds = [event.kind for event in events]
         assert RuntimeEventKind.STATUS in kinds
+        assert RuntimeEventKind.TURN_INPUTS in kinds
         assert RuntimeEventKind.TEXT in kinds
         assert kinds[-1] == RuntimeEventKind.DONE
         assert events[-1].text == "2+2 equals 4"
         assert events[-1].payload["execution_backend"] == "direct_rlm"
+        assert events[-1].payload["schema_version"] == EVENT_SCHEMA_VERSION
+        assert events[-1].payload["history_turns"] == 0
         assert events[-1].payload["trajectory"]["steps"]
 
     @pytest.mark.asyncio
