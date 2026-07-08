@@ -24,6 +24,7 @@ from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext, Tu
 from fleet_rlm.api.runtime_services.chat_runtime import PreparedChatRuntime
 from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
 from fleet_rlm.utils.identity import sanitize_id
+from tests.unit.runtime_services._module_isolation import isolated_module_reload
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -573,23 +574,16 @@ class TestNoImportSideEffects:
         monkeypatch.setattr(socket, "create_connection", _fail)  # type: ignore[attr-defined]
         monkeypatch.setattr(socket, "getaddrinfo", _fail)
 
-        # Import should succeed without hitting any networking
-        import importlib
-
-        from fleet_rlm.api.runtime_services import chat_context as mod
-
-        importlib.reload(mod)
+        with isolated_module_reload("fleet_rlm.api.runtime_services.chat_context"):
+            pass
 
     def test_import_does_not_trigger_transport_modules(self) -> None:
         """Importing chat_context doesn't pull in fastapi.WebSocket or Request."""
         # Clear any cached import state
         mod_names_before = {k for k in sys.modules if "websocket" in k.lower() or "request" in k.lower()}
 
-        import importlib
-
-        from fleet_rlm.api.runtime_services import chat_context
-
-        importlib.reload(chat_context)
+        with isolated_module_reload("fleet_rlm.api.runtime_services.chat_context"):
+            pass
 
         mod_names_after = {k for k in sys.modules if "websocket" in k.lower() or "request" in k.lower()}
 

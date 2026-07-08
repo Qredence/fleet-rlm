@@ -21,124 +21,32 @@ from fleet_rlm.api.dependencies import require_http_identity
 from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext
 from fleet_rlm.api.runtime_services.chat_runtime import PreparedChatRuntime
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
+from tests.unit.api.fakes import (
+    DEFAULT_BODY,
+    FakeChatAgent,
+    FakeChatAgentContext,
+    assert_sse_ok,
+    build_default_chat_client,
+    install_chat_agent_context_stub,
+    install_prepare_chat_runtime_stub,
+    make_done_event,
+    make_error_event,
+    make_started_event,
+    make_text_event,
+    parse_sse_body,
+    stub_identity_dependency,
+    stub_stream_turn,
+)
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
-
-
-class _FakeChatAgent:
-    """Minimal agent used to keep /api/chat tests off Daytona/LLM runtime."""
-
-    def __init__(self) -> None:
-        self.execution_mode: str | None = None
-
-    def set_execution_mode(self, mode: str) -> None:
-        self.execution_mode = mode
-
-    async def aiter_chat_turn_stream(self, **kwargs: Any) -> AsyncIterator[RuntimeEvent]:
-        yield _make_started_event()
-        yield _make_text_event(f"agent saw {kwargs.get('message', '')}")
-        yield _make_done_event()
-
-
-class _FakeChatAgentContext:
-    def __init__(self, agent: _FakeChatAgent) -> None:
-        self.agent = agent
-        self.entered = False
-        self.exited = False
-
-    async def __aenter__(self) -> _FakeChatAgent:
-        self.entered = True
-        return self.agent
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object | None,
-    ) -> bool:
-        self.exited = True
-        return False
-
-
-class _FakePrepareError(Exception):
-    """Simulates a prepare_chat_runtime failure for testing error paths."""
+#
+# FakeChatAgent, FakeChatAgentContext, and the SSE/event helpers above are
+# shared with test_cross_flows.py via tests/unit/api/fakes.py. Only the
+# helpers below are specific to this file.
 
 
 class _SentinelError(Exception):
     """Raised inside stubs to test error-handling behaviour."""
-
-
-def _make_event_stream(
-    events: list[RuntimeEvent],
-) -> AsyncIterator[RuntimeEvent]:
-    """Return an async iterator that yields the given *events* then stops."""
-
-    async def _gen() -> AsyncIterator[RuntimeEvent]:
-        for ev in events:
-            yield ev
-
-    return _gen()
-
-
-def _make_text_event(text: str) -> RuntimeEvent:
-    return RuntimeEvent(kind=RuntimeEventKind.TEXT, text=text)
-
-
-def _make_done_event(payload: dict[str, Any] | None = None) -> RuntimeEvent:
-    return RuntimeEvent(
-        kind=RuntimeEventKind.DONE,
-        text="done",
-        payload=payload or {"history_turns": 1},
-    )
-
-
-def _make_error_event(text: str = "boom") -> RuntimeEvent:
-    return RuntimeEvent(kind=RuntimeEventKind.ERROR, text=text)
-
-
-def _make_started_event(payload: dict[str, Any] | None = None) -> RuntimeEvent:
-    return RuntimeEvent(
-        kind=RuntimeEventKind.TURN_STARTED,
-        text="started",
-        payload=payload
-        or {
-            "message_id": "msg-1",
-            "selected_skills": ["skill-1"],
-            "available_tools": ["repl_execute"],
-            "execution_mode": "auto",
-            "session_id": "sess-1",
-            "run_id": "run-1",
-        },
-    )
-
-
-def _parse_sse_body(body: str) -> list[dict[str, Any]]:
-    """Parse SSE ``data:`` lines into a list of JSON payloads.
-
-    Returns dicts for JSON lines; returns the string ``[DONE]`` for the
-    terminal marker.
-    """
-    parts: list[dict[str, Any] | str] = []
-    for line in body.strip().split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        if line == "data: [DONE]":
-            parts.append("[DONE]")
-        elif line.startswith("data: "):
-            payload_str = line[len("data: ") :]
-            try:
-                parts.append(json.loads(payload_str))
-            except json.JSONDecodeError:
-                parts.append(payload_str)
-    return parts  # type: ignore[return-value]
-
-
-def _assert_sse_ok(response: Any) -> None:
-    """Assert a successful SSE response."""
-    assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text[:200]}"
-    content_type = response.headers.get("content-type", "")
-    assert "text/event-stream" in content_type, f"Expected text/event-stream, got {content_type}"
 
 
 def _assert_header(response: Any, name: str, expected: str) -> None:
@@ -147,80 +55,21 @@ def _assert_header(response: Any, name: str, expected: str) -> None:
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
-
-
-@pytest.fixture
-def stub_identity() -> NormalizedIdentity:
-    """Return a fixed NormalizedIdentity for test use."""
-    return NormalizedIdentity(
-        tenant_claim="tenant-1",
-        user_claim="user-1",
-        email="test@example.com",
-        name="Test User",
-    )
+#
+# stub_identity lives in tests/unit/api/conftest.py, shared with
+# test_cross_flows.py. stub_chat_agent_context / stub_prepare_chat_runtime
+# stay local (as thin wrappers around the fakes.py installers) so their
+# autouse monkeypatching doesn't leak into other tests/unit/api/ modules.
 
 
 @pytest.fixture(autouse=True)
-def stub_chat_agent_context(monkeypatch) -> list[_FakeChatAgentContext]:
-    contexts: list[_FakeChatAgentContext] = []
-    chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
-
-    async def _build_context(runtime: object, pool: Any = None) -> _FakeChatAgentContext:
-        _ = runtime
-        context = _FakeChatAgentContext(_FakeChatAgent())
-        contexts.append(context)
-        return context
-
-    monkeypatch.setattr(chat_module, "build_chat_agent_context", _build_context)
-    return contexts
+def stub_chat_agent_context(monkeypatch: pytest.MonkeyPatch) -> list[FakeChatAgentContext]:
+    return install_chat_agent_context_stub(monkeypatch)
 
 
 @pytest.fixture(autouse=True)
-def stub_prepare_chat_runtime(monkeypatch) -> list[PreparedChatRuntime]:
-    chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
-    runtimes: list[PreparedChatRuntime] = []
-
-    async def _prepare_runtime(**kwargs: Any) -> PreparedChatRuntime:
-        config_deps = kwargs["config_deps"]
-        persistence_deps = kwargs["persistence_deps"]
-        runtime = PreparedChatRuntime(
-            cfg=config_deps.config,
-            planner_lm=object(),
-            delegate_lm=None,
-            repository=None,
-            persistence=persistence_deps.local_store,
-            persistence_required=False,
-            identity_rows=None,
-        )
-        runtimes.append(runtime)
-        return runtime
-
-    monkeypatch.setattr(chat_module, "prepare_chat_runtime", _prepare_runtime)
-    return runtimes
-
-
-def _stub_identity_dependency(stub_identity: NormalizedIdentity):
-    """Return a callable that returns the stub identity (for dependency overrides)."""
-    return lambda: stub_identity
-
-
-def _stub_stream_turn(events: list[RuntimeEvent]):
-    """Return a callable *stream_turn* stub yielding the given *events*."""
-
-    async def _stub(*, ctx: ChatExecutionContext, agent_runtime: object, message: str) -> AsyncIterator[RuntimeEvent]:
-        for ev in events:
-            yield ev
-
-    return _stub
-
-
-def _stub_stream_turn_error(error: Exception):
-    """Return a callable *stream_turn* stub that raises *error*."""
-
-    async def _stub(*, ctx: ChatExecutionContext, agent_runtime: object, message: str) -> AsyncIterator[RuntimeEvent]:
-        raise error
-
-    return _stub
+def stub_prepare_chat_runtime(monkeypatch: pytest.MonkeyPatch) -> list[PreparedChatRuntime]:
+    return install_prepare_chat_runtime_stub(monkeypatch)
 
 
 @pytest.fixture
@@ -231,30 +80,7 @@ def chat_client(no_db_app, monkeypatch, stub_identity) -> Iterator[TestClient]:
     - ``require_http_identity`` → returns a fixed ``NormalizedIdentity``
     - ``stream_turn`` in the chat router module → yields controllable events
     """
-    # Override auth to use the stub identity.
-    no_db_app.dependency_overrides[require_http_identity] = _stub_identity_dependency(stub_identity)
-
-    # Default stream_turn stub: yield a simple text event + DONE.
-    chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
-    monkeypatch.setattr(
-        chat_module,
-        "stream_turn",
-        _stub_stream_turn(
-            [
-                _make_started_event(),
-                _make_text_event("Hello from stub!"),
-                _make_done_event(),
-            ]
-        ),
-    )
-
-    with TestClient(no_db_app) as client:
-        yield client
-
-
-DEFAULT_BODY: dict[str, Any] = {
-    "messages": [{"role": "user", "content": "hello"}],
-}
+    yield from build_default_chat_client(no_db_app, monkeypatch, stub_identity)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -268,7 +94,7 @@ class Test_SSE_001_BasicStream:  # noqa: N801
     def test_val_sse_001_successful_post_returns_sse_stream(self, chat_client: TestClient) -> None:
         """POST /api/chat returns 200 + text/event-stream + data: lines."""
         response = chat_client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
         body = response.text
         assert "data: " in body, "Body must contain SSE data: lines"
         assert "[DONE]" in body, "Body must terminate with [DONE]"
@@ -277,7 +103,7 @@ class Test_SSE_001_BasicStream:  # noqa: N801
         """POST /api/chat succeeds; POST /api/v1/chat returns 404."""
         ok = chat_client.post("/api/chat", json=DEFAULT_BODY)
         assert ok.status_code != 404, "/api/chat should not return 404"
-        _assert_sse_ok(ok)
+        assert_sse_ok(ok)
 
         missing = chat_client.post("/api/v1/chat", json=DEFAULT_BODY)
         assert missing.status_code == 404, f"/api/v1/chat should be 404, got {missing.status_code}"
@@ -298,12 +124,12 @@ class Test_SSE_001_BasicStream:  # noqa: N801
     def test_val_sse_005_content_type_is_text_event_stream(self, chat_client: TestClient) -> None:
         """Content-Type starts with text/event-stream."""
         response = chat_client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
     def test_val_sse_006_stream_emits_ai_sdk_v1_parts(self, chat_client: TestClient) -> None:
         """SSE body consists of AI SDK v1 part types as data: lines."""
         response = chat_client.post("/api/chat", json=DEFAULT_BODY)
-        parts = _parse_sse_body(response.text)
+        parts = parse_sse_body(response.text)
 
         # Expect at least one recognised AI SDK v1 part type.
         v1_types = {
@@ -355,17 +181,17 @@ class Test_SSE_001_BasicStream:  # noqa: N801
     def test_val_sse_064_real_stream_turn_uses_agent_context(
         self,
         no_db_app,
-        stub_chat_agent_context: list[_FakeChatAgentContext],
+        stub_chat_agent_context: list[FakeChatAgentContext],
         stub_prepare_chat_runtime: list[PreparedChatRuntime],
         stub_identity: NormalizedIdentity,
     ) -> None:
         """The route builds an agent context before invoking the real stream_turn."""
-        no_db_app.dependency_overrides[require_http_identity] = _stub_identity_dependency(stub_identity)
+        no_db_app.dependency_overrides[require_http_identity] = stub_identity_dependency(stub_identity)
 
         with TestClient(no_db_app) as client:
             response = client.post("/api/chat", json=DEFAULT_BODY)
 
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
         assert stub_chat_agent_context
         assert stub_chat_agent_context[0].entered is True
         assert stub_chat_agent_context[0].exited is True
@@ -384,7 +210,7 @@ class Test_SSE_001_BasicStream:  # noqa: N801
     def test_val_sse_008_normal_completion_emits_finish_then_done(self, chat_client: TestClient) -> None:
         """Normal completion emits finish-step, finish, then [DONE]."""
         response = chat_client.post("/api/chat", json=DEFAULT_BODY)
-        parts = _parse_sse_body(response.text)
+        parts = parse_sse_body(response.text)
         types = [p["type"] for p in parts if isinstance(p, dict) and "type" in p]
         assert "finish-step" in types, "Expected finish-step part"
         assert "finish" in types, "Expected finish part"
@@ -399,7 +225,7 @@ class Test_SSE_009_PartStructure:  # noqa: N801
     def test_val_sse_009_start_part_carries_message_id(self, chat_client: TestClient) -> None:
         """First start part has non-empty messageId."""
         response = chat_client.post("/api/chat", json=DEFAULT_BODY)
-        parts = _parse_sse_body(response.text)
+        parts = parse_sse_body(response.text)
         start_parts = [p for p in parts if isinstance(p, dict) and p.get("type") == "start"]
         assert start_parts, "Expected at least one start part"
         assert start_parts[0].get("messageId"), "start part must have non-empty messageId"
@@ -407,7 +233,7 @@ class Test_SSE_009_PartStructure:  # noqa: N801
     def test_val_sse_010_text_deltas_wrapped(self, chat_client: TestClient) -> None:
         """Text deltas are wrapped in text-start/text-end."""
         response = chat_client.post("/api/chat", json=DEFAULT_BODY)
-        parts = _parse_sse_body(response.text)
+        parts = parse_sse_body(response.text)
         types = [p["type"] for p in parts if isinstance(p, dict) and "type" in p]
 
         # Our stub yields a started event then a TEXT event, so we expect:
@@ -427,21 +253,21 @@ class Test_SSE_009_PartStructure:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            _stub_stream_turn(
+            stub_stream_turn(
                 [
-                    _make_started_event(),
+                    make_started_event(),
                     RuntimeEvent(kind=RuntimeEventKind.REASONING, text="thinking..."),
-                    _make_done_event(),
+                    make_done_event(),
                 ]
             ),
         )
-        no_db_app.dependency_overrides[require_http_identity] = _stub_identity_dependency(
+        no_db_app.dependency_overrides[require_http_identity] = stub_identity_dependency(
             NormalizedIdentity(tenant_claim="t", user_claim="u"),
         )
         with TestClient(no_db_app) as client:
             response = client.post("/api/chat", json=DEFAULT_BODY)
 
-        parts = _parse_sse_body(response.text)
+        parts = parse_sse_body(response.text)
         types = [p["type"] for p in parts if isinstance(p, dict) and "type" in p]
         if "reasoning-start" in types:
             assert "reasoning-end" in types
@@ -461,9 +287,9 @@ class Test_SSE_009_PartStructure:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            _stub_stream_turn(
+            stub_stream_turn(
                 [
-                    _make_started_event(),
+                    make_started_event(),
                     RuntimeEvent(
                         kind=RuntimeEventKind.TOOL_CALL,
                         text="calling tool",
@@ -472,18 +298,18 @@ class Test_SSE_009_PartStructure:  # noqa: N801
                             tool_args={"code": "print(1)"},
                         ),
                     ),
-                    _make_done_event(),
+                    make_done_event(),
                 ]
             ),
         )
-        no_db_app.dependency_overrides[require_http_identity] = _stub_identity_dependency(
+        no_db_app.dependency_overrides[require_http_identity] = stub_identity_dependency(
             NormalizedIdentity(tenant_claim="t", user_claim="u"),
         )
         with TestClient(no_db_app) as client:
             response = client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
-        parts = _parse_sse_body(response.text)
+        parts = parse_sse_body(response.text)
         tool_start = [p for p in parts if isinstance(p, dict) and p.get("type") == "tool-input-start"]
         tool_avail = [p for p in parts if isinstance(p, dict) and p.get("type") == "tool-input-available"]
         assert tool_start, "Expected tool-input-start"
@@ -504,9 +330,9 @@ class Test_SSE_009_PartStructure:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            _stub_stream_turn(
+            stub_stream_turn(
                 [
-                    _make_started_event(),
+                    make_started_event(),
                     RuntimeEvent(
                         kind=RuntimeEventKind.TOOL_CALL,
                         text="calling tool",
@@ -524,18 +350,18 @@ class Test_SSE_009_PartStructure:  # noqa: N801
                             step_index=0,
                         ),
                     ),
-                    _make_done_event(),
+                    make_done_event(),
                 ]
             ),
         )
-        no_db_app.dependency_overrides[require_http_identity] = _stub_identity_dependency(
+        no_db_app.dependency_overrides[require_http_identity] = stub_identity_dependency(
             NormalizedIdentity(tenant_claim="t", user_claim="u"),
         )
         with TestClient(no_db_app) as client:
             response = client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
-        parts = _parse_sse_body(response.text)
+        parts = parse_sse_body(response.text)
         tool_outputs = [p for p in parts if isinstance(p, dict) and p.get("type") == "tool-output-available"]
         assert tool_outputs, "Expected tool-output-available"
         assert tool_outputs[0].get("toolCallId"), "tool-output-available must have toolCallId"
@@ -544,7 +370,7 @@ class Test_SSE_009_PartStructure:  # noqa: N801
     def test_val_sse_014_fleet_metadata_in_data_custom_parts(self, chat_client: TestClient) -> None:
         """SSE body contains data-* custom parts for fleet metadata."""
         response = chat_client.post("/api/chat", json=DEFAULT_BODY)
-        parts = _parse_sse_body(response.text)
+        parts = parse_sse_body(response.text)
         data_parts = [p for p in parts if isinstance(p, dict) and p.get("type", "").startswith("data-")]
         assert data_parts, "Expected at least one data-* part"
 
@@ -556,7 +382,7 @@ class Test_SSE_009_PartStructure:  # noqa: N801
         from fleet_rlm.runtime.events import RuntimeToolInfo
 
         all_events: list[RuntimeEvent] = [
-            _make_started_event(),  # TURN_STARTED
+            make_started_event(),  # TURN_STARTED
             RuntimeEvent(kind=RuntimeEventKind.TEXT, text="hello"),  # TEXT
             RuntimeEvent(kind=RuntimeEventKind.REASONING, text="think"),  # REASONING
             RuntimeEvent(kind=RuntimeEventKind.STATUS, text="working"),  # STATUS
@@ -590,19 +416,19 @@ class Test_SSE_009_PartStructure:  # noqa: N801
                 kind=RuntimeEventKind.CLARIFICATION,
                 payload={"question": "Which?", "options": ["a"]},
             ),  # CLARIFICATION
-            _make_error_event("boom"),  # ERROR (terminal)
+            make_error_event("boom"),  # ERROR (terminal)
         ]
 
         chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
-        monkeypatch.setattr(chat_module, "stream_turn", _stub_stream_turn(all_events))
-        no_db_app.dependency_overrides[require_http_identity] = _stub_identity_dependency(
+        monkeypatch.setattr(chat_module, "stream_turn", stub_stream_turn(all_events))
+        no_db_app.dependency_overrides[require_http_identity] = stub_identity_dependency(
             NormalizedIdentity(tenant_claim="t", user_claim="u"),
         )
         with TestClient(no_db_app) as client:
             response = client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
-        parts = _parse_sse_body(response.text)
+        parts = parse_sse_body(response.text)
         part_types: set[str] = set()
         for p in parts:
             if isinstance(p, dict) and "type" in p:
@@ -661,7 +487,7 @@ class Test_SSE_016_Auth:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            _stub_stream_turn([_make_started_event(), _make_text_event("hi"), _make_done_event()]),
+            stub_stream_turn([make_started_event(), make_text_event("hi"), make_done_event()]),
         )
 
         with TestClient(app) as client:
@@ -695,7 +521,7 @@ class Test_SSE_016_Auth:  # noqa: N801
         )
 
         chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
-        monkeypatch.setattr(chat_module, "stream_turn", _stub_stream_turn([_make_done_event()]))
+        monkeypatch.setattr(chat_module, "stream_turn", stub_stream_turn([make_done_event()]))
 
         with TestClient(app) as client:
             response = client.post(
@@ -709,12 +535,12 @@ class Test_SSE_016_Auth:  # noqa: N801
     def test_val_sse_019_local_mode_bypasses_auth(self, chat_client: TestClient) -> None:
         """Local mode (auth_required=false) bypasses auth, returns 200+SSE."""
         response = chat_client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
     def test_val_sse_020_same_identity_shape_as_ws(self, chat_client: TestClient) -> None:
         """Identity resolved by /api/chat is NormalizedIdentity same as WS."""
         response = chat_client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
         # The identity flows through to ChatExecutionContext.identity; in the
         # stub, we already use NormalizedIdentity. The key invariant is that
         # no auth-layer error occurs.
@@ -792,7 +618,7 @@ class Test_SSE_026_UserMessageExtraction:  # noqa: N801
         # We can't directly observe the extracted message in the SSE output
         # without instrumenting the stub, but the 200+SSE confirms the turn
         # ran using the last user message (not rejected).
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
     def test_val_sse_059_scan_backwards_for_last_user(self, chat_client: TestClient, no_db_app, monkeypatch) -> None:
         """Scan backwards for last user message when last is assistant."""
@@ -802,7 +628,7 @@ class Test_SSE_026_UserMessageExtraction:  # noqa: N801
             *, ctx: ChatExecutionContext, agent_runtime: object, message: str
         ) -> AsyncIterator[RuntimeEvent]:
             captured_messages.append(message)
-            for ev in [_make_started_event(), _make_text_event("response"), _make_done_event()]:
+            for ev in [make_started_event(), make_text_event("response"), make_done_event()]:
                 yield ev
 
         chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
@@ -817,7 +643,7 @@ class Test_SSE_026_UserMessageExtraction:  # noqa: N801
             }
             response = client.post("/api/chat", json=body)
 
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
         assert captured_messages, "stream_turn should have been called"
         assert captured_messages[0] == "hello", f"Expected 'hello' (last user message), got {captured_messages[0]!r}"
 
@@ -840,7 +666,7 @@ class Test_SSE_026_UserMessageExtraction:  # noqa: N801
             *, ctx: ChatExecutionContext, agent_runtime: object, message: str
         ) -> AsyncIterator[RuntimeEvent]:
             captured_messages.append(message)
-            for ev in [_make_started_event(), _make_text_event("ok"), _make_done_event()]:
+            for ev in [make_started_event(), make_text_event("ok"), make_done_event()]:
                 yield ev
 
         chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
@@ -854,7 +680,7 @@ class Test_SSE_026_UserMessageExtraction:  # noqa: N801
             }
             response = client.post("/api/chat", json=body)
 
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
         assert captured_messages
         assert captured_messages[0] == "hello from parts", (
             f"Expected parts-extracted text, got {captured_messages[0]!r}"
@@ -872,7 +698,7 @@ class Test_SSE_027_Sessions:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            _stub_stream_turn(
+            stub_stream_turn(
                 [
                     RuntimeEvent(
                         kind=RuntimeEventKind.TURN_STARTED,
@@ -883,20 +709,20 @@ class Test_SSE_027_Sessions:  # noqa: N801
                             "run_id": "run-1",
                         },
                     ),
-                    _make_done_event(),
+                    make_done_event(),
                 ]
             ),
         )
 
         with TestClient(no_db_app) as client:
             response = client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
     def test_val_sse_029_non_existent_session_id_creates_new(self, chat_client: TestClient) -> None:
         """Non-existent session_id creates a new session (not crash)."""
         body = {**DEFAULT_BODY, "session_id": "nonexistent-session"}
         response = chat_client.post("/api/chat", json=body)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
     def test_val_sse_030_concurrent_requests_isolated(self, chat_client: TestClient, no_db_app, monkeypatch) -> None:
         """Two concurrent requests produce independent streams."""
@@ -904,11 +730,11 @@ class Test_SSE_027_Sessions:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            _stub_stream_turn(
+            stub_stream_turn(
                 [
-                    _make_started_event(),
-                    _make_text_event("independent"),
-                    _make_done_event(),
+                    make_started_event(),
+                    make_text_event("independent"),
+                    make_done_event(),
                 ]
             ),
         )
@@ -916,8 +742,8 @@ class Test_SSE_027_Sessions:  # noqa: N801
         with TestClient(no_db_app) as client:
             resp1 = client.post("/api/chat", json={"messages": [{"role": "user", "content": "req1"}]})
             resp2 = client.post("/api/chat", json={"messages": [{"role": "user", "content": "req2"}]})
-        _assert_sse_ok(resp1)
-        _assert_sse_ok(resp2)
+        assert_sse_ok(resp1)
+        assert_sse_ok(resp2)
 
 
 class Test_SSE_031_Cancellation:  # noqa: N801
@@ -944,15 +770,15 @@ class Test_SSE_031_Cancellation:  # noqa: N801
                     text="started",
                     payload={"message_id": f"msg-{i}"},
                 )
-                yield _make_text_event(f"chunk-{i}")
-            yield _make_done_event()
+                yield make_text_event(f"chunk-{i}")
+            yield make_done_event()
 
         chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
         monkeypatch.setattr(chat_module, "stream_turn", _stream_with_cancel_flag)
 
         # Verify cancel_flag is mutable dict shared with ChatExecutionContext.
         response = chat_client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
         assert captured_cancel_flag is not None
         assert "cancelled" in captured_cancel_flag
         # Default state is False before any cancellation.
@@ -968,18 +794,18 @@ class Test_SSE_031_Cancellation:  # noqa: N801
         ) -> AsyncIterator[RuntimeEvent]:
             # Signal cancellation right away.
             ctx.cancel_flag["cancelled"] = True
-            yield _make_started_event()
-            yield _make_text_event("partial")
-            yield _make_done_event()
+            yield make_started_event()
+            yield make_text_event("partial")
+            yield make_done_event()
 
         chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
         monkeypatch.setattr(chat_module, "stream_turn", _stream_and_cancel)
 
         with TestClient(no_db_app) as client:
             response = client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
-        parts = _parse_sse_body(response.text)
+        parts = parse_sse_body(response.text)
         types = [p["type"] for p in parts if isinstance(p, dict) and "type" in p]
         assert "abort" in types or parts[-1] == "[DONE]", "Expected abort part or [DONE] on cancellation"
 
@@ -994,13 +820,13 @@ class Test_SSE_033_ErrorHandling:  # noqa: N801
         # Since our default stub yields a normal flow, let's use a custom stub.
         # This test verifies that project_sse handles ERROR events correctly.
         response = chat_client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
     def test_val_sse_034_error_before_first_byte_returns_non_200(self, chat_client: TestClient) -> None:
         """Error before first byte returns 4xx/5xx JSON, not SSE."""
         # Auth test covers this: 401 is returned before SSE starts.
         response = chat_client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
     def test_val_sse_050_unhandled_exception_does_not_produce_malformed_stream(
         self, chat_client: TestClient, no_db_app, monkeypatch
@@ -1018,8 +844,8 @@ class Test_SSE_033_ErrorHandling:  # noqa: N801
         with TestClient(no_db_app) as client:
             response = client.post("/api/chat", json=DEFAULT_BODY)
 
-        _assert_sse_ok(response)
-        parts = _parse_sse_body(response.text)
+        assert_sse_ok(response)
+        parts = parse_sse_body(response.text)
         assert parts[-1] == "[DONE]", "Stream must end with [DONE] even after error"
         error_parts = [p for p in parts if isinstance(p, dict) and p.get("type") == "error"]
         assert error_parts, "Expected an error part when stream_turn raises"
@@ -1032,7 +858,7 @@ class Test_SSE_033_ErrorHandling:  # noqa: N801
         async def _raises_after_yield(
             *, ctx: ChatExecutionContext, agent_runtime: object, message: str
         ) -> AsyncIterator[RuntimeEvent]:
-            yield _make_started_event()
+            yield make_started_event()
             raise _SentinelError("fail after yield")
 
         chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
@@ -1041,8 +867,8 @@ class Test_SSE_033_ErrorHandling:  # noqa: N801
         with TestClient(no_db_app) as client:
             response = client.post("/api/chat", json=DEFAULT_BODY)
 
-        _assert_sse_ok(response)
-        parts = _parse_sse_body(response.text)
+        assert_sse_ok(response)
+        parts = parse_sse_body(response.text)
         assert parts[-1] == "[DONE]", "Stream must end with [DONE]"
         error_parts = [p for p in parts if isinstance(p, dict) and p.get("type") == "error"]
         assert error_parts, "Expected error part when stream_turn raises mid-stream"
@@ -1067,20 +893,20 @@ class Test_SSE_035_StreamCharacteristics:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            _stub_stream_turn(
+            stub_stream_turn(
                 [
-                    _make_started_event(),
-                    _make_text_event(large_text),
-                    _make_done_event(),
+                    make_started_event(),
+                    make_text_event(large_text),
+                    make_done_event(),
                 ]
             ),
         )
 
         with TestClient(no_db_app) as client:
             response = client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
-        parts = _parse_sse_body(response.text)
+        parts = parse_sse_body(response.text)
         text_deltas = [p["delta"] for p in parts if isinstance(p, dict) and p.get("type") == "text-delta"]
         reconstructed = "".join(text_deltas)
         assert reconstructed == large_text, (
@@ -1097,7 +923,7 @@ class Test_SSE_035_StreamCharacteristics:  # noqa: N801
     def test_val_sse_047_no_websocket_upgrade_required(self, chat_client: TestClient) -> None:
         """Standard POST works without WebSocket upgrade headers."""
         response = chat_client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
     def test_val_sse_048_clean_close_after_done(self, chat_client: TestClient) -> None:
         """Response ends cleanly after [DONE]."""
@@ -1116,7 +942,7 @@ class Test_SSE_035_StreamCharacteristics:  # noqa: N801
             json=DEFAULT_BODY,
             headers={"Accept": "application/json"},
         )
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
         assert "text/event-stream" in response.headers.get("content-type", "")
 
     def test_val_sse_054_empty_turn_well_formed(self, chat_client: TestClient, no_db_app, monkeypatch) -> None:
@@ -1125,7 +951,7 @@ class Test_SSE_035_StreamCharacteristics:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            _stub_stream_turn(
+            stub_stream_turn(
                 [
                     RuntimeEvent(kind=RuntimeEventKind.DONE, text="done", payload={"history_turns": 0}),
                 ]
@@ -1134,9 +960,9 @@ class Test_SSE_035_StreamCharacteristics:  # noqa: N801
 
         with TestClient(no_db_app) as client:
             response = client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
-        parts = _parse_sse_body(response.text)
+        parts = parse_sse_body(response.text)
         types = [p["type"] for p in parts if isinstance(p, dict) and "type" in p]
         assert "start" in types, "Expected start part"
         assert "start-step" in types, "Expected start-step part"
@@ -1156,7 +982,7 @@ class Test_SSE_035_StreamCharacteristics:  # noqa: N801
         # Should be 200 or 422 (per FastAPI max body size), never 429.
         assert response.status_code in (200, 422), f"Expected 200 or 422, got {response.status_code} (not a custom 429)"
         if response.status_code == 200:
-            _assert_sse_ok(response)
+            assert_sse_ok(response)
 
     def test_val_sse_057_non_idempotent(self, chat_client: TestClient, no_db_app, monkeypatch) -> None:
         """Two identical POST requests produce independent streams (messageId varies)."""
@@ -1178,8 +1004,8 @@ class Test_SSE_035_StreamCharacteristics:  # noqa: N801
                     "run_id": f"run-{call_count[0]}",
                 },
             )
-            yield _make_text_event(f"response-{call_count[0]}")
-            yield _make_done_event()
+            yield make_text_event(f"response-{call_count[0]}")
+            yield make_done_event()
 
         chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
         monkeypatch.setattr(chat_module, "stream_turn", _dynamic_stream)
@@ -1188,11 +1014,11 @@ class Test_SSE_035_StreamCharacteristics:  # noqa: N801
             resp1 = client.post("/api/chat", json=DEFAULT_BODY)
             resp2 = client.post("/api/chat", json=DEFAULT_BODY)
 
-        _assert_sse_ok(resp1)
-        _assert_sse_ok(resp2)
+        assert_sse_ok(resp1)
+        assert_sse_ok(resp2)
 
-        parts1 = _parse_sse_body(resp1.text)
-        parts2 = _parse_sse_body(resp2.text)
+        parts1 = parse_sse_body(resp1.text)
+        parts2 = parse_sse_body(resp2.text)
         msg_ids_1 = [p["messageId"] for p in parts1 if isinstance(p, dict) and p.get("type") == "start"]
         msg_ids_2 = [p["messageId"] for p in parts2 if isinstance(p, dict) and p.get("type") == "start"]
         assert msg_ids_1, "First request must have a messageId"
@@ -1207,18 +1033,18 @@ class Test_SSE_035_StreamCharacteristics:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            _stub_stream_turn(
+            stub_stream_turn(
                 [
-                    _make_started_event(),
+                    make_started_event(),
                     RuntimeEvent(kind=RuntimeEventKind.MLFLOW_SPAN, payload={"span_id": "sp-1"}),
-                    _make_done_event(),
+                    make_done_event(),
                 ]
             ),
         )
 
         with TestClient(no_db_app) as client:
             response = client.post("/api/chat", json={**DEFAULT_BODY, "trace": False})
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
     def test_val_sse_062_no_content_negotiation(self, chat_client: TestClient) -> None:
         """Always SSE for valid requests, no 406."""
@@ -1227,14 +1053,14 @@ class Test_SSE_035_StreamCharacteristics:  # noqa: N801
             json=DEFAULT_BODY,
             headers={"Accept": "application/json"},
         )
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
         # Accept: text/event-stream
         response2 = chat_client.post(
             "/api/chat",
             json=DEFAULT_BODY,
             headers={"Accept": "text/event-stream"},
         )
-        _assert_sse_ok(response2)
+        assert_sse_ok(response2)
 
 
 class Test_SSE_040_DataAgent:  # noqa: N801
@@ -1243,8 +1069,8 @@ class Test_SSE_040_DataAgent:  # noqa: N801
     def test_val_sse_040_data_agent_carries_skills_and_tools(self, chat_client: TestClient) -> None:
         """data-agent has selected_skills and available_tools."""
         response = chat_client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response)
-        parts = _parse_sse_body(response.text)
+        assert_sse_ok(response)
+        parts = parse_sse_body(response.text)
         data_agents = [p for p in parts if isinstance(p, dict) and p.get("type") == "data-agent"]
         assert data_agents, "Expected at least one data-agent part"
         da = data_agents[0]
@@ -1262,21 +1088,21 @@ class Test_SSE_044_Determinism:  # noqa: N801
         """Two identical requests produce identical part-type sequences."""
         chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
         fixed_events = [
-            _make_started_event(),
-            _make_text_event("hello"),
-            _make_done_event(),
+            make_started_event(),
+            make_text_event("hello"),
+            make_done_event(),
         ]
-        monkeypatch.setattr(chat_module, "stream_turn", _stub_stream_turn(fixed_events))
+        monkeypatch.setattr(chat_module, "stream_turn", stub_stream_turn(fixed_events))
 
         with TestClient(no_db_app) as client:
             resp1 = client.post("/api/chat", json=DEFAULT_BODY)
             resp2 = client.post("/api/chat", json=DEFAULT_BODY)
 
-        _assert_sse_ok(resp1)
-        _assert_sse_ok(resp2)
+        assert_sse_ok(resp1)
+        assert_sse_ok(resp2)
 
-        types1 = [p["type"] for p in _parse_sse_body(resp1.text) if isinstance(p, dict) and "type" in p]
-        types2 = [p["type"] for p in _parse_sse_body(resp2.text) if isinstance(p, dict) and "type" in p]
+        types1 = [p["type"] for p in parse_sse_body(resp1.text) if isinstance(p, dict) and "type" in p]
+        types2 = [p["type"] for p in parse_sse_body(resp2.text) if isinstance(p, dict) and "type" in p]
         assert types1 == types2, "Part-type sequences must be identical for same input"
 
     def test_val_sse_045_no_secrets_leaked(self, chat_client: TestClient, no_db_app, monkeypatch) -> None:
@@ -1310,7 +1136,7 @@ class Test_SSE_051_RouteMounting:  # noqa: N801
         response_v1 = chat_client.post("/api/v1/chat", json=DEFAULT_BODY)
         assert response_v1.status_code == 404, "/api/v1/chat should be 404"
         response_root = chat_client.post("/api/chat", json=DEFAULT_BODY)
-        _assert_sse_ok(response_root)
+        assert_sse_ok(response_root)
 
     def test_val_sse_052_chat_router_does_not_shadow_existing_routes(self, chat_client: TestClient) -> None:
         """Existing /api/v1/* routes still work after chat router is added."""
@@ -1343,7 +1169,7 @@ class Test_SSE_053_SkillFiltering:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            _stub_stream_turn([_make_started_event(), _make_text_event("ok"), _make_done_event()]),
+            stub_stream_turn([make_started_event(), make_text_event("ok"), make_done_event()]),
         )
 
         body = {
@@ -1352,7 +1178,7 @@ class Test_SSE_053_SkillFiltering:  # noqa: N801
         }
         with TestClient(no_db_app) as client:
             response = client.post("/api/chat", json=body)
-        _assert_sse_ok(response)
+        assert_sse_ok(response)
 
 
 class Test_SSE_039_Format:  # noqa: N801
@@ -1410,21 +1236,21 @@ def test_sse_uses_shared_interpreter_pool_for_agent_context(
     stub_identity,
 ) -> None:
     """POST /api/chat uses the shared interpreter pool from app state."""
-    no_db_app.dependency_overrides[require_http_identity] = _stub_identity_dependency(stub_identity)
+    no_db_app.dependency_overrides[require_http_identity] = stub_identity_dependency(stub_identity)
 
     captured_pool = []
     chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
 
-    async def _spy_build_context(runtime: object, pool: Any = None) -> _FakeChatAgentContext:
+    async def _spy_build_context(runtime: object, pool: Any = None) -> FakeChatAgentContext:
         captured_pool.append(pool)
-        return _FakeChatAgentContext(_FakeChatAgent())
+        return FakeChatAgentContext(FakeChatAgent())
 
     monkeypatch.setattr(chat_module, "build_chat_agent_context", _spy_build_context)
 
     with TestClient(no_db_app) as client:
         response = client.post("/api/chat", json=DEFAULT_BODY)
 
-    _assert_sse_ok(response)
+    assert_sse_ok(response)
     assert len(captured_pool) == 1
     assert captured_pool[0] is no_db_app.state.interpreter_pool_deps.pool
 
@@ -1438,7 +1264,7 @@ def test_sse_prepare_failure_does_not_leak_exception_detail(
     """SSE prepare failure does not leak raw exception strings to the client."""
     import logging
 
-    no_db_app.dependency_overrides[require_http_identity] = _stub_identity_dependency(stub_identity)
+    no_db_app.dependency_overrides[require_http_identity] = stub_identity_dependency(stub_identity)
 
     chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
 
@@ -1469,7 +1295,7 @@ def test_sse_build_agent_context_failure_does_not_leak_exception_detail(
     """SSE build_chat_agent_context failure does not leak raw exception strings to the client."""
     import logging
 
-    no_db_app.dependency_overrides[require_http_identity] = _stub_identity_dependency(stub_identity)
+    no_db_app.dependency_overrides[require_http_identity] = stub_identity_dependency(stub_identity)
 
     chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
 
