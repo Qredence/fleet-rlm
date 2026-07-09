@@ -238,3 +238,36 @@ def test_public_artifact_responses_do_not_expose_raw_volume_paths() -> None:
     dumped = str(payload)
     assert "/home/daytona/memory" not in dumped
     assert "C:" not in dumped
+
+
+def test_resolve_artifact_by_id_uses_session_index_without_tree_walk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.artifacts import io as artifact_io
+
+    session = _FakeSession()
+    interpreter = _interpreter(session)
+    create_payload = create_artifact_impl(
+        session_id="sess-1",
+        category="reports",
+        relative_path="summary.md",
+        content="indexed",
+        interpreter=interpreter,
+    )
+    artifact_id = create_payload["artifact"]["ref"]["id"]
+    session.list_calls.clear()
+
+    def fail_walk(*args: object, **kwargs: object) -> list[tuple[str, str]]:
+        raise AssertionError("resolve_artifact_by_id should not walk the artifact tree when indexed")
+
+    monkeypatch.setattr(artifact_io, "_walk_artifact_files", fail_walk)
+
+    update_payload = update_artifact_impl(
+        session_id="sess-1",
+        artifact_id=artifact_id,
+        content="updated via index",
+        interpreter=interpreter,
+    )
+
+    assert update_payload["status"] == "ok"
+    assert session.list_calls == []
