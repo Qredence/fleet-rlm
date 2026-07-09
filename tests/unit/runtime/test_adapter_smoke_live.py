@@ -69,6 +69,8 @@ _SMOKE_SCRIPT = textwrap.dedent(
 
 
 def _have_creds() -> bool:
+    if (os.environ.get("FLEET_RLM_RUN_LIVE_LLM_TESTS") or "").strip() != "1":
+        return False
     if not os.environ.get("DAYTONA_API_KEY"):
         return False
     if not (os.environ.get("FLEET_RLM_SMOKE_QWEN_KEY") or os.environ.get("OPENAI_API_KEY")):

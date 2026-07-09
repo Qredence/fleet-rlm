@@ -26,6 +26,7 @@ from .openapi import annotate_validation_error_schemas
 from .routers import (
     auth,
     chat,
+    files,
     health,
     info,
     optimization,
@@ -61,6 +62,7 @@ def _register_api_routes(app: FastAPI) -> None:
     api_v1.include_router(ws.router)
     api_v1.include_router(sessions.router)
     api_v1.include_router(runtime.router)
+    api_v1.include_router(files.router)
     api_v1.include_router(skills.router)
     from .routers import llm_profiles
 
