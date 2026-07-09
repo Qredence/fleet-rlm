@@ -116,6 +116,7 @@ TURN_CONTROLS_FIELDS = {
     "trace",
     "trace_mode",
     "selected_skill_ids",
+    "attached_files",
 }
 
 # ---------------------------------------------------------------------------
@@ -148,6 +149,7 @@ class TestTurnControls:
         assert ctrl.trace is None
         assert ctrl.trace_mode is None
         assert ctrl.selected_skill_ids == []
+        assert ctrl.attached_files is None
 
     def test_context_paths_is_fresh_list_per_instance(self) -> None:
         ctrl1 = TurnControls()

@@ -13,7 +13,7 @@ def _chat() -> type:
 
 
 def test_chat_request_model_fields():
-    """ChatRequest.model_fields contains messages + all 10 fleet control fields."""
+    """ChatRequest.model_fields contains messages + all 11 fleet control fields."""
     chat = _chat()
     fields = chat.ChatRequest.model_fields
 
@@ -33,6 +33,7 @@ def test_chat_request_model_fields():
         "trace",
         "trace_mode",
         "selected_skill_ids",
+        "attachment_refs",
     ]
     for cf in control_fields:
         assert cf in fields, f"Missing control field: {cf}"
@@ -95,6 +96,7 @@ def test_chat_request_validates_well_formed_body():
     assert request.trace is None
     assert request.trace_mode is None
     assert request.selected_skill_ids is None
+    assert request.attachment_refs is None
 
 
 def test_chat_request_rejects_empty_messages():
@@ -139,6 +141,7 @@ def test_chat_request_messages_only_valid():
     assert request.trace is None
     assert request.trace_mode is None
     assert request.selected_skill_ids is None
+    assert request.attachment_refs is None
 
 
 def test_legacy_execution_modes_accepted():
@@ -147,7 +150,10 @@ def test_legacy_execution_modes_accepted():
 
     for mode in ("auto", "rlm_only", "tools_only"):
         request = chat.ChatRequest.model_validate(
-            {"messages": [{"role": "user", "content": "hi"}], "execution_mode": mode}
+            {
+                "messages": [{"role": "user", "content": "hi"}],
+                "execution_mode": mode,
+            }
         )
         assert request.execution_mode == mode
 
@@ -193,6 +199,7 @@ def test_chat_request_with_control_fields():
             "trace": True,
             "trace_mode": "verbose",
             "selected_skill_ids": ["skill-1", "skill-2"],
+            "attachment_refs": ["a" * 32],
         }
     )
 
@@ -206,6 +213,7 @@ def test_chat_request_with_control_fields():
     assert request.trace is True
     assert request.trace_mode == "verbose"
     assert request.selected_skill_ids == ["skill-1", "skill-2"]
+    assert request.attachment_refs == ["a" * 32]
 
 
 def test_chat_message_default_content_is_none():
