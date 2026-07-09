@@ -41,6 +41,8 @@ from fleet_rlm.runtime.tools.volume_memory_tools import (
 )
 from fleet_rlm.skills.execution_deps import SkillExecutionDeps
 from fleet_rlm.skills.loader import default_skill_runtime_context
+from fleet_rlm.tools.filesystem import list_files_impl, read_file_impl, reject_legacy_list_files_pattern
+from fleet_rlm.tools.sandbox import inspect_workspace_impl
 
 INTERPRETER_TOOL_NAMES = frozenset(
     {
@@ -49,8 +51,11 @@ INTERPRETER_TOOL_NAMES = frozenset(
         "delegate_to_rlm",
         "delegate_to_rlm_batched",
         "execute_code",
+        "inspect_workspace",
+        "list_files",
         "list_skills",
         "load_skill",
+        "read_file",
         "read_buffer",
         "read_skill_resource",
         "run_skill_script",
@@ -204,6 +209,22 @@ def _bound_runtime_tool_factories(
         _ = timeout
         return coerce_sandbox_result(interpreter.execute(code, variables or {}))
 
+    def list_files(
+        path: str = ".",
+        root: str = "workspace",
+        pattern: str | None = None,
+    ) -> dict[str, Any]:
+        rejected = reject_legacy_list_files_pattern(pattern)
+        if rejected is not None:
+            return rejected
+        return list_files_impl(path, root=root, interpreter=interpreter)
+
+    def read_file(path: str, root: str = "workspace", max_bytes: int = 200_000) -> dict[str, Any]:
+        return read_file_impl(path, root=root, max_bytes=max_bytes, interpreter=interpreter)
+
+    def inspect_workspace(path: str = ".", max_entries: int = 50) -> dict[str, Any]:
+        return inspect_workspace_impl(path, max_entries=max_entries, interpreter=interpreter)
+
     def read_buffer(name: str = "default") -> dict[str, Any]:
         return execute_sandbox_tool(
             interpreter,
@@ -249,7 +270,10 @@ def _bound_runtime_tool_factories(
             "delegate_to_rlm": delegate_to_rlm,
             "delegate_to_rlm_batched": delegate_to_rlm_batched,
             "execute_code": execute_code,
+            "inspect_workspace": inspect_workspace,
+            "list_files": list_files,
             "read_buffer": read_buffer,
+            "read_file": read_file,
             "sandbox_list_files": functools.partial(_sandbox_list_files_impl, sandbox_ctx),
             "sandbox_read_file": functools.partial(_sandbox_read_file_impl, sandbox_ctx),
             "sandbox_write_file": functools.partial(_sandbox_write_file_impl, sandbox_ctx),

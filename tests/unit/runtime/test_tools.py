@@ -71,7 +71,7 @@ def test_tool_marker_collection_and_name_listing() -> None:
 def test_discover_tools_exposes_delegate_and_chunking_tools() -> None:
     from fleet_rlm.runtime.tools import discover_tools, list_react_tool_names
 
-    names = set(list_react_tool_names(discover_tools()))
+    names = set(list_react_tool_names(discover_tools(sandbox_available=True)))
 
     assert {"delegate_to_rlm", "delegate_to_rlm_batched", "chunk_document", "load_document"} <= names
 
@@ -206,23 +206,28 @@ def test_delegate_to_rlm_marks_broker_failure_as_degraded(monkeypatch: pytest.Mo
     assert child.shutdown_calls == 1
 
 
-def test_list_files_scopes_default_search_to_repo_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_list_files_stub_requires_runtime_binding() -> None:
     from fleet_rlm.runtime.tools.filesystem import list_files
 
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "src").mkdir()
-    (tmp_path / "tests").mkdir()
-    (tmp_path / "notes").mkdir()
-    (tmp_path / "src" / "main.py").write_text("print('src')\n", encoding="utf-8")
-    (tmp_path / "tests" / "test_main.py").write_text("assert True\n", encoding="utf-8")
-    (tmp_path / "notes" / "ignored.py").write_text("print('ignored')\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="bound Daytona interpreter"):
+        list_files()
+
+
+def test_list_files_rejects_legacy_pattern_argument() -> None:
+    from fleet_rlm.runtime.tools.filesystem import list_files
 
     result = list_files(pattern="**/*.py")
 
-    assert result["status"] == "ok"
-    assert result["list_files_scoped"] is True
-    assert result["list_files_scope_roots"] == ["src", "tests"]
-    assert result["files"] == ["src/main.py", "tests/test_main.py"]
+    assert result["status"] == "error"
+    assert "no longer supports glob pattern" in result["error"]
+
+
+def test_find_files_and_read_file_slice_are_discoverable() -> None:
+    from fleet_rlm.runtime.tools.registry import discover_tools, list_react_tool_names
+
+    names = set(list_react_tool_names(discover_tools()))
+
+    assert {"find_files", "read_file_slice"} <= names
 
 
 def test_find_files_rg_cli_finds_matches(tmp_path: Path) -> None:
@@ -446,7 +451,7 @@ def test_browser_fetch_page_in_discover_tools() -> None:
     from fleet_rlm.runtime.tools.registry import discover_tools
 
     discover_tools.cache_clear()
-    tools = discover_tools()
+    tools = discover_tools(sandbox_available=True)
     tool_names = [getattr(t, "name", None) or getattr(t.func, "__name__", "") for t in tools]
     assert "browser_fetch_page" in tool_names
 

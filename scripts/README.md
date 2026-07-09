@@ -19,6 +19,7 @@ Support boundary:
 | `check_harness_engineering.py` | Validate root agent-map budget, harness docs, `.codex` config, script inventory, and structural boundaries | None | `uv run python scripts/check_harness_engineering.py` |
 | `codex_feedback_loop.py` | Run the safe local Codex feedback loop and write a concise report | None for `--profile safe`; running app for `--profile app` | `uv run python scripts/codex_feedback_loop.py --profile safe` |
 | `openapi_tools.py` | Generate or validate the root OpenAPI contract | Backend dependencies | `uv run python scripts/openapi_tools.py generate` |
+| `sync_plans_canvas.py` | Regenerate or check the Cursor `plans-roadmap` canvas generated phases block from `PLANS.md` | Existing `PLANS.md`; Cursor canvas path for sync/check | `uv run python scripts/sync_plans_canvas.py --check` |
 | `validate_release.py` | Run release hygiene, metadata, and wheel integrity checks | Build artifacts for `wheel` mode | `uv run python scripts/validate_release.py metadata` |
 | `run_duplicate_check.zsh` | Run `jscpd` against handwritten source blocks | `src/frontend/node_modules` installed | `./scripts/run_duplicate_check.zsh` |
 

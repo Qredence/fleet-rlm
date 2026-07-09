@@ -1,4 +1,4 @@
-"""DSPy ReAct filesystem tools for the RLM chat agent."""
+"""Compatibility stubs for policy-gated Daytona filesystem tools."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from fleet_rlm.runtime.tools._marker import tool_fn
+from fleet_rlm.tools.filesystem import list_files_impl, read_file_impl, reject_legacy_list_files_pattern
+from fleet_rlm.tools.sandbox import inspect_workspace_impl
 
 
 @dataclass(slots=True)
@@ -318,10 +320,16 @@ def build_filesystem_tools(agent: Any) -> list[Any]:
 
 
 @tool_fn
-def list_files(path: str = ".", pattern: str = "**/*") -> dict[str, Any]:
-    """List host files matching a glob pattern."""
-    _ctx = _FilesystemToolContext(agent=None)  # type: ignore[arg-type]
-    return _list_files_impl(_ctx, path=path, pattern=pattern)
+def list_files(
+    path: str = ".",
+    root: str = "workspace",
+    pattern: str | None = None,
+) -> dict[str, Any]:
+    """List files and directories in an approved Daytona workspace or volume root."""
+    rejected = reject_legacy_list_files_pattern(pattern)
+    if rejected is not None:
+        return rejected
+    return list_files_impl(path, root=root, interpreter=None)
 
 
 @tool_fn
@@ -342,3 +350,15 @@ def find_files(pattern: str, path: str = ".", include: str = "") -> dict[str, An
     """Search host file contents with a regex pattern."""
     _ctx = _FilesystemToolContext(agent=None)  # type: ignore[arg-type]
     return _find_files_impl(_ctx, pattern=pattern, path=path, include=include)
+
+
+@tool_fn
+def read_file(path: str, root: str = "workspace", max_bytes: int = 200_000) -> dict[str, Any]:
+    """Read a bounded file preview from an approved Daytona workspace or volume root."""
+    return read_file_impl(path, root=root, max_bytes=max_bytes, interpreter=None)
+
+
+@tool_fn
+def inspect_workspace(path: str = ".", max_entries: int = 50) -> dict[str, Any]:
+    """Inspect Daytona workspace metadata without reading file bodies."""
+    return inspect_workspace_impl(path, max_entries=max_entries, interpreter=None)

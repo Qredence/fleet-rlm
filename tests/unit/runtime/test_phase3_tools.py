@@ -15,7 +15,7 @@ def _tool_func(tool: Any) -> Any:
 def test_phase3_tools_are_registered() -> None:
     from fleet_rlm.runtime.tools import discover_tools, list_react_tool_names
 
-    names = set(list_react_tool_names(discover_tools()))
+    names = set(list_react_tool_names(discover_tools(sandbox_available=True)))
 
     assert {
         "web_search",

@@ -102,6 +102,10 @@ results/
 archive/
 artifacts/
 artifacts/eval/
+!src/fleet_rlm/artifacts/
+!src/fleet_rlm/artifacts/*.py
+!tests/unit/artifacts/
+!tests/unit/artifacts/*.py
 !src/frontend/src/features/artifacts/
 !src/frontend/src/features/artifacts/*.tsx
 

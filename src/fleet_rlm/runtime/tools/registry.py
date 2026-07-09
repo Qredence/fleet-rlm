@@ -6,6 +6,8 @@ import functools
 import importlib
 from typing import Any, Iterable
 
+from fleet_rlm.tools.registry import ToolExposurePolicy, filter_tool_names
+
 from ._marker import tool_fn
 
 TOOL_MODULE_NAMES: tuple[str, ...] = (
@@ -71,12 +73,31 @@ def _import_tool_modules(
 
 
 @functools.lru_cache(maxsize=1)
-def discover_tools() -> list[Any]:
+def _discover_unfiltered_tools() -> tuple[Any, ...]:
+    """Discover all explicitly registered fleet tool functions before policy."""
+    return tuple(_collect_tools_from_modules(_import_tool_modules()))
+
+
+def discover_tools(
+    *,
+    tool_policy: ToolExposurePolicy | None = None,
+    sandbox_available: bool = False,
+) -> list[Any]:
     """Discover all explicitly registered fleet tool functions.
 
     The result is cached because tool modules are static after import.
     """
-    return _collect_tools_from_modules(_import_tool_modules())
+    tools = list(_discover_unfiltered_tools())
+    tool_by_name = {name: tool for name, tool in zip(list_react_tool_names(tools), tools, strict=True)}
+    filtered_names = filter_tool_names(
+        list(tool_by_name),
+        policy=tool_policy,
+        sandbox_available=sandbox_available,
+    )
+    return [tool_by_name[name] for name in filtered_names]
+
+
+setattr(discover_tools, "cache_clear", _discover_unfiltered_tools.cache_clear)
 
 
 __all__ = [

@@ -22,7 +22,7 @@ import pytest
 def _disable_runtime_tool_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.runtime.agent import runtime as runtime_mod
 
-    monkeypatch.setattr(runtime_mod, "discover_tools", lambda: [])
+    monkeypatch.setattr(runtime_mod, "discover_tools", lambda **_kwargs: [])
 
 
 class _ScriptedAgent:

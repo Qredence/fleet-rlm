@@ -76,7 +76,7 @@ def test_enrich_with_skills_uses_scaffold_when_volume_unmounted() -> None:
 def _disable_runtime_tool_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.runtime.agent import runtime as runtime_mod
 
-    monkeypatch.setattr(runtime_mod, "discover_tools", lambda: [])
+    monkeypatch.setattr(runtime_mod, "discover_tools", lambda **_kwargs: [])
 
 
 class _PosthocAgent:

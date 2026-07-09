@@ -2,4 +2,10 @@
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .registry import ToolDescriptor, ToolExposurePolicy, ToolRuntimeContext
+
+__all__ = [
+    "ToolDescriptor",
+    "ToolExposurePolicy",
+    "ToolRuntimeContext",
+]

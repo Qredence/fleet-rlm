@@ -21,6 +21,7 @@ from fleet_rlm.runtime.agent.runtime_history import maybe_refresh_summary
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventContext
 from fleet_rlm.runtime.tools import discover_tools
 from fleet_rlm.runtime.tools.binding import bind_runtime_tools, execute_sandbox_tool
+from fleet_rlm.tools.registry import ToolExposurePolicy
 from fleet_rlm.utils.async_compat import _run_async_compat
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ class AgentRuntime:
         use_escalation: bool = True,
         summary_interval: int = 10,
         compaction_threshold_pct: float = 0.7,
+        tool_policy: ToolExposurePolicy | None = None,
     ) -> None:
         self.interpreter: Any | None = interpreter
         self.history: dspy.History = dspy.History(messages=[])
@@ -86,12 +88,16 @@ class AgentRuntime:
         self._summary_interval: int = summary_interval
         self._turns_since_summary: int = 0
         self._use_escalation: bool = use_escalation
+        self._tool_policy: ToolExposurePolicy = tool_policy or ToolExposurePolicy()
 
         # Phase 7: token-budget-aware compaction threshold (keep history_max_turns as ceiling)
         self._compaction_threshold_pct: float = max(0.0, min(1.0, compaction_threshold_pct))
 
         # Discover tools from the registry; append any extra tools
-        base_tools = discover_tools()
+        base_tools = discover_tools(
+            tool_policy=self._tool_policy,
+            sandbox_available=interpreter is not None,
+        )
         base_tools = bind_runtime_tools(
             base_tools,
             runtime=self,

@@ -19,7 +19,7 @@ COMMAND_DISPATCH: dict[str, tuple[str, list[str], list[str]]] = {
     "fetch_web_document": ("fetch_web_document", ["url"], ["alias"]),
     "set_active_document": ("set_active_document", ["alias"], []),
     "list_documents": ("list_documents", [], []),
-    "list_files": ("list_files", [], ["path", "pattern"]),
+    "list_files": ("list_files", [], ["path", "root", "pattern"]),
     "read_file_slice": ("read_file_slice", ["path"], ["start_line", "num_lines", "end_line"]),
     "find_files": ("find_files", ["pattern"], ["path", "include"]),
     "chunk_host": (

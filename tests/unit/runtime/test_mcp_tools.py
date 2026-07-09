@@ -119,7 +119,7 @@ async def test_agent_runtime_mcp_reattach_replaces_previous_tools(monkeypatch: p
         async def aclose(self) -> None:
             self.closed = True
 
-    monkeypatch.setattr(runtime_mod, "discover_tools", lambda: [_tool("base_tool")])
+    monkeypatch.setattr(runtime_mod, "discover_tools", lambda **_kwargs: [_tool("base_tool")])
     monkeypatch.setattr(mcp_tools_mod, "MCPToolProvider", FakeProvider)
 
     rt = AgentRuntime(use_escalation=False)
@@ -154,7 +154,7 @@ async def test_agent_runtime_ashutdown_closes_mcp_provider(monkeypatch: pytest.M
         async def aclose(self) -> None:
             self.closed = True
 
-    monkeypatch.setattr(runtime_mod, "discover_tools", lambda: [_tool("base_tool")])
+    monkeypatch.setattr(runtime_mod, "discover_tools", lambda **_kwargs: [_tool("base_tool")])
     monkeypatch.setattr(mcp_tools_mod, "MCPToolProvider", FakeProvider)
 
     rt = AgentRuntime(use_escalation=False)
