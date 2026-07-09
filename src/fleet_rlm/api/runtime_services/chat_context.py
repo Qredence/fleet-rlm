@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from fleet_rlm.api.auth.types import NormalizedIdentity
 from fleet_rlm.api.runtime_services.chat_runtime import PreparedChatRuntime
 from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
+from fleet_rlm.files.schemas import AttachedFiles
 
 
 @dataclass(slots=True)
@@ -36,6 +37,7 @@ class TurnControls:
     trace: bool | None = None
     trace_mode: str | None = None
     selected_skill_ids: list[str] = field(default_factory=list)
+    attached_files: AttachedFiles | None = None
 
 
 @dataclass(slots=True)

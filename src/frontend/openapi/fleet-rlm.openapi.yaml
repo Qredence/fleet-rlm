@@ -1071,6 +1071,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/files/upload:
+    post:
+      tags:
+        - files
+      summary: Upload File
+      description: Upload a file and stage it into durable session-scoped storage.
+      operationId: upload_file_api_v1_files_upload_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/Body_upload_file_api_v1_files_upload_post"
+        required: true
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileUploadResponse"
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+      security:
+        - HTTPBearer: []
   /api/v1/skills/user:
     post:
       tags:
@@ -3354,6 +3382,53 @@ paths:
         - HTTPBearer: []
 components:
   schemas:
+    AttachmentRef:
+      properties:
+        id:
+          type: string
+          minLength: 1
+          title: Id
+          description: Stable attachment identifier.
+        filename:
+          type: string
+          minLength: 1
+          title: Filename
+          description: Display filename (basename only).
+        mime_type:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Mime Type
+          description: Best-effort MIME type for the attachment.
+        size_bytes:
+          type: integer
+          minimum: 0.0
+          title: Size Bytes
+          description: Attachment size in bytes.
+        checksum:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Checksum
+          description: Optional content checksum when available.
+        staging_path:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Staging Path
+          description: Safe relative staging path under the approved uploads root.
+        metadata:
+          additionalProperties: true
+          type: object
+          title: Metadata
+          description: Optional attachment metadata bag.
+      type: object
+      required:
+        - id
+        - filename
+        - size_bytes
+      title: AttachmentRef
+      description: Reference to one uploaded or staged user file.
     AuthMeResponse:
       properties:
         tenant_claim:
@@ -3413,6 +3488,22 @@ components:
       required:
         - file
       title: Body_upload_dataset_api_v1_optimization_datasets_post
+    Body_upload_file_api_v1_files_upload_post:
+      properties:
+        session_id:
+          type: string
+          title: Session Id
+          description: Session identifier to scope attachment staging.
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+          description: File to upload (single attachment).
+      type: object
+      required:
+        - session_id
+        - file
+      title: Body_upload_file_api_v1_files_upload_post
     ChatMessage:
       properties:
         role:
@@ -3522,6 +3613,15 @@ components:
             - type: "null"
           title: Selected Skill Ids
           description: Optional list of skill IDs to select for this turn.
+        attachment_refs:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          title: Attachment Refs
+          description: Optional list of attachment IDs from a prior upload for this
+            session.
       additionalProperties: false
       type: object
       required:
@@ -3864,6 +3964,18 @@ components:
         Clients poll ``GET /api/v1/evaluations/{run_id}`` to observe the
 
         ``pending`` -> ``running`` -> ``completed`` transition (VAL-SEC-010).'
+    FileUploadResponse:
+      properties:
+        attachment:
+          $ref: "#/components/schemas/AttachmentRef"
+        uploaded:
+          $ref: "#/components/schemas/UploadedFileMetadata"
+      additionalProperties: false
+      type: object
+      required:
+        - attachment
+        - uploaded
+      title: FileUploadResponse
     GEPAModuleInfo:
       properties:
         slug:
@@ -7775,6 +7887,43 @@ components:
         - has_more
       title: TurnListResponse
       description: Paginated turn list.
+    UploadedFileMetadata:
+      properties:
+        filename:
+          type: string
+          minLength: 1
+          title: Filename
+          description: Uploaded file display name.
+        content_type:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Content Type
+          description: Uploaded file MIME type when provided.
+        size_bytes:
+          type: integer
+          minimum: 0.0
+          title: Size Bytes
+          description: Uploaded file size in bytes.
+        checksum_sha256:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Checksum Sha256
+          description: SHA-256 checksum of uploaded bytes.
+        created_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Created At
+          description: Server timestamp when the upload was staged.
+      additionalProperties: false
+      type: object
+      required:
+        - filename
+        - size_bytes
+      title: UploadedFileMetadata
     ValidationError:
       properties:
         loc:

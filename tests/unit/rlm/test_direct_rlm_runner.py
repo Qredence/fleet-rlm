@@ -14,7 +14,9 @@ from fleet_rlm.api.events.project_sse import project_sse
 from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext, TurnControls
 from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
 from fleet_rlm.api.runtime_services.stream_turn import stream_turn
+from fleet_rlm.files.schemas import AttachedFiles, AttachmentRef
 from fleet_rlm.rlm.errors import MISSING_INTERPRETER, MISSING_PLANNER_LM, TURN_CANCELLED
+from fleet_rlm.rlm.inputs import build_direct_rlm_turn_inputs
 from fleet_rlm.rlm.runner import DirectRLMRunner
 from fleet_rlm.runtime.events import EVENT_SCHEMA_VERSION, RuntimeEvent, RuntimeEventKind
 from tests.unit.runtime_services.fakes import StubAgent
@@ -292,3 +294,53 @@ class TestStreamTurnDirectRLMDispatch:
         assert events[-1].kind == RuntimeEventKind.DONE
         assert agent.captured_kwargs is not None
         assert agent.captured_kwargs["message"] == "hello"
+
+
+class TestAttachedFilesTurnInputs:
+    def test_build_direct_rlm_turn_inputs_includes_metadata_only(self, sample_context: ChatExecutionContext) -> None:
+        attached = AttachedFiles(
+            attachments=[
+                AttachmentRef(
+                    id="a" * 32,
+                    filename="notes.txt",
+                    mime_type="text/plain",
+                    size_bytes=5,
+                    staging_path="uploads/sessions/sess-1/attachments/" + ("a" * 32) + "__notes.txt",
+                )
+            ]
+        )
+        controls = TurnControls(execution_backend=ExecutionBackend.direct_rlm, attached_files=attached)
+        ctx = replace(sample_context, controls=controls)
+        rows = build_direct_rlm_turn_inputs(ctx, "hello", None)
+        attached_row = next(row for row in rows if row.label == "Attached files")
+
+        assert attached_row.kind == "context"
+        assert isinstance(attached_row.value, list)
+        payload = str(attached_row.value)
+        assert "/home/daytona/memory" not in payload
+        assert attached_row.value[0]["filename"] == "notes.txt"  # type: ignore[index]
+
+    @pytest.mark.asyncio
+    async def test_runner_emits_attached_files_in_turn_inputs(self, sample_context: ChatExecutionContext) -> None:
+        attached = AttachedFiles(
+            attachments=[
+                AttachmentRef(
+                    id="b" * 32,
+                    filename="data.csv",
+                    mime_type="text/csv",
+                    size_bytes=10,
+                    staging_path="uploads/sessions/sess-1/attachments/" + ("b" * 32) + "__data.csv",
+                )
+            ]
+        )
+        controls = TurnControls(execution_backend=ExecutionBackend.direct_rlm, attached_files=attached)
+        ctx = replace(sample_context, controls=controls)
+        agent = _AgentWithInterpreter(sample_context.prepared.planner_lm)
+        runner = DirectRLMRunner(turn_executor=_fake_turn_executor)
+        events = await _collect_events(runner, ctx, agent_runtime=agent)
+
+        turn_inputs = next(event for event in events if event.kind == RuntimeEventKind.TURN_INPUTS)
+        rows = turn_inputs.payload.get("rows", [])
+        attached_row = next(row for row in rows if row.get("label") == "Attached files")
+        assert attached_row.get("kind") == "context"
+        assert "/home/daytona/memory" not in str(attached_row.get("value"))

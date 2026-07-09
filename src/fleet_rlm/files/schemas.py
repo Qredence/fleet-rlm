@@ -10,13 +10,16 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 class AttachmentRef(BaseModel):
     """Reference to one uploaded or staged user file."""
 
-    id: str = Field(min_length=1)
-    filename: str = Field(min_length=1)
-    mime_type: str | None = None
-    size_bytes: int = Field(ge=0)
-    checksum: str | None = None
-    staging_path: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    id: str = Field(min_length=1, description="Stable attachment identifier.")
+    filename: str = Field(min_length=1, description="Display filename (basename only).")
+    mime_type: str | None = Field(default=None, description="Best-effort MIME type for the attachment.")
+    size_bytes: int = Field(ge=0, description="Attachment size in bytes.")
+    checksum: str | None = Field(default=None, description="Optional content checksum when available.")
+    staging_path: str | None = Field(
+        default=None,
+        description="Safe relative staging path under the approved uploads root.",
+    )
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Optional attachment metadata bag.")
 
     @field_validator("filename")
     @classmethod

@@ -72,6 +72,11 @@ def _uploads_session_root(session_id: str) -> str:
     return f"uploads/sessions/{safe_session_id}/attachments"
 
 
+def uploads_session_attachments_relative_dir(session_id: str) -> str:
+    """Return the approved relative uploads directory for one session."""
+    return _uploads_session_root(session_id)
+
+
 def stage_uploaded_file_to_volume(
     *,
     volume_mount_path: str,
@@ -147,4 +152,5 @@ __all__ = [
     "StagedUpload",
     "UploadSafetyError",
     "stage_uploaded_file_to_volume",
+    "uploads_session_attachments_relative_dir",
 ]

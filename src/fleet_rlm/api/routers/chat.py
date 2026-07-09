@@ -32,6 +32,8 @@ from fleet_rlm.api.runtime_services.chat_prepare_errors import public_prepare_er
 from fleet_rlm.api.runtime_services.chat_runtime import build_chat_agent_context, prepare_chat_runtime
 from fleet_rlm.api.runtime_services.stream_turn import stream_turn
 from fleet_rlm.api.schemas.chat import ChatMessage, ChatRequest
+from fleet_rlm.files.attachment_resolution import AttachmentResolutionError, resolve_attachment_refs
+from fleet_rlm.integrations.daytona.volumes import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
 
@@ -208,6 +210,18 @@ async def _prepare_chat_event_stream(
             detail="No user message found in messages. At least one message with role='user' is required.",
         )
 
+    # ── 1b. Resolve attachment refs before streaming ──────────────────
+    attached_files = None
+    if body.attachment_refs:
+        try:
+            attached_files = resolve_attachment_refs(
+                volume_mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
+                session_id=body.session_id,
+                attachment_ids=body.attachment_refs,
+            )
+        except AttachmentResolutionError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     # ── 2. Prepare the chat runtime ───────────────────────────────────
     # Use SSE-appropriate error/close callbacks that raise HTTP exceptions
     # instead of writing to a WebSocket.
@@ -285,6 +299,7 @@ async def _prepare_chat_event_stream(
                     trace=body.trace,
                     trace_mode=body.trace_mode,
                     selected_skill_ids=body.selected_skill_ids or [],
+                    attached_files=attached_files,
                 ),
             )
             async for event in _build_and_stream(ctx, agent, user_message, request, cancel_flag):

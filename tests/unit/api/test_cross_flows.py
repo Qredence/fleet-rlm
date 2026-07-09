@@ -320,13 +320,11 @@ class TestCross003_ErrorMidStream:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            stub_stream_turn(
-                [
-                    make_started_event(),
-                    make_text_event("partial output"),
-                    make_error_event("mid-stream failure"),
-                ]
-            ),
+            stub_stream_turn([
+                make_started_event(),
+                make_text_event("partial output"),
+                make_error_event("mid-stream failure"),
+            ]),
         )
 
         with TestClient(no_db_app) as client:
@@ -707,6 +705,51 @@ class TestCross007_FirstVisit:  # noqa: N801
         assert ctx2.session_id == generated_session_id, (
             "Second request must pass the session_id to ChatExecutionContext"
         )
+
+
+class TestCrossAttachmentRefs:
+    def test_attachment_refs_thread_into_chat_execution_context(
+        self,
+        no_db_app,
+        monkeypatch,
+        stub_identity: NormalizedIdentity,
+        tmp_path,
+    ) -> None:
+        from io import BytesIO
+
+        from fleet_rlm.api.routers import chat as chat_router
+        from fleet_rlm.files.upload_staging import stage_uploaded_file_to_volume
+
+        monkeypatch.setattr(chat_router, "DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH", tmp_path)
+        staged = stage_uploaded_file_to_volume(
+            volume_mount_path=str(tmp_path),
+            session_id="sess-cross",
+            filename="notes.txt",
+            content_type="text/plain",
+            stream=BytesIO(b"notes"),
+        )
+        captured: dict[str, Any] = {}
+        chat_module = importlib.import_module("fleet_rlm.api.routers.chat")
+        monkeypatch.setattr(chat_module, "stream_turn", _spy_stream_turn(captured))
+        install_prepare_chat_runtime_stub(monkeypatch)
+        install_chat_agent_context_stub(monkeypatch)
+
+        no_db_app.dependency_overrides[require_http_identity] = stub_identity_dependency(stub_identity)
+        body = {
+            **DEFAULT_BODY,
+            "session_id": "sess-cross",
+            "attachment_refs": [staged.attachment.id],
+        }
+        with TestClient(no_db_app) as client:
+            response = client.post("/api/chat", json=body)
+
+        assert_sse_ok(response)
+        ctx = captured.get("ctx")
+        assert ctx is not None
+        assert ctx.controls.attached_files is not None
+        assert len(ctx.controls.attached_files.attachments) == 1
+        assert ctx.controls.attached_files.attachments[0].id == staged.attachment.id
+        assert ctx.controls.attached_files.attachments[0].filename == "notes.txt"
 
 
 # ═════════════════════════════════════════════════════════════════════════════

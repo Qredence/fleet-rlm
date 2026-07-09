@@ -176,6 +176,13 @@ export interface paths {
      */
     get: operations["get_volumes_api_v1_runtime_volumes_get"];
   };
+  "/api/v1/files/upload": {
+    /**
+     * Upload File
+     * @description Upload a file and stage it into durable session-scoped storage.
+     */
+    post: operations["upload_file_api_v1_files_upload_post"];
+  };
   "/api/v1/skills/user": {
     /**
      * Create a user-scoped skill
@@ -506,6 +513,49 @@ export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
     /**
+     * AttachmentRef
+     * @description Reference to one uploaded or staged user file.
+     */
+    AttachmentRef: {
+      /**
+       * Id
+       * @description Stable attachment identifier.
+       */
+      id: string;
+      /**
+       * Filename
+       * @description Display filename (basename only).
+       */
+      filename: string;
+      /**
+       * Mime Type
+       * @description Best-effort MIME type for the attachment.
+       */
+      mime_type?: string | null;
+      /**
+       * Size Bytes
+       * @description Attachment size in bytes.
+       */
+      size_bytes: number;
+      /**
+       * Checksum
+       * @description Optional content checksum when available.
+       */
+      checksum?: string | null;
+      /**
+       * Staging Path
+       * @description Safe relative staging path under the approved uploads root.
+       */
+      staging_path?: string | null;
+      /**
+       * Metadata
+       * @description Optional attachment metadata bag.
+       */
+      metadata?: {
+        [key: string]: unknown;
+      };
+    };
+    /**
      * AuthMeResponse
      * @description Resolved identity payload returned to authenticated clients.
      */
@@ -553,6 +603,19 @@ export interface components {
        * @description Optional module slug used to validate required dataset keys.
        */
       module_slug?: string | null;
+    };
+    /** Body_upload_file_api_v1_files_upload_post */
+    Body_upload_file_api_v1_files_upload_post: {
+      /**
+       * Session Id
+       * @description Session identifier to scope attachment staging.
+       */
+      session_id: string;
+      /**
+       * File
+       * @description File to upload (single attachment).
+       */
+      file: string;
     };
     /**
      * ChatMessage
@@ -640,6 +703,11 @@ export interface components {
        * @description Optional list of skill IDs to select for this turn.
        */
       selected_skill_ids?: string[] | null;
+      /**
+       * Attachment Refs
+       * @description Optional list of attachment IDs from a prior upload for this session.
+       */
+      attachment_refs?: string[] | null;
     };
     /**
      * DatasetDetailResponse
@@ -951,6 +1019,11 @@ export interface components {
        * @default pending
        */
       status?: string;
+    };
+    /** FileUploadResponse */
+    FileUploadResponse: {
+      attachment: components["schemas"]["AttachmentRef"];
+      uploaded: components["schemas"]["UploadedFileMetadata"];
     };
     /**
      * GEPAModuleInfo
@@ -4467,6 +4540,34 @@ export interface components {
        */
       has_more: boolean;
     };
+    /** UploadedFileMetadata */
+    UploadedFileMetadata: {
+      /**
+       * Filename
+       * @description Uploaded file display name.
+       */
+      filename: string;
+      /**
+       * Content Type
+       * @description Uploaded file MIME type when provided.
+       */
+      content_type?: string | null;
+      /**
+       * Size Bytes
+       * @description Uploaded file size in bytes.
+       */
+      size_bytes: number;
+      /**
+       * Checksum Sha256
+       * @description SHA-256 checksum of uploaded bytes.
+       */
+      checksum_sha256?: string | null;
+      /**
+       * Created At
+       * @description Server timestamp when the upload was staged.
+       */
+      created_at?: string | null;
+    };
     /** ValidationError */
     ValidationError: {
       /**
@@ -5688,6 +5789,31 @@ export interface operations {
       /** @description Volume list timed out before the backend returned a result. */
       504: {
         content: never;
+      };
+    };
+  };
+  /**
+   * Upload File
+   * @description Upload a file and stage it into durable session-scoped storage.
+   */
+  upload_file_api_v1_files_upload_post: {
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_file_api_v1_files_upload_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["FileUploadResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
       };
     };
   };

@@ -74,3 +74,7 @@ class ChatRequest(BaseModel):
         default=None,
         description="Optional list of skill IDs to select for this turn.",
     )
+    attachment_refs: list[str] | None = Field(
+        default=None,
+        description="Optional list of attachment IDs from a prior upload for this session.",
+    )

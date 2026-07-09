@@ -17,6 +17,7 @@ from fastapi import WebSocketDisconnect
 
 from fleet_rlm.api.runtime_services.run_lifecycle import ExecutionLifecycleManager
 from fleet_rlm.api.runtime_services.stream_failures import PersistenceRequiredError
+from fleet_rlm.files.schemas import AttachedFiles
 from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventContext, RuntimeEventKind
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
@@ -194,6 +195,7 @@ def build_workspace_task_request(
     cancel_flag: dict[str, bool] | None = None,
     selected_skill_ids: list[str] | None = None,
     trace_mode: str | None = None,
+    attached_files: AttachedFiles | None = None,
 ) -> Any:
     """Build the worker request for one websocket message turn.
 
@@ -225,6 +227,7 @@ def build_workspace_task_request(
         cancel_flag=cancel_flag,
         selected_skill_ids=selected_skill_ids,
         trace_mode=trace_mode,
+        attached_files=attached_files,
     )
 
 

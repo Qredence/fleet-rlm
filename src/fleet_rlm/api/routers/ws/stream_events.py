@@ -14,6 +14,7 @@ from fleet_rlm.api.runtime_services.chat_context import (
     TurnControls,
 )
 from fleet_rlm.api.runtime_services.stream_turn import stream_turn
+from fleet_rlm.files.schemas import AttachedFiles
 from fleet_rlm.runtime.events import RuntimeEvent
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class WorkspaceTaskRequest:
     cancel_flag: dict[str, bool] | None = None
     selected_skill_ids: list[str] | None = None
     trace_mode: str | None = None
+    attached_files: AttachedFiles | None = None
 
 
 def build_stream_event_dict(
@@ -168,6 +170,7 @@ async def stream_agent_turn(
                 trace=request.trace,
                 trace_mode=request.trace_mode,
                 selected_skill_ids=list(request.selected_skill_ids) if request.selected_skill_ids else [],
+                attached_files=request.attached_files,
             ),
         )
         event_count = 0

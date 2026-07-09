@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext
+from fleet_rlm.files.schemas import AttachedFiles
 from fleet_rlm.runtime.events import TurnInputRow
 
 
@@ -16,6 +17,19 @@ def history_turn_count(agent_runtime: Any | None) -> int:
     if history is None:
         return 0
     return len(getattr(history, "messages", []) or [])
+
+
+def _attachment_metadata_rows(attached: AttachedFiles) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for attachment in attached.attachments:
+        rows.append({
+            "id": attachment.id,
+            "filename": attachment.filename,
+            "mime_type": attachment.mime_type,
+            "size_bytes": attachment.size_bytes,
+            "staging_path": attachment.staging_path,
+        })
+    return rows
 
 
 def build_direct_rlm_turn_inputs(
@@ -42,6 +56,25 @@ def build_direct_rlm_turn_inputs(
                 label="Active skills",
                 kind="skills",
                 value=skills,
+                preview=preview[:preview_limit],
+            )
+        )
+
+    attached = ctx.controls.attached_files
+    if attached is not None and attached.attachments:
+        metadata_rows = _attachment_metadata_rows(attached)
+        max_visible = 20
+        visible = metadata_rows[:max_visible]
+        total = len(metadata_rows)
+        if total > max_visible:
+            preview = f"{total} file(s) (showing first {max_visible})"
+        else:
+            preview = ", ".join(str(row.get("filename") or row.get("id") or "") for row in visible)
+        rows.append(
+            TurnInputRow(
+                label="Attached files",
+                kind="context",
+                value=visible,
                 preview=preview[:preview_limit],
             )
         )
