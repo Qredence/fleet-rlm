@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import inspect
 from types import SimpleNamespace
 from typing import Any
@@ -106,3 +107,28 @@ def test_all_discovered_tools_have_descriptors() -> None:
     discovered = set(list_react_tool_names(list(_discover_unfiltered_tools())))
     missing = discovered - set(descriptor_by_name())
     assert not missing, f"Tools missing descriptors: {sorted(missing)}"
+
+
+def test_skills_install_policy_does_not_import_api_config() -> None:
+    import fleet_rlm.skills.install_policy as install_policy
+
+    source = inspect.getsource(install_policy)
+    assert "fleet_rlm.api.config" not in source
+
+
+def test_backend_checkpoint_package_imports_are_side_effect_light() -> None:
+    packages = [
+        "fleet_rlm.api",
+        "fleet_rlm.daytona",
+        "fleet_rlm.integrations.daytona",
+        "fleet_rlm.tools",
+        "fleet_rlm.runtime.tools",
+        "fleet_rlm.artifacts",
+        "fleet_rlm.files",
+        "fleet_rlm.skills",
+        "fleet_rlm.rlm",
+        "fleet_rlm.runtime",
+    ]
+
+    for package in packages:
+        importlib.import_module(package)

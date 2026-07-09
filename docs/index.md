@@ -20,6 +20,7 @@
 Read these after you've seen the product:
 
 - **[Architecture Overview](architecture.md)** — current layer ownership model.
+- **[Backend Structure After Phase 5](audits/backend-structure-phase5.md)** — package ownership and compatibility boundaries before Phase 6 (read-only).
 - **[MLflow / Trace Parity Audit](audits/mlflow-trace-parity.md)** — legacy vs `direct_rlm` observability gaps (read-only).
 - **[Skill Script Runtime Prep Audit](audits/skill-script-runtime-prep.md)** — Phase 3F.3 verdict on `_active_skills` wiring and scaffold materialization (read-only).
 - **[Agent Harness](agent-harness/README.md)** — repo-local harness engineering controls.
