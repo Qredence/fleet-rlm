@@ -131,9 +131,9 @@ _TOOL_DESCRIPTORS: tuple[ToolDescriptor, ...] = (
     ),
     ToolDescriptor(
         name="create_artifact",
-        description="Deferred shape for creating a session artifact under an approved artifact root.",
+        description="Create a new session artifact under an approved artifact root.",
         category="artifacts",
-        callable_path="fleet_rlm.tools.artifacts:create_artifact_ref",
+        callable_path="fleet_rlm.tools.artifacts:create_artifact_impl",
         enabled_by_default=False,
         required_capabilities=["artifacts:write"],
         sandbox_required=True,
@@ -142,14 +142,32 @@ _TOOL_DESCRIPTORS: tuple[ToolDescriptor, ...] = (
     ),
     ToolDescriptor(
         name="update_artifact",
-        description="Deferred shape for updating a session artifact under an approved artifact root.",
+        description="Update an existing session artifact under an approved artifact root.",
         category="artifacts",
-        callable_path="fleet_rlm.tools.artifacts:update_artifact_ref",
+        callable_path="fleet_rlm.tools.artifacts:update_artifact_impl",
         enabled_by_default=False,
         required_capabilities=["artifacts:write"],
         sandbox_required=True,
         write_capability=True,
         risk_level="medium",
+    ),
+    ToolDescriptor(
+        name="list_artifacts",
+        description="List safe artifact metadata for the current session.",
+        category="artifacts",
+        callable_path="fleet_rlm.tools.artifacts:list_artifacts_impl",
+        required_capabilities=["artifacts:read"],
+        sandbox_required=True,
+        risk_level="low",
+    ),
+    ToolDescriptor(
+        name="read_artifact",
+        description="Read bounded artifact content from an approved session artifact root.",
+        category="artifacts",
+        callable_path="fleet_rlm.tools.artifacts:read_artifact_impl",
+        required_capabilities=["artifacts:read"],
+        sandbox_required=True,
+        risk_level="low",
     ),
     ToolDescriptor(
         name="sandbox_list_files",
@@ -388,9 +406,16 @@ def is_tool_exposed(descriptor: ToolDescriptor, context: ToolRuntimeContext) -> 
     if descriptor.name in policy.disabled_tool_names:
         return False
     explicitly_enabled = descriptor.name in policy.enabled_tool_names
+    write_enabled = policy.allow_write_tools or explicitly_enabled
     if not descriptor.enabled_by_default and not explicitly_enabled:
-        return False
-    if descriptor.write_capability and not (policy.allow_write_tools or explicitly_enabled):
+        # allow_write_tools lifts only artifact write tools; other deferred
+        # write tools (filesystem/sandbox) still require enabled_tool_names.
+        artifact_write_opt_in = (
+            descriptor.write_capability and write_enabled and "artifacts:write" in descriptor.required_capabilities
+        )
+        if not artifact_write_opt_in:
+            return False
+    if descriptor.write_capability and not write_enabled:
         return False
     if descriptor.sandbox_required and (not policy.allow_sandbox_tools or not context.sandbox_available):
         return False

@@ -18,7 +18,7 @@ from fleet_rlm.runtime.modules.factory import (
 )
 from fleet_rlm.runtime.modules.rlm_prompts import build_rlm_core_context
 from fleet_rlm.runtime.modules.skill_selection import SkillSelectionModule
-from fleet_rlm.runtime.sandbox_types import ActiveSkills
+from fleet_rlm.runtime.sandbox_types import ActiveSkills, AttachedFiles
 from fleet_rlm.skills.schemas import SkillRuntimeContext
 
 logger = logging.getLogger(__name__)
@@ -93,6 +93,7 @@ def run_direct_rlm_turn(
         "core_memory": core_context,
         "history": history,
         "active_skills": active_skills,
+        "attached_files": ctx.controls.attached_files or AttachedFiles(),
     }
 
     with dspy.settings.context(lm=planner_lm):

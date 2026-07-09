@@ -274,6 +274,8 @@ async def _prepare_chat_event_stream(
 
     async def _event_stream() -> AsyncIterator[ServerSentEvent]:
         async with agent_context as agent:
+            if body.session_id:
+                agent._db_session_id = body.session_id
             ctx = ChatExecutionContext(
                 prepared=runtime,
                 identity=identity,

@@ -11,6 +11,7 @@ from fleet_rlm.tools.registry import ToolExposurePolicy, filter_tool_names
 from ._marker import tool_fn
 
 TOOL_MODULE_NAMES: tuple[str, ...] = (
+    "artifacts",
     "browser_tools",
     "chunking_tools",
     "document_tools",

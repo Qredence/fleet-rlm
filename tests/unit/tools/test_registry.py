@@ -29,6 +29,9 @@ def test_write_enabled_tools_are_hidden_by_default() -> None:
     assert "write_file" not in names
     assert "sandbox_write_file" not in names
     assert "create_artifact" not in names
+    assert "update_artifact" not in names
+    assert "list_artifacts" in names
+    assert "read_artifact" in names
 
 
 def test_policy_can_explicitly_enable_write_tool() -> None:
@@ -40,6 +43,32 @@ def test_policy_can_explicitly_enable_write_tool() -> None:
     names = {descriptor.name for descriptor in list_exposed_tool_descriptors(context=context)}
 
     assert "write_file" in names
+
+
+def test_policy_allow_write_tools_enables_artifact_writes() -> None:
+    context = ToolRuntimeContext(
+        sandbox_available=True,
+        policy=ToolExposurePolicy(allow_write_tools=True),
+    )
+
+    names = {descriptor.name for descriptor in list_exposed_tool_descriptors(context=context)}
+
+    assert "create_artifact" in names
+    assert "update_artifact" in names
+    assert "sandbox_delete_file" not in names
+    assert "sandbox_write_file" not in names
+    assert "write_file" not in names
+
+
+def test_policy_can_explicitly_enable_destructive_sandbox_write_tool() -> None:
+    context = ToolRuntimeContext(
+        sandbox_available=True,
+        policy=ToolExposurePolicy(enabled_tool_names=["sandbox_delete_file"]),
+    )
+
+    names = {descriptor.name for descriptor in list_exposed_tool_descriptors(context=context)}
+
+    assert "sandbox_delete_file" in names
 
 
 def test_allowed_capabilities_filter_tools() -> None:

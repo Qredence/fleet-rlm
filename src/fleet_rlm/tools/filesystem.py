@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import Any
 
+from fleet_rlm.artifacts.storage import write_large_tool_output_artifact
 from fleet_rlm.tools.paths import (
     FilesystemSafetyError,
     assert_no_detectable_symlink_escape,
@@ -101,6 +102,7 @@ def read_file_impl(
     root: FilesystemRoot | str = "workspace",
     max_bytes: int = _DEFAULT_MAX_READ_BYTES,
     interpreter: Any | None = None,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Read a bounded UTF-8 preview from an approved Daytona root."""
     bound = require_interpreter(interpreter)
@@ -115,7 +117,7 @@ def read_file_impl(
     truncated = len(raw_bytes) > bounded_max
     preview = raw_bytes[:bounded_max] if truncated else raw_bytes
     text = preview.decode("utf-8", errors="replace")
-    return {
+    payload = {
         "status": "ok",
         "root": root,
         "path": display_path,
@@ -125,6 +127,16 @@ def read_file_impl(
         "truncated": truncated,
         "encoding": "utf-8-lossy" if "\ufffd" in text else "utf-8",
     }
+    if truncated and session_id:
+        artifact = write_large_tool_output_artifact(
+            interpreter,
+            session_id=session_id,
+            tool_name="read_file",
+            content=raw_bytes,
+        )
+        payload["artifact"] = artifact.model_dump()
+        payload["artifact_backed"] = True
+    return payload
 
 
 def write_file_impl(*args: Any, **kwargs: Any) -> dict[str, Any]:

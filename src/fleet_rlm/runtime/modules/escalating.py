@@ -48,7 +48,7 @@ from fleet_rlm.runtime.modules.rlm_routing import (
     fetch_url_document,
     resolve_rlm_routing,
 )
-from fleet_rlm.runtime.sandbox_types import ActiveSkills, LargeDocument, WorkspaceContext
+from fleet_rlm.runtime.sandbox_types import ActiveSkills, AttachedFiles, LargeDocument, WorkspaceContext
 
 logger = logging.getLogger(__name__)
 
@@ -1240,6 +1240,7 @@ class EscalatingFleetModule(dspy.Module):
             "core_memory": core_context,
             "history": history,
             "active_skills": active_skills or ActiveSkills(selected=selected_skills or []),
+            "attached_files": AttachedFiles(),
         }
         rlm = self._rlm
         if url_document_mode:

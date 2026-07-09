@@ -11,7 +11,7 @@ from typing import Literal, TypedDict
 
 import dspy
 
-from fleet_rlm.runtime.sandbox_types import ActiveSkills, LargeDocument, WorkspaceContext
+from fleet_rlm.runtime.sandbox_types import ActiveSkills, AttachedFiles, LargeDocument, WorkspaceContext
 from fleet_rlm.skills.signatures import SkillSelectionSignature
 
 
@@ -472,6 +472,13 @@ class RLMTurnSignature(dspy.Signature):
             "when needed; do not print entire skill markdown."
         )
     )
+    attached_files: AttachedFiles = dspy.InputField(
+        desc=(
+            "Uploaded attachment metadata stored as a REPL dict with key 'attachments'. "
+            "Use staging_path with controlled file tools when file contents are needed; "
+            "do not assume contents are prompt-injected."
+        )
+    )
     response: str = dspy.OutputField(
         desc=(
             "Final answer (call SUBMIT(response=...) in REPL). Use Markdown headings and lists "
@@ -507,6 +514,9 @@ class RLMDocumentTurnSignature(dspy.Signature):
             "Selected skill guidance stored as a REPL dict. Inspect only the relevant skill markdown "
             "through active_skills['instructions']; do not print whole skill files."
         )
+    )
+    attached_files: AttachedFiles = dspy.InputField(
+        desc="Uploaded attachment metadata stored as a REPL dict with key 'attachments'; contents are not injected."
     )
     response: str = dspy.OutputField(
         desc=(
@@ -558,6 +568,9 @@ class RLMWorkspaceTurnSignature(dspy.Signature):
             "Selected skill guidance stored as a REPL dict. Inspect only the relevant skill markdown "
             "through active_skills['instructions']; do not print whole skill files."
         )
+    )
+    attached_files: AttachedFiles = dspy.InputField(
+        desc="Uploaded attachment metadata stored as a REPL dict with key 'attachments'; contents are not injected."
     )
     response: str = dspy.OutputField(
         desc=(

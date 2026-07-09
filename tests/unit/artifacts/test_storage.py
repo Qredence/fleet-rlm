@@ -4,6 +4,7 @@ import pytest
 
 from fleet_rlm.artifacts.storage import (
     ArtifactPathError,
+    artifact_public_relative_path,
     artifact_session_root,
     build_artifact_metadata,
     build_artifact_ref,
@@ -18,6 +19,12 @@ def test_artifact_session_root_sanitizes_session_id() -> None:
     assert "/" not in root.name
     assert ".." not in root.name
     assert root.name.endswith("session-alpha")
+
+
+def test_artifact_public_relative_path_uses_approved_layout() -> None:
+    path = artifact_public_relative_path("sess-1", category="reports", relative_path="summary.md")
+
+    assert path == "artifacts/sessions/sess-1/reports/summary.md"
 
 
 def test_resolve_artifact_path_uses_approved_category_root() -> None:
@@ -49,7 +56,10 @@ def test_build_artifact_ref_and_metadata() -> None:
     metadata = build_artifact_metadata(ref=ref, title="Phase 5")
 
     assert ref.id.startswith("artifact-")
-    assert ref.uri.startswith("daytona:///home/daytona/memory/artifacts/sessions/sess-1/plans/phase-5.md")
+    assert ref.path == "artifacts/sessions/sess-1/plans/phase-5.md"
+    assert ref.uri == "daytona://artifacts/sessions/sess-1/plans/phase-5.md"
+    assert "/home/daytona/memory" not in ref.path
+    assert "/home/daytona/memory" not in ref.uri
     assert metadata.ref == ref
     assert metadata.title == "Phase 5"
     assert metadata.created_at

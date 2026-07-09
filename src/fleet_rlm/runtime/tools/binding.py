@@ -41,6 +41,12 @@ from fleet_rlm.runtime.tools.volume_memory_tools import (
 )
 from fleet_rlm.skills.execution_deps import SkillExecutionDeps
 from fleet_rlm.skills.loader import default_skill_runtime_context
+from fleet_rlm.tools.artifacts import (
+    create_artifact_impl,
+    list_artifacts_impl,
+    read_artifact_impl,
+    update_artifact_impl,
+)
 from fleet_rlm.tools.filesystem import list_files_impl, read_file_impl, reject_legacy_list_files_pattern
 from fleet_rlm.tools.sandbox import inspect_workspace_impl
 
@@ -48,15 +54,18 @@ INTERPRETER_TOOL_NAMES = frozenset(
     {
         "browser_fetch_page",
         "clear_buffer",
+        "create_artifact",
         "delegate_to_rlm",
         "delegate_to_rlm_batched",
         "execute_code",
         "inspect_workspace",
+        "list_artifacts",
         "list_files",
         "list_skills",
         "load_skill",
-        "read_file",
         "read_buffer",
+        "read_artifact",
+        "read_file",
         "read_skill_resource",
         "run_skill_script",
         "recursive_workspace",
@@ -73,6 +82,7 @@ INTERPRETER_TOOL_NAMES = frozenset(
         "sandbox_search_files",
         "sandbox_write_file",
         "search_knowledge",
+        "update_artifact",
         "write_buffer",
     }
 )
@@ -200,6 +210,7 @@ def _bound_runtime_tool_factories(
     factories["run_skill_script"] = run_skill_script
 
     sandbox_ctx = _SandboxFilesystemToolContext(interpreter=interpreter)
+    session_id = str(getattr(runtime, "_db_session_id", "") or "").strip()
 
     def execute_code(
         code: str,
@@ -220,7 +231,9 @@ def _bound_runtime_tool_factories(
         return list_files_impl(path, root=root, interpreter=interpreter)
 
     def read_file(path: str, root: str = "workspace", max_bytes: int = 200_000) -> dict[str, Any]:
-        return read_file_impl(path, root=root, max_bytes=max_bytes, interpreter=interpreter)
+        return read_file_impl(
+            path, root=root, max_bytes=max_bytes, interpreter=interpreter, session_id=session_id or None
+        )
 
     def inspect_workspace(path: str = ".", max_entries: int = 50) -> dict[str, Any]:
         return inspect_workspace_impl(path, max_entries=max_entries, interpreter=interpreter)
@@ -264,15 +277,90 @@ def _bound_runtime_tool_factories(
             interpreter=interpreter,
         )
 
+    def _artifact_session_error() -> dict[str, Any]:
+        return {
+            "status": "error",
+            "error": "session_id is required for artifact tools.",
+        }
+
+    def create_artifact(
+        category: str,
+        relative_path: str,
+        content: str,
+        mime_type: str | None = None,
+        title: str | None = None,
+    ) -> dict[str, Any]:
+        if not session_id:
+            return _artifact_session_error()
+        return create_artifact_impl(
+            session_id=session_id,
+            category=category,
+            relative_path=relative_path,
+            content=content,
+            mime_type=mime_type,
+            title=title,
+            interpreter=interpreter,
+        )
+
+    def update_artifact(
+        content: str,
+        artifact_id: str | None = None,
+        category: str | None = None,
+        relative_path: str | None = None,
+        mime_type: str | None = None,
+        title: str | None = None,
+    ) -> dict[str, Any]:
+        if not session_id:
+            return _artifact_session_error()
+        return update_artifact_impl(
+            session_id=session_id,
+            content=content,
+            artifact_id=artifact_id,
+            category=category,
+            relative_path=relative_path,
+            mime_type=mime_type,
+            title=title,
+            interpreter=interpreter,
+        )
+
+    def list_artifacts(category: str | None = None) -> dict[str, Any]:
+        if not session_id:
+            return _artifact_session_error()
+        return list_artifacts_impl(
+            session_id=session_id,
+            category=category,
+            interpreter=interpreter,
+        )
+
+    def read_artifact(
+        artifact_id: str | None = None,
+        category: str | None = None,
+        relative_path: str | None = None,
+        max_bytes: int = 200_000,
+    ) -> dict[str, Any]:
+        if not session_id:
+            return _artifact_session_error()
+        return read_artifact_impl(
+            session_id=session_id,
+            artifact_id=artifact_id,
+            category=category,
+            relative_path=relative_path,
+            max_bytes=max_bytes,
+            interpreter=interpreter,
+        )
+
     factories.update(
         {
             "clear_buffer": clear_buffer,
+            "create_artifact": create_artifact,
             "delegate_to_rlm": delegate_to_rlm,
             "delegate_to_rlm_batched": delegate_to_rlm_batched,
             "execute_code": execute_code,
             "inspect_workspace": inspect_workspace,
+            "list_artifacts": list_artifacts,
             "list_files": list_files,
             "read_buffer": read_buffer,
+            "read_artifact": read_artifact,
             "read_file": read_file,
             "sandbox_list_files": functools.partial(_sandbox_list_files_impl, sandbox_ctx),
             "sandbox_read_file": functools.partial(_sandbox_read_file_impl, sandbox_ctx),
@@ -284,6 +372,7 @@ def _bound_runtime_tool_factories(
             "sandbox_find_in_files": functools.partial(_sandbox_find_in_files_impl, sandbox_ctx),
             "sandbox_replace_in_files": functools.partial(_sandbox_replace_in_files_impl, sandbox_ctx),
             "sandbox_get_file_info": functools.partial(_sandbox_get_file_info_impl, sandbox_ctx),
+            "update_artifact": update_artifact,
             "write_buffer": write_buffer,
         }
     )

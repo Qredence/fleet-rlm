@@ -11,6 +11,7 @@ import json
 
 from dspy.primitives.sandbox_serializable import SandboxSerializable
 
+from fleet_rlm.files.schemas import AttachedFiles
 from fleet_rlm.skills.active import ActiveSkills
 
 
@@ -117,6 +118,7 @@ class WorkspaceContext(SandboxSerializable):
 
 __all__ = [
     "ActiveSkills",
+    "AttachedFiles",
     "LargeDocument",
     "WorkspaceContext",
 ]

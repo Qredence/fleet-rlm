@@ -20,7 +20,7 @@ def test_interpreter_delegation_tools_collects_sub_rlm_callables() -> None:
 def test_sandbox_types_serialize_to_json_dicts() -> None:
     import json
 
-    from fleet_rlm.runtime.sandbox_types import ActiveSkills, LargeDocument, WorkspaceContext
+    from fleet_rlm.runtime.sandbox_types import ActiveSkills, AttachedFiles, LargeDocument, WorkspaceContext
 
     doc = LargeDocument(text="body text", source_url="https://example.com", metadata={"status": "ok"})
     payload = json.loads(doc.to_sandbox().decode("utf-8"))
@@ -47,6 +47,11 @@ def test_sandbox_types_serialize_to_json_dicts() -> None:
     assert "long-context" in preview
     assert "Process large context" in preview
     assert "SECRET FULL MARKDOWN" not in preview
+
+    attached = AttachedFiles()
+    assert attached.sandbox_assignment("attached_files", "_raw") == "attached_files = json.loads(_raw)"
+    assert json.loads(attached.to_sandbox().decode("utf-8")) == {"attachments": []}
+    assert "no attached files" in attached.rlm_preview()
 
 
 def test_create_runtime_rlm_without_llm_tools_removes_callback_instructions() -> None:
@@ -189,7 +194,7 @@ def test_streaming_rlm_uses_strict_chat_adapter_without_disabling_semantic_callb
 
     from fleet_rlm.runtime.agent.signatures import RLMTurnSignature
     from fleet_rlm.runtime.modules.factory import create_runtime_rlm
-    from fleet_rlm.runtime.sandbox_types import ActiveSkills
+    from fleet_rlm.runtime.sandbox_types import ActiveSkills, AttachedFiles
 
     interpreter = SimpleNamespace(semantic_callbacks_enabled=True)
     observed: dict[str, Any] = {}
@@ -214,7 +219,11 @@ def test_streaming_rlm_uses_strict_chat_adapter_without_disabling_semantic_callb
     )
 
     result = rlm.forward(
-        user_request="inspect", core_memory="", history=dspy.History(messages=[]), active_skills=ActiveSkills()
+        user_request="inspect",
+        core_memory="",
+        history=dspy.History(messages=[]),
+        active_skills=ActiveSkills(),
+        attached_files=AttachedFiles(),
     )
 
     assert result.response == "done"
@@ -336,7 +345,7 @@ def test_no_callback_rlm_scopes_disabled_semantic_callbacks(monkeypatch) -> None
 
     from fleet_rlm.runtime.agent.signatures import RLMTurnSignature
     from fleet_rlm.runtime.modules.factory import _NoCallbackRLM, create_runtime_rlm
-    from fleet_rlm.runtime.sandbox_types import ActiveSkills
+    from fleet_rlm.runtime.sandbox_types import ActiveSkills, AttachedFiles
 
     interpreter = SimpleNamespace(semantic_callbacks_enabled=True)
     observed: dict[str, Any] = {}
@@ -362,7 +371,11 @@ def test_no_callback_rlm_scopes_disabled_semantic_callbacks(monkeypatch) -> None
     )
 
     result = rlm.forward(
-        user_request="inspect", core_memory="", history=dspy.History(messages=[]), active_skills=ActiveSkills()
+        user_request="inspect",
+        core_memory="",
+        history=dspy.History(messages=[]),
+        active_skills=ActiveSkills(),
+        attached_files=AttachedFiles(),
     )
 
     assert result.response == "done"
@@ -392,7 +405,13 @@ def test_runtime_module_registry_flags_and_signature_fields_are_stable() -> None
     assert RUNTIME_MODULE_REGISTRY["extract_from_logs"].variable_mode is True
     assert RUNTIME_MODULE_REGISTRY["grounded_answer"].variable_mode is False
 
-    assert set(RLMTurnSignature.input_fields) == {"user_request", "core_memory", "history", "active_skills"}
+    assert set(RLMTurnSignature.input_fields) == {
+        "user_request",
+        "core_memory",
+        "history",
+        "active_skills",
+        "attached_files",
+    }
     assert set(RLMTurnSignature.output_fields) == {"response"}
     assert set(RLMDocumentTurnSignature.input_fields) == {
         "user_request",
@@ -400,6 +419,7 @@ def test_runtime_module_registry_flags_and_signature_fields_are_stable() -> None
         "history",
         "document",
         "active_skills",
+        "attached_files",
     }
     assert set(RLMDocumentTurnSignature.output_fields) == {"response"}
     assert set(RLMWorkspaceTurnSignature.input_fields) == {
@@ -408,6 +428,7 @@ def test_runtime_module_registry_flags_and_signature_fields_are_stable() -> None
         "history",
         "context",
         "active_skills",
+        "attached_files",
     }
     assert set(RLMWorkspaceTurnSignature.output_fields) == {"response"}
     assert {"query", "evidence_chunks", "response_style"} <= set(GroundedAnswerWithCitations.input_fields)

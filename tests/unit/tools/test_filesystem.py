@@ -14,10 +14,16 @@ class _FakeSession:
     def __init__(self) -> None:
         self.list_calls: list[str] = []
         self.read_calls: list[str] = []
+        self.write_calls: list[tuple[str, str]] = []
+        self.move_calls: list[tuple[str, str]] = []
+        self.delete_calls: list[str] = []
         self.file_contents = {
             "/workspace/repo/README.md": "hello fleet",
             "/workspace/repo/large.txt": "x" * 12,
             "/home/daytona/memory/artifacts/report.txt": "artifact",
+        }
+        self.file_info = {
+            path: SimpleNamespace(size=len(content.encode("utf-8"))) for path, content in self.file_contents.items()
         }
         self.list_entries = {
             "/workspace/repo": [
@@ -28,6 +34,13 @@ class _FakeSession:
                 SimpleNamespace(name="report.txt", is_dir=False, size=8),
             ],
         }
+        self.sandbox = SimpleNamespace(fs=_FakeFs(self))
+
+    def _rebind_sandbox_if_needed(self) -> None:
+        return None
+
+    def _resolve_sandbox_path(self, path: str) -> str:
+        return path
 
     def list_files(self, path: str) -> list[Any]:
         self.list_calls.append(path)
@@ -36,6 +49,33 @@ class _FakeSession:
     def read_file(self, path: str) -> str:
         self.read_calls.append(path)
         return self.file_contents[path]
+
+    def write_file(self, path: str, content: str) -> str:
+        self.write_calls.append((path, content))
+        self.file_contents[path] = content
+        self.file_info[path] = SimpleNamespace(size=len(content.encode("utf-8")))
+        return path
+
+
+class _FakeFs:
+    def __init__(self, session: _FakeSession) -> None:
+        self._session = session
+
+    def get_file_info(self, path: str) -> SimpleNamespace:
+        if path not in self._session.file_contents:
+            raise FileNotFoundError(path)
+        return self._session.file_info[path]
+
+    def move_files(self, source: str, destination: str) -> None:
+        self._session.move_calls.append((source, destination))
+        content = self._session.file_contents.pop(source)
+        self._session.file_contents[destination] = content
+        self._session.file_info[destination] = SimpleNamespace(size=len(content.encode("utf-8")))
+
+    def delete_file(self, path: str) -> None:
+        self._session.delete_calls.append(path)
+        self._session.file_contents.pop(path, None)
+        self._session.file_info.pop(path, None)
 
 
 def _interpreter(session: _FakeSession | None = None) -> SimpleNamespace:
@@ -108,6 +148,24 @@ def test_read_file_truncates_large_output() -> None:
     assert payload["size"] == 12
     assert payload["returned_bytes"] == 5
     assert payload["truncated"] is True
+    assert "artifact" not in payload
+
+
+def test_large_read_file_output_becomes_safe_artifact_when_session_scoped() -> None:
+    session = _FakeSession()
+
+    payload = read_file_impl("large.txt", max_bytes=5, interpreter=_interpreter(session), session_id="sess-1")
+
+    assert payload["content"] == "xxxxx"
+    assert payload["truncated"] is True
+    assert payload["artifact_backed"] is True
+    artifact = payload["artifact"]["ref"]
+    assert artifact["category"] == "data"
+    assert artifact["path"].startswith("artifacts/sessions/sess-1/data/tool-outputs/read_file/")
+    assert artifact["size_bytes"] == 12
+    assert artifact["checksum"]
+    assert "/home/daytona/memory" not in str(payload)
+    assert any(path.endswith(".txt") and "/tool-outputs/read_file/" in path for path in session.file_contents)
 
 
 def test_reject_legacy_list_files_pattern() -> None:
