@@ -358,7 +358,7 @@ async def _background_execution_task(
                 identity_rows=runtime.identity_rows,
             )
 
-            agent._db_session_id = (session.session_record or {}).get("db_session_id")
+            agent._db_session_id = sess_id
             agent._identity_rows = runtime.identity_rows
             if agent.interpreter is not None:
                 agent.interpreter._host_repository = runtime.persistence

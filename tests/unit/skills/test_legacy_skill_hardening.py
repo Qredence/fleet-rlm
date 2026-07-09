@@ -10,6 +10,7 @@ import pytest
 
 from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext, TurnControls
 from fleet_rlm.api.runtime_services.stream_turn import _build_stream_kwargs
+from fleet_rlm.files.schemas import AttachedFiles, AttachmentRef
 from fleet_rlm.runtime.agent.runtime import AgentRuntime
 from fleet_rlm.runtime.modules.escalating import EscalatingFleetModule
 from fleet_rlm.skills.active import ActiveSkills
@@ -74,6 +75,54 @@ def test_escalation_call_args_include_selected_skill_ids() -> None:
     args = runtime._escalation_call_args("hello")
 
     assert args["selected_skill_ids"] == ["diagnostics"]
+
+
+def test_build_stream_kwargs_forwards_attached_files() -> None:
+    from fleet_rlm.api.auth.types import NormalizedIdentity
+    from fleet_rlm.api.runtime_services.chat_runtime import PreparedChatRuntime
+
+    attached = AttachedFiles(attachments=[AttachmentRef(id="a" * 32, filename="notes.txt", size_bytes=1)])
+    prepared = PreparedChatRuntime(
+        cfg=object(),
+        planner_lm=object(),
+        delegate_lm=object(),
+        repository=object(),
+        persistence=None,
+        persistence_required=False,
+        identity_rows=None,
+    )
+    ctx = ChatExecutionContext(
+        prepared=prepared,
+        identity=NormalizedIdentity(tenant_claim="t", user_claim="u", email="t@t.com"),  # type: ignore[arg-type]
+        session_id="sess-1",
+        canonical_workspace_id="w",
+        canonical_user_id="u",
+        owner_tenant_claim="t",
+        owner_user_claim="u",
+        cancel_flag={"cancelled": False},
+        controls=TurnControls(attached_files=attached),
+    )
+
+    kwargs = _build_stream_kwargs(ctx, "hello")
+
+    assert kwargs["attached_files"] is attached
+
+
+def test_escalation_call_args_include_attached_files() -> None:
+    attached = AttachedFiles(attachments=[AttachmentRef(id="b" * 32, filename="data.csv", size_bytes=2)])
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime._use_escalation = True
+    runtime.core_memory = {}
+    runtime.history = dspy.History(messages=[])
+    runtime.execution_mode = "auto"
+    runtime.conversation_summary = ""
+    runtime._turn_context = None
+    runtime._selected_skill_ids = []
+    runtime._attached_files = attached
+
+    args = runtime._escalation_call_args("hello")
+
+    assert args["attached_files"] is attached
 
 
 def test_legacy_enrich_with_skills_honors_explicit_selected_skill_ids(tmp_path: Path) -> None:

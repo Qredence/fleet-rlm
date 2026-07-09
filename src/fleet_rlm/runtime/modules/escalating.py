@@ -775,6 +775,7 @@ class EscalatingFleetModule(dspy.Module):
         conversation_summary: str = "",
         turn_context: TurnContext | None = None,
         selected_skill_ids: list[str] | None = None,
+        attached_files: AttachedFiles | None = None,
     ) -> dspy.Prediction:
         """Run one turn through the fleet program.
 
@@ -823,6 +824,7 @@ class EscalatingFleetModule(dspy.Module):
                 routing_decision=prep.routing_decision,
                 source_url=prep.source_url,
                 turn_context=turn_context,
+                attached_files=attached_files,
             )
             return _apply_rlm_budget_semantics_guard(prediction, user_request=user_request)
 
@@ -853,6 +855,7 @@ class EscalatingFleetModule(dspy.Module):
                 routing_decision="router_rlm",
                 source_url=None,
                 turn_context=turn_context,
+                attached_files=attached_files,
             )
             return _apply_rlm_budget_semantics_guard(prediction, user_request=user_request)
 
@@ -898,6 +901,7 @@ class EscalatingFleetModule(dspy.Module):
         conversation_summary: str = "",
         turn_context: TurnContext | None = None,
         selected_skill_ids: list[str] | None = None,
+        attached_files: AttachedFiles | None = None,
     ) -> dspy.Prediction:
         """Run one turn without blocking async callers.
 
@@ -933,6 +937,7 @@ class EscalatingFleetModule(dspy.Module):
                 routing_decision=prep.routing_decision,
                 source_url=prep.source_url,
                 turn_context=turn_context,
+                attached_files=attached_files,
             )
             return _apply_rlm_budget_semantics_guard(prediction, user_request=user_request)
 
@@ -965,6 +970,7 @@ class EscalatingFleetModule(dspy.Module):
                 routing_decision="router_rlm",
                 source_url=None,
                 turn_context=turn_context,
+                attached_files=attached_files,
             )
             return _apply_rlm_budget_semantics_guard(prediction, user_request=user_request)
 
@@ -1161,6 +1167,7 @@ class EscalatingFleetModule(dspy.Module):
         routing_decision: str = "rlm",
         source_url: str | None = None,
         turn_context: TurnContext | None = None,
+        attached_files: AttachedFiles | None = None,
     ) -> dspy.Prediction:
         staged_inline_context = bool(getattr(turn_context, "inline_context_text", "") or "")
         if self._rlm is None:
@@ -1240,7 +1247,7 @@ class EscalatingFleetModule(dspy.Module):
             "core_memory": core_context,
             "history": history,
             "active_skills": active_skills or ActiveSkills(selected=selected_skills or []),
-            "attached_files": AttachedFiles(),
+            "attached_files": attached_files or AttachedFiles(),
         }
         rlm = self._rlm
         if url_document_mode:

@@ -37,7 +37,8 @@ def _build_stream_kwargs(
     Uses the legacy AgentRuntime allowlist. Context-only controls such as
     ``trace_mode`` stay on ``TurnControls`` for transports/future backends.
     Explicit ``selected_skill_ids`` are forwarded to the legacy runtime when
-    non-empty. The ``cancel_check`` lambda reads ``ctx.cancel_flag`` on each
+    non-empty. ``attached_files`` is forwarded when present on turn controls.
+    The ``cancel_check`` lambda reads ``ctx.cancel_flag`` on each
     invocation.
     """
     kwargs: dict[str, Any] = {
@@ -61,6 +62,8 @@ def _build_stream_kwargs(
         kwargs["batch_concurrency"] = controls.batch_concurrency
     if controls.selected_skill_ids:
         kwargs["selected_skill_ids"] = list(controls.selected_skill_ids)
+    if controls.attached_files is not None:
+        kwargs["attached_files"] = controls.attached_files
 
     return kwargs
 

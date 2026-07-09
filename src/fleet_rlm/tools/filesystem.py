@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import Any
 
-from fleet_rlm.artifacts.storage import write_large_tool_output_artifact
+from fleet_rlm.artifacts.storage import ArtifactWriteError, write_large_tool_output_artifact
 from fleet_rlm.tools.paths import (
     FilesystemSafetyError,
     assert_no_detectable_symlink_escape,
@@ -128,14 +128,17 @@ def read_file_impl(
         "encoding": "utf-8-lossy" if "\ufffd" in text else "utf-8",
     }
     if truncated and session_id:
-        artifact = write_large_tool_output_artifact(
-            interpreter,
-            session_id=session_id,
-            tool_name="read_file",
-            content=raw_bytes,
-        )
-        payload["artifact"] = artifact.model_dump()
-        payload["artifact_backed"] = True
+        try:
+            artifact = write_large_tool_output_artifact(
+                interpreter,
+                session_id=session_id,
+                tool_name="read_file",
+                content=raw_bytes,
+            )
+            payload["artifact"] = artifact.model_dump()
+            payload["artifact_backed"] = True
+        except (ArtifactWriteError, RuntimeError, ValueError):
+            pass
     return payload
 
 

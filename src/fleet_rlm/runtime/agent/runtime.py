@@ -19,6 +19,7 @@ from fleet_rlm.runtime.agent import runtime_helpers as rh
 from fleet_rlm.runtime.agent import runtime_mcp, runtime_streaming
 from fleet_rlm.runtime.agent.runtime_history import maybe_refresh_summary
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventContext
+from fleet_rlm.runtime.sandbox_types import AttachedFiles
 from fleet_rlm.runtime.tools import discover_tools
 from fleet_rlm.runtime.tools.binding import bind_runtime_tools, execute_sandbox_tool
 from fleet_rlm.tools.registry import ToolExposurePolicy
@@ -167,6 +168,9 @@ class AgentRuntime:
         selected = list(getattr(self, "_selected_skill_ids", None) or [])
         if selected:
             args["selected_skill_ids"] = selected
+        attached_files = getattr(self, "_attached_files", None)
+        if isinstance(attached_files, AttachedFiles):
+            args["attached_files"] = attached_files
         return args
 
     def preview_routing(
@@ -412,6 +416,7 @@ class AgentRuntime:
         batch_concurrency: int | None = None,
         volume_name: str | None = None,
         selected_skill_ids: list[str] | None = None,
+        attached_files: AttachedFiles | None = None,
     ) -> AsyncIterator[RuntimeEvent]:
         """Stream one chat turn through the agent, yielding events.
 
@@ -446,6 +451,7 @@ class AgentRuntime:
             session_context_paths=interpreter_session_context_paths(interpreter),
         )
         self._selected_skill_ids = list(selected_skill_ids or [])
+        self._attached_files = attached_files if attached_files is not None else AttachedFiles()
         try:
             async for event in runtime_streaming.aiter_chat_turn_stream(
                 self,
@@ -456,6 +462,7 @@ class AgentRuntime:
         finally:
             self._turn_context = None
             self._selected_skill_ids = []
+            self._attached_files = AttachedFiles()
 
     # -----------------------------------------------------------------
     # Core memory API (accessible by tools)

@@ -161,7 +161,7 @@ def read_artifact_impl(
             "size": ref.size_bytes,
             "returned_bytes": len(preview),
             "truncated": truncated,
-            "artifact_backed": truncated,
+            "artifact_backed": True,
             "encoding": "utf-8-lossy" if "\ufffd" in text else "utf-8",
         }
     except (ArtifactPathError, ArtifactWriteError, RuntimeError, ValueError) as exc:
