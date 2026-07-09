@@ -12,15 +12,6 @@ class LoadSkillInput(BaseModel):
     name: str = Field(..., description="Skill name (without .md extension)")
 
 
-class LoadSkillOutput(BaseModel):
-    status: str
-    name: str
-    scope: str | None = None
-    path: str | None = None
-    instructions: str = ""
-    error: str | None = None
-
-
 class SkillScope(str, Enum):
     SESSION = "session"
     USER = "user"
@@ -45,6 +36,47 @@ class SkillResourceKind(str, Enum):
     SCRIPT = "script"
     ASSET = "asset"
     TEMPLATE = "template"
+
+
+class SkillResourceItem(BaseModel):
+    kind: SkillResourceKind | str
+    path: str
+    description: str | None = None
+
+
+class SkillCatalogItem(BaseModel):
+    name: str
+    description: str
+    scope: SkillScope | str
+    trust_level: SkillTrustLevel | str
+    source: str
+    resource_count: int = 0
+
+
+class LoadSkillOutput(BaseModel):
+    status: str
+    name: str
+    scope: str | None = None
+    path: str | None = None
+    source: str | None = None
+    instructions: str = ""
+    resources: list[SkillResourceItem] = Field(default_factory=list)
+    error: str | None = None
+
+
+class ListSkillsOutput(BaseModel):
+    status: str
+    skills: list[SkillCatalogItem] = Field(default_factory=list)
+    error: str | None = None
+
+
+class ReadSkillResourceOutput(BaseModel):
+    status: str
+    name: str = ""
+    path: str = ""
+    content: str = ""
+    error: str | None = None
+    code: str | None = None
 
 
 class SkillResource(BaseModel):
@@ -103,13 +135,17 @@ class SkillValidationResult(BaseModel):
 
 
 __all__ = [
+    "ListSkillsOutput",
     "LoadSkillInput",
     "LoadSkillOutput",
+    "ReadSkillResourceOutput",
     "SkillBundle",
     "SkillCatalogEntry",
+    "SkillCatalogItem",
     "SkillMetadata",
     "SkillPermissionMode",
     "SkillResource",
+    "SkillResourceItem",
     "SkillResourceKind",
     "SkillRuntimeContext",
     "SkillScope",

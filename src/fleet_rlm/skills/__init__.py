@@ -17,7 +17,6 @@ from fleet_rlm.skills.catalog import (
 from fleet_rlm.skills.loader import (
     clear_skill_cache,
     load_resource,
-    load_skill,
     load_skill_bundle,
     load_skill_impl,
 )
@@ -56,6 +55,7 @@ _load_skill_impl = load_skill_impl
 
 _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     "SkillSelectionModule": ("fleet_rlm.skills.selection", "SkillSelectionModule"),
+    "load_skill": ("fleet_rlm.tools.skill_tools", "load_skill"),
     "preview_skills_for_turn": ("fleet_rlm.skills.selection", "preview_skills_for_turn"),
     "select_skill_candidates": ("fleet_rlm.skills.selection", "select_skill_candidates"),
     "SkillSelectionSignature": ("fleet_rlm.skills.signatures", "SkillSelectionSignature"),

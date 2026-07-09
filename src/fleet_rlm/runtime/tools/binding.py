@@ -28,11 +28,16 @@ from fleet_rlm.runtime.tools.sandbox_filesystem import (
     _sandbox_write_file_impl,
     _SandboxFilesystemToolContext,
 )
-from fleet_rlm.runtime.tools.skill_tools import _load_skill_impl
+from fleet_rlm.runtime.tools.skill_tools import (
+    list_skills_impl,
+    load_skill_tool_impl,
+    read_skill_resource_impl,
+)
 from fleet_rlm.runtime.tools.volume_memory_tools import (
     _recall_impl,
     _remember_impl,
 )
+from fleet_rlm.skills.loader import default_skill_runtime_context
 
 INTERPRETER_TOOL_NAMES = frozenset(
     {
@@ -41,8 +46,10 @@ INTERPRETER_TOOL_NAMES = frozenset(
         "delegate_to_rlm",
         "delegate_to_rlm_batched",
         "execute_code",
+        "list_skills",
         "load_skill",
         "read_buffer",
+        "read_skill_resource",
         "recursive_workspace",
         "remember",
         "recall",
@@ -149,6 +156,7 @@ def _bound_runtime_tool_factories(
     agent_depth: int = int(getattr(runtime, "agent_depth", 0) or 0)
 
     if volume_mount_path:
+        skill_context = default_skill_runtime_context(volume_mount_path=volume_mount_path)
 
         def remember(key: str, value: str) -> dict[str, Any]:
             return _remember_impl(key, value, volume_mount_path=volume_mount_path, agent_depth=agent_depth)
@@ -164,11 +172,19 @@ def _bound_runtime_tool_factories(
                 query, volume_mount_path=volume_mount_path, max_results=max_results
             ).model_dump()
 
+        def list_skills() -> dict[str, Any]:
+            return list_skills_impl(context=skill_context)
+
         def load_skill(name: str) -> dict[str, Any]:
-            return _load_skill_impl(name, volume_mount_path=volume_mount_path).model_dump()
+            return load_skill_tool_impl(name, context=skill_context)
+
+        def read_skill_resource(name: str, resource_path: str) -> dict[str, Any]:
+            return read_skill_resource_impl(name, resource_path, context=skill_context)
 
         factories["load_document"] = load_document
+        factories["list_skills"] = list_skills
         factories["load_skill"] = load_skill
+        factories["read_skill_resource"] = read_skill_resource
         factories["remember"] = remember
         factories["recall"] = recall
         factories["search_knowledge"] = search_knowledge

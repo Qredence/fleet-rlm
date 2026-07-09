@@ -18,14 +18,16 @@ _KEBAB_CASE_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _APPROVED_RESOURCE_ROOTS = frozenset({"references", "scripts", "assets", "templates"})
 _MAX_SKILL_MD_BYTES = 50 * 1024
 _VAGUE_DESCRIPTION_MAX_LEN = 10
-_GENERIC_DESCRIPTIONS = frozenset({
-    "skill",
-    "a skill",
-    "bundled fleet-rlm skill",
-    "todo",
-    "tbd",
-    "description",
-})
+_GENERIC_DESCRIPTIONS = frozenset(
+    {
+        "skill",
+        "a skill",
+        "bundled fleet-rlm skill",
+        "todo",
+        "tbd",
+        "description",
+    }
+)
 
 
 def safe_skill_name(name: str) -> str:

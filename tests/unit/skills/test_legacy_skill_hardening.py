@@ -13,8 +13,9 @@ from fleet_rlm.api.runtime_services.stream_turn import _build_stream_kwargs
 from fleet_rlm.runtime.agent.runtime import AgentRuntime
 from fleet_rlm.runtime.modules.escalating import EscalatingFleetModule
 from fleet_rlm.skills.active import ActiveSkills
-from fleet_rlm.skills.loader import clear_skill_cache, load_skill, load_skill_impl
+from fleet_rlm.skills.loader import clear_skill_cache, load_skill_impl
 from fleet_rlm.skills.schemas import SkillRuntimeContext, SkillVisibilityPolicy
+from fleet_rlm.tools.skill_tools import load_skill
 
 
 def _write_skill_md(path: Path, *, name: str, description: str) -> None:
@@ -163,14 +164,15 @@ def test_load_skill_impl_rejects_invisible_skill() -> None:
 def test_load_skill_tool_rejects_invisible_skill() -> None:
     clear_skill_cache()
     with patch(
-        "fleet_rlm.skills.loader.default_skill_runtime_context",
+        "fleet_rlm.tools.skill_tools.default_skill_runtime_context",
         return_value=SkillRuntimeContext(
             visibility=SkillVisibilityPolicy(excluded_skill_ids=["diagnostics"]),
         ),
     ):
         payload = load_skill("diagnostics")
-    assert payload["status"] == "error"
-    assert "not visible" in (payload.get("error") or "").lower()
+    assert payload["status"] == "not_found"
+    assert payload["error"] == "Skill not found or inaccessible."
+    assert "diagnostics" not in str(payload)
 
 
 def test_escalating_forward_passes_selected_skill_ids_to_prepare_turn() -> None:

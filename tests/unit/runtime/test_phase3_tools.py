@@ -17,7 +17,15 @@ def test_phase3_tools_are_registered() -> None:
 
     names = set(list_react_tool_names(discover_tools()))
 
-    assert {"web_search", "fetch_page", "search_knowledge", "load_skill", "load_document"} <= names
+    assert {
+        "web_search",
+        "fetch_page",
+        "search_knowledge",
+        "load_skill",
+        "load_document",
+        "list_skills",
+        "read_skill_resource",
+    } <= names
 
 
 def test_load_document_persists_and_searches_knowledge(tmp_path: Path) -> None:
@@ -62,27 +70,44 @@ def test_bind_runtime_tools_binds_phase3_volume_tools(tmp_path: Path) -> None:
     from fleet_rlm.runtime.tools.binding import bind_runtime_tools
     from fleet_rlm.runtime.tools.document_tools import load_document
     from fleet_rlm.runtime.tools.knowledge_tools import search_knowledge
-    from fleet_rlm.runtime.tools.skill_tools import load_skill
+    from fleet_rlm.runtime.tools.skill_tools import list_skills, load_skill, read_skill_resource
 
     volume = tmp_path / "volume"
     (volume / "knowledge" / "ingested").mkdir(parents=True)
-    (volume / "skills" / "user").mkdir(parents=True)
-    (volume / "skills" / "user" / "alpha.md").write_text("alpha instructions", encoding="utf-8")
+    skill_dir = volume / "skills" / "user" / "alpha"
+    skill_dir.mkdir(parents=True)
+    skill_dir.joinpath("SKILL.md").write_text(
+        '---\nname: alpha\ndescription: "Alpha skill"\n---\n\n# Alpha\n',
+        encoding="utf-8",
+    )
+    refs = skill_dir / "references"
+    refs.mkdir()
+    refs.joinpath("note.md").write_text("alpha reference body", encoding="utf-8")
     doc = tmp_path / "doc.txt"
     doc.write_text("alpha searchable text", encoding="utf-8")
     runtime = types.SimpleNamespace(core_memory={})
     interpreter = types.SimpleNamespace(volume_mount_path=str(volume))
 
-    bound = bind_runtime_tools([load_document, search_knowledge, load_skill], runtime=runtime, interpreter=interpreter)
+    bound = bind_runtime_tools(
+        [load_document, search_knowledge, load_skill, list_skills, read_skill_resource],
+        runtime=runtime,
+        interpreter=interpreter,
+    )
     tools = {getattr(tool, "name", ""): _tool_func(tool) for tool in bound}
 
     loaded = tools["load_document"](str(doc), alias="alpha-doc")
     searched = tools["search_knowledge"]("searchable")
     skill = tools["load_skill"]("alpha")
+    listed = tools["list_skills"]()
+    resource = tools["read_skill_resource"]("alpha", "references/note.md")
 
     assert loaded["status"] == "ok"
     assert searched["count"] == 1
-    assert skill["instructions"] == "alpha instructions"
+    assert skill["instructions"].startswith("---")
+    assert skill["resources"]
+    assert any(item["name"] == "alpha" for item in listed["skills"])
+    assert resource["status"] == "ok"
+    assert resource["content"] == "alpha reference body"
 
 
 def test_phase3_volume_tools_use_env_volume_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

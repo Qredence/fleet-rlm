@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import functools
 from pathlib import Path
-from typing import Any
 
-from fleet_rlm.runtime.tools._marker import tool_fn
 from fleet_rlm.skills.catalog import (
     discover_scaffold_skills,
     inventory_skill_resources,
@@ -27,10 +25,10 @@ from fleet_rlm.skills.errors import (
 from fleet_rlm.skills.paths import skills_root
 from fleet_rlm.skills.permissions import is_skill_visible
 from fleet_rlm.skills.schemas import (
-    LoadSkillInput,
     LoadSkillOutput,
     SkillBundle,
     SkillMetadata,
+    SkillResourceItem,
     SkillRuntimeContext,
     SkillScope,
     SkillVisibilityPolicy,
@@ -112,12 +110,23 @@ def _load_skill_impl_uncached(
     scope = bundle.metadata.scope.value
     source = bundle.metadata.source
     path = source.split(":", 1)[-1] if ":" in source else source
+    safe_source = source.split(":", 1)[0] if ":" in source else source
+    resources = [
+        SkillResourceItem(
+            kind=resource.kind.value,
+            path=resource.path,
+            description=resource.description,
+        )
+        for resource in bundle.resources
+    ]
     return LoadSkillOutput(
         status="ok",
         name=normalized,
         scope=scope,
         path=path,
+        source=safe_source,
         instructions=bundle.instructions,
+        resources=resources,
     )
 
 
@@ -160,14 +169,6 @@ def load_skill_impl(
 
 # Backward-compatible alias used across runtime and quality modules.
 _load_skill_impl = load_skill_impl
-
-
-@tool_fn
-def load_skill(name: str) -> dict[str, Any]:
-    """Load a human-curated markdown skill from the persistent volume."""
-    validated = LoadSkillInput(name=name)
-    output = load_skill_impl(validated.name)
-    return output.model_dump()
 
 
 def _read_skill_instructions(metadata: SkillMetadata, *, context: SkillRuntimeContext) -> str:
@@ -255,7 +256,6 @@ __all__ = [
     "clear_skill_cache",
     "default_skill_runtime_context",
     "load_resource",
-    "load_skill",
     "load_skill_bundle",
     "load_skill_impl",
     "_load_skill_impl",

@@ -6,7 +6,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from fleet_rlm.skills.schemas import LoadSkillInput, LoadSkillOutput
+from fleet_rlm.skills.schemas import (
+    ListSkillsOutput,
+    LoadSkillInput,
+    LoadSkillOutput,
+    ReadSkillResourceOutput,
+)
 
 
 class WebSearchInput(BaseModel):
@@ -103,6 +108,8 @@ __all__ = [
     "SearchKnowledgeOutput",
     "LoadSkillInput",
     "LoadSkillOutput",
+    "ListSkillsOutput",
+    "ReadSkillResourceOutput",
     "KnowledgePersistResult",
     "LoadDocumentInput",
     "LoadDocumentOutput",

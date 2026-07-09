@@ -7,19 +7,10 @@ from typing import Annotated, NoReturn
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from fleet_rlm.skills.catalog import parse_skill_frontmatter
-from fleet_rlm.skills.errors import (
-    SkillError,
-    SkillNotFoundError,
-    SkillNotVisibleError,
-    SkillResourceNotFoundError,
-    SkillResourcePathError,
-    SkillValidationError,
-)
-from fleet_rlm.skills.loader import load_resource, load_skill_bundle
+from fleet_rlm.skills.errors import SkillError
 from fleet_rlm.skills.repository import list_visible
 from fleet_rlm.skills.schemas import (
     SkillBundle,
-    SkillCatalogEntry,
     SkillMetadata,
     SkillPermissionMode,
     SkillResource,
@@ -31,8 +22,16 @@ from fleet_rlm.skills.schemas import (
     SkillVisibilityPolicy,
 )
 from fleet_rlm.skills.selection import SkillSelectionModule
+from fleet_rlm.skills.service import (
+    list_skills_output,
+    load_visible_skill_bundle,
+    public_error_for_skill_error,
+    read_skill_resource_public_output,
+    safe_source_label,
+    skill_catalog_item_from_bundle,
+    skill_resource_item,
+)
 from fleet_rlm.skills.validator import (
-    safe_skill_name,
     validate_resource_path,
     validate_skill_bundle,
     validate_skill_metadata,
@@ -67,12 +66,8 @@ SKILL_ERROR_RESPONSES: OpenAPIResponses = {
 }
 
 
-def _safe_source_label(source: str) -> str:
-    return source.split(":", 1)[0] if ":" in source else source
-
-
 def _safe_sources_dict(sources: dict[str, str]) -> dict[str, str]:
-    return {name: _safe_source_label(source) for name, source in sources.items()}
+    return {name: safe_source_label(source) for name, source in sources.items()}
 
 
 def _safe_skill_context(active_skills) -> str:
@@ -81,7 +76,7 @@ def _safe_skill_context(active_skills) -> str:
     lines = ["[Active Skills]", "Selected skill guidance is available in the REPL variable `active_skills`."]
     for name in active_skills.selected:
         description = active_skills.catalog.get(name, "")
-        source = _safe_source_label(active_skills.sources.get(name, ""))
+        source = safe_source_label(active_skills.sources.get(name, ""))
         detail = f"- {name}"
         if description:
             detail += f": {description}"
@@ -91,30 +86,12 @@ def _safe_skill_context(active_skills) -> str:
     return "\n".join(lines)
 
 
-def _resource_item(resource: SkillResource) -> SkillResourceItem:
-    return SkillResourceItem(kind=resource.kind, path=resource.path, description=resource.description)
+def _api_resource_item(resource: SkillResource) -> SkillResourceItem:
+    return SkillResourceItem(**skill_resource_item(resource).model_dump())
 
 
-def _catalog_item(entry: SkillCatalogEntry, *, resource_count: int = 0) -> SkillCatalogItem:
-    return SkillCatalogItem(
-        name=entry.name,
-        description=entry.description,
-        scope=entry.scope,
-        trust_level=entry.trust_level,
-        source=_safe_source_label(entry.source),
-        resource_count=resource_count,
-    )
-
-
-def _bundle_item(bundle: SkillBundle) -> SkillCatalogItem:
-    return SkillCatalogItem(
-        name=bundle.metadata.name,
-        description=bundle.metadata.description,
-        scope=bundle.metadata.scope,
-        trust_level=bundle.metadata.trust_level,
-        source=_safe_source_label(bundle.metadata.source),
-        resource_count=len(bundle.resources),
-    )
+def _api_bundle_item(bundle: SkillBundle) -> SkillCatalogItem:
+    return SkillCatalogItem(**skill_catalog_item_from_bundle(bundle).model_dump())
 
 
 def _visibility_policy(value: SkillVisibilityPolicyInput | None) -> SkillVisibilityPolicy:
@@ -254,19 +231,23 @@ def _bad_request(message: str, *, code: str = "invalid_skill_request") -> HTTPEx
 
 
 def _raise_skill_http_error(exc: SkillError) -> NoReturn:
-    if isinstance(exc, SkillValidationError):
-        message = "Invalid skill name." if exc.code == "invalid_skill_name" else "Invalid skill request."
-        raise _bad_request(message, code=exc.code) from exc
-    if isinstance(exc, SkillResourcePathError):
-        raise _bad_request("Invalid resource path.", code="invalid_resource_path") from exc
-    if isinstance(exc, SkillNotFoundError | SkillNotVisibleError | SkillResourceNotFoundError):
+    public_error = public_error_for_skill_error(exc)
+    if public_error.status_code == status.HTTP_404_NOT_FOUND:
         raise _not_found() from exc
-    raise _bad_request("Invalid skill request.", code=exc.code) from exc
+    raise _bad_request(public_error.message, code=public_error.code) from exc
+
+
+def _raise_skill_payload_http_error(message: str, *, code: str | None) -> NoReturn:
+    if code == "skill_not_found":
+        raise _not_found()
+    if code == "invalid_resource_path":
+        raise _bad_request("Invalid resource path.", code="invalid_resource_path")
+    raise _bad_request(message, code=code or "invalid_skill_request")
 
 
 def _load_visible_bundle(name: str, context: SkillRuntimeContext) -> SkillBundle:
     try:
-        return load_skill_bundle(safe_skill_name(name), context)
+        return load_visible_skill_bundle(name, context)
     except SkillError as exc:
         _raise_skill_http_error(exc)
 
@@ -292,7 +273,9 @@ async def list_skills(
         excluded_skill_ids=excluded_skill_ids,
         included_skill_ids=included_skill_ids,
     )
-    return SkillListResponse(skills=[_catalog_item(entry) for entry in list_visible(context)])
+    return SkillListResponse(
+        skills=[SkillCatalogItem(**item.model_dump()) for item in list_skills_output(context=context).skills]
+    )
 
 
 @router.get(
@@ -319,8 +302,8 @@ async def get_skill(
     )
     bundle = _load_visible_bundle(name, context)
     return SkillDetailResponse(
-        skill=_bundle_item(bundle),
-        resources=[_resource_item(resource) for resource in bundle.resources],
+        skill=_api_bundle_item(bundle),
+        resources=[_api_resource_item(resource) for resource in bundle.resources],
     )
 
 
@@ -383,9 +366,9 @@ async def load_skills(
         bundle = _load_visible_bundle(name, context)
         bundles.append(
             SkillBundleResponse(
-                skill=_bundle_item(bundle),
+                skill=_api_bundle_item(bundle),
                 instructions=bundle.instructions,
-                resources=[_resource_item(resource) for resource in bundle.resources],
+                resources=[_api_resource_item(resource) for resource in bundle.resources],
             )
         )
     return SkillLoadResponse(bundles=bundles)
@@ -463,12 +446,10 @@ async def read_skill_resource(
         excluded_skill_ids=excluded_skill_ids,
         included_skill_ids=included_skill_ids,
     )
-    try:
-        normalized = safe_skill_name(name)
-        content = load_resource(normalized, resource_path, context)
-    except SkillError as exc:
-        _raise_skill_http_error(exc)
-    return SkillResourceContentResponse(name=normalized, path=resource_path, content=content)
+    payload = read_skill_resource_public_output(name, resource_path, context=context)
+    if payload.status != "ok":
+        _raise_skill_payload_http_error(payload.error or "Invalid skill request.", code=payload.code)
+    return SkillResourceContentResponse(name=payload.name, path=payload.path, content=payload.content)
 
 
 __all__ = ["router"]
