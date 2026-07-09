@@ -22,13 +22,15 @@ def history_turn_count(agent_runtime: Any | None) -> int:
 def _attachment_metadata_rows(attached: AttachedFiles) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for attachment in attached.attachments:
-        rows.append({
-            "id": attachment.id,
-            "filename": attachment.filename,
-            "mime_type": attachment.mime_type,
-            "size_bytes": attachment.size_bytes,
-            "staging_path": attachment.staging_path,
-        })
+        rows.append(
+            {
+                "id": attachment.id,
+                "filename": attachment.filename,
+                "mime_type": attachment.mime_type,
+                "size_bytes": attachment.size_bytes,
+                "staging_path": attachment.staging_path,
+            }
+        )
     return rows
 
 

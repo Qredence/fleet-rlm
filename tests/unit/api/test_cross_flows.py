@@ -320,11 +320,13 @@ class TestCross003_ErrorMidStream:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            stub_stream_turn([
-                make_started_event(),
-                make_text_event("partial output"),
-                make_error_event("mid-stream failure"),
-            ]),
+            stub_stream_turn(
+                [
+                    make_started_event(),
+                    make_text_event("partial output"),
+                    make_error_event("mid-stream failure"),
+                ]
+            ),
         )
 
         with TestClient(no_db_app) as client:

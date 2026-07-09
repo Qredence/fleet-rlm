@@ -253,11 +253,13 @@ class Test_SSE_009_PartStructure:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            stub_stream_turn([
-                make_started_event(),
-                RuntimeEvent(kind=RuntimeEventKind.REASONING, text="thinking..."),
-                make_done_event(),
-            ]),
+            stub_stream_turn(
+                [
+                    make_started_event(),
+                    RuntimeEvent(kind=RuntimeEventKind.REASONING, text="thinking..."),
+                    make_done_event(),
+                ]
+            ),
         )
         no_db_app.dependency_overrides[require_http_identity] = stub_identity_dependency(
             NormalizedIdentity(tenant_claim="t", user_claim="u"),
@@ -285,18 +287,20 @@ class Test_SSE_009_PartStructure:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            stub_stream_turn([
-                make_started_event(),
-                RuntimeEvent(
-                    kind=RuntimeEventKind.TOOL_CALL,
-                    text="calling tool",
-                    tool=RuntimeToolInfo(
-                        tool_name="repl_execute",
-                        tool_args={"code": "print(1)"},
+            stub_stream_turn(
+                [
+                    make_started_event(),
+                    RuntimeEvent(
+                        kind=RuntimeEventKind.TOOL_CALL,
+                        text="calling tool",
+                        tool=RuntimeToolInfo(
+                            tool_name="repl_execute",
+                            tool_args={"code": "print(1)"},
+                        ),
                     ),
-                ),
-                make_done_event(),
-            ]),
+                    make_done_event(),
+                ]
+            ),
         )
         no_db_app.dependency_overrides[require_http_identity] = stub_identity_dependency(
             NormalizedIdentity(tenant_claim="t", user_claim="u"),
@@ -326,27 +330,29 @@ class Test_SSE_009_PartStructure:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            stub_stream_turn([
-                make_started_event(),
-                RuntimeEvent(
-                    kind=RuntimeEventKind.TOOL_CALL,
-                    text="calling tool",
-                    tool=RuntimeToolInfo(
-                        tool_name="repl_execute",
-                        tool_args={"code": "print(1)"},
+            stub_stream_turn(
+                [
+                    make_started_event(),
+                    RuntimeEvent(
+                        kind=RuntimeEventKind.TOOL_CALL,
+                        text="calling tool",
+                        tool=RuntimeToolInfo(
+                            tool_name="repl_execute",
+                            tool_args={"code": "print(1)"},
+                        ),
                     ),
-                ),
-                RuntimeEvent(
-                    kind=RuntimeEventKind.TOOL_RESULT,
-                    text="42",
-                    tool=RuntimeToolInfo(
-                        tool_name="repl_execute",
-                        tool_output="42",
-                        step_index=0,
+                    RuntimeEvent(
+                        kind=RuntimeEventKind.TOOL_RESULT,
+                        text="42",
+                        tool=RuntimeToolInfo(
+                            tool_name="repl_execute",
+                            tool_output="42",
+                            step_index=0,
+                        ),
                     ),
-                ),
-                make_done_event(),
-            ]),
+                    make_done_event(),
+                ]
+            ),
         )
         no_db_app.dependency_overrides[require_http_identity] = stub_identity_dependency(
             NormalizedIdentity(tenant_claim="t", user_claim="u"),
@@ -692,18 +698,20 @@ class Test_SSE_027_Sessions:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            stub_stream_turn([
-                RuntimeEvent(
-                    kind=RuntimeEventKind.TURN_STARTED,
-                    text="started",
-                    payload={
-                        "message_id": "msg-1",
-                        "session_id": "sess-auto-1",
-                        "run_id": "run-1",
-                    },
-                ),
-                make_done_event(),
-            ]),
+            stub_stream_turn(
+                [
+                    RuntimeEvent(
+                        kind=RuntimeEventKind.TURN_STARTED,
+                        text="started",
+                        payload={
+                            "message_id": "msg-1",
+                            "session_id": "sess-auto-1",
+                            "run_id": "run-1",
+                        },
+                    ),
+                    make_done_event(),
+                ]
+            ),
         )
 
         with TestClient(no_db_app) as client:
@@ -722,11 +730,13 @@ class Test_SSE_027_Sessions:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            stub_stream_turn([
-                make_started_event(),
-                make_text_event("independent"),
-                make_done_event(),
-            ]),
+            stub_stream_turn(
+                [
+                    make_started_event(),
+                    make_text_event("independent"),
+                    make_done_event(),
+                ]
+            ),
         )
 
         with TestClient(no_db_app) as client:
@@ -883,11 +893,13 @@ class Test_SSE_035_StreamCharacteristics:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            stub_stream_turn([
-                make_started_event(),
-                make_text_event(large_text),
-                make_done_event(),
-            ]),
+            stub_stream_turn(
+                [
+                    make_started_event(),
+                    make_text_event(large_text),
+                    make_done_event(),
+                ]
+            ),
         )
 
         with TestClient(no_db_app) as client:
@@ -939,9 +951,11 @@ class Test_SSE_035_StreamCharacteristics:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            stub_stream_turn([
-                RuntimeEvent(kind=RuntimeEventKind.DONE, text="done", payload={"history_turns": 0}),
-            ]),
+            stub_stream_turn(
+                [
+                    RuntimeEvent(kind=RuntimeEventKind.DONE, text="done", payload={"history_turns": 0}),
+                ]
+            ),
         )
 
         with TestClient(no_db_app) as client:
@@ -1019,11 +1033,13 @@ class Test_SSE_035_StreamCharacteristics:  # noqa: N801
         monkeypatch.setattr(
             chat_module,
             "stream_turn",
-            stub_stream_turn([
-                make_started_event(),
-                RuntimeEvent(kind=RuntimeEventKind.MLFLOW_SPAN, payload={"span_id": "sp-1"}),
-                make_done_event(),
-            ]),
+            stub_stream_turn(
+                [
+                    make_started_event(),
+                    RuntimeEvent(kind=RuntimeEventKind.MLFLOW_SPAN, payload={"span_id": "sp-1"}),
+                    make_done_event(),
+                ]
+            ),
         )
 
         with TestClient(no_db_app) as client:
@@ -1318,11 +1334,13 @@ def chat_client_with_volume(no_db_app, monkeypatch, stub_identity, tmp_path):
     monkeypatch.setattr(
         chat_router,
         "stream_turn",
-        stub_stream_turn([
-            make_started_event(),
-            make_text_event("Hello from stub!"),
-            make_done_event(),
-        ]),
+        stub_stream_turn(
+            [
+                make_started_event(),
+                make_text_event("Hello from stub!"),
+                make_done_event(),
+            ]
+        ),
     )
 
     def _stage(session_id: str, filename: str = "hello.txt") -> str:
