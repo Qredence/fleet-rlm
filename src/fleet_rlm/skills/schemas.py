@@ -79,6 +79,16 @@ class ReadSkillResourceOutput(BaseModel):
     code: str | None = None
 
 
+class RunSkillScriptOutput(BaseModel):
+    success: bool = False
+    exit_code: int | None = None
+    stdout: str | None = None
+    stderr: str | None = None
+    artifact_id: str | None = None
+    log_path: str | None = None
+    error: str | None = None
+
+
 class SkillResource(BaseModel):
     kind: SkillResourceKind
     path: str
@@ -139,6 +149,7 @@ __all__ = [
     "LoadSkillInput",
     "LoadSkillOutput",
     "ReadSkillResourceOutput",
+    "RunSkillScriptOutput",
     "SkillBundle",
     "SkillCatalogEntry",
     "SkillCatalogItem",

@@ -11,6 +11,7 @@ from fleet_rlm.skills.schemas import (
     LoadSkillInput,
     LoadSkillOutput,
     ReadSkillResourceOutput,
+    RunSkillScriptOutput,
 )
 
 
@@ -110,6 +111,7 @@ __all__ = [
     "LoadSkillOutput",
     "ListSkillsOutput",
     "ReadSkillResourceOutput",
+    "RunSkillScriptOutput",
     "KnowledgePersistResult",
     "LoadDocumentInput",
     "LoadDocumentOutput",

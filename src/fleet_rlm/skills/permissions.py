@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from fleet_rlm.skills.schemas import (
+    SkillMetadata,
     SkillPermissionMode,
     SkillScope,
+    SkillTrustLevel,
     SkillVisibilityPolicy,
 )
+
+_BUILTIN_SCOPES = frozenset({SkillScope.SCAFFOLD, SkillScope.SYSTEM})
+_ADMIN_APPROVED_SCOPES = frozenset({SkillScope.ORG, SkillScope.PROJECT})
 
 
 def default_permission_mode(scope: SkillScope) -> SkillPermissionMode:
@@ -29,8 +34,16 @@ def is_skill_visible(name: str, scope: SkillScope, policy: SkillVisibilityPolicy
     return True
 
 
+def is_skill_script_execution_permitted(metadata: SkillMetadata) -> bool:
+    """Return whether trusted script execution is allowed for *metadata*."""
+    if metadata.trust_level != SkillTrustLevel.TRUSTED:
+        return False
+    return metadata.scope in _BUILTIN_SCOPES | _ADMIN_APPROVED_SCOPES
+
+
 __all__ = [
     "default_permission_mode",
     "is_scope_visible",
+    "is_skill_script_execution_permitted",
     "is_skill_visible",
 ]

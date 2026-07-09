@@ -25,6 +25,7 @@ def test_phase3_tools_are_registered() -> None:
         "load_document",
         "list_skills",
         "read_skill_resource",
+        "run_skill_script",
     } <= names
 
 
@@ -110,6 +111,46 @@ def test_bind_runtime_tools_binds_phase3_volume_tools(tmp_path: Path) -> None:
     assert resource["content"] == "alpha reference body"
 
 
+def test_bind_run_skill_script_uses_per_turn_selected_skill_ids(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.runtime.tools.binding import bind_runtime_tools
+    from fleet_rlm.runtime.tools.skill_tools import run_skill_script
+
+    volume = tmp_path / "volume"
+    skill_dir = volume / "skills" / "system" / "alpha"
+    scripts = skill_dir / "scripts"
+    scripts.mkdir(parents=True)
+    skill_dir.joinpath("SKILL.md").write_text(
+        '---\nname: alpha\ndescription: "Alpha skill"\n---\n\n# Alpha\n',
+        encoding="utf-8",
+    )
+    scripts.joinpath("run.py").write_text("print('ok')\n", encoding="utf-8")
+
+    interpreter = SimpleNamespace(
+        volume_mount_path=str(volume),
+        delegate_result_truncation_chars=8000,
+        execute=lambda code, variables=None: SimpleNamespace(
+            output={
+                "success": True,
+                "exit_code": 0,
+                "stdout": "ok",
+                "stderr": "",
+            }
+        ),
+    )
+    runtime = SimpleNamespace(core_memory={}, _selected_skill_ids=[])
+
+    bound = bind_runtime_tools([run_skill_script], runtime=runtime, interpreter=interpreter)
+    tools = {getattr(tool, "name", ""): _tool_func(tool) for tool in bound}
+    runtime._selected_skill_ids = ["alpha"]
+
+    payload = tools["run_skill_script"]("alpha", "scripts/run.py")
+
+    assert payload["success"] is True
+    assert payload["exit_code"] == 0
+
+
 def test_phase3_volume_tools_use_env_volume_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.runtime.tools.knowledge_tools import persist_knowledge_document, search_knowledge
     from fleet_rlm.runtime.tools.skill_tools import load_skill
@@ -172,9 +213,9 @@ def test_web_search_uses_brave_api(monkeypatch: Any) -> None:
             return None
 
         def read(self) -> bytes:
-            return json.dumps(
-                {"web": {"results": [{"url": "https://example.com", "title": "Example", "description": "Snippet"}]}}
-            ).encode("utf-8")
+            return json.dumps({
+                "web": {"results": [{"url": "https://example.com", "title": "Example", "description": "Snippet"}]}
+            }).encode("utf-8")
 
     captured: list[Any] = []
 

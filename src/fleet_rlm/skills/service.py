@@ -12,6 +12,8 @@ from fleet_rlm.skills.errors import (
     SkillNotVisibleError,
     SkillResourceNotFoundError,
     SkillResourcePathError,
+    SkillScriptNotFoundError,
+    SkillScriptNotPermittedError,
     SkillValidationError,
 )
 from fleet_rlm.skills.loader import (
@@ -25,6 +27,7 @@ from fleet_rlm.skills.schemas import (
     ListSkillsOutput,
     LoadSkillOutput,
     ReadSkillResourceOutput,
+    RunSkillScriptOutput,
     SkillBundle,
     SkillCatalogEntry,
     SkillCatalogItem,
@@ -35,6 +38,10 @@ from fleet_rlm.skills.schemas import (
 from fleet_rlm.skills.validator import safe_skill_name
 
 INACCESSIBLE_SKILL_MESSAGE = "Skill not found or inaccessible."
+INACCESSIBLE_SCRIPT_MESSAGE = "Skill script not found or inaccessible."
+SCRIPT_NOT_PERMITTED_MESSAGE = "Skill script execution is not permitted."
+SCRIPT_EXECUTION_FAILED_MESSAGE = "Skill script execution failed."
+INVALID_SCRIPT_PATH_MESSAGE = "Invalid skill script path."
 
 
 @dataclass(frozen=True)
@@ -178,8 +185,54 @@ def _is_inaccessible_load_error(error: str | None) -> bool:
     return bool(error and error.startswith("Skill is not visible:"))
 
 
+def run_skill_script_error_output(exc: SkillError) -> RunSkillScriptOutput:
+    if isinstance(exc, SkillScriptNotPermittedError):
+        return RunSkillScriptOutput(success=False, error=SCRIPT_NOT_PERMITTED_MESSAGE)
+    if isinstance(exc, SkillResourcePathError):
+        return RunSkillScriptOutput(success=False, error=INVALID_SCRIPT_PATH_MESSAGE)
+    if isinstance(exc, SkillValidationError):
+        if exc.code == "invalid_script_args":
+            return RunSkillScriptOutput(success=False, error=SCRIPT_EXECUTION_FAILED_MESSAGE)
+        if exc.code == "invalid_skill_name":
+            return RunSkillScriptOutput(success=False, error=INACCESSIBLE_SCRIPT_MESSAGE)
+        return RunSkillScriptOutput(success=False, error=SCRIPT_EXECUTION_FAILED_MESSAGE)
+    if isinstance(
+        exc, SkillNotFoundError | SkillNotVisibleError | SkillScriptNotFoundError | SkillResourceNotFoundError
+    ):
+        return RunSkillScriptOutput(success=False, error=INACCESSIBLE_SCRIPT_MESSAGE)
+    return RunSkillScriptOutput(success=False, error=SCRIPT_EXECUTION_FAILED_MESSAGE)
+
+
+def run_skill_script_public_output(payload: dict[str, Any]) -> RunSkillScriptOutput:
+    error = payload.get("error")
+    success = bool(payload.get("success"))
+    sanitized_error = None
+    if not success:
+        if error in {
+            SCRIPT_NOT_PERMITTED_MESSAGE,
+            INACCESSIBLE_SCRIPT_MESSAGE,
+            INVALID_SCRIPT_PATH_MESSAGE,
+        }:
+            sanitized_error = str(error)
+        elif error or payload.get("exit_code") not in (None, 0):
+            sanitized_error = SCRIPT_EXECUTION_FAILED_MESSAGE
+    return RunSkillScriptOutput(
+        success=success,
+        exit_code=payload.get("exit_code"),
+        stdout=payload.get("stdout") if success else None,
+        stderr=payload.get("stderr") if success else None,
+        artifact_id=payload.get("artifact_id"),
+        log_path=payload.get("log_path"),
+        error=sanitized_error,
+    )
+
+
 __all__ = [
+    "INACCESSIBLE_SCRIPT_MESSAGE",
     "INACCESSIBLE_SKILL_MESSAGE",
+    "INVALID_SCRIPT_PATH_MESSAGE",
+    "SCRIPT_EXECUTION_FAILED_MESSAGE",
+    "SCRIPT_NOT_PERMITTED_MESSAGE",
     "SkillPublicError",
     "list_skills_output",
     "load_skill_public_output",
@@ -188,6 +241,8 @@ __all__ = [
     "read_skill_resource_error_output",
     "read_skill_resource_public_output",
     "resource_count_for_entry",
+    "run_skill_script_error_output",
+    "run_skill_script_public_output",
     "safe_source_label",
     "skill_catalog_item_from_bundle",
     "skill_catalog_item_from_entry",

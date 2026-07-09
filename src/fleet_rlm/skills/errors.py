@@ -42,11 +42,27 @@ class SkillResourceNotFoundError(SkillError):
         super().__init__("skill_resource_not_found", "Skill resource not found.")
 
 
+class SkillScriptNotFoundError(SkillError):
+    """Script missing or inaccessible for a selected skill."""
+
+    def __init__(self) -> None:
+        super().__init__("skill_script_not_found", "Skill script not found or inaccessible.")
+
+
+class SkillScriptNotPermittedError(SkillError):
+    """Trust or permission policy rejected script execution."""
+
+    def __init__(self) -> None:
+        super().__init__("skill_script_not_permitted", "Skill script execution is not permitted.")
+
+
 __all__ = [
     "SkillError",
     "SkillNotFoundError",
     "SkillNotVisibleError",
     "SkillResourceNotFoundError",
     "SkillResourcePathError",
+    "SkillScriptNotFoundError",
+    "SkillScriptNotPermittedError",
     "SkillValidationError",
 ]

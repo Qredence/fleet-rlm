@@ -14,6 +14,8 @@ from fleet_rlm.tools.skill_tools import (
     load_skill_tool_impl,
     read_skill_resource,
     read_skill_resource_impl,
+    run_skill_script,
+    run_skill_script_tool_impl,
 )
 
 __all__ = [
@@ -26,5 +28,7 @@ __all__ = [
     "load_skill_tool_impl",
     "read_skill_resource",
     "read_skill_resource_impl",
+    "run_skill_script",
+    "run_skill_script_tool_impl",
     "_load_skill_impl",
 ]
