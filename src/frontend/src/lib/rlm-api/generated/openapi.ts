@@ -176,6 +176,58 @@ export interface paths {
      */
     get: operations["get_volumes_api_v1_runtime_volumes_get"];
   };
+  "/api/v1/skills/user": {
+    /**
+     * Create a user-scoped skill
+     * @description Create a user-scoped skill directly, or stage it when write policy requires approval.
+     */
+    post: operations["create_user_skill_endpoint_api_v1_skills_user_post"];
+  };
+  "/api/v1/skills/user/{name}": {
+    /**
+     * Delete a user-scoped skill
+     * @description Delete a user-scoped skill directly, or stage it when write policy requires approval.
+     */
+    delete: operations["delete_user_skill_endpoint_api_v1_skills_user__name__delete"];
+    /**
+     * Update a user-scoped skill
+     * @description Update a user-scoped skill directly, or stage it when write policy requires approval.
+     */
+    patch: operations["update_user_skill_endpoint_api_v1_skills_user__name__patch"];
+  };
+  "/api/v1/skills/session": {
+    /**
+     * Create a session-scoped skill
+     * @description Create a session-scoped skill directly, or stage it when write policy requires approval.
+     */
+    post: operations["create_session_skill_endpoint_api_v1_skills_session_post"];
+  };
+  "/api/v1/skills/session/{name}": {
+    /**
+     * Delete a session-scoped skill
+     * @description Delete a session-scoped skill directly, or stage it when write policy requires approval.
+     */
+    delete: operations["delete_session_skill_endpoint_api_v1_skills_session__name__delete"];
+    /**
+     * Update a session-scoped skill
+     * @description Update a session-scoped skill directly, or stage it when write policy requires approval.
+     */
+    patch: operations["update_session_skill_endpoint_api_v1_skills_session__name__patch"];
+  };
+  "/api/v1/skills/staged/{change_id}/approve": {
+    /**
+     * Approve a staged skill change
+     * @description Re-validate and commit a pending staged skill change.
+     */
+    post: operations["approve_staged_skill_change_endpoint_api_v1_skills_staged__change_id__approve_post"];
+  };
+  "/api/v1/skills/staged/{change_id}/reject": {
+    /**
+     * Reject a staged skill change
+     * @description Reject a pending staged skill change without committing it, recording audit metadata.
+     */
+    post: operations["reject_staged_skill_change_endpoint_api_v1_skills_staged__change_id__reject_post"];
+  };
   "/api/v1/skills": {
     /**
      * List visible skills
@@ -3498,6 +3550,11 @@ export interface components {
       largest_output_span?: components["schemas"]["SessionTracePerformanceSpanSummary"] | null;
     };
     /**
+     * SkillApprovalStatus
+     * @enum {string}
+     */
+    SkillApprovalStatus: "pending" | "approved" | "rejected";
+    /**
      * SkillBundleResponse
      * @description Loaded visible skill bundle.
      */
@@ -3746,6 +3803,50 @@ export interface components {
       warnings?: string[];
     };
     /**
+     * SkillStagedActionResponse
+     * @description Safe response for a staged-change approval or rejection action.
+     */
+    SkillStagedActionResponse: {
+      /**
+       * Staged Change Id
+       * @description Staged change id.
+       */
+      staged_change_id: string;
+      /**
+       * Skill Name
+       * @description Skill id.
+       */
+      skill_name: string;
+      /** @description Skill scope. */
+      scope: components["schemas"]["SkillScope"];
+      /** @description Original staged write action. */
+      action: components["schemas"]["SkillWriteAction"];
+      /**
+       * Status
+       * @description Approval action outcome.
+       * @enum {string}
+       */
+      status: "approved" | "rejected";
+      /** @description Final staged change approval status. */
+      approval_status: components["schemas"]["SkillApprovalStatus"];
+    };
+    /**
+     * SkillStagedApproveRequest
+     * @description Request body for approving a staged skill change.
+     */
+    SkillStagedApproveRequest: Record<string, never>;
+    /**
+     * SkillStagedRejectRequest
+     * @description Request body for rejecting a staged skill change.
+     */
+    SkillStagedRejectRequest: {
+      /**
+       * Reason
+       * @description Optional rejection reason recorded in audit metadata.
+       */
+      reason?: string | null;
+    };
+    /**
      * SkillTrustLevel
      * @enum {string}
      */
@@ -3859,6 +3960,91 @@ export interface components {
        * @description Optional allowlist of visible skill ids.
        */
       included_skill_ids?: string[] | null;
+    };
+    /**
+     * SkillWriteAction
+     * @enum {string}
+     */
+    SkillWriteAction: "create" | "update" | "delete" | "stage" | "approve" | "reject";
+    /**
+     * SkillWriteCreateRequest
+     * @description Request body for creating a user- or session-scoped skill.
+     */
+    SkillWriteCreateRequest: {
+      /**
+       * Name
+       * @description Skill id to create.
+       */
+      name: string;
+      /**
+       * Raw Markdown
+       * @description SKILL.md markdown content, including frontmatter.
+       */
+      raw_markdown: string;
+      /**
+       * Session Id
+       * @description Optional session id recorded in audit metadata.
+       */
+      session_id?: string | null;
+      /**
+       * Reason
+       * @description Optional reason recorded in audit metadata.
+       */
+      reason?: string | null;
+    };
+    /**
+     * SkillWriteResponse
+     * @description Safe response for a direct or staged skill write.
+     */
+    SkillWriteResponse: {
+      /**
+       * Skill Name
+       * @description Skill id.
+       */
+      skill_name: string;
+      /** @description Skill scope. */
+      scope: components["schemas"]["SkillScope"];
+      /** @description Write action performed. */
+      action: components["schemas"]["SkillWriteAction"];
+      /**
+       * Status
+       * @description Whether the write committed directly or was staged for approval.
+       * @enum {string}
+       */
+      status: "committed" | "staged";
+      /**
+       * Staged Change Id
+       * @description Staged change id when the write was staged.
+       */
+      staged_change_id?: string | null;
+      /** @description Staged change approval status when applicable. */
+      approval_status?: components["schemas"]["SkillApprovalStatus"] | null;
+      /**
+       * Source
+       * @description Safe source label without filesystem paths.
+       */
+      source?: string | null;
+    };
+    /**
+     * SkillWriteUpdateRequest
+     * @description Request body for updating a user- or session-scoped skill.
+     */
+    SkillWriteUpdateRequest: {
+      /**
+       * Raw Markdown
+       * @description SKILL.md markdown content, including frontmatter.
+       */
+      raw_markdown: string;
+      /**
+       * Session Id
+       * @description Optional session id recorded in audit metadata.
+       */
+      session_id?: string | null;
+      /**
+       * Reason
+       * @description Optional reason recorded in audit metadata.
+       */
+      reason?: string | null;
     };
     /**
      * TraceFeedbackRequest
@@ -5244,6 +5430,384 @@ export interface operations {
       };
       /** @description Volume list timed out before the backend returned a result. */
       504: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Create a user-scoped skill
+   * @description Create a user-scoped skill directly, or stage it when write policy requires approval.
+   */
+  create_user_skill_endpoint_api_v1_skills_user_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillWriteCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillWriteResponse"];
+        };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The requested skill scope or write action is not permitted. */
+      403: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description The request body failed schema validation. */
+      422: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Delete a user-scoped skill
+   * @description Delete a user-scoped skill directly, or stage it when write policy requires approval.
+   */
+  delete_user_skill_endpoint_api_v1_skills_user__name__delete: {
+    parameters: {
+      query?: {
+        /** @description Optional session id recorded in audit metadata. */
+        session_id?: string | null;
+      };
+      path: {
+        /** @description Skill id. */
+        name: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillWriteResponse"];
+        };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The requested skill scope or write action is not permitted. */
+      403: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description The request body failed schema validation. */
+      422: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Update a user-scoped skill
+   * @description Update a user-scoped skill directly, or stage it when write policy requires approval.
+   */
+  update_user_skill_endpoint_api_v1_skills_user__name__patch: {
+    parameters: {
+      path: {
+        /** @description Skill id. */
+        name: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillWriteUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillWriteResponse"];
+        };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The requested skill scope or write action is not permitted. */
+      403: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description The request body failed schema validation. */
+      422: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Create a session-scoped skill
+   * @description Create a session-scoped skill directly, or stage it when write policy requires approval.
+   */
+  create_session_skill_endpoint_api_v1_skills_session_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillWriteCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillWriteResponse"];
+        };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The requested skill scope or write action is not permitted. */
+      403: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description The request body failed schema validation. */
+      422: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Delete a session-scoped skill
+   * @description Delete a session-scoped skill directly, or stage it when write policy requires approval.
+   */
+  delete_session_skill_endpoint_api_v1_skills_session__name__delete: {
+    parameters: {
+      query?: {
+        /** @description Optional session id recorded in audit metadata. */
+        session_id?: string | null;
+      };
+      path: {
+        /** @description Skill id. */
+        name: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillWriteResponse"];
+        };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The requested skill scope or write action is not permitted. */
+      403: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description The request body failed schema validation. */
+      422: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Update a session-scoped skill
+   * @description Update a session-scoped skill directly, or stage it when write policy requires approval.
+   */
+  update_session_skill_endpoint_api_v1_skills_session__name__patch: {
+    parameters: {
+      path: {
+        /** @description Skill id. */
+        name: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillWriteUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillWriteResponse"];
+        };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The requested skill scope or write action is not permitted. */
+      403: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description The request body failed schema validation. */
+      422: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Approve a staged skill change
+   * @description Re-validate and commit a pending staged skill change.
+   */
+  approve_staged_skill_change_endpoint_api_v1_skills_staged__change_id__approve_post: {
+    parameters: {
+      path: {
+        /** @description Staged change id. */
+        change_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillStagedApproveRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillStagedActionResponse"];
+        };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The requested skill scope or write action is not permitted. */
+      403: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description The request body failed schema validation. */
+      422: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Reject a staged skill change
+   * @description Reject a pending staged skill change without committing it, recording audit metadata.
+   */
+  reject_staged_skill_change_endpoint_api_v1_skills_staged__change_id__reject_post: {
+    parameters: {
+      path: {
+        /** @description Staged change id. */
+        change_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillStagedRejectRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillStagedActionResponse"];
+        };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The requested skill scope or write action is not permitted. */
+      403: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description The request body failed schema validation. */
+      422: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
         content: never;
       };
     };

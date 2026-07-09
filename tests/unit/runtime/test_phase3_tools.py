@@ -213,9 +213,9 @@ def test_web_search_uses_brave_api(monkeypatch: Any) -> None:
             return None
 
         def read(self) -> bytes:
-            return json.dumps({
-                "web": {"results": [{"url": "https://example.com", "title": "Example", "description": "Snippet"}]}
-            }).encode("utf-8")
+            return json.dumps(
+                {"web": {"results": [{"url": "https://example.com", "title": "Example", "description": "Snippet"}]}}
+            ).encode("utf-8")
 
     captured: list[Any] = []
 

@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path, PurePosixPath
 from typing import Literal
 from urllib.parse import unquote
 
 from fleet_rlm.skills.errors import SkillResourcePathError, SkillValidationError
 from fleet_rlm.skills.schemas import (
     SkillMetadata,
+    SkillPermissionMode,
     SkillResource,
+    SkillScope,
+    SkillTrustLevel,
     SkillValidationIssue,
     SkillValidationResult,
 )
@@ -232,10 +236,121 @@ def validate_skill_bundle(
     return SkillValidationResult(valid=not any(i.severity == "error" for i in issues), issues=issues)
 
 
+def validate_skill_markdown(raw_markdown: str, *, directory_name: str | None = None) -> SkillValidationResult:
+    """Validate SKILL.md frontmatter and bundle constraints for writes."""
+    from fleet_rlm.skills.catalog import parse_skill_frontmatter
+
+    name, description = parse_skill_frontmatter(raw_markdown)
+    meta_result = validate_skill_metadata(
+        name=name or "",
+        description=description,
+        directory_name=directory_name,
+    )
+    if not name:
+        return meta_result
+    metadata = SkillMetadata(
+        name=name,
+        description=description or "",
+        scope=SkillScope.USER,
+        trust_level=SkillTrustLevel.COMMUNITY,
+        permission_mode=SkillPermissionMode.READ_WRITE,
+        source="write:validate",
+        directory_style=True,
+    )
+    return _merge_results(
+        meta_result,
+        validate_skill_bundle(metadata, [], raw_markdown=raw_markdown),
+    )
+
+
+def validate_write_target_path(scope_root: Path, target: Path) -> SkillValidationResult:
+    """Ensure a write target stays within an allowed scope root without symlink escape."""
+    issues: list[SkillValidationIssue] = []
+    raw = target.as_posix()
+    if "\\" in raw:
+        issues.append(
+            _issue(
+                severity="error",
+                code="backslash_path",
+                message="Backslash skill write paths are not allowed.",
+                path=raw,
+            )
+        )
+
+    decoded = unquote(raw)
+    if ".." in PurePosixPath(decoded).parts:
+        issues.append(
+            _issue(
+                severity="error",
+                code="traversal",
+                message="Path traversal segments are not allowed.",
+                path=raw,
+            )
+        )
+
+    if "%2e%2e" in raw.lower() or "%2f" in raw.lower():
+        issues.append(
+            _issue(
+                severity="error",
+                code="encoded_traversal",
+                message="URL-encoded traversal segments are not allowed.",
+                path=raw,
+            )
+        )
+
+    try:
+        resolved_root = scope_root.resolve()
+        resolved_target = target.resolve()
+        relative = resolved_target.relative_to(resolved_root)
+    except ValueError:
+        if target.is_absolute():
+            issues.append(
+                _issue(
+                    severity="error",
+                    code="absolute_path",
+                    message="Absolute skill write paths are not allowed.",
+                    path=raw,
+                )
+            )
+        issues.append(
+            _issue(
+                severity="error",
+                code="outside_scope_root",
+                message="Skill write path escapes the allowed scope root.",
+                path=raw,
+            )
+        )
+        return SkillValidationResult(valid=not any(i.severity == "error" for i in issues), issues=issues)
+    except OSError:
+        issues.append(
+            _issue(
+                severity="error",
+                code="path_resolution_failed",
+                message="Skill write path could not be resolved safely.",
+                path=raw,
+            )
+        )
+        return SkillValidationResult(valid=False, issues=issues)
+
+    if ".." in relative.parts:
+        issues.append(
+            _issue(
+                severity="error",
+                code="traversal",
+                message="Path traversal segments are not allowed.",
+                path=raw,
+            )
+        )
+
+    return SkillValidationResult(valid=not any(i.severity == "error" for i in issues), issues=issues)
+
+
 __all__ = [
     "require_valid_resource_path",
     "safe_skill_name",
     "validate_resource_path",
     "validate_skill_bundle",
+    "validate_skill_markdown",
     "validate_skill_metadata",
+    "validate_write_target_path",
 ]

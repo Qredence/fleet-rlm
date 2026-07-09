@@ -1,4 +1,4 @@
-"""Read-only Skills API routes."""
+"""Skills API routes: read-only catalog access."""
 
 from __future__ import annotations
 
@@ -55,8 +55,10 @@ from ..schemas.skills import (
     SkillVisibilityPolicyInput,
 )
 from ._types import OpenAPIResponses
+from .skills_write import router as skills_write_router
 
 router = APIRouter(prefix="/skills", tags=["skills"])
+router.include_router(skills_write_router)
 
 SKILL_ERROR_RESPONSES: OpenAPIResponses = {
     400: {"description": "The request contains invalid skill or resource input."},

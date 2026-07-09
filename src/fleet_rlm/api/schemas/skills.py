@@ -1,16 +1,18 @@
-"""Pydantic schemas for read-only Skills API routes."""
+"""Pydantic schemas for Skills API routes (read-only and write)."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from fleet_rlm.skills.schemas import (
+    SkillApprovalStatus,
     SkillResourceKind,
     SkillScope,
     SkillTrustLevel,
     SkillValidationIssue,
+    SkillWriteAction,
 )
 
 
@@ -172,6 +174,72 @@ class SkillErrorDetail(BaseModel):
     detail: Any | None = Field(default=None, description="Optional structured safe detail.")
 
 
+class SkillWriteCreateRequest(BaseModel):
+    """Request body for creating a user- or session-scoped skill."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(description="Skill id to create.")
+    raw_markdown: str = Field(description="SKILL.md markdown content, including frontmatter.")
+    session_id: str | None = Field(default=None, description="Optional session id recorded in audit metadata.")
+    reason: str | None = Field(default=None, description="Optional reason recorded in audit metadata.")
+
+
+class SkillWriteUpdateRequest(BaseModel):
+    """Request body for updating a user- or session-scoped skill."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    raw_markdown: str = Field(description="SKILL.md markdown content, including frontmatter.")
+    session_id: str | None = Field(default=None, description="Optional session id recorded in audit metadata.")
+    reason: str | None = Field(default=None, description="Optional reason recorded in audit metadata.")
+
+
+class SkillWriteResponse(BaseModel):
+    """Safe response for a direct or staged skill write."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skill_name: str = Field(description="Skill id.")
+    scope: SkillScope = Field(description="Skill scope.")
+    action: SkillWriteAction = Field(description="Write action performed.")
+    status: Literal["committed", "staged"] = Field(
+        description="Whether the write committed directly or was staged for approval."
+    )
+    staged_change_id: str | None = Field(default=None, description="Staged change id when the write was staged.")
+    approval_status: SkillApprovalStatus | None = Field(
+        default=None, description="Staged change approval status when applicable."
+    )
+    source: str | None = Field(default=None, description="Safe source label without filesystem paths.")
+
+
+class SkillStagedApproveRequest(BaseModel):
+    """Request body for approving a staged skill change."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SkillStagedRejectRequest(BaseModel):
+    """Request body for rejecting a staged skill change."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str | None = Field(default=None, description="Optional rejection reason recorded in audit metadata.")
+
+
+class SkillStagedActionResponse(BaseModel):
+    """Safe response for a staged-change approval or rejection action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    staged_change_id: str = Field(description="Staged change id.")
+    skill_name: str = Field(description="Skill id.")
+    scope: SkillScope = Field(description="Skill scope.")
+    action: SkillWriteAction = Field(description="Original staged write action.")
+    status: Literal["approved", "rejected"] = Field(description="Approval action outcome.")
+    approval_status: SkillApprovalStatus = Field(description="Final staged change approval status.")
+
+
 __all__ = [
     "SkillBundleResponse",
     "SkillCatalogItem",
@@ -185,7 +253,13 @@ __all__ = [
     "SkillRuntimeContextInput",
     "SkillSelectRequest",
     "SkillSelectionResponse",
+    "SkillStagedActionResponse",
+    "SkillStagedApproveRequest",
+    "SkillStagedRejectRequest",
     "SkillValidateRequest",
     "SkillValidateResponse",
     "SkillVisibilityPolicyInput",
+    "SkillWriteCreateRequest",
+    "SkillWriteResponse",
+    "SkillWriteUpdateRequest",
 ]

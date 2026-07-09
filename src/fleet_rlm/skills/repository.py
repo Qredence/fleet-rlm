@@ -1,4 +1,4 @@
-"""Skill catalog repository — read-only views over bundled and volume skills."""
+"""Skill catalog repository — read-only views."""
 
 from __future__ import annotations
 

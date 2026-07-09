@@ -42,33 +42,35 @@ from fleet_rlm.runtime.tools.volume_memory_tools import (
 from fleet_rlm.skills.execution_deps import SkillExecutionDeps
 from fleet_rlm.skills.loader import default_skill_runtime_context
 
-INTERPRETER_TOOL_NAMES = frozenset({
-    "browser_fetch_page",
-    "clear_buffer",
-    "delegate_to_rlm",
-    "delegate_to_rlm_batched",
-    "execute_code",
-    "list_skills",
-    "load_skill",
-    "read_buffer",
-    "read_skill_resource",
-    "run_skill_script",
-    "recursive_workspace",
-    "remember",
-    "recall",
-    "sandbox_create_directory",
-    "sandbox_delete_file",
-    "sandbox_find_in_files",
-    "sandbox_get_file_info",
-    "sandbox_list_files",
-    "sandbox_move_file",
-    "sandbox_read_file",
-    "sandbox_replace_in_files",
-    "sandbox_search_files",
-    "sandbox_write_file",
-    "search_knowledge",
-    "write_buffer",
-})
+INTERPRETER_TOOL_NAMES = frozenset(
+    {
+        "browser_fetch_page",
+        "clear_buffer",
+        "delegate_to_rlm",
+        "delegate_to_rlm_batched",
+        "execute_code",
+        "list_skills",
+        "load_skill",
+        "read_buffer",
+        "read_skill_resource",
+        "run_skill_script",
+        "recursive_workspace",
+        "remember",
+        "recall",
+        "sandbox_create_directory",
+        "sandbox_delete_file",
+        "sandbox_find_in_files",
+        "sandbox_get_file_info",
+        "sandbox_list_files",
+        "sandbox_move_file",
+        "sandbox_read_file",
+        "sandbox_replace_in_files",
+        "sandbox_search_files",
+        "sandbox_write_file",
+        "search_knowledge",
+        "write_buffer",
+    }
+)
 
 
 def _tool_name(tool: Any) -> str | None:
@@ -241,24 +243,26 @@ def _bound_runtime_tool_factories(
             interpreter=interpreter,
         )
 
-    factories.update({
-        "clear_buffer": clear_buffer,
-        "delegate_to_rlm": delegate_to_rlm,
-        "delegate_to_rlm_batched": delegate_to_rlm_batched,
-        "execute_code": execute_code,
-        "read_buffer": read_buffer,
-        "sandbox_list_files": functools.partial(_sandbox_list_files_impl, sandbox_ctx),
-        "sandbox_read_file": functools.partial(_sandbox_read_file_impl, sandbox_ctx),
-        "sandbox_write_file": functools.partial(_sandbox_write_file_impl, sandbox_ctx),
-        "sandbox_create_directory": functools.partial(_sandbox_create_directory_impl, sandbox_ctx),
-        "sandbox_delete_file": functools.partial(_sandbox_delete_file_impl, sandbox_ctx),
-        "sandbox_move_file": functools.partial(_sandbox_move_file_impl, sandbox_ctx),
-        "sandbox_search_files": functools.partial(_sandbox_search_files_impl, sandbox_ctx),
-        "sandbox_find_in_files": functools.partial(_sandbox_find_in_files_impl, sandbox_ctx),
-        "sandbox_replace_in_files": functools.partial(_sandbox_replace_in_files_impl, sandbox_ctx),
-        "sandbox_get_file_info": functools.partial(_sandbox_get_file_info_impl, sandbox_ctx),
-        "write_buffer": write_buffer,
-    })
+    factories.update(
+        {
+            "clear_buffer": clear_buffer,
+            "delegate_to_rlm": delegate_to_rlm,
+            "delegate_to_rlm_batched": delegate_to_rlm_batched,
+            "execute_code": execute_code,
+            "read_buffer": read_buffer,
+            "sandbox_list_files": functools.partial(_sandbox_list_files_impl, sandbox_ctx),
+            "sandbox_read_file": functools.partial(_sandbox_read_file_impl, sandbox_ctx),
+            "sandbox_write_file": functools.partial(_sandbox_write_file_impl, sandbox_ctx),
+            "sandbox_create_directory": functools.partial(_sandbox_create_directory_impl, sandbox_ctx),
+            "sandbox_delete_file": functools.partial(_sandbox_delete_file_impl, sandbox_ctx),
+            "sandbox_move_file": functools.partial(_sandbox_move_file_impl, sandbox_ctx),
+            "sandbox_search_files": functools.partial(_sandbox_search_files_impl, sandbox_ctx),
+            "sandbox_find_in_files": functools.partial(_sandbox_find_in_files_impl, sandbox_ctx),
+            "sandbox_replace_in_files": functools.partial(_sandbox_replace_in_files_impl, sandbox_ctx),
+            "sandbox_get_file_info": functools.partial(_sandbox_get_file_info_impl, sandbox_ctx),
+            "write_buffer": write_buffer,
+        }
+    )
 
     def recursive_workspace(
         query: str,

@@ -10,11 +10,14 @@ from fleet_rlm.skills.errors import (
     SkillError,
     SkillNotFoundError,
     SkillNotVisibleError,
+    SkillProtectedError,
     SkillResourceNotFoundError,
     SkillResourcePathError,
     SkillScriptNotFoundError,
     SkillScriptNotPermittedError,
     SkillValidationError,
+    SkillWriteDeniedError,
+    StagedChangeNotFoundError,
 )
 from fleet_rlm.skills.loader import (
     default_skill_runtime_context,
@@ -178,6 +181,10 @@ def public_error_for_skill_error(exc: SkillError) -> SkillPublicError:
         return SkillPublicError(status_code=400, code="invalid_resource_path", message="Invalid resource path.")
     if isinstance(exc, SkillNotFoundError | SkillNotVisibleError | SkillResourceNotFoundError):
         return SkillPublicError(status_code=404, code="skill_not_found", message=INACCESSIBLE_SKILL_MESSAGE)
+    if isinstance(exc, SkillProtectedError | SkillWriteDeniedError):
+        return SkillPublicError(status_code=403, code=exc.code, message="Skill not found or inaccessible.")
+    if isinstance(exc, StagedChangeNotFoundError):
+        return SkillPublicError(status_code=404, code=exc.code, message="Staged skill change not found.")
     return SkillPublicError(status_code=400, code=exc.code, message="Invalid skill request.")
 
 

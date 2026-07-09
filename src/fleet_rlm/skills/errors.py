@@ -56,13 +56,39 @@ class SkillScriptNotPermittedError(SkillError):
         super().__init__("skill_script_not_permitted", "Skill script execution is not permitted.")
 
 
+class SkillWriteDeniedError(SkillError):
+    """Write policy rejected the requested scope or actor."""
+
+    def __init__(self, message: str = "Skill write is not permitted.", *, code: str = "skill_write_denied") -> None:
+        super().__init__(code, message)
+
+
+class SkillProtectedError(SkillError):
+    """Target skill or scope is read-only and cannot be modified."""
+
+    def __init__(
+        self, message: str = "Skill is protected and cannot be modified.", *, code: str = "skill_protected"
+    ) -> None:
+        super().__init__(code, message)
+
+
+class StagedChangeNotFoundError(SkillError):
+    """Staged skill change id was not found or is no longer pending."""
+
+    def __init__(self) -> None:
+        super().__init__("staged_change_not_found", "Staged skill change not found.")
+
+
 __all__ = [
     "SkillError",
     "SkillNotFoundError",
     "SkillNotVisibleError",
+    "SkillProtectedError",
     "SkillResourceNotFoundError",
     "SkillResourcePathError",
     "SkillScriptNotFoundError",
     "SkillScriptNotPermittedError",
     "SkillValidationError",
+    "SkillWriteDeniedError",
+    "StagedChangeNotFoundError",
 ]

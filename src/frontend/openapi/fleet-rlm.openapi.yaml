@@ -1071,6 +1071,353 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/skills/user:
+    post:
+      tags:
+        - skills
+      summary: Create a user-scoped skill
+      description: Create a user-scoped skill directly, or stage it when write policy
+        requires approval.
+      operationId: create_user_skill_endpoint_api_v1_skills_user_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillWriteCreateRequest"
+        required: true
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillWriteResponse"
+        "400":
+          description: The request contains invalid skill or resource input.
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "403":
+          description: The requested skill scope or write action is not permitted.
+        "404":
+          description: Skill not found or inaccessible.
+        "422":
+          description: The request body failed schema validation.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+      security:
+        - HTTPBearer: []
+  /api/v1/skills/user/{name}:
+    patch:
+      tags:
+        - skills
+      summary: Update a user-scoped skill
+      description: Update a user-scoped skill directly, or stage it when write policy
+        requires approval.
+      operationId: update_user_skill_endpoint_api_v1_skills_user__name__patch
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Skill id.
+            title: Name
+          description: Skill id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillWriteUpdateRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillWriteResponse"
+        "400":
+          description: The request contains invalid skill or resource input.
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "403":
+          description: The requested skill scope or write action is not permitted.
+        "404":
+          description: Skill not found or inaccessible.
+        "422":
+          description: The request body failed schema validation.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+    delete:
+      tags:
+        - skills
+      summary: Delete a user-scoped skill
+      description: Delete a user-scoped skill directly, or stage it when write policy
+        requires approval.
+      operationId: delete_user_skill_endpoint_api_v1_skills_user__name__delete
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Skill id.
+            title: Name
+          description: Skill id.
+        - name: session_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            description: Optional session id recorded in audit metadata.
+            title: Session Id
+          description: Optional session id recorded in audit metadata.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillWriteResponse"
+        "400":
+          description: The request contains invalid skill or resource input.
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "403":
+          description: The requested skill scope or write action is not permitted.
+        "404":
+          description: Skill not found or inaccessible.
+        "422":
+          description: The request body failed schema validation.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+  /api/v1/skills/session:
+    post:
+      tags:
+        - skills
+      summary: Create a session-scoped skill
+      description: Create a session-scoped skill directly, or stage it when write
+        policy requires approval.
+      operationId: create_session_skill_endpoint_api_v1_skills_session_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillWriteCreateRequest"
+        required: true
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillWriteResponse"
+        "400":
+          description: The request contains invalid skill or resource input.
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "403":
+          description: The requested skill scope or write action is not permitted.
+        "404":
+          description: Skill not found or inaccessible.
+        "422":
+          description: The request body failed schema validation.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+      security:
+        - HTTPBearer: []
+  /api/v1/skills/session/{name}:
+    patch:
+      tags:
+        - skills
+      summary: Update a session-scoped skill
+      description: Update a session-scoped skill directly, or stage it when write
+        policy requires approval.
+      operationId: update_session_skill_endpoint_api_v1_skills_session__name__patch
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Skill id.
+            title: Name
+          description: Skill id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillWriteUpdateRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillWriteResponse"
+        "400":
+          description: The request contains invalid skill or resource input.
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "403":
+          description: The requested skill scope or write action is not permitted.
+        "404":
+          description: Skill not found or inaccessible.
+        "422":
+          description: The request body failed schema validation.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+    delete:
+      tags:
+        - skills
+      summary: Delete a session-scoped skill
+      description: Delete a session-scoped skill directly, or stage it when write
+        policy requires approval.
+      operationId: delete_session_skill_endpoint_api_v1_skills_session__name__delete
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Skill id.
+            title: Name
+          description: Skill id.
+        - name: session_id
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            description: Optional session id recorded in audit metadata.
+            title: Session Id
+          description: Optional session id recorded in audit metadata.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillWriteResponse"
+        "400":
+          description: The request contains invalid skill or resource input.
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "403":
+          description: The requested skill scope or write action is not permitted.
+        "404":
+          description: Skill not found or inaccessible.
+        "422":
+          description: The request body failed schema validation.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+  /api/v1/skills/staged/{change_id}/approve:
+    post:
+      tags:
+        - skills
+      summary: Approve a staged skill change
+      description: Re-validate and commit a pending staged skill change.
+      operationId: approve_staged_skill_change_endpoint_api_v1_skills_staged__change_id__approve_post
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: change_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Staged change id.
+            title: Change Id
+          description: Staged change id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillStagedApproveRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillStagedActionResponse"
+        "400":
+          description: The request contains invalid skill or resource input.
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "403":
+          description: The requested skill scope or write action is not permitted.
+        "404":
+          description: Skill not found or inaccessible.
+        "422":
+          description: The request body failed schema validation.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+  /api/v1/skills/staged/{change_id}/reject:
+    post:
+      tags:
+        - skills
+      summary: Reject a staged skill change
+      description: Reject a pending staged skill change without committing it, recording
+        audit metadata.
+      operationId: reject_staged_skill_change_endpoint_api_v1_skills_staged__change_id__reject_post
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: change_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Staged change id.
+            title: Change Id
+          description: Staged change id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillStagedRejectRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillStagedActionResponse"
+        "400":
+          description: The request contains invalid skill or resource input.
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "403":
+          description: The requested skill scope or write action is not permitted.
+        "404":
+          description: Skill not found or inaccessible.
+        "422":
+          description: The request body failed schema validation.
+        "503":
+          description: Runtime services are unavailable because server startup is
+            incomplete.
   /api/v1/skills:
     get:
       tags:
@@ -6133,6 +6480,13 @@ components:
       type: object
       title: SessionTracePerformanceSummary
       description: Performance and token summary derived from raw MLflow trace spans.
+    SkillApprovalStatus:
+      type: string
+      enum:
+        - pending
+        - approved
+        - rejected
+      title: SkillApprovalStatus
     SkillBundleResponse:
       properties:
         skill:
@@ -6425,6 +6779,61 @@ components:
       type: object
       title: SkillSelectionResponse
       description: Read-only skill selection result.
+    SkillStagedActionResponse:
+      properties:
+        staged_change_id:
+          type: string
+          title: Staged Change Id
+          description: Staged change id.
+        skill_name:
+          type: string
+          title: Skill Name
+          description: Skill id.
+        scope:
+          $ref: "#/components/schemas/SkillScope"
+          description: Skill scope.
+        action:
+          $ref: "#/components/schemas/SkillWriteAction"
+          description: Original staged write action.
+        status:
+          type: string
+          enum:
+            - approved
+            - rejected
+          title: Status
+          description: Approval action outcome.
+        approval_status:
+          $ref: "#/components/schemas/SkillApprovalStatus"
+          description: Final staged change approval status.
+      additionalProperties: false
+      type: object
+      required:
+        - staged_change_id
+        - skill_name
+        - scope
+        - action
+        - status
+        - approval_status
+      title: SkillStagedActionResponse
+      description: Safe response for a staged-change approval or rejection action.
+    SkillStagedApproveRequest:
+      properties: {}
+      additionalProperties: false
+      type: object
+      title: SkillStagedApproveRequest
+      description: Request body for approving a staged skill change.
+    SkillStagedRejectRequest:
+      properties:
+        reason:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Reason
+          description: Optional rejection reason recorded in audit metadata.
+      additionalProperties: false
+      type: object
+      title: SkillStagedRejectRequest
+      description: Request body for rejecting a staged skill change.
     SkillTrustLevel:
       type: string
       enum:
@@ -6566,6 +6975,114 @@ components:
       type: object
       title: SkillVisibilityPolicyInput
       description: Optional visibility overrides for read-only skill inspection.
+    SkillWriteAction:
+      type: string
+      enum:
+        - create
+        - update
+        - delete
+        - stage
+        - approve
+        - reject
+      title: SkillWriteAction
+    SkillWriteCreateRequest:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Skill id to create.
+        raw_markdown:
+          type: string
+          title: Raw Markdown
+          description: SKILL.md markdown content, including frontmatter.
+        session_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Session Id
+          description: Optional session id recorded in audit metadata.
+        reason:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Reason
+          description: Optional reason recorded in audit metadata.
+      additionalProperties: false
+      type: object
+      required:
+        - name
+        - raw_markdown
+      title: SkillWriteCreateRequest
+      description: Request body for creating a user- or session-scoped skill.
+    SkillWriteResponse:
+      properties:
+        skill_name:
+          type: string
+          title: Skill Name
+          description: Skill id.
+        scope:
+          $ref: "#/components/schemas/SkillScope"
+          description: Skill scope.
+        action:
+          $ref: "#/components/schemas/SkillWriteAction"
+          description: Write action performed.
+        status:
+          type: string
+          enum:
+            - committed
+            - staged
+          title: Status
+          description: Whether the write committed directly or was staged for approval.
+        staged_change_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Staged Change Id
+          description: Staged change id when the write was staged.
+        approval_status:
+          anyOf:
+            - $ref: "#/components/schemas/SkillApprovalStatus"
+            - type: "null"
+          description: Staged change approval status when applicable.
+        source:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Source
+          description: Safe source label without filesystem paths.
+      additionalProperties: false
+      type: object
+      required:
+        - skill_name
+        - scope
+        - action
+        - status
+      title: SkillWriteResponse
+      description: Safe response for a direct or staged skill write.
+    SkillWriteUpdateRequest:
+      properties:
+        raw_markdown:
+          type: string
+          title: Raw Markdown
+          description: SKILL.md markdown content, including frontmatter.
+        session_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Session Id
+          description: Optional session id recorded in audit metadata.
+        reason:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Reason
+          description: Optional reason recorded in audit metadata.
+      additionalProperties: false
+      type: object
+      required:
+        - raw_markdown
+      title: SkillWriteUpdateRequest
+      description: Request body for updating a user- or session-scoped skill.
     TraceFeedbackRequest:
       properties:
         trace_id:

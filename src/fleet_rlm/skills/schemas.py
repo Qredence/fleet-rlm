@@ -144,6 +144,76 @@ class SkillValidationResult(BaseModel):
     issues: list[SkillValidationIssue] = Field(default_factory=list)
 
 
+class SkillWriteAction(str, Enum):
+    CREATE = "create"
+    UPDATE = "update"
+    DELETE = "delete"
+    STAGE = "stage"
+    APPROVE = "approve"
+    REJECT = "reject"
+
+
+class SkillApprovalStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class SkillWritePolicy(BaseModel):
+    user_writes_enabled: bool = True
+    session_writes_enabled: bool = True
+    require_staging: bool = False
+    agent_writes_require_staging: bool = True
+
+
+class SkillWriteContext(BaseModel):
+    volume_mount_path: str
+    session_id: str | None = None
+    user_id: str | None = None
+    workspace_id: str | None = None
+    org_id: str | None = None
+    policy: SkillWritePolicy = Field(default_factory=SkillWritePolicy)
+    actor: Literal["user", "agent", "admin"] = "user"
+    admin_writable_scopes: list[SkillScope] = Field(default_factory=list)
+
+
+class StagedSkillChange(BaseModel):
+    id: str
+    skill_name: str
+    scope: SkillScope
+    action: SkillWriteAction
+    status: SkillApprovalStatus
+    created_at: str
+    raw_markdown: str | None = None
+    actor: str | None = None
+    user_id: str | None = None
+    session_id: str | None = None
+    workspace_id: str | None = None
+    org_id: str | None = None
+    old_content_hash: str | None = None
+    new_content_hash: str | None = None
+    source_label: str | None = None
+    reason: str | None = None
+
+
+class SkillAuditRecord(BaseModel):
+    timestamp: str
+    skill_name: str
+    scope: SkillScope
+    action: SkillWriteAction
+    actor: str | None = None
+    user_id: str | None = None
+    session_id: str | None = None
+    workspace_id: str | None = None
+    org_id: str | None = None
+    old_content_hash: str | None = None
+    new_content_hash: str | None = None
+    source_label: str
+    approval_status: SkillApprovalStatus | None = None
+    reason: str | None = None
+    staged_change_id: str | None = None
+
+
 __all__ = [
     "ListSkillsOutput",
     "LoadSkillInput",
@@ -161,7 +231,13 @@ __all__ = [
     "SkillRuntimeContext",
     "SkillScope",
     "SkillTrustLevel",
+    "SkillApprovalStatus",
+    "SkillAuditRecord",
     "SkillValidationIssue",
     "SkillValidationResult",
     "SkillVisibilityPolicy",
+    "SkillWriteAction",
+    "SkillWriteContext",
+    "SkillWritePolicy",
+    "StagedSkillChange",
 ]
