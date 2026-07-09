@@ -228,6 +228,26 @@ export interface paths {
      */
     post: operations["reject_staged_skill_change_endpoint_api_v1_skills_staged__change_id__reject_post"];
   };
+  "/api/v1/skills/install/url": {
+    /** Install Skill Url */
+    post: operations["install_skill_url_api_v1_skills_install_url_post"];
+  };
+  "/api/v1/skills/install/bundle": {
+    /** Install Skill Bundle */
+    post: operations["install_skill_bundle_api_v1_skills_install_bundle_post"];
+  };
+  "/api/v1/skills/install/scans/{scan_id}": {
+    /** Get Install Scan */
+    get: operations["get_install_scan_api_v1_skills_install_scans__scan_id__get"];
+  };
+  "/api/v1/skills/{name}/provenance": {
+    /** Get Skill Provenance */
+    get: operations["get_skill_provenance_api_v1_skills__name__provenance_get"];
+  };
+  "/api/v1/skills/{name}/update": {
+    /** Update Skill */
+    post: operations["update_skill_api_v1_skills__name__update_post"];
+  };
   "/api/v1/skills": {
     /**
      * List visible skills
@@ -3617,6 +3637,109 @@ export interface components {
       resources?: components["schemas"]["SkillResourceItem"][];
     };
     /**
+     * SkillInstallBundleRequest
+     * @description Request body for installing a multi-file skill bundle.
+     */
+    SkillInstallBundleRequest: {
+      /**
+       * Source
+       * @description Bundle install source type.
+       * @enum {string}
+       */
+      source: "manifest" | "repo" | "tap";
+      /**
+       * Manifest
+       * @description Inline bundle manifest.
+       */
+      manifest?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Files
+       * @description Base64-encoded bundle file payloads keyed by relative path.
+       */
+      files?: {
+        [key: string]: string;
+      } | null;
+      /**
+       * Repo Url
+       * @description GitHub repository URL for repo installs.
+       */
+      repo_url?: string | null;
+      /**
+       * Tap Skill Name
+       * @description Skill name to resolve from configured tap.
+       */
+      tap_skill_name?: string | null;
+      /**
+       * Force
+       * @description Bypass non-critical scan warnings.
+       * @default false
+       */
+      force?: boolean;
+      /**
+       * Session Id
+       * @description Optional session id for audit metadata.
+       */
+      session_id?: string | null;
+    };
+    /**
+     * SkillInstallResponse
+     * @description Safe response for a committed remote skill install.
+     */
+    SkillInstallResponse: {
+      /**
+       * Skill Name
+       * @description Installed skill id.
+       */
+      skill_name: string;
+      /** @description Installed skill scope. */
+      scope: components["schemas"]["SkillScope"];
+      /**
+       * Status
+       * @description Install outcome.
+       * @enum {string}
+       */
+      status: "committed" | "quarantined";
+      /**
+       * Content Hash
+       * @description Installed content integrity hash.
+       */
+      content_hash: string;
+      /**
+       * Scan Id
+       * @description Security scan id for review.
+       */
+      scan_id: string;
+    };
+    /**
+     * SkillInstallUrlRequest
+     * @description Request body for installing a single-file remote SKILL.md.
+     */
+    SkillInstallUrlRequest: {
+      /**
+       * Url
+       * @description HTTPS URL to a single SKILL.md file.
+       */
+      url: string;
+      /**
+       * Name
+       * @description Optional skill id override.
+       */
+      name?: string | null;
+      /**
+       * Force
+       * @description Bypass non-critical scan warnings.
+       * @default false
+       */
+      force?: boolean;
+      /**
+       * Session Id
+       * @description Optional session id for audit metadata.
+       */
+      session_id?: string | null;
+    };
+    /**
      * SkillListResponse
      * @description Response for visible skill catalog listing.
      */
@@ -3667,6 +3790,55 @@ export interface components {
       bundles?: components["schemas"]["SkillBundleResponse"][];
     };
     /**
+     * SkillProvenanceResponse
+     * @description Safe provenance metadata for an installed skill.
+     */
+    SkillProvenanceResponse: {
+      /**
+       * Skill Name
+       * @description Skill id.
+       */
+      skill_name: string;
+      /** @description Skill scope. */
+      scope: components["schemas"]["SkillScope"];
+      /**
+       * Source
+       * @description Install source type.
+       */
+      source: string;
+      /**
+       * Content Hash
+       * @description Installed content hash.
+       */
+      content_hash: string;
+      /**
+       * Upstream Content Hash
+       * @description Last known upstream hash.
+       */
+      upstream_content_hash?: string | null;
+      /**
+       * Drift Detected
+       * @description Whether upstream content drift was detected.
+       * @default false
+       */
+      drift_detected?: boolean;
+      /**
+       * Installed At
+       * @description Install timestamp.
+       */
+      installed_at: string;
+      /**
+       * Updated At
+       * @description Last update timestamp.
+       */
+      updated_at?: string | null;
+      /**
+       * Scan Id
+       * @description Last security scan id.
+       */
+      scan_id?: string | null;
+    };
+    /**
      * SkillResourceContentResponse
      * @description Response body for one safe skill resource.
      */
@@ -3710,6 +3882,41 @@ export interface components {
      * @enum {string}
      */
     SkillResourceKind: "reference" | "script" | "asset" | "template";
+    /**
+     * SkillScanResponse
+     * @description Stored security scan result for review.
+     */
+    SkillScanResponse: {
+      /**
+       * Scan Id
+       * @description Scan id.
+       */
+      scan_id: string;
+      /**
+       * Skill Name
+       * @description Skill id.
+       */
+      skill_name: string;
+      /** @description Skill scope. */
+      scope: components["schemas"]["SkillScope"];
+      /**
+       * Blocked
+       * @description Whether the scan blocked install.
+       */
+      blocked: boolean;
+      /**
+       * Force Allowed
+       * @description Whether force-install is permitted.
+       */
+      force_allowed: boolean;
+      /**
+       * Findings
+       * @description Sanitized scan findings.
+       */
+      findings?: {
+        [key: string]: string | null;
+      }[];
+    };
     /**
      * SkillScope
      * @enum {string}
@@ -3851,6 +4058,56 @@ export interface components {
      * @enum {string}
      */
     SkillTrustLevel: "trusted" | "community";
+    /**
+     * SkillUpdateRequest
+     * @description Request body for updating a remotely installed skill.
+     */
+    SkillUpdateRequest: {
+      /**
+       * Force
+       * @description Bypass non-critical scan warnings on update.
+       * @default false
+       */
+      force?: boolean;
+      /**
+       * Session Id
+       * @description Optional session id for audit metadata.
+       */
+      session_id?: string | null;
+    };
+    /**
+     * SkillUpdateResponse
+     * @description Safe response for update checks and updates.
+     */
+    SkillUpdateResponse: {
+      /**
+       * Skill Name
+       * @description Skill id.
+       */
+      skill_name: string;
+      /** @description Skill scope. */
+      scope: components["schemas"]["SkillScope"];
+      /**
+       * Drift Detected
+       * @description Whether content drift was detected.
+       */
+      drift_detected: boolean;
+      /**
+       * Updated
+       * @description Whether an update was applied.
+       */
+      updated: boolean;
+      /**
+       * Content Hash
+       * @description Current installed content hash.
+       */
+      content_hash?: string | null;
+      /**
+       * Upstream Content Hash
+       * @description Upstream content hash when known.
+       */
+      upstream_content_hash?: string | null;
+    };
     /**
      * SkillValidateRequest
      * @description Request body for read-only skill validation.
@@ -5785,6 +6042,248 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["SkillStagedActionResponse"];
         };
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The requested skill scope or write action is not permitted. */
+      403: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description The request body failed schema validation. */
+      422: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /** Install Skill Url */
+  install_skill_url_api_v1_skills_install_url_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillInstallUrlRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["SkillInstallResponse"];
+        };
+      };
+      /** @description Install quarantined pending security review. */
+      202: {
+        content: never;
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The requested skill scope or write action is not permitted. */
+      403: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description The request body failed schema validation. */
+      422: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /** Install Skill Bundle */
+  install_skill_bundle_api_v1_skills_install_bundle_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillInstallBundleRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["SkillInstallResponse"];
+        };
+      };
+      /** @description Install quarantined pending security review. */
+      202: {
+        content: never;
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The requested skill scope or write action is not permitted. */
+      403: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description The request body failed schema validation. */
+      422: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /** Get Install Scan */
+  get_install_scan_api_v1_skills_install_scans__scan_id__get: {
+    parameters: {
+      path: {
+        /** @description Security scan id. */
+        scan_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillScanResponse"];
+        };
+      };
+      /** @description Install quarantined pending security review. */
+      202: {
+        content: never;
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The requested skill scope or write action is not permitted. */
+      403: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description The request body failed schema validation. */
+      422: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /** Get Skill Provenance */
+  get_skill_provenance_api_v1_skills__name__provenance_get: {
+    parameters: {
+      query?: {
+        /** @description Skill scope. */
+        scope?: components["schemas"]["SkillScope"];
+        /** @description Visible skill scopes. */
+        visible_scopes?: components["schemas"]["SkillScope"][] | null;
+        /** @description Skill ids to hide. */
+        excluded_skill_ids?: string[] | null;
+        /** @description Optional visible skill allowlist. */
+        included_skill_ids?: string[] | null;
+      };
+      path: {
+        /** @description Skill id. */
+        name: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillProvenanceResponse"];
+        };
+      };
+      /** @description Install quarantined pending security review. */
+      202: {
+        content: never;
+      };
+      /** @description The request contains invalid skill or resource input. */
+      400: {
+        content: never;
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description The requested skill scope or write action is not permitted. */
+      403: {
+        content: never;
+      };
+      /** @description Skill not found or inaccessible. */
+      404: {
+        content: never;
+      };
+      /** @description The request body failed schema validation. */
+      422: {
+        content: never;
+      };
+      /** @description Runtime services are unavailable because server startup is incomplete. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /** Update Skill */
+  update_skill_api_v1_skills__name__update_post: {
+    parameters: {
+      query?: {
+        /** @description Skill scope. */
+        scope?: components["schemas"]["SkillScope"];
+      };
+      path: {
+        /** @description Skill id. */
+        name: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SkillUpdateResponse"];
+        };
+      };
+      /** @description Install quarantined pending security review. */
+      202: {
+        content: never;
       };
       /** @description The request contains invalid skill or resource input. */
       400: {

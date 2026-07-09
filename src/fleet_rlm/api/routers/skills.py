@@ -55,10 +55,12 @@ from ..schemas.skills import (
     SkillVisibilityPolicyInput,
 )
 from ._types import OpenAPIResponses
+from .skills_install import router as skills_install_router
 from .skills_write import router as skills_write_router
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 router.include_router(skills_write_router)
+router.include_router(skills_install_router)
 
 SKILL_ERROR_RESPONSES: OpenAPIResponses = {
     400: {"description": "The request contains invalid skill or resource input."},

@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from fleet_rlm.skills.permissions import default_permission_mode
+from fleet_rlm.skills.provenance import resolve_volume_trust_level
 from fleet_rlm.skills.schemas import (
     SkillMetadata,
     SkillResource,
@@ -94,12 +95,22 @@ def _metadata_from_markdown(
     scope: SkillScope,
     source: str,
     directory_style: bool,
+    trust_level: SkillTrustLevel | None = None,
+    volume_mount_path: str | None = None,
 ) -> SkillMetadata:
+    resolved_trust = trust_level
+    if resolved_trust is None:
+        resolved_trust = resolve_volume_trust_level(
+            volume_mount_path=volume_mount_path,
+            scope=scope,
+            name=name,
+            source=source,
+        )
     return SkillMetadata(
         name=name,
         description=description,
         scope=scope,
-        trust_level=SkillTrustLevel.TRUSTED,
+        trust_level=resolved_trust,
         permission_mode=default_permission_mode(scope),
         source=source,
         directory_style=directory_style,
@@ -125,6 +136,7 @@ def _iter_scaffold_skill_metadata() -> Iterator[SkillMetadata]:
             scope=SkillScope.SCAFFOLD,
             source=source,
             directory_style=True,
+            trust_level=SkillTrustLevel.TRUSTED,
         )
 
 
@@ -133,6 +145,7 @@ def _iter_volume_skill_metadata(root: Path, scope: SkillScope) -> Iterator[Skill
     if not scope_dir.is_dir():
         return
 
+    volume_mount_path = str(root.parent)
     seen_names: set[str] = set()
 
     for entry in sorted(scope_dir.iterdir()):
@@ -161,6 +174,7 @@ def _iter_volume_skill_metadata(root: Path, scope: SkillScope) -> Iterator[Skill
                 scope=scope,
                 source=source,
                 directory_style=True,
+                volume_mount_path=volume_mount_path,
             )
             continue
 
@@ -187,6 +201,7 @@ def _iter_volume_skill_metadata(root: Path, scope: SkillScope) -> Iterator[Skill
                 scope=scope,
                 source=source,
                 directory_style=False,
+                volume_mount_path=volume_mount_path,
             )
 
 

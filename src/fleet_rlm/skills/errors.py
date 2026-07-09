@@ -79,6 +79,44 @@ class StagedChangeNotFoundError(SkillError):
         super().__init__("staged_change_not_found", "Staged skill change not found.")
 
 
+class SkillInstallDeniedError(SkillError):
+    """Remote install policy rejected the request."""
+
+    def __init__(
+        self, message: str = "Remote skill install is not permitted.", *, code: str = "skill_install_denied"
+    ) -> None:
+        super().__init__(code, message)
+
+
+class SkillInstallBlockedError(SkillError):
+    """Security scan or validation blocked the install."""
+
+    def __init__(
+        self,
+        message: str = "Skill install blocked by security policy.",
+        *,
+        code: str = "skill_install_blocked",
+        scan_id: str | None = None,
+    ) -> None:
+        self.scan_id = scan_id
+        super().__init__(code, message)
+
+
+class SkillQuarantinedError(SkillError):
+    """Install was quarantined for review."""
+
+    def __init__(self, *, scan_id: str, message: str = "Skill install quarantined for review.") -> None:
+        self.scan_id = scan_id
+        super().__init__("skill_quarantined", message)
+
+
+class SkillRemoteFetchError(SkillError):
+    """Remote fetch failed or was rejected by SSRF policy."""
+
+    def __init__(self, message: str = "Remote skill fetch failed.", *, code: str = "skill_remote_fetch_failed") -> None:
+        super().__init__(code, message)
+
+
 __all__ = [
     "SkillError",
     "SkillNotFoundError",
@@ -89,6 +127,10 @@ __all__ = [
     "SkillScriptNotFoundError",
     "SkillScriptNotPermittedError",
     "SkillValidationError",
+    "SkillInstallBlockedError",
+    "SkillInstallDeniedError",
+    "SkillQuarantinedError",
+    "SkillRemoteFetchError",
     "SkillWriteDeniedError",
     "StagedChangeNotFoundError",
 ]

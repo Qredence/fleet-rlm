@@ -153,6 +153,82 @@ class SkillWriteAction(str, Enum):
     REJECT = "reject"
 
 
+class SkillInstallSource(str, Enum):
+    URL_SINGLE = "url_single"
+    MANIFEST = "manifest"
+    GITHUB_REPO = "github_repo"
+    TAP = "tap"
+
+
+class SkillInstallAction(str, Enum):
+    INSTALL = "install"
+    UPDATE = "update"
+    QUARANTINE = "quarantine"
+
+
+class SkillSecuritySeverity(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+class SkillInstallPolicy(BaseModel):
+    url_install_enabled: bool = False
+    bundle_install_enabled: bool = False
+    allowed_hosts: list[str] = Field(default_factory=list)
+    tap_url: str | None = None
+    max_url_bytes: int = 512 * 1024
+    max_bundle_bytes: int = 5 * 1024 * 1024
+
+
+class SkillProvenanceRecord(BaseModel):
+    skill_name: str
+    scope: SkillScope
+    source: SkillInstallSource
+    source_url: str | None = None
+    repo: str | None = None
+    ref: str | None = None
+    subpath: str | None = None
+    manifest_url: str | None = None
+    tap_name: str | None = None
+    trust_level: SkillTrustLevel = SkillTrustLevel.COMMUNITY
+    content_hash: str
+    upstream_content_hash: str | None = None
+    installed_at: str
+    updated_at: str | None = None
+    last_checked_at: str | None = None
+    drift_detected: bool = False
+    scan_id: str | None = None
+
+
+class SkillSecurityFinding(BaseModel):
+    severity: SkillSecuritySeverity
+    code: str
+    message: str
+    path: str | None = None
+
+
+class SkillSecurityScanResult(BaseModel):
+    scan_id: str
+    skill_name: str
+    scope: SkillScope
+    findings: list[SkillSecurityFinding] = Field(default_factory=list)
+    blocked: bool = False
+    force_allowed: bool = True
+    scanned_at: str
+    content_hash: str | None = None
+
+
+class SkillUpdateStatus(BaseModel):
+    skill_name: str
+    scope: SkillScope
+    installed: bool
+    drift_detected: bool = False
+    content_hash: str | None = None
+    upstream_content_hash: str | None = None
+    provenance: SkillProvenanceRecord | None = None
+
+
 class SkillApprovalStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
@@ -200,7 +276,7 @@ class SkillAuditRecord(BaseModel):
     timestamp: str
     skill_name: str
     scope: SkillScope
-    action: SkillWriteAction
+    action: SkillWriteAction | SkillInstallAction
     actor: str | None = None
     user_id: str | None = None
     session_id: str | None = None
@@ -220,19 +296,27 @@ __all__ = [
     "LoadSkillOutput",
     "ReadSkillResourceOutput",
     "RunSkillScriptOutput",
+    "SkillApprovalStatus",
+    "SkillAuditRecord",
     "SkillBundle",
     "SkillCatalogEntry",
     "SkillCatalogItem",
+    "SkillInstallAction",
+    "SkillInstallPolicy",
+    "SkillInstallSource",
     "SkillMetadata",
     "SkillPermissionMode",
+    "SkillProvenanceRecord",
     "SkillResource",
     "SkillResourceItem",
     "SkillResourceKind",
     "SkillRuntimeContext",
     "SkillScope",
+    "SkillSecurityFinding",
+    "SkillSecurityScanResult",
+    "SkillSecuritySeverity",
     "SkillTrustLevel",
-    "SkillApprovalStatus",
-    "SkillAuditRecord",
+    "SkillUpdateStatus",
     "SkillValidationIssue",
     "SkillValidationResult",
     "SkillVisibilityPolicy",

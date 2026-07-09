@@ -240,22 +240,120 @@ class SkillStagedActionResponse(BaseModel):
     approval_status: SkillApprovalStatus = Field(description="Final staged change approval status.")
 
 
+class SkillInstallUrlRequest(BaseModel):
+    """Request body for installing a single-file remote SKILL.md."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(description="HTTPS URL to a single SKILL.md file.")
+    name: str | None = Field(default=None, description="Optional skill id override.")
+    force: bool = Field(default=False, description="Bypass non-critical scan warnings.")
+    session_id: str | None = Field(default=None, description="Optional session id for audit metadata.")
+
+
+class SkillInstallBundleRequest(BaseModel):
+    """Request body for installing a multi-file skill bundle."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["manifest", "repo", "tap"] = Field(description="Bundle install source type.")
+    manifest: dict[str, object] | None = Field(default=None, description="Inline bundle manifest.")
+    files: dict[str, str] | None = Field(
+        default=None,
+        description="Base64-encoded bundle file payloads keyed by relative path.",
+    )
+    repo_url: str | None = Field(default=None, description="GitHub repository URL for repo installs.")
+    tap_skill_name: str | None = Field(default=None, description="Skill name to resolve from configured tap.")
+    force: bool = Field(default=False, description="Bypass non-critical scan warnings.")
+    session_id: str | None = Field(default=None, description="Optional session id for audit metadata.")
+
+
+class SkillInstallResponse(BaseModel):
+    """Safe response for a committed remote skill install."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skill_name: str = Field(description="Installed skill id.")
+    scope: SkillScope = Field(description="Installed skill scope.")
+    status: Literal["committed", "quarantined"] = Field(description="Install outcome.")
+    content_hash: str = Field(description="Installed content integrity hash.")
+    scan_id: str = Field(description="Security scan id for review.")
+
+
+class SkillProvenanceResponse(BaseModel):
+    """Safe provenance metadata for an installed skill."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skill_name: str = Field(description="Skill id.")
+    scope: SkillScope = Field(description="Skill scope.")
+    source: str = Field(description="Install source type.")
+    content_hash: str = Field(description="Installed content hash.")
+    upstream_content_hash: str | None = Field(default=None, description="Last known upstream hash.")
+    drift_detected: bool = Field(default=False, description="Whether upstream content drift was detected.")
+    installed_at: str = Field(description="Install timestamp.")
+    updated_at: str | None = Field(default=None, description="Last update timestamp.")
+    scan_id: str | None = Field(default=None, description="Last security scan id.")
+
+
+class SkillScanResponse(BaseModel):
+    """Stored security scan result for review."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scan_id: str = Field(description="Scan id.")
+    skill_name: str = Field(description="Skill id.")
+    scope: SkillScope = Field(description="Skill scope.")
+    blocked: bool = Field(description="Whether the scan blocked install.")
+    force_allowed: bool = Field(description="Whether force-install is permitted.")
+    findings: list[dict[str, str | None]] = Field(default_factory=list, description="Sanitized scan findings.")
+
+
+class SkillUpdateRequest(BaseModel):
+    """Request body for updating a remotely installed skill."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    force: bool = Field(default=False, description="Bypass non-critical scan warnings on update.")
+    session_id: str | None = Field(default=None, description="Optional session id for audit metadata.")
+
+
+class SkillUpdateResponse(BaseModel):
+    """Safe response for update checks and updates."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skill_name: str = Field(description="Skill id.")
+    scope: SkillScope = Field(description="Skill scope.")
+    drift_detected: bool = Field(description="Whether content drift was detected.")
+    updated: bool = Field(description="Whether an update was applied.")
+    content_hash: str | None = Field(default=None, description="Current installed content hash.")
+    upstream_content_hash: str | None = Field(default=None, description="Upstream content hash when known.")
+
+
 __all__ = [
     "SkillBundleResponse",
     "SkillCatalogItem",
     "SkillDetailResponse",
     "SkillErrorDetail",
     "SkillListResponse",
+    "SkillInstallBundleRequest",
+    "SkillInstallResponse",
+    "SkillInstallUrlRequest",
     "SkillLoadRequest",
     "SkillLoadResponse",
+    "SkillProvenanceResponse",
     "SkillResourceContentResponse",
     "SkillResourceItem",
     "SkillRuntimeContextInput",
+    "SkillScanResponse",
     "SkillSelectRequest",
     "SkillSelectionResponse",
     "SkillStagedActionResponse",
     "SkillStagedApproveRequest",
     "SkillStagedRejectRequest",
+    "SkillUpdateRequest",
+    "SkillUpdateResponse",
     "SkillValidateRequest",
     "SkillValidateResponse",
     "SkillVisibilityPolicyInput",

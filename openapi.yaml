@@ -1418,6 +1418,253 @@ paths:
         '503':
           description: Runtime services are unavailable because server startup is
             incomplete.
+  /api/v1/skills/install/url:
+    post:
+      tags:
+      - skills
+      summary: Install Skill Url
+      operationId: install_skill_url_api_v1_skills_install_url_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillInstallUrlRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillInstallResponse'
+        '400':
+          description: The request contains invalid skill or resource input.
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The requested skill scope or write action is not permitted.
+        '404':
+          description: Skill not found or inaccessible.
+        '422':
+          description: The request body failed schema validation.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '202':
+          description: Install quarantined pending security review.
+      security:
+      - HTTPBearer: []
+  /api/v1/skills/install/bundle:
+    post:
+      tags:
+      - skills
+      summary: Install Skill Bundle
+      operationId: install_skill_bundle_api_v1_skills_install_bundle_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillInstallBundleRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillInstallResponse'
+        '400':
+          description: The request contains invalid skill or resource input.
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The requested skill scope or write action is not permitted.
+        '404':
+          description: Skill not found or inaccessible.
+        '422':
+          description: The request body failed schema validation.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '202':
+          description: Install quarantined pending security review.
+      security:
+      - HTTPBearer: []
+  /api/v1/skills/install/scans/{scan_id}:
+    get:
+      tags:
+      - skills
+      summary: Get Install Scan
+      operationId: get_install_scan_api_v1_skills_install_scans__scan_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: scan_id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Security scan id.
+          title: Scan Id
+        description: Security scan id.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillScanResponse'
+        '400':
+          description: The request contains invalid skill or resource input.
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The requested skill scope or write action is not permitted.
+        '404':
+          description: Skill not found or inaccessible.
+        '422':
+          description: The request body failed schema validation.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '202':
+          description: Install quarantined pending security review.
+  /api/v1/skills/{name}/provenance:
+    get:
+      tags:
+      - skills
+      summary: Get Skill Provenance
+      operationId: get_skill_provenance_api_v1_skills__name__provenance_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Skill id.
+          title: Name
+        description: Skill id.
+      - name: scope
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/SkillScope'
+          description: Skill scope.
+          default: user
+        description: Skill scope.
+      - name: visible_scopes
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              $ref: '#/components/schemas/SkillScope'
+          - type: 'null'
+          description: Visible skill scopes.
+          title: Visible Scopes
+        description: Visible skill scopes.
+      - name: excluded_skill_ids
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          description: Skill ids to hide.
+          title: Excluded Skill Ids
+        description: Skill ids to hide.
+      - name: included_skill_ids
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          description: Optional visible skill allowlist.
+          title: Included Skill Ids
+        description: Optional visible skill allowlist.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillProvenanceResponse'
+        '400':
+          description: The request contains invalid skill or resource input.
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The requested skill scope or write action is not permitted.
+        '404':
+          description: Skill not found or inaccessible.
+        '422':
+          description: The request body failed schema validation.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '202':
+          description: Install quarantined pending security review.
+  /api/v1/skills/{name}/update:
+    post:
+      tags:
+      - skills
+      summary: Update Skill
+      operationId: update_skill_api_v1_skills__name__update_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Skill id.
+          title: Name
+        description: Skill id.
+      - name: scope
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/SkillScope'
+          description: Skill scope.
+          default: user
+        description: Skill scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillUpdateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillUpdateResponse'
+        '400':
+          description: The request contains invalid skill or resource input.
+        '401':
+          description: Authentication is required or the provided token is invalid.
+        '403':
+          description: The requested skill scope or write action is not permitted.
+        '404':
+          description: Skill not found or inaccessible.
+        '422':
+          description: The request body failed schema validation.
+        '503':
+          description: Runtime services are unavailable because server startup is
+            incomplete.
+        '202':
+          description: Install quarantined pending security review.
   /api/v1/skills:
     get:
       tags:
@@ -6561,6 +6808,123 @@ components:
       - skill
       title: SkillDetailResponse
       description: Response for one visible skill.
+    SkillInstallBundleRequest:
+      properties:
+        source:
+          type: string
+          enum:
+          - manifest
+          - repo
+          - tap
+          title: Source
+          description: Bundle install source type.
+        manifest:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Manifest
+          description: Inline bundle manifest.
+        files:
+          anyOf:
+          - additionalProperties:
+              type: string
+            type: object
+          - type: 'null'
+          title: Files
+          description: Base64-encoded bundle file payloads keyed by relative path.
+        repo_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Repo Url
+          description: GitHub repository URL for repo installs.
+        tap_skill_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tap Skill Name
+          description: Skill name to resolve from configured tap.
+        force:
+          type: boolean
+          title: Force
+          description: Bypass non-critical scan warnings.
+          default: false
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Session Id
+          description: Optional session id for audit metadata.
+      additionalProperties: false
+      type: object
+      required:
+      - source
+      title: SkillInstallBundleRequest
+      description: Request body for installing a multi-file skill bundle.
+    SkillInstallResponse:
+      properties:
+        skill_name:
+          type: string
+          title: Skill Name
+          description: Installed skill id.
+        scope:
+          $ref: '#/components/schemas/SkillScope'
+          description: Installed skill scope.
+        status:
+          type: string
+          enum:
+          - committed
+          - quarantined
+          title: Status
+          description: Install outcome.
+        content_hash:
+          type: string
+          title: Content Hash
+          description: Installed content integrity hash.
+        scan_id:
+          type: string
+          title: Scan Id
+          description: Security scan id for review.
+      additionalProperties: false
+      type: object
+      required:
+      - skill_name
+      - scope
+      - status
+      - content_hash
+      - scan_id
+      title: SkillInstallResponse
+      description: Safe response for a committed remote skill install.
+    SkillInstallUrlRequest:
+      properties:
+        url:
+          type: string
+          title: Url
+          description: HTTPS URL to a single SKILL.md file.
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+          description: Optional skill id override.
+        force:
+          type: boolean
+          title: Force
+          description: Bypass non-critical scan warnings.
+          default: false
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Session Id
+          description: Optional session id for audit metadata.
+      additionalProperties: false
+      type: object
+      required:
+      - url
+      title: SkillInstallUrlRequest
+      description: Request body for installing a single-file remote SKILL.md.
     SkillListResponse:
       properties:
         skills:
@@ -6624,6 +6988,60 @@ components:
       type: object
       title: SkillLoadResponse
       description: Response for loading one or more visible skill bundles.
+    SkillProvenanceResponse:
+      properties:
+        skill_name:
+          type: string
+          title: Skill Name
+          description: Skill id.
+        scope:
+          $ref: '#/components/schemas/SkillScope'
+          description: Skill scope.
+        source:
+          type: string
+          title: Source
+          description: Install source type.
+        content_hash:
+          type: string
+          title: Content Hash
+          description: Installed content hash.
+        upstream_content_hash:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Upstream Content Hash
+          description: Last known upstream hash.
+        drift_detected:
+          type: boolean
+          title: Drift Detected
+          description: Whether upstream content drift was detected.
+          default: false
+        installed_at:
+          type: string
+          title: Installed At
+          description: Install timestamp.
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+          description: Last update timestamp.
+        scan_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Scan Id
+          description: Last security scan id.
+      additionalProperties: false
+      type: object
+      required:
+      - skill_name
+      - scope
+      - source
+      - content_hash
+      - installed_at
+      title: SkillProvenanceResponse
+      description: Safe provenance metadata for an installed skill.
     SkillResourceContentResponse:
       properties:
         name:
@@ -6676,6 +7094,47 @@ components:
       - asset
       - template
       title: SkillResourceKind
+    SkillScanResponse:
+      properties:
+        scan_id:
+          type: string
+          title: Scan Id
+          description: Scan id.
+        skill_name:
+          type: string
+          title: Skill Name
+          description: Skill id.
+        scope:
+          $ref: '#/components/schemas/SkillScope'
+          description: Skill scope.
+        blocked:
+          type: boolean
+          title: Blocked
+          description: Whether the scan blocked install.
+        force_allowed:
+          type: boolean
+          title: Force Allowed
+          description: Whether force-install is permitted.
+        findings:
+          items:
+            additionalProperties:
+              anyOf:
+              - type: string
+              - type: 'null'
+            type: object
+          type: array
+          title: Findings
+          description: Sanitized scan findings.
+      additionalProperties: false
+      type: object
+      required:
+      - scan_id
+      - skill_name
+      - scope
+      - blocked
+      - force_allowed
+      title: SkillScanResponse
+      description: Stored security scan result for review.
     SkillScope:
       type: string
       enum:
@@ -6840,6 +7299,61 @@ components:
       - trusted
       - community
       title: SkillTrustLevel
+    SkillUpdateRequest:
+      properties:
+        force:
+          type: boolean
+          title: Force
+          description: Bypass non-critical scan warnings on update.
+          default: false
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Session Id
+          description: Optional session id for audit metadata.
+      additionalProperties: false
+      type: object
+      title: SkillUpdateRequest
+      description: Request body for updating a remotely installed skill.
+    SkillUpdateResponse:
+      properties:
+        skill_name:
+          type: string
+          title: Skill Name
+          description: Skill id.
+        scope:
+          $ref: '#/components/schemas/SkillScope'
+          description: Skill scope.
+        drift_detected:
+          type: boolean
+          title: Drift Detected
+          description: Whether content drift was detected.
+        updated:
+          type: boolean
+          title: Updated
+          description: Whether an update was applied.
+        content_hash:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content Hash
+          description: Current installed content hash.
+        upstream_content_hash:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Upstream Content Hash
+          description: Upstream content hash when known.
+      additionalProperties: false
+      type: object
+      required:
+      - skill_name
+      - scope
+      - drift_detected
+      - updated
+      title: SkillUpdateResponse
+      description: Safe response for update checks and updates.
     SkillValidateRequest:
       properties:
         volume_mount_path:

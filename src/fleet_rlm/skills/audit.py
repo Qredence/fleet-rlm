@@ -9,6 +9,7 @@ from pathlib import Path
 from fleet_rlm.skills.schemas import (
     SkillApprovalStatus,
     SkillAuditRecord,
+    SkillInstallAction,
     SkillScope,
     SkillWriteAction,
     SkillWriteContext,
@@ -31,7 +32,7 @@ def record_audit_event(
     context: SkillWriteContext,
     skill_name: str,
     scope: SkillScope,
-    action: SkillWriteAction,
+    action: SkillWriteAction | SkillInstallAction,
     source_label: str,
     old_content_hash: str | None = None,
     new_content_hash: str | None = None,

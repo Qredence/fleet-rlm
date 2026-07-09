@@ -3,7 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from fleet_rlm.skills.catalog import iter_all_skill_metadata
-from fleet_rlm.skills.schemas import SkillRuntimeContext, SkillScope
+from fleet_rlm.skills.provenance import write_provenance
+from fleet_rlm.skills.schemas import (
+    SkillInstallSource,
+    SkillProvenanceRecord,
+    SkillRuntimeContext,
+    SkillScope,
+    SkillTrustLevel,
+)
 
 
 def _write_skill_md(path: Path, *, name: str, description: str) -> None:
@@ -74,3 +81,27 @@ def test_missing_session_project_org_dirs_are_skipped(tmp_path: Path) -> None:
     context = SkillRuntimeContext(volume_mount_path=str(tmp_path))
     scopes = {metadata.scope for metadata in iter_all_skill_metadata(context) if metadata.name == "only-system"}
     assert scopes == {SkillScope.SYSTEM}
+
+
+def test_remote_source_without_provenance_is_community_trust(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    skills_root = tmp_path / "skills"
+    user_dir = skills_root / "user" / "remote-only"
+    user_dir.mkdir(parents=True)
+    _write_skill_md(user_dir / "SKILL.md", name="remote-only", description="Remote source label only.")
+    write_provenance(
+        str(tmp_path),
+        SkillProvenanceRecord(
+            skill_name="remote-only",
+            scope=SkillScope.USER,
+            source=SkillInstallSource.URL_SINGLE,
+            source_url="https://example.com/SKILL.md",
+            trust_level=SkillTrustLevel.COMMUNITY,
+            content_hash="hash",
+            installed_at=datetime.now(UTC).isoformat(),
+        ),
+    )
+    context = SkillRuntimeContext(volume_mount_path=str(tmp_path))
+    metadata = next(item for item in iter_all_skill_metadata(context) if item.name == "remote-only")
+    assert metadata.trust_level is SkillTrustLevel.COMMUNITY

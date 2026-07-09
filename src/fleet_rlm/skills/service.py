@@ -8,9 +8,13 @@ from typing import Any
 from fleet_rlm.skills.catalog import inventory_skill_resources, resolve_skill_directory, resolve_skill_metadata
 from fleet_rlm.skills.errors import (
     SkillError,
+    SkillInstallBlockedError,
+    SkillInstallDeniedError,
     SkillNotFoundError,
     SkillNotVisibleError,
     SkillProtectedError,
+    SkillQuarantinedError,
+    SkillRemoteFetchError,
     SkillResourceNotFoundError,
     SkillResourcePathError,
     SkillScriptNotFoundError,
@@ -181,8 +185,12 @@ def public_error_for_skill_error(exc: SkillError) -> SkillPublicError:
         return SkillPublicError(status_code=400, code="invalid_resource_path", message="Invalid resource path.")
     if isinstance(exc, SkillNotFoundError | SkillNotVisibleError | SkillResourceNotFoundError):
         return SkillPublicError(status_code=404, code="skill_not_found", message=INACCESSIBLE_SKILL_MESSAGE)
-    if isinstance(exc, SkillProtectedError | SkillWriteDeniedError):
+    if isinstance(exc, SkillProtectedError | SkillWriteDeniedError | SkillInstallDeniedError):
         return SkillPublicError(status_code=403, code=exc.code, message="Skill not found or inaccessible.")
+    if isinstance(exc, SkillInstallBlockedError | SkillQuarantinedError):
+        return SkillPublicError(status_code=403, code=exc.code, message="Skill install blocked.")
+    if isinstance(exc, SkillRemoteFetchError):
+        return SkillPublicError(status_code=400, code=exc.code, message="Remote skill fetch failed.")
     if isinstance(exc, StagedChangeNotFoundError):
         return SkillPublicError(status_code=404, code=exc.code, message="Staged skill change not found.")
     return SkillPublicError(status_code=400, code=exc.code, message="Invalid skill request.")

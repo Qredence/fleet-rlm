@@ -161,6 +161,10 @@ class AppConfig(BaseSettings):
     serve_ui: bool = Field(default=True, alias="FLEET_RLM_SERVE_UI")
     expose_docs: bool = Field(default=False, alias="FLEET_RLM_EXPOSE_DOCS")
     expose_root: bool = Field(default=False, alias="FLEET_RLM_EXPOSE_ROOT")
+    skill_remote_url_install_enabled: bool = Field(default=False, alias="FLEET_SKILL_REMOTE_URL_INSTALL")
+    skill_remote_bundle_install_enabled: bool = Field(default=False, alias="FLEET_SKILL_REMOTE_BUNDLE_INSTALL")
+    skill_remote_allowed_hosts: list[str] = Field(default_factory=list, alias="FLEET_SKILL_REMOTE_ALLOWED_HOSTS")
+    skill_remote_tap_url: str | None = Field(default=None, alias="FLEET_SKILL_REMOTE_TAP_URL")
 
     @field_validator(
         "agent_model",
@@ -196,6 +200,7 @@ class AppConfig(BaseSettings):
         "cors_allowed_origins",
         "entra_allowed_user_ids",
         "entra_allowed_group_ids",
+        "skill_remote_allowed_hosts",
         mode="before",
     )
     @classmethod
