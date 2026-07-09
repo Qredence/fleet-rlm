@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
-from urllib.parse import unquote
 
+from fleet_rlm.tools.paths import PathSafetyError, validate_relative_posix_path
 from fleet_rlm.utils.identity import sanitize_id
 
 from .schemas import ArtifactMetadata, ArtifactRef
@@ -20,19 +20,16 @@ class ArtifactPathError(ValueError):
 
 
 def _validate_relative_artifact_path(path: str) -> PurePosixPath:
-    raw = str(path or "").strip()
-    if not raw:
-        raise ArtifactPathError("Artifact path must not be empty.")
-    lowered = raw.lower()
-    if "%2e%2e" in lowered or "%2f" in lowered or "%5c" in lowered:
-        raise ArtifactPathError("Artifact path traversal is not allowed.")
-    if "\\" in raw:
-        raise ArtifactPathError("Backslash artifact paths are not allowed.")
-    decoded = unquote(raw)
-    candidate = PurePosixPath(decoded)
-    if candidate.is_absolute() or ".." in candidate.parts:
-        raise ArtifactPathError("Artifact path must stay inside the artifact root.")
-    return candidate
+    try:
+        return validate_relative_posix_path(
+            path,
+            empty_message="Artifact path must not be empty.",
+            traversal_message="Artifact path traversal is not allowed.",
+            absolute_message="Artifact path must stay inside the artifact root.",
+            backslash_message="Backslash artifact paths are not allowed.",
+        )
+    except PathSafetyError as exc:
+        raise ArtifactPathError(str(exc)) from exc
 
 
 def artifact_session_root(

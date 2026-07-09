@@ -234,12 +234,12 @@ def test_find_files_rg_cli_finds_matches(tmp_path: Path) -> None:
     if shutil.which("rg") is None:
         pytest.skip("ripgrep CLI is not available")
 
-    from fleet_rlm.runtime.tools.filesystem import _find_files_with_rg_cli
+    from fleet_rlm.runtime.tools.host_filesystem import find_host_files_with_rg_cli
 
     target = tmp_path / "sample.py"
     target.write_text("alpha = 'sandbox budget session'\n", encoding="utf-8")
 
-    result = _find_files_with_rg_cli(pattern="sandbox.*session", path=str(tmp_path), include="*.py")
+    result = find_host_files_with_rg_cli(pattern="sandbox.*session", path=str(tmp_path), include="*.py")
 
     assert result["status"] == "ok"
     assert result["count"] == 1
