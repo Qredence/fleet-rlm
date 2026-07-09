@@ -1,6 +1,6 @@
 # Skill Script Runtime Prep Audit
 
-Audit date: 2026-07-09  
+Audit date: 2026-07-09
 Scope: Phase 3F.3 — whether turn-prep `ActiveSkills` wiring or scaffold materialization is **required** for `run_skill_script` correctness.
 
 ## Verdict

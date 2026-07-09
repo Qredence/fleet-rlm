@@ -616,11 +616,11 @@ class LLMQueryMixin:
                     errors.append((idx, exc))
                     if self._is_auth_failure(exc) or getattr(self, "_sub_lm_auth_failed", False):
                         auth_failure_seen = True
-                        for pending in future_to_idx:
-                            pending.cancel()
+                        canceled_pending = sum(1 for pending in tuple(future_to_idx) if pending.cancel())
                         future_to_idx.clear()
-                        skipped_due_to_auth = max(0, len(prompts) - submitted_count)
+                        skipped_due_to_auth = max(0, len(prompts) - submitted_count) + canceled_pending
                         self._decrement_llm_calls(skipped_due_to_auth)
+                        submitted_count -= canceled_pending
                         break
                 if not auth_failure_seen:
                     _submit_until_window()

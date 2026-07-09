@@ -1,7 +1,7 @@
 # MLflow / Trace Parity Audit (read-only)
 
-**Date:** 2026-07-08  
-**Scope:** Compare `legacy_agent_runtime` vs opt-in `direct_rlm` observability paths.  
+**Date:** 2026-07-08
+**Scope:** Compare `legacy_agent_runtime` vs opt-in `direct_rlm` observability paths.
 **Status:** Audit only — no code changes in this document.
 
 ## Summary
