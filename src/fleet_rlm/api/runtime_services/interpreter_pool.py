@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fleet_rlm.integrations.daytona.runtime import get_sandbox_id_from_interpreter
+from fleet_rlm.daytona.sandbox import get_sandbox_id_from_interpreter
 from fleet_rlm.integrations.observability.mlflow_context import (
     mlflow_child_span,
     set_mlflow_span_outputs,
@@ -327,7 +327,7 @@ class InterpreterPool:
         """Build a SandboxSpec with pool-level defaults (runner_tags, recoverable)."""
         cfg = self._cfg
         try:
-            from fleet_rlm.integrations.daytona.models import build_sandbox_spec
+            from fleet_rlm.daytona.sandbox import build_sandbox_spec
 
             return build_sandbox_spec(
                 volume_name=cfg.volume_name,
@@ -341,7 +341,7 @@ class InterpreterPool:
         """Create a fresh DaytonaInterpreter with the pool's config."""
         cfg = self._cfg
         try:
-            from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
+            from fleet_rlm.daytona.interpreter import DaytonaInterpreter
 
             interpreter = DaytonaInterpreter(
                 volume_name=cfg.volume_name,
@@ -531,7 +531,7 @@ class InterpreterPool:
         """Recover a single archived sandbox into a fresh interpreter."""
         cfg = self._cfg
         try:
-            from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
+            from fleet_rlm.daytona.interpreter import DaytonaInterpreter
 
             interpreter = DaytonaInterpreter(
                 volume_name=cfg.volume_name,

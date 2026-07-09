@@ -31,13 +31,15 @@ def test_verify_bundle_files_rejects_hash_mismatch() -> None:
 
 def test_install_skill_from_manifest_rejects_traversal(tmp_path: Path) -> None:
     with pytest.raises(SkillValidationError):
-        parse_bundle_manifest({
-            "name": "bundle-alpha",
-            "files": {
-                "SKILL.md": hashlib.sha256(_markdown("bundle-alpha")).hexdigest(),
-                "../secret.txt": hashlib.sha256(b"nope").hexdigest(),
-            },
-        })
+        parse_bundle_manifest(
+            {
+                "name": "bundle-alpha",
+                "files": {
+                    "SKILL.md": hashlib.sha256(_markdown("bundle-alpha")).hexdigest(),
+                    "../secret.txt": hashlib.sha256(b"nope").hexdigest(),
+                },
+            }
+        )
 
 
 def test_install_skill_from_manifest_commits_directory_skill(tmp_path: Path) -> None:

@@ -398,7 +398,7 @@ async def build_chat_agent_context(runtime: PreparedChatRuntime, *, pool: Any | 
             target = db_settings.get("DAYTONA_TARGET", "").strip() or None
 
             if api_key_encrypted and api_url:
-                from fleet_rlm.integrations.daytona.config import ResolvedDaytonaConfig
+                from fleet_rlm.daytona.diagnostics import ResolvedDaytonaConfig
                 from fleet_rlm.integrations.llm_profiles.crypto import decrypt_api_key
 
                 secret_key = runtime.cfg.secret_encryption_key
@@ -414,9 +414,8 @@ async def build_chat_agent_context(runtime: PreparedChatRuntime, *, pool: Any | 
 
     if custom_config is not None:
         logger.info("Initializing custom per-user Daytona interpreter sandbox...")
-        from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter
-        from fleet_rlm.integrations.daytona.models import build_sandbox_spec
-        from fleet_rlm.integrations.daytona.runtime import DaytonaSandboxRuntime
+        from fleet_rlm.daytona.interpreter import DaytonaInterpreter
+        from fleet_rlm.daytona.sandbox import DaytonaSandboxRuntime, build_sandbox_spec
 
         sandbox_runtime = DaytonaSandboxRuntime(config=custom_config)
         sandbox_spec = build_sandbox_spec(

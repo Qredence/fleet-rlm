@@ -60,23 +60,23 @@ __all__ = [
 _IMPORT_MAP: dict[str, tuple[str, str]] = {
     "ContextSource": ("fleet_rlm.integrations.daytona.models", "ContextSource"),
     "DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH": (
-        "fleet_rlm.integrations.daytona.runtime",
+        "fleet_rlm.daytona.sandbox",
         "DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH",
     ),
     "DaytonaConfigError": (
-        "fleet_rlm.integrations.daytona.errors",
+        "fleet_rlm.daytona.diagnostics",
         "DaytonaConfigError",
     ),
     "DaytonaDiagnosticError": (
-        "fleet_rlm.integrations.daytona.errors",
+        "fleet_rlm.daytona.diagnostics",
         "DaytonaDiagnosticError",
     ),
     "DaytonaInterpreter": (
-        "fleet_rlm.integrations.daytona.interpreter",
+        "fleet_rlm.daytona.interpreter",
         "DaytonaInterpreter",
     ),
     "DaytonaRunCancelled": (
-        "fleet_rlm.integrations.daytona.errors",
+        "fleet_rlm.daytona.diagnostics",
         "DaytonaRunCancelled",
     ),
     "LogStreamParser": (
@@ -92,15 +92,15 @@ _IMPORT_MAP: dict[str, tuple[str, str]] = {
         "SandboxEventCategory",
     ),
     "DaytonaSandboxRuntime": (
-        "fleet_rlm.integrations.daytona.runtime",
+        "fleet_rlm.daytona.sandbox",
         "DaytonaSandboxRuntime",
     ),
     "DaytonaSandboxSession": (
-        "fleet_rlm.integrations.daytona.runtime",
+        "fleet_rlm.daytona.sandbox",
         "DaytonaSandboxSession",
     ),
     "ResolvedDaytonaConfig": (
-        "fleet_rlm.integrations.daytona.config",
+        "fleet_rlm.daytona.diagnostics",
         "ResolvedDaytonaConfig",
     ),
     "SandboxLmRuntimeConfig": (
@@ -109,31 +109,31 @@ _IMPORT_MAP: dict[str, tuple[str, str]] = {
     ),
     "SandboxSpec": ("fleet_rlm.integrations.daytona.models", "SandboxSpec"),
     "VolumeNotReadyError": (
-        "fleet_rlm.integrations.daytona.errors",
+        "fleet_rlm.daytona.diagnostics",
         "VolumeNotReadyError",
     ),
     "ainit_memory_db": (
-        "fleet_rlm.integrations.daytona.volumes",
+        "fleet_rlm.daytona.volume",
         "ainit_memory_db",
     ),
     "init_memory_db": (
-        "fleet_rlm.integrations.daytona.volumes",
+        "fleet_rlm.daytona.volume",
         "init_memory_db",
     ),
     "bootstrap_snapshot": (
-        "fleet_rlm.integrations.daytona.runtime",
+        "fleet_rlm.daytona.sandbox",
         "bootstrap_snapshot",
     ),
     "resolve_daytona_config": (
-        "fleet_rlm.integrations.daytona.config",
+        "fleet_rlm.daytona.diagnostics",
         "resolve_daytona_config",
     ),
     "resolve_daytona_lm_runtime_config": (
-        "fleet_rlm.integrations.daytona.config",
+        "fleet_rlm.daytona.diagnostics",
         "resolve_daytona_lm_runtime_config",
     ),
     "run_daytona_smoke": (
-        "fleet_rlm.integrations.daytona.diagnostics",
+        "fleet_rlm.daytona.diagnostics",
         "run_daytona_smoke",
     ),
 }
