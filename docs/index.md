@@ -8,6 +8,7 @@
 2. **[How-to Guides](how-to-guides/index.md)** — solve specific problems: installation, Codex local setup, deployment, DSPy integration, troubleshooting, MLflow workflows.
 3. **[Explanation](explanation/index.md)** — understand the product: spec, concepts, user flows.
 4. **[Agent Harness](agent-harness/README.md)** — Codex operating model, local feedback loop, architecture invariants, and drift control.
+5. **[Agent Skills Configuration](agents/domain.md)** — local tracker, triage vocabulary, and domain-context reading rules.
 
 ## Reference
 
@@ -20,9 +21,7 @@
 Read these after you've seen the product:
 
 - **[Architecture Overview](architecture.md)** — current layer ownership model.
-- **[Backend Structure After Phase 5](audits/backend-structure-phase5.md)** — package ownership and compatibility boundaries before Phase 6 (read-only).
-- **[MLflow / Trace Parity Audit](audits/mlflow-trace-parity.md)** — legacy vs `direct_rlm` observability gaps (read-only).
-- **[Skill Script Runtime Prep Audit](audits/skill-script-runtime-prep.md)** — Phase 3F.3 verdict on `_active_skills` wiring and scaffold materialization (read-only).
+- **[Implementation Phases](plan-implementation/README.md)** — canonical roadmap, phase status, acceptance criteria, and implementation evidence.
 - **[Agent Harness](agent-harness/README.md)** — repo-local harness engineering controls.
 - **[Wiring Analysis](explanation/wiring-analysis.md)**
 - **[Releasing to PyPI](how-to-guides/releasing.md)** — automated and manual release flow

@@ -24,7 +24,6 @@ venv/
 !.env.example
 !.env.sample
 .fleet/
-plan/*
 # Jupyter
 .ipynb_checkpoints/
 mlartifacts/
@@ -45,8 +44,7 @@ tmp/
 
 # Plans and notes
 @plan/
-plans/
-PLANS.md
+.scratch/
 TASKS.md
 docs/notes/
 docs/internal/
@@ -73,6 +71,7 @@ src/frontend/.tmp-*.mjs
 # Agent/tooling state
 .claude/
 .agents/
+.worktrees/
 .codex/*
 !.codex/environments/
 !.codex/environments/environment.toml
@@ -167,7 +166,7 @@ src/frontend/test_output.txt
 .understand-anything/
 plan-code-change/
 skill-optimization/
-traces/
+/traces/
 plan/
 transcript-vvqo_92l.jsonl
 
@@ -179,5 +178,3 @@ transcript-vvqo_92l.jsonl
 .cursor/hooks/state/continual-learning.json
 PLAN.md
 PLANS_REORGANIZED.md
-PROGRESS.md
-scripts/sync_plans_canvas.py

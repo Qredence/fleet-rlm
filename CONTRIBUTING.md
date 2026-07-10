@@ -222,7 +222,7 @@ def test_env_loading_with_quotes(monkeypatch):
 
 - Update docs in the same PR when behavior changes
 - Keep `docs/index.md` and Diataxis section indexes aligned with active docs
-- Historical docs are preserved under `plans/archive/docs-archive/` and are not active runbooks
+- Implementation phases, status, and evidence live under `docs/plan-implementation/`; superseded planning copies remain available through Git history rather than a parallel docs tree
 - Keep `scripts/README.md` aligned with the retained helper-script surface
 
 ---

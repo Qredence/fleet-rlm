@@ -89,7 +89,7 @@ config_file = "agents/sandbox-runtime.toml"
 nickname_candidates = ["Daytona", "Sandbox"]
 
 [agents.docs-maintainer]
-description = "AGENTS.md, PLANS.md, docs, README, and durable workflow documentation consistency."
+description = "AGENTS.md, implementation-phase dossiers, docs, README, and durable workflow documentation consistency."
 config_file = "agents/docs-maintainer.toml"
 nickname_candidates = ["Docs", "Maintainer"]
 

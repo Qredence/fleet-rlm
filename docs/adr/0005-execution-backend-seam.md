@@ -130,8 +130,8 @@ Subsequent phases implemented the backend behind the same seam:
 through the pooled interpreter and emits `STATUS`, `TURN_INPUTS`, trajectory
 replay (`REASONING`/`TOOL_*`), `TEXT`, structured `ERROR`, and enriched
 `DONE` (`schema_version`, `history_turns`, `trajectory`,
-`execution_backend`). `direct_rlm` is still opt-in (server-side
-`EXECUTION_BACKEND` only) and is not exposed on `ChatRequest`.
+`execution_backend`). `direct_rlm` is promotion-gated and currently opt-in
+(server-side `EXECUTION_BACKEND` only); it is not exposed on `ChatRequest`.
 
 ## Consequences
 

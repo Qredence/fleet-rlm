@@ -29,6 +29,20 @@
 - Frontend routing, Agent Elements, styling, session restore, and package rules live in `src/frontend/AGENTS.md`.
 - Local Codex actions, ports, browser smoke expectations, and tool preferences live in `.codex/` and loop docs.
 
+## Agent skills
+
+### Issue tracker
+
+Planning issues use local Markdown under `.scratch/<feature>/`; `.scratch/` is local-only and ignored. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix` roles. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Use the root, backend, and frontend contexts listed in `CONTEXT-MAP.md`, plus relevant ADRs. See `docs/agents/domain.md`.
+
 ## Setup
 
 ```bash
@@ -80,9 +94,9 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 
 - Local development runs API on `:8000`, Vite dev server on `:5173`, and MLflow telemetry on `:5001` (Python 3.13+), standardizing streaming responses on `RuntimeEvent` (`runtime/events.py`) projected using `project_chat` (WebSocket) or `project_sse` (`POST /api/chat`); live LLM adapter smoke tests require explicit opt-in via `FLEET_RLM_RUN_LIVE_LLM_TESTS=1`.
 - Chat execution defaults to `legacy_agent_runtime` (`EXECUTION_BACKEND` env; `direct_rlm` is opt-in server-side only and not accepted on `ChatRequest`). Opt-in `direct_rlm` runs real `dspy.RLM` turns via the pooled Daytona interpreter (Phase 2C); Phase 2D (`59b76422`) emits `TURN_INPUTS` and enriches terminal `DONE` with `schema_version` and `history_turns`; live `TurnProgressRelay`/`MLFLOW_SPAN` parity remains deferred. Under `execution_mode=auto`, most turns route to direct/tools rather than `dspy.RLM`; use `rlm_only` to force RLM. `POST /api/chat` SSE and WebSocket execution share the same `InterpreterPoolDeps` interpreter-pool lifecycle.
-- `PLANS.md` is the canonical backend roadmap (gitignored locally per `.gitignore`); `make plans-canvas-sync` / `make plans-canvas-check` regenerate the `plans-roadmap` canvas `PHASES` block (re-sync after status changes); Phases 3H–5 are complete; Phase 6 (trace/transcript/performance/MLflow) is next; do not maintain `PLANS_REORGANIZED.md` as a parallel plan.
+- `docs/plan-implementation/README.md` is the canonical backend roadmap interface; phase status, acceptance, and evidence live in its per-phase dossiers. `make plans-canvas-sync` / `make plans-canvas-check` regenerate the `plans-roadmap` canvas from those dossiers after status changes. Phases 3H–5 are complete; Phase 6 is in progress and uncommitted.
 - Phase 3 Skills package lives at `src/fleet_rlm/skills/` (`ActiveSkills`, loader, selection, catalog, sync, 3G writes/staging/approval/audit, 3H remote install/provenance/security lifecycle); RLM skill tools are thin wrappers in `src/fleet_rlm/tools/skill_tools.py` (runtime facade at `runtime/tools/skill_tools.py`) with public serialization in `skills/service.py`; read/write HTTP APIs at `/api/v1/skills/*` with visibility gating and typed domain errors; `run_skill_script` runs trusted selected-skill `scripts/` files inside Daytona only (never on the FastAPI host) and public failure output must not expose stdout/stderr; preserve `SandboxSerializable` contract and legacy flat `skills/system`/`skills/user` paths; scaffold skill materialization remains deferred unless it becomes a product requirement.
-- Any `config.yaml` work requires `docs/config-audit.md` first (audit-first; `PLANS.md` Phase 7); run `docs/audits/mlflow-trace-parity.md` before observability implementation changes.
+- Any `config.yaml` work requires `docs/config-audit.md` first (audit-first; see the Phase 7 dossier); read `docs/plan-implementation/phases/06-observability/evidence-mlflow-trace-parity.md` before observability implementation changes.
 - Phase 5 tools/attachments layer uses policy-aware descriptors/registry in `src/fleet_rlm/tools/` with runtime facades; `discover_tools()` is the single `ToolExposurePolicy` filter and defaults `sandbox_available=False` (sandbox tools opt in explicitly). `POST /api/v1/files/upload` stages one file per request under `/home/daytona/memory/uploads/sessions/<session_id>/attachments/` (approved `/uploads` durable root only), returns safe `AttachmentRef` metadata (no raw host/volume paths), 10MB default max, SHA-256 checksum, atomic collision-resistant writes. `POST /api/chat` accepts optional `attachment_refs` (IDs only); refs resolve before SSE streaming starts—invalid refs return sanitized HTTP 400 without opening a stream—and `TurnControls.attached_files` carries metadata only (no content reads or prompt injection). Phase 5D adds controlled Daytona artifact tools with `artifacts/storage` split into `paths.py`/`io.py` and per-session `.artifact-index.json`.
 - Backend/runtime refactors follow the incremental migration loop (create seam → preserve behavior → migrate one runtime concern → validate → repeat); see `.cursor/rules/incremental-migration.mdc`.
 - Phase 4 Daytona facade lives at `src/fleet_rlm/daytona/` with `integrations.daytona` compatibility preserved; sandboxes use snapshot `fleet-rlm-01` by default (`fleet-rlm-browser` when browser skills are selected), mount persistent storage at `/home/daytona/memory`, and resolve volume name from `VOLUME_NAME` (server default `rlm-volume-dspy`).

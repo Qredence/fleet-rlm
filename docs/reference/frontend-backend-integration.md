@@ -422,7 +422,7 @@ unchanged.
   (``TurnControls.execution_backend``).
 - **Default is ``legacy_agent_runtime``.** Every existing Phase 1 call path
   resolves to this backend, preserving 100% of Phase 1 behavior.
-- **``direct_rlm`` is an opt-in backend.** Set ``EXECUTION_BACKEND=direct_rlm``
+- **``direct_rlm`` is promotion-gated and currently opt-in.** Set ``EXECUTION_BACKEND=direct_rlm``
   server-side. Introduced as a stub in Phase 2A; dispatches to
   ``DirectRLMRunner`` as of Phase 2B; runs an opt-in golden path through
   ``dspy.RLM`` and the pooled Daytona interpreter as of Phase 2C; emits
@@ -486,8 +486,9 @@ implementations may consume it explicitly. ``ctx.prepared.planner_lm`` remains
 the DSPy planner LM and is not the AgentRuntime. The second backend
 ``direct_rlm`` dispatches to ``DirectRLMRunner`` (Phase 2B+), which runs one
 real RLM turn and emits ``TURN_INPUTS``, trajectory replay, ``TEXT``,
-structured ``ERROR``, and enriched ``DONE`` (Phase 2D). It is opt-in
-(``EXECUTION_BACKEND=direct_rlm``) and not exposed on ``ChatRequest``.
+structured ``ERROR``, and enriched ``DONE`` (Phase 2D). It is promotion-gated,
+currently opt-in (``EXECUTION_BACKEND=direct_rlm``), and not exposed on
+``ChatRequest``.
 
 ### RuntimeEventKind → AI SDK UIMessage v1 Part Mapping
 

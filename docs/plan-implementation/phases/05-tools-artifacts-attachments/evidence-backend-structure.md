@@ -1,4 +1,4 @@
-# Backend Structure After Phase 5
+# Backend structure after Phase 5
 
 Audit date: 2026-07-09
 Scope: Backend package structure checkpoint after Phase 5 and before Phase 6.
@@ -125,8 +125,8 @@ WebSocket, legacy runtime, and opt-in direct RLM.
 ## Boundary Checks
 
 Targeted scans found no stale references claiming that attachments, attachment
-refs, or artifact tools are unimplemented. `PLANS.md` already marks Phase 5
-complete and Phase 6 next, so no roadmap status edit is required for this
+refs, or artifact tools are unimplemented. The Phase 5 dossier marks these
+complete and Phase 6 in progress, so no Phase 5 status edit is required for this
 checkpoint.
 
 Layer boundary checks:

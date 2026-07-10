@@ -34,6 +34,8 @@
   * [Product Spec](explanation/product-spec.md)
   * [fleet-rlm Concepts](explanation/concepts.md)
   * [Architecture Overview](architecture.md)
+  * [Implementation Phases](plan-implementation/README.md)
+    * [Target Architecture](plan-implementation/target-architecture.md)
   * [Agent Runtime Execution Flow](explanation/agent-runtime-execution-flow.md)
   * [User Interaction Flows](explanation/user-flows.md)
   * [Component UML](explanation/component-uml.md)
@@ -48,6 +50,12 @@
   * [Architecture Invariants](agent-harness/architecture-invariants.md)
   * [Harness Quality Score](agent-harness/quality-score.md)
   * [Drift Control](agent-harness/drift-control.md)
+
+## Agent Skills
+
+* [Domain Documentation](agents/domain.md)
+* [Local Markdown Issue Tracker](agents/issue-tracker.md)
+* [Triage Labels](agents/triage-labels.md)
 
 ## Specs
 

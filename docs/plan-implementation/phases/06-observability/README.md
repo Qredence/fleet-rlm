@@ -1,0 +1,93 @@
+# Observability dossier
+
+## Phase 6 — Trace, transcript, performance, and MLflow
+
+- **Order:** `6`
+- **Status:** `in_progress_uncommitted`
+- **Track:** `Observability`
+- **Summary:** Record both runtime backends through one provider-neutral observability seam.
+
+### Current evidence state
+
+The current working tree contains the Task 1 recorder, redaction, classifier,
+performance, trace-service, transport-context, schema, and test changes based on
+`bdd38f8978ac6bc775a844641d8bc784ecffd822`. Focused tests and API synchronization
+were reported on 2026-07-10, but no implementation commit closes this phase.
+Phase 9 promotion remains separate and gated.
+
+### Goal and stable interfaces
+
+One recorder observes the existing `RuntimeEvent` stream before SSE/WebSocket
+projection. It must consume `RuntimeEventKind.MLFLOW_SPAN` rather than introduce a
+second event vocabulary. Session trace-debug, performance, run-step, feedback,
+and mapped-render schemas remain compatible.
+
+MLflow is an optional adapter owned by observability/quality. It is disabled
+unless configured, lazily imported, and never required by default tests or local
+development. Raw operational failures stay in server logs; client projections
+use recursively redacted events and stable error codes.
+
+### Rendering classification
+
+```text
+assistant_text -> AI SDK text parts
+reasoning      -> reasoning parts
+tool           -> tool parts + data-span
+sandbox        -> data-span / data-sandbox
+status_note    -> data-span / status
+artifact       -> data-artifact
+task           -> data-task
+performance    -> data-performance
+mlflow_span    -> data-span / trace debug panel
+non_rendered   -> trace debug only
+```
+
+### Compatibility and safety
+
+- Preserve `SessionTraceDebugSpan`, performance summaries, trace items,
+  feedback requests, run steps, and existing mapped-render values.
+- Preserve `POST /api/chat`, WebSocket controls, Skills, attachments, artifacts,
+  Daytona state, and both transport projectors.
+- Sanitize direct-runner errors, trace-feedback adapter errors, and trace-debug
+  previews before they become client-visible.
+- Keep quality/optimization execution outside chat.
+
+### Non-goals
+
+- Replace session storage schemas or remove public trace routes.
+- Require a live relay to produce the direct-RLM post-turn record.
+- Add automatic fallback/replay between runtime backends.
+- Make MLflow a required runtime or test dependency.
+
+### Acceptance criteria
+
+- [x] Legacy and direct fixture streams pass through the same recorder interface.
+- [x] MLflow-shaped spans ingest into the existing `SessionTraceDebugSpan` interface.
+- [x] Disabled MLflow is a no-op and imports no MLflow runtime.
+- [x] Client-facing errors, paths, and secret-shaped values are redacted.
+- [x] Detailed operational diagnostics remain server-side.
+- [x] Trace-debug classification remains additive and `non_rendered` stays debug-only.
+- [x] Performance aggregation works from sanitized recorded spans.
+- [x] Trace/debug/performance interfaces and both chat transports remain compatible in focused validation.
+- [ ] Live direct-RLM trace-span and promotion evidence is recorded.
+- [ ] The full repository gate passes on the final Phase 6 diff.
+
+### Evidence
+
+- [MLflow and trace parity audit](evidence-mlflow-trace-parity.md)
+- [Phase 6 observability surface and implementation evidence](evidence-observability-surface.md)
+- [Task 1 validation record](evidence-task-1-validation.md)
+
+### Validation
+
+```bash
+uv run pytest tests/unit/observability/ tests/unit/api/test_trace_service.py tests/unit/api/test_session_trace_debug.py
+make api-check
+```
+
+## Deferred gaps
+
+- Live `TurnProgressRelay` behavior for direct RLM.
+- Exact direct-vs-legacy cancellation and fallback/replay parity.
+- Any session-storage schema replacement or public route removal.
+- Live promotion evidence requiring Daytona, an LLM, MLflow, auth, and persistence.

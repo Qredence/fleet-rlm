@@ -88,7 +88,8 @@ client disconnect / cancel -> abort  +  data: [DONE]
 ```
 
 Additional Fleet `data-*` custom parts (not driven 1:1 by a RuntimeEventKind
-but projected from payload fields per PLANS.md §21 and the foundation text):
+but projected from payload fields per the implementation-phase dossiers and
+the foundation text):
 
 ```text
 data-artifact      generated/updated file artifact (title, content_type, path)
