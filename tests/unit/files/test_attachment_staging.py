@@ -11,6 +11,8 @@ from fleet_rlm.files.upload_staging import (
     stage_uploaded_file_to_volume,
 )
 
+_OWNER_SCOPE = "tenant-a:user-a"
+
 
 def test_stage_uploaded_file_writes_under_uploads_root(tmp_path: Path) -> None:
     staged = stage_uploaded_file_to_volume(
@@ -19,6 +21,7 @@ def test_stage_uploaded_file_writes_under_uploads_root(tmp_path: Path) -> None:
         filename="hello.txt",
         content_type="text/plain",
         stream=BytesIO(b"hello world"),
+        owner_scope=_OWNER_SCOPE,
     )
 
     assert staged.attachment.filename == "hello.txt"
@@ -53,6 +56,7 @@ def test_stage_uploaded_file_rejects_unsafe_filenames(tmp_path: Path, filename: 
             filename=filename,
             content_type="text/plain",
             stream=BytesIO(b"hi"),
+            owner_scope=_OWNER_SCOPE,
         )
 
 
@@ -64,6 +68,7 @@ def test_stage_uploaded_file_rejects_oversize(tmp_path: Path) -> None:
             filename="big.bin",
             content_type="application/octet-stream",
             stream=BytesIO(b"a" * (DEFAULT_MAX_UPLOAD_BYTES + 1)),
+            owner_scope=_OWNER_SCOPE,
         )
 
 
@@ -74,6 +79,7 @@ def test_stage_uploaded_file_does_not_overwrite_existing(tmp_path: Path) -> None
         filename="same.txt",
         content_type="text/plain",
         stream=BytesIO(b"first"),
+        owner_scope=_OWNER_SCOPE,
     )
     second = stage_uploaded_file_to_volume(
         volume_mount_path=str(tmp_path),
@@ -81,6 +87,7 @@ def test_stage_uploaded_file_does_not_overwrite_existing(tmp_path: Path) -> None
         filename="same.txt",
         content_type="text/plain",
         stream=BytesIO(b"second"),
+        owner_scope=_OWNER_SCOPE,
     )
 
     assert first.attachment.id != second.attachment.id
@@ -90,3 +97,48 @@ def test_stage_uploaded_file_does_not_overwrite_existing(tmp_path: Path) -> None
     second_path = tmp_path / second.relative_path
     assert first_path.read_bytes() == b"first"
     assert second_path.read_bytes() == b"second"
+
+
+def test_stage_uploaded_file_refuses_to_claim_an_existing_unbound_session(tmp_path: Path) -> None:
+    staged = stage_uploaded_file_to_volume(
+        volume_mount_path=str(tmp_path),
+        session_id="sess-1",
+        filename="first.txt",
+        content_type="text/plain",
+        stream=BytesIO(b"first"),
+        owner_scope=_OWNER_SCOPE,
+    )
+    (tmp_path / staged.relative_path).parent.joinpath(".attachment-owner").unlink()
+
+    with pytest.raises(UploadSafetyError, match="owner validation"):
+        stage_uploaded_file_to_volume(
+            volume_mount_path=str(tmp_path),
+            session_id="sess-1",
+            filename="second.txt",
+            content_type="text/plain",
+            stream=BytesIO(b"second"),
+            owner_scope=_OWNER_SCOPE,
+        )
+
+
+def test_stage_uploaded_file_isolates_same_session_id_by_owner(tmp_path: Path) -> None:
+    first = stage_uploaded_file_to_volume(
+        volume_mount_path=str(tmp_path),
+        session_id="shared-session-id",
+        filename="first.txt",
+        content_type="text/plain",
+        stream=BytesIO(b"first"),
+        owner_scope="tenant-a:user-a",
+    )
+    second = stage_uploaded_file_to_volume(
+        volume_mount_path=str(tmp_path),
+        session_id="shared-session-id",
+        filename="second.txt",
+        content_type="text/plain",
+        stream=BytesIO(b"second"),
+        owner_scope="tenant-b:user-b",
+    )
+
+    assert first.relative_path != second.relative_path
+    assert (tmp_path / first.relative_path).read_bytes() == b"first"
+    assert (tmp_path / second.relative_path).read_bytes() == b"second"

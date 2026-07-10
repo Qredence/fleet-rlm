@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.integrations.observability.config import MlflowConfig
+from fleet_rlm.traces.feedback import trace_feedback_error_detail
 
 from ..schemas.feedback import TraceFeedbackRequest, TraceFeedbackResponse
 from .common import RUNTIME_TEST_TIMEOUT_SECONDS, run_blocking
@@ -103,9 +104,10 @@ class TraceService:
                 timeout=RUNTIME_TEST_TIMEOUT_SECONDS,
             )
         except Exception as exc:
+            logger.warning("MLflow trace feedback resolution failed.", exc_info=True)
             raise HTTPException(
                 status_code=503,
-                detail=f"Failed to resolve MLflow trace: {exc}",
+                detail=trace_feedback_error_detail("resolve"),
             ) from exc
 
         if trace is None:
@@ -149,9 +151,10 @@ class TraceService:
                 timeout=None,
             )
         except Exception as exc:
+            logger.warning("MLflow trace feedback logging failed.", exc_info=True)
             raise HTTPException(
                 status_code=503,
-                detail=f"Failed to log MLflow feedback: {exc}",
+                detail=trace_feedback_error_detail("log"),
             ) from exc
 
         try:
@@ -180,7 +183,7 @@ class TraceService:
             )
             raise HTTPException(
                 status_code=503,
-                detail="Failed to persist trace feedback.",
+                detail=trace_feedback_error_detail("persist"),
             ) from exc
 
         return TraceFeedbackResponse(

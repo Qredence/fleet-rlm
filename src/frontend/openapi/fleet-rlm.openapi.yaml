@@ -5694,6 +5694,13 @@ components:
           type: boolean
           title: Ready
           description: Whether critical runtime services are ready to serve requests.
+        execution_backend:
+          type: string
+          enum:
+            - legacy_agent_runtime
+            - direct_rlm
+          title: Execution Backend
+          description: Server-configured backend used for new chat turns.
         active_models:
           $ref: "#/components/schemas/RuntimeActiveModels"
           description: Resolved planner and delegate model identities.
@@ -5734,6 +5741,7 @@ components:
         - settings_write_enabled
         - profile_write_enabled
         - ready
+        - execution_backend
         - active_models
         - tests
       title: RuntimeStatusResponse
@@ -6398,7 +6406,8 @@ components:
           description: How many spans are intentionally observability-only.
         performance_summary:
           $ref: "#/components/schemas/SessionTracePerformanceSummary"
-          description: Performance, token, and fallback summary derived from raw spans.
+          description: Performance, token, and fallback summary derived from sanitized
+            spans.
         spans:
           items:
             $ref: "#/components/schemas/SessionTraceDebugSpan"
@@ -6458,6 +6467,10 @@ components:
             - tool
             - sandbox
             - status_note
+            - artifact
+            - task
+            - performance
+            - mlflow_span
             - non_rendered
           title: Mapped Render Kind
           description: Frontend chat render kind the span most closely maps to.
@@ -6838,7 +6851,8 @@ components:
           description: Span with the largest output payload.
       type: object
       title: SessionTracePerformanceSummary
-      description: Performance and token summary derived from raw MLflow trace spans.
+      description: Performance and token summary derived from sanitized MLflow trace
+        spans.
     SkillApprovalStatus:
       type: string
       enum:

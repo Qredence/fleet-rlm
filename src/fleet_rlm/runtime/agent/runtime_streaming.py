@@ -100,8 +100,8 @@ def _safe_streaming_error_text(exc: BaseException) -> str:
     if "failed to parse the lm response" in lower or "adapterparseerror" in lower:
         return "Adapter parse failed while reading the model response."
     if "lm response:" in lower or "reasoning_content" in lower:
-        return f"{type(exc).__name__}: model response could not be rendered safely."
-    return message
+        return "Model response could not be rendered safely."
+    return "Runtime operation failed."
 
 
 def _response_stream_listeners(program: Any) -> list[StreamListener]:

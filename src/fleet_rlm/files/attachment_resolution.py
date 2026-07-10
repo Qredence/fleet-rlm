@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hmac
 import mimetypes
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from fleet_rlm.tools.paths import (
@@ -15,13 +17,21 @@ from fleet_rlm.tools.paths import (
 )
 
 from .schemas import AttachedFiles, AttachmentRef
-from .upload_staging import uploads_session_attachments_relative_dir
+from .upload_staging import _ATTACHMENT_OWNER_MARKER, uploads_session_attachments_relative_dir
 
 _ATTACHMENT_ID_RE = re.compile(r"^[a-f0-9]{32}$")
 
 
 class AttachmentResolutionError(ValueError):
     """Raised when attachment references cannot be resolved safely."""
+
+
+@dataclass(frozen=True, slots=True)
+class PersistedSessionOwnerProof:
+    """Ownership evidence recovered from a session record, not a request payload."""
+
+    session_id: str
+    owner_scope: str
 
 
 def _validate_attachment_id(attachment_id: str) -> str:
@@ -58,6 +68,8 @@ def resolve_attachment_refs(
     volume_mount_path: str,
     session_id: str | None,
     attachment_ids: list[str] | None,
+    owner_scope: str | None = None,
+    persisted_session_owner_proof: PersistedSessionOwnerProof | None = None,
 ) -> AttachedFiles | None:
     """Resolve attachment IDs to metadata-only ``AttachedFiles``.
 
@@ -70,18 +82,51 @@ def resolve_attachment_refs(
 
     if not str(session_id or "").strip():
         raise AttachmentResolutionError("session_id is required when attachment_refs is provided.")
+    safe_owner_scope = str(owner_scope or "").strip()
+    if not safe_owner_scope:
+        raise AttachmentResolutionError("Attachment owner scope is required.")
 
     safe_session_id = str(session_id).strip()
     normalized_ids = [_validate_attachment_id(item) for item in attachment_ids]
     if len(normalized_ids) != len(set(normalized_ids)):
         raise AttachmentResolutionError("Duplicate attachment references are not allowed.")
 
-    relative_dir = uploads_session_attachments_relative_dir(safe_session_id)
+    relative_dir = uploads_session_attachments_relative_dir(safe_session_id, owner_scope=safe_owner_scope)
     validate_relative_posix_path(relative_dir)
 
     base = Path(volume_mount_path)
     attachments_dir = base / relative_dir
     if not attachments_dir.is_dir():
+        legacy_relative_dir = uploads_session_attachments_relative_dir(safe_session_id)
+        validate_relative_posix_path(legacy_relative_dir)
+        legacy_attachments_dir = base / legacy_relative_dir
+        if not legacy_attachments_dir.is_dir():
+            raise AttachmentResolutionError("One or more attachment references are invalid.")
+        relative_dir = legacy_relative_dir
+        attachments_dir = legacy_attachments_dir
+    owner_marker = attachments_dir / _ATTACHMENT_OWNER_MARKER
+    if owner_marker.is_file():
+        try:
+            marker_scope = owner_marker.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise AttachmentResolutionError("One or more attachment references are invalid.") from exc
+    else:
+        # Phase 5 uploads created before the owner marker can only be resumed
+        # when a persisted session record proves that the authenticated owner
+        # owns this exact session. A request identity alone is not sufficient
+        # proof for an unmarked shared-volume directory.
+        proof = persisted_session_owner_proof
+        proof_session_id = str(proof.session_id or "").strip() if proof is not None else ""
+        proof_owner_scope = str(proof.owner_scope or "").strip() if proof is not None else ""
+        if not (
+            proof_session_id
+            and proof_owner_scope
+            and hmac.compare_digest(proof_session_id, safe_session_id)
+            and hmac.compare_digest(proof_owner_scope, safe_owner_scope)
+        ):
+            raise AttachmentResolutionError("One or more attachment references are invalid.")
+        marker_scope = proof_owner_scope
+    if not marker_scope or not hmac.compare_digest(marker_scope, safe_owner_scope):
         raise AttachmentResolutionError("One or more attachment references are invalid.")
 
     resolved: list[AttachmentRef] = []
@@ -116,5 +161,6 @@ def resolve_attachment_refs(
 
 __all__ = [
     "AttachmentResolutionError",
+    "PersistedSessionOwnerProof",
     "resolve_attachment_refs",
 ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from unittest.mock import MagicMock
 
 
 def test_daytona_facade_modules_import_without_live_credentials() -> None:
@@ -24,6 +25,18 @@ def test_daytona_interpreter_facade_matches_existing_implementation() -> None:
     from fleet_rlm.integrations.daytona.interpreter import DaytonaInterpreter as LegacyDaytonaInterpreter
 
     assert DaytonaInterpreter is LegacyDaytonaInterpreter
+
+
+def test_daytona_interpreter_facade_does_not_retain_a_temporary_legacy_patch(monkeypatch) -> None:
+    from fleet_rlm.daytona import interpreter as facade
+    from fleet_rlm.integrations.daytona import interpreter as implementation
+
+    original = implementation.DaytonaInterpreter
+    monkeypatch.setattr(implementation, "DaytonaInterpreter", MagicMock(name="DaytonaInterpreter"))
+    importlib.reload(facade)
+    monkeypatch.undo()
+
+    assert facade.DaytonaInterpreter is original
 
 
 def test_existing_integration_root_imports_resolve_through_facades() -> None:

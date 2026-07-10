@@ -3,6 +3,22 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _enable_mlflow_for_adapter_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fake-MLflow adapter tests must opt in explicitly after Phase 6."""
+    from fleet_rlm.integrations.observability import mlflow_runtime
+
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+    monkeypatch.setattr(mlflow_runtime, "_import_mlflow", lambda: None)
+    monkeypatch.setattr(
+        mlflow_runtime,
+        "get_mlflow_config",
+        lambda: SimpleNamespace(enabled=False, active_model_id=None),
+    )
+
 
 def test_mlflow_request_context_initializes_mlflow_at_turn_entry(monkeypatch) -> None:
     from fleet_rlm.integrations.observability.mlflow_context import (
@@ -36,6 +52,40 @@ def test_mlflow_request_context_initializes_mlflow_at_turn_entry(monkeypatch) ->
         pass
 
     assert init_calls == [True]
+
+
+def test_mlflow_request_context_is_a_noop_without_explicit_enablement(monkeypatch) -> None:
+    """Disabled WebSocket lifecycle must not import, span, or flush MLflow."""
+    from fleet_rlm.integrations.observability import mlflow_context
+    from fleet_rlm.integrations.observability.mlflow_context import (
+        MlflowTraceRequestContext,
+        capture_last_active_trace_id,
+        current_request_context,
+        finalize_current_mlflow_trace,
+        mlflow_child_span,
+        mlflow_request_context,
+    )
+
+    monkeypatch.delenv("MLFLOW_ENABLED", raising=False)
+    runtime_calls: list[str] = []
+
+    def _unexpected_runtime_import() -> object:
+        runtime_calls.append("called")
+        raise AssertionError("disabled MLflow lifecycle must not touch mlflow_runtime")
+
+    monkeypatch.setattr(mlflow_context, "_runtime_module", _unexpected_runtime_import)
+    context = MlflowTraceRequestContext(client_request_id="chat-disabled")
+
+    with mlflow_request_context(context) as active_context:
+        assert active_context is context
+        assert current_request_context() is context
+        with mlflow_child_span("fleet_rlm.ws_stream_body") as span:
+            assert span is None
+        assert finalize_current_mlflow_trace(state="OK") is None
+        assert capture_last_active_trace_id() is None
+
+    assert current_request_context() is None
+    assert runtime_calls == []
 
 
 class _FakeSpanContext:

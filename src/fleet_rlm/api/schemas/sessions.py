@@ -194,6 +194,10 @@ class SessionTraceDebugSpan(BaseModel):
         "tool",
         "sandbox",
         "status_note",
+        "artifact",
+        "task",
+        "performance",
+        "mlflow_span",
         "non_rendered",
     ] = Field(description="Frontend chat render kind the span most closely maps to.")
     mapped_component_type: str | None = Field(
@@ -235,7 +239,7 @@ class SessionTracePerformanceSpanSummary(BaseModel):
 
 
 class SessionTracePerformanceSummary(BaseModel):
-    """Performance and token summary derived from raw MLflow trace spans."""
+    """Performance and token summary derived from sanitized MLflow trace spans."""
 
     total_duration_ms: int | None = Field(default=None, description="Root trace duration in milliseconds.")
     llm_duration_ms: int = Field(default=0, description="Total duration of LLM/chat-model spans.")
@@ -291,7 +295,7 @@ class SessionTraceDebugResponse(BaseModel):
     renderable_span_count: int = Field(description="How many spans map to a renderable chat component.")
     non_rendered_span_count: int = Field(description="How many spans are intentionally observability-only.")
     performance_summary: SessionTracePerformanceSummary = Field(
-        description="Performance, token, and fallback summary derived from raw spans."
+        description="Performance, token, and fallback summary derived from sanitized spans."
     )
     spans: list[SessionTraceDebugSpan] = Field(description="Per-span mapping summary.")
 

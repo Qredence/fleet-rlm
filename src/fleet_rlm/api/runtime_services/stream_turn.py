@@ -23,6 +23,7 @@ from typing import Any
 from fleet_rlm.api.config import AppConfig
 from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext
 from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
+from fleet_rlm.observability.recorder import RuntimeTraceRecorder
 from fleet_rlm.runtime.events import RuntimeEvent
 
 logger = logging.getLogger(__name__)
@@ -168,6 +169,16 @@ async def stream_turn(
     """
     # Resolve which execution backend to use for this turn (stable once set).
     backend = _resolve_backend(ctx)
+    if not isinstance(backend, ExecutionBackend):
+        raise ValueError(f"Unknown execution backend: {backend!r}")
+    recorder = RuntimeTraceRecorder(
+        session_id=ctx.session_id,
+        execution_backend=backend.value,
+    )
+
+    # Both backends execute against the same AgentRuntime session state.
+    # Restoring here keeps direct-RLM resumes equivalent to legacy turns.
+    await _restore_session(ctx, agent_runtime)
 
     if backend is ExecutionBackend.legacy_agent_runtime:
         # ── Phase 1 path: unchanged ──
@@ -187,35 +198,43 @@ async def stream_turn(
                 )
             set_execution_mode(ctx.controls.execution_mode)
 
-        # Restore session if a session_id was provided.
-        await _restore_session(ctx, agent_runtime)
-
         # Build kwargs and delegate to the runtime.
         kwargs = _build_stream_kwargs(ctx, message)
         stream = aiter_chat_turn_stream(**kwargs)
 
         try:
             async for event in stream:
-                yield event
+                for recorded_event in recorder.observe(event):
+                    yield recorded_event
         finally:
             aclose = getattr(stream, "aclose", None)
             if callable(aclose):
                 await aclose()
 
     elif backend is ExecutionBackend.direct_rlm:
+        from fleet_rlm.observability.mlflow import direct_rlm_trace_context
+        from fleet_rlm.rlm.inputs import history_turn_count
         from fleet_rlm.rlm.runner import DirectRLMRunner
 
         runner = DirectRLMRunner()
-        async for event in runner.stream(
-            ctx=ctx,
+        with direct_rlm_trace_context(
+            session_id=ctx.session_id,
+            workspace_id=ctx.canonical_workspace_id,
+            user_id=ctx.canonical_user_id,
+            app_env=getattr(getattr(ctx.prepared, "cfg", None), "app_env", None),
             message=message,
-            agent_runtime=agent_runtime,
-            cancel_check=lambda: ctx.cancel_flag.get("cancelled", False),
+            turn_index=history_turn_count(agent_runtime),
+            execution_mode=ctx.controls.execution_mode,
+            sub_lm_configured=getattr(ctx.prepared, "delegate_lm", None) is not None,
         ):
-            yield event
-
-    else:
-        raise ValueError(f"Unknown execution backend: {backend!r}")
+            async for event in runner.stream(
+                ctx=ctx,
+                message=message,
+                agent_runtime=agent_runtime,
+                cancel_check=lambda: ctx.cancel_flag.get("cancelled", False),
+            ):
+                for recorded_event in recorder.observe(event):
+                    yield recorded_event
 
 
 __all__ = [

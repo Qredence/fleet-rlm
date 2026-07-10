@@ -594,6 +594,7 @@ def build_runtime_status_response(
         settings_write_enabled=settings_write_enabled,
         profile_write_enabled=settings_write_enabled or config_deps.config.auth_required,
         ready=ready,
+        execution_backend=config_deps.config.execution_backend.value,
         sandbox_provider="daytona",
         active_models=RuntimeActiveModels(
             planner=resolve_active_model(config_deps.config.agent_model, "DSPY_LM_MODEL"),

@@ -12,6 +12,14 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from fleet_rlm.files.attachment_resolution import (
+    AttachmentResolutionError,
+    PersistedSessionOwnerProof,
+    resolve_attachment_refs,
+)
+from fleet_rlm.files.schemas import AttachedFiles
+from fleet_rlm.files.upload_staging import attachment_owner_scope
+from fleet_rlm.integrations.daytona.volumes import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
 from fleet_rlm.runtime.events import RuntimeEvent
 
 from ...dependencies import DiagnosticsDeps, SessionCacheDeps
@@ -35,7 +43,7 @@ from ...runtime_services.chat_runtime import (
 from ...runtime_services.session_persistence import build_local_persist_fn
 from ...schemas import WSMessage
 from .commands import handle_command_with_persist
-from .session import switch_session_if_needed
+from .session import resolve_persisted_session_owner_proof, switch_session_if_needed
 from .stream_events import build_stream_event_dict
 from .transport import (
     _error_envelope,
@@ -48,6 +56,36 @@ from .turn_runner import run_streaming_turn
 from .turn_setup import prepare_chat_message_turn
 
 logger = logging.getLogger(__name__)
+
+
+async def _resolve_ws_attachment_refs(
+    *,
+    websocket: WebSocket,
+    session_id: str,
+    owner_scope: str,
+    attachment_refs: list[str] | None,
+    persisted_session_owner_proof: PersistedSessionOwnerProof | None = None,
+) -> AttachedFiles | None:
+    """Resolve staged attachment IDs before a websocket turn can begin."""
+    if not attachment_refs:
+        return None
+    try:
+        return resolve_attachment_refs(
+            volume_mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
+            session_id=session_id,
+            attachment_ids=attachment_refs,
+            owner_scope=owner_scope,
+            persisted_session_owner_proof=persisted_session_owner_proof,
+        )
+    except AttachmentResolutionError as exc:
+        await _try_send_json(
+            websocket,
+            _error_envelope(
+                code="invalid_attachment_refs",
+                message=str(exc),
+            ),
+        )
+        return None
 
 
 def _agent_turn_count(agent: ChatAgentProtocol) -> int:
@@ -255,6 +293,7 @@ async def _process_chat_message(
     sess_id: str,
     execution_emitter: ExecutionEventEmitter,
     identity: object | None = None,
+    attached_files: AttachedFiles | None = None,
 ) -> str | None:
     """Process one ``message`` payload and return the loaded docs path."""
     prepared_turn = await prepare_chat_message_turn(
@@ -283,11 +322,14 @@ async def _process_chat_message(
     )
     session.orchestration_session = orchestration_session
 
-    # Build per-turn controls from WSMessage fields for TurnControls threading.
-    # Note: selected_skill_ids is not a WSMessage field; it defaults to empty list.
+    # Build per-turn controls from validated WSMessage fields.
     turn_controls_kwargs: dict[str, Any] = {}
     if msg.trace_mode is not None:
         turn_controls_kwargs["trace_mode"] = msg.trace_mode
+    if msg.selected_skill_ids:
+        turn_controls_kwargs["selected_skill_ids"] = list(msg.selected_skill_ids)
+    if attached_files is not None:
+        turn_controls_kwargs["attached_files"] = attached_files
 
     return await run_streaming_turn(
         websocket=websocket,
@@ -318,6 +360,7 @@ async def _background_execution_task(
     sess_id: str,
     execution_emitter: ExecutionEventEmitter,
     identity: object | None = None,
+    attached_files: AttachedFiles | None = None,
 ) -> str | None:
     """Run execution in the background with its own agent context."""
     from ...runtime_services.chat_runtime import build_chat_agent_context
@@ -385,6 +428,7 @@ async def _background_execution_task(
                 sess_id=sess_id,
                 execution_emitter=execution_emitter,
                 identity=identity,
+                attached_files=attached_files,
             )
     except Exception:
         logger.exception("Background websocket execution task failed")
@@ -488,6 +532,28 @@ class _ExecutionConnectionLoop:
                     workspace_id=self.session.canonical_workspace_id,
                     user_id=self.session.canonical_user_id,
                 )
+                owner_scope = attachment_owner_scope(
+                    tenant_claim=self.session.owner_tenant_claim,
+                    user_claim=self.session.owner_user_claim,
+                )
+                persisted_session_owner_proof = None
+                if msg.attachment_refs:
+                    persisted_session_owner_proof = await resolve_persisted_session_owner_proof(
+                        persistence=self.runtime.persistence,
+                        identity_rows=self.runtime.identity_rows,
+                        session_id=sess_id,
+                        owner_tenant_claim=self.session.owner_tenant_claim,
+                        owner_user_claim=self.session.owner_user_claim,
+                    )
+                attached_files = await _resolve_ws_attachment_refs(
+                    websocket=self.websocket,
+                    session_id=sess_id,
+                    owner_scope=owner_scope,
+                    attachment_refs=msg.attachment_refs,
+                    persisted_session_owner_proof=persisted_session_owner_proof,
+                )
+                if msg.attachment_refs and attached_files is None:
+                    continue
                 await self.execution_emitter.update_subscription(
                     self.websocket,
                     ExecutionSubscription(
@@ -530,6 +596,7 @@ class _ExecutionConnectionLoop:
                         sess_id=sess_id,
                         execution_emitter=self.execution_emitter,
                         identity=self.identity,
+                        attached_files=attached_files,
                     )
                 )
         except (asyncio.CancelledError, WebSocketDisconnect):

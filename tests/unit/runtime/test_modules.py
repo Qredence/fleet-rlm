@@ -117,6 +117,7 @@ def test_streaming_rlm_emits_action_and_result_steps() -> None:
 
 
 def test_streaming_rlm_records_real_repl_execution_span(monkeypatch) -> None:
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
     from fleet_rlm.integrations.observability import mlflow_context
     from fleet_rlm.runtime.agent.signatures import RLMTurnSignature
     from fleet_rlm.runtime.modules.factory import create_runtime_rlm

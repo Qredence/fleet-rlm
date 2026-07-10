@@ -37,6 +37,7 @@ def test_runtime_status_includes_daytona_slot_diagnostics() -> None:
         "available_slots": 5,
         "active_count": 0,
     }
+    assert response.execution_backend == "legacy_agent_runtime"
 
 
 def test_runtime_status_surfaces_persisted_mlflow_scorers(monkeypatch) -> None:

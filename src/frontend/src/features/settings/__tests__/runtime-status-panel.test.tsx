@@ -12,6 +12,7 @@ describe("RuntimeStatusPanel", () => {
       settings_write_enabled: true,
       profile_write_enabled: true,
       ready: false,
+      execution_backend: "legacy_agent_runtime",
       active_models: {
         planner: "openai/gpt-4.1",
         delegate: "openai/gpt-4.1-mini",

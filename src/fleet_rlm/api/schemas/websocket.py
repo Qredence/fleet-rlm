@@ -57,6 +57,14 @@ class WSMessage(BaseModel):
         default=None,
         description="Optional session identifier for restoring an existing websocket session.",
     )
+    selected_skill_ids: list[str] | None = Field(
+        default=None,
+        description="Optional list of trusted skill IDs to select for this turn.",
+    )
+    attachment_refs: list[str] | None = Field(
+        default=None,
+        description="Optional IDs of previously staged attachments for this session.",
+    )
     # Command dispatch fields (used when type == "command")
     command: str = Field(default="", description="Command name when `type` is `command`.")
     args: dict[str, Any] = Field(

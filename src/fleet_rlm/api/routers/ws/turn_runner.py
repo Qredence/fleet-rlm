@@ -14,10 +14,12 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from fleet_rlm.files.schemas import AttachedFiles
 from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.integrations.observability.trace_context import (
     runtime_telemetry_enabled_context,
 )
+from fleet_rlm.observability.redaction import sanitize_runtime_event
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
@@ -57,14 +59,8 @@ logger = logging.getLogger(__name__)
 
 
 def _safe_websocket_error_text(exc: BaseException) -> str:
-    """Return a websocket-safe error summary without raw LM payloads."""
-    message = str(exc)
-    lower = message.lower()
-    if "failed to parse the lm response" in lower or "adapterparseerror" in lower:
-        return "Adapter parse failed while reading the model response."
-    if "lm response:" in lower or "reasoning_content" in lower:
-        return f"{type(exc).__name__}: model response could not be rendered safely."
-    return message
+    """Return the canonical Phase 6-safe error text for WebSocket clients."""
+    return sanitize_runtime_event(RuntimeEvent(kind=RuntimeEventKind.ERROR, text=str(exc))).text
 
 
 def _terminal_run_status(event: RuntimeEvent) -> RunStatus:
@@ -372,6 +368,7 @@ async def _stream_agent_events(
     owner_user_claim: str | None = None,
     selected_skill_ids: list[str] | None = None,
     trace_mode: str | None = None,
+    attached_files: AttachedFiles | None = None,
 ) -> None:
     from ...runtime_services.chat_persistence import build_workspace_task_request
 
@@ -389,6 +386,7 @@ async def _stream_agent_events(
         cancel_flag=cancel_flag,
         selected_skill_ids=selected_skill_ids,
         trace_mode=trace_mode,
+        attached_files=attached_files,
     )
 
     bridge_started = False
@@ -453,6 +451,7 @@ async def run_streaming_turn(
     owner_user_claim: str | None = None,
     selected_skill_ids: list[str] | None = None,
     trace_mode: str | None = None,
+    attached_files: AttachedFiles | None = None,
 ) -> str | None:
     """Execute one streaming turn, emitting events and persisting lifecycle steps."""
     lifecycle = prepared_turn.lifecycle
@@ -514,6 +513,7 @@ async def run_streaming_turn(
                 owner_user_claim=owner_user_claim,
                 selected_skill_ids=selected_skill_ids,
                 trace_mode=trace_mode,
+                attached_files=attached_files,
             )
 
         await _run_prepared_stream(

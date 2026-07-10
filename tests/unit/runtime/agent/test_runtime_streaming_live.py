@@ -10,6 +10,7 @@ import pytest
 
 from fleet_rlm.runtime.agent.runtime_streaming import (
     _await_turn_with_live_progress,
+    _safe_streaming_error_text,
     _TurnComplete,
     aiter_chat_turn_stream,
 )
@@ -111,3 +112,9 @@ async def test_adapter_parse_error_reasoning_content_streams_as_reasoning_and_er
     assert error_events[0].text == "Adapter parse failed while reading the model response."
     assert "LM Response" not in serialized
     assert "reasoning_content" not in serialized
+
+
+def test_generic_streaming_error_never_returns_provider_exception_text() -> None:
+    raw = "provider accessToken=top-secret failed at /etc/fleet-rlm/provider.conf"
+
+    assert _safe_streaming_error_text(RuntimeError(raw)) == "Runtime operation failed."

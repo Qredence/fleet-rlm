@@ -151,6 +151,7 @@ ROUNDTRIP_CASES = [
             "settings_write_enabled": True,
             "profile_write_enabled": True,
             "ready": True,
+            "execution_backend": "legacy_agent_runtime",
             "active_models": {
                 "planner": "openai/gpt-4o",
                 "delegate": "anthropic/claude-3-5-sonnet",

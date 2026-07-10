@@ -75,6 +75,7 @@ class _RecordingLM:
 
 
 def test_llm_query_records_provider_wait_span(monkeypatch) -> None:
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
     from fleet_rlm.integrations.observability import mlflow_context
     from fleet_rlm.runtime.execution.llm_query import LLMQueryMixin
 

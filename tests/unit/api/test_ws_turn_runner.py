@@ -8,7 +8,12 @@ from typing import Any
 import pytest
 
 from fleet_rlm.api.events import ExecutionStepBuilder
-from fleet_rlm.api.routers.ws.turn_runner import _emit_stream_event, _stream_agent_events
+from fleet_rlm.api.routers.ws.turn_runner import (
+    _emit_stream_event,
+    _run_prepared_stream,
+    _stream_agent_events,
+    handle_stream_error,
+)
 from fleet_rlm.api.runtime_services.run_lifecycle import ExecutionLifecycleManager
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 
@@ -249,3 +254,50 @@ async def test_stream_agent_events_ignores_mlflow_span_exit_failure(monkeypatch:
     assert lifecycle.run_completed is True
     assert bridge.stopped is True
     assert websocket.messages[-1]["data"]["kind"] == "execution_completed"
+
+
+@pytest.mark.asyncio
+async def test_ws_prepared_stream_does_not_touch_mlflow_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.integrations.observability import mlflow_context
+    from fleet_rlm.integrations.observability.mlflow_context import MlflowTraceRequestContext
+
+    monkeypatch.delenv("MLFLOW_ENABLED", raising=False)
+
+    def _unexpected_runtime_import() -> object:
+        raise AssertionError("disabled WebSocket turn must not initialize MLflow")
+
+    monkeypatch.setattr(mlflow_context, "_runtime_module", _unexpected_runtime_import)
+    streamed: list[str] = []
+
+    async def _stream_body() -> None:
+        streamed.append("ran")
+
+    await _run_prepared_stream(
+        mlflow_trace_context=MlflowTraceRequestContext(client_request_id="ws-disabled"),
+        stream_body=_stream_body,
+    )
+
+    assert streamed == ["ran"]
+
+
+@pytest.mark.asyncio
+async def test_handle_stream_error_redacts_untrusted_exception_text_from_websocket_payload() -> None:
+    lifecycle, step_builder, _ = _lifecycle()
+    websocket = _FakeWebSocket()
+
+    await handle_stream_error(
+        websocket=websocket,  # type: ignore[arg-type]
+        lifecycle=lifecycle,
+        step_builder=step_builder,
+        exc=RuntimeError("Provider rejected api_key=sk-live-secret-12345678 at /var/lib/fleet-rlm/provider-debug.log"),
+        request_message="hello",
+    )
+
+    assert websocket.messages == [
+        {
+            "type": "error",
+            "code": "internal_error",
+            "message": "Streaming error: Runtime operation failed.",
+            "details": {"error_type": "RuntimeError"},
+        }
+    ]

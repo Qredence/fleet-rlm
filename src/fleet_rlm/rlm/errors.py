@@ -55,17 +55,21 @@ def direct_rlm_status_event(text: str, *, phase: str = "direct_rlm_start") -> Ru
 
 
 def direct_rlm_error_event(detail: DirectRLMErrorDetail, *, error: str | None = None) -> RuntimeEvent:
-    """Emit a terminal ERROR event with structured direct-RLM metadata."""
+    """Emit a terminal ERROR event with structured, client-safe metadata.
+
+    ``error`` is intentionally retained as a compatibility parameter for
+    callers that log it server-side, but raw provider/runtime details must not
+    enter a ``RuntimeEvent`` payload or visible text.
+    """
+    del error
     payload: dict[str, object] = {
         "code": detail.code,
         "execution_backend": "direct_rlm",
         "recoverable": detail.recoverable,
     }
-    if error:
-        payload["error"] = error
     return RuntimeEvent(
         kind=RuntimeEventKind.ERROR,
-        text=detail.message if error is None else f"{detail.message} ({error})",
+        text=detail.message,
         payload=payload,
     )
 

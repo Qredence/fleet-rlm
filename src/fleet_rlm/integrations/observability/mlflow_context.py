@@ -83,14 +83,71 @@ def new_client_request_id(*, prefix: str = "fleet") -> str:
     return f"{prefix}-{uuid.uuid4().hex}"
 
 
+def build_chat_trace_context(
+    *,
+    workspace_id: str | None,
+    user_id: str | None,
+    session_id: str | None,
+    turn_index: int,
+    run_id: str | None,
+    message: str,
+    execution_mode: str | None,
+    app_env: str | None,
+    sub_lm_configured: bool,
+    turn_index_source: str = "agent_history",
+    execution_backend: str | None = None,
+) -> MlflowTraceRequestContext:
+    """Build one transport-neutral MLflow request context for a chat turn."""
+    client_request_id = new_client_request_id(prefix="chat")
+    trace_session_id = None
+    if workspace_id and user_id and session_id:
+        trace_session_id = f"{workspace_id}:{user_id}:{session_id}"
+    elif session_id:
+        trace_session_id = session_id
+
+    metadata = {
+        "fleet_rlm.workspace_id": workspace_id or "",
+        "fleet_rlm.turn_index": str(turn_index),
+        "fleet_rlm.predicted_turn_index": str(turn_index),
+        "fleet_rlm.turn_index_source": turn_index_source,
+        "fleet_rlm.turn_attempt_id": client_request_id,
+        "fleet_rlm.client_request_id": client_request_id,
+        "fleet_rlm.runtime_mode": "daytona_pilot",
+        "fleet_rlm.events_mode": execution_mode or "auto",
+        "fleet_rlm.sub_lm_configured": str(sub_lm_configured).lower(),
+    }
+    if run_id:
+        metadata["fleet_rlm.run_id"] = run_id
+    if execution_backend:
+        metadata["fleet_rlm.execution_backend"] = execution_backend
+
+    return MlflowTraceRequestContext(
+        client_request_id=client_request_id,
+        session_id=trace_session_id,
+        user_id=user_id,
+        app_env=app_env,
+        request_preview=message,
+        metadata=metadata,
+    )
+
+
 def current_request_context() -> MlflowTraceRequestContext | None:
     """Return the active MLflow request context, if any."""
     return _CURRENT_REQUEST_CONTEXT.get()
 
 
+def _mlflow_enabled() -> bool:
+    """Return whether this process explicitly opted into MLflow work."""
+    return _env_bool(os.getenv("MLFLOW_ENABLED"), default=False)
+
+
 @contextmanager
 def _application_turn_span(context: MlflowTraceRequestContext):
     """Open a parent MLflow span for the full chat turn when tracing is enabled."""
+    if not _mlflow_enabled():
+        yield None
+        return
+
     runtime = _runtime_module()
     mlflow = runtime._import_mlflow()
     if mlflow is None:
@@ -188,7 +245,7 @@ def _register_dspy_autolog(mlflow: Any) -> bool:
 
 def _try_initialize_mlflow_for_turn() -> None:
     """Ensure MLflow is initialized before the first span in a chat turn."""
-    if not _env_bool(os.getenv("MLFLOW_ENABLED"), default=True):
+    if not _mlflow_enabled():
         return
 
     # Deferred import: mlflow_runtime imports this module at load time.
@@ -209,11 +266,19 @@ def _try_initialize_mlflow_for_turn() -> None:
 @contextmanager
 def mlflow_request_context(context: MlflowTraceRequestContext):
     """Scope MLflow request metadata to the current execution context."""
-    _try_initialize_mlflow_for_turn()
     context_token = _CURRENT_REQUEST_CONTEXT.set(context)
     trace_token = _CURRENT_TRACE_ID.set(None)
+    if not _mlflow_enabled():
+        try:
+            yield context
+        finally:
+            _CURRENT_TRACE_ID.reset(trace_token)
+            _CURRENT_REQUEST_CONTEXT.reset(context_token)
+        return
+
     trace_state = "OK"
     try:
+        _try_initialize_mlflow_for_turn()
         with _application_turn_span(context):
             try:
                 yield context
@@ -292,6 +357,10 @@ def mlflow_child_span(
     inputs: dict[str, Any] | None = None,
 ) -> Iterator[Any | None]:
     """Best-effort child span for codepaths already inside an MLflow trace."""
+    if not _mlflow_enabled():
+        yield None
+        return
+
     runtime = _runtime_module()
     mlflow = runtime._import_mlflow()
     if mlflow is None or not _has_active_mlflow_trace(mlflow):
@@ -423,6 +492,9 @@ def _record_rlm_available_tools_span(mlflow: Any, start_span: Any) -> bool:
 
 def record_rlm_trajectory_spans(trajectory: Any) -> int:
     """Materialize RLM trajectory tool/REPL steps as child MLflow spans."""
+    if not _mlflow_enabled():
+        return 0
+
     steps = _coerce_trajectory_steps(trajectory)
     if not steps:
         return 0
@@ -618,6 +690,9 @@ def update_current_mlflow_trace(
     trace_metadata: dict[str, Any] | None = None,
 ) -> str | None:
     """Apply the current request context to the active MLflow trace."""
+    if not _mlflow_enabled():
+        return None
+
     context = current_request_context()
     if context is None:
         return None
@@ -667,6 +742,9 @@ def update_current_mlflow_trace(
 
 def finalize_current_mlflow_trace(*, state: str) -> str | None:
     """Mark the active MLflow trace as terminal when request processing ends."""
+    if not _mlflow_enabled():
+        return None
+
     context = current_request_context()
 
     runtime = _runtime_module()
@@ -699,6 +777,9 @@ def finalize_current_mlflow_trace(*, state: str) -> str | None:
 
 def capture_last_active_trace_id() -> str | None:
     """Cache and return the last active MLflow trace id for this execution."""
+    if not _mlflow_enabled():
+        return None
+
     context = current_request_context()
 
     trace_id = _CURRENT_TRACE_ID.get()
@@ -757,7 +838,7 @@ def trace_result_metadata(
     trace_metadata: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     """Return optional MLflow metadata to attach to final/result payloads."""
-    if not _env_bool(os.getenv("MLFLOW_ENABLED"), default=True):
+    if not _mlflow_enabled():
         return {}
 
     runtime = _runtime_module()
@@ -825,7 +906,7 @@ def set_gen_ai_system_attributes(
         This function is a no-op when MLFLOW_ENABLED=false or when the span
         is None (VAL-C-037).
     """
-    if not _env_bool(os.getenv("MLFLOW_ENABLED"), default=True):
+    if not _mlflow_enabled():
         return
     if span is None:
         return
@@ -867,7 +948,7 @@ def set_gen_ai_usage_attributes(
         This function is a no-op when MLFLOW_ENABLED=false or when the span
         is None (VAL-C-037).
     """
-    if not _env_bool(os.getenv("MLFLOW_ENABLED"), default=True):
+    if not _mlflow_enabled():
         return
     if span is None:
         return
@@ -907,7 +988,7 @@ def set_gen_ai_tool_attributes(
         This function is a no-op when MLFLOW_ENABLED=false or when the span
         is None (VAL-C-037).
     """
-    if not _env_bool(os.getenv("MLFLOW_ENABLED"), default=True):
+    if not _mlflow_enabled():
         return
     if span is None:
         return
@@ -931,6 +1012,7 @@ def is_autolog_registered() -> bool:
 
 __all__ = [
     "MlflowTraceRequestContext",
+    "build_chat_trace_context",
     "capture_last_active_trace_id",
     "current_request_context",
     "is_autolog_registered",

@@ -11,6 +11,41 @@ from fastapi import HTTPException
 
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.integrations.persistence_protocol import UnsupportedLocalCapabilityError
+from fleet_rlm.observability.token_usage import int_or_none as _pure_int_or_none
+from fleet_rlm.traces.classifier import (
+    MappedRenderKind,
+)
+from fleet_rlm.traces.classifier import (
+    classify_span as _pure_classify_span,
+)
+from fleet_rlm.traces.classifier import (
+    component_type_hint as _pure_component_type_hint,
+)
+from fleet_rlm.traces.classifier import (
+    fallback_reason as _pure_fallback_reason,
+)
+from fleet_rlm.traces.classifier import (
+    span_attributes as _pure_span_attributes,
+)
+from fleet_rlm.traces.classifier import (
+    span_status_code as _pure_span_status_code,
+)
+from fleet_rlm.traces.classifier import (
+    span_type as _pure_span_type,
+)
+from fleet_rlm.traces.mlflow_ingest import sanitize_trace_info, sanitize_trace_spans
+from fleet_rlm.traces.performance import (
+    output_chars as _pure_output_chars,
+)
+from fleet_rlm.traces.performance import (
+    span_duration_ms as _pure_span_duration_ms,
+)
+from fleet_rlm.traces.performance import (
+    span_token_usage as _pure_span_token_usage,
+)
+from fleet_rlm.traces.performance import (
+    summarize_spans,
+)
 
 from ..schemas.sessions import (
     SessionTraceDebugResponse,
@@ -28,15 +63,6 @@ from .session_trace_export import (
 )
 
 ResolvedTraceSource = Literal["trace_id", "client_request_id", "session_row", "runtime_session_id"]
-MappedRenderKind = Literal[
-    "assistant_text",
-    "reasoning",
-    "tool",
-    "sandbox",
-    "status_note",
-    "non_rendered",
-]
-
 logger = logging.getLogger(__name__)
 
 
@@ -72,30 +98,18 @@ def _unix_nano_string(value: Any) -> str | None:
 
 
 def _span_attributes(span: dict[str, Any]) -> dict[str, Any]:
-    attributes = span.get("attributes")
-    return attributes if isinstance(attributes, dict) else {}
+    """Compatibility adapter for :func:`fleet_rlm.traces.classifier.span_attributes`."""
+    return _pure_span_attributes(span)
 
 
 def _span_status_code(span: dict[str, Any]) -> str | None:
-    status = span.get("status")
-    if isinstance(status, dict):
-        return optional_string(status.get("code"))
-    return None
+    """Compatibility adapter for the pure classifier helper."""
+    return _pure_span_status_code(span)
 
 
 def _int_or_none(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str) and value.strip():
-        try:
-            return int(float(value.strip()))
-        except ValueError:
-            return None
-    return None
+    """Compatibility adapter for the provider-neutral numeric helper."""
+    return _pure_int_or_none(value)
 
 
 def _span_timestamp(value: Any) -> int | None:
@@ -103,11 +117,8 @@ def _span_timestamp(value: Any) -> int | None:
 
 
 def _span_duration_ms(span: dict[str, Any]) -> int | None:
-    start = _span_timestamp(span.get("start_time_unix_nano"))
-    end = _span_timestamp(span.get("end_time_unix_nano"))
-    if start is None or end is None or end <= start:
-        return None
-    return int((end - start) / 1_000_000)
+    """Compatibility adapter for the pure performance helper."""
+    return _pure_span_duration_ms(span)
 
 
 def _jsonish_value(value: Any) -> Any:
@@ -137,64 +148,19 @@ def _span_outputs(span: dict[str, Any]) -> Any:
 
 
 def _output_chars(span: dict[str, Any]) -> int | None:
-    output = _span_outputs(span)
-    if output is None:
-        return None
-    if isinstance(output, str):
-        return len(output)
-    try:
-        return len(json.dumps(output, ensure_ascii=True, sort_keys=True))
-    except Exception:
-        return len(str(output))
+    """Compatibility adapter for the pure performance helper."""
+    return _pure_output_chars(span)
 
 
 def _token_usage(span: dict[str, Any]) -> tuple[int | None, int | None, int | None]:
-    attributes = _span_attributes(span)
-    usage = _jsonish_value(attributes.get("mlflow.chat.tokenUsage"))
-    if not isinstance(usage, dict):
-        usage = _jsonish_value(attributes.get("mlflow.chat.tokenUsageJson"))
-    if not isinstance(usage, dict):
-        usage = {}
-
-    input_tokens = _int_or_none(
-        usage.get("input_tokens")
-        or usage.get("prompt_tokens")
-        or usage.get("inputTokens")
-        or attributes.get("mlflow.chat.inputTokens")
-    )
-    output_tokens = _int_or_none(
-        usage.get("output_tokens")
-        or usage.get("completion_tokens")
-        or usage.get("outputTokens")
-        or attributes.get("mlflow.chat.outputTokens")
-    )
-    total_tokens = _int_or_none(
-        usage.get("total_tokens") or usage.get("totalTokens") or attributes.get("mlflow.chat.totalTokens")
-    )
-    if total_tokens is None and (input_tokens is not None or output_tokens is not None):
-        total_tokens = int(input_tokens or 0) + int(output_tokens or 0)
-    return input_tokens, output_tokens, total_tokens
+    """Compatibility adapter for the pure performance helper."""
+    usage = _pure_span_token_usage(span)
+    return usage.input_tokens or None, usage.output_tokens or None, usage.total_tokens or None
 
 
 def _fallback_reason(span: dict[str, Any]) -> str | None:
-    haystack_parts = [
-        optional_string(span.get("name")),
-        optional_string(_span_status_code(span)),
-        optional_string(span.get("status", {}).get("message") if isinstance(span.get("status"), dict) else None),
-        _preview_value(_span_inputs(span), max_chars=500),
-        _preview_value(_span_outputs(span), max_chars=500),
-        _preview_value(_span_attributes(span), max_chars=500),
-    ]
-    haystack = " ".join(part for part in haystack_parts if part).lower()
-    if "adapterparseerror" in haystack or "failed to parse" in haystack or "parse error" in haystack:
-        return "adapter_parse_error"
-    if "jsonadapter" in haystack and ("fallback" in haystack or "retry" in haystack):
-        return "json_adapter_fallback"
-    if "chatadapter" in haystack and ("fallback" in haystack or "retry" in haystack):
-        return "chat_adapter_fallback"
-    if "fallback" in haystack and "adapter" in haystack:
-        return "adapter_fallback"
-    return None
+    """Compatibility adapter for the pure classifier helper."""
+    return _pure_fallback_reason(span)
 
 
 def _span_summary(span: dict[str, Any]) -> SessionTracePerformanceSpanSummary:
@@ -217,219 +183,39 @@ def _csv_attr_values(value: Any) -> list[str]:
     return [item.strip() for item in text.split(",") if item.strip()]
 
 
-def _build_performance_summary(spans: list[dict[str, Any]]) -> SessionTracePerformanceSummary:
-    llm_duration = 0
-    repl_duration = 0
-    tool_duration = 0
-    input_tokens_total = 0
-    output_tokens_total = 0
-    total_tokens_total = 0
-    parse_error_count = 0
-    fallback_count = 0
-    selected_skills: list[str] = []
-    action_max_tokens: int | None = None
-    max_output_chars: int | None = None
-    root_duration: int | None = None
-    slowest_llm: dict[str, Any] | None = None
-    largest_output: dict[str, Any] | None = None
+def _build_performance_summary(
+    spans: list[dict[str, Any]],
+    *,
+    raw_spans: list[dict[str, Any]] | None = None,
+) -> SessionTracePerformanceSummary:
+    """Build a client-safe performance summary from sanitized trace spans.
 
-    for span in spans:
-        duration = _span_duration_ms(span) or 0
-        span_type = (_span_type(span) or "").upper()
-        name = str(span.get("name") or "")
-        attributes = _span_attributes(span)
-
-        if span.get("parent_span_id") is None and duration:
-            root_duration = duration if root_duration is None else max(root_duration, duration)
-
-        if span_type in {"LLM", "CHAT_MODEL"} or name == "LM.__call__":
-            llm_duration += duration
-            if slowest_llm is None or duration > (_span_duration_ms(slowest_llm) or 0):
-                slowest_llm = span
-        elif span_type == "TOOL" and "repl" in name.lower():
-            repl_duration += duration
-        elif span_type == "TOOL":
-            tool_duration += duration
-
-        input_tokens, output_tokens, total_tokens = _token_usage(span)
-        input_tokens_total += int(input_tokens or 0)
-        output_tokens_total += int(output_tokens or 0)
-        total_tokens_total += int(total_tokens or 0)
-
-        output_chars = _output_chars(span) or 0
-        if largest_output is None or output_chars > (_output_chars(largest_output) or 0):
-            largest_output = span
-
-        reason = _fallback_reason(span)
-        if reason is not None:
-            if "parse" in reason:
-                parse_error_count += 1
-            if "fallback" in reason or "retry" in reason or reason == "adapter_parse_error":
-                fallback_count += 1
-
-        for skill in _csv_attr_values(attributes.get("fleet_rlm.selected_skills")):
-            if skill not in selected_skills:
-                selected_skills.append(skill)
-
-        action_max_tokens = action_max_tokens or _int_or_none(attributes.get("fleet_rlm.rlm_action_max_tokens"))
-        max_output_chars = max_output_chars or _int_or_none(attributes.get("fleet_rlm.rlm_max_output_chars"))
-
-    known_duration = llm_duration + repl_duration + tool_duration
-    root_overhead = None
-    if root_duration is not None:
-        root_overhead = max(0, root_duration - known_duration)
-
-    expected_total = input_tokens_total + output_tokens_total
-    token_total_mismatch = bool(total_tokens_total and total_tokens_total != expected_total)
-
-    return SessionTracePerformanceSummary(
-        total_duration_ms=root_duration,
-        llm_duration_ms=llm_duration,
-        repl_duration_ms=repl_duration,
-        tool_duration_ms=tool_duration,
-        root_overhead_ms=root_overhead,
-        input_tokens=input_tokens_total,
-        output_tokens=output_tokens_total,
-        total_tokens=total_tokens_total or expected_total,
-        token_total_mismatch=token_total_mismatch,
-        adapter_fallback_count=fallback_count,
-        parse_error_count=parse_error_count,
-        selected_skills=selected_skills,
-        rlm_action_max_tokens=action_max_tokens,
-        rlm_max_output_chars=max_output_chars,
-        slowest_llm_span=_span_summary(slowest_llm) if slowest_llm is not None else None,
-        largest_output_span=_span_summary(largest_output) if largest_output is not None else None,
-    )
+    Adapter fallback detection returns only fixed category counts, so retain
+    those two numeric signals from provider data without retaining any raw
+    span name, output, or selected-skill value in the client response.
+    """
+    payload = summarize_spans(spans).as_dict()
+    if raw_spans is not None:
+        raw_summary = summarize_spans(raw_spans)
+        payload["adapter_fallback_count"] = raw_summary.adapter_fallback_count
+        payload["parse_error_count"] = raw_summary.parse_error_count
+    return SessionTracePerformanceSummary.model_validate(payload)
 
 
 def _span_type(span: dict[str, Any]) -> str | None:
-    attributes = _span_attributes(span)
-    return optional_string(span.get("span_type")) or optional_string(attributes.get("mlflow.spanType"))
+    """Compatibility adapter for the pure classifier helper."""
+    return _pure_span_type(span)
 
 
 def _component_type_hint(tool_name: str) -> str:
-    normalized = tool_name.lower()
-    if normalized.startswith("mcp__"):
-        return f"tool-{tool_name}"
-    if any(
-        token in normalized
-        for token in ("bash", "exec", "command", "terminal", "run", "shell", "python", "repl", "interpreter", "sandbox")
-    ):
-        return "tool-Bash"
-    if any(
-        token in normalized
-        for token in (
-            "load_document",
-            "load-document",
-            "read_file",
-            "read-file",
-            "read_document",
-            "read-document",
-            "open_document",
-            "document_read",
-            "file_read",
-        )
-    ):
-        return "tool-Read"
-    if any(
-        token in normalized
-        for token in ("list_files", "list-files", "list_dir", "glob", "tree", "directory_listing", "browse_files")
-    ):
-        return "tool-Glob"
-    if "write" in normalized or "create_file" in normalized:
-        return "tool-Write"
-    if any(token in normalized for token in ("edit", "patch", "notebook")):
-        return "tool-Edit"
-    if any(token in normalized for token in ("grep", "find", "search")):
-        return "tool-WebSearch" if "web" in normalized else "tool-Grep"
-    if any(token in normalized for token in ("webfetch", "fetch", "browser", "url")):
-        return "tool-WebFetch"
-    if any(token in normalized for token in ("todo", "task_list")):
-        return "tool-TodoWrite"
-    if any(token in normalized for token in ("plan", "planning")):
-        return "tool-PlanWrite"
-    if any(token in normalized for token in ("delegate", "sub_rlm", "agent", "recursive")):
-        return "tool-Agent"
-    if any(token in normalized for token in ("think", "reason")):
-        return "tool-Thinking"
-    sanitized = "".join(
-        segment[:1].upper() + segment[1:] for segment in tool_name.replace("-", "_").split("_") if segment
-    )
-    return f"tool-{sanitized or 'Tool'}"
+    """Compatibility adapter for the pure classifier helper."""
+    return _pure_component_type_hint(tool_name)
 
 
 def _classify_span(span: dict[str, Any]) -> tuple[MappedRenderKind, str | None, str, str | None]:
-    name = optional_string(span.get("name")) or "unknown"
-    span_type = (_span_type(span) or "").upper()
-    attributes = _span_attributes(span)
-    tool_name = optional_string(attributes.get("mlflow.spanFunctionName")) or name
-
-    if span_type == "TOOL":
-        component_type = _component_type_hint(tool_name)
-        if component_type == "tool-Bash":
-            return (
-                "sandbox",
-                component_type,
-                "TOOL span executes REPL or shell code and is rendered as a sandbox/Bash tool card.",
-                tool_name,
-            )
-        return (
-            "tool",
-            component_type,
-            "TOOL span is rendered as a concrete tool card using the frontend tool classification rules.",
-            tool_name,
-        )
-
-    if span_type in {"LLM", "CHAT_MODEL"}:
-        if name == "rlm_available_tools":
-            return (
-                "non_rendered",
-                None,
-                "This span records available tool schemas for MLflow judges and is intentionally not shown in the chat transcript.",
-                None,
-            )
-        return (
-            "non_rendered",
-            None,
-            "LLM/chat-model spans are observability-only; the chat transcript renders runtime-emitted reasoning and assistant text instead.",
-            None,
-        )
-
-    if span_type in {
-        "AGENT",
-        "WORKFLOW",
-        "TASK",
-        "CHAIN",
-        "MEMORY",
-        "RETRIEVER",
-        "EMBEDDING",
-        "RERANKER",
-        "PARSER",
-        "GUARDRAIL",
-        "EVALUATOR",
-    }:
-        return (
-            "non_rendered",
-            None,
-            "This orchestration span provides trace context but does not map to a standalone chat transcript component.",
-            None,
-        )
-
-    status_code = _span_status_code(span)
-    if status_code == "STATUS_CODE_ERROR":
-        return (
-            "status_note",
-            "tool-Status",
-            "Error-only span is treated as a status/error note when surfaced in the transcript.",
-            None,
-        )
-
-    return (
-        "non_rendered",
-        None,
-        "Span does not correspond to a dedicated chat component under the current websocket contract.",
-        None,
-    )
+    """Compatibility adapter for the pure classifier helper."""
+    result = _pure_classify_span(span)
+    return result.render_kind, result.component_type, result.rationale, result.tool_name
 
 
 def _trace_spans(trace: Any) -> list[dict[str, Any]]:
@@ -488,12 +274,13 @@ def build_session_trace_debug_response(
     resolved_from: ResolvedTraceSource,
     runtime_session_id: str | None = None,
 ) -> SessionTraceDebugResponse:
-    info = _trace_info(trace)
-    spans = _trace_spans(trace)
+    info = sanitize_trace_info(_trace_info(trace))
+    raw_spans = _trace_spans(trace)
+    spans = sanitize_trace_spans(raw_spans)
     mapped_spans: list[SessionTraceDebugSpan] = []
     renderable_count = 0
 
-    for span in spans:
+    for raw_span, span in zip(raw_spans, spans, strict=True):
         mapped_render_kind, mapped_component_type, rationale, tool_name = _classify_span(span)
         if mapped_render_kind != "non_rendered":
             renderable_count += 1
@@ -517,7 +304,7 @@ def build_session_trace_debug_response(
                 output_tokens=_token_usage(span)[1],
                 total_tokens=_token_usage(span)[2],
                 output_chars=_output_chars(span),
-                retry_or_fallback_reason=_fallback_reason(span),
+                retry_or_fallback_reason=_fallback_reason(raw_span),
             )
         )
 
@@ -536,7 +323,9 @@ def build_session_trace_debug_response(
         span_count=len(mapped_spans),
         renderable_span_count=renderable_count,
         non_rendered_span_count=len(mapped_spans) - renderable_count,
-        performance_summary=_build_performance_summary(spans),
+        # Aggregate only the sanitized span copies: compact references such as
+        # slowest-span names and selected skills are client-facing fields too.
+        performance_summary=_build_performance_summary(spans, raw_spans=raw_spans),
         spans=mapped_spans,
     )
 

@@ -15,7 +15,8 @@ from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext, Tu
 from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
 from fleet_rlm.api.runtime_services.stream_turn import stream_turn
 from fleet_rlm.files.schemas import AttachedFiles, AttachmentRef
-from fleet_rlm.rlm.errors import MISSING_INTERPRETER, MISSING_PLANNER_LM, TURN_CANCELLED
+from fleet_rlm.rlm.errors import MISSING_INTERPRETER, MISSING_PLANNER_LM, RLM_EXECUTION_FAILED, TURN_CANCELLED
+from fleet_rlm.rlm.execution import build_direct_rlm_artifact_tools
 from fleet_rlm.rlm.inputs import build_direct_rlm_turn_inputs
 from fleet_rlm.rlm.runner import DirectRLMRunner
 from fleet_rlm.runtime.events import EVENT_SCHEMA_VERSION, RuntimeEvent, RuntimeEventKind
@@ -38,7 +39,11 @@ class _AgentWithInterpreter:
         self.interpreter = _FakeInterpreter()
         self.core_memory = ""
         self.history = dspy.History(messages=[])
+        self.history_max_turns: int | None = None
         self.planner_lm = planner_lm
+
+    async def aimport_session_state(self, state: dict[str, Any]) -> None:
+        self.history = dspy.History(messages=list(state.get("history", [])))
 
 
 async def _collect_events(
@@ -129,6 +134,27 @@ class TestDirectRLMRunnerErrors:
         assert events[-1].payload["code"] == TURN_CANCELLED.code
 
     @pytest.mark.asyncio
+    async def test_executor_failure_never_exposes_raw_exception_text(
+        self, sample_context: ChatExecutionContext
+    ) -> None:
+        def _failing_executor(**_: object) -> object:
+            raise RuntimeError("provider token=top-secret at /home/daytona/memory/private.log")
+
+        agent = _AgentWithInterpreter(sample_context.prepared.planner_lm)
+        events = await _collect_events(
+            DirectRLMRunner(turn_executor=_failing_executor),
+            _direct_rlm_context(sample_context),
+            agent_runtime=agent,
+        )
+
+        error = events[-1]
+        assert error.kind is RuntimeEventKind.ERROR
+        assert error.text == RLM_EXECUTION_FAILED.message
+        assert "top-secret" not in error.model_dump_json()
+        assert "/home/daytona/memory" not in error.model_dump_json()
+        assert "error" not in error.payload
+
+    @pytest.mark.asyncio
     async def test_stream_override_is_injectable(self, sample_context: ChatExecutionContext) -> None:
         async def _override(
             *,
@@ -168,7 +194,7 @@ class TestDirectRLMRunnerGoldenPath:
         assert events[-1].text == "2+2 equals 4"
         assert events[-1].payload["execution_backend"] == "direct_rlm"
         assert events[-1].payload["schema_version"] == EVENT_SCHEMA_VERSION
-        assert events[-1].payload["history_turns"] == 0
+        assert events[-1].payload["history_turns"] == 1
         assert events[-1].payload["trajectory"]["steps"]
 
     @pytest.mark.asyncio
@@ -222,6 +248,41 @@ class TestDirectRLMRunnerProjection:
 
 class TestStreamTurnDirectRLMDispatch:
     @pytest.mark.asyncio
+    async def test_direct_rlm_restores_persisted_history_before_running(
+        self,
+        sample_context: ChatExecutionContext,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        class _SessionStore:
+            async def get_session_record(self, *, session_id: str) -> dict[str, object]:
+                assert session_id == "resumed-direct-session"
+                return {"session": {"state": {"history": [{"user_message": "earlier", "response": "answer"}]}}}
+
+        agent = _AgentWithInterpreter(sample_context.prepared.planner_lm)
+        prepared = replace(sample_context.prepared, planner_lm=agent, repository=None, persistence=_SessionStore())
+        ctx = _direct_rlm_context(sample_context, prepared=prepared, session_id="resumed-direct-session")
+        seen_history_sizes: list[int] = []
+
+        async def _spy_stream(
+            self: DirectRLMRunner,
+            *,
+            ctx: ChatExecutionContext,
+            message: str,
+            agent_runtime: object | None = None,
+            cancel_check: object = None,
+        ) -> AsyncIterator[RuntimeEvent]:
+            _ = self, ctx, message, cancel_check
+            seen_history_sizes.append(len(getattr(agent_runtime.history, "messages", [])))
+            yield RuntimeEvent(kind=RuntimeEventKind.DONE, text="resumed")
+
+        monkeypatch.setattr(DirectRLMRunner, "stream", _spy_stream)
+
+        events = [event async for event in stream_turn(ctx=ctx, agent_runtime=agent, message="continue")]
+
+        assert events[-1].kind is RuntimeEventKind.DONE
+        assert seen_history_sizes == [1]
+
+    @pytest.mark.asyncio
     async def test_stream_turn_dispatches_to_direct_rlm_runner(
         self,
         sample_context: ChatExecutionContext,
@@ -254,7 +315,11 @@ class TestStreamTurnDirectRLMDispatch:
         assert calls[0][1] == "dispatch me"
         assert calls[0][2] is agent
         assert agent.calls == []
-        assert [event.kind for event in events] == [RuntimeEventKind.STATUS, RuntimeEventKind.ERROR]
+        assert [event.kind for event in events] == [
+            RuntimeEventKind.STATUS,
+            RuntimeEventKind.MLFLOW_SPAN,
+            RuntimeEventKind.ERROR,
+        ]
 
     @pytest.mark.asyncio
     async def test_stream_turn_runs_injected_direct_rlm_turn(
@@ -344,3 +409,52 @@ class TestAttachedFilesTurnInputs:
         attached_row = next(row for row in rows if row.get("label") == "Attached files")
         assert attached_row.get("kind") == "context"
         assert "/home/daytona/memory" not in str(attached_row.get("value"))
+
+
+class TestDirectRLMSessionContinuity:
+    @pytest.mark.asyncio
+    async def test_three_direct_turns_append_history_for_session_resume(
+        self,
+        sample_context: ChatExecutionContext,
+    ) -> None:
+        seen_history_sizes: list[int] = []
+
+        def _executor(*, agent_runtime: object, **_: object) -> _FakePrediction:
+            seen_history_sizes.append(len(getattr(agent_runtime.history, "messages", [])))
+            return _FakePrediction(response=f"reply-{len(seen_history_sizes)}")
+
+        agent = _AgentWithInterpreter(sample_context.prepared.planner_lm)
+        agent.history_max_turns = 3
+        runner = DirectRLMRunner(turn_executor=_executor)
+        ctx = _direct_rlm_context(sample_context, session_id="direct-history-session")
+
+        terminal_events = []
+        for message in ("one", "two", "three"):
+            events = await _collect_events(runner, ctx, message=message, agent_runtime=agent)
+            terminal_events.append(events[-1])
+
+        assert seen_history_sizes == [0, 1, 2]
+        assert [event.payload["history_turns"] for event in terminal_events] == [1, 2, 3]
+        assert [turn["user_message"] for turn in agent.history.messages] == ["one", "two", "three"]
+
+
+def test_direct_rlm_artifact_tools_are_session_bound_and_daytona_backed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_create_artifact_impl(**kwargs: object) -> dict[str, str]:
+        captured.update(kwargs)
+        return {"status": "ok"}
+
+    monkeypatch.setattr("fleet_rlm.runtime.tools.binding.create_artifact_impl", _fake_create_artifact_impl)
+    interpreter = object()
+    tools = build_direct_rlm_artifact_tools(session_id="promotion-session", interpreter=interpreter)
+
+    names = {tool.name for tool in tools}
+    assert names == {"create_artifact", "list_artifacts", "read_artifact", "update_artifact"}
+
+    create = next(tool for tool in tools if tool.name == "create_artifact")
+    assert create.func(category="reports", relative_path="result.md", content="# done") == {"status": "ok"}
+    assert captured["session_id"] == "promotion-session"
+    assert captured["interpreter"] is interpreter

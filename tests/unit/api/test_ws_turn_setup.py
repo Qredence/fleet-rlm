@@ -7,9 +7,9 @@ import pytest
 
 def test_build_trace_context_includes_attempt_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.api.routers.ws import turn_setup
-    from fleet_rlm.integrations.observability import mlflow_runtime
+    from fleet_rlm.integrations.observability import mlflow_context
 
-    monkeypatch.setattr(mlflow_runtime, "new_client_request_id", lambda *, prefix: f"{prefix}-fixed")
+    monkeypatch.setattr(mlflow_context, "new_client_request_id", lambda *, prefix: f"{prefix}-fixed")
 
     context = turn_setup._build_trace_context(
         runtime=SimpleNamespace(cfg=SimpleNamespace(app_env="local")),

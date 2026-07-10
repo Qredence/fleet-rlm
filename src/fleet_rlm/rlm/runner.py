@@ -21,6 +21,7 @@ from fleet_rlm.rlm.errors import (
 from fleet_rlm.rlm.execution import DirectRLMTurnExecutor, extract_direct_rlm_response, run_direct_rlm_turn
 from fleet_rlm.rlm.inputs import build_direct_rlm_turn_inputs, history_turn_count
 from fleet_rlm.rlm.trajectory import build_direct_rlm_done_event, iter_trajectory_runtime_events
+from fleet_rlm.runtime.agent.runtime_helpers import append_turn_to_history
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 
 logger = logging.getLogger(__name__)
@@ -133,6 +134,15 @@ class DirectRLMRunner:
         response = extract_direct_rlm_response(prediction)
         if response:
             yield RuntimeEvent(kind=RuntimeEventKind.TEXT, text=response)
+
+        history = getattr(agent_runtime, "history", None)
+        if agent_runtime is not None and history is not None:
+            agent_runtime.history = append_turn_to_history(
+                history,
+                user_message=message,
+                response=response,
+                history_max_turns=getattr(agent_runtime, "history_max_turns", None),
+            )
 
         yield build_direct_rlm_done_event(
             response=response,

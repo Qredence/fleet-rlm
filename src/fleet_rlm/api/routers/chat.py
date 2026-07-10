@@ -27,12 +27,14 @@ from fleet_rlm.api.dependencies import (
     PersistenceDepsDep,
 )
 from fleet_rlm.api.events.project_sse import project_sse
+from fleet_rlm.api.routers.ws.session import resolve_persisted_session_owner_proof
 from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext, TurnControls
 from fleet_rlm.api.runtime_services.chat_prepare_errors import public_prepare_error_detail
 from fleet_rlm.api.runtime_services.chat_runtime import build_chat_agent_context, prepare_chat_runtime
 from fleet_rlm.api.runtime_services.stream_turn import stream_turn
 from fleet_rlm.api.schemas.chat import ChatMessage, ChatRequest
 from fleet_rlm.files.attachment_resolution import AttachmentResolutionError, resolve_attachment_refs
+from fleet_rlm.files.upload_staging import attachment_owner_scope
 from fleet_rlm.integrations.daytona.volumes import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 from fleet_rlm.utils.identity import sanitize_id as _sanitize_id
@@ -210,18 +212,6 @@ async def _prepare_chat_event_stream(
             detail="No user message found in messages. At least one message with role='user' is required.",
         )
 
-    # ── 1b. Resolve attachment refs before streaming ──────────────────
-    attached_files = None
-    if body.attachment_refs:
-        try:
-            attached_files = resolve_attachment_refs(
-                volume_mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
-                session_id=body.session_id,
-                attachment_ids=body.attachment_refs,
-            )
-        except AttachmentResolutionError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
     # ── 2. Prepare the chat runtime ───────────────────────────────────
     # Use SSE-appropriate error/close callbacks that raise HTTP exceptions
     # instead of writing to a WebSocket.
@@ -256,6 +246,31 @@ async def _prepare_chat_event_stream(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=public_prepare_error_detail(),
         )
+
+    # ── 2b. Resolve attachment refs before streaming ──────────────────
+    attached_files = None
+    if body.attachment_refs:
+        owner_scope = attachment_owner_scope(
+            tenant_claim=identity.tenant_claim,
+            user_claim=identity.user_claim,
+        )
+        persisted_session_owner_proof = await resolve_persisted_session_owner_proof(
+            persistence=runtime.persistence,
+            identity_rows=runtime.identity_rows,
+            session_id=body.session_id or "",
+            owner_tenant_claim=identity.tenant_claim,
+            owner_user_claim=identity.user_claim,
+        )
+        try:
+            attached_files = resolve_attachment_refs(
+                volume_mount_path=str(DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH),
+                session_id=body.session_id,
+                attachment_ids=body.attachment_refs,
+                owner_scope=owner_scope,
+                persisted_session_owner_proof=persisted_session_owner_proof,
+            )
+        except AttachmentResolutionError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     # ── 3. Build ChatExecutionContext ─────────────────────────────────
     cfg = config_deps.config

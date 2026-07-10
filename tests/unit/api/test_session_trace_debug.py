@@ -129,6 +129,76 @@ def test_build_session_trace_debug_response_maps_tool_and_observability_spans():
     assert response.performance_summary.slowest_llm_span.name == "LM.__call__"
 
 
+def test_trace_debug_adds_phase6_render_kinds_and_redacts_provider_values():
+    trace = FakeTrace(
+        {
+            "info": {
+                "trace_id": "tr-phase6",
+                "request_preview": "Bearer top-secret /home/daytona/memory/private.txt",
+            },
+            "data": {
+                "spans": [
+                    {"span_id": "artifact", "name": "artifact", "span_type": "ARTIFACT"},
+                    {"span_id": "task", "name": "task", "span_type": "TASK"},
+                    {"span_id": "performance", "name": "performance", "span_type": "PERFORMANCE"},
+                    {
+                        "span_id": "mlflow",
+                        "name": "direct_rlm.turn",
+                        "attributes": {"event_kind": "mlflow_span"},
+                        "inputs": {"api_key": "sk-live-secret", "path": "/private/trace.json"},
+                    },
+                ]
+            },
+        }
+    )
+
+    response = build_session_trace_debug_response(trace=trace, resolved_from="trace_id")
+
+    assert [span.mapped_render_kind for span in response.spans] == [
+        "artifact",
+        "task",
+        "performance",
+        "mlflow_span",
+    ]
+    rendered = response.model_dump_json()
+    assert "top-secret" not in rendered
+    assert "sk-live-secret" not in rendered
+    assert "/home/daytona/memory" not in rendered
+    assert "/private/trace.json" not in rendered
+
+
+def test_trace_debug_performance_summary_uses_sanitized_span_values():
+    trace = FakeTrace(
+        {
+            "info": {"trace_id": "tr-safe-performance"},
+            "data": {
+                "spans": [
+                    {
+                        "span_id": "span-sensitive",
+                        "name": "LM /etc/fleet-rlm/provider.conf",
+                        "span_type": "LLM",
+                        "start_time_unix_nano": "0",
+                        "end_time_unix_nano": "5000000000",
+                        "attributes": {
+                            "fleet_rlm.selected_skills": "safe-skill,/etc/fleet-rlm/skill-secret",
+                        },
+                        "outputs": "Bearer top-secret-token",
+                    }
+                ]
+            },
+        }
+    )
+
+    response = build_session_trace_debug_response(trace=trace, resolved_from="trace_id")
+
+    rendered = response.model_dump_json()
+    assert "/etc/fleet-rlm/provider.conf" not in rendered
+    assert "/etc/fleet-rlm/skill-secret" not in rendered
+    assert "top-secret-token" not in rendered
+    assert response.performance_summary.slowest_llm_span is not None
+    assert response.performance_summary.slowest_llm_span.name != "LM /etc/fleet-rlm/provider.conf"
+
+
 @pytest.mark.asyncio
 async def test_get_owned_session_trace_debug_resolves_explicit_trace_id(monkeypatch: pytest.MonkeyPatch):
     from fleet_rlm.integrations.observability import mlflow_traces

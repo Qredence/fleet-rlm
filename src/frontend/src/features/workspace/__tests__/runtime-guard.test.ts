@@ -10,6 +10,7 @@ function makeStatus(overrides: Partial<RuntimeStatusResponse> = {}): RuntimeStat
     settings_write_enabled: true,
     profile_write_enabled: true,
     ready: true,
+    execution_backend: "legacy_agent_runtime",
     sandbox_provider: "daytona",
     active_models: {
       planner: "openai/gpt-4.1-mini",

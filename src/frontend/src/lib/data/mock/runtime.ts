@@ -211,6 +211,7 @@ export function getMockRuntimeStatus(): RuntimeStatusResponse {
     settings_write_enabled: true,
     profile_write_enabled: true,
     ready: true,
+    execution_backend: "legacy_agent_runtime",
     active_models: {
       planner: fallbackValues.DSPY_LM_MODEL,
       delegate: fallbackValues.DSPY_DELEGATE_LM_MODEL,

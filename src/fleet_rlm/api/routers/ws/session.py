@@ -10,6 +10,8 @@ from typing import Any
 from sqlalchemy.exc import SQLAlchemyError
 
 from fleet_rlm.api.runtime_services.session_paths import session_conversation_path
+from fleet_rlm.files.attachment_resolution import PersistedSessionOwnerProof
+from fleet_rlm.files.upload_staging import attachment_owner_scope
 from fleet_rlm.integrations.database import FleetRepository
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.utils.identity import owner_fingerprint, session_key
@@ -70,6 +72,61 @@ def _restorable_session_state(session_record: dict[str, Any]) -> Any:
     if not restored_state and isinstance(manifest_data, dict):
         restored_state = manifest_data.get("state", {})
     return restored_state
+
+
+def _persisted_external_session_id(session_record: object) -> str | None:
+    external_session_id = str(getattr(session_record, "external_session_id", "") or "").strip()
+    if external_session_id:
+        return external_session_id
+    metadata = getattr(session_record, "metadata_json", None)
+    if isinstance(metadata, dict):
+        value = str(metadata.get("external_session_id") or "").strip()
+        if value:
+            return value
+    return None
+
+
+async def resolve_persisted_session_owner_proof(
+    *,
+    persistence: Any,
+    identity_rows: IdentityUpsertResult | None,
+    session_id: str,
+    owner_tenant_claim: str,
+    owner_user_claim: str,
+) -> PersistedSessionOwnerProof | None:
+    """Return legacy attachment ownership evidence only for an owned DB session.
+
+    Markerless attachment directories predate owner markers, so the external
+    session id is trusted only after the persistence layer scopes it to the
+    authenticated tenant, user, and workspace.
+    """
+    safe_session_id = str(session_id or "").strip()
+    if persistence is None or identity_rows is None or not safe_session_id:
+        return None
+    get_by_external_id = getattr(persistence, "get_chat_session_by_external_id", None)
+    if not callable(get_by_external_id):
+        return None
+    try:
+        session_record = await get_by_external_id(
+            tenant_id=identity_rows.tenant_id,
+            external_session_id=safe_session_id,
+            user_id=identity_rows.user_id,
+            workspace_id=identity_rows.workspace_id,
+        )
+    except Exception:
+        logger.warning("Unable to verify persisted session ownership for legacy attachment", exc_info=True)
+        return None
+    if session_record is None or _persisted_external_session_id(session_record) != safe_session_id:
+        return None
+
+    owner_scope = attachment_owner_scope(
+        tenant_claim=owner_tenant_claim,
+        user_claim=owner_user_claim,
+    )
+    return PersistedSessionOwnerProof(
+        session_id=safe_session_id,
+        owner_scope=owner_scope,
+    )
 
 
 async def _restore_agent_state(

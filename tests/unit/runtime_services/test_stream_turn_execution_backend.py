@@ -17,6 +17,7 @@ from __future__ import annotations
 import ast
 import sys
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -554,7 +555,7 @@ class TestDispatch006_SessionRestore:  # noqa: N801
 
 
 class TestDispatch007_DirectRlmYieldsStructuredEvents:  # noqa: N801
-    """VAL-DISPATCH-007: direct_rlm yields status + terminal error events."""
+    """VAL-DISPATCH-007: direct_rlm yields status, completion span, and error events."""
 
     @pytest.mark.asyncio
     async def test_direct_rlm_yields_status_and_error(
@@ -575,7 +576,11 @@ class TestDispatch007_DirectRlmYieldsStructuredEvents:  # noqa: N801
         )
         events = [event async for event in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi")]
 
-        assert [event.kind for event in events] == [RuntimeEventKind.STATUS, RuntimeEventKind.ERROR]
+        assert [event.kind for event in events] == [
+            RuntimeEventKind.STATUS,
+            RuntimeEventKind.MLFLOW_SPAN,
+            RuntimeEventKind.ERROR,
+        ]
 
 
 class TestDispatch008_StructuredErrorPayload:  # noqa: N801
@@ -606,6 +611,104 @@ class TestDispatch008_StructuredErrorPayload:  # noqa: N801
         assert error_event.kind == RuntimeEventKind.ERROR
         assert error_event.payload["code"] == MISSING_INTERPRETER.code
         assert error_event.payload["execution_backend"] == "direct_rlm"
+
+
+class TestStreamTurnObservabilityRecorder:
+    @pytest.mark.asyncio
+    async def test_direct_turn_uses_shared_recorder_before_transport_projection(
+        self,
+        sample_context: ChatExecutionContext,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Both backends pass through the same redacting recorder seam."""
+
+        async def _stream(self: object, **_: object) -> AsyncIterator[RuntimeEvent]:
+            yield RuntimeEvent.status("using /home/daytona/memory")
+            yield RuntimeEvent(kind=RuntimeEventKind.DONE, text="done")
+
+        monkeypatch.setattr("fleet_rlm.rlm.runner.DirectRLMRunner.stream", _stream)
+        ctx = replace(
+            sample_context,
+            controls=TurnControls(execution_backend=ExecutionBackend.direct_rlm),
+        )
+
+        events = [event async for event in stream_turn(ctx=ctx, agent_runtime=object(), message="hi")]
+
+        assert [event.kind for event in events] == [
+            RuntimeEventKind.STATUS,
+            RuntimeEventKind.MLFLOW_SPAN,
+            RuntimeEventKind.DONE,
+        ]
+        assert "/home/daytona/memory" not in events[0].text
+
+    @pytest.mark.asyncio
+    async def test_direct_turn_creates_an_enabled_trace_context_before_terminal_span(
+        self,
+        sample_context: ChatExecutionContext,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The transport-neutral direct path gives SSE a real MLflow trace id."""
+        from fleet_rlm.integrations.observability import mlflow_runtime
+        from fleet_rlm.observability import mlflow as mlflow_adapter
+
+        class _FakeSpan:
+            def __enter__(self) -> "_FakeSpan":
+                return self
+
+            def __exit__(self, *_: object) -> None:
+                return None
+
+            def set_inputs(self, _: object) -> None:
+                return None
+
+            def set_outputs(self, _: object) -> None:
+                return None
+
+        fake_mlflow = type(
+            "FakeMlflow",
+            (),
+            {
+                "start_span": staticmethod(lambda **_: _FakeSpan()),
+                "get_current_active_span": staticmethod(lambda: object()),
+                "get_active_trace_id": staticmethod(lambda: "tr-direct-sse"),
+                "update_current_trace": staticmethod(lambda **_: None),
+            },
+        )()
+        monkeypatch.setenv("MLFLOW_ENABLED", "true")
+        monkeypatch.setattr(mlflow_runtime, "_import_mlflow", lambda: fake_mlflow)
+        monkeypatch.setattr(
+            mlflow_runtime,
+            "get_mlflow_config",
+            lambda: type("Config", (), {"enabled": True, "active_model_id": None})(),
+        )
+        monkeypatch.setattr(mlflow_runtime, "initialize_mlflow", lambda _: True)
+        monkeypatch.setattr(mlflow_runtime, "flush_mlflow_traces", lambda: None)
+
+        exported_records: list[object] = []
+        monkeypatch.setattr(
+            mlflow_adapter,
+            "_schedule_direct_rlm_completion_export",
+            lambda record: exported_records.append(record),
+        )
+
+        async def _stream(self: object, **_: object) -> AsyncIterator[RuntimeEvent]:
+            yield RuntimeEvent(
+                kind=RuntimeEventKind.DONE,
+                text="done",
+                payload={"trajectory": [{"code": "print('ok')", "output": "ok"}]},
+            )
+
+        monkeypatch.setattr("fleet_rlm.rlm.runner.DirectRLMRunner.stream", _stream)
+        ctx = replace(
+            sample_context,
+            controls=TurnControls(execution_backend=ExecutionBackend.direct_rlm),
+        )
+
+        events = [event async for event in stream_turn(ctx=ctx, agent_runtime=object(), message="hello")]
+
+        assert [event.kind for event in events] == [RuntimeEventKind.MLFLOW_SPAN, RuntimeEventKind.DONE]
+        assert events[0].payload["trace_id"] == "tr-direct-sse"
+        assert exported_records
 
 
 class TestDispatch009_SkipsSetExecutionMode:  # noqa: N801
@@ -640,15 +743,15 @@ class TestDispatch009_SkipsSetExecutionMode:  # noqa: N801
         assert "set_execution_mode" not in [c[0] for c in agent.calls]
 
 
-class TestDispatch010_SkipsRestoreSession:  # noqa: N801
-    """VAL-DISPATCH-010: direct_rlm skips legacy _restore_session."""
+class TestDispatch010_RestoresSession:  # noqa: N801
+    """VAL-DISPATCH-010: direct_rlm restores shared session state."""
 
     @pytest.mark.asyncio
-    async def test_raises_before_restore_session(
+    async def test_restores_before_direct_runner(
         self,
         sample_prepared: PreparedChatRuntime,
     ) -> None:
-        """Even with session_id, direct_rlm never calls aimport_session_state."""
+        """Direct RLM restores persisted state before checking its dependencies."""
         session_state = {"history_turns": 3}
         store = SessionRestoringStore(session_record={"session": {"state": session_state}})
 
@@ -678,7 +781,7 @@ class TestDispatch010_SkipsRestoreSession:  # noqa: N801
         events = [event async for event in stream_turn(ctx=ctx, agent_runtime=ctx.prepared.planner_lm, message="hi")]
 
         assert events[-1].kind == RuntimeEventKind.ERROR
-        assert "aimport_session_state" not in [c[0] for c in agent.calls]
+        assert "aimport_session_state" in [c[0] for c in agent.calls]
         assert "areset" not in [c[0] for c in agent.calls]
 
 

@@ -358,36 +358,21 @@ def _build_trace_context(
     message: str,
     execution_mode: str,
 ):
-    from fleet_rlm.integrations.observability.mlflow_runtime import (
-        MlflowTraceRequestContext,
-        new_client_request_id,
-    )
+    from fleet_rlm.integrations.observability.mlflow_context import build_chat_trace_context
 
-    client_request_id = new_client_request_id(prefix="chat")
     # Check if delegate LM (sub_lm) is configured for cost tracking. Use
     # getattr so test/mocked runtimes without a delegate_lm attribute don't crash.
     sub_lm_configured = getattr(runtime, "delegate_lm", None) is not None
-    metadata = {
-        "fleet_rlm.workspace_id": workspace_id,
-        "fleet_rlm.turn_index": str(turn_index),
-        "fleet_rlm.predicted_turn_index": str(turn_index),
-        "fleet_rlm.turn_index_source": "agent_history",
-        "fleet_rlm.turn_attempt_id": client_request_id,
-        "fleet_rlm.client_request_id": client_request_id,
-        "fleet_rlm.runtime_mode": "daytona_pilot",
-        "fleet_rlm.events_mode": execution_mode,
-        "fleet_rlm.sub_lm_configured": str(sub_lm_configured).lower(),
-    }
-    if run_id:
-        metadata["fleet_rlm.run_id"] = run_id
-
-    return MlflowTraceRequestContext(
-        client_request_id=client_request_id,
-        session_id=f"{workspace_id}:{user_id}:{sess_id}",
+    return build_chat_trace_context(
+        workspace_id=workspace_id,
         user_id=user_id,
-        app_env=runtime.cfg.app_env,
-        request_preview=message,
-        metadata=metadata,
+        session_id=sess_id,
+        turn_index=turn_index,
+        run_id=run_id,
+        message=message,
+        execution_mode=execution_mode,
+        app_env=getattr(runtime.cfg, "app_env", None),
+        sub_lm_configured=sub_lm_configured,
     )
 
 

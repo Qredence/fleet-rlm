@@ -53,7 +53,7 @@ class MlflowConfig(BaseModel):
     directly by the MLflow client and intentionally not duplicated here.
     """
 
-    enabled: bool = Field(default=True)
+    enabled: bool = Field(default=False)
     tracking_uri: str = Field(default="http://127.0.0.1:5001")
     local_backend_store_uri: str = Field(default=PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI)
     experiment: str = Field(default="fleet-rlm")
@@ -85,7 +85,7 @@ class MlflowConfig(BaseModel):
         ).strip() or None
         enabled_raw = os.getenv("MLFLOW_ENABLED")
         return cls(
-            enabled=_env_bool(enabled_raw, default=True),
+            enabled=_env_bool(enabled_raw, default=False),
             tracking_uri=tracking_uri,
             local_backend_store_uri=(local_backend_store_uri or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI),
             experiment=experiment or "fleet-rlm",

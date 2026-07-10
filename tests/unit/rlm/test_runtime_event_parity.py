@@ -156,7 +156,7 @@ class TestDirectRLMEventParity:
         assert done_event.kind == RuntimeEventKind.DONE
         assert done_event.payload["execution_backend"] == "direct_rlm"
         assert done_event.payload["schema_version"] == EVENT_SCHEMA_VERSION
-        assert done_event.payload["history_turns"] == 1
+        assert done_event.payload["history_turns"] == 2
         assert done_event.payload["trajectory"]["steps"]
 
     @pytest.mark.asyncio

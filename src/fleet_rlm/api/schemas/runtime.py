@@ -194,6 +194,9 @@ class RuntimeStatusResponse(BaseModel):
     settings_write_enabled: bool = Field(description="Whether process/env runtime settings writes are allowed.")
     profile_write_enabled: bool = Field(description="Whether authenticated LLM provider profile writes are allowed.")
     ready: bool = Field(description="Whether critical runtime services are ready to serve requests.")
+    execution_backend: Literal["legacy_agent_runtime", "direct_rlm"] = Field(
+        description="Server-configured backend used for new chat turns."
+    )
     active_models: RuntimeActiveModels = Field(description="Resolved planner and delegate model identities.")
     sandbox_provider: VolumeProvider = Field(
         default="daytona",

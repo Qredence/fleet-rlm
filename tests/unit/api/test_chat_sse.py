@@ -11,7 +11,10 @@ from __future__ import annotations
 import importlib
 import json
 from collections.abc import AsyncIterator, Iterator
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,6 +23,7 @@ from fleet_rlm.api.auth.types import NormalizedIdentity
 from fleet_rlm.api.dependencies import require_http_identity
 from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext
 from fleet_rlm.api.runtime_services.chat_runtime import PreparedChatRuntime
+from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 from tests.unit.api.fakes import (
     DEFAULT_BODY,
@@ -1327,7 +1331,7 @@ def chat_client_with_volume(no_db_app, monkeypatch, stub_identity, tmp_path):
     from io import BytesIO
 
     from fleet_rlm.api.routers import chat as chat_router
-    from fleet_rlm.files.upload_staging import stage_uploaded_file_to_volume
+    from fleet_rlm.files.upload_staging import attachment_owner_scope, stage_uploaded_file_to_volume
 
     monkeypatch.setattr(chat_router, "DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH", tmp_path)
     no_db_app.dependency_overrides[require_http_identity] = stub_identity_dependency(stub_identity)
@@ -1350,6 +1354,10 @@ def chat_client_with_volume(no_db_app, monkeypatch, stub_identity, tmp_path):
             filename=filename,
             content_type="text/plain",
             stream=BytesIO(b"hello"),
+            owner_scope=attachment_owner_scope(
+                tenant_claim=stub_identity.tenant_claim,
+                user_claim=stub_identity.user_claim,
+            ),
         )
         return staged.attachment.id
 
@@ -1357,7 +1365,39 @@ def chat_client_with_volume(no_db_app, monkeypatch, stub_identity, tmp_path):
         yield client, _stage, tmp_path
 
 
+def _move_to_markerless_legacy_attachment(tmp_path, *, session_id: str, attachment_id: str) -> None:
+    source = next((tmp_path / "uploads" / "sessions" / session_id / "owners").glob(f"*/attachments/{attachment_id}__*"))
+    legacy_dir = tmp_path / "uploads" / "sessions" / session_id / "attachments"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    source.rename(legacy_dir / source.name)
+    source.parent.joinpath(".attachment-owner").unlink()
+    source.parent.rmdir()
+
+
 class TestChatAttachmentRefs:
+    @staticmethod
+    def _install_persisted_session_runtime(
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        persistence: object,
+        identity_rows: IdentityUpsertResult,
+    ) -> None:
+        chat_router = importlib.import_module("fleet_rlm.api.routers.chat")
+
+        async def _prepare_runtime(**kwargs: Any) -> PreparedChatRuntime:
+            config_deps = kwargs["config_deps"]
+            return PreparedChatRuntime(
+                cfg=config_deps.config,
+                planner_lm=object(),
+                delegate_lm=None,
+                repository=None,
+                persistence=persistence,
+                persistence_required=False,
+                identity_rows=identity_rows,
+            )
+
+        monkeypatch.setattr(chat_router, "prepare_chat_runtime", _prepare_runtime)
+
     def test_accepts_valid_attachment_refs(self, chat_client_with_volume) -> None:
         client, stage, _tmp = chat_client_with_volume
         attachment_id = stage("sess-attach")
@@ -1432,3 +1472,94 @@ class TestChatAttachmentRefs:
         assert response.status_code == 400
         for forbidden in ("/home/daytona/memory", "/Users/", "/Volumes/", "C:\\", str(tmp_path)):
             assert forbidden not in payload
+
+    def test_resolves_markerless_attachment_for_owned_persisted_session(
+        self,
+        chat_client_with_volume,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_identity: NormalizedIdentity,
+    ) -> None:
+        client, stage, tmp_path = chat_client_with_volume
+        session_id = "owned-legacy-session"
+        attachment_id = stage(session_id)
+        _move_to_markerless_legacy_attachment(tmp_path, session_id=session_id, attachment_id=attachment_id)
+        identity_rows = IdentityUpsertResult(
+            tenant_id=uuid4(),
+            user_id=uuid4(),
+            workspace_id=uuid4(),
+        )
+        persistence = SimpleNamespace(
+            get_chat_session_by_external_id=AsyncMock(
+                return_value=SimpleNamespace(metadata_json={"external_session_id": session_id})
+            )
+        )
+        self._install_persisted_session_runtime(
+            monkeypatch,
+            persistence=persistence,
+            identity_rows=identity_rows,
+        )
+
+        response = client.post(
+            "/api/chat",
+            json={
+                **DEFAULT_BODY,
+                "session_id": session_id,
+                "attachment_refs": [attachment_id],
+            },
+        )
+
+        assert_sse_ok(response)
+        persistence.get_chat_session_by_external_id.assert_awaited_once_with(
+            tenant_id=identity_rows.tenant_id,
+            external_session_id=session_id,
+            user_id=identity_rows.user_id,
+            workspace_id=identity_rows.workspace_id,
+        )
+
+    def test_rejects_markerless_attachment_for_other_persisted_session_owner(
+        self,
+        chat_client_with_volume,
+        monkeypatch: pytest.MonkeyPatch,
+        no_db_app,
+    ) -> None:
+        client, stage, tmp_path = chat_client_with_volume
+        victim_session_id = "victim-legacy-session"
+        attachment_id = stage(victim_session_id)
+        _move_to_markerless_legacy_attachment(
+            tmp_path,
+            session_id=victim_session_id,
+            attachment_id=attachment_id,
+        )
+        attacker_identity = NormalizedIdentity(
+            tenant_claim="attacker-tenant",
+            user_claim="attacker-user",
+        )
+        no_db_app.dependency_overrides[require_http_identity] = stub_identity_dependency(attacker_identity)
+        identity_rows = IdentityUpsertResult(
+            tenant_id=uuid4(),
+            user_id=uuid4(),
+            workspace_id=uuid4(),
+        )
+        persistence = SimpleNamespace(get_chat_session_by_external_id=AsyncMock(return_value=None))
+        self._install_persisted_session_runtime(
+            monkeypatch,
+            persistence=persistence,
+            identity_rows=identity_rows,
+        )
+
+        response = client.post(
+            "/api/chat",
+            json={
+                **DEFAULT_BODY,
+                "session_id": victim_session_id,
+                "attachment_refs": [attachment_id],
+            },
+        )
+
+        assert response.status_code == 400
+        persistence.get_chat_session_by_external_id.assert_awaited_once_with(
+            tenant_id=identity_rows.tenant_id,
+            external_session_id=victim_session_id,
+            user_id=identity_rows.user_id,
+            workspace_id=identity_rows.workspace_id,
+        )

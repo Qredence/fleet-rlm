@@ -7,7 +7,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from fleet_rlm.files.upload_staging import UploadSafetyError, stage_uploaded_file_to_volume
+from fleet_rlm.files.upload_staging import (
+    UploadSafetyError,
+    attachment_owner_scope,
+    stage_uploaded_file_to_volume,
+)
 from fleet_rlm.integrations.daytona.volumes import DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH
 
 from ..dependencies import HTTPIdentityDep
@@ -26,8 +30,6 @@ async def upload_file(
     file: Annotated[UploadFile, File(description="File to upload (single attachment).")],
 ) -> FileUploadResponse:
     """Upload a file and stage it into durable session-scoped storage."""
-    _ = identity  # auth boundary is enforced by dependency
-
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required.")
 
@@ -38,6 +40,10 @@ async def upload_file(
             filename=file.filename,
             content_type=file.content_type,
             stream=file.file,
+            owner_scope=attachment_owner_scope(
+                tenant_claim=identity.tenant_claim,
+                user_claim=identity.user_claim,
+            ),
         )
     except UploadSafetyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

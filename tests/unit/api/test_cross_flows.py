@@ -720,7 +720,7 @@ class TestCrossAttachmentRefs:
         from io import BytesIO
 
         from fleet_rlm.api.routers import chat as chat_router
-        from fleet_rlm.files.upload_staging import stage_uploaded_file_to_volume
+        from fleet_rlm.files.upload_staging import attachment_owner_scope, stage_uploaded_file_to_volume
 
         monkeypatch.setattr(chat_router, "DAYTONA_PERSISTENT_VOLUME_MOUNT_PATH", tmp_path)
         staged = stage_uploaded_file_to_volume(
@@ -729,6 +729,10 @@ class TestCrossAttachmentRefs:
             filename="notes.txt",
             content_type="text/plain",
             stream=BytesIO(b"notes"),
+            owner_scope=attachment_owner_scope(
+                tenant_claim=stub_identity.tenant_claim,
+                user_claim=stub_identity.user_claim,
+            ),
         )
         captured: dict[str, Any] = {}
         chat_module = importlib.import_module("fleet_rlm.api.routers.chat")

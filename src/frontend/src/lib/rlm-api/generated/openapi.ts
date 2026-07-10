@@ -2588,6 +2588,12 @@ export interface components {
        * @description Whether critical runtime services are ready to serve requests.
        */
       ready: boolean;
+      /**
+       * Execution Backend
+       * @description Server-configured backend used for new chat turns.
+       * @enum {string}
+       */
+      execution_backend: "legacy_agent_runtime" | "direct_rlm";
       /** @description Resolved planner and delegate model identities. */
       active_models: components["schemas"]["RuntimeActiveModels"];
       /**
@@ -3245,7 +3251,7 @@ export interface components {
        * @description How many spans are intentionally observability-only.
        */
       non_rendered_span_count: number;
-      /** @description Performance, token, and fallback summary derived from raw spans. */
+      /** @description Performance, token, and fallback summary derived from sanitized spans. */
       performance_summary: components["schemas"]["SessionTracePerformanceSummary"];
       /**
        * Spans
@@ -3299,6 +3305,10 @@ export interface components {
         | "tool"
         | "sandbox"
         | "status_note"
+        | "artifact"
+        | "task"
+        | "performance"
+        | "mlflow_span"
         | "non_rendered";
       /**
        * Mapped Component Type
@@ -3555,7 +3565,7 @@ export interface components {
     };
     /**
      * SessionTracePerformanceSummary
-     * @description Performance and token summary derived from raw MLflow trace spans.
+     * @description Performance and token summary derived from sanitized MLflow trace spans.
      */
     SessionTracePerformanceSummary: {
       /**
