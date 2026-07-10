@@ -24,7 +24,8 @@ EXPECTED_DOSSIERS = (
     "09-direct-rlm-promotion",
     "10-frontend-sse-cleanup",
 )
-BEGIN_MARKER = "// BEGIN GENERATED PHASES — do not edit; run: make plans-canvas-sync"
+BEGIN_MARKER = "// BEGIN GENERATED PHASES — do not edit; run: uv run python scripts/sync_plans_canvas.py"
+LEGACY_BEGIN_MARKER = "// BEGIN GENERATED PHASES — do not edit; run: make plans-canvas-sync"
 END_MARKER = "// END GENERATED PHASES"
 
 PHASE_HEADING_RE = re.compile(
@@ -297,7 +298,8 @@ def select_next_phase(phases: list[PhaseRecord]) -> PhaseRecord:
 
 def patch_canvas(canvas_path: Path, generated: str) -> bool:
     content = canvas_path.read_text(encoding="utf-8")
-    start = content.find(BEGIN_MARKER)
+    begin_marker = BEGIN_MARKER if BEGIN_MARKER in content else LEGACY_BEGIN_MARKER
+    start = content.find(begin_marker)
     end = content.find(END_MARKER)
     if start < 0 or end < 0:
         raise ValueError(f"{canvas_path} is missing generated markers; add {BEGIN_MARKER!r} and {END_MARKER!r}")
@@ -336,7 +338,8 @@ def main() -> int:
 
     if args.check:
         content = args.canvas.read_text(encoding="utf-8")
-        start = content.find(BEGIN_MARKER)
+        begin_marker = BEGIN_MARKER if BEGIN_MARKER in content else LEGACY_BEGIN_MARKER
+        start = content.find(begin_marker)
         end = content.find(END_MARKER)
         if start < 0 or end < 0:
             print("ERROR: canvas markers missing", file=sys.stderr)
@@ -345,7 +348,7 @@ def main() -> int:
         current = content[start:end]
         if current != generated.rstrip("\n"):
             print("ERROR: plans-roadmap canvas is out of sync with phase dossiers", file=sys.stderr)
-            print("Run: make plans-canvas-sync", file=sys.stderr)
+            print("Run: uv run python scripts/sync_plans_canvas.py", file=sys.stderr)
             return 1
         print("✅ plans-roadmap canvas is in sync with phase dossiers")
         return 0

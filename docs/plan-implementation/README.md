@@ -45,7 +45,7 @@ unchecked remediation criterion.
 3. [Phase 3 — Skills](phases/03-skills/README.md) — complete overall; Phase 3F partial.
 4. [Phase 4 — Daytona facade](phases/04-daytona-facade/README.md) — complete.
 5. [Phase 5 — Tools, artifacts, attachments](phases/05-tools-artifacts-attachments/README.md) — complete.
-6. [Phase 6 — Observability](phases/06-observability/README.md) — in progress, uncommitted.
+6. [Phase 6 — Observability](phases/06-observability/README.md) — partial; committed implementation with unresolved live and full-gate evidence.
 7. [Phase 7 — Typed config](phases/07-typed-config/README.md) — planned, audit first.
 8. [Phase 8 — GEPA quality](phases/08-gepa-quality/README.md) — planned.
 9. [Phase 9 — Direct RLM promotion](phases/09-direct-rlm-promotion/README.md) — promotion gated.
@@ -98,7 +98,8 @@ acceptance criteria, and validation evidence. Across all phases:
   ownership, non-goals, acceptance criteria, validation lanes, rollback or
   compatibility conditions, and required evidence. Unknown details stay
   unchecked; they are never filled with invented evidence.
-- After status changes, run `make plans-canvas-sync` and `make plans-canvas-check`.
+- After status changes, run `uv run python scripts/sync_plans_canvas.py` and
+  `uv run python scripts/sync_plans_canvas.py --check`.
 - Run `make check-docs` for any documentation or workflow change.
 
 ## Completion definition

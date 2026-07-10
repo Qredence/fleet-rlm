@@ -3,17 +3,20 @@
 ## Phase 6 — Trace, transcript, performance, and MLflow
 
 - **Order:** `6`
-- **Status:** `in_progress_uncommitted`
+- **Status:** `partial`
 - **Track:** `Observability`
 - **Summary:** Record both runtime backends through one provider-neutral observability seam.
 
 ### Current evidence state
 
-The current working tree contains the Task 1 recorder, redaction, classifier,
-performance, trace-service, transport-context, schema, and test changes based on
-`bdd38f8978ac6bc775a844641d8bc784ecffd822`. Focused tests and API synchronization
-were reported on 2026-07-10, but no implementation commit closes this phase.
-Phase 9 promotion remains separate and gated.
+Commit `29701f06` contains the recorder, redaction, classifier, performance,
+trace-service, transport-context, schema, promotion-harness, and test changes.
+Local backend unit/contracts, static checks, OpenAPI synchronization, and docs
+checks passed on 2026-07-10. This phase remains partial: the required live
+direct-RLM trace/promotion evidence is absent, and the sidecar full gate exposed
+an asynchronous frontend-test teardown rejection that must be cleanly resolved
+or classified before Phase 6 can be called complete. Phase 9 promotion remains
+separate and gated.
 
 ### Goal and stable interfaces
 
@@ -70,13 +73,14 @@ non_rendered   -> trace debug only
 - [x] Performance aggregation works from sanitized recorded spans.
 - [x] Trace/debug/performance interfaces and both chat transports remain compatible in focused validation.
 - [ ] Live direct-RLM trace-span and promotion evidence is recorded.
-- [ ] The full repository gate passes on the final Phase 6 diff.
+- [ ] The full repository gate passes without unhandled frontend-test rejections.
 
 ### Evidence
 
 - [MLflow and trace parity audit](evidence-mlflow-trace-parity.md)
 - [Phase 6 observability surface and implementation evidence](evidence-observability-surface.md)
 - [Task 1 validation record](evidence-task-1-validation.md)
+- [Roadmap-claim audit, 2026-07-10](evidence-roadmap-claim-audit-2026-07-10.md)
 
 ### Validation
 

@@ -208,3 +208,16 @@ def test_select_next_phase_returns_reopened_phase_when_no_phase_is_active() -> N
     ]
 
     assert sync.select_next_phase(phases).code == "2"
+
+
+def test_patch_canvas_migrates_the_legacy_make_marker(tmp_path: Path) -> None:
+    sync = _load_sync_module()
+    canvas = tmp_path / "plans-roadmap.canvas.tsx"
+    legacy_marker = "// BEGIN GENERATED PHASES — do not edit; run: make plans-canvas-sync"
+    canvas.write_text(f"before\n{legacy_marker}\nold\n{sync.END_MARKER}\nafter\n", encoding="utf-8")
+
+    generated = f"{sync.BEGIN_MARKER}\nnew\n{sync.END_MARKER}\n"
+    assert sync.patch_canvas(canvas, generated) is True
+    content = canvas.read_text(encoding="utf-8")
+    assert sync.BEGIN_MARKER in content
+    assert legacy_marker not in content
