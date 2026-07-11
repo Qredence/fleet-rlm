@@ -1,8 +1,4 @@
-"""FastAPI application factory for the parallel clean-backend package.
-
-K-001 provides a bare app only. Routes, lifespan resources, and runtime wiring
-arrive in later kernel tickets.
-"""
+"""FastAPI application factory for the parallel clean-backend package."""
 
 from __future__ import annotations
 
@@ -13,9 +9,17 @@ from .config import Settings
 
 
 def create_app(*, settings: Settings | None = None) -> FastAPI:
-    """Create a FastAPI app without constructing external runtime clients."""
+    """Create a FastAPI app. Routes are attached without constructing LM/Daytona clients."""
     resolved = settings if settings is not None else Settings()
-    return FastAPI(
+    app = FastAPI(
         title=resolved.app_name,
         version=__version__,
     )
+    app.state.settings = resolved
+
+    # Import routes inside the factory so importing create_app stays light;
+    # calling create_app wires HTTP only (no provider clients).
+    from fleet_rlm_clean.api.routes.chat import router as chat_router
+
+    app.include_router(chat_router)
+    return app
