@@ -99,6 +99,60 @@ async def load_activated_skill_markdown_map(
     return overrides
 
 
+async def load_workspace_skill_activation_map(
+    persistence: Any,
+    *,
+    tenant_id: Any,
+    workspace_id: Any,
+    created_by_user_id: Any | None = None,
+) -> dict[str, str]:
+    """Preload all workspace Skill activations into a skill-id → Markdown map.
+
+    Prefers ``list_target_activations`` (single workspace query). Falls back to
+    an empty map when listing is unsupported or fails (ADR-0006 fail-closed).
+    """
+    from fleet_rlm.runtime.active_artifacts import resolve_skill_markdown
+
+    list_fn = getattr(persistence, "list_target_activations", None)
+    if not callable(list_fn):
+        return {}
+    try:
+        rows = await list_fn(
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            target_kind="skill",
+            created_by_user_id=created_by_user_id,
+        )
+    except Exception:
+        return {}
+
+    overrides: dict[str, str] = {}
+    for _activation, artifact_row in rows or []:
+        artifact = active_artifact_from_version_row(artifact_row)
+        if artifact is None:
+            continue
+        try:
+            overrides[artifact.target_id] = resolve_skill_markdown("", artifact)
+        except Exception:
+            continue
+    return overrides
+
+
+def apply_activated_skill_markdown(agent: Any, mapping: dict[str, str] | None) -> None:
+    """Attach activated Skill Markdown to AgentRuntime and its cognition module."""
+    payload = dict(mapping or {})
+    try:
+        agent.activated_skill_markdown = payload
+    except Exception:
+        pass
+    inner = getattr(agent, "agent", None)
+    if inner is not None:
+        try:
+            inner.activated_skill_markdown = payload
+        except Exception:
+            pass
+
+
 async def build_module_with_workspace_activation(
     slug: str,
     *,
@@ -123,7 +177,9 @@ async def build_module_with_workspace_activation(
 
 __all__ = [
     "active_artifact_from_version_row",
+    "apply_activated_skill_markdown",
     "build_module_with_workspace_activation",
     "load_activated_skill_markdown_map",
+    "load_workspace_skill_activation_map",
     "resolve_workspace_active_artifact",
 ]

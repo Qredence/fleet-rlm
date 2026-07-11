@@ -10,6 +10,7 @@ import pytest
 
 from fleet_rlm.quality.activation_resolve import (
     active_artifact_from_version_row,
+    load_workspace_skill_activation_map,
     resolve_workspace_active_artifact,
 )
 from fleet_rlm.quality.promotion import PromotionEvidence, PromotionGatePolicy, evaluate_promotion_gate
@@ -55,6 +56,19 @@ async def test_resolve_workspace_active_artifact_none_on_missing() -> None:
         target_id="x",
     )
     assert resolved is None
+
+
+@pytest.mark.asyncio
+async def test_load_workspace_skill_activation_map_empty_when_no_list() -> None:
+    class _Persistence:
+        pass
+
+    mapping = await load_workspace_skill_activation_map(
+        _Persistence(),
+        tenant_id="t",
+        workspace_id="w",
+    )
+    assert mapping == {}
 
 
 def test_promotion_gate_requires_metric_call_budget() -> None:

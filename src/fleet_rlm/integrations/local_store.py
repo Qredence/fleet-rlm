@@ -1849,3 +1849,14 @@ class LocalStore(PersistenceProtocol):
         created_by_user_id: uuid.UUID | None = None,
     ) -> tuple[Any, Any]:
         raise UnsupportedLocalCapabilityError("get_target_activation")
+
+    async def list_target_activations(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        target_kind: str | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> list[tuple[Any, Any]]:
+        # LocalStore has no activation pointers; empty list keeps chat fail-closed.
+        return []

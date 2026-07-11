@@ -105,7 +105,14 @@ selection only per DSPy docs), promotion gate evidence producers (including
 artifact round-trip), candidate `optimization_artifact_versions` on run success,
 approve → activate → rollback APIs, cancel-before-execution, LocalStore
 unsupported stubs, and unit coverage for activation resolve + promotion gates.
-Still open: opt-in live smoke evidence file, and CI Postgres runs of
+
+**Chat activation wiring (follow-up):** `list_target_activations` +
+`load_workspace_skill_activation_map` preload Skill Markdown at
+`build_chat_agent_context` onto `AgentRuntime.activated_skill_markdown` (and the
+inner escalating module). Tool skill context re-reads activations on each call
+so late attach is visible. LocalStore returns an empty list (fail-closed catalog
+defaults). Still open: opt-in live smoke evidence file, cost/latency for real
+`promotion_ready`, and CI Postgres runs of
 `tests/integration/database/test_optimization_activation_lifecycle.py`
 (skipped locally without `DATABASE_URL`).
 

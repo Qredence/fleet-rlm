@@ -154,9 +154,13 @@ def _bound_runtime_tool_factories(
 
     if volume_mount_path:
         skill_context = default_skill_runtime_context(volume_mount_path=volume_mount_path)
-        activated_markdown = dict(getattr(runtime, "activated_skill_markdown", None) or {})
-        if activated_markdown:
-            skill_context = skill_context.model_copy(update={"activated_skill_markdown": activated_markdown})
+
+        def _skill_context_with_activations() -> Any:
+            """Re-read activations from runtime so late chat-prepare attach is visible."""
+            activated_markdown = dict(getattr(runtime, "activated_skill_markdown", None) or {})
+            if not activated_markdown:
+                return skill_context
+            return skill_context.model_copy(update={"activated_skill_markdown": activated_markdown})
 
         def remember(key: str, value: str) -> dict[str, Any]:
             return _remember_impl(key, value, volume_mount_path=volume_mount_path, agent_depth=agent_depth)
@@ -173,13 +177,13 @@ def _bound_runtime_tool_factories(
             ).model_dump()
 
         def list_skills() -> dict[str, Any]:
-            return list_skills_impl(context=skill_context)
+            return list_skills_impl(context=_skill_context_with_activations())
 
         def load_skill(name: str) -> dict[str, Any]:
-            return load_skill_tool_impl(name, context=skill_context)
+            return load_skill_tool_impl(name, context=_skill_context_with_activations())
 
         def read_skill_resource(name: str, resource_path: str) -> dict[str, Any]:
-            return read_skill_resource_impl(name, resource_path, context=skill_context)
+            return read_skill_resource_impl(name, resource_path, context=_skill_context_with_activations())
 
         factories["load_document"] = load_document
         factories["list_skills"] = list_skills

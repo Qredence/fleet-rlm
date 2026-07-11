@@ -74,6 +74,9 @@ class AgentRuntime:
         self._repository: Any | None = repository
         self._identity_rows: Any | None = None
 
+        # Workspace-scoped Skill activation overrides (ADR-0006); empty = catalog defaults.
+        self.activated_skill_markdown: dict[str, str] = {}
+
         # Execution and document state
         self.execution_mode: str = "auto"
         self.loaded_document_paths: list[str] = []
@@ -124,7 +127,7 @@ class AgentRuntime:
         if self._use_escalation:
             from fleet_rlm.runtime.modules.escalating import EscalatingFleetModule
 
-            return EscalatingFleetModule(
+            module = EscalatingFleetModule(
                 interpreter=self.interpreter,
                 tools=tools,
                 max_iterations=self.rlm_max_iterations,
@@ -134,6 +137,8 @@ class AgentRuntime:
                 action_timeout=self.rlm_action_timeout,
                 summary_interval=self._summary_interval,
             )
+            module.activated_skill_markdown = dict(getattr(self, "activated_skill_markdown", None) or {})
+            return module
         return FleetAgent(
             tools=tools,
             max_iters=self._max_iters,

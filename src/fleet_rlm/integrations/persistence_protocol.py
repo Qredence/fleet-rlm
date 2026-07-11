@@ -654,5 +654,16 @@ class PersistenceProtocol(Protocol):
         """Return the activation pointer and active artifact version."""
         pass
 
+    async def list_target_activations(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        target_kind: str | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> list[tuple[OptimizationTargetActivation, OptimizationArtifactVersion | None]]:
+        """List workspace activation pointers (optionally filtered by target kind)."""
+        pass
+
 
 __all__ = ["PersistenceProtocol", "UnsupportedLocalCapabilityError"]

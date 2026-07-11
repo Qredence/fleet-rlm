@@ -1247,6 +1247,48 @@ class OptimizationRepository(RepositoryContextMixin):
             ).scalar_one_or_none()
             return activation, artifact
 
+    async def list_target_activations(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        target_kind: str | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> list[tuple[OptimizationTargetActivation, OptimizationArtifactVersion | None]]:
+        """List activation pointers for a workspace, optionally filtered by target kind."""
+        async with self._scoped_session(
+            tenant_id=tenant_id,
+            user_id=created_by_user_id,
+            workspace_id=workspace_id,
+        ) as (session, resolved_workspace_id):
+            conditions = [
+                OptimizationTargetActivation.tenant_id == tenant_id,
+                OptimizationTargetActivation.workspace_id == resolved_workspace_id,
+            ]
+            if target_kind is not None:
+                conditions.append(OptimizationTargetActivation.target_kind == target_kind)
+            activations = list(
+                (await session.execute(select(OptimizationTargetActivation).where(and_(*conditions)))).scalars()
+            )
+            if not activations:
+                return []
+            artifact_ids = [row.active_artifact_version_id for row in activations]
+            artifacts = {
+                row.id: row
+                for row in (
+                    await session.execute(
+                        select(OptimizationArtifactVersion).where(
+                            and_(
+                                OptimizationArtifactVersion.tenant_id == tenant_id,
+                                OptimizationArtifactVersion.workspace_id == resolved_workspace_id,
+                                OptimizationArtifactVersion.id.in_(artifact_ids),
+                            )
+                        )
+                    )
+                ).scalars()
+            }
+            return [(activation, artifacts.get(activation.active_artifact_version_id)) for activation in activations]
+
     async def _ensure_optimization_module_in_session(
         self,
         session,

@@ -378,6 +378,43 @@ class _ManagedAgentContext:
         return False
 
 
+async def attach_workspace_skill_activations(
+    agent: Any,
+    *,
+    persistence: Any,
+    identity_rows: IdentityUpsertResult | None,
+) -> dict[str, str]:
+    """Preload workspace Skill activations onto the chat agent (ADR-0006).
+
+    Fail-closed: missing identity, unsupported local store, or resolve errors
+    leave the agent on catalog defaults.
+    """
+    from fleet_rlm.quality.activation_resolve import (
+        apply_activated_skill_markdown,
+        load_workspace_skill_activation_map,
+    )
+
+    if agent is None or identity_rows is None or persistence is None:
+        return {}
+    tenant_id = getattr(identity_rows, "tenant_id", None)
+    workspace_id = getattr(identity_rows, "workspace_id", None)
+    user_id = getattr(identity_rows, "user_id", None)
+    if tenant_id is None or workspace_id is None:
+        return {}
+    try:
+        mapping = await load_workspace_skill_activation_map(
+            persistence,
+            tenant_id=tenant_id,
+            workspace_id=workspace_id,
+            created_by_user_id=user_id,
+        )
+    except Exception as exc:
+        logger.warning("Could not load workspace skill activations: %s", type(exc).__name__)
+        mapping = {}
+    apply_activated_skill_markdown(agent, mapping)
+    return mapping
+
+
 async def build_chat_agent_context(runtime: PreparedChatRuntime, *, pool: Any | None = None) -> Any:
     kwargs = _chat_agent_builder_kwargs(runtime)
 
@@ -448,6 +485,11 @@ async def build_chat_agent_context(runtime: PreparedChatRuntime, *, pool: Any | 
         kwargs["interpreter"] = interpreter
         try:
             agent = build_chat_agent(**kwargs)
+            await attach_workspace_skill_activations(
+                agent,
+                persistence=runtime.persistence,
+                identity_rows=runtime.identity_rows,
+            )
         except Exception:
             await interpreter.__aexit__(None, None, None)
             raise
@@ -463,6 +505,11 @@ async def build_chat_agent_context(runtime: PreparedChatRuntime, *, pool: Any | 
         kwargs["interpreter"] = interpreter
     try:
         agent = build_chat_agent(**kwargs)
+        await attach_workspace_skill_activations(
+            agent,
+            persistence=runtime.persistence,
+            identity_rows=runtime.identity_rows,
+        )
     except Exception:
         await pool.release(interpreter)
         raise
@@ -488,6 +535,7 @@ __all__ = [
     "PreparedChatRuntime",
     "SessionContext",
     "StreamEventLike",
+    "attach_workspace_skill_activations",
     "build_chat_agent_context",
     "new_chat_session_state",
     "prepare_chat_runtime",
