@@ -51,6 +51,16 @@ tests/contracts/clean_backend/test_framework_contracts.py
 
 Create the immutable event envelope, event kinds, ordering rules, terminal rules, and SSE projector.
 
+**Files** (parallel package until cutover)
+
+```text
+src/fleet_rlm_clean/rlm/events.py
+src/fleet_rlm_clean/api/sse.py
+tests/unit/clean_backend/test_runtime_events.py
+tests/contracts/clean_backend/test_sse_projection.py
+tests/contracts/clean_backend/fixtures/valid_run_transcript.sse
+```
+
 **Acceptance**
 
 - Sequence is strictly increasing per run.
