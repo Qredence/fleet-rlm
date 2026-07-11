@@ -11,7 +11,7 @@ Current documented constructor:
 ```python
 dspy.RLM(
     signature,
-    max_iters=20,
+    max_iterations=20,  # installed dspy==3.3.0b1; docs sometimes say max_iters
     max_llm_calls=50,
     max_output_chars=10_000,
     verbose=False,
@@ -35,7 +35,7 @@ Documented behavior:
 Fleet implications:
 
 1. `RLMModelBundle` separates root and sub-model roles.
-2. `RLMFactory` always passes explicit finite budgets.
+2. `RLMFactory` always passes explicit finite budgets (`max_iterations`, not `max_iters`).
 3. Tool names are stable Python identifiers.
 4. Public SSE never exposes raw trajectory reasoning.
 5. Dependency upgrades fail contract tests when constructor parameters or result behavior change.
