@@ -158,7 +158,7 @@ async def test_persist_session_state_skips_volume_without_creating_cleanup_sessi
 async def test_persist_session_state_writes_local_turns_from_exported_history() -> None:
     from fleet_rlm.api.dependencies import SessionCacheDeps
     from fleet_rlm.api.runtime_services.session_persistence import persist_session_state
-    from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+    from fleet_rlm.db.repos.identity import IdentityUpsertResult
 
     tenant_id = uuid.uuid4()
     user_id = uuid.uuid4()
@@ -225,7 +225,7 @@ async def test_persist_session_state_writes_local_turns_from_exported_history() 
 async def test_persist_session_state_writes_repository_turns_from_exported_history() -> None:
     from fleet_rlm.api.dependencies import SessionCacheDeps
     from fleet_rlm.api.runtime_services.session_persistence import persist_session_state
-    from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+    from fleet_rlm.db.repos.identity import IdentityUpsertResult
 
     tenant_id = uuid.uuid4()
     user_id = uuid.uuid4()
@@ -655,7 +655,7 @@ async def test_switch_session_layout_initialization_does_not_create_daytona_sess
 @pytest.mark.asyncio
 async def test_link_database_session_uses_local_identity_ownership(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.api.routers.ws import session as ws_session
-    from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+    from fleet_rlm.db.repos.identity import IdentityUpsertResult
 
     created: dict[str, Any] = {}
 

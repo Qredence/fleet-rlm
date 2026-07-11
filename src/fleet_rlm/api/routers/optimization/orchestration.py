@@ -12,8 +12,8 @@ from typing import Any
 
 from fastapi import BackgroundTasks, HTTPException
 
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
-from fleet_rlm.integrations.database.repository_optimization import OptimizationRunCreateRequest
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
+from fleet_rlm.db.repos.optimization import OptimizationRunCreateRequest
 from fleet_rlm.integrations.llm_profiles.resolver import (
     build_lm_kwargs_from_resolved,
     resolve_role_config,

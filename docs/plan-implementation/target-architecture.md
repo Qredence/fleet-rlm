@@ -62,12 +62,11 @@ projectors.
   MLflow ingestion compatibility.
 - `quality/` owns offline datasets, metrics, GEPA runs, results, and promotion.
 - `db/` owns the SQLAlchemy table catalog, async engine helpers, domain
-  repositories, and the Postgres store façade. Target layout is domain modules
+  repositories, and the Postgres store façade. Live layout is domain modules
   under `db/models/` (schema only) and `db/repos/` (transactions, RLS context,
-  and queries), with one model registry for Alembic. Until
-  [Phase 8.5](phases/08.5-persistence-db/README.md) lands, live code remains
-  under `integrations/database/`; that path may stay as a compatibility
-  re-export after the move.
+  and queries), with one model registry for Alembic
+  ([Phase 8.5](phases/08.5-persistence-db/README.md)). The former flat
+  `integrations/database/` package is removed.
 - `integrations/persistence_protocol.py` and `integrations/local_store.py` own
   the dual-backend persistence port and the limited local backend. Postgres is
   the system of record; LocalStore is not required to match Neon capability.

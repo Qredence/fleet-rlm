@@ -23,8 +23,8 @@ from fastapi import (
     Path as ApiPath,
 )
 
-from fleet_rlm.integrations.database import DatasetFormat, DatasetSource
-from fleet_rlm.integrations.database.repository_optimization import DatasetCreateRequest, DatasetReviewUpdate
+from fleet_rlm.db import DatasetFormat, DatasetSource
+from fleet_rlm.db.repos.optimization import DatasetCreateRequest, DatasetReviewUpdate
 from fleet_rlm.integrations.persistence_protocol import UnsupportedLocalCapabilityError
 from fleet_rlm.quality import module_registry
 from fleet_rlm.quality.dataset_versions import (

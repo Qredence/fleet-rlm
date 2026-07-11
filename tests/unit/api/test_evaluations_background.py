@@ -41,7 +41,7 @@ from fleet_rlm.api.runtime_services.evaluations import (
     start_evaluation_run,
 )
 from fleet_rlm.api.schemas.evaluations import EvaluationRequest
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.quality.eval.report import EvaluationReport
 
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")

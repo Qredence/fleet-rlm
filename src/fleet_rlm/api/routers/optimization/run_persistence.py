@@ -8,8 +8,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
-from fleet_rlm.integrations.database.repository_optimization import OptimizationArtifactCreateRequest
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
+from fleet_rlm.db.repos.optimization import OptimizationArtifactCreateRequest
 from fleet_rlm.integrations.persistence_protocol import UnsupportedLocalCapabilityError
 
 logger = logging.getLogger(__name__)

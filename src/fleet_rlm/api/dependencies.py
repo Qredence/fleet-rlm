@@ -10,8 +10,8 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException, Request, Security, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.db import DatabaseManager, FleetRepository
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.integrations.persistence_protocol import PersistenceProtocol
 from fleet_rlm.utils.identity import owner_fingerprint
 

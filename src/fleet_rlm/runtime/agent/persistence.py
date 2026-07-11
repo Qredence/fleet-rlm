@@ -249,7 +249,7 @@ async def persist_session_metadata(
     any required UUID cannot be parsed.
 
     Args:
-        repository: A :class:`~fleet_rlm.integrations.database.FleetRepository`
+        repository: A :class:`~fleet_rlm.db.FleetRepository`
             instance, or ``None`` to skip persistence.
         workspace_id: Workspace UUID string.
         user_id: Optional user UUID string.
@@ -266,7 +266,7 @@ async def persist_session_metadata(
 
     import uuid as _uuid
 
-    from fleet_rlm.integrations.database.repository_chat import ChatSessionUpsertRequest
+    from fleet_rlm.db.repos.chat import ChatSessionUpsertRequest
 
     def _to_uuid(val: str | None) -> _uuid.UUID | None:
         if val is None:

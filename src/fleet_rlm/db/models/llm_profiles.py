@@ -9,7 +9,7 @@ from sqlalchemy import DateTime, ForeignKeyConstraint, Index, String, Text, Uniq
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .models_base import Base
+from fleet_rlm.db.base import Base
 
 
 class LlmProviderProfile(Base):

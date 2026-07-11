@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from fleet_rlm.integrations.database.models_enums import OptimizationRunStatus
-from fleet_rlm.integrations.database.repository_optimization import (
+from fleet_rlm.db.enums import OptimizationRunStatus
+from fleet_rlm.db.repos.optimization import (
     OptimizationArtifactCreateRequest,
     OptimizationRunCreateRequest,
 )

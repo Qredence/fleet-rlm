@@ -17,8 +17,8 @@ from fastapi import WebSocketDisconnect
 
 from fleet_rlm.api.runtime_services.run_lifecycle import ExecutionLifecycleManager
 from fleet_rlm.api.runtime_services.stream_failures import PersistenceRequiredError
+from fleet_rlm.db import RunStatus
 from fleet_rlm.files.schemas import AttachedFiles
-from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventContext, RuntimeEventKind
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 

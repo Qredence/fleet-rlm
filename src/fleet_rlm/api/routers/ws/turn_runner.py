@@ -14,8 +14,8 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from fleet_rlm.db import RunStatus
 from fleet_rlm.files.schemas import AttachedFiles
-from fleet_rlm.integrations.database import RunStatus
 from fleet_rlm.integrations.observability.trace_context import (
     runtime_telemetry_enabled_context,
 )

@@ -10,20 +10,13 @@ from typing import Any
 from sqlalchemy import Select, and_, delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
-from fleet_rlm.quality.dataset_versions import (
-    canonical_dataset_sha256,
-    partition_value,
-    validate_approval_partitions,
-    validate_dataset_partitions,
-)
-
-from .models_enums import (
+from fleet_rlm.db.enums import (
     DatasetFormat,
     DatasetSource,
     OptimizationRunStatus,
     PromptSnapshotType,
 )
-from .models_optimization import (
+from fleet_rlm.db.models.optimization import (
     Dataset,
     DatasetExample,
     EvaluationResult,
@@ -33,10 +26,16 @@ from .models_optimization import (
     OptimizationTargetActivation,
     PromptSnapshot,
 )
-from .repository_shared import (
+from fleet_rlm.db.repos.shared import (
     RepositoryContextMixin,
     _count_from_stmt,
     _utc_now,
+)
+from fleet_rlm.quality.dataset_versions import (
+    canonical_dataset_sha256,
+    partition_value,
+    validate_approval_partitions,
+    validate_dataset_partitions,
 )
 
 

@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.integrations.persistence_protocol import UnsupportedLocalCapabilityError
 
 from ..schemas.sessions import SessionTraceExportRequest, SessionTraceExportResponse

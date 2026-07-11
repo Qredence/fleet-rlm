@@ -7,7 +7,7 @@ import os
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from fleet_rlm.integrations.database import SandboxProvider
+from fleet_rlm.db import SandboxProvider
 from fleet_rlm.utils.time import (
     now_iso as utc_now_iso,  # noqa: F401  re-export for consumers
 )

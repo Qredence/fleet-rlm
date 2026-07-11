@@ -9,14 +9,14 @@ from collections.abc import Callable
 from typing import Any
 
 from fleet_rlm.api.runtime_services.stream_failures import PersistenceRequiredError
-from fleet_rlm.integrations.database import (
+from fleet_rlm.db import (
     FleetRepository,
     MemoryKind,
     MemoryScope,
     MemorySource,
 )
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
-from fleet_rlm.integrations.database.repository_memory import MemoryItemCreateRequest
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
+from fleet_rlm.db.repos.memory import MemoryItemCreateRequest
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 from fleet_rlm.utils.time import now_iso
 

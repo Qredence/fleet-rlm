@@ -28,9 +28,9 @@ safe.
 - Phase 8 quality work remains offline and does not couple frontend migration to GEPA.
 - Phase 9 has promoted direct RLM with passing live golden-flow, safety, trace,
   session, artifact, and performance evidence.
-- Optional: after [Phase 8.5](../08.5-persistence-db/README.md) and an import
-  inventory, remove the `integrations/database` compatibility shim only when no
-  active consumer remains (same evidence bar as other Phase 10 deletions).
+- Database package ownership was cleaned in
+  [Phase 8.5](../08.5-persistence-db/README.md) (`src/fleet_rlm/db/`;
+  `integrations/database` removed). Phase 10 does not own further DB shim work.
 
 ### Ordered internal stages
 

@@ -4,7 +4,7 @@ import uuid as _uuid
 
 from fleet_rlm.api.auth import NormalizedIdentity
 from fleet_rlm.api.dependencies import require_http_identity
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 
 
 def _stub_identity() -> NormalizedIdentity:

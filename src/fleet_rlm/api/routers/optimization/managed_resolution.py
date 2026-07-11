@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.quality.checkpointing import build_run_fingerprint
 from fleet_rlm.quality.contracts import OptimizationRunSpec
 from fleet_rlm.quality.dataset_versions import canonical_dataset_sha256, partition_value, validate_approval_partitions

@@ -16,7 +16,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.quality import optimization_runner
 from fleet_rlm.quality.contracts import OptimizationRunSpec
 from fleet_rlm.quality.optimization_dispatch import run_optimization_from_request_fields

@@ -13,8 +13,8 @@ Keep the backend layered from transport to runtime to substrate:
   tool registry, session state, and module construction.
 - `src/fleet_rlm/integrations/daytona/` owns Daytona interpreter lifecycle, sandbox execution,
   volumes, diagnostics, and substrate-specific cleanup.
-- `src/fleet_rlm/integrations/database/` and `src/fleet_rlm/integrations/local_store.py` own
-  persistence.
+- `src/fleet_rlm/db/` and `src/fleet_rlm/integrations/local_store.py` own
+  persistence (Postgres domain models/repos vs limited LocalStore dual backend).
 - `src/fleet_rlm/quality/` owns offline DSPy evaluation and optimization machinery.
 
 Transport code may call runtime services and schemas. Runtime code should not import frontend,

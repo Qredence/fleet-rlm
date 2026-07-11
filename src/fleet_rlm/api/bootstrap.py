@@ -11,9 +11,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
+from fleet_rlm.db import DatabaseManager, FleetRepository
 from fleet_rlm.integrations.config.env_file import resolve_env_path
 from fleet_rlm.integrations.config.process import load_process_config, server_config_values
-from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
 
 from .auth import build_auth_provider
 from .bootstrap_observability import (

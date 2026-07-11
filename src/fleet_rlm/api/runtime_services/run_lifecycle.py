@@ -22,16 +22,16 @@ from fleet_rlm.api.runtime_services.common import (
     resolve_sandbox_provider,
 )
 from fleet_rlm.api.runtime_services.stream_failures import PersistenceRequiredError
-from fleet_rlm.integrations.database import (
+from fleet_rlm.db import (
     FleetRepository,
     RunStatus,
     RunStepType,
 )
-from fleet_rlm.integrations.database.repository_chat import (
+from fleet_rlm.db.repos.chat import (
     RunCreateRequest,
     RunStepCreateRequest,
 )
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 logger = logging.getLogger(__name__)

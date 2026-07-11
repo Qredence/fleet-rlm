@@ -9,10 +9,10 @@ from typing import Any
 from sqlalchemy import Select, and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
-from .models_enums import MemoryKind, MemoryScope, MemorySource
-from .models_memory import MemoryItem
-from .models_runs import ChatSession, Run
-from .repository_shared import (
+from fleet_rlm.db.enums import MemoryKind, MemoryScope, MemorySource
+from fleet_rlm.db.models.chat_runtime import ChatSession, Run
+from fleet_rlm.db.models.memory import MemoryItem
+from fleet_rlm.db.repos.shared import (
     RepositoryContextMixin,
     _coerce_enum,
     _count_from_stmt,

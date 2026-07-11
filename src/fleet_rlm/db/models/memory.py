@@ -21,8 +21,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .models_base import Base, _pg_enum
-from .models_enums import MemoryKind, MemoryScope, MemorySource, MemoryStatus
+from fleet_rlm.db.base import Base, _pg_enum
+from fleet_rlm.db.enums import MemoryKind, MemoryScope, MemorySource, MemoryStatus
 
 
 class MemoryItem(Base):

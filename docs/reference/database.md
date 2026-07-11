@@ -8,21 +8,22 @@ tenant + workspace scoped, and all new primary keys are generated with `app.uuid
 
 | Component | Location |
 | --- | --- |
-| Engine and session lifecycle | `src/fleet_rlm/integrations/database/engine.py` |
-| Repository boundary | `src/fleet_rlm/integrations/database/fleet_repository.py` |
-| Shared repository context helpers | `src/fleet_rlm/integrations/database/repository_shared.py` |
-| SQLAlchemy models | `src/fleet_rlm/integrations/database/models_*.py` |
-| Typed request DTOs | Domain-specific dataclasses in `repository_*.py` modules |
-| Alembic migrations | `migrations/versions/` |
+| Engine and session lifecycle | `src/fleet_rlm/db/engine.py` |
+| Repository boundary | `src/fleet_rlm/db/repos/fleet.py` (`FleetRepository`) |
+| Shared repository context helpers | `src/fleet_rlm/db/repos/shared.py` |
+| SQLAlchemy models | `src/fleet_rlm/db/models/` (domain modules + registry) |
+| Typed request DTOs | Domain-specific dataclasses in `src/fleet_rlm/db/repos/*.py` |
+| Alembic migrations | `migrations/versions/` (registry import via `fleet_rlm.db.models`) |
+| Dual-backend port | `src/fleet_rlm/integrations/persistence_protocol.py` |
+| Local SQLite backend | `src/fleet_rlm/integrations/local_store.py` |
 
 ## Roadmap
 
 [Phase 8.5 — Persistence DB](../plan-implementation/phases/08.5-persistence-db/README.md)
-plans a behavior-preserving move to `src/fleet_rlm/db/` (domain `models/` +
-`repos/`, one Alembic registry, temporary re-exports from
-`integrations/database`). Until that phase’s code lands, the table above is the
-live layout. Postgres remains the system of record; LocalStore stays a limited
-dual backend and is not required to match Neon capability.
+moved ownership to `src/fleet_rlm/db/` (domain `models/` + `repos/`, one Alembic
+registry) and removed the flat `integrations/database/` package. Postgres remains
+the system of record; LocalStore stays a limited dual backend and is not required
+to match Neon capability.
 
 ## Schema Baseline
 

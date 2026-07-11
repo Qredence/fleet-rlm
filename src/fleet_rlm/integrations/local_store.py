@@ -23,66 +23,66 @@ from sqlalchemy import Column, Integer, text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
-from fleet_rlm.integrations.database.models_enums import (
+from fleet_rlm.db.enums import (
     ChatSessionStatus as DbChatSessionStatus,
 )
-from fleet_rlm.integrations.database.models_enums import (
+from fleet_rlm.db.enums import (
     ExternalTraceProvider as DbExternalTraceProvider,
 )
-from fleet_rlm.integrations.database.models_enums import (
+from fleet_rlm.db.enums import (
     MembershipRole as DbMembershipRole,
 )
-from fleet_rlm.integrations.database.models_enums import (
+from fleet_rlm.db.enums import (
     MemoryScope as DbMemoryScope,
 )
-from fleet_rlm.integrations.database.models_enums import (
+from fleet_rlm.db.enums import (
     OptimizationRunStatus as DbOptimizationRunStatus,
 )
-from fleet_rlm.integrations.database.models_enums import (
+from fleet_rlm.db.enums import (
     RunStatus as DbRunStatus,
 )
-from fleet_rlm.integrations.database.models_enums import (
+from fleet_rlm.db.enums import (
     TenantStatus as DbTenantStatus,
 )
-from fleet_rlm.integrations.database.models_memory import MemoryItem as DbMemoryItem
-from fleet_rlm.integrations.database.models_optimization import (
-    Dataset as DbDataset,
-)
-from fleet_rlm.integrations.database.models_optimization import (
-    DatasetExample as DbDatasetExample,
-)
-from fleet_rlm.integrations.database.models_optimization import (
-    EvaluationResult as DbEvaluationResult,
-)
-from fleet_rlm.integrations.database.models_optimization import (
-    OptimizationRun as DbOptimizationRun,
-)
-from fleet_rlm.integrations.database.models_optimization import (
-    PromptSnapshot as DbPromptSnapshot,
-)
-from fleet_rlm.integrations.database.models_runs import (
+from fleet_rlm.db.models.chat_runtime import (
     Artifact as DbArtifact,
 )
-from fleet_rlm.integrations.database.models_runs import (
+from fleet_rlm.db.models.chat_runtime import (
     ChatSession as DbChatSession,
 )
-from fleet_rlm.integrations.database.models_runs import (
+from fleet_rlm.db.models.chat_runtime import (
     ChatTurn as DbChatTurn,
 )
-from fleet_rlm.integrations.database.models_runs import (
+from fleet_rlm.db.models.chat_runtime import (
     Run as DbRun,
 )
-from fleet_rlm.integrations.database.models_runs import (
+from fleet_rlm.db.models.chat_runtime import (
     RunStep as DbRunStep,
 )
-from fleet_rlm.integrations.database.repository_chat import (
+from fleet_rlm.db.models.memory import MemoryItem as DbMemoryItem
+from fleet_rlm.db.models.optimization import (
+    Dataset as DbDataset,
+)
+from fleet_rlm.db.models.optimization import (
+    DatasetExample as DbDatasetExample,
+)
+from fleet_rlm.db.models.optimization import (
+    EvaluationResult as DbEvaluationResult,
+)
+from fleet_rlm.db.models.optimization import (
+    OptimizationRun as DbOptimizationRun,
+)
+from fleet_rlm.db.models.optimization import (
+    PromptSnapshot as DbPromptSnapshot,
+)
+from fleet_rlm.db.repos.chat import (
     ArtifactCreateRequest,
     RunCreateRequest,
     RunStepCreateRequest,
 )
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
-from fleet_rlm.integrations.database.repository_memory import MemoryItemCreateRequest
-from fleet_rlm.integrations.database.repository_optimization import (
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
+from fleet_rlm.db.repos.memory import MemoryItemCreateRequest
+from fleet_rlm.db.repos.optimization import (
     DatasetCreateRequest,
     DatasetReviewUpdate,
     OptimizationArtifactCreateRequest,

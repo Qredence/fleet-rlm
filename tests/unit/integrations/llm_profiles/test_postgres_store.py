@@ -8,8 +8,8 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.integrations.database.models_llm_profiles import LlmRoleBinding
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.db.models.llm_profiles import LlmRoleBinding
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.integrations.llm_profiles.store import ROLE_NAMES, PostgresLlmProfileStore
 
 

@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException
 
-from fleet_rlm.integrations.database import FleetRepository
+from fleet_rlm.db import FleetRepository
 
 from ..auth import AuthError, resolve_admitted_identity
 from ..dependencies import ConfigDepsDep, HTTPIdentityDep, PersistenceDep, WebSocketTicketDepsDep

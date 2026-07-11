@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert
 
-from .models_enums import MembershipRole, TenantStatus
-from .models_identity import Tenant, User, WorkspaceRuntimeSetting
-from .repository_shared import RepositoryContextMixin, _utc_now
+from fleet_rlm.db.enums import MembershipRole, TenantStatus
+from fleet_rlm.db.models.identity import Tenant, User, WorkspaceRuntimeSetting
+from fleet_rlm.db.repos.shared import RepositoryContextMixin, _utc_now
 
 
 @dataclass(frozen=True)

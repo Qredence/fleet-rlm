@@ -17,8 +17,8 @@ from cryptography.fernet import Fernet
 
 from fleet_rlm.api.routers import runtime as runtime_router
 from fleet_rlm.api.schemas.runtime import RuntimeSettingsUpdateRequest
+from fleet_rlm.db.repos.fleet import FleetRepository
 from fleet_rlm.integrations.config.env_file import mask_secret
-from fleet_rlm.integrations.database.fleet_repository import FleetRepository
 from fleet_rlm.integrations.llm_profiles.crypto import decrypt_api_key, encrypt_api_key
 
 
@@ -53,7 +53,7 @@ def _make_deps(secret_key: str, repo: _FakeFleetRepository, identity):
 
 @pytest.mark.asyncio
 async def test_masked_daytona_key_resubmit_does_not_corrupt_stored_key() -> None:
-    from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+    from fleet_rlm.db.repos.identity import IdentityUpsertResult
 
     secret_key = Fernet.generate_key().decode("ascii")
     real_key = "sk-real-production-key-1234"
@@ -89,7 +89,7 @@ async def test_masked_daytona_key_resubmit_does_not_corrupt_stored_key() -> None
 
 @pytest.mark.asyncio
 async def test_new_daytona_key_is_encrypted_and_persisted() -> None:
-    from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+    from fleet_rlm.db.repos.identity import IdentityUpsertResult
 
     secret_key = Fernet.generate_key().decode("ascii")
     repo = _FakeFleetRepository()
@@ -121,7 +121,7 @@ async def test_empty_daytona_key_when_existing_is_skipped_not_cleared() -> None:
     snapshot, which would otherwise be round-tripped back and erase the
     real credential on the next save.
     """
-    from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+    from fleet_rlm.db.repos.identity import IdentityUpsertResult
 
     secret_key = Fernet.generate_key().decode("ascii")
     real_key = "sk-keep-me-alive"
@@ -152,7 +152,7 @@ async def test_empty_daytona_key_when_existing_is_skipped_not_cleared() -> None:
 async def test_empty_daytona_key_clears_when_no_existing_value() -> None:
     """An empty PATCH value is still treated as an explicit clear when there
     is no existing stored value (idempotent clear on a fresh record)."""
-    from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+    from fleet_rlm.db.repos.identity import IdentityUpsertResult
 
     secret_key = Fernet.generate_key().decode("ascii")
     repo = _FakeFleetRepository()

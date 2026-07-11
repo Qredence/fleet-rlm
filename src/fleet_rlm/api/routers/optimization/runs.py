@@ -16,7 +16,7 @@ from fastapi import (
     Path as ApiPath,
 )
 
-from fleet_rlm.integrations.database import OptimizationRunStatus
+from fleet_rlm.db import OptimizationRunStatus
 from fleet_rlm.integrations.persistence_protocol import UnsupportedLocalCapabilityError
 
 from ...dependencies import ConfigDepsDep, HTTPIdentityDep, PersistenceDep, PersistenceDepsDep

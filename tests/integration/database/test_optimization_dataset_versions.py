@@ -4,8 +4,8 @@ import uuid
 
 import pytest
 
-from fleet_rlm.integrations.database.models_enums import DatasetFormat, DatasetSource
-from fleet_rlm.integrations.database.repository_optimization import DatasetCreateRequest, DatasetReviewUpdate
+from fleet_rlm.db.enums import DatasetFormat, DatasetSource
+from fleet_rlm.db.repos.optimization import DatasetCreateRequest, DatasetReviewUpdate
 
 
 @pytest.mark.integration

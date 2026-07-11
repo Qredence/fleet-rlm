@@ -12,8 +12,8 @@ from typing import Any, cast
 
 from fastapi import HTTPException
 
-from fleet_rlm.integrations.database import ChatSessionStatus, ChatTurn
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.db import ChatSessionStatus, ChatTurn
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.utils.session_titles import derive_session_title, is_placeholder_session_title
 
 from ..schemas.optimization import DatasetResponse
@@ -536,8 +536,8 @@ class SessionService:
             build_transcript_dataset_rows,
             persist_jsonl_rows,
         )
-        from fleet_rlm.integrations.database import DatasetFormat, DatasetSource
-        from fleet_rlm.integrations.database.repository_optimization import (
+        from fleet_rlm.db import DatasetFormat, DatasetSource
+        from fleet_rlm.db.repos.optimization import (
             DatasetCreateRequest,
         )
 

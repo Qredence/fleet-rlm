@@ -669,7 +669,7 @@ def _validate_evidence_payload(
                 "error": f"Evidence tag exceeds maximum {_EVIDENCE_MAX_TAG_BYTES} bytes.",
             }
 
-    from fleet_rlm.integrations.database.models_enums import MemoryKind, MemoryScope
+    from fleet_rlm.db.enums import MemoryKind, MemoryScope
 
     try:
         MemoryScope(scope)
@@ -727,12 +727,12 @@ def store_evidence(
     if repository is None or identity is None:
         return {"status": "skipped", "reason": "no_repository"}
 
-    from fleet_rlm.integrations.database.models_enums import (
+    from fleet_rlm.db.enums import (
         MemoryKind,
         MemoryScope,
         MemorySource,
     )
-    from fleet_rlm.integrations.database.repository_memory import (
+    from fleet_rlm.db.repos.memory import (
         MemoryItemCreateRequest,
     )
 
@@ -774,7 +774,7 @@ def fetch_evidence(
 
     effective_limit = max(1, min(limit, _EVIDENCE_MAX_LIMIT))
 
-    from fleet_rlm.integrations.database.models_enums import MemoryScope
+    from fleet_rlm.db.enums import MemoryScope
 
     try:
         MemoryScope(scope)
@@ -828,7 +828,7 @@ def list_evidence(
 
     effective_limit = max(1, min(limit, _EVIDENCE_MAX_LIMIT))
 
-    from fleet_rlm.integrations.database.models_enums import MemoryScope
+    from fleet_rlm.db.enums import MemoryScope
 
     try:
         MemoryScope(scope)

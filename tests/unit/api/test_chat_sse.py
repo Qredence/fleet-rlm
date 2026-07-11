@@ -24,7 +24,7 @@ from fleet_rlm.api.auth.types import NormalizedIdentity
 from fleet_rlm.api.dependencies import require_http_identity
 from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext
 from fleet_rlm.api.runtime_services.chat_runtime import PreparedChatRuntime
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 from tests.unit.api.fakes import (
     DEFAULT_BODY,

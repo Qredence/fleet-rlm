@@ -18,8 +18,8 @@ detailed phase dossiers.
 
 The current product phase is [Phase 8 — GEPA quality](phases/08-gepa-quality/README.md)
 (status `partial`). [Phase 8.5 — Persistence DB](phases/08.5-persistence-db/README.md)
-is planned structural work that may run in parallel when cheap and **must not
-gate** promotion. Direct RLM remains
+is `complete` (structural `db/` package + legacy cleanup) and **must not gate**
+promotion. Direct RLM remains
 [promotion-gated in Phase 9](phases/09-direct-rlm-promotion/README.md).
 
 ## Status vocabulary
@@ -51,7 +51,7 @@ unchecked remediation criterion.
 6. [Phase 6 — Observability](phases/06-observability/README.md) — complete.
 7. [Phase 7 — Typed config](phases/07-typed-config/README.md) — complete in `f61fd045`.
 8. [Phase 8 — GEPA quality](phases/08-gepa-quality/README.md) — partial.
-8.5. [Phase 8.5 — Persistence DB package](phases/08.5-persistence-db/README.md) — planned (structural; non-blocking for Phase 9).
+8.5. [Phase 8.5 — Persistence DB package](phases/08.5-persistence-db/README.md) — complete (structural; non-blocking for Phase 9).
 9. [Phase 9 — Direct RLM promotion](phases/09-direct-rlm-promotion/README.md) — promotion gated.
 10. [Phase 10 — Frontend SSE and cleanup](phases/10-frontend-sse-cleanup/README.md) — planned.
 

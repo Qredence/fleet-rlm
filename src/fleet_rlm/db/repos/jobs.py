@@ -10,10 +10,9 @@ from typing import Any
 from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
-from .models_enums import JobStatus, JobType, SandboxProvider, SandboxSessionStatus
-from .models_jobs import Job
-from .models_sandbox import SandboxSession
-from .repository_shared import RepositoryContextMixin, _coerce_enum, _utc_now
+from fleet_rlm.db.enums import JobStatus, JobType, SandboxProvider, SandboxSessionStatus
+from fleet_rlm.db.models.ops import Job, SandboxSession
+from fleet_rlm.db.repos.shared import RepositoryContextMixin, _coerce_enum, _utc_now
 
 
 @dataclass(frozen=True)

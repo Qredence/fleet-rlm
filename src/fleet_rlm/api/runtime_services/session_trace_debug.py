@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from fastapi import HTTPException
 
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.integrations.persistence_protocol import UnsupportedLocalCapabilityError
 from fleet_rlm.observability.token_usage import int_or_none as _pure_int_or_none
 from fleet_rlm.traces.classifier import (

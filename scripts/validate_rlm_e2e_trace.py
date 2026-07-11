@@ -29,7 +29,7 @@ import httpx
 import websockets
 from sqlalchemy import and_, func, select, text
 
-from fleet_rlm.integrations.database import (
+from fleet_rlm.db import (
     Artifact,
     DatabaseManager,
     FleetRepository,

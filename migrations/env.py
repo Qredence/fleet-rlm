@@ -18,41 +18,9 @@ if str(SRC) not in sys.path:
 
 load_dotenv(ROOT / ".env", override=True)
 
-from fleet_rlm.integrations.database import (  # noqa: E402
-    Artifact,  # noqa: F401
-    Base,
-    ChatSession,  # noqa: F401
-    ChatTurn,  # noqa: F401
-    Dataset,  # noqa: F401
-    DatasetExample,  # noqa: F401
-    EvaluationResult,  # noqa: F401
-    ExecutionEvent,  # noqa: F401
-    ExternalTrace,  # noqa: F401
-    Job,  # noqa: F401
-    MemoryItem,  # noqa: F401
-    MemoryLink,  # noqa: F401
-    OptimizationArtifactVersion,  # noqa: F401
-    OptimizationModule,  # noqa: F401
-    OptimizationRun,  # noqa: F401
-    OptimizationTargetActivation,  # noqa: F401
-    PromptSnapshot,  # noqa: F401
-    RLMProgram,  # noqa: F401
-    Run,  # noqa: F401
-    RunStep,  # noqa: F401
-    SandboxSession,  # noqa: F401
-    SessionStateSnapshot,  # noqa: F401
-    # Import all active SQLModel models so Alembic metadata has complete schema registry
-    Tenant,  # noqa: F401
-    TenantSubscription,  # noqa: F401
-    TraceFeedback,  # noqa: F401
-    User,  # noqa: F401
-    Workspace,  # noqa: F401
-    WorkspaceMembership,  # noqa: F401
-    WorkspaceRuntimeSetting,  # noqa: F401
-    models_llm_profiles,  # noqa: E402, F401
-    select_database_url,
-    to_sync_database_url,
-)
+# Single model registry registers every table on Base.metadata.
+from fleet_rlm.db.engine import select_database_url, to_sync_database_url  # noqa: E402
+from fleet_rlm.db.models import Base  # noqa: E402, F401
 
 config = context.config
 

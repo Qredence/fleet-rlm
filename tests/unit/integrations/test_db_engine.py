@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 
 def test_select_database_url_prefers_admin_and_falls_back_to_runtime() -> None:
-    from fleet_rlm.integrations.database.engine import select_database_url
+    from fleet_rlm.db.engine import select_database_url
 
     assert (
         select_database_url(
@@ -26,7 +26,7 @@ def test_select_database_url_prefers_admin_and_falls_back_to_runtime() -> None:
 
 
 def test_database_manager_creates_engine_with_expected_pool_settings(monkeypatch) -> None:
-    from fleet_rlm.integrations.database.engine import DatabaseManager
+    from fleet_rlm.db.engine import DatabaseManager
 
     created: list[tuple[str, dict[str, object]]] = []
 
@@ -35,7 +35,7 @@ def test_database_manager_creates_engine_with_expected_pool_settings(monkeypatch
         return SimpleNamespace(url=url, kwargs=kwargs)
 
     monkeypatch.setattr(
-        "fleet_rlm.integrations.database.engine.create_async_engine",
+        "fleet_rlm.db.engine.create_async_engine",
         fake_create_async_engine,
     )
 

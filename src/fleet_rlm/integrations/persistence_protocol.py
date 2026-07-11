@@ -29,15 +29,22 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
-from fleet_rlm.integrations.database.models_enums import (
+from fleet_rlm.db.enums import (
     ChatSessionStatus,
     ExternalTraceProvider,
     MemoryScope,
     OptimizationRunStatus,
     RunStatus,
 )
-from fleet_rlm.integrations.database.models_memory import MemoryItem
-from fleet_rlm.integrations.database.models_optimization import (
+from fleet_rlm.db.models.chat_runtime import (
+    Artifact,
+    ChatSession,
+    ChatTurn,
+    Run,
+    RunStep,
+)
+from fleet_rlm.db.models.memory import MemoryItem
+from fleet_rlm.db.models.optimization import (
     Dataset,
     DatasetExample,
     EvaluationResult,
@@ -46,21 +53,14 @@ from fleet_rlm.integrations.database.models_optimization import (
     OptimizationTargetActivation,
     PromptSnapshot,
 )
-from fleet_rlm.integrations.database.models_runs import (
-    Artifact,
-    ChatSession,
-    ChatTurn,
-    Run,
-    RunStep,
-)
-from fleet_rlm.integrations.database.repository_chat import (
+from fleet_rlm.db.repos.chat import (
     ArtifactCreateRequest,
     RunCreateRequest,
     RunStepCreateRequest,
 )
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
-from fleet_rlm.integrations.database.repository_memory import MemoryItemCreateRequest
-from fleet_rlm.integrations.database.repository_optimization import (
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
+from fleet_rlm.db.repos.memory import MemoryItemCreateRequest
+from fleet_rlm.db.repos.optimization import (
     DatasetCreateRequest,
     DatasetReviewUpdate,
     OptimizationArtifactCreateRequest,

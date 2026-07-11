@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+from fleet_rlm.db.repos.chat import ChatRepository
+from fleet_rlm.db.repos.identity import IdentityRepository
+from fleet_rlm.db.repos.jobs import JobsRepository
+from fleet_rlm.db.repos.memory import MemoryRepository
+from fleet_rlm.db.repos.optimization import OptimizationRepository
 from fleet_rlm.integrations.persistence_protocol import PersistenceProtocol
-
-from .repository_chat import ChatRepository
-from .repository_identity import IdentityRepository
-from .repository_jobs import JobsRepository
-from .repository_memory import MemoryRepository
-from .repository_optimization import OptimizationRepository
 
 
 class FleetRepository(

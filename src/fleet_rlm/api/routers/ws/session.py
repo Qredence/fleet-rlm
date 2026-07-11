@@ -10,10 +10,10 @@ from typing import Any
 from sqlalchemy.exc import SQLAlchemyError
 
 from fleet_rlm.api.runtime_services.session_paths import session_conversation_path
+from fleet_rlm.db import FleetRepository
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.files.attachment_resolution import PersistedSessionOwnerProof
 from fleet_rlm.files.upload_staging import attachment_owner_scope
-from fleet_rlm.integrations.database import FleetRepository
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.utils.identity import owner_fingerprint, session_key
 
 from ...dependencies import SessionCacheDeps
@@ -159,8 +159,8 @@ async def _link_database_session(
 
     if isinstance(persistence, FleetRepository) and identity_rows is not None:
         try:
-            from fleet_rlm.integrations.database import ChatSessionStatus
-            from fleet_rlm.integrations.database.repository_chat import (
+            from fleet_rlm.db import ChatSessionStatus
+            from fleet_rlm.db.repos.chat import (
                 ChatSessionUpsertRequest,
             )
 

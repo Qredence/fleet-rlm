@@ -24,7 +24,7 @@ graph TB
 | --- | --- | --- |
 | `fleet` | `cli/main.py` | `cli/fleet_cli.py`, `cli/terminal/*` |
 | `fleet-rlm` | `cli/fleet_cli.py` | `cli/commands/*`, `cli/runners.py`, `integrations/config/*` |
-| FastAPI server | `api/main.py:create_app` | `api/routers/*`, `api/auth/*`, `api/runtime_services/*`, `integrations/database/*`, `integrations/observability/*` |
+| FastAPI server | `api/main.py:create_app` | `api/routers/*`, `api/auth/*`, `api/runtime_services/*`, `db/*`, `integrations/observability/*` |
 
 
 ## Core Execution Path
@@ -99,7 +99,7 @@ graph LR
 | Package | Role | Notable files |
 | --- | --- | --- |
 | `integrations/config/` | Typed process config and environment settings | `process.py`, `settings_catalog.py`, `env_file.py`, `config.yaml` |
-| `integrations/database/` | Persistence boundary | `engine.py`, `fleet_repository.py`, `models_base.py`, `models_enums.py`, `models_identity.py`, `models_jobs.py`, `models_llm_profiles.py`, `models_memory.py`, `models_optimization.py`, `models_runs.py`, `models_sandbox.py`, `repository_chat.py`, `repository_identity.py`, `repository_jobs.py`, `repository_memory.py`, `repository_optimization.py`, `repository_shared.py` |
+| `db/` | Persistence boundary | `engine.py`, `base.py`, `enums.py`, `models/` (identity, chat_runtime, optimization, memory, llm_profiles, ops), `repos/` (shared, identity, chat, optimization, memory, jobs, fleet) |
 | `integrations/local_store.py` | Local sidecar persistence | session history, turn transcripts, optimization-run tracking |
 
 | `integrations/observability/` | Telemetry and tracing | `posthog_callback.py`, `mlflow_runtime.py`, `mlflow_traces.py`, `trace_context.py` |

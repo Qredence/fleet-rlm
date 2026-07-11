@@ -12,7 +12,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from fleet_rlm.integrations.database import (
+from fleet_rlm.db import (
     ArtifactKind,
     DatabaseManager,
     FleetRepository,
@@ -23,16 +23,16 @@ from fleet_rlm.integrations.database import (
     RunStepType,
     select_database_url,
 )
-from fleet_rlm.integrations.database.repository_chat import (
+from fleet_rlm.db.repos.chat import (
     ArtifactCreateRequest,
     RunCreateRequest,
     RunStepCreateRequest,
 )
-from fleet_rlm.integrations.database.repository_jobs import (
+from fleet_rlm.db.repos.jobs import (
     JobCreateRequest,
     JobLeaseRequest,
 )
-from fleet_rlm.integrations.database.repository_memory import (
+from fleet_rlm.db.repos.memory import (
     MemoryItemCreateRequest,
 )
 

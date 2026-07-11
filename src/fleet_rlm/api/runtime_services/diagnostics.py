@@ -12,7 +12,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+    from fleet_rlm.db.repos.identity import IdentityUpsertResult
 
 from pydantic import ValidationError
 

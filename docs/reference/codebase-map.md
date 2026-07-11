@@ -106,7 +106,7 @@ Key files:
   - `cli/runners.py`
 
 - Outgoing:
-  - `src/fleet_rlm/integrations/database/*`
+  - `src/fleet_rlm/db/*`
   - external Daytona SDK and provider systems
 
 Key files:

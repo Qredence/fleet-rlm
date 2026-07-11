@@ -12,8 +12,8 @@ from datetime import datetime
 from typing import Any, Protocol, cast
 
 from fleet_rlm.api.runtime_services.chat_prepare_errors import CHAT_RUNTIME_PREPARE_FAILED_MESSAGE
-from fleet_rlm.integrations.database import FleetRepository
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.db import FleetRepository
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.integrations.llm_profiles.resolver import build_lm_kwargs_from_resolved, resolve_active_role_configs
 from fleet_rlm.integrations.llm_profiles.store import resolve_profile_store
 from fleet_rlm.runtime.events import RuntimeEvent

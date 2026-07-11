@@ -28,7 +28,7 @@ graph TB
     API --> RUNTIME["runtime/\nchat agent + execution helpers + modules"]
     RUNTIME --> DAYTONA["integrations/daytona/\ninterpreter + runtime + filesystem"]
     API --> EVENTS["api/events/\nexecution event shaping"]
-    API --> PERSISTENCE["integrations/local_store.py\nintegrations/database/"]
+    API --> PERSISTENCE["integrations/local_store.py\ndb/"]
     RUNTIME --> QUALITY["quality/\noffline GEPA + DSPy optimization"]
 ```
 

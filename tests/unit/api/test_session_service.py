@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from fleet_rlm.api.runtime_services.session_service import SessionService
-from fleet_rlm.integrations.database import ChatSessionStatus
+from fleet_rlm.db import ChatSessionStatus
 
 
 def test_list_session_state_counts_exported_turns_schema() -> None:

@@ -14,10 +14,10 @@ from fleet_rlm.api.events import ExecutionEventEmitter, ExecutionStepBuilder
 from fleet_rlm.api.routers.ws import connection_loop, turn_runner
 from fleet_rlm.api.runtime_services.run_lifecycle import ExecutionLifecycleManager
 from fleet_rlm.api.schemas import WSMessage
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.files.attachment_resolution import AttachmentResolutionError, PersistedSessionOwnerProof
 from fleet_rlm.files.schemas import AttachedFiles, AttachmentRef
 from fleet_rlm.files.upload_staging import attachment_owner_scope, stage_uploaded_file_to_volume
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
 
 

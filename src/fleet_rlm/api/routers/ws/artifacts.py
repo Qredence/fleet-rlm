@@ -6,9 +6,9 @@ import logging
 import uuid
 from typing import Any
 
-from fleet_rlm.integrations.database import ArtifactKind
-from fleet_rlm.integrations.database.repository_chat import ArtifactCreateRequest
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.db import ArtifactKind
+from fleet_rlm.db.repos.chat import ArtifactCreateRequest
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 from fleet_rlm.utils.time import now_iso
 

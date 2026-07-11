@@ -233,7 +233,7 @@ See `.env.example` and [installation](docs/how-to-guides/installation.md) for th
 src/fleet_rlm/api/                   FastAPI app, auth, routers, WebSocket transport
 src/fleet_rlm/runtime/               DSPy agent runtime, execution helpers, tools
 src/fleet_rlm/integrations/daytona/  Daytona interpreter, sandbox lifecycle, durable volumes
-src/fleet_rlm/integrations/database/ Postgres repository, schema, migrations-facing models
+src/fleet_rlm/db/                  Postgres models, engine, domain repositories
 src/fleet_rlm/integrations/local_store.py  SQLite fallback store and local session helpers
 src/fleet_rlm/quality/               Offline DSPy evaluation and optimization
 src/fleet_rlm/cli/                   `fleet` and `fleet-rlm` entrypoints

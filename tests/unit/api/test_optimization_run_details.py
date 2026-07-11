@@ -16,7 +16,7 @@ from fleet_rlm.api.routers.optimization.run_details import (
     create_or_load_promotion_draft,
 )
 from fleet_rlm.api.schemas.optimization import OptimizationRunResponse
-from fleet_rlm.integrations.database.models_enums import OptimizationRunStatus
+from fleet_rlm.db.enums import OptimizationRunStatus
 
 
 def _run(tmp_path: Path, *, manifest_path: Path | None, output_path: Path | None) -> OptimizationRunResponse:

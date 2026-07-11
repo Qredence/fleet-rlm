@@ -19,8 +19,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .models_base import Base, _pg_enum
-from .models_enums import (
+from fleet_rlm.db.base import Base, _pg_enum
+from fleet_rlm.db.enums import (
     MembershipRole,
     TenantPlan,
     TenantStatus,

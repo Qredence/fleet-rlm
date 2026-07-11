@@ -105,7 +105,7 @@ async def get_runtime_settings(
 ) -> RuntimeSettingsSnapshot:
     """Return the effective runtime settings snapshot used by the local server."""
     extra_values = {}
-    from fleet_rlm.integrations.database import FleetRepository
+    from fleet_rlm.db import FleetRepository
 
     if (
         persistence_deps.repository is not None
@@ -161,7 +161,7 @@ async def patch_runtime_settings(
     request: RuntimeSettingsUpdateRequest,
 ) -> RuntimeSettingsUpdateResponse:
     """Persist allowed runtime setting changes and hot-apply them in-process."""
-    from fleet_rlm.integrations.database import FleetRepository
+    from fleet_rlm.db import FleetRepository
 
     daytona_keys = {"DAYTONA_API_KEY", "DAYTONA_API_URL", "DAYTONA_TARGET"}
     daytona_updates = {k: v for k, v in request.updates.items() if k in daytona_keys}

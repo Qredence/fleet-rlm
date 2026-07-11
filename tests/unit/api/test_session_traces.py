@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from fleet_rlm.api.runtime_services.session_service import SessionService
 from fleet_rlm.api.runtime_services.session_trace_debug import get_owned_session_trace_debug
 from fleet_rlm.api.schemas.sessions import SessionTraceExportRequest
-from fleet_rlm.integrations.database.models_enums import ExternalTraceProvider
+from fleet_rlm.db.enums import ExternalTraceProvider
 from fleet_rlm.integrations.observability.mlflow_traces import _trace_session_id
 from fleet_rlm.integrations.persistence_protocol import UnsupportedLocalCapabilityError
 

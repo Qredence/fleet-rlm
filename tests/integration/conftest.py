@@ -23,7 +23,7 @@ def require_database_url() -> str:
 
 @pytest_asyncio.fixture
 async def database_manager(require_database_url: str) -> AsyncIterator:
-    from fleet_rlm.integrations.database import DatabaseManager
+    from fleet_rlm.db import DatabaseManager
 
     db = DatabaseManager(require_database_url)
     try:
@@ -34,6 +34,6 @@ async def database_manager(require_database_url: str) -> AsyncIterator:
 
 @pytest_asyncio.fixture
 async def repository(database_manager) -> object:
-    from fleet_rlm.integrations.database import FleetRepository
+    from fleet_rlm.db import FleetRepository
 
     return FleetRepository(database_manager)

@@ -20,7 +20,7 @@ from fleet_rlm.api.dependencies import (
     resolve_persisted_identity,
 )
 from fleet_rlm.api.runtime_services import evaluations as evaluation_service
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.quality.eval.report import EvaluationReport
 
 

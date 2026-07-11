@@ -11,9 +11,7 @@ from typing import Any, cast
 from sqlalchemy import Select, and_, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
-from fleet_rlm.utils.session_titles import derive_session_title, is_placeholder_session_title
-
-from .models_enums import (
+from fleet_rlm.db.enums import (
     ArtifactKind,
     ArtifactProvider,
     ChatSessionStatus,
@@ -24,7 +22,7 @@ from .models_enums import (
     RunType,
     SandboxProvider,
 )
-from .models_runs import (
+from fleet_rlm.db.models.chat_runtime import (
     Artifact,
     ChatSession,
     ChatTurn,
@@ -33,12 +31,13 @@ from .models_runs import (
     RunStep,
     TraceFeedback,
 )
-from .repository_shared import (
+from fleet_rlm.db.repos.shared import (
     RepositoryContextMixin,
     _coerce_enum,
     _count_from_stmt,
     _utc_now,
 )
+from fleet_rlm.utils.session_titles import derive_session_title, is_placeholder_session_title
 
 
 def _session_external_id(metadata: object) -> str | None:

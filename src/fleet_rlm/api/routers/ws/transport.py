@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from fleet_rlm.integrations.database import RunStatus
+from fleet_rlm.db import RunStatus
 from fleet_rlm.utils.logging import sanitize_for_log as _sanitize_for_log
 
 from ...auth import AuthError

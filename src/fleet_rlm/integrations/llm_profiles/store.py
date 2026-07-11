@@ -15,10 +15,10 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.sql import and_, text
 
+from fleet_rlm.db.engine import DatabaseManager
+from fleet_rlm.db.models.llm_profiles import LlmProviderProfile, LlmRoleBinding
+from fleet_rlm.db.repos.identity import IdentityUpsertResult
 from fleet_rlm.integrations.config.env_file import resolve_env_path
-from fleet_rlm.integrations.database.engine import DatabaseManager
-from fleet_rlm.integrations.database.models_llm_profiles import LlmProviderProfile, LlmRoleBinding
-from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 
 from .crypto import decrypt_api_key, encrypt_api_key
 from .types import (

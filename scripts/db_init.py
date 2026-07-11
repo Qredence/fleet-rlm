@@ -13,7 +13,7 @@ from alembic import command
 from alembic.config import Config
 from dotenv import load_dotenv
 
-from fleet_rlm.integrations.database.engine import DatabaseManager, select_database_url
+from fleet_rlm.db.engine import DatabaseManager, select_database_url
 
 
 def build_parser() -> argparse.ArgumentParser:
