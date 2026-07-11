@@ -30,16 +30,21 @@ class LiveDaytonaPlatform:
     def create(
         self,
         *,
-        volume_id: str,
-        mount_path: str,
+        volume_id: str | None = None,
+        mount_path: str | None = None,
         labels: dict[str, str] | None = None,
+        with_volume: bool = True,
     ) -> Any:
         from daytona import CreateSandboxFromSnapshotParams, VolumeMount
 
+        volumes = None
+        if with_volume and volume_id and mount_path:
+            volumes = [VolumeMount(volume_id=volume_id, mount_path=mount_path)]
         params = CreateSandboxFromSnapshotParams(
             language="python",
             labels=labels or {},
-            volumes=[VolumeMount(volume_id=volume_id, mount_path=mount_path)],
+            volumes=volumes,
+            ephemeral=True,
         )
         return self._client.create(params)
 

@@ -131,9 +131,9 @@ async def test_live_kernel_rlm_daytona_through_runner() -> None:
         workspace_id=uuid4(),
         session_id=uuid4(),
         message=(
-            "Use the Python interpreter to compute 17*19 and print the product. "
-            "Also call llm_query once asking only for the word 'ok'. "
-            "Then submit the product as the answer."
+            "Task: in the Python REPL, evaluate 17*19 and print it. "
+            "Then call llm_query('reply with only ok') once. "
+            "Finally call final_answer with the product 323 as the answer field."
         ),
     )
     try:

@@ -6,7 +6,7 @@ Secrets use ``SecretStr`` so public dumps never expose plaintext values.
 
 from __future__ import annotations
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="FLEET_CLEAN_",
+        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -50,3 +51,16 @@ class Settings(BaseSettings):
         default=False,
         description="When true, app wiring may construct live LM/Daytona clients",
     )
+
+    @field_validator("llm_base_url", mode="before")
+    @classmethod
+    def _sanitize_llm_base_url(cls, value: object) -> str | None:
+        """Only keep real http(s) bases; ignore secrets/comments pasted into .env."""
+        if value is None or value == "":
+            return None
+        text = str(value).strip().strip("'\"")
+        if " #" in text:
+            text = text.split(" #", 1)[0].rstrip().strip("'\"")
+        if not (text.startswith("http://") or text.startswith("https://")):
+            return None
+        return text.rstrip("/")
