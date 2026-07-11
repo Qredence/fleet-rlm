@@ -3,7 +3,7 @@
 ## Phase 7 — Config audit and typed config
 
 - **Order:** `7`
-- **Status:** `in_progress_uncommitted`
+- **Status:** `complete`
 - **Track:** `Config`
 - **Summary:** Audit every configuration source before introducing typed process defaults.
 
@@ -134,16 +134,15 @@ Provider and Daytona keys remain secret inputs, not YAML defaults.
 - [x] MLflow settings do not require an MLflow server.
 - [x] Runtime diagnostics report the source of major values without secrets.
 
-### Current evidence state
+### Completion evidence
 
-The current working tree adds the resource-free typed process models and loader,
-one canonical packaged YAML, typed dotted CLI overrides, and server projection.
+Commit `f61fd045` adds the resource-free typed process models and loader, one
+canonical packaged YAML, typed dotted CLI overrides, and server projection.
 The settings catalog and `.env` persistence behavior are separate modules.
 Hydra, OmegaConf, the duplicate YAML, and the legacy aggregate models have been
 removed. The server `BaseSettings` adapter, encrypted LLM profiles, and
 workspace settings remain at their higher-precedence scopes. All acceptance
-criteria pass, but the phase remains `in_progress_uncommitted` until this
-implementation and evidence cross the required commit boundary.
+criteria and the required validation gate pass, so Phase 7 is complete.
 
 ### Validation
 
