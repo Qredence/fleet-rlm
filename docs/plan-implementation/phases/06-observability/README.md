@@ -3,20 +3,21 @@
 ## Phase 6 — Trace, transcript, performance, and MLflow
 
 - **Order:** `6`
-- **Status:** `partial`
+- **Status:** `in_progress_uncommitted`
 - **Track:** `Observability`
 - **Summary:** Record both runtime backends through one provider-neutral observability seam.
 
 ### Current evidence state
 
 Commit `29701f06` contains the recorder, redaction, classifier, performance,
-trace-service, transport-context, schema, promotion-harness, and test changes.
-Local backend unit/contracts, static checks, OpenAPI synchronization, and docs
-checks passed on 2026-07-10. This phase remains partial: the required live
-direct-RLM trace/promotion evidence is absent, and the sidecar full gate exposed
-an asynchronous frontend-test teardown rejection that must be cleanly resolved
-or classified before Phase 6 can be called complete. Phase 9 promotion remains
-separate and gated.
+trace-service, transport-context, schema, promotion-harness, and initial tests.
+On 2026-07-11, the frontend teardown defect was repaired, the FastAPI SSE
+generator lifecycle and MLflow trace correlation were verified, a live
+direct-RLM `POST /api/chat` turn produced a correlated MLflow trace, and the
+full repository/API gates passed. All Phase 6 acceptance criteria are complete
+in the current working tree; the status remains `in_progress_uncommitted` until
+these changes are committed. Phase 9 backend promotion remains separate and
+gated.
 
 ### Goal and stable interfaces
 
@@ -72,8 +73,8 @@ non_rendered   -> trace debug only
 - [x] Trace-debug classification remains additive and `non_rendered` stays debug-only.
 - [x] Performance aggregation works from sanitized recorded spans.
 - [x] Trace/debug/performance interfaces and both chat transports remain compatible in focused validation.
-- [ ] Live direct-RLM trace-span and promotion evidence is recorded.
-- [ ] The full repository gate passes without unhandled frontend-test rejections.
+- [x] Live direct-RLM trace-span evidence is recorded through FastAPI SSE.
+- [x] The full repository gate passes without unhandled frontend-test rejections.
 
 ### Evidence
 
@@ -81,6 +82,8 @@ non_rendered   -> trace debug only
 - [Phase 6 observability surface and implementation evidence](evidence-observability-surface.md)
 - [Task 1 validation record](evidence-task-1-validation.md)
 - [Roadmap-claim audit, 2026-07-10](evidence-roadmap-claim-audit-2026-07-10.md)
+- [Frontend test-teardown repair, 2026-07-11](evidence-frontend-test-teardown-2026-07-11.md)
+- [Direct-RLM FastAPI SSE and MLflow evidence, 2026-07-11](evidence-direct-rlm-sse-mlflow-2026-07-11.md)
 
 ### Validation
 
@@ -94,4 +97,4 @@ make api-check
 - Live `TurnProgressRelay` behavior for direct RLM.
 - Exact direct-vs-legacy cancellation and fallback/replay parity.
 - Any session-storage schema replacement or public route removal.
-- Live promotion evidence requiring Daytona, an LLM, MLflow, auth, and persistence.
+- Phase 9's multi-run backend-promotion matrix and default-backend switch.

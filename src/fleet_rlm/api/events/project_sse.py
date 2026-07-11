@@ -36,7 +36,7 @@ def _generate_tool_call_id() -> str:
     return f"call_{uuid4().hex[:16]}"
 
 
-async def project_sse(
+async def _project_sse_lines(
     event_stream: AsyncIterator[RuntimeEvent],
     cancel_flag: dict[str, bool] | None = None,
 ) -> AsyncIterator[str]:
@@ -403,6 +403,20 @@ async def project_sse(
         step_active = False
     yield _make_part("finish")
     yield "data: [DONE]\n\n"
+
+
+async def project_sse(
+    event_stream: AsyncIterator[RuntimeEvent],
+    cancel_flag: dict[str, bool] | None = None,
+) -> AsyncIterator[str]:
+    """Project an event stream and always close it after completion or disconnect."""
+    try:
+        async for line in _project_sse_lines(event_stream, cancel_flag=cancel_flag):
+            yield line
+    finally:
+        aclose = getattr(event_stream, "aclose", None)
+        if callable(aclose):
+            await aclose()
 
 
 __all__ = ["project_sse"]

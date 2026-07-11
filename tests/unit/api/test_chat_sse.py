@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib
 import json
 from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -202,6 +203,55 @@ class Test_SSE_001_BasicStream:  # noqa: N801
         assert stub_prepare_chat_runtime
         assert stub_prepare_chat_runtime[0].planner_lm is not stub_chat_agent_context[0].agent
         assert "agent saw hello" in response.text
+
+    def test_direct_rlm_completion_span_is_projected_over_sse(
+        self,
+        no_db_app,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_identity: NormalizedIdentity,
+    ) -> None:
+        """The canonical FastAPI SSE route exposes the direct-RLM trace id."""
+        from fleet_rlm.integrations.observability.mlflow_context import (
+            MlflowTraceRequestContext,
+            mlflow_request_context,
+        )
+        from fleet_rlm.rlm.runner import DirectRLMRunner
+
+        @contextmanager
+        def _trace_context(**_kwargs: object) -> Iterator[None]:
+            context = MlflowTraceRequestContext(
+                client_request_id="chat-sse-direct",
+                resolved_trace_id="tr-sse-direct",
+            )
+            with mlflow_request_context(context):
+                yield
+
+        async def _direct_stream(
+            self: DirectRLMRunner,
+            **_kwargs: object,
+        ) -> AsyncIterator[RuntimeEvent]:
+            del self
+            yield make_started_event()
+            yield make_text_event("direct response")
+            yield make_done_event()
+
+        monkeypatch.setenv("EXECUTION_BACKEND", "direct_rlm")
+        monkeypatch.setenv("MLFLOW_ENABLED", "false")
+        monkeypatch.setattr(
+            "fleet_rlm.observability.mlflow.direct_rlm_trace_context",
+            _trace_context,
+        )
+        monkeypatch.setattr(DirectRLMRunner, "stream", _direct_stream)
+        no_db_app.dependency_overrides[require_http_identity] = stub_identity_dependency(stub_identity)
+
+        with TestClient(no_db_app) as client:
+            response = client.post("/api/chat", json=DEFAULT_BODY)
+
+        assert_sse_ok(response)
+        parts = parse_sse_body(response.text)
+        spans = [part for part in parts if isinstance(part, dict) and part.get("type") == "data-span"]
+        assert len(spans) == 1
+        assert spans[0]["trace_id"] == "tr-sse-direct"
 
     def test_val_sse_007_stream_terminates_with_done(self, chat_client: TestClient) -> None:
         """SSE body ends with data: [DONE]."""

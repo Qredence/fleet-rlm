@@ -14,9 +14,12 @@ render AI SDK UIMessage text, reasoning, tool, artifact, task, performance, and
 span parts. Trace/debug panels consume backend `mapped_render_kind` and
 `mapped_component_type` values.
 
-WebSocket remains for terminal, sandbox, and other bidirectional control. Legacy
-chat execution is deprecated only after telemetry, browser smoke, contract tests,
-session restore, and promotion evidence show the SSE path is safe.
+Legacy WebSocket execution remains available only during migration. Phase 10
+must move each active consumer to HTTP commands plus SSE events, or prove that
+the consumer is obsolete, before removing its backend route and support code.
+Legacy chat execution is deprecated only after telemetry, browser smoke,
+contract tests, session restore, and promotion evidence show the SSE path is
+safe.
 
 ### Prerequisites
 
@@ -28,12 +31,13 @@ session restore, and promotion evidence show the SSE path is safe.
 
 ### Ordered internal stages
 
-1. **Adopt SSE for workspace transcript execution.** Keep WebSocket controls
-   available and prove transcript, session restore, attachment, artifact, and
-   trace/debug behavior through browser and contract tests.
-2. **Narrow WebSocket responsibility.** Inventory consumers and retain only
-   terminal, sandbox input, cancellation, resize, or other genuinely
-   bidirectional operations.
+1. **Adopt SSE for workspace transcript execution.** Keep compatibility controls
+   available during migration and prove transcript, session restore, attachment,
+   artifact, and trace/debug behavior through browser and contract tests.
+2. **Retire WebSocket consumers.** Inventory terminal, sandbox input,
+   cancellation, resize, and other consumers. Move each required operation to
+   HTTP commands plus SSE events, or record evidence that it is obsolete, before
+   removing its backend route and support code.
 3. **Inventory legacy runtime consumers.** Map imports, configuration,
    compatibility exports, tests, operational rollback requirements, and any
    external consumers before deprecation.
@@ -46,7 +50,8 @@ session restore, and promotion evidence show the SSE path is safe.
 
 ### Non-goals
 
-- Remove WebSocket terminal or sandbox control.
+- Remove a WebSocket control before its consumer has a verified HTTP/SSE
+  replacement or is proven obsolete.
 - Delete legacy runtime branches before Phase 9 promotion evidence.
 - Reimplement backend render classification in the frontend.
 
@@ -55,7 +60,8 @@ session restore, and promotion evidence show the SSE path is safe.
 - [ ] Workspace chat uses `/api/chat` SSE by default.
 - [ ] AI Elements render every supported UIMessage and Fleet data part.
 - [ ] Session restore, attachments, artifacts, and trace/debug panels remain compatible.
-- [ ] WebSocket is limited to bidirectional control responsibilities.
+- [ ] No WebSocket routes, modules, schemas, dependencies, or projections remain
+  under `src/fleet_rlm/`.
 - [ ] Legacy execution moves to compatibility ownership before unused branches are removed.
 - [ ] Browser, contract, telemetry, and rollback evidence support each deletion.
 - [ ] Each internal stage records its prerequisites, evidence, rollback trigger,
@@ -69,7 +75,7 @@ session restore, and promotion evidence show the SSE path is safe.
   active contract remains documented and tested.
 - A deletion is blocked when any active import, client, browser flow, operational
   runbook, or rollback test still depends on it.
-- Evidence includes frontend unit/E2E results, backend HTTP/WebSocket contracts,
+- Evidence includes frontend unit/E2E results, backend HTTP/SSE contracts,
   session restore and attachment/artifact flows, trace/performance telemetry,
   consumer inventories, and an explicit deletion ledger.
 

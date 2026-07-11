@@ -44,7 +44,7 @@ projectors.
 
 ## Final module ownership
 
-- `api/` owns HTTP/WebSocket transport, authentication, request schemas,
+- `api/` owns HTTP transport, authentication, request schemas,
   transport-neutral execution context, runtime dispatch, and response projection.
 - `rlm/` owns the direct RLM runner, signatures, inputs, trajectory normalization,
   error mapping, and per-run RLM lifecycle.
@@ -67,13 +67,11 @@ live in the owning module. Thin facades do not become a second implementation.
 
 ## Transport direction
 
-SSE is canonical for main chat transcript streaming because chat is primarily a
-one-way server stream, aligns with AI SDK UIMessage parts, and decouples frontend
-rendering from runtime execution. WebSocket remains for terminal, sandbox, and
-other bidirectional control until Phase 10 has migration evidence.
-
-Both transports consume the same `RuntimeEvent` stream. Transport projectors do
-not branch on execution backend.
+SSE is the backend streaming transport because chat is primarily a one-way
+server stream, aligns with AI SDK UIMessage parts, and decouples frontend
+rendering from runtime execution. HTTP request handlers own client commands and
+the SSE projector consumes the shared `RuntimeEvent` stream without branching
+on execution backend.
 
 ## Runtime direction
 
@@ -110,8 +108,8 @@ unbounded prompt or transport payloads.
 
 Do not break:
 
-- `POST /api/chat` or WebSocket control paths;
-- `RuntimeEvent` and its SSE/WebSocket projections;
+- `POST /api/chat` and required HTTP control paths;
+- `RuntimeEvent` and its SSE projection;
 - session trace, performance, run-step, and feedback schemas;
 - `ActiveSkills`, visibility checks, and skill selection;
 - Daytona volume/session state and approved durable roots;
@@ -150,7 +148,6 @@ hot path. The ordered destination is:
 preserve behavior while direct RLM earns parity
   -> promote direct RLM through explicit live evidence
   -> move workspace transcript execution to SSE
-  -> narrow WebSocket to genuinely bidirectional control
   -> inventory active legacy consumers and rollback requirements
   -> isolate compatibility ownership
   -> remove only paths proven dead by contract, browser, telemetry, and rollback evidence
@@ -163,8 +160,7 @@ contract still exists. It must not become an indefinite second implementation.
 
 The refactor is complete only when:
 
-- `POST /api/chat` is the normal transcript path and WebSocket is limited to
-  genuinely bidirectional control;
+- `POST /api/chat` is the transcript path and backend streaming is SSE;
 - direct `dspy.RLM` is the promoted primary agentic runtime and its live matrix
   proves Skills, attachments, artifacts, session restore, traces, safety, and
   performance;

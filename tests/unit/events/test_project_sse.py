@@ -39,6 +39,25 @@ async def _project(events: list[RuntimeEvent], cancel_flag: dict[str, bool] | No
     return result
 
 
+@pytest.mark.asyncio
+async def test_terminal_projection_closes_upstream_event_stream() -> None:
+    """A terminal SSE frame finalizes upstream request contexts immediately."""
+    closed = False
+
+    async def _stream() -> AsyncIterator[RuntimeEvent]:
+        nonlocal closed
+        try:
+            yield RuntimeEvent(kind=RuntimeEventKind.DONE, text="done")
+            pytest.fail("project_sse requested an event after the terminal frame")
+        finally:
+            closed = True
+
+    lines = [line async for line in project_sse(_stream())]
+
+    assert lines[-1] == "data: [DONE]\n\n"
+    assert closed is True
+
+
 def _parse_payload(line: str) -> dict[str, Any]:
     """Parse the JSON payload from an SSE ``data: {json}\n\n`` line."""
     assert line.startswith("data: "), f"Expected data: prefix, got: {line!r}"

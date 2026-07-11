@@ -1,6 +1,8 @@
 PYTHON_SOURCES = src tests
 PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db
 PYTEST := uv run --no-sync pytest
+PYTEST_XDIST_MAX_WORKERS ?= 2
+PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
 
 .PHONY: \
 	help \
@@ -86,13 +88,13 @@ typecheck:
 	uv run ty check src
 
 test:
-	$(PYTEST) -q -n auto tests/unit tests/contracts -m "$(PYTEST_FAST_MARKERS)"
+	$(PYTEST) -q $(PYTEST_PARALLEL) tests/unit tests/contracts -m "$(PYTEST_FAST_MARKERS)"
 	$(PYTEST) -q tests/integration -m "$(PYTEST_FAST_MARKERS)" -n 0
 
 test-fast: test
 
 test-unit:
-	$(PYTEST) -q -n auto tests/unit -m "$(PYTEST_FAST_MARKERS)"
+	$(PYTEST) -q $(PYTEST_PARALLEL) tests/unit -m "$(PYTEST_FAST_MARKERS)"
 
 test-integration:
 	$(PYTEST) -q tests/integration tests/contracts -m "$(PYTEST_FAST_MARKERS)" -n 0

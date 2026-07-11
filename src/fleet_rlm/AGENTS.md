@@ -2,7 +2,8 @@
 
 Backend, runtime, API, persistence, Daytona, and package rules for the
 `fleet-rlm` FastAPI application. This guide is for developers working in
-`src/fleet_rlm/`; the root `AGENTS.md` provides the top-level map.
+`src/fleet_rlm/`; read the root [AGENTS.md](../../AGENTS.md) first for the
+top-level map and shared rules.
 
 **Important:** this is a reference for *backend code only* — frontend rules
 live in `src/frontend/AGENTS.md`.

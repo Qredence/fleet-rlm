@@ -38,17 +38,33 @@ function CodeBlockCode({ code, language = "tsx", theme, className, ...props }: C
   const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
 
   useEffect(() => {
-    async function highlight() {
-      if (!code) {
-        setHighlightedHtml("<pre><code></code></pre>");
-        return;
-      }
+    let cancelled = false;
+    setHighlightedHtml(null);
 
-      const { codeToHtml } = await import("shiki");
-      const html = await codeToHtml(code, { lang: language, theme: activeTheme });
-      setHighlightedHtml(html);
+    if (!code) {
+      setHighlightedHtml("<pre><code></code></pre>");
+      return () => {
+        cancelled = true;
+      };
     }
-    highlight();
+
+    void (async () => {
+      try {
+        const { codeToHtml } = await import("shiki");
+        const html = await codeToHtml(code, { lang: language, theme: activeTheme });
+        if (!cancelled) {
+          setHighlightedHtml(html);
+        }
+      } catch {
+        if (!cancelled) {
+          setHighlightedHtml(null);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [code, language, activeTheme]);
 
   const classNames = cn("w-full overflow-x-auto typo-body-sm [&>pre]:px-4 [&>pre]:py-4", className);

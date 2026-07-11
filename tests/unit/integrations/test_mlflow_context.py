@@ -332,11 +332,11 @@ def test_mlflow_request_context_opens_application_turn_span(monkeypatch) -> None
         mlflow_request_context,
     )
 
-    captured: list[dict[str, object]] = []
+    captured: list[dict[str, Any]] = []
 
     class FakeSpan:
-        def __init__(self, name: str, span_type: str | None, attributes: dict[str, object] | None) -> None:
-            self.record: dict[str, object] = {
+        def __init__(self, name: str, span_type: str | None, attributes: dict[str, Any] | None) -> None:
+            self.record: dict[str, Any] = {
                 "name": name,
                 "span_type": span_type,
                 "attributes": attributes or {},
@@ -384,6 +384,55 @@ def test_mlflow_request_context_opens_application_turn_span(monkeypatch) -> None
     assert captured[0]["name"] == "fleet_rlm.chat_turn"
     assert captured[0]["inputs"] == {"message": "analyze docs"}
     assert captured[0]["outputs"] == {"response": "done"}
+
+
+def test_request_context_caches_trace_id_from_application_span(monkeypatch) -> None:
+    from fleet_rlm.integrations.observability import mlflow_context
+    from fleet_rlm.integrations.observability.mlflow_context import (
+        MlflowTraceRequestContext,
+        mlflow_request_context,
+        trace_result_metadata,
+    )
+
+    class FakeSpan:
+        trace_id = "tr-root-span"
+
+        def __enter__(self) -> "FakeSpan":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def set_inputs(self, _inputs: object) -> None:
+            return None
+
+        def set_outputs(self, _outputs: object) -> None:
+            return None
+
+    fake_mlflow = SimpleNamespace(
+        get_active_trace_id=lambda: None,
+        get_last_active_trace_id=lambda **_: None,
+        start_span=lambda **_: FakeSpan(),
+        update_current_trace=lambda **_: None,
+    )
+    fake_runtime = SimpleNamespace(
+        _import_mlflow=lambda: fake_mlflow,
+        flush_mlflow_traces=lambda: None,
+        get_mlflow_config=lambda: SimpleNamespace(enabled=True, active_model_id=None),
+        initialize_mlflow=lambda _config: True,
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+    )
+    monkeypatch.setenv("MLFLOW_ENABLED", "true")
+    monkeypatch.setattr(mlflow_context, "_runtime_module", lambda: fake_runtime)
+    monkeypatch.setattr(mlflow_context, "_try_initialize_mlflow_for_turn", lambda: None)
+
+    with mlflow_request_context(MlflowTraceRequestContext(client_request_id="chat-root-span")):
+        metadata = trace_result_metadata()
+
+    assert metadata == {
+        "mlflow_trace_id": "tr-root-span",
+        "mlflow_client_request_id": "chat-root-span",
+    }
 
 
 def test_record_rlm_trajectory_spans_materializes_repl_steps(monkeypatch) -> None:
@@ -778,11 +827,11 @@ def test_gen_ai_attributes_in_application_turn_span(monkeypatch) -> None:
         mlflow_request_context,
     )
 
-    captured: list[dict[str, object]] = []
+    captured: list[dict[str, Any]] = []
 
     class FakeSpan:
-        def __init__(self, name: str, span_type: str | None, attributes: dict[str, object] | None) -> None:
-            self.record: dict[str, object] = {
+        def __init__(self, name: str, span_type: str | None, attributes: dict[str, Any] | None) -> None:
+            self.record: dict[str, Any] = {
                 "name": name,
                 "span_type": span_type,
                 "attributes": attributes or {},

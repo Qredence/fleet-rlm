@@ -113,16 +113,21 @@ async def _ensure_turn_preamble(
     ``start-step`` + ``finish-step`` + ``finish`` + ``[DONE]``.
     """
     started_seen = False
-    async for event in event_stream:
-        if not started_seen:
-            started_seen = True
-            if event.kind != RuntimeEventKind.TURN_STARTED:
-                yield RuntimeEvent(
-                    kind=RuntimeEventKind.TURN_STARTED,
-                    text="started",
-                    payload={"message_id": str(uuid4())},
-                )
-        yield event
+    try:
+        async for event in event_stream:
+            if not started_seen:
+                started_seen = True
+                if event.kind != RuntimeEventKind.TURN_STARTED:
+                    yield RuntimeEvent(
+                        kind=RuntimeEventKind.TURN_STARTED,
+                        text="started",
+                        payload={"message_id": str(uuid4())},
+                    )
+            yield event
+    finally:
+        aclose = getattr(event_stream, "aclose", None)
+        if callable(aclose):
+            await aclose()
 
 
 async def _build_and_stream(
@@ -163,8 +168,13 @@ async def _runtime_event_stream(
     event_stream: Any = stream_turn(ctx=ctx, agent_runtime=agent_runtime, message=user_message)
     if isawaitable(event_stream):
         event_stream = await event_stream
-    async for event in event_stream:
-        yield event
+    try:
+        async for event in event_stream:
+            yield event
+    finally:
+        aclose = getattr(event_stream, "aclose", None)
+        if callable(aclose):
+            await aclose()
 
 
 def _server_sent_event_from_data_line(line: str) -> ServerSentEvent:

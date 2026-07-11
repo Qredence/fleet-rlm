@@ -48,7 +48,15 @@ class AgentsMdValidator:
     EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "#")
 
     # Directories to exclude from AGENTS.md validation (third-party)
-    EXCLUDED_DIRS = ("node_modules", ".venv", "__pycache__", "dist", "build", ".evo", ".claude")
+    EXCLUDED_DIRS = (
+        "node_modules",
+        ".venv",
+        "__pycache__",
+        "dist",
+        "build",
+        ".evo",
+        ".claude",
+    )
 
     def validate_all(self) -> list[ValidationError]:
         """Run all validation checks."""
@@ -77,6 +85,14 @@ class AgentsMdValidator:
         for p in self.repo_root.rglob("AGENTS.md"):
             # Exclude third-party directories
             if any(exc in p.parts for exc in self.EXCLUDED_DIRS):
+                continue
+            relative_path = p.relative_to(self.repo_root)
+            ignored = subprocess.run(
+                ["git", "check-ignore", "--quiet", "--", str(relative_path)],
+                cwd=self.repo_root,
+                check=False,
+            )
+            if ignored.returncode == 0:
                 continue
             results.append(p)
         return sorted(results)

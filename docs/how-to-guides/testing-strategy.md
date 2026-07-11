@@ -125,6 +125,14 @@ The `Makefile` provides convenient targets for running tests:
 | `make quality-gate`     | Run backend lint/type/tests, metadata/docs checks, and the repo frontend gate |
 | `make release-check`    | Run release-oriented validation, including security and packaging |
 
+The unit and contract targets retain pytest-xdist auto-detection but cap local
+fan-out at two workers to avoid resource-contention timeouts on supported
+developer hosts. Larger CI runners can override the cap explicitly, for example:
+
+```bash
+make test PYTEST_XDIST_MAX_WORKERS=4
+```
+
 ### Direct pytest Commands
 
 ```bash
