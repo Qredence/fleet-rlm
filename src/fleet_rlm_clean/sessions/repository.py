@@ -8,8 +8,16 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from fleet_rlm_clean.persistence.models import RunRow, SessionRow, TurnRow, UserRow, WorkspaceRow
-from fleet_rlm_clean.sessions.errors import SessionNotFoundError
+from fleet_rlm_clean.persistence.models import (
+    RunRow,
+    SessionCheckpointRow,
+    SessionRow,
+    TurnRow,
+    UserRow,
+    WorkspaceRow,
+)
+from fleet_rlm_clean.sessions.checkpoints import StaleCheckpointError, TurnClaim
+from fleet_rlm_clean.sessions.errors import IdempotencyConflictError, SessionNotFoundError
 from fleet_rlm_clean.sessions.models import SessionRecord, SessionSnapshot, TurnRecord
 
 
@@ -101,6 +109,69 @@ class SessionRepository:
         current = int(result.scalar_one())
         return current + 1
 
+    @staticmethod
+    def _normalize_idempotency_key(key: str | None) -> str | None:
+        if key is None:
+            return None
+        cleaned = key.strip()
+        return cleaned or None
+
+    async def claim_turn(
+        self,
+        session_id: UUID,
+        *,
+        idempotency_key: str | None = None,
+        run_id: UUID | None = None,
+    ) -> TurnClaim:
+        """Claim a turn under optional idempotency key; may return a completed replay."""
+        key = self._normalize_idempotency_key(idempotency_key)
+        async with self._session_factory() as db:
+            session = await db.get(SessionRow, session_id)
+            if session is None:
+                raise SessionNotFoundError(f"session {session_id} not found")
+            base_version = int(session.checkpoint_version)
+
+            if key is not None:
+                result = await db.execute(
+                    select(RunRow).where(
+                        RunRow.session_id == session_id,
+                        RunRow.idempotency_key == key,
+                    )
+                )
+                existing = result.scalar_one_or_none()
+                if existing is not None:
+                    if existing.status == "completed":
+                        return TurnClaim(
+                            run_id=existing.id,
+                            base_checkpoint_version=base_version,
+                            replay=True,
+                            assistant_text=existing.result_assistant_text,
+                        )
+                    if existing.status == "running":
+                        raise IdempotencyConflictError(
+                            f"idempotency key {key!r} already in-flight for session {session_id}"
+                        )
+                    # Failed prior attempt: allow retry with a new run row by clearing key
+                    # uniqueness — re-use same key only after marking failed rows' key null.
+                    existing.idempotency_key = None
+                    await db.flush()
+
+            rid = run_id or uuid4()
+            db.add(
+                RunRow(
+                    id=rid,
+                    session_id=session_id,
+                    status="running",
+                    idempotency_key=key,
+                )
+            )
+            await db.commit()
+            return TurnClaim(
+                run_id=rid,
+                base_checkpoint_version=base_version,
+                replay=False,
+            )
+
     async def begin_run(
         self,
         session_id: UUID,
@@ -108,22 +179,13 @@ class SessionRepository:
         idempotency_key: str | None = None,
         run_id: UUID | None = None,
     ) -> UUID:
-        """Record a running turn attempt. Does not append History turns."""
-        rid = run_id or uuid4()
-        async with self._session_factory() as db:
-            session = await db.get(SessionRow, session_id)
-            if session is None:
-                raise SessionNotFoundError(f"session {session_id} not found")
-            db.add(
-                RunRow(
-                    id=rid,
-                    session_id=session_id,
-                    status="running",
-                    idempotency_key=idempotency_key,
-                )
-            )
-            await db.commit()
-            return rid
+        """Record a running turn attempt. Prefer ``claim_turn`` for idempotency."""
+        claim = await self.claim_turn(
+            session_id, idempotency_key=idempotency_key, run_id=run_id
+        )
+        if claim.replay:
+            return claim.run_id
+        return claim.run_id
 
     async def append_completed_exchange(
         self,
@@ -132,12 +194,19 @@ class SessionRepository:
         user_text: str,
         assistant_text: str,
         run_id: UUID | None = None,
+        expected_checkpoint_version: int | None = None,
     ) -> SessionSnapshot:
         """Persist user+assistant completed turns and advance checkpoint_version."""
         async with self._session_factory() as db:
             session = await db.get(SessionRow, session_id)
             if session is None:
                 raise SessionNotFoundError(f"session {session_id} not found")
+
+            actual = int(session.checkpoint_version)
+            if expected_checkpoint_version is not None and actual != expected_checkpoint_version:
+                raise StaleCheckpointError(
+                    session_id, expected=expected_checkpoint_version, actual=actual
+                )
 
             seq = await self._next_sequence(db, session_id)
             db.add(
@@ -160,12 +229,25 @@ class SessionRepository:
                     status="completed",
                 )
             )
-            session.checkpoint_version = int(session.checkpoint_version) + 1
+            new_version = actual + 1
+            session.checkpoint_version = new_version
+            db.add(
+                SessionCheckpointRow(
+                    session_id=session_id,
+                    version=new_version,
+                    payload_json={
+                        "run_id": str(run_id) if run_id else None,
+                        "user_text_chars": len(user_text),
+                        "assistant_text_chars": len(assistant_text),
+                    },
+                )
+            )
             if run_id is not None:
                 run = await db.get(RunRow, run_id)
                 if run is not None:
                     run.status = "completed"
                     run.finished_at = datetime.now(UTC)
+                    run.result_assistant_text = assistant_text
             await db.commit()
         # Fresh session after commit avoids expired attribute lazy-loads.
         return await self.load(session_id)

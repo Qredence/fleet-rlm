@@ -87,7 +87,15 @@ class TurnRow(Base):
 
 class RunRow(Base):
     __tablename__ = "clean_runs"
-    __table_args__ = (Index("ix_clean_runs_session_created", "session_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_clean_runs_session_created", "session_id", "created_at"),
+        # One logical key per session when provided (NULLs allowed multiple times).
+        UniqueConstraint(
+            "session_id",
+            "idempotency_key",
+            name="uq_clean_runs_session_idempotency_key",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=_uuid)
     session_id: Mapped[uuid.UUID] = mapped_column(
@@ -97,6 +105,7 @@ class RunRow(Base):
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     usage_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    result_assistant_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

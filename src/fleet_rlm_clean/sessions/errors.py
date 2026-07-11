@@ -9,3 +9,7 @@ class SessionRepositoryError(RuntimeError):
 
 class SessionNotFoundError(SessionRepositoryError):
     """Raised when a session id cannot be loaded."""
+
+
+class IdempotencyConflictError(SessionRepositoryError):
+    """Raised when an idempotency key is already bound to an in-flight run."""

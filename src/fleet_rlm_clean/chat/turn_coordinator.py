@@ -5,15 +5,17 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable
 from typing import Any, Protocol
 from unittest.mock import MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fleet_rlm_clean.chat.commands import ChatTurnCommand
 from fleet_rlm_clean.rlm.budgets import RLMBudget
 from fleet_rlm_clean.rlm.context import InterpreterLeaseLike, RLMTurnContext
-from fleet_rlm_clean.rlm.events import RuntimeEvent, RuntimeEventKind
+from fleet_rlm_clean.rlm.events import EventRecorder, RuntimeEvent, RuntimeEventKind
 from fleet_rlm_clean.rlm.model_bundle import RLMModelBundle
 from fleet_rlm_clean.rlm.runner import RLMRunner
+from fleet_rlm_clean.sessions.checkpoints import TurnClaim
 from fleet_rlm_clean.sessions.history import turns_to_history
+from fleet_rlm_clean.sessions.locks import SessionLockRegistry
 
 
 class TurnRunner(Protocol):
@@ -22,6 +24,14 @@ class TurnRunner(Protocol):
 
 class SessionStore(Protocol):
     async def load(self, session_id: Any) -> Any: ...
+
+    async def claim_turn(
+        self,
+        session_id: Any,
+        *,
+        idempotency_key: str | None = None,
+        run_id: Any | None = None,
+    ) -> TurnClaim: ...
 
     async def begin_run(
         self,
@@ -38,6 +48,7 @@ class SessionStore(Protocol):
         user_text: str,
         assistant_text: str,
         run_id: Any | None = None,
+        expected_checkpoint_version: int | None = None,
     ) -> Any: ...
 
     async def finish_failed_run(
@@ -88,12 +99,14 @@ class TurnCoordinator:
         runner: TurnRunner | None = None,
         context_builder: Callable[[ChatTurnCommand], RLMTurnContext] | None = None,
         session_repository: SessionStore | None = None,
+        locks: SessionLockRegistry | None = None,
     ) -> None:
         self._runner: TurnRunner = runner if runner is not None else RLMRunner()
         self._context_builder = (
             context_builder if context_builder is not None else _default_kernel_context
         )
         self._sessions = session_repository
+        self._locks = locks if locks is not None else SessionLockRegistry()
 
     async def stream(self, command: ChatTurnCommand) -> AsyncIterator[RuntimeEvent]:
         """Stream public RuntimeEvents for a single chat command."""
@@ -101,34 +114,34 @@ class TurnCoordinator:
             msg = "message is required"
             raise ValueError(msg)
 
-        context = self._context_builder(command)
-        if self._sessions is not None:
-            context = await self._attach_history(context, command)
-
-        terminal: RuntimeEvent | None = None
-        try:
+        if self._sessions is None:
+            context = self._context_builder(command)
             async for event in self._runner.stream(context):
-                if event.kind in {RuntimeEventKind.RUN_COMPLETED, RuntimeEventKind.ERROR}:
-                    terminal = event
                 yield event
-        finally:
-            if self._sessions is not None:
-                await self._persist_terminal(command, context, terminal)
+            return
 
-    async def _attach_history(
-        self, context: RLMTurnContext, command: ChatTurnCommand
-    ) -> RLMTurnContext:
+        async with self._locks.hold(command.session_id):
+            async for event in self._stream_locked(command):
+                yield event
+
+    async def _stream_locked(self, command: ChatTurnCommand) -> AsyncIterator[RuntimeEvent]:
         assert self._sessions is not None
+        context = self._context_builder(command)
         snapshot = await self._sessions.load(command.session_id)
         history = turns_to_history(snapshot.turns)
-        run_id = await self._sessions.begin_run(
-            command.session_id,
-            idempotency_key=command.idempotency_key or None,
-            run_id=context.run_id,
-        )
-        # frozen dataclass — rebuild with history + run_id from begin_run
-        return RLMTurnContext(
-            run_id=run_id,
+
+        claim = await self._claim(command, context.run_id)
+        if claim.replay:
+            async for event in self._replay_events(
+                session_id=command.session_id,
+                run_id=claim.run_id,
+                assistant_text=claim.assistant_text or "",
+            ):
+                yield event
+            return
+
+        context = RLMTurnContext(
+            run_id=claim.run_id,
             session_id=context.session_id,
             user_id=context.user_id,
             workspace_id=context.workspace_id,
@@ -143,12 +156,71 @@ class TurnCoordinator:
             artifacts=context.artifacts,
             tools=context.tools,
         )
+        base_version = claim.base_checkpoint_version
+        terminal: RuntimeEvent | None = None
+        try:
+            async for event in self._runner.stream(context):
+                if event.kind in {RuntimeEventKind.RUN_COMPLETED, RuntimeEventKind.ERROR}:
+                    terminal = event
+                yield event
+        finally:
+            await self._persist_terminal(
+                command,
+                context,
+                terminal,
+                expected_checkpoint_version=base_version,
+            )
+
+    async def _claim(self, command: ChatTurnCommand, preferred_run_id: UUID) -> TurnClaim:
+        assert self._sessions is not None
+        claim_turn = getattr(self._sessions, "claim_turn", None)
+        if callable(claim_turn):
+            return await claim_turn(
+                command.session_id,
+                idempotency_key=command.idempotency_key or None,
+                run_id=preferred_run_id,
+            )
+        # Fallback for older store doubles
+        run_id = await self._sessions.begin_run(
+            command.session_id,
+            idempotency_key=command.idempotency_key or None,
+            run_id=preferred_run_id,
+        )
+        snap = await self._sessions.load(command.session_id)
+        return TurnClaim(
+            run_id=run_id,
+            base_checkpoint_version=int(snap.session.checkpoint_version),
+            replay=False,
+        )
+
+    async def _replay_events(
+        self,
+        *,
+        session_id: UUID,
+        run_id: UUID,
+        assistant_text: str,
+    ) -> AsyncIterator[RuntimeEvent]:
+        recorder = EventRecorder(run_id=run_id, session_id=session_id)
+        yield recorder.emit(RuntimeEventKind.STATUS, {"message": "idempotent_replay"})
+        if assistant_text:
+            yield recorder.emit(RuntimeEventKind.TEXT_DELTA, {"text": assistant_text})
+            yield recorder.emit(RuntimeEventKind.TEXT_COMPLETED, {"text": assistant_text})
+        yield recorder.emit(
+            RuntimeEventKind.RUN_COMPLETED,
+            {
+                "status": "completed",
+                "assistant_text": assistant_text,
+                "idempotent_replay": True,
+            },
+        )
 
     async def _persist_terminal(
         self,
         command: ChatTurnCommand,
         context: RLMTurnContext,
         terminal: RuntimeEvent | None,
+        *,
+        expected_checkpoint_version: int | None,
     ) -> None:
         assert self._sessions is not None
         if terminal is None:
@@ -165,6 +237,7 @@ class TurnCoordinator:
                 user_text=command.message,
                 assistant_text=assistant,
                 run_id=context.run_id,
+                expected_checkpoint_version=expected_checkpoint_version,
             )
             return
         message = str(terminal.payload.get("message") or "turn failed")
