@@ -40,6 +40,15 @@ src/fleet_rlm/
 └── utils/                # Shared utilities
 ```
 
+### Canonical process configuration
+
+`integrations/config/process.py` and its packaged `config.yaml` are the single
+typed process-config seam for CLI and server startup. Precedence is typed
+defaults, YAML, environment aliases, then CLI overrides or persisted
+workspace/profile settings at their scope. Secrets must never be added to YAML.
+The settings UI catalog lives in `settings_catalog.py`; `.env` masking and safe
+updates live in `env_file.py`.
+
 ---
 
 ## API Routes

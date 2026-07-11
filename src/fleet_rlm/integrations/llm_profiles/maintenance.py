@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from fleet_rlm.integrations.config.runtime_settings import apply_env_updates, resolve_env_path
+from fleet_rlm.integrations.config.env_file import apply_env_updates, resolve_env_path
 
 from .crypto import decrypt_api_key, encrypt_api_key
 from .model_catalog import invalidate_profile_catalog

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from fleet_rlm.integrations.config.runtime_settings import (
+from fleet_rlm.integrations.config.env_file import (
     RUNTIME_SETTINGS_ALLOWLIST,
     normalize_updates,
 )

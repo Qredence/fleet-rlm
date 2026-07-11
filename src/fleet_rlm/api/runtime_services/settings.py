@@ -10,13 +10,12 @@ from typing import Mapping, TypedDict
 
 from fastapi import HTTPException
 
-from fleet_rlm.integrations.config.runtime_settings import (
-    RUNTIME_SETTINGS_ALLOWLIST,
-    RUNTIME_SETTINGS_KEYS,
+from fleet_rlm.integrations.config.env_file import (
     apply_env_updates,
     get_settings_snapshot,
     normalize_updates,
 )
+from fleet_rlm.integrations.config.settings_catalog import RUNTIME_SETTINGS_ALLOWLIST, RUNTIME_SETTINGS_KEYS
 
 from ..bootstrap import (
     cancel_optional_runtime_startup,

@@ -15,7 +15,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.sql import and_, text
 
-from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
+from fleet_rlm.integrations.config.env_file import resolve_env_path
 from fleet_rlm.integrations.database.engine import DatabaseManager
 from fleet_rlm.integrations.database.models_llm_profiles import LlmProviderProfile, LlmRoleBinding
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult

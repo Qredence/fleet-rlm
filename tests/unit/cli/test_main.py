@@ -33,15 +33,15 @@ def test_main_help_exits_with_zero(
 
 def test_main_parses_args_and_runs_terminal_chat(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.cli import main as main_module
-    from fleet_rlm.integrations.config.env import AppConfig
+    from fleet_rlm.integrations.config.process import ProcessConfig
 
     captured: dict[str, object] = {}
 
-    def fake_initialize_app_config(overrides: list[str]) -> AppConfig:
+    def fake_initialize_app_config(overrides: list[str]) -> ProcessConfig:
         captured["overrides"] = list(overrides)
-        return AppConfig()
+        return ProcessConfig()
 
-    def fake_run_terminal_chat(*, config: AppConfig, options: object) -> None:
+    def fake_run_terminal_chat(*, config: ProcessConfig, options: object) -> None:
         captured["config"] = config
         captured["options"] = options
 
@@ -65,7 +65,7 @@ def test_main_parses_args_and_runs_terminal_chat(monkeypatch: pytest.MonkeyPatch
 
     options = captured["options"]
     assert captured["overrides"] == []
-    assert isinstance(captured["config"], AppConfig)
+    assert isinstance(captured["config"], ProcessConfig)
     assert options.docs_path == Path("README.md")  # ty: ignore[unresolved-attribute]
     assert options.trace_mode == "verbose"  # ty: ignore[unresolved-attribute]
     assert options.volume_name == "volume-a"  # ty: ignore[unresolved-attribute]
@@ -93,9 +93,5 @@ def test_run_web_ui_rewrites_argv_to_serve_api(monkeypatch: pytest.MonkeyPatch) 
     assert forwarded["argv"] == [
         "fleet-rlm",
         "serve-api",
-        "--host",
-        "0.0.0.0",
-        "--port",
-        "8000",
         "agent.model=openai/test-model",
     ]

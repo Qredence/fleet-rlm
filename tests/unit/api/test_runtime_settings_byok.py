@@ -17,7 +17,7 @@ from cryptography.fernet import Fernet
 
 from fleet_rlm.api.routers import runtime as runtime_router
 from fleet_rlm.api.schemas.runtime import RuntimeSettingsUpdateRequest
-from fleet_rlm.integrations.config.runtime_settings import mask_secret
+from fleet_rlm.integrations.config.env_file import mask_secret
 from fleet_rlm.integrations.database.fleet_repository import FleetRepository
 from fleet_rlm.integrations.llm_profiles.crypto import decrypt_api_key, encrypt_api_key
 

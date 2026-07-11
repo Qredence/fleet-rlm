@@ -17,7 +17,7 @@ from prompt_toolkit.shortcuts.prompt import CompleteStyle
 from prompt_toolkit.styles import Style
 from rich.console import Console
 
-from fleet_rlm.integrations.config.env import AppConfig
+from fleet_rlm.integrations.config.process import ProcessConfig
 from fleet_rlm.runtime.agent.commands import COMMAND_DISPATCH
 from fleet_rlm.runtime.config import (
     build_dspy_context,
@@ -201,7 +201,7 @@ _COMMAND_TEMPLATES: dict[str, str] = {
 }
 
 
-def run_terminal_chat(*, config: AppConfig, options: TerminalChatOptions) -> None:
+def run_terminal_chat(*, config: ProcessConfig, options: TerminalChatOptions) -> None:
     """Start standalone in-process terminal chat (no FastAPI backend required)."""
     session = _TerminalChatSession(config=config, options=options)
     session.run()
@@ -233,13 +233,13 @@ def _error_hint(exc: Exception) -> str | None:
 class _TerminalChatSession:
     """Terminal chat session handling user interaction and agent communication."""
 
-    def __init__(self, *, config: AppConfig, options: TerminalChatOptions) -> None:
+    def __init__(self, *, config: ProcessConfig, options: TerminalChatOptions) -> None:
         self.config = config
         self.options = options
         self.trace_mode: TraceMode = cast(TraceMode, _normalize_trace_mode(options.trace_mode))
         self.session_id = uuid.uuid4().hex[:8]
-        self.secret_name = config.interpreter.secrets[0] if config.interpreter.secrets else "LITELLM"
-        self.volume_name = options.volume_name or config.interpreter.volume_name or "rlm-volume-dspy"
+        self.secret_name = config.daytona.secret_name
+        self.volume_name = options.volume_name or config.daytona.volume_name or "rlm-volume-dspy"
         self.console = Console()
         self.last_status = "ready"
         self.is_processing = False
@@ -317,10 +317,10 @@ class _TerminalChatSession:
         if hasattr(signal, "SIGWINCH"):
             signal.signal(signal.SIGWINCH, lambda *_: self._render_shell())
 
-        planner_lm = get_planner_lm_from_env(model_name=self.config.llm.model)
+        planner_lm = get_planner_lm_from_env(model_name=self.config.llm.roles.planner.model)
         delegate_lm = get_delegate_lm_from_env(
-            model_name=self.config.llm.delegate_model,
-            default_max_tokens=self.config.llm.delegate_max_tokens,
+            model_name=self.config.llm.roles.delegate.model,
+            default_max_tokens=self.config.llm.roles.delegate.max_tokens,
         )
         self._print_banner(planner_ready=planner_lm is not None)
 
@@ -337,7 +337,7 @@ class _TerminalChatSession:
 
         agent_context = build_chat_agent(
             docs_path=self.options.docs_path,
-            react_max_iters=self.config.rlm_settings.max_iters,
+            react_max_iters=self.config.rlm.max_iters,
             planner_lm=planner_lm,
             delegate_lm=delegate_lm,
         )
@@ -405,7 +405,7 @@ class _TerminalChatSession:
         def _layout(draft: str = "") -> Any:
             return build_shell_layout(
                 session_id=self.session_id,
-                model=self.config.llm.model,
+                model=self.config.llm.roles.planner.model or "",
                 trace_mode=self.trace_mode,
                 last_status=self.last_status,
                 transcript=self.transcript,
@@ -536,7 +536,7 @@ class _TerminalChatSession:
         """Return the bottom toolbar HTML."""
         return _bottom_toolbar_impl(
             self,
-            model=self.config.llm.model,
+            model=self.config.llm.roles.planner.model or "",
             docs_count=0,
             trace_mode=self.trace_mode,
         )

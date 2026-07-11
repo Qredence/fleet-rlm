@@ -11,7 +11,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
-from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
+from fleet_rlm.integrations.config.env_file import resolve_env_path
+from fleet_rlm.integrations.config.process import load_process_config, server_config_values
 from fleet_rlm.integrations.database import DatabaseManager, FleetRepository
 
 from .auth import build_auth_provider
@@ -104,7 +105,16 @@ def resolve_runtime_config(
     )
     app_env = (os.getenv("APP_ENV") or "local").strip().lower()
     load_dotenv(dotenv_path=str(env_path), override=app_env == "local")
-    return AppConfig(env_path=env_path)
+    process_config = load_process_config().config
+    projected = server_config_values(process_config)
+    if app_env != "local":
+        if "DATABASE_REQUIRED" not in os.environ:
+            projected.pop("database_required", None)
+        if "AUTH_MODE" not in os.environ:
+            projected.pop("auth_mode", None)
+        if "CORS_ALLOWED_ORIGINS" not in os.environ:
+            projected.pop("cors_allowed_origins", None)
+    return AppConfig.model_validate({"env_path": env_path, **projected})
 
 
 def prime_runtime_env(cfg: AppConfig) -> None:

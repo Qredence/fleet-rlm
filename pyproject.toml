@@ -32,7 +32,6 @@ dependencies = [
     "dspy==3.3.0b1",
     # Core orchestration and CLI/runtime ergonomics.
     "daytona==0.192.0",
-    "hydra-core>=1.3,<2",
     "prompt-toolkit>=3.0.50,<4",
     "rich>=15.0.0,<16",
     "structlog>=25.5.0,<26",
@@ -325,7 +324,6 @@ pep621_dev_dependency_groups = ["dev"]
 known_first_party = ["fleet_rlm"]
 
 [tool.deptry.package_module_name_map]
-hydra-core = "hydra"
 pydantic-settings = "pydantic_settings"
 prompt-toolkit = "prompt_toolkit"
 python-dotenv = "dotenv"

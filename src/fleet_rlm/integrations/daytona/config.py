@@ -9,7 +9,8 @@ from typing import Any, Mapping
 
 from dotenv import dotenv_values
 
-from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
+from fleet_rlm.integrations.config.env_file import resolve_env_path
+from fleet_rlm.integrations.config.process import load_process_config
 
 from .errors import DaytonaConfigError
 from .models import SandboxLmRuntimeConfig
@@ -28,7 +29,12 @@ class ResolvedDaytonaConfig:
 
 
 def _load_env_sources() -> dict[str, str]:
+    process_config = load_process_config().config
     file_values: dict[str, str] = {}
+    if process_config.daytona.api_url:
+        file_values["DAYTONA_API_URL"] = process_config.daytona.api_url
+    if process_config.daytona.target:
+        file_values["DAYTONA_TARGET"] = process_config.daytona.target
     env_path = resolve_env_path(start_paths=[Path.cwd()])
     candidates = (env_path, env_path.with_name(".env.local"))
     for candidate in candidates:

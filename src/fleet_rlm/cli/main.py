@@ -7,10 +7,10 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from .config import initialize_app_config, split_hydra_overrides
+from .config import initialize_app_config, split_config_overrides
 
 if TYPE_CHECKING:
-    from fleet_rlm.integrations.config.env import AppConfig
+    from fleet_rlm.integrations.config.process import ProcessConfig
 
     from .terminal.chat import TerminalChatOptions
 
@@ -31,7 +31,7 @@ def _build_terminal_chat_options(
     )
 
 
-def run_terminal_chat(*, config: AppConfig, options: TerminalChatOptions) -> None:
+def run_terminal_chat(*, config: ProcessConfig, options: TerminalChatOptions) -> None:
     from fleet_rlm.cli.terminal.chat import run_terminal_chat as _run_terminal_chat
 
     _run_terminal_chat(config=config, options=options)
@@ -42,7 +42,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="fleet",
         description=(
             "Start standalone fleet interactive chat. "
-            "Hydra overrides are supported as key=value tokens.\n"
+            "Typed configuration overrides are supported as dotted.path=value tokens.\n"
             "Use 'fleet web' to launch the Web UI server."
         ),
     )
@@ -89,18 +89,17 @@ def _run_web_ui() -> None:
         )
         raise SystemExit(1)
 
-    print("Starting Web UI and API server on http://0.0.0.0:8000 ...")
+    from fleet_rlm.integrations.config.process import load_process_config
+
+    api_config = load_process_config().config.api
+    print(f"Starting Web UI and API server on http://{api_config.host}:{api_config.port} ...")
     from .fleet_cli import main as cli_main
 
-    hydra_args = [arg for arg in sys.argv[2:] if "=" in arg and not arg.startswith("-")]
+    config_overrides = [arg for arg in sys.argv[2:] if "=" in arg and not arg.startswith("-")]
     sys.argv = [
         "fleet-rlm",
         "serve-api",
-        "--host",
-        "0.0.0.0",
-        "--port",
-        "8000",
-        *hydra_args,
+        *config_overrides,
     ]
     cli_main()
 
@@ -114,13 +113,13 @@ def main() -> None:
     parser = _build_parser()
     args, remainder = parser.parse_known_args(sys.argv[1:])
 
-    hydra_overrides, unknown_args = split_hydra_overrides(remainder)
+    config_overrides, unknown_args = split_config_overrides(remainder)
 
     if unknown_args:
         parser.error(f"Unknown arguments: {' '.join(unknown_args)}")
 
     try:
-        config = initialize_app_config(hydra_overrides)
+        config = initialize_app_config(config_overrides)
     except Exception as exc:
         print(f"Configuration Error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

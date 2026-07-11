@@ -3,7 +3,7 @@
 ## Phase 7 — Config audit and typed config
 
 - **Order:** `7`
-- **Status:** `planned`
+- **Status:** `in_progress_uncommitted`
 - **Track:** `Config`
 - **Summary:** Audit every configuration source before introducing typed process defaults.
 
@@ -13,6 +13,10 @@ Before implementation, create `docs/config-audit.md` with one row per setting:
 current default, type, consumers, proposed config path, secret classification,
 scope, and preserved environment alias. Do not infer ownership from the old
 roadmap alone; verify live consumers.
+
+The completed audit is [Configuration audit](../../../config-audit.md). It
+records the typed process surface and a mechanical inventory of every live
+uppercase input and consumer under `src/fleet_rlm/`.
 
 ### Precedence and safety
 
@@ -32,36 +36,25 @@ llm:
   roles:
     planner:
       model: null
-      model_type: chat
       temperature: 0.0
       max_tokens: 2048
-      cache: true
-      num_retries: 3
       request_timeout_s: 30
     delegate:
       model: null
-      model_type: chat
       temperature: 0.0
       max_tokens: 4096
-      cache: true
-      num_retries: 3
       request_timeout_s: 120
     delegate_small:
       model: null
-      model_type: chat
       temperature: 0.0
       max_tokens: 2048
-      cache: true
-      num_retries: 3
       request_timeout_s: 60
     judge:
       model: null
-      model_type: chat
       temperature: 0.0
       max_tokens: 1024
-      cache: true
-      num_retries: 3
       request_timeout_s: 60
+
 rlm:
   max_iters: 20
   max_llm_calls: 50
@@ -72,59 +65,27 @@ rlm:
     delegate_max_calls_per_turn: 8
     child_isolation_mode: auto
     child_fork_fallback: clean
-  legacy_hardening:
-    action_max_tokens: null
-    action_timeout_s: null
-    context_preparse_enabled: false
-    repl_output_cache_enabled: false
-    summary_iteration_threshold: null
 daytona:
   api_url: null
   target: null
-  workspace_root: /workspace
-  volume_mount_path: null
-  memory_root: null
+  volume_name: null
+  execution_timeout_s: 900
+  secret_name: LITELLM
   pool:
     max_concurrent_sandboxes: 5
   lifecycle:
     session_lifecycle: delete
-    cleanup_child_sandboxes: true
+
 persistence:
-  database_url: null
   database_required: false
-  local_store_path: .fleet_rlm/local.db
+
 observability:
   mlflow:
     enabled: false
     tracking_uri: null
     experiment_name: null
     auto_start: true
-    log_runtime_spans: true
-    log_quality_runs: true
-    log_gepa_runs: true
-  traces:
-    capture_runtime_events: true
-    capture_rich_spans: true
-    redact_client_errors: true
-quality:
-  auto_assessment:
-    enabled: false
-    scorers: [safety, guidelines]
-    sample_rate: 1.0
-  gepa:
-    enabled: false
-    auto: null
-    max_metric_calls: null
-    max_full_evals: null
-    reflection_lm_role: judge
-    reflection_minibatch_size: 3
-    candidate_selection_strategy: pareto
-    track_stats: false
-    track_best_outputs: false
-    use_mlflow: false
-    mlflow_tracking_uri: null
-    mlflow_experiment_name: null
-    log_dir: null
+
 api:
   host: 0.0.0.0
   port: 8000
@@ -132,10 +93,10 @@ api:
   cors_origins: [http://localhost:5173]
 ```
 
-The audit may revise path names where live ownership differs. It must preserve
-the semantic split: DSPy constructor fields under `llm`/`rlm`, Fleet recursion
-policy under `rlm.recursion`, runtime tracing under `observability`, and offline
-optimizer settings under `quality.gepa`.
+Only settings with a current runtime consumer are exposed. Phase 8 optimizer
+settings and other deferred knobs must not enter the public YAML until their
+owning runtime reads them. DSPy constructor fields remain under `llm`/`rlm`,
+Fleet recursion policy under `rlm.recursion`, and MLflow under `observability`.
 
 ### Environment aliases to preserve
 
@@ -165,18 +126,30 @@ Provider and Daytona keys remain secret inputs, not YAML defaults.
 
 ### Acceptance criteria
 
-- [ ] The config audit covers every live setting and consumer.
-- [ ] Importing config models has no runtime side effects.
-- [ ] Missing YAML uses typed defaults and present YAML loads safely.
-- [ ] Environment aliases override YAML during the migration window.
-- [ ] Existing environment-only workflows continue to work.
-- [ ] MLflow settings do not require an MLflow server.
-- [ ] Runtime diagnostics report the source of major values without secrets.
+- [x] The config audit covers every live setting and consumer.
+- [x] Importing config models has no runtime side effects.
+- [x] Missing YAML uses typed defaults and present YAML loads safely.
+- [x] Environment aliases override YAML during the migration window.
+- [x] Existing environment-only workflows continue to work.
+- [x] MLflow settings do not require an MLflow server.
+- [x] Runtime diagnostics report the source of major values without secrets.
+
+### Current evidence state
+
+The current working tree adds the resource-free typed process models and loader,
+one canonical packaged YAML, typed dotted CLI overrides, and server projection.
+The settings catalog and `.env` persistence behavior are separate modules.
+Hydra, OmegaConf, the duplicate YAML, and the legacy aggregate models have been
+removed. The server `BaseSettings` adapter, encrypted LLM profiles, and
+workspace settings remain at their higher-precedence scopes. All acceptance
+criteria pass, but the phase remains `in_progress_uncommitted` until this
+implementation and evidence cross the required commit boundary.
 
 ### Validation
 
 ```bash
 uv run pytest tests/unit/runtime/test_config.py tests/unit/api/test_config.py \
-  tests/unit/integrations/test_env_config.py tests/unit/cli/test_config.py
+  tests/unit/integrations/test_env_config.py \
+  tests/unit/integrations/test_process_config.py tests/unit/cli/test_config.py
 make check-docs
 ```

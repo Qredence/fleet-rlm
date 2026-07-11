@@ -202,7 +202,7 @@ async def patch_runtime_settings(
                         db_settings[k] = ""  # explicit clear
                         actually_updated.append(k)
                     else:
-                        from fleet_rlm.integrations.config.runtime_settings import _is_masked_secret_round_trip
+                        from fleet_rlm.integrations.config.env_file import _is_masked_secret_round_trip
                         from fleet_rlm.integrations.llm_profiles.crypto import decrypt_api_key, encrypt_api_key
 
                         secret_key = config_deps.config.secret_encryption_key

@@ -56,7 +56,7 @@ def test_get_planner_lm_from_env_shim_unpacks_four_helpers(monkeypatch):
     assert bootstrap_module.get_planner_lm_from_env() is sentinel
 
 
-def test_sync_llm_model_config_from_env_overrides_stale_hydra_defaults(clean_runtime_env, monkeypatch):
+def test_sync_llm_model_config_from_env_overrides_yaml_defaults(clean_runtime_env, monkeypatch):
     bootstrap_module = importlib.import_module("fleet_rlm.api.bootstrap")
     config_module = importlib.import_module("fleet_rlm.api.config")
 
@@ -88,3 +88,20 @@ def test_prime_runtime_env_preserves_existing_values_outside_local(clean_runtime
     bootstrap_module.prime_runtime_env(cfg)
 
     assert os.getenv("FEATURE_FLAG") == "existing"
+
+
+def test_resolve_runtime_config_preserves_environment_over_yaml(clean_runtime_env, tmp_path, monkeypatch):
+    bootstrap_module = importlib.import_module("fleet_rlm.api.bootstrap")
+
+    env_path = tmp_path / ".env"
+    env_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("FLEET_RLM_ENV_PATH", str(env_path))
+    monkeypatch.setenv("RLM_MAX_DEPTH", "9")
+    monkeypatch.setenv("DELEGATE_MAX_CALLS_PER_TURN", "11")
+    monkeypatch.setenv("AGENT_MAX_OUTPUT_CHARS", "4321")
+
+    cfg = bootstrap_module.resolve_runtime_config()
+
+    assert cfg.rlm_max_depth == 9
+    assert cfg.delegate_max_calls_per_turn == 11
+    assert cfg.agent_max_output_chars == 4321

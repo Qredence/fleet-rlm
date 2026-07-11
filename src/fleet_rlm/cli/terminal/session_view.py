@@ -24,7 +24,7 @@ def print_banner(session: Any, *, planner_ready: bool) -> None:
     _print_banner(
         console=session.console,
         session_id=session.session_id,
-        model=session.config.llm.model,
+        model=session.config.llm.roles.planner.model,
         planner_ready=planner_ready,
         workspace=Path.cwd(),
     )
@@ -99,7 +99,7 @@ def render_shell(session: Any, *, draft_assistant: str = "") -> None:
         live.update(
             build_shell_layout(
                 session_id=session.session_id,
-                model=session.config.llm.model,
+                model=session.config.llm.roles.planner.model,
                 trace_mode=session.trace_mode,
                 last_status=session.last_status,
                 transcript=session.transcript,
@@ -116,7 +116,7 @@ def render_shell(session: Any, *, draft_assistant: str = "") -> None:
         _render_shell(
             console=console,
             session_id=session.session_id,
-            model=session.config.llm.model,
+            model=session.config.llm.roles.planner.model,
             trace_mode=session.trace_mode,
             last_status=session.last_status,
             transcript=session.transcript,

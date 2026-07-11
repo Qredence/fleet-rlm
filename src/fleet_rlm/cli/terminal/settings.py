@@ -15,7 +15,7 @@ from dotenv import set_key
 from rich.panel import Panel
 
 from fleet_rlm.cli import runners
-from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
+from fleet_rlm.integrations.config.env_file import resolve_env_path
 
 from .ui import _prompt_choice, _prompt_value
 
@@ -272,10 +272,10 @@ def run_long_context(session: Any, arg_text: str) -> None:
                 docs_path=docs_path,
                 query=query,
                 mode=mode,
-                max_iterations=session.config.rlm_settings.max_iterations,
-                max_llm_calls=session.config.rlm_settings.max_llm_calls,
-                verbose=session.config.rlm_settings.verbose,
-                timeout=session.config.interpreter.timeout,
+                max_iterations=session.config.rlm.max_iters,
+                max_llm_calls=session.config.rlm.max_llm_calls,
+                verbose=session.config.rlm.verbose,
+                timeout=session.config.daytona.execution_timeout_s,
                 secret_name=session.secret_name,
                 volume_name=session.volume_name,
             )

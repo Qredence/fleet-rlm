@@ -14,7 +14,7 @@ def _snapshot_fields(snapshot: dict[str, object]) -> dict[str, dict[str, object]
 
 
 def test_resolve_env_path_prefers_explicit_override(clean_runtime_env: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
+    from fleet_rlm.integrations.config.env_file import resolve_env_path
 
     explicit = tmp_path / "custom.env"
     clean_runtime_env.setenv("FLEET_RLM_ENV_PATH", str(explicit))
@@ -23,7 +23,7 @@ def test_resolve_env_path_prefers_explicit_override(clean_runtime_env: pytest.Mo
 
 
 def test_resolve_env_path_searches_upward_for_pyproject(clean_runtime_env: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
+    from fleet_rlm.integrations.config.env_file import resolve_env_path
 
     repo_root = tmp_path / "repo"
     nested = repo_root / "src" / "fleet_rlm"
@@ -39,7 +39,7 @@ def test_get_settings_snapshot_masks_secrets_and_preserves_categories(
     clean_runtime_env: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from fleet_rlm.integrations.config.runtime_settings import get_settings_snapshot
+    from fleet_rlm.integrations.config.env_file import get_settings_snapshot
 
     env_path = write_env_file(
         tmp_path,
@@ -71,7 +71,7 @@ def test_apply_env_updates_ignores_masked_secret_round_trip(
     clean_runtime_env: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from fleet_rlm.integrations.config.runtime_settings import apply_env_updates, mask_secret
+    from fleet_rlm.integrations.config.env_file import apply_env_updates, mask_secret
 
     llm_secret = "supersecret66"
     daytona_secret = "daytonasecret99"
@@ -102,30 +102,29 @@ def test_apply_env_updates_ignores_masked_secret_round_trip(
     assert "DSPY_LM_MODEL='openai/gpt-4.1-mini'" in text
 
 
-def test_app_config_syncs_agent_and_interpreter_sections() -> None:
-    from fleet_rlm.integrations.config.env import AppConfig
+def test_process_config_validates_canonical_sections() -> None:
+    from fleet_rlm.integrations.config.process import ProcessConfig
 
-    config = AppConfig.model_validate(
+    config = ProcessConfig.model_validate(
         {
             "llm": {
-                "model": "openai/gpt-4.1",
-                "delegate_model": "openai/gpt-4.1-mini",
-                "delegate_max_tokens": 2048,
+                "roles": {
+                    "planner": {"model": "openai/gpt-4.1"},
+                    "delegate": {"model": "openai/gpt-4.1-mini", "max_tokens": 2048},
+                }
             },
-            "sandbox": {
-                "timeout": 321,
-                "async_execute": False,
+            "daytona": {
+                "execution_timeout_s": 321,
+                "volume_name": "tenant-volume",
             },
-            "volumes": {"name": "tenant-volume"},
         }
     )
 
-    assert config.llm.model == "openai/gpt-4.1"
-    assert config.llm.delegate_model == "openai/gpt-4.1-mini"
-    assert config.llm.delegate_max_tokens == 2048
-    assert config.interpreter.timeout == 321
-    assert config.interpreter.async_execute is False
-    assert config.interpreter.volume_name == "tenant-volume"
+    assert config.llm.roles.planner.model == "openai/gpt-4.1"
+    assert config.llm.roles.delegate.model == "openai/gpt-4.1-mini"
+    assert config.llm.roles.delegate.max_tokens == 2048
+    assert config.daytona.execution_timeout_s == 321
+    assert config.daytona.volume_name == "tenant-volume"
 
 
 def test_initialize_app_config_loads_pruned_default_config(clean_runtime_env: pytest.MonkeyPatch) -> None:
@@ -136,27 +135,27 @@ def test_initialize_app_config_loads_pruned_default_config(clean_runtime_env: py
 
     config = initialize_app_config()
 
-    assert config.llm.model == "openai/pruned-default"
-    assert config.sandbox.provider == "daytona"
-    assert config.volumes.name == "rlm-volume-test"
-    assert config.database.url is None
-    assert config.memory.core_memory_limits["persona"] == 2000
-    assert config.analytics.posthog.enabled is False
+    assert config.llm.roles.planner.model == "openai/pruned-default"
+    assert config.daytona.volume_name == "rlm-volume-test"
+    assert config.persistence.database_url is None
+    assert config.observability.mlflow.enabled is False
 
 
-def test_app_config_carries_delegate_timeout_settings() -> None:
-    from fleet_rlm.integrations.config.env import AppConfig
+def test_process_config_carries_recursion_settings() -> None:
+    from fleet_rlm.integrations.config.process import ProcessConfig
 
-    config = AppConfig.model_validate(
+    config = ProcessConfig.model_validate(
         {
-            "rlm_settings": {
-                "delegate_execution_timeout": 45,
-                "daytona_broker_health_timeout": 7.5,
-                "daytona_broker_start_retries": 2,
+            "rlm": {
+                "recursion": {
+                    "max_depth": 3,
+                    "delegate_max_calls_per_turn": 4,
+                    "child_fork_fallback": "fail",
+                },
             }
         }
     )
 
-    assert config.rlm_settings.delegate_execution_timeout == 45
-    assert config.rlm_settings.daytona_broker_health_timeout == 7.5
-    assert config.rlm_settings.daytona_broker_start_retries == 2
+    assert config.rlm.recursion.max_depth == 3
+    assert config.rlm.recursion.delegate_max_calls_per_turn == 4
+    assert config.rlm.recursion.child_fork_fallback == "fail"

@@ -1,52 +1,63 @@
-defaults:
-  - _self_
+# Canonical non-secret process defaults for fleet-rlm.
+# Precedence: typed defaults < this file < environment aliases < CLI overrides.
+# Credentials belong in the environment or encrypted database storage, never here.
 
 llm:
-  max_iters: 60
-  model: ${oc.env:DSPY_LM_MODEL,""}
-  temperature: 1
-  delegate_model: ${oc.env:DSPY_DELEGATE_LM_MODEL,null}
-  delegate_small_model: ${oc.env:DSPY_DELEGATE_LM_SMALL_MODEL,null}
-  max_tokens: ${oc.env:DSPY_LM_MAX_TOKENS,64000}
-  delegate_max_tokens: ${oc.env:DSPY_DELEGATE_LM_MAX_TOKENS,64000}
-  api_base: ${oc.env:DSPY_LM_API_BASE,null}
-  adapter: ${oc.env:DSPY_ADAPTER,null}
-  adapter_use_native_function_calling: ${oc.env:DSPY_ADAPTER_USE_NATIVE_FUNCTION_CALLING,false}
-  rlm_max_iterations: 30
-  guardrail_mode: "off"
-  min_substantive_chars: 20
+  roles:
+    planner:
+      model: null
+      temperature: 0.0
+      max_tokens: 2048
+      request_timeout_s: 30
+    delegate:
+      model: null
+      temperature: 0.0
+      max_tokens: 4096
+      request_timeout_s: 120
+    delegate_small:
+      model: null
+      temperature: 0.0
+      max_tokens: 2048
+      request_timeout_s: 60
+    judge:
+      model: null
+      temperature: 0.0
+      max_tokens: 1024
+      request_timeout_s: 60
 
-sandbox:
-  provider: "daytona"
-  image: "python:3.13-slim-bookworm"
-  timeout: ${oc.env:TIMEOUT,900}
-  secret_name: "LITELLM"
-  daytona_api_url: ${oc.env:DAYTONA_API_URL,null}
-  daytona_target: ${oc.env:DAYTONA_TARGET,null}
-  async_execute: ${oc.env:INTERPRETER_ASYNC_EXECUTE,true}
-
-volumes:
-  name: ${oc.env:VOLUME_NAME,null}
-
-rlm_settings:
-  max_depth: 2
-  max_iters: 60
-  deep_max_iters: 60
-  enable_adaptive_iters: true
-  max_iterations: 60
+rlm:
+  max_iters: 20
   max_llm_calls: 50
-  max_output_chars: 5000
-  action_max_tokens: ${oc.env:FLEET_RLM_ACTION_MAX_TOKENS,2048}
-  delegate_max_calls_per_turn: 8
-  delegate_result_truncation_chars: 8000
-  delegate_execution_timeout: ${oc.env:RLM_DELEGATE_EXECUTION_TIMEOUT,300}
-  delegate_max_iterations: ${oc.env:RLM_DELEGATE_MAX_ITERATIONS,8}
-  delegate_adapter: ${oc.env:RLM_DELEGATE_ADAPTER,json}
-  daytona_broker_health_timeout: ${oc.env:DAYTONA_BROKER_HEALTH_TIMEOUT,20.0}
-  daytona_broker_tool_call_timeout: ${oc.env:DAYTONA_BROKER_TOOL_CALL_TIMEOUT,180.0}
-  daytona_broker_start_retries: ${oc.env:DAYTONA_BROKER_START_RETRIES,1}
-  child_isolation_mode: ${oc.env:RLM_CHILD_ISOLATION_MODE,auto}
-  child_fork_fallback: ${oc.env:RLM_CHILD_FORK_FALLBACK,clean}
-  stdout_summary_threshold: 10000
-  stdout_summary_prefix_len: 200
-  verbose: True
+  max_output_chars: 10000
+  verbose: false
+  recursion:
+    max_depth: 2
+    delegate_max_calls_per_turn: 8
+    child_isolation_mode: auto
+    child_fork_fallback: clean
+daytona:
+  api_url: null
+  target: null
+  volume_name: null
+  execution_timeout_s: 900
+  secret_name: LITELLM
+  pool:
+    max_concurrent_sandboxes: 5
+  lifecycle:
+    session_lifecycle: delete
+
+persistence:
+  database_required: false
+
+observability:
+  mlflow:
+    enabled: false
+    tracking_uri: null
+    experiment_name: null
+    auto_start: true
+
+api:
+  host: 0.0.0.0
+  port: 8000
+  auth_mode: dev
+  cors_origins: [http://localhost:5173]

@@ -3,7 +3,7 @@
 ## Phase 6 — Trace, transcript, performance, and MLflow
 
 - **Order:** `6`
-- **Status:** `in_progress_uncommitted`
+- **Status:** `complete`
 - **Track:** `Observability`
 - **Summary:** Record both runtime backends through one provider-neutral observability seam.
 
@@ -14,10 +14,9 @@ trace-service, transport-context, schema, promotion-harness, and initial tests.
 On 2026-07-11, the frontend teardown defect was repaired, the FastAPI SSE
 generator lifecycle and MLflow trace correlation were verified, a live
 direct-RLM `POST /api/chat` turn produced a correlated MLflow trace, and the
-full repository/API gates passed. All Phase 6 acceptance criteria are complete
-in the current working tree; the status remains `in_progress_uncommitted` until
-these changes are committed. Phase 9 backend promotion remains separate and
-gated.
+full repository/API gates passed. Commit `7ab16953` finalized that evidence.
+The focused observability and API contract gate was rerun successfully before
+Phase 7 began. Phase 9 backend promotion remains separate and gated.
 
 ### Goal and stable interfaces
 

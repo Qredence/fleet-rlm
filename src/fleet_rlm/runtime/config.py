@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from dotenv import load_dotenv
 
 from fleet_rlm.integrations.config._env_utils import env_bool as _env_bool
-from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
+from fleet_rlm.integrations.config.env_file import resolve_env_path
 
 if TYPE_CHECKING:
     import dspy

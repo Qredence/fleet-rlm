@@ -98,7 +98,7 @@ graph LR
 
 | Package | Role | Notable files |
 | --- | --- | --- |
-| `integrations/config/` | App/env/runtime settings | `env.py`, `runtime_settings.py`, `_env_utils.py`, `config.yaml` |
+| `integrations/config/` | Typed process config and environment settings | `process.py`, `settings_catalog.py`, `env_file.py`, `config.yaml` |
 | `integrations/database/` | Persistence boundary | `engine.py`, `fleet_repository.py`, `models_base.py`, `models_enums.py`, `models_identity.py`, `models_jobs.py`, `models_llm_profiles.py`, `models_memory.py`, `models_optimization.py`, `models_runs.py`, `models_sandbox.py`, `repository_chat.py`, `repository_identity.py`, `repository_jobs.py`, `repository_memory.py`, `repository_optimization.py`, `repository_shared.py` |
 | `integrations/local_store.py` | Local sidecar persistence | session history, turn transcripts, optimization-run tracking |
 

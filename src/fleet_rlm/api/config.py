@@ -1,10 +1,9 @@
 """Server runtime configuration.
 
 ``AppConfig`` is the single config model for the server runtime. It is a
-``BaseSettings`` subclass that reads from environment variables (and an
-optional ``.env`` file). The CLI/Hydra ``AppConfig`` defined in
-``integrations/config/env.py`` is a separate nested model used for YAML
-configuration; the server uses this env-var-backed ``AppConfig`` directly.
+``BaseSettings`` adapter that preserves hosted-only environment settings. The
+canonical non-secret process defaults are projected from
+``integrations.config.process.ProcessConfig`` during server bootstrap.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ from pydantic import (
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fleet_rlm.api.runtime_services.execution_backend import ExecutionBackend
-from fleet_rlm.integrations.config.runtime_settings import resolve_env_path
+from fleet_rlm.integrations.config.env_file import resolve_env_path
 
 DEFAULT_SERVER_VOLUME_NAME = "rlm-volume-dspy"
 

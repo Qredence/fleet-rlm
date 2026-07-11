@@ -18,7 +18,6 @@ import dspy
 import pytest
 from dspy.utils.exceptions import AdapterParseError
 
-from fleet_rlm.integrations.config.env import RlmSettings
 from fleet_rlm.integrations.daytona.log_stream import (
     LogStreamParser,
     parse_log_line,
@@ -90,11 +89,6 @@ def _make_streaming_rlm_bypass_init(
 
 
 class TestActionTimeout:
-    def test_action_timeout_defaults_to_90(self) -> None:
-        """_StreamingRLM should default action_timeout to 90s."""
-        settings = RlmSettings()
-        assert settings.action_timeout == 90
-
     def test_action_timeout_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """FLEET_RLM_ACTION_TIMEOUT should override the default."""
         monkeypatch.setenv("FLEET_RLM_ACTION_TIMEOUT", "45")
@@ -389,13 +383,6 @@ class TestBudgetParameters:
         """VARIABLE_MODE_MAX_OUTPUT_CHARS should be 10,000 (DSPy default)."""
         assert VARIABLE_MODE_MAX_OUTPUT_CHARS == 10_000
 
-    def test_rlm_settings_defaults(self) -> None:
-        """RlmSettings should expose the new budget defaults."""
-        settings = RlmSettings()
-        assert settings.action_timeout == 90
-        assert settings.url_document_max_iterations == 12
-        assert settings.url_document_max_llm_calls == 30
-
     def test_url_document_caps_applied_in_module(self) -> None:
         """EscalatingFleetModule should cap URL document RLM at 12 iters / 30 calls."""
         from fleet_rlm.runtime.modules import escalating
@@ -482,43 +469,6 @@ class TestEnvironmentVariableOverrides:
         assert _env_int("TEST_VAR_SPACE", 42) == 42
         assert _env_int("TEST_VAR_NEG", 42) == -5
         assert _env_int("TEST_VAR_ZERO", 42) == 0
-
-
-class TestRlmSettingsDefaults:
-    """Verify ``RlmSettings`` dataclass defaults match the documented contract."""
-
-    def test_rlm_settings_defaults(self) -> None:
-        settings = RlmSettings()
-
-        assert settings.max_depth == 2
-        assert settings.max_iters == 60
-        assert settings.deep_max_iters == 60
-        assert settings.enable_adaptive_iters is True
-        assert settings.max_iterations == 60
-        assert settings.max_llm_calls == 50
-        assert settings.max_output_chars == 5000
-        assert settings.action_max_tokens == 2048
-        assert settings.action_timeout == 90
-        assert settings.url_document_max_iterations == 12
-        assert settings.url_document_max_llm_calls == 30
-
-    def test_rlm_settings_action_timeout_default_matches_factory(self) -> None:
-        """The RlmSettings default for ``action_timeout`` must match the factory default."""
-        from fleet_rlm.runtime.modules.factory import _env_int
-
-        settings = RlmSettings()
-        factory_default = _env_int("FLEET_RLM_ACTION_TIMEOUT", 90)
-
-        assert settings.action_timeout == factory_default
-
-    def test_rlm_settings_url_document_defaults_match_escalating(self) -> None:
-        """The RlmSettings defaults for URL-document budgets must match the escalating module defaults."""
-        from fleet_rlm.runtime.modules.escalating import _env_int
-
-        settings = RlmSettings()
-
-        assert settings.url_document_max_iterations == _env_int("FLEET_RLM_URL_DOCUMENT_MAX_ITERATIONS", 12)
-        assert settings.url_document_max_llm_calls == _env_int("FLEET_RLM_URL_DOCUMENT_MAX_LLM_CALLS", 30)
 
 
 # ---------------------------------------------------------------------------

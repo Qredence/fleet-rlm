@@ -11,7 +11,7 @@ from uuid import UUID
 import dspy
 from fastapi import HTTPException
 
-from fleet_rlm.integrations.config.runtime_settings import apply_env_updates
+from fleet_rlm.integrations.config.env_file import apply_env_updates
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.integrations.llm_profiles.crypto import mask_api_key
 from fleet_rlm.integrations.llm_profiles.model_catalog import (

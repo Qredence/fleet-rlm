@@ -16,7 +16,7 @@ detailed phase dossiers.
 4. Consult the canonical [architecture decision records](../adr/) for decisions;
    ADRs are linked, not copied into phase dossiers.
 
-The current implementation phase is [Phase 6 — Observability](phases/06-observability/README.md).
+The current implementation phase is [Phase 7 — Typed config](phases/07-typed-config/README.md).
 Direct RLM remains [promotion-gated in Phase 9](phases/09-direct-rlm-promotion/README.md).
 
 ## Status vocabulary
@@ -45,8 +45,8 @@ unchecked remediation criterion.
 3. [Phase 3 — Skills](phases/03-skills/README.md) — complete overall; Phase 3F partial.
 4. [Phase 4 — Daytona facade](phases/04-daytona-facade/README.md) — complete.
 5. [Phase 5 — Tools, artifacts, attachments](phases/05-tools-artifacts-attachments/README.md) — complete.
-6. [Phase 6 — Observability](phases/06-observability/README.md) — in progress, uncommitted; every acceptance criterion passes in the current working tree, awaiting the commit boundary required for `complete`.
-7. [Phase 7 — Typed config](phases/07-typed-config/README.md) — planned, audit first.
+6. [Phase 6 — Observability](phases/06-observability/README.md) — complete.
+7. [Phase 7 — Typed config](phases/07-typed-config/README.md) — in progress, uncommitted; every acceptance criterion passes in the current working tree, awaiting the commit boundary required for `complete`.
 8. [Phase 8 — GEPA quality](phases/08-gepa-quality/README.md) — planned.
 9. [Phase 9 — Direct RLM promotion](phases/09-direct-rlm-promotion/README.md) — promotion gated.
 10. [Phase 10 — Frontend SSE and cleanup](phases/10-frontend-sse-cleanup/README.md) — planned.

@@ -47,7 +47,10 @@ class ConcurrencyConfig(BaseModel):
     def from_env(cls) -> ConcurrencyConfig:
         """Load configuration from environment variables with defaults."""
         raw = os.environ.get("FLEET_MAX_CONCURRENT_SANDBOXES", "").strip()
-        limit = 5
+        from fleet_rlm.integrations.config.process import load_process_config
+
+        yaml_env = {key: value for key, value in os.environ.items() if key != "FLEET_MAX_CONCURRENT_SANDBOXES"}
+        limit = load_process_config(environ=yaml_env).config.daytona.pool.max_concurrent_sandboxes
         if raw:
             try:
                 limit = int(raw)
@@ -316,6 +319,10 @@ class SessionLifecycleConfig(BaseModel):
 
     @classmethod
     def from_env(cls) -> SessionLifecycleConfig:
+        from fleet_rlm.integrations.config.process import load_process_config
+
+        yaml_env = {key: value for key, value in os.environ.items() if key != "FLEET_SESSION_LIFECYCLE"}
+        process = load_process_config(environ=yaml_env).config.daytona.lifecycle
         raw_max = os.environ.get("FLEET_MAX_PAUSED_SANDBOXES", "").strip()
         max_paused = 3
         if raw_max:
@@ -324,7 +331,7 @@ class SessionLifecycleConfig(BaseModel):
             except ValueError:
                 logger.warning("Invalid FLEET_MAX_PAUSED_SANDBOXES: %s", raw_max)
         return cls(
-            lifecycle=os.environ.get("FLEET_SESSION_LIFECYCLE", "").strip(),
+            lifecycle=os.environ.get("FLEET_SESSION_LIFECYCLE", "").strip() or process.session_lifecycle,
             max_paused_sandboxes=max_paused,
         )
 

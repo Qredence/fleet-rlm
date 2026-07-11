@@ -234,7 +234,14 @@ def resolve_mlflow_auto_start_enabled(
 ) -> bool:
     """Return the effective MLflow auto-start decision for the current runtime."""
 
-    raw_value = auto_start_env if auto_start_env is not None else os.getenv("MLFLOW_AUTO_START")
+    if auto_start_env is not None:
+        raw_value = auto_start_env
+    else:
+        raw_value = os.getenv("MLFLOW_AUTO_START")
+        if raw_value is None:
+            from fleet_rlm.integrations.config.process import load_process_config
+
+            raw_value = str(load_process_config().config.observability.mlflow.auto_start)
     normalized = (raw_value or "").strip().lower()
     if normalized in _MLFLOW_AUTO_START_TRUTHY:
         return True

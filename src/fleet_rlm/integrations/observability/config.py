@@ -7,6 +7,7 @@ import os
 from pydantic import BaseModel, Field
 
 from fleet_rlm.integrations.config._env_utils import env_bool as _env_bool
+from fleet_rlm.integrations.config.process import load_process_config
 
 PROJECT_POSTHOG_DEFAULT_HOST = "https://eu.i.posthog.com"
 PROJECT_POSTHOG_DEFAULT_API_KEY: str | None = None
@@ -71,11 +72,17 @@ class MlflowConfig(BaseModel):
     @classmethod
     def from_env(cls) -> MlflowConfig:
         """Load MLflow configuration from environment variables."""
-        tracking_uri = (os.getenv("MLFLOW_TRACKING_URI") or "http://127.0.0.1:5001").strip()
+        process = load_process_config().config.observability.mlflow
+        tracking_uri = (os.getenv("MLFLOW_TRACKING_URI") or process.tracking_uri or "http://127.0.0.1:5001").strip()
         local_backend_store_uri = (
             os.getenv("MLFLOW_LOCAL_BACKEND_STORE_URI") or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI
         ).strip()
-        experiment = (os.getenv("MLFLOW_EXPERIMENT") or "fleet-rlm").strip()
+        experiment = (
+            os.getenv("MLFLOW_EXPERIMENT_NAME")
+            or os.getenv("MLFLOW_EXPERIMENT")
+            or process.experiment_name
+            or "fleet-rlm"
+        ).strip()
         active_model_id = (os.getenv("MLFLOW_ACTIVE_MODEL_ID") or "").strip() or None
         auto_assessment_judge_model = (
             os.getenv("FLEET_RLM_AUTO_ASSESSMENT_JUDGE_MODEL")
@@ -85,7 +92,7 @@ class MlflowConfig(BaseModel):
         ).strip() or None
         enabled_raw = os.getenv("MLFLOW_ENABLED")
         return cls(
-            enabled=_env_bool(enabled_raw, default=False),
+            enabled=_env_bool(enabled_raw, default=process.enabled),
             tracking_uri=tracking_uri,
             local_backend_store_uri=(local_backend_store_uri or PROJECT_MLFLOW_LOCAL_BACKEND_STORE_URI),
             experiment=experiment or "fleet-rlm",

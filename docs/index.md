@@ -22,6 +22,7 @@ Read these after you've seen the product:
 
 - **[Architecture Overview](architecture.md)** — current layer ownership model.
 - **[Implementation Phases](plan-implementation/README.md)** — canonical roadmap, phase status, acceptance criteria, and implementation evidence.
+- **[Configuration Audit](config-audit.md)** — typed process defaults, ownership, precedence, aliases, and secret boundaries.
 - **[Agent Harness](agent-harness/README.md)** — repo-local harness engineering controls.
 - **[Wiring Analysis](explanation/wiring-analysis.md)**
 - **[Releasing to PyPI](how-to-guides/releasing.md)** — automated and manual release flow

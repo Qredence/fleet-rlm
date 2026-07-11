@@ -10,8 +10,8 @@ Core commands:
     - daytona-snapshot: Bootstrap the reusable Daytona base snapshot
 
 Usage:
-    # Use Hydra syntax for configuration overrides
-    $ python -m fleet_rlm.cli agent.model=gpt-4-turbo timeout=1200
+    # Use typed dotted-path configuration overrides
+    $ python -m fleet_rlm.cli llm.roles.planner.model=openai/gpt-4o rlm.max_iters=20
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from .config import (
     initialize_app_config,
     require_current_app_config,
     set_current_app_config,
-    split_hydra_overrides,
+    split_config_overrides,
 )
 
 app = typer.Typer(
@@ -250,8 +250,8 @@ def daytona_snapshot(
 
 
 def main() -> None:
-    """Entry point that runs Typer with optional Hydra config initialization."""
-    hydra_overrides, typer_args = split_hydra_overrides(sys.argv[1:])
+    """Entry point that runs Typer with optional typed config initialization."""
+    config_overrides, typer_args = split_config_overrides(sys.argv[1:])
     set_current_app_config(None)
 
     # Help and completion output should be available without initializing runtime config.
@@ -261,7 +261,7 @@ def main() -> None:
 
     # Initialize config (with optional overrides)
     try:
-        set_current_app_config(initialize_app_config(hydra_overrides))
+        set_current_app_config(initialize_app_config(config_overrides))
     except Exception as e:
         print(f"Configuration Error: {e}", file=sys.stderr)
         raise typer.Exit(code=1)
