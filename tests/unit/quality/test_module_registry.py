@@ -72,6 +72,12 @@ def test_listing_helpers_return_sorted_modules(monkeypatch) -> None:
             "output_keys": [],
             "optimization_target_kind": "custom",
             "required_dataset_keys": ["prompt", "answer"],
+            "target_version": "1",
+            "metric_profile_id": "",
+            "proposer_policy": "dspy_default",
+            "evaluation_concurrency": 1,
+            "artifact_codec": "dspy_state_json",
+            "confidence_aware": False,
         },
         {
             "slug": "zeta-module",
@@ -84,6 +90,12 @@ def test_listing_helpers_return_sorted_modules(monkeypatch) -> None:
             "output_keys": [],
             "optimization_target_kind": "custom",
             "required_dataset_keys": ["prompt", "answer"],
+            "target_version": "1",
+            "metric_profile_id": "",
+            "proposer_policy": "dspy_default",
+            "evaluation_concurrency": 1,
+            "artifact_codec": "dspy_state_json",
+            "confidence_aware": False,
         },
     ]
 
@@ -109,3 +121,5 @@ def test_runtime_signature_targets_are_registered() -> None:
     assert plan_code_change["input_keys"] == ["task", "repo_context", "constraints"]
     assert plan_code_change["output_keys"] == ["plan_steps", "files_to_touch", "validation_commands", "risks"]
     assert plan_code_change["optimization_target_kind"] == "runtime-signature"
+    assert plan_code_change["metric_profile_id"] == "plan-code-change@1"
+    assert all(metadata[slug]["metric_profile_id"] == f"{slug}@1" for slug in slugs)

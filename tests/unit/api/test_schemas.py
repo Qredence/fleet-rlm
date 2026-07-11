@@ -5,6 +5,59 @@ import importlib
 import pytest
 from pydantic import ValidationError
 
+from fleet_rlm.api.schemas.optimization import DatasetReviewRequest, GEPAOptimizationRequest
+
+
+def test_gepa_request_accepts_canonical_managed_contract() -> None:
+    request = GEPAOptimizationRequest.model_validate(
+        {
+            "target": {"kind": "module", "id": "plan-code-change"},
+            "dataset_version_id": "dataset-v1",
+            "metric_profile_id": "plan-code-change@1",
+            "task_model": {"profile_id": "task-profile", "model_id": "openai/task"},
+            "reflection_model": {
+                "profile_id": "reflection-profile",
+                "model_id": "openai/reflection",
+            },
+            "budget": {"kind": "max_metric_calls", "value": 20, "wall_clock_seconds": 600},
+            "search": {"candidate_selection_strategy": "pareto", "seed": 7},
+        }
+    )
+
+    assert request.module_slug == "plan-code-change"
+    assert request.dataset_id == "dataset-v1"
+    assert request.max_metric_calls == 20
+    assert request.task_model is not None
+    assert request.search.seed == 7
+
+
+def test_gepa_request_rejects_canonical_request_mixed_with_raw_paths() -> None:
+    with pytest.raises(ValueError, match="filesystem output"):
+        GEPAOptimizationRequest.model_validate(
+            {
+                "target": {"kind": "skill", "id": "optimization"},
+                "dataset_version_id": "dataset-v1",
+                "metric_profile_id": "skill@1",
+                "task_model": {"profile_id": "task", "model_id": "openai/task"},
+                "reflection_model": {"profile_id": "reflection", "model_id": "openai/reflection"},
+                "budget": {"kind": "auto", "value": "light"},
+                "output_path": "unsafe.json",
+            }
+        )
+
+
+def test_dataset_review_request_requires_at_least_one_status() -> None:
+    with pytest.raises(ValidationError, match="consent_status or redaction_status"):
+        DatasetReviewRequest()
+
+
+def test_dataset_review_request_accepts_explicit_review_states() -> None:
+    request = DatasetReviewRequest(consent_status="approved", redaction_status="rejected")
+
+    assert request.consent_status == "approved"
+    assert request.redaction_status == "rejected"
+
+
 ROUNDTRIP_CASES = [
     ("fleet_rlm.api.schemas.base", "HealthResponse", {}),
     (

@@ -32,14 +32,22 @@ async def test_create_async_run_and_enqueue_registers_background_task(
             "skill_name": "optimization",
         }
     )
+    resolved_dataset_id = uuid.uuid4()
     prepared = orchestration.PreparedOptimizationRequest(
         program_spec="skill:optimization",
         dataset_path=dataset_path,
         dataset_ref=str(dataset_path),
+        dataset_id=resolved_dataset_id,
         output_path=None,
         skill_path=None,
         trace_bundle_paths=[],
         reflection_lm_config=None,
+        task_lm_config=None,
+        search_config={},
+        max_full_evals=None,
+        run_spec=None,
+        run_fingerprint=None,
+        timeout_seconds=900,
     )
 
     async def fake_prepare(**kwargs):
@@ -70,6 +78,8 @@ async def test_create_async_run_and_enqueue_registers_background_task(
     assert response.run_id == str(run_uuid)
     assert response.status == "running"
     assert len(background_tasks.calls) == 1
+    create_request = persistence.create_optimization_run.await_args.args[0]
+    assert create_request.dataset_id == resolved_dataset_id
     task_fn, task_args, task_kwargs = background_tasks.calls[0]
     assert task_fn is run_optimization_background
     assert task_kwargs["run_id"] == str(run_uuid)

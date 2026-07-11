@@ -220,10 +220,34 @@ def _write_dataset(tmp_path: Path) -> Path:
     dataset_path.write_text(
         json.dumps(
             [
-                {"question": "question-1", "answer": "answer-1", "domain": "math", "difficulty": "easy"},
-                {"question": "question-2", "answer": "answer-2", "domain": "math", "difficulty": "easy"},
-                {"question": "question-3", "answer": "answer-3", "domain": "logic", "difficulty": "easy"},
-                {"question": "question-4", "answer": "answer-4", "domain": "logic", "difficulty": "easy"},
+                {
+                    "question": "question-1",
+                    "answer": "answer-1",
+                    "domain": "math",
+                    "difficulty": "easy",
+                    "partition": "training",
+                },
+                {
+                    "question": "question-2",
+                    "answer": "answer-2",
+                    "domain": "math",
+                    "difficulty": "easy",
+                    "partition": "training",
+                },
+                {
+                    "question": "question-3",
+                    "answer": "answer-3",
+                    "domain": "logic",
+                    "difficulty": "easy",
+                    "partition": "selection",
+                },
+                {
+                    "question": "question-4",
+                    "answer": "answer-4",
+                    "domain": "logic",
+                    "difficulty": "easy",
+                    "partition": "promotion_test",
+                },
             ]
         ),
         encoding="utf-8",
@@ -236,7 +260,7 @@ def _stub_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeGEPA.last_init = None
     _FakeGEPA.last_compile = None
     _install_fake_dspy(monkeypatch)
-    monkeypatch.setattr(optimization_runner, "_optimization_dspy_context", nullcontext)
+    monkeypatch.setattr(optimization_runner, "_optimization_dspy_context", lambda _config=None: nullcontext())
 
 
 def test_evaluate_validation_set_records_successes_and_failures() -> None:
@@ -289,7 +313,7 @@ def test_run_module_optimization_writes_artifacts_and_manifest(tmp_path, monkeyp
     assert Path(result["manifest_path"]) == manifest_path
     assert result["baseline_validation_score"] == 1.0
     assert result["validation_score"] == 1.0
-    assert result["review_bundle"]["holdout"]["split_reference"]["strategy"] == "stratified-metadata"
+    assert result["review_bundle"]["holdout"]["split_reference"]["strategy"] == "explicit-partitions"
     assert result["review_bundle"]["prompt_snapshots"]["matched_predictors"] == [
         {
             "predictor_name": "solve",
@@ -307,11 +331,11 @@ def test_run_module_optimization_writes_artifacts_and_manifest(tmp_path, monkeyp
     assert _FakeGEPA.last_init["max_metric_calls"] == 12
     assert _FakeGEPA.last_init["instruction_proposer"] is None
     assert _FakeGEPA.last_init["track_stats"] is True
-    assert _FakeGEPA.last_init["track_best_outputs"] is True
+    assert _FakeGEPA.last_init["track_best_outputs"] is False
     assert _FakeGEPA.last_init["use_mlflow"] is False
     assert _FakeGEPA.last_init["gepa_kwargs"] == {"use_cloudpickle": True}
     assert len(_FakeGEPA.last_compile["trainset"]) == 2  # ty: ignore[invalid-argument-type]
-    assert len(_FakeGEPA.last_compile["valset"]) == 2  # ty: ignore[invalid-argument-type]
+    assert len(_FakeGEPA.last_compile["valset"]) == 1  # ty: ignore[invalid-argument-type]
     evidence_path = output_path.with_suffix(".gepa-evidence.json")
     evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
     assert evidence["best_candidate_id"] == "candidate-2"
@@ -319,7 +343,11 @@ def test_run_module_optimization_writes_artifacts_and_manifest(tmp_path, monkeyp
     assert manifest["review_bundle"]["gepa_evidence"]["path"] == str(evidence_path)
     assert manifest["review_bundle"]["gepa_evidence"]["candidate_count"] == 3
     assert manifest["review_bundle"]["holdout"]["external_validation_available"] is True
-    assert manifest["review_bundle"]["holdout"]["promotion_ready"] is True
+    assert manifest["review_bundle"]["holdout"]["promotion_ready"] is False
+    # Unmeasured cost/latency must fail closed (None evidence, not zero stubs).
+    failures = set(manifest["review_bundle"]["holdout"]["promotion_gate_failures"])
+    assert "cost_evidence_missing" in failures
+    assert "latency_evidence_missing" in failures
     assert manifest["review_bundle"]["insights"]["candidate_decisions"][0]["candidate_id"] == "candidate-0"
     assert manifest["review_bundle"]["insights"]["candidate_decisions"][2]["status"] == "selected"
 
