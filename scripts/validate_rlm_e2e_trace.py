@@ -568,6 +568,7 @@ def _assert_artifact_readback(
     checksum: str,
 ) -> None:
     """Require a bounded artifact-tool readback, not merely a model claim."""
+
     def decoded_mapping(value: Any) -> dict[str, Any] | None:
         if isinstance(value, dict):
             return value
