@@ -1,7 +1,7 @@
 """Typed process settings for the parallel clean-backend package.
 
 No clients, engines, LMs, or network access are constructed at import time.
-Secrets use ``SecretStr`` so public dumps never expose plaintext values.
+Secrets use SecretStr so public dumps never expose plaintext values.
 """
 
 from __future__ import annotations
@@ -25,4 +25,12 @@ class Settings(BaseSettings):
     database_url: str | None = Field(
         default=None,
         description="Async SQLAlchemy URL (e.g. sqlite+aiosqlite:///:memory: or postgresql+asyncpg://...)",
+    )
+    volume_name: str = Field(
+        default="rlm-volume-dspy",
+        description="Daytona Volume name for workspace durable files",
+    )
+    volume_mount_path: str = Field(
+        default="/home/daytona/fleet",
+        description="Absolute Sandbox mount path for the workspace Volume",
     )
