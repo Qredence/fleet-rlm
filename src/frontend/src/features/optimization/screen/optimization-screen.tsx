@@ -15,9 +15,11 @@ import { RunHistory } from "../run-history/run-history";
 import {
   useOptimizationMutations,
   useOptimizationRunDetails,
+  useOptimizationRunScorecard,
   useOptimizationRuns,
   useOptimizationStatus,
 } from "../use-optimization";
+import { optimizationEndpoints } from "@/lib/rlm-api";
 
 type OptimizationTab = "new-run" | "history";
 
@@ -26,7 +28,8 @@ const EMPTY_RUNS: OptimizationRunResponse[] = [];
 export function OptimizationScreen() {
   const statusQuery = useOptimizationStatus();
   const runsQuery = useOptimizationRuns();
-  const { createPromotionDraft } = useOptimizationMutations();
+  const { createPromotionDraft, approveArtifact, activateArtifact, resumeRun } =
+    useOptimizationMutations();
 
   const [activeTab, setActiveTab] = useState<OptimizationTab>("new-run");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -34,6 +37,7 @@ export function OptimizationScreen() {
     null,
   );
   const runDetailsQuery = useOptimizationRunDetails(selectedRunId);
+  const scorecardQuery = useOptimizationRunScorecard(selectedRunId);
 
   const runs = runsQuery.data ?? EMPTY_RUNS;
 
@@ -53,6 +57,51 @@ export function OptimizationScreen() {
     }
   };
 
+  const resolveRunArtifactId = async (): Promise<string | null> => {
+    if (!selectedRunId) return null;
+    try {
+      const artifact = await optimizationEndpoints.runArtifact(selectedRunId);
+      return artifact.id;
+    } catch (error) {
+      toast.error("Run artifact unavailable", { description: errorMessage(error) });
+      return null;
+    }
+  };
+
+  const handleApproveArtifact = async () => {
+    const artifactId = await resolveRunArtifactId();
+    if (!artifactId) return;
+    try {
+      const approved = await approveArtifact.mutateAsync(artifactId);
+      toast.success("Artifact approved", { description: approved.id });
+    } catch (error) {
+      toast.error("Approve failed", { description: errorMessage(error) });
+    }
+  };
+
+  const handleActivateArtifact = async () => {
+    const artifactId = await resolveRunArtifactId();
+    if (!artifactId) return;
+    try {
+      const activation = await activateArtifact.mutateAsync(artifactId);
+      toast.success("Artifact activated", {
+        description: `${activation.target_kind}:${activation.target_id}`,
+      });
+    } catch (error) {
+      toast.error("Activate failed", { description: errorMessage(error) });
+    }
+  };
+
+  const handleResumeRun = async () => {
+    if (!selectedRunId) return;
+    try {
+      const resumed = await resumeRun.mutateAsync(selectedRunId);
+      toast.success("Run resumed", { description: resumed.run_id });
+    } catch (error) {
+      toast.error("Resume failed", { description: errorMessage(error) });
+    }
+  };
+
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-background">
       <RunDetailsSheet
@@ -61,12 +110,21 @@ export function OptimizationScreen() {
         onOpenChange={(open) => {
           if (!open) setSelectedRunId(null);
         }}
-        detail={runDetailsQuery.data}
+        detail={runDetailsQuery.data ?? undefined}
         isLoading={runDetailsQuery.isLoading}
         error={runDetailsQuery.error}
         draft={promotionDraft}
         isDraftPending={createPromotionDraft.isPending}
         onCreateDraft={() => void handleCreatePromotionDraft()}
+        scorecard={scorecardQuery.data ?? null}
+        scorecardLoading={scorecardQuery.isLoading}
+        scorecardError={scorecardQuery.error}
+        onApproveArtifact={() => void handleApproveArtifact()}
+        onActivateArtifact={() => void handleActivateArtifact()}
+        onResumeRun={() => void handleResumeRun()}
+        isArtifactActionPending={
+          approveArtifact.isPending || activateArtifact.isPending || resumeRun.isPending
+        }
       />
 
       <ScrollArea className="min-h-0 flex-1">

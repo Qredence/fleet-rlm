@@ -19,6 +19,7 @@ import { ScoreBadge } from "@/components/product/score-badge";
 import type {
   OptimizationPromotionDraftResponse,
   OptimizationRunDetailResponse,
+  SealedPromotionScorecard,
 } from "@/lib/rlm-api";
 
 import { errorMessage, formatScore, shortPath, targetLabel } from "../optimization-format";
@@ -67,6 +68,13 @@ export function RunDetailsSheet({
   draft,
   isDraftPending,
   onCreateDraft,
+  scorecard,
+  scorecardLoading,
+  scorecardError,
+  onApproveArtifact,
+  onActivateArtifact,
+  onResumeRun,
+  isArtifactActionPending,
 }: {
   runId: string | null;
   open: boolean;
@@ -77,6 +85,13 @@ export function RunDetailsSheet({
   draft: OptimizationPromotionDraftResponse | null;
   isDraftPending: boolean;
   onCreateDraft: () => void;
+  scorecard?: SealedPromotionScorecard | null;
+  scorecardLoading?: boolean;
+  scorecardError?: unknown;
+  onApproveArtifact?: (artifactVersionId: string) => void;
+  onActivateArtifact?: (artifactVersionId: string) => void;
+  onResumeRun?: () => void;
+  isArtifactActionPending?: boolean;
 }) {
   const run = detail?.run;
   const manifestText = detail?.manifest ? JSON.stringify(detail.manifest, null, 2) : "";
@@ -84,8 +99,13 @@ export function RunDetailsSheet({
   const traceEvidence = detail?.trace_evidence ?? [];
   const candidateDecisions = detail?.candidate_decisions ?? [];
   const artifactRefs = detail?.artifact_refs ?? [];
-  const promotionReady = holdoutIsPromotionReady(detail);
+  const promotionReady =
+    typeof scorecard?.promotion_ready === "boolean"
+      ? scorecard.promotion_ready
+      : holdoutIsPromotionReady(detail);
   const candidateEvidencePath = gepaEvidencePath(detail);
+  const canResume =
+    run?.status === "failed" || run?.status === "cancelled" || run?.status === "interrupted";
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -117,10 +137,11 @@ export function RunDetailsSheet({
               <Tabs defaultValue="summary" className="space-y-4">
                 <TabsList className="flex flex-wrap">
                   <TabsTrigger value="summary">Summary</TabsTrigger>
+                  <TabsTrigger value="scorecard">Scorecard</TabsTrigger>
                   <TabsTrigger value="prompt">Prompt Diff</TabsTrigger>
                   <TabsTrigger value="trace">Trace Evidence</TabsTrigger>
                   <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
-                  <TabsTrigger value="promotion">Promotion Draft</TabsTrigger>
+                  <TabsTrigger value="promotion">Promotion</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="summary" className="space-y-4">
@@ -134,16 +155,43 @@ export function RunDetailsSheet({
                     <AlertTitle>Self-improving RLM objective</AlertTitle>
                     <AlertDescription>
                       GEPA pairs a proposer RLM with distilled MLflow trace evidence to improve the
-                      executor RLM prompt artifact. The result is auditable and non-mutating until a
-                      promotion draft is reviewed.
+                      executor RLM prompt artifact. GEPA&apos;s valset is selection-only; sealed
+                      promotion-test scores live on the Scorecard tab. Activation is a separate
+                      explicit step after human approval.
                     </AlertDescription>
                   </Alert>
+                  {canResume && onResumeRun ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={isArtifactActionPending}
+                        onClick={onResumeRun}
+                      >
+                        Resume run
+                      </Button>
+                      <span className="text-xs text-muted-foreground">
+                        Exact fingerprint resume only; never automatic.
+                      </span>
+                    </div>
+                  ) : null}
                   {promotionReady === false ? (
                     <Alert>
-                      <AlertTitle>Holdout validation required</AlertTitle>
+                      <AlertTitle>Sealed promotion gate not ready</AlertTitle>
                       <AlertDescription>
-                        GEPA used the trainset as its internal Pareto valset for this run. Review
-                        the draft, but add holdout validation examples before promotion.
+                        GEPA selection scores are not promotion evidence. Review the Scorecard tab
+                        for sealed promotion-test failures before approving or activating an
+                        artifact.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                  {promotionReady === true ? (
+                    <Alert>
+                      <AlertTitle>Sealed promotion gate ready</AlertTitle>
+                      <AlertDescription>
+                        Scorecard reports promotion_ready. Approve the candidate artifact, then
+                        activate for this workspace when you intend runtime behavior to change.
                       </AlertDescription>
                     </Alert>
                   ) : null}
@@ -209,6 +257,87 @@ export function RunDetailsSheet({
                       </div>
                     ))}
                   </div>
+                </TabsContent>
+
+                <TabsContent value="scorecard" className="space-y-4">
+                  {scorecardError ? (
+                    <Alert>
+                      <AlertTitle>Scorecard unavailable</AlertTitle>
+                      <AlertDescription>{errorMessage(scorecardError)}</AlertDescription>
+                    </Alert>
+                  ) : null}
+                  {scorecardLoading ? <Skeleton className="h-40 w-full" /> : null}
+                  {!scorecardLoading && scorecard ? (
+                    <>
+                      <Alert>
+                        <AlertTitle>
+                          {scorecard.promotion_ready
+                            ? "Promotion gate ready"
+                            : "Promotion gate blocked"}
+                        </AlertTitle>
+                        <AlertDescription>
+                          GEPA valset role: {scorecard.gepa_valset_role}. Protocol:{" "}
+                          {scorecard.protocol_version ?? "unknown"}.
+                        </AlertDescription>
+                      </Alert>
+                      <div className="rounded-md border border-border-subtle bg-muted/20 px-3 py-3">
+                        <KeyValueGrid
+                          items={[
+                            {
+                              label: "Promotion ready",
+                              value: scorecard.promotion_ready ? "yes" : "no",
+                            },
+                            {
+                              label: "Baseline (sealed test)",
+                              value: scoreCell(scorecard.baseline_score),
+                            },
+                            {
+                              label: "Candidate (sealed test)",
+                              value: scoreCell(scorecard.candidate_score),
+                            },
+                            { label: "Delta", value: scoreCell(scorecard.score_delta) },
+                            {
+                              label: "Promotion-test examples",
+                              value: scorecard.promotion_test_examples ?? "-",
+                            },
+                            {
+                              label: "Selection examples (GEPA valset)",
+                              value: scorecard.selection_examples ?? "-",
+                            },
+                            {
+                              label: "max_metric_calls budget",
+                              value:
+                                scorecard.metric_call_budget_used == null
+                                  ? "-"
+                                  : scorecard.metric_call_budget_used
+                                    ? "yes"
+                                    : "no",
+                            },
+                          ]}
+                        />
+                      </div>
+                      {scorecard.promotion_gate_failures.length > 0 ? (
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium">Gate failures</div>
+                          <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
+                            {scorecard.promotion_gate_failures.map((failure) => (
+                              <li key={failure} className="font-mono text-xs">
+                                {failure}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                    </>
+                  ) : null}
+                  {!scorecardLoading && !scorecard && !scorecardError ? (
+                    <Alert>
+                      <AlertTitle>No scorecard yet</AlertTitle>
+                      <AlertDescription>
+                        Sealed promotion-test metadata is written when a managed GEPA run completes.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
                 </TabsContent>
 
                 <TabsContent value="prompt" className="space-y-4">
@@ -347,14 +476,37 @@ export function RunDetailsSheet({
 
                 <TabsContent value="promotion" className="space-y-4">
                   <Alert>
-                    <AlertTitle>Draft only</AlertTitle>
+                    <AlertTitle>Managed promotion path</AlertTitle>
                     <AlertDescription>
-                      Creating a promotion draft records the selected artifact for review. It does
-                      not overwrite scaffold skills or live runtime prompts.
+                      Prefer the sealed Scorecard, then approve and activate a DB artifact version.
+                      Filesystem promotion drafts remain viewable but are not the activation path.
                     </AlertDescription>
                   </Alert>
-                  <Button type="button" onClick={onCreateDraft} disabled={isDraftPending || !runId}>
-                    {isDraftPending ? "Creating draft..." : "Create promotion draft"}
+                  {onApproveArtifact || onActivateArtifact ? (
+                    <div className="flex flex-wrap gap-2">
+                      {onApproveArtifact ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={isArtifactActionPending || !runId}
+                          onClick={() => onApproveArtifact("from-run")}
+                        >
+                          Approve run artifact
+                        </Button>
+                      ) : null}
+                      {onActivateArtifact ? (
+                        <Button
+                          type="button"
+                          disabled={isArtifactActionPending || !runId}
+                          onClick={() => onActivateArtifact("from-run")}
+                        >
+                          Activate approved artifact
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <Button type="button" variant="secondary" onClick={onCreateDraft} disabled={isDraftPending || !runId}>
+                    {isDraftPending ? "Creating draft..." : "Create filesystem draft (legacy)"}
                   </Button>
                   {draft ? (
                     <div className="space-y-3 rounded-md border border-border-subtle p-3">

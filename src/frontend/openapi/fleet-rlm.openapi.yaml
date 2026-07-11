@@ -2952,6 +2952,119 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/runs/{run_id}/cancel:
+    post:
+      tags:
+        - optimization
+      summary: Cancel Optimization Run
+      description: Request cooperative cancellation of a running optimization job.
+      operationId: cancel_optimization_run_api_v1_optimization_runs__run_id__cancel_post
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Identifier of the optimization run to cancel.
+            title: Run Id
+          description: Identifier of the optimization run to cancel.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptimizationRunResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: Run not found.
+        "501":
+          description: Requires managed Postgres persistence.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/runs/{run_id}/resume:
+    post:
+      tags:
+        - optimization
+      summary: Resume Optimization Run
+      description: Explicitly resume a terminal run after exact fingerprint validation
+        (never automatic).
+      operationId: resume_optimization_run_api_v1_optimization_runs__run_id__resume_post
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Identifier of the optimization run to resume.
+            title: Run Id
+          description: Identifier of the optimization run to resume.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptimizationRunCreatedResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: Run not found.
+        "409":
+          description: Resume not allowed (status or fingerprint).
+        "501":
+          description: Requires managed Postgres persistence.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/runs/{run_id}/scorecard:
+    get:
+      tags:
+        - optimization
+      summary: Get Run Scorecard
+      description: Return sealed promotion-test scorecard from run metadata (not GEPA
+        selection scores).
+      operationId: get_run_scorecard_api_v1_optimization_runs__run_id__scorecard_get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Identifier of the optimization run.
+            title: Run Id
+          description: Identifier of the optimization run.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SealedPromotionScorecard"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: Run not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /api/v1/optimization/runs/{run_id}/promotion-drafts:
     post:
       tags:
@@ -3163,6 +3276,91 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/datasets/{dataset_id}/review:
+    patch:
+      tags:
+        - optimization
+      summary: Review Dataset Version
+      description: Update review state on a draft managed Dataset Version.
+      operationId: review_dataset_version_api_v1_optimization_datasets__dataset_id__review_patch
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: dataset_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Dataset Version identifier.
+            title: Dataset Id
+          description: Dataset Version identifier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetReviewRequest"
+              description: Consent and redaction review update.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: Dataset Version not found.
+        "409":
+          description: Dataset Version is immutable.
+        "503":
+          description: Managed Dataset Versions require Postgres persistence.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/datasets/{dataset_id}/approve:
+    post:
+      tags:
+        - optimization
+      summary: Approve Dataset Version
+      description: Verify and atomically seal a managed Dataset Version.
+      operationId: approve_dataset_version_api_v1_optimization_datasets__dataset_id__approve_post
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: dataset_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Dataset Version identifier.
+            title: Dataset Id
+          description: Dataset Version identifier.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: Dataset Version not found.
+        "409":
+          description: Dataset Version is not eligible for approval.
+        "503":
+          description: Managed Dataset Versions require Postgres persistence.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /api/v1/optimization/datasets/{dataset_id}:
     get:
       tags:
@@ -3192,6 +3390,219 @@ paths:
           description: Authentication is required or the provided token is invalid.
         "404":
           description: Dataset not found.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/runs/{run_id}/artifact:
+    get:
+      tags:
+        - optimization
+      summary: Get Run Artifact
+      description: Return the persisted artifact version for a completed run, if any.
+      operationId: get_run_artifact_api_v1_optimization_runs__run_id__artifact_get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Optimization run identifier.
+            title: Run Id
+          description: Optimization run identifier.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptimizationArtifactVersionResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: Artifact not found.
+        "501":
+          description: Requires managed Postgres persistence.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/artifacts/{artifact_version_id}/approve:
+    post:
+      tags:
+        - optimization
+      summary: Approve Artifact Version
+      description: Human-approve a candidate artifact. Does not activate runtime behavior.
+      operationId: approve_artifact_version_api_v1_optimization_artifacts__artifact_version_id__approve_post
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: artifact_version_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Artifact version identifier.
+            title: Artifact Version Id
+          description: Artifact version identifier.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptimizationArtifactVersionResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: Artifact not found.
+        "409":
+          description: Artifact cannot be approved.
+        "501":
+          description: Requires managed Postgres persistence.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/artifacts/{artifact_version_id}/activate:
+    post:
+      tags:
+        - optimization
+      summary: Activate Artifact Version
+      description: Atomically activate an approved artifact for its Managed Target
+        in this workspace.
+      operationId: activate_artifact_version_api_v1_optimization_artifacts__artifact_version_id__activate_post
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: artifact_version_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Approved artifact version identifier.
+            title: Artifact Version Id
+          description: Approved artifact version identifier.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptimizationTargetActivationResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: Artifact not found.
+        "409":
+          description: Artifact cannot be activated.
+        "501":
+          description: Requires managed Postgres persistence.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/targets/{target_kind}/{target_id}/rollback:
+    post:
+      tags:
+        - optimization
+      summary: Rollback Target Activation
+      description: Roll back to the previous retained artifact version for a Managed
+        Target.
+      operationId: rollback_target_activation_api_v1_optimization_targets__target_kind___target_id__rollback_post
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: target_kind
+          in: path
+          required: true
+          schema:
+            enum:
+              - module
+              - skill
+            type: string
+            description: Managed target kind.
+            title: Target Kind
+          description: Managed target kind.
+        - name: target_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Managed target identifier.
+            title: Target Id
+          description: Managed target identifier.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptimizationTargetActivationResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: No activation or previous version to roll back.
+        "501":
+          description: Requires managed Postgres persistence.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /api/v1/optimization/targets/{target_kind}/{target_id}/activation:
+    get:
+      tags:
+        - optimization
+      summary: Get Target Activation
+      description: Return the workspace activation pointer for a Managed Target.
+      operationId: get_target_activation_api_v1_optimization_targets__target_kind___target_id__activation_get
+      security:
+        - HTTPBearer: []
+      parameters:
+        - name: target_kind
+          in: path
+          required: true
+          schema:
+            enum:
+              - module
+              - skill
+            type: string
+            description: Managed target kind.
+            title: Target Kind
+          description: Managed target kind.
+        - name: target_id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: Managed target identifier.
+            title: Target Id
+          description: Managed target identifier.
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptimizationTargetActivationResponse"
+        "401":
+          description: Authentication is required or the provided token is invalid.
+        "404":
+          description: No activation pointer for this target.
+        "501":
+          description: Requires managed Postgres persistence.
         "422":
           description: Validation Error
           content:
@@ -3484,6 +3895,18 @@ components:
             - type: "null"
           title: Module Slug
           description: Optional module slug used to validate required dataset keys.
+        skill_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Skill Name
+          description: Optional catalog Skill id owning this managed Dataset Version.
+        supersedes_dataset_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Supersedes Dataset Id
+          description: Optional approved Dataset Version superseded by this upload.
       type: object
       required:
         - file
@@ -3652,6 +4075,50 @@ components:
             - type: "null"
           title: Module Slug
           description: Associated module slug, when provided.
+        version:
+          type: integer
+          title: Version
+          description: Immutable version number within the dataset lineage.
+          default: 1
+        supersedes_dataset_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Supersedes Dataset Id
+          description: Previous Dataset Version, when present.
+        eligibility:
+          type: string
+          title: Eligibility
+          description: Dataset lifecycle eligibility state.
+          default: draft
+        consent_status:
+          type: string
+          title: Consent Status
+          description: Consent review state.
+          default: unreviewed
+        redaction_status:
+          type: string
+          title: Redaction Status
+          description: Redaction review state.
+          default: unreviewed
+        content_sha256:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Content Sha256
+          description: Canonical ordered-row SHA-256 digest.
+        approved_at:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Approved At
+          description: Approval timestamp for sealed versions.
+        approved_by_user_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Approved By User Id
+          description: Approving user identifier.
         created_at:
           type: string
           title: Created At
@@ -3735,6 +4202,50 @@ components:
             - type: "null"
           title: Module Slug
           description: Associated module slug, when provided.
+        version:
+          type: integer
+          title: Version
+          description: Immutable version number within the dataset lineage.
+          default: 1
+        supersedes_dataset_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Supersedes Dataset Id
+          description: Previous Dataset Version, when present.
+        eligibility:
+          type: string
+          title: Eligibility
+          description: Dataset lifecycle eligibility state.
+          default: draft
+        consent_status:
+          type: string
+          title: Consent Status
+          description: Consent review state.
+          default: unreviewed
+        redaction_status:
+          type: string
+          title: Redaction Status
+          description: Redaction review state.
+          default: unreviewed
+        content_sha256:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Content Sha256
+          description: Canonical ordered-row SHA-256 digest.
+        approved_at:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Approved At
+          description: Approval timestamp for sealed versions.
+        approved_by_user_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Approved By User Id
+          description: Approving user identifier.
         created_at:
           type: string
           title: Created At
@@ -3748,6 +4259,30 @@ components:
         - created_at
       title: DatasetResponse
       description: Metadata for a registered dataset.
+    DatasetReviewRequest:
+      properties:
+        consent_status:
+          anyOf:
+            - type: string
+              enum:
+                - approved
+                - rejected
+            - type: "null"
+          title: Consent Status
+          description: Updated consent review state.
+        redaction_status:
+          anyOf:
+            - type: string
+              enum:
+                - approved
+                - rejected
+            - type: "null"
+          title: Redaction Status
+          description: Updated redaction review state.
+      additionalProperties: false
+      type: object
+      title: DatasetReviewRequest
+      description: Review-state transition for a draft managed Dataset Version.
     EvaluationReportResponse:
       properties:
         run_id:
@@ -4048,6 +4583,54 @@ components:
       description: Metadata for a registered optimizable DSPy module.
     GEPAOptimizationRequest:
       properties:
+        target:
+          anyOf:
+            - $ref: "#/components/schemas/ManagedOptimizationTargetRef"
+            - type: "null"
+          description: Canonical managed target reference.
+        dataset_version_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Dataset Version Id
+          description: Approved immutable Dataset Version identifier.
+        metric_profile_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Metric Profile Id
+          description: Qualified Metric Profile id in name@version form.
+        task_model:
+          anyOf:
+            - $ref: "#/components/schemas/OptimizationModelSelection"
+            - type: "null"
+          description: Explicit task-model selection.
+        reflection_model:
+          anyOf:
+            - $ref: "#/components/schemas/OptimizationModelSelection"
+            - type: "null"
+          description: Explicit reflection-model selection.
+        budget:
+          anyOf:
+            - oneOf:
+                - $ref: "#/components/schemas/OptimizationAutoBudget"
+                - $ref: "#/components/schemas/OptimizationMetricCallsBudget"
+                - $ref: "#/components/schemas/OptimizationFullEvalsBudget"
+              discriminator:
+                propertyName: kind
+                mapping:
+                  auto: "#/components/schemas/OptimizationAutoBudget"
+                  max_full_evals: "#/components/schemas/OptimizationFullEvalsBudget"
+                  max_metric_calls: "#/components/schemas/OptimizationMetricCallsBudget"
+            - type: "null"
+          title: Budget
+          description: Canonical discriminated GEPA budget.
+        search:
+          $ref: "#/components/schemas/GEPASearchConfig"
+          description: GEPA search configuration.
+        tracking:
+          $ref: "#/components/schemas/OptimizationTrackingRequest"
+          description: Optimization tracking policy.
         dataset_path:
           anyOf:
             - type: string
@@ -4233,6 +4816,63 @@ components:
         - validation_examples
       title: GEPAOptimizationResponse
       description: Result payload after a GEPA optimization run completes.
+    GEPASearchConfig:
+      properties:
+        reflection_minibatch_size:
+          type: integer
+          maximum: 50.0
+          minimum: 1.0
+          title: Reflection Minibatch Size
+          description: GEPA reflection minibatch size.
+          default: 3
+        candidate_selection_strategy:
+          type: string
+          enum:
+            - pareto
+            - current_best
+          title: Candidate Selection Strategy
+          description: GEPA candidate-selection strategy.
+          default: pareto
+        component_selector:
+          type: string
+          enum:
+            - round_robin
+            - all
+          title: Component Selector
+          description: Predictor component-selection strategy.
+          default: round_robin
+        skip_perfect_score:
+          type: boolean
+          title: Skip Perfect Score
+          description: Skip reflection for perfectly scored examples.
+          default: true
+        add_format_failure_as_feedback:
+          type: boolean
+          title: Add Format Failure As Feedback
+          description: Whether formatting failures become GEPA feedback.
+          default: false
+        use_merge:
+          type: boolean
+          title: Use Merge
+          description: Enable GEPA candidate merging.
+          default: true
+        max_merge_invocations:
+          anyOf:
+            - type: integer
+              maximum: 100.0
+              minimum: 0.0
+            - type: "null"
+          title: Max Merge Invocations
+          description: Maximum candidate merge attempts.
+          default: 5
+        seed:
+          type: integer
+          title: Seed
+          description: Deterministic GEPA search seed.
+          default: 0
+      additionalProperties: false
+      type: object
+      title: GEPASearchConfig
     GEPAStatusResponse:
       properties:
         available:
@@ -4586,6 +5226,32 @@ components:
           description: Small delegate role binding patch.
       type: object
       title: LlmRoleBindingsUpdateRequest
+    ManagedOptimizationTargetRef:
+      properties:
+        kind:
+          type: string
+          enum:
+            - module
+            - skill
+          title: Kind
+          description: Managed optimization target kind.
+        id:
+          type: string
+          minLength: 1
+          title: Id
+          description: Registered module slug or catalog-resolved Skill id.
+        version:
+          type: string
+          minLength: 1
+          title: Version
+          description: Managed target version.
+          default: "1"
+      additionalProperties: false
+      type: object
+      required:
+        - kind
+        - id
+      title: ManagedOptimizationTargetRef
     OptimizationArtifactRef:
       properties:
         label:
@@ -4612,6 +5278,100 @@ components:
         - kind
       title: OptimizationArtifactRef
       description: A filesystem artifact produced or consumed by an optimization run.
+    OptimizationArtifactVersionResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Artifact version identifier.
+        optimization_run_id:
+          type: string
+          title: Optimization Run Id
+          description: Source optimization run.
+        target_kind:
+          type: string
+          enum:
+            - module
+            - skill
+          title: Target Kind
+          description: Managed target kind.
+        target_id:
+          type: string
+          title: Target Id
+          description: Managed target id.
+        artifact_kind:
+          type: string
+          title: Artifact Kind
+          description: module_state_json or skill_markdown.
+        artifact_path:
+          type: string
+          title: Artifact Path
+          description: Filesystem path to the immutable artifact payload.
+        artifact_sha256:
+          type: string
+          title: Artifact Sha256
+          description: SHA-256 of the artifact payload.
+        status:
+          type: string
+          title: Status
+          description: candidate | approved | active.
+        approved_at:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Approved At
+          description: Approval timestamp.
+        activated_at:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Activated At
+          description: Activation timestamp.
+        created_at:
+          type: string
+          title: Created At
+          description: Creation timestamp.
+      type: object
+      required:
+        - id
+        - optimization_run_id
+        - target_kind
+        - target_id
+        - artifact_kind
+        - artifact_path
+        - artifact_sha256
+        - status
+        - created_at
+      title: OptimizationArtifactVersionResponse
+      description: Persisted optimization artifact version.
+    OptimizationAutoBudget:
+      properties:
+        wall_clock_seconds:
+          type: integer
+          maximum: 86400.0
+          minimum: 1.0
+          title: Wall Clock Seconds
+          description: Requested wall-clock limit before the server ceiling is applied.
+          default: 3600
+        kind:
+          type: string
+          const: auto
+          title: Kind
+          description: Automatic GEPA budget discriminator.
+          default: auto
+        value:
+          type: string
+          enum:
+            - light
+            - medium
+            - heavy
+          title: Value
+          description: Automatic GEPA intensity.
+      additionalProperties: false
+      type: object
+      required:
+        - value
+      title: OptimizationAutoBudget
     OptimizationCandidateDecision:
       properties:
         candidate_id:
@@ -4663,6 +5423,31 @@ components:
         - summary
       title: OptimizationCandidateDecision
       description: A selected or rejected GEPA prompt candidate decision.
+    OptimizationFullEvalsBudget:
+      properties:
+        wall_clock_seconds:
+          type: integer
+          maximum: 86400.0
+          minimum: 1.0
+          title: Wall Clock Seconds
+          description: Requested wall-clock limit before the server ceiling is applied.
+          default: 3600
+        kind:
+          type: string
+          const: max_full_evals
+          title: Kind
+          description: Full-evaluation budget discriminator.
+          default: max_full_evals
+        value:
+          type: integer
+          minimum: 1.0
+          title: Value
+          description: Maximum full evaluations allowed for the run.
+      additionalProperties: false
+      type: object
+      required:
+        - value
+      title: OptimizationFullEvalsBudget
     OptimizationHoldoutSummary:
       properties:
         promotion_ready:
@@ -4697,6 +5482,49 @@ components:
       type: object
       title: OptimizationHoldoutSummary
       description: Typed holdout validation summary from a GEPA review bundle.
+    OptimizationMetricCallsBudget:
+      properties:
+        wall_clock_seconds:
+          type: integer
+          maximum: 86400.0
+          minimum: 1.0
+          title: Wall Clock Seconds
+          description: Requested wall-clock limit before the server ceiling is applied.
+          default: 3600
+        kind:
+          type: string
+          const: max_metric_calls
+          title: Kind
+          description: Metric-call budget discriminator.
+          default: max_metric_calls
+        value:
+          type: integer
+          minimum: 1.0
+          title: Value
+          description: Maximum metric calls allowed for the run.
+      additionalProperties: false
+      type: object
+      required:
+        - value
+      title: OptimizationMetricCallsBudget
+    OptimizationModelSelection:
+      properties:
+        profile_id:
+          type: string
+          minLength: 1
+          title: Profile Id
+          description: Saved provider profile identifier.
+        model_id:
+          type: string
+          minLength: 1
+          title: Model Id
+          description: Provider-native model identifier.
+      additionalProperties: false
+      type: object
+      required:
+        - profile_id
+        - model_id
+      title: OptimizationModelSelection
     OptimizationPromotionDraftResponse:
       properties:
         ok:
@@ -5116,6 +5944,46 @@ components:
       type: object
       title: OptimizationScoreSummary
       description: Score and split summary for a GEPA run.
+    OptimizationTargetActivationResponse:
+      properties:
+        target_kind:
+          type: string
+          enum:
+            - module
+            - skill
+          title: Target Kind
+          description: Managed target kind.
+        target_id:
+          type: string
+          title: Target Id
+          description: Managed target id.
+        active_artifact_version_id:
+          type: string
+          title: Active Artifact Version Id
+          description: Currently active artifact version.
+        previous_artifact_version_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Previous Artifact Version Id
+          description: Previous artifact retained for rollback.
+        active_artifact:
+          anyOf:
+            - $ref: "#/components/schemas/OptimizationArtifactVersionResponse"
+            - type: "null"
+          description: Resolved active artifact metadata when available.
+        updated_at:
+          type: string
+          title: Updated At
+          description: Last activation update timestamp.
+      type: object
+      required:
+        - target_kind
+        - target_id
+        - active_artifact_version_id
+        - updated_at
+      title: OptimizationTargetActivationResponse
+      description: Workspace-scoped activation pointer for a Managed Target.
     OptimizationTraceEvidenceItem:
       properties:
         kind:
@@ -5169,6 +6037,16 @@ components:
         - kind
       title: OptimizationTraceEvidenceItem
       description: Distilled trace evidence used by the GEPA proposer.
+    OptimizationTrackingRequest:
+      properties:
+        restricted_payloads:
+          type: boolean
+          title: Restricted Payloads
+          description: Allow restricted optimization payload logging.
+          default: false
+      additionalProperties: false
+      type: object
+      title: OptimizationTrackingRequest
     PromptSnapshotItem:
       properties:
         predictor_name:
@@ -5982,6 +6860,71 @@ components:
         - total
       title: SandboxListResponse
       description: Response for the sandbox list endpoint.
+    SealedPromotionScorecard:
+      properties:
+        protocol_version:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Protocol Version
+          description: phase8-v1 or legacy.
+        gepa_valset_role:
+          type: string
+          const: selection
+          title: Gepa Valset Role
+          description: DSPy GEPA valset is selection-only; not a promotion holdout.
+          default: selection
+        promotion_ready:
+          type: boolean
+          title: Promotion Ready
+          description: Whether evaluate_promotion_gate returned ready.
+        promotion_gate_failures:
+          items:
+            type: string
+          type: array
+          title: Promotion Gate Failures
+          description: Gate failure codes.
+        baseline_score:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Baseline Score
+          description: Baseline score on sealed promotion_test.
+        candidate_score:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Candidate Score
+          description: Winner score on sealed promotion_test.
+        score_delta:
+          anyOf:
+            - type: number
+            - type: "null"
+          title: Score Delta
+          description: candidate - baseline on sealed test.
+        promotion_test_examples:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Promotion Test Examples
+          description: Sealed promotion_test row count.
+        selection_examples:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Selection Examples
+          description: GEPA valset/selection row count.
+        metric_call_budget_used:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Metric Call Budget Used
+          description: Whether promotion-grade max_metric_calls budget was used.
+      type: object
+      required:
+        - promotion_ready
+      title: SealedPromotionScorecard
+      description: Sealed promotion-test scorecard (not GEPA selection scores).
     ServiceInfoResponse:
       properties:
         version:

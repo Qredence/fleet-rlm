@@ -15,6 +15,11 @@ export type OptimizationRunResponse = components["schemas"]["OptimizationRunResp
 export type OptimizationRunDetailResponse = components["schemas"]["OptimizationRunDetailResponse"];
 export type OptimizationPromotionDraftResponse =
   components["schemas"]["OptimizationPromotionDraftResponse"];
+export type SealedPromotionScorecard = components["schemas"]["SealedPromotionScorecard"];
+export type OptimizationArtifactVersionResponse =
+  components["schemas"]["OptimizationArtifactVersionResponse"];
+export type OptimizationTargetActivationResponse =
+  components["schemas"]["OptimizationTargetActivationResponse"];
 
 export interface UploadOptimizationDatasetInput {
   file: File;
@@ -109,6 +114,60 @@ export const optimizationEndpoints = {
       typedClient.POST("/api/v1/optimization/runs/{run_id}/promotion-drafts", {
         params: { path: { run_id: runId } },
         signal: withTimeout(signal, 120_000),
+      }),
+    );
+  },
+
+  runScorecard(runId: string, signal?: AbortSignal) {
+    return unwrap(
+      typedClient.GET("/api/v1/optimization/runs/{run_id}/scorecard", {
+        params: { path: { run_id: runId } },
+        signal: withTimeout(signal),
+      }),
+    );
+  },
+
+  cancelRun(runId: string, signal?: AbortSignal) {
+    return unwrap(
+      typedClient.POST("/api/v1/optimization/runs/{run_id}/cancel", {
+        params: { path: { run_id: runId } },
+        signal: withTimeout(signal),
+      }),
+    );
+  },
+
+  resumeRun(runId: string, signal?: AbortSignal) {
+    return unwrap(
+      typedClient.POST("/api/v1/optimization/runs/{run_id}/resume", {
+        params: { path: { run_id: runId } },
+        signal: withTimeout(signal, 120_000),
+      }),
+    );
+  },
+
+  runArtifact(runId: string, signal?: AbortSignal) {
+    return unwrap(
+      typedClient.GET("/api/v1/optimization/runs/{run_id}/artifact", {
+        params: { path: { run_id: runId } },
+        signal: withTimeout(signal),
+      }),
+    );
+  },
+
+  approveArtifact(artifactVersionId: string, signal?: AbortSignal) {
+    return unwrap(
+      typedClient.POST("/api/v1/optimization/artifacts/{artifact_version_id}/approve", {
+        params: { path: { artifact_version_id: artifactVersionId } },
+        signal: withTimeout(signal),
+      }),
+    );
+  },
+
+  activateArtifact(artifactVersionId: string, signal?: AbortSignal) {
+    return unwrap(
+      typedClient.POST("/api/v1/optimization/artifacts/{artifact_version_id}/activate", {
+        params: { path: { artifact_version_id: artifactVersionId } },
+        signal: withTimeout(signal),
       }),
     );
   },

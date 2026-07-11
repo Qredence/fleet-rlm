@@ -16,6 +16,8 @@ export const optimizationQueryKeys = {
   runs: () => [...optimizationQueryKeys.all, "runs"] as const,
   runDetails: (runId: string | null | undefined) =>
     [...optimizationQueryKeys.all, "runs", runId ?? "none", "details"] as const,
+  runScorecard: (runId: string | null | undefined) =>
+    [...optimizationQueryKeys.all, "runs", runId ?? "none", "scorecard"] as const,
 };
 
 export const optimizationQueryOptions = {
@@ -49,6 +51,14 @@ export const optimizationQueryOptions = {
       return optimizationEndpoints.runDetails(runId, signal);
     },
   }),
+  runScorecard: (runId: string | null) => ({
+    queryKey: optimizationQueryKeys.runScorecard(runId),
+    queryFn: ({ signal }: QueryFunctionContext) => {
+      if (!runId)
+        return null as unknown as Awaited<ReturnType<typeof optimizationEndpoints.runScorecard>>;
+      return optimizationEndpoints.runScorecard(runId, signal);
+    },
+  }),
 };
 
 export function useOptimizationStatus() {
@@ -80,6 +90,14 @@ export function useOptimizationRunDetails(runId: string | null) {
   });
 }
 
+export function useOptimizationRunScorecard(runId: string | null) {
+  return useQuery({
+    ...optimizationQueryOptions.runScorecard(runId),
+    enabled: Boolean(runId),
+    retry: false,
+  });
+}
+
 export function useOptimizationMutations() {
   const queryClient = useQueryClient();
 
@@ -102,6 +120,29 @@ export function useOptimizationMutations() {
     },
   });
 
+  const approveArtifact = useMutation({
+    mutationFn: (artifactVersionId: string) =>
+      optimizationEndpoints.approveArtifact(artifactVersionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: optimizationQueryKeys.runs() });
+    },
+  });
+
+  const activateArtifact = useMutation({
+    mutationFn: (artifactVersionId: string) =>
+      optimizationEndpoints.activateArtifact(artifactVersionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: optimizationQueryKeys.runs() });
+    },
+  });
+
+  const resumeRun = useMutation({
+    mutationFn: (runId: string) => optimizationEndpoints.resumeRun(runId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: optimizationQueryKeys.runs() });
+    },
+  });
+
   const exportSessionTraces = useMutation({
     mutationFn: (input: { sessionId: string }) =>
       optimizationEndpoints.exportSessionTraces(input.sessionId, { format: "both" }),
@@ -111,6 +152,9 @@ export function useOptimizationMutations() {
     uploadDataset,
     createRun,
     createPromotionDraft,
+    approveArtifact,
+    activateArtifact,
+    resumeRun,
     exportSessionTraces,
   };
 }

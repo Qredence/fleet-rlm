@@ -424,6 +424,27 @@ export interface paths {
      */
     get: operations["get_run_details_api_v1_optimization_runs__run_id__details_get"];
   };
+  "/api/v1/optimization/runs/{run_id}/cancel": {
+    /**
+     * Cancel Optimization Run
+     * @description Request cooperative cancellation of a running optimization job.
+     */
+    post: operations["cancel_optimization_run_api_v1_optimization_runs__run_id__cancel_post"];
+  };
+  "/api/v1/optimization/runs/{run_id}/resume": {
+    /**
+     * Resume Optimization Run
+     * @description Explicitly resume a terminal run after exact fingerprint validation (never automatic).
+     */
+    post: operations["resume_optimization_run_api_v1_optimization_runs__run_id__resume_post"];
+  };
+  "/api/v1/optimization/runs/{run_id}/scorecard": {
+    /**
+     * Get Run Scorecard
+     * @description Return sealed promotion-test scorecard from run metadata (not GEPA selection scores).
+     */
+    get: operations["get_run_scorecard_api_v1_optimization_runs__run_id__scorecard_get"];
+  };
   "/api/v1/optimization/runs/{run_id}/promotion-drafts": {
     /**
      * Create Run Promotion Draft
@@ -457,12 +478,61 @@ export interface paths {
      */
     post: operations["upload_dataset_api_v1_optimization_datasets_post"];
   };
+  "/api/v1/optimization/datasets/{dataset_id}/review": {
+    /**
+     * Review Dataset Version
+     * @description Update review state on a draft managed Dataset Version.
+     */
+    patch: operations["review_dataset_version_api_v1_optimization_datasets__dataset_id__review_patch"];
+  };
+  "/api/v1/optimization/datasets/{dataset_id}/approve": {
+    /**
+     * Approve Dataset Version
+     * @description Verify and atomically seal a managed Dataset Version.
+     */
+    post: operations["approve_dataset_version_api_v1_optimization_datasets__dataset_id__approve_post"];
+  };
   "/api/v1/optimization/datasets/{dataset_id}": {
     /**
      * Get Dataset Detail
      * @description Return dataset metadata with the first 10 rows as preview.
      */
     get: operations["get_dataset_detail_api_v1_optimization_datasets__dataset_id__get"];
+  };
+  "/api/v1/optimization/runs/{run_id}/artifact": {
+    /**
+     * Get Run Artifact
+     * @description Return the persisted artifact version for a completed run, if any.
+     */
+    get: operations["get_run_artifact_api_v1_optimization_runs__run_id__artifact_get"];
+  };
+  "/api/v1/optimization/artifacts/{artifact_version_id}/approve": {
+    /**
+     * Approve Artifact Version
+     * @description Human-approve a candidate artifact. Does not activate runtime behavior.
+     */
+    post: operations["approve_artifact_version_api_v1_optimization_artifacts__artifact_version_id__approve_post"];
+  };
+  "/api/v1/optimization/artifacts/{artifact_version_id}/activate": {
+    /**
+     * Activate Artifact Version
+     * @description Atomically activate an approved artifact for its Managed Target in this workspace.
+     */
+    post: operations["activate_artifact_version_api_v1_optimization_artifacts__artifact_version_id__activate_post"];
+  };
+  "/api/v1/optimization/targets/{target_kind}/{target_id}/rollback": {
+    /**
+     * Rollback Target Activation
+     * @description Roll back to the previous retained artifact version for a Managed Target.
+     */
+    post: operations["rollback_target_activation_api_v1_optimization_targets__target_kind___target_id__rollback_post"];
+  };
+  "/api/v1/optimization/targets/{target_kind}/{target_id}/activation": {
+    /**
+     * Get Target Activation
+     * @description Return the workspace activation pointer for a Managed Target.
+     */
+    get: operations["get_target_activation_api_v1_optimization_targets__target_kind___target_id__activation_get"];
   };
   "/api/v1/traces/feedback": {
     /**
@@ -603,6 +673,16 @@ export interface components {
        * @description Optional module slug used to validate required dataset keys.
        */
       module_slug?: string | null;
+      /**
+       * Skill Name
+       * @description Optional catalog Skill id owning this managed Dataset Version.
+       */
+      skill_name?: string | null;
+      /**
+       * Supersedes Dataset Id
+       * @description Optional approved Dataset Version superseded by this upload.
+       */
+      supersedes_dataset_id?: string | null;
     };
     /** Body_upload_file_api_v1_files_upload_post */
     Body_upload_file_api_v1_files_upload_post: {
@@ -740,6 +820,50 @@ export interface components {
        */
       module_slug?: string | null;
       /**
+       * Version
+       * @description Immutable version number within the dataset lineage.
+       * @default 1
+       */
+      version?: number;
+      /**
+       * Supersedes Dataset Id
+       * @description Previous Dataset Version, when present.
+       */
+      supersedes_dataset_id?: string | null;
+      /**
+       * Eligibility
+       * @description Dataset lifecycle eligibility state.
+       * @default draft
+       */
+      eligibility?: string;
+      /**
+       * Consent Status
+       * @description Consent review state.
+       * @default unreviewed
+       */
+      consent_status?: string;
+      /**
+       * Redaction Status
+       * @description Redaction review state.
+       * @default unreviewed
+       */
+      redaction_status?: string;
+      /**
+       * Content Sha256
+       * @description Canonical ordered-row SHA-256 digest.
+       */
+      content_sha256?: string | null;
+      /**
+       * Approved At
+       * @description Approval timestamp for sealed versions.
+       */
+      approved_at?: string | null;
+      /**
+       * Approved By User Id
+       * @description Approving user identifier.
+       */
+      approved_by_user_id?: string | null;
+      /**
        * Created At
        * @description ISO-8601 creation timestamp.
        */
@@ -819,10 +943,70 @@ export interface components {
        */
       module_slug?: string | null;
       /**
+       * Version
+       * @description Immutable version number within the dataset lineage.
+       * @default 1
+       */
+      version?: number;
+      /**
+       * Supersedes Dataset Id
+       * @description Previous Dataset Version, when present.
+       */
+      supersedes_dataset_id?: string | null;
+      /**
+       * Eligibility
+       * @description Dataset lifecycle eligibility state.
+       * @default draft
+       */
+      eligibility?: string;
+      /**
+       * Consent Status
+       * @description Consent review state.
+       * @default unreviewed
+       */
+      consent_status?: string;
+      /**
+       * Redaction Status
+       * @description Redaction review state.
+       * @default unreviewed
+       */
+      redaction_status?: string;
+      /**
+       * Content Sha256
+       * @description Canonical ordered-row SHA-256 digest.
+       */
+      content_sha256?: string | null;
+      /**
+       * Approved At
+       * @description Approval timestamp for sealed versions.
+       */
+      approved_at?: string | null;
+      /**
+       * Approved By User Id
+       * @description Approving user identifier.
+       */
+      approved_by_user_id?: string | null;
+      /**
        * Created At
        * @description ISO-8601 creation timestamp.
        */
       created_at: string;
+    };
+    /**
+     * DatasetReviewRequest
+     * @description Review-state transition for a draft managed Dataset Version.
+     */
+    DatasetReviewRequest: {
+      /**
+       * Consent Status
+       * @description Updated consent review state.
+       */
+      consent_status?: ("approved" | "rejected") | null;
+      /**
+       * Redaction Status
+       * @description Updated redaction review state.
+       */
+      redaction_status?: ("approved" | "rejected") | null;
     };
     /**
      * EvaluationReportResponse
@@ -1094,6 +1278,37 @@ export interface components {
      * @description Request body for triggering a GEPA prompt optimization run.
      */
     GEPAOptimizationRequest: {
+      /** @description Canonical managed target reference. */
+      target?: components["schemas"]["ManagedOptimizationTargetRef"] | null;
+      /**
+       * Dataset Version Id
+       * @description Approved immutable Dataset Version identifier.
+       */
+      dataset_version_id?: string | null;
+      /**
+       * Metric Profile Id
+       * @description Qualified Metric Profile id in name@version form.
+       */
+      metric_profile_id?: string | null;
+      /** @description Explicit task-model selection. */
+      task_model?: components["schemas"]["OptimizationModelSelection"] | null;
+      /** @description Explicit reflection-model selection. */
+      reflection_model?: components["schemas"]["OptimizationModelSelection"] | null;
+      /**
+       * Budget
+       * @description Canonical discriminated GEPA budget.
+       */
+      budget?:
+        | (
+            | components["schemas"]["OptimizationAutoBudget"]
+            | components["schemas"]["OptimizationMetricCallsBudget"]
+            | components["schemas"]["OptimizationFullEvalsBudget"]
+          )
+        | null;
+      /** @description GEPA search configuration. */
+      search?: components["schemas"]["GEPASearchConfig"];
+      /** @description Optimization tracking policy. */
+      tracking?: components["schemas"]["OptimizationTrackingRequest"];
       /**
        * Dataset Path
        * @description Relative filesystem path to the dataset file.
@@ -1248,6 +1463,59 @@ export interface components {
        * @description Error message when the optimization run failed.
        */
       error?: string | null;
+    };
+    /** GEPASearchConfig */
+    GEPASearchConfig: {
+      /**
+       * Reflection Minibatch Size
+       * @description GEPA reflection minibatch size.
+       * @default 3
+       */
+      reflection_minibatch_size?: number;
+      /**
+       * Candidate Selection Strategy
+       * @description GEPA candidate-selection strategy.
+       * @default pareto
+       * @enum {string}
+       */
+      candidate_selection_strategy?: "pareto" | "current_best";
+      /**
+       * Component Selector
+       * @description Predictor component-selection strategy.
+       * @default round_robin
+       * @enum {string}
+       */
+      component_selector?: "round_robin" | "all";
+      /**
+       * Skip Perfect Score
+       * @description Skip reflection for perfectly scored examples.
+       * @default true
+       */
+      skip_perfect_score?: boolean;
+      /**
+       * Add Format Failure As Feedback
+       * @description Whether formatting failures become GEPA feedback.
+       * @default false
+       */
+      add_format_failure_as_feedback?: boolean;
+      /**
+       * Use Merge
+       * @description Enable GEPA candidate merging.
+       * @default true
+       */
+      use_merge?: boolean;
+      /**
+       * Max Merge Invocations
+       * @description Maximum candidate merge attempts.
+       * @default 5
+       */
+      max_merge_invocations?: number | null;
+      /**
+       * Seed
+       * @description Deterministic GEPA search seed.
+       * @default 0
+       */
+      seed?: number;
     };
     /**
      * GEPAStatusResponse
@@ -1561,6 +1829,26 @@ export interface components {
       /** @description Small delegate role binding patch. */
       delegate_small?: components["schemas"]["LlmRoleBindingUpdate"] | null;
     };
+    /** ManagedOptimizationTargetRef */
+    ManagedOptimizationTargetRef: {
+      /**
+       * Kind
+       * @description Managed optimization target kind.
+       * @enum {string}
+       */
+      kind: "module" | "skill";
+      /**
+       * Id
+       * @description Registered module slug or catalog-resolved Skill id.
+       */
+      id: string;
+      /**
+       * Version
+       * @description Managed target version.
+       * @default 1
+       */
+      version?: string;
+    };
     /**
      * OptimizationArtifactRef
      * @description A filesystem artifact produced or consumed by an optimization run.
@@ -1587,6 +1875,90 @@ export interface components {
        * @default false
        */
       exists?: boolean;
+    };
+    /**
+     * OptimizationArtifactVersionResponse
+     * @description Persisted optimization artifact version.
+     */
+    OptimizationArtifactVersionResponse: {
+      /**
+       * Id
+       * @description Artifact version identifier.
+       */
+      id: string;
+      /**
+       * Optimization Run Id
+       * @description Source optimization run.
+       */
+      optimization_run_id: string;
+      /**
+       * Target Kind
+       * @description Managed target kind.
+       * @enum {string}
+       */
+      target_kind: "module" | "skill";
+      /**
+       * Target Id
+       * @description Managed target id.
+       */
+      target_id: string;
+      /**
+       * Artifact Kind
+       * @description module_state_json or skill_markdown.
+       */
+      artifact_kind: string;
+      /**
+       * Artifact Path
+       * @description Filesystem path to the immutable artifact payload.
+       */
+      artifact_path: string;
+      /**
+       * Artifact Sha256
+       * @description SHA-256 of the artifact payload.
+       */
+      artifact_sha256: string;
+      /**
+       * Status
+       * @description candidate | approved | active.
+       */
+      status: string;
+      /**
+       * Approved At
+       * @description Approval timestamp.
+       */
+      approved_at?: string | null;
+      /**
+       * Activated At
+       * @description Activation timestamp.
+       */
+      activated_at?: string | null;
+      /**
+       * Created At
+       * @description Creation timestamp.
+       */
+      created_at: string;
+    };
+    /** OptimizationAutoBudget */
+    OptimizationAutoBudget: {
+      /**
+       * Wall Clock Seconds
+       * @description Requested wall-clock limit before the server ceiling is applied.
+       * @default 3600
+       */
+      wall_clock_seconds?: number;
+      /**
+       * Kind
+       * @description Automatic GEPA budget discriminator.
+       * @default auto
+       * @constant
+       */
+      kind?: "auto";
+      /**
+       * Value
+       * @description Automatic GEPA intensity.
+       * @enum {string}
+       */
+      value: "light" | "medium" | "heavy";
     };
     /**
      * OptimizationCandidateDecision
@@ -1635,6 +2007,27 @@ export interface components {
        */
       missing_candidate_artifact?: boolean;
     };
+    /** OptimizationFullEvalsBudget */
+    OptimizationFullEvalsBudget: {
+      /**
+       * Wall Clock Seconds
+       * @description Requested wall-clock limit before the server ceiling is applied.
+       * @default 3600
+       */
+      wall_clock_seconds?: number;
+      /**
+       * Kind
+       * @description Full-evaluation budget discriminator.
+       * @default max_full_evals
+       * @constant
+       */
+      kind?: "max_full_evals";
+      /**
+       * Value
+       * @description Maximum full evaluations allowed for the run.
+       */
+      value: number;
+    };
     /**
      * OptimizationHoldoutSummary
      * @description Typed holdout validation summary from a GEPA review bundle.
@@ -1667,6 +2060,40 @@ export interface components {
        * @description Optimized minus baseline score.
        */
       score_delta?: number | null;
+    };
+    /** OptimizationMetricCallsBudget */
+    OptimizationMetricCallsBudget: {
+      /**
+       * Wall Clock Seconds
+       * @description Requested wall-clock limit before the server ceiling is applied.
+       * @default 3600
+       */
+      wall_clock_seconds?: number;
+      /**
+       * Kind
+       * @description Metric-call budget discriminator.
+       * @default max_metric_calls
+       * @constant
+       */
+      kind?: "max_metric_calls";
+      /**
+       * Value
+       * @description Maximum metric calls allowed for the run.
+       */
+      value: number;
+    };
+    /** OptimizationModelSelection */
+    OptimizationModelSelection: {
+      /**
+       * Profile Id
+       * @description Saved provider profile identifier.
+       */
+      profile_id: string;
+      /**
+       * Model Id
+       * @description Provider-native model identifier.
+       */
+      model_id: string;
     };
     /**
      * OptimizationPromotionDraftResponse
@@ -2039,6 +2466,40 @@ export interface components {
       split_strategy?: string | null;
     };
     /**
+     * OptimizationTargetActivationResponse
+     * @description Workspace-scoped activation pointer for a Managed Target.
+     */
+    OptimizationTargetActivationResponse: {
+      /**
+       * Target Kind
+       * @description Managed target kind.
+       * @enum {string}
+       */
+      target_kind: "module" | "skill";
+      /**
+       * Target Id
+       * @description Managed target id.
+       */
+      target_id: string;
+      /**
+       * Active Artifact Version Id
+       * @description Currently active artifact version.
+       */
+      active_artifact_version_id: string;
+      /**
+       * Previous Artifact Version Id
+       * @description Previous artifact retained for rollback.
+       */
+      previous_artifact_version_id?: string | null;
+      /** @description Resolved active artifact metadata when available. */
+      active_artifact?: components["schemas"]["OptimizationArtifactVersionResponse"] | null;
+      /**
+       * Updated At
+       * @description Last activation update timestamp.
+       */
+      updated_at: string;
+    };
+    /**
      * OptimizationTraceEvidenceItem
      * @description Distilled trace evidence used by the GEPA proposer.
      */
@@ -2083,6 +2544,15 @@ export interface components {
        * @description Prompt-change recommendations distilled from trace evidence.
        */
       prompt_change_recommendations?: string[];
+    };
+    /** OptimizationTrackingRequest */
+    OptimizationTrackingRequest: {
+      /**
+       * Restricted Payloads
+       * @description Allow restricted optimization payload logging.
+       * @default false
+       */
+      restricted_payloads?: boolean;
     };
     /**
      * PromptSnapshotItem
@@ -2841,6 +3311,64 @@ export interface components {
        * @default 1
        */
       total_pages?: number;
+    };
+    /**
+     * SealedPromotionScorecard
+     * @description Sealed promotion-test scorecard (not GEPA selection scores).
+     */
+    SealedPromotionScorecard: {
+      /**
+       * Protocol Version
+       * @description phase8-v1 or legacy.
+       */
+      protocol_version?: string | null;
+      /**
+       * Gepa Valset Role
+       * @description DSPy GEPA valset is selection-only; not a promotion holdout.
+       * @default selection
+       * @constant
+       */
+      gepa_valset_role?: "selection";
+      /**
+       * Promotion Ready
+       * @description Whether evaluate_promotion_gate returned ready.
+       */
+      promotion_ready: boolean;
+      /**
+       * Promotion Gate Failures
+       * @description Gate failure codes.
+       */
+      promotion_gate_failures?: string[];
+      /**
+       * Baseline Score
+       * @description Baseline score on sealed promotion_test.
+       */
+      baseline_score?: number | null;
+      /**
+       * Candidate Score
+       * @description Winner score on sealed promotion_test.
+       */
+      candidate_score?: number | null;
+      /**
+       * Score Delta
+       * @description candidate - baseline on sealed test.
+       */
+      score_delta?: number | null;
+      /**
+       * Promotion Test Examples
+       * @description Sealed promotion_test row count.
+       */
+      promotion_test_examples?: number | null;
+      /**
+       * Selection Examples
+       * @description GEPA valset/selection row count.
+       */
+      selection_examples?: number | null;
+      /**
+       * Metric Call Budget Used
+       * @description Whether promotion-grade max_metric_calls budget was used.
+       */
+      metric_call_budget_used?: boolean | null;
     };
     /**
      * ServiceInfoResponse
@@ -7522,6 +8050,120 @@ export interface operations {
     };
   };
   /**
+   * Cancel Optimization Run
+   * @description Request cooperative cancellation of a running optimization job.
+   */
+  cancel_optimization_run_api_v1_optimization_runs__run_id__cancel_post: {
+    parameters: {
+      path: {
+        /** @description Identifier of the optimization run to cancel. */
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OptimizationRunResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Run not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Requires managed Postgres persistence. */
+      501: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Resume Optimization Run
+   * @description Explicitly resume a terminal run after exact fingerprint validation (never automatic).
+   */
+  resume_optimization_run_api_v1_optimization_runs__run_id__resume_post: {
+    parameters: {
+      path: {
+        /** @description Identifier of the optimization run to resume. */
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OptimizationRunCreatedResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Run not found. */
+      404: {
+        content: never;
+      };
+      /** @description Resume not allowed (status or fingerprint). */
+      409: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Requires managed Postgres persistence. */
+      501: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Get Run Scorecard
+   * @description Return sealed promotion-test scorecard from run metadata (not GEPA selection scores).
+   */
+  get_run_scorecard_api_v1_optimization_runs__run_id__scorecard_get: {
+    parameters: {
+      path: {
+        /** @description Identifier of the optimization run. */
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["SealedPromotionScorecard"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Run not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
    * Create Run Promotion Draft
    * @description Create or load a non-mutating draft promotion artifact for an optimization run.
    */
@@ -7696,6 +8338,95 @@ export interface operations {
     };
   };
   /**
+   * Review Dataset Version
+   * @description Update review state on a draft managed Dataset Version.
+   */
+  review_dataset_version_api_v1_optimization_datasets__dataset_id__review_patch: {
+    parameters: {
+      path: {
+        /** @description Dataset Version identifier. */
+        dataset_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DatasetReviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DatasetResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Dataset Version not found. */
+      404: {
+        content: never;
+      };
+      /** @description Dataset Version is immutable. */
+      409: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Managed Dataset Versions require Postgres persistence. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Approve Dataset Version
+   * @description Verify and atomically seal a managed Dataset Version.
+   */
+  approve_dataset_version_api_v1_optimization_datasets__dataset_id__approve_post: {
+    parameters: {
+      path: {
+        /** @description Dataset Version identifier. */
+        dataset_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DatasetResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Dataset Version not found. */
+      404: {
+        content: never;
+      };
+      /** @description Dataset Version is not eligible for approval. */
+      409: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Managed Dataset Versions require Postgres persistence. */
+      503: {
+        content: never;
+      };
+    };
+  };
+  /**
    * Get Dataset Detail
    * @description Return dataset metadata with the first 10 rows as preview.
    */
@@ -7726,6 +8457,208 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
+      };
+    };
+  };
+  /**
+   * Get Run Artifact
+   * @description Return the persisted artifact version for a completed run, if any.
+   */
+  get_run_artifact_api_v1_optimization_runs__run_id__artifact_get: {
+    parameters: {
+      path: {
+        /** @description Optimization run identifier. */
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OptimizationArtifactVersionResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Artifact not found. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Requires managed Postgres persistence. */
+      501: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Approve Artifact Version
+   * @description Human-approve a candidate artifact. Does not activate runtime behavior.
+   */
+  approve_artifact_version_api_v1_optimization_artifacts__artifact_version_id__approve_post: {
+    parameters: {
+      path: {
+        /** @description Artifact version identifier. */
+        artifact_version_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OptimizationArtifactVersionResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Artifact not found. */
+      404: {
+        content: never;
+      };
+      /** @description Artifact cannot be approved. */
+      409: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Requires managed Postgres persistence. */
+      501: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Activate Artifact Version
+   * @description Atomically activate an approved artifact for its Managed Target in this workspace.
+   */
+  activate_artifact_version_api_v1_optimization_artifacts__artifact_version_id__activate_post: {
+    parameters: {
+      path: {
+        /** @description Approved artifact version identifier. */
+        artifact_version_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OptimizationTargetActivationResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description Artifact not found. */
+      404: {
+        content: never;
+      };
+      /** @description Artifact cannot be activated. */
+      409: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Requires managed Postgres persistence. */
+      501: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Rollback Target Activation
+   * @description Roll back to the previous retained artifact version for a Managed Target.
+   */
+  rollback_target_activation_api_v1_optimization_targets__target_kind___target_id__rollback_post: {
+    parameters: {
+      path: {
+        /** @description Managed target kind. */
+        target_kind: "module" | "skill";
+        /** @description Managed target identifier. */
+        target_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OptimizationTargetActivationResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description No activation or previous version to roll back. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Requires managed Postgres persistence. */
+      501: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Get Target Activation
+   * @description Return the workspace activation pointer for a Managed Target.
+   */
+  get_target_activation_api_v1_optimization_targets__target_kind___target_id__activation_get: {
+    parameters: {
+      path: {
+        /** @description Managed target kind. */
+        target_kind: "module" | "skill";
+        /** @description Managed target identifier. */
+        target_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OptimizationTargetActivationResponse"];
+        };
+      };
+      /** @description Authentication is required or the provided token is invalid. */
+      401: {
+        content: never;
+      };
+      /** @description No activation pointer for this target. */
+      404: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Requires managed Postgres persistence. */
+      501: {
+        content: never;
       };
     };
   };
