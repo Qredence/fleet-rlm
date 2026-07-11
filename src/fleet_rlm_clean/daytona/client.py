@@ -1,0 +1,21 @@
+"""Daytona SDK client construction for the clean-backend package.
+
+Construction is explicit and never happens at import time.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from fleet_rlm_clean.config import Settings
+
+
+def build_daytona_client(settings: Settings) -> Any:
+    """Construct a Daytona SDK client from clean-backend settings."""
+    from daytona import Daytona, DaytonaConfig
+
+    api_key = None
+    if settings.daytona_api_key is not None:
+        api_key = settings.daytona_api_key.get_secret_value() or None
+    config = DaytonaConfig(api_key=api_key) if api_key else None
+    return Daytona(config)

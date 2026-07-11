@@ -72,6 +72,18 @@ tests/contracts/clean_backend/fixtures/valid_run_transcript.sse
 
 Create a package-owned adapter for Daytona code execution.
 
+**Files** (parallel package until cutover)
+
+```text
+src/fleet_rlm_clean/daytona/errors.py
+src/fleet_rlm_clean/daytona/client.py
+src/fleet_rlm_clean/daytona/interpreter.py
+src/fleet_rlm_clean/daytona/leases.py
+tests/unit/clean_backend/test_daytona_adapter.py
+tests/contracts/clean_backend/test_daytona_import_boundary.py
+tests/live/clean_backend/test_daytona_interpreter_state.py
+```
+
 **Acceptance**
 
 - No other package imports Daytona SDK DTOs.
