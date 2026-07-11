@@ -97,6 +97,18 @@ class Dataset(Base):
             "optimization_module_id",
             "created_at",
         ),
+        Index("ix_datasets_supersedes_dataset_id", "supersedes_dataset_id"),
+        CheckConstraint("version >= 1", name="ck_datasets_version_positive"),
+        CheckConstraint("eligibility IN ('draft', 'approved')", name="ck_datasets_eligibility"),
+        CheckConstraint("consent_status IN ('unreviewed', 'approved', 'rejected')", name="ck_datasets_consent_status"),
+        CheckConstraint(
+            "redaction_status IN ('unreviewed', 'approved', 'rejected')",
+            name="ck_datasets_redaction_status",
+        ),
+        CheckConstraint(
+            "eligibility <> 'approved' OR approved_at IS NOT NULL",
+            name="ck_datasets_approved_has_timestamp",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
@@ -115,6 +127,18 @@ class Dataset(Base):
         server_default=DatasetSource.UPLOAD.value,
     )
     uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    supersedes_dataset_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("datasets.id", ondelete="SET NULL"), nullable=True
+    )
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    eligibility: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'draft'"))
+    consent_status: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'unreviewed'"))
+    redaction_status: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'unreviewed'"))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -141,6 +165,10 @@ class DatasetExample(Base):
             name="fk_dataset_examples_dataset_id__datasets_id",
         ),
         UniqueConstraint("dataset_id", "row_index", name="uq_dataset_examples_dataset_row_index"),
+        CheckConstraint(
+            "partition IN ('training', 'selection', 'promotion_test', 'unassigned')",
+            name="ck_dataset_examples_partition",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
@@ -152,6 +180,8 @@ class DatasetExample(Base):
     row_index: Mapped[int] = mapped_column(Integer, nullable=False)
     input_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    partition: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'unassigned'"))
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -215,6 +245,10 @@ class OptimizationRun(Base):
     manifest_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     phase: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    run_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -302,3 +336,71 @@ class PromptSnapshot(Base):
     )
     prompt_text: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class OptimizationArtifactVersion(Base):
+    __tablename__ = "optimization_artifact_versions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "workspace_id"],
+            ["workspaces.tenant_id", "workspaces.id"],
+            ondelete="CASCADE",
+            name="fk_opt_artifact_versions_tenant_workspace",
+        ),
+        UniqueConstraint("optimization_run_id", name="uq_opt_artifact_versions_run"),
+        Index("ix_opt_artifact_versions_target", "workspace_id", "target_kind", "target_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    optimization_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("optimization_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    target_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    artifact_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    artifact_path: Mapped[str] = mapped_column(Text, nullable=False)
+    artifact_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'candidate'"))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class OptimizationTargetActivation(Base):
+    __tablename__ = "optimization_target_activations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "workspace_id"],
+            ["workspaces.tenant_id", "workspaces.id"],
+            ondelete="CASCADE",
+            name="fk_opt_target_activations_tenant_workspace",
+        ),
+        UniqueConstraint("workspace_id", "target_kind", "target_id", name="uq_opt_target_activation_workspace"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("app.uuid_v7()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    target_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    active_artifact_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("optimization_artifact_versions.id", ondelete="RESTRICT"), nullable=False
+    )
+    previous_artifact_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("optimization_artifact_versions.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )

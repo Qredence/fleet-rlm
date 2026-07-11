@@ -31,8 +31,10 @@ from fleet_rlm.integrations.database import (  # noqa: E402
     Job,  # noqa: F401
     MemoryItem,  # noqa: F401
     MemoryLink,  # noqa: F401
+    OptimizationArtifactVersion,  # noqa: F401
     OptimizationModule,  # noqa: F401
     OptimizationRun,  # noqa: F401
+    OptimizationTargetActivation,  # noqa: F401
     PromptSnapshot,  # noqa: F401
     RLMProgram,  # noqa: F401
     Run,  # noqa: F401

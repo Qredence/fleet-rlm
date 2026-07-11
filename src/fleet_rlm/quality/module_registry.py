@@ -12,11 +12,28 @@ by providing a factory function that the registry invokes lazily on first use.
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
+class MetricProfile:
+    """Versioned quality policy owned by one managed optimization target."""
+
+    profile_id: str
+    version: str = "1"
+    minimum_test_examples: int = 1
+    minimum_score_delta: float = 0.0
+    maximum_cost_increase_ratio: float = 0.20
+    maximum_p95_latency_increase_ratio: float = 0.20
+    critical_slices: tuple[str, ...] = ()
+
+    @property
+    def qualified_id(self) -> str:
+        return f"{self.profile_id}@{self.version}"
+
+
+@dataclass(frozen=True, slots=True)
 class ModuleOptimizationSpec:
     """Describes an optimizable DSPy module for the GEPA offline pipeline."""
 
@@ -40,6 +57,13 @@ class ModuleOptimizationSpec:
     signature_class_name: str | None = None
     output_keys: list[str] | None = None
     optimization_target_kind: str = "custom"
+    target_version: str = "1"
+    metric_profile: MetricProfile | None = None
+    proposer_policy: str = "dspy_default"
+    evaluation_concurrency: int = 1
+    artifact_codec: str = "dspy_state_json"
+    confidence_aware: bool = False
+    hard_gates: tuple[str, ...] = field(default_factory=tuple)
 
 
 # -- Module registry --------------------------------------------------------
@@ -60,6 +84,29 @@ def get_module_spec(slug: str) -> ModuleOptimizationSpec | None:
     """Look up a registered module by slug.  Returns ``None`` if unknown."""
     _ensure_registered()
     return _REGISTRY.get(slug)
+
+
+def build_module_with_optional_activation(
+    slug: str,
+    *,
+    active_artifact: object | None = None,
+) -> object | None:
+    """Build a fresh registered module and optionally apply an activated artifact.
+
+    When ``active_artifact`` is None the factory default is returned unchanged
+    (ADR-0006 fail-closed / quality-activation-disabled behavior).
+    """
+    from fleet_rlm.runtime.active_artifacts import ActiveArtifact, load_module_state
+
+    spec = get_module_spec(slug)
+    if spec is None:
+        return None
+    module = spec.module_factory()
+    if active_artifact is None:
+        return module
+    if not isinstance(active_artifact, ActiveArtifact):
+        return module
+    return load_module_state(module, active_artifact)
 
 
 def list_module_slugs() -> list[str]:
@@ -86,6 +133,12 @@ def list_module_metadata() -> list[dict[str, Any]]:
             "output_keys": list(spec.output_keys or []),
             "optimization_target_kind": spec.optimization_target_kind,
             "required_dataset_keys": spec.required_dataset_keys,
+            "target_version": spec.target_version,
+            "metric_profile_id": spec.metric_profile.qualified_id if spec.metric_profile else spec.metric_name,
+            "proposer_policy": spec.proposer_policy,
+            "evaluation_concurrency": spec.evaluation_concurrency,
+            "artifact_codec": spec.artifact_codec,
+            "confidence_aware": spec.confidence_aware,
         }
         for spec in sorted(_REGISTRY.values(), key=lambda s: s.module_slug)
     ]

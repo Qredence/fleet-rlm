@@ -12,6 +12,7 @@ from typing import Annotated, Any, cast
 
 from fastapi import (
     APIRouter,
+    Body,
     File,
     Form,
     HTTPException,
@@ -23,8 +24,14 @@ from fastapi import (
 )
 
 from fleet_rlm.integrations.database import DatasetFormat, DatasetSource
-from fleet_rlm.integrations.database.repository_optimization import DatasetCreateRequest
+from fleet_rlm.integrations.database.repository_optimization import DatasetCreateRequest, DatasetReviewUpdate
+from fleet_rlm.integrations.persistence_protocol import UnsupportedLocalCapabilityError
 from fleet_rlm.quality import module_registry
+from fleet_rlm.quality.dataset_versions import (
+    DatasetVersionError,
+    canonical_dataset_sha256,
+    validate_dataset_partitions,
+)
 
 from ...dependencies import ConfigDepsDep, HTTPIdentityDep, PersistenceDep
 from ...runtime_services.optimization_datasets import (
@@ -35,6 +42,7 @@ from ...schemas.optimization import (
     DatasetDetailResponse,
     DatasetListResponse,
     DatasetResponse,
+    DatasetReviewRequest,
 )
 from ...schemas.sessions import TranscriptDatasetRequest
 from ._deps import (
@@ -190,6 +198,14 @@ async def upload_dataset(
         str | None,
         Form(description="Optional module slug used to validate required dataset keys."),
     ] = None,
+    skill_name: Annotated[
+        str | None,
+        Form(description="Optional catalog Skill id owning this managed Dataset Version."),
+    ] = None,
+    supersedes_dataset_id: Annotated[
+        str | None,
+        Form(description="Optional approved Dataset Version superseded by this upload."),
+    ] = None,
 ) -> DatasetResponse:
     """Upload and register a dataset file (.json or .jsonl)."""
     persisted_identity = await _resolve_persisted_identity(
@@ -200,6 +216,8 @@ async def upload_dataset(
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required.")
+    if module_slug and skill_name:
+        raise HTTPException(status_code=400, detail="Provide module_slug or skill_name, not both.")
 
     ext = Path(file.filename).suffix.lower()
     if ext not in (".json", ".jsonl"):
@@ -224,6 +242,10 @@ async def upload_dataset(
     if not rows:
         raise HTTPException(status_code=400, detail="Dataset is empty.")
     object_rows = _require_object_rows(rows)
+    try:
+        validate_dataset_partitions(object_rows)
+    except DatasetVersionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Validate ALL rows against module requirements if module_slug given.
     # No file or dataset record is written when any row fails validation.
@@ -242,6 +264,30 @@ async def upload_dataset(
                         f"'{module_slug}': {sorted(missing)}"
                     ),
                 )
+
+    predecessor_uuid = None
+    if supersedes_dataset_id is not None:
+        predecessor_uuid = _parse_uuid_id(
+            supersedes_dataset_id,
+            detail=f"Dataset {supersedes_dataset_id} not found.",
+        )
+        predecessor = await persistence.get_dataset(
+            tenant_id=persisted_identity.tenant_id,
+            dataset_id=predecessor_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+        )
+        if predecessor is None:
+            raise HTTPException(status_code=404, detail=f"Dataset {supersedes_dataset_id} not found.")
+        if getattr(predecessor, "eligibility", "draft") != "approved":
+            raise HTTPException(status_code=409, detail="Only an approved Dataset Version can be superseded.")
+        predecessor_metadata = getattr(predecessor, "metadata_json", {}) or {}
+        predecessor_slug = getattr(predecessor, "module_slug", None) or _extract_metadata_str(
+            predecessor_metadata, "module_slug"
+        )
+        predecessor_skill = _extract_metadata_str(predecessor_metadata, "skill_name")
+        if (predecessor_slug, predecessor_skill) != (module_slug, skill_name):
+            raise HTTPException(status_code=409, detail="Superseded Dataset Version has a different managed target.")
 
     # Save file to dataset root
     ds_root = Path(os.environ.get("FLEET_RLM_DATASET_ROOT", OPTIMIZATION_DATA_ROOT)).resolve()
@@ -266,10 +312,118 @@ async def upload_dataset(
             source=DatasetSource.UPLOAD,
             module_slug=module_slug,
             uri=str(dest),
+            supersedes_dataset_id=predecessor_uuid,
+            metadata_json={"skill_name": skill_name} if skill_name else {},
         ),
         examples=object_rows,
     )
     return _dataset_to_response(ds)
+
+
+@router.patch(
+    "/datasets/{dataset_id}/review",
+    response_model=DatasetResponse,
+    responses=cast(
+        OpenAPIResponses,
+        {
+            **AUTH_ERROR_RESPONSES,
+            404: {"description": "Dataset Version not found."},
+            409: {"description": "Dataset Version is immutable."},
+            503: {"description": "Managed Dataset Versions require Postgres persistence."},
+        },
+    ),
+)
+async def review_dataset_version(
+    config_deps: ConfigDepsDep,
+    identity: HTTPIdentityDep,
+    persistence: PersistenceDep,
+    dataset_id: Annotated[str, ApiPath(description="Dataset Version identifier.")],
+    request: Annotated[DatasetReviewRequest, Body(description="Consent and redaction review update.")],
+) -> DatasetResponse:
+    """Update review state on a draft managed Dataset Version."""
+    if not getattr(persistence, "supports_managed_dataset_versions", False):
+        raise HTTPException(status_code=503, detail="Managed Dataset Versions require Postgres persistence.")
+    persisted_identity = await _resolve_persisted_identity(
+        config_deps=config_deps, persistence=persistence, identity=identity
+    )
+    try:
+        dataset = await persistence.review_dataset_version(
+            tenant_id=persisted_identity.tenant_id,
+            dataset_id=_parse_uuid_id(dataset_id, detail=f"Dataset {dataset_id} not found."),
+            workspace_id=persisted_identity.workspace_id,
+            reviewed_by_user_id=persisted_identity.user_id,
+            update_request=DatasetReviewUpdate(
+                consent_status=request.consent_status,
+                redaction_status=request.redaction_status,
+            ),
+        )
+    except UnsupportedLocalCapabilityError as exc:
+        raise HTTPException(status_code=503, detail="Managed Dataset Versions require Postgres persistence.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if dataset is None:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found.")
+    return _dataset_to_response(dataset)
+
+
+@router.post(
+    "/datasets/{dataset_id}/approve",
+    response_model=DatasetResponse,
+    responses=cast(
+        OpenAPIResponses,
+        {
+            **AUTH_ERROR_RESPONSES,
+            404: {"description": "Dataset Version not found."},
+            409: {"description": "Dataset Version is not eligible for approval."},
+            503: {"description": "Managed Dataset Versions require Postgres persistence."},
+        },
+    ),
+)
+async def approve_dataset_version(
+    config_deps: ConfigDepsDep,
+    identity: HTTPIdentityDep,
+    persistence: PersistenceDep,
+    dataset_id: Annotated[str, ApiPath(description="Dataset Version identifier.")],
+) -> DatasetResponse:
+    """Verify and atomically seal a managed Dataset Version."""
+    if not getattr(persistence, "supports_managed_dataset_versions", False):
+        raise HTTPException(status_code=503, detail="Managed Dataset Versions require Postgres persistence.")
+    persisted_identity = await _resolve_persisted_identity(
+        config_deps=config_deps, persistence=persistence, identity=identity
+    )
+    dataset_uuid = _parse_uuid_id(dataset_id, detail=f"Dataset {dataset_id} not found.")
+    dataset = await persistence.get_dataset(
+        tenant_id=persisted_identity.tenant_id,
+        dataset_id=dataset_uuid,
+        workspace_id=persisted_identity.workspace_id,
+        created_by_user_id=persisted_identity.user_id,
+    )
+    if dataset is None:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found.")
+    if not dataset.uri or not Path(dataset.uri).is_file():
+        raise HTTPException(status_code=409, detail="Dataset Version content is unavailable.")
+    try:
+        content = await asyncio.to_thread(Path(dataset.uri).read_bytes)
+        rows = _require_object_rows(_parse_rows(content, str(dataset.format.value)))
+        validate_dataset_partitions(rows)
+    except (DatasetVersionError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail="Dataset Version content failed integrity validation.") from exc
+    if not dataset.content_sha256 or canonical_dataset_sha256(rows) != dataset.content_sha256:
+        raise HTTPException(status_code=409, detail="Dataset Version content digest does not match its stored value.")
+    try:
+        approved = await persistence.approve_dataset_version(
+            tenant_id=persisted_identity.tenant_id,
+            dataset_id=dataset_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            approved_by_user_id=persisted_identity.user_id,
+        )
+    except UnsupportedLocalCapabilityError as exc:
+        raise HTTPException(status_code=503, detail="Managed Dataset Versions require Postgres persistence.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if approved is None:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id} not found.")
+    return _dataset_to_response(approved)
 
 
 @router.get(

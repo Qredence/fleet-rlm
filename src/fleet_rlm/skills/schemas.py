@@ -130,6 +130,9 @@ class SkillRuntimeContext(BaseModel):
     visibility: SkillVisibilityPolicy = Field(default_factory=SkillVisibilityPolicy)
     selected_skill_ids: list[str] = Field(default_factory=list)
     max_active_skills: int | None = None
+    # Workspace-activated Skill Markdown keyed by skill name (ADR-0006).
+    # Missing keys preserve catalog/scaffold defaults (fail closed / no pointer).
+    activated_skill_markdown: dict[str, str] = Field(default_factory=dict)
 
 
 class SkillValidationIssue(BaseModel):

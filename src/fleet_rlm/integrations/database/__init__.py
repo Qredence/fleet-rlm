@@ -57,8 +57,10 @@ if TYPE_CHECKING:
         Dataset,
         DatasetExample,
         EvaluationResult,
+        OptimizationArtifactVersion,
         OptimizationModule,
         OptimizationRun,
+        OptimizationTargetActivation,
         PromptSnapshot,
     )
     from .models_runs import (
@@ -134,7 +136,9 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "DatasetExample",
         "EvaluationResult",
         "OptimizationModule",
+        "OptimizationArtifactVersion",
         "OptimizationRun",
+        "OptimizationTargetActivation",
         "PromptSnapshot",
     ),
     "models_runs": (

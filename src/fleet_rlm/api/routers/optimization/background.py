@@ -18,6 +18,7 @@ from typing import Any, Literal, cast
 
 from fleet_rlm.integrations.database.repository_identity import IdentityUpsertResult
 from fleet_rlm.quality import optimization_runner
+from fleet_rlm.quality.contracts import OptimizationRunSpec
 from fleet_rlm.quality.optimization_dispatch import run_optimization_from_request_fields
 
 from ...runtime_services.common import run_blocking
@@ -50,6 +51,7 @@ def log_optimization_mlflow_run_metadata(
     program_spec: str,
     auto: Literal["light", "medium", "heavy"] | None,
     max_metric_calls: int | None = None,
+    max_full_evals: int | None = None,
     train_ratio: float,
     optimizer_label: str,
     module_slug: str | None = None,
@@ -169,11 +171,16 @@ async def run_optimization_background(
     auto: Literal["light", "medium", "heavy"],
     train_ratio: float,
     max_metric_calls: int | None = None,
+    max_full_evals: int | None = None,
     optimizer: optimization_runner.OptimizerName = "gepa",
     skill_name: str | None = None,
     skill_path: str | None = None,
     trace_bundle_paths: list[str] | None = None,
     reflection_lm_config: dict[str, Any] | None = None,
+    task_lm_config: dict[str, Any] | None = None,
+    search_config: dict[str, Any] | None = None,
+    run_spec: OptimizationRunSpec | None = None,
+    timeout_seconds: int = OPTIMIZATION_TIMEOUT_SECONDS,
 ) -> None:
     """Execute an optimization run in a background task.
 
@@ -225,6 +232,7 @@ async def run_optimization_background(
                         program_spec=program_spec,
                         auto=auto,
                         max_metric_calls=max_metric_calls,
+                        max_full_evals=max_full_evals,
                         train_ratio=train_ratio,
                         optimizer_label=optimizer_label,
                         module_slug=module_slug,
@@ -241,6 +249,25 @@ async def run_optimization_background(
             logger.debug("MLflow setup skipped for run %s", run_id, exc_info=True)
 
     try:
+        # Cooperative cancel: honor cancel_requested_at before expensive GEPA work.
+        current = await persistence.get_optimization_run(
+            tenant_id=persisted_identity.tenant_id,
+            run_id=run_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+        )
+        if current is not None and getattr(current, "cancel_requested_at", None) is not None:
+            from .run_persistence import persist_optimization_run_failure
+
+            await persist_optimization_run_failure(
+                persistence=persistence,
+                persisted_identity=persisted_identity,
+                run_uuid=run_uuid,
+                error="Optimization cancelled before execution.",
+                cancelled=True,
+            )
+            return
+
         await persistence.update_optimization_run_phase(
             tenant_id=persisted_identity.tenant_id,
             run_id=run_uuid,
@@ -248,6 +275,25 @@ async def run_optimization_background(
             created_by_user_id=persisted_identity.user_id,
             phase="loading",
         )
+        # Best-effort mid-lifecycle cancel: GEPA itself is not interruptible here.
+        mid = await persistence.get_optimization_run(
+            tenant_id=persisted_identity.tenant_id,
+            run_id=run_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+        )
+        if mid is not None and getattr(mid, "cancel_requested_at", None) is not None:
+            from .run_persistence import persist_optimization_run_failure
+
+            await persist_optimization_run_failure(
+                persistence=persistence,
+                persisted_identity=persisted_identity,
+                run_uuid=run_uuid,
+                error="Optimization cancelled before execution.",
+                cancelled=True,
+            )
+            return
+
         await persistence.update_optimization_run_phase(
             tenant_id=persisted_identity.tenant_id,
             run_id=run_uuid,
@@ -267,15 +313,33 @@ async def run_optimization_background(
                 train_ratio=train_ratio,
                 auto=auto,
                 max_metric_calls=max_metric_calls,
+                max_full_evals=max_full_evals,
                 optimizer=optimizer,
                 run_id=None,
                 skill_name=skill_name,
                 skill_path=skill_path,
                 trace_bundle_paths=trace_bundle_paths,
                 reflection_lm_config=reflection_lm_config,
+                task_lm_config=task_lm_config,
+                search_config=search_config,
+                run_spec=run_spec,
             ),
-            timeout=OPTIMIZATION_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
         )
+
+        # If cancel was requested during GEPA, still persist success (work completed)
+        # but surface a status note in logs; cancel is best-effort pre-compile only.
+        post = await persistence.get_optimization_run(
+            tenant_id=persisted_identity.tenant_id,
+            run_id=run_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+        )
+        if post is not None and getattr(post, "cancel_requested_at", None) is not None:
+            logger.info(
+                "Cancel was requested during GEPA for run %s; persisting completed result (cancel is pre-compile best-effort).",
+                run_id,
+            )
 
         # Log validation score to MLflow when available
         try:

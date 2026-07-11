@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from fleet_rlm.quality import module_registry, optimization_runner
+from fleet_rlm.quality.contracts import OptimizationRunSpec
 from fleet_rlm.quality.module_registry import ModuleOptimizationSpec
 from fleet_rlm.quality.skill_optimization import spec_for_skill
 
@@ -44,8 +45,12 @@ def run_optimization_for_spec(
     optimizer: optimization_runner.OptimizerName,
     run_id: int | None = None,
     max_metric_calls: int | None = None,
+    max_full_evals: int | None = None,
     trace_bundle_paths: list[str] | None = None,
     reflection_lm_config: dict[str, Any] | None = None,
+    task_lm_config: dict[str, Any] | None = None,
+    search_config: dict[str, Any] | None = None,
+    run_spec: OptimizationRunSpec | None = None,
 ) -> dict[str, Any]:
     """Run the unified optimization pipeline for a resolved spec."""
     return cast(
@@ -58,10 +63,14 @@ def run_optimization_for_spec(
             train_ratio=train_ratio,
             auto=auto,
             max_metric_calls=max_metric_calls,
+            max_full_evals=max_full_evals,
             optimizer=optimizer,
             run_id=run_id,
             reflection_lm_config=reflection_lm_config,
+            task_lm_config=task_lm_config,
+            search_config=search_config,
             trace_bundle_paths=trace_bundle_paths,
+            run_spec=run_spec,
         ),
     )
 
@@ -80,8 +89,12 @@ def run_optimization_from_request_fields(
     optimizer: optimization_runner.OptimizerName,
     run_id: int | None = None,
     max_metric_calls: int | None = None,
+    max_full_evals: int | None = None,
     trace_bundle_paths: list[str] | None = None,
     reflection_lm_config: dict[str, Any] | None = None,
+    task_lm_config: dict[str, Any] | None = None,
+    search_config: dict[str, Any] | None = None,
+    run_spec: OptimizationRunSpec | None = None,
 ) -> dict[str, Any]:
     """Resolve the optimization target and run the unified pipeline."""
     spec = resolve_optimization_spec(
@@ -99,10 +112,14 @@ def run_optimization_from_request_fields(
         train_ratio=train_ratio,
         auto=auto,
         max_metric_calls=max_metric_calls,
+        max_full_evals=max_full_evals,
         optimizer=optimizer,
         run_id=run_id,
         reflection_lm_config=reflection_lm_config,
+        task_lm_config=task_lm_config,
+        search_config=search_config,
         trace_bundle_paths=trace_bundle_paths,
+        run_spec=run_spec,
     )
 
 

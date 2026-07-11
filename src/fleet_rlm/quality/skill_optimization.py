@@ -8,7 +8,7 @@ from typing import Any
 
 import dspy
 
-from fleet_rlm.quality.module_registry import ModuleOptimizationSpec
+from fleet_rlm.quality.module_registry import MetricProfile, ModuleOptimizationSpec
 from fleet_rlm.quality.optimization_runner import build_gepa_feedback_metric
 from fleet_rlm.quality.rlm_gepa import DaytonaRLMProposalProgram, RLMInstructionProposer
 from fleet_rlm.runtime.tools.skill_tools import _load_skill_impl
@@ -208,6 +208,10 @@ def spec_for_skill(
             proposal_program=_make_default_proposal_program(),
             trace_bundle_paths=trace_bundle_paths or [],
         ),
+        proposer_policy="fleet_rlm_skill",
+        artifact_codec="skill_markdown",
+        optimization_target_kind="skill",
+        metric_profile=MetricProfile(profile_id=slug),
     )
 
 

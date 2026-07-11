@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 from .artifacts import build_manifest, resolve_artifact_path, write_manifest
+from .contracts import OptimizationRunSpec
 from .datasets import (
     load_dataset_rows,
     rows_to_examples,
@@ -28,9 +29,11 @@ from .datasets import (
     validate_required_keys,
     validation_range_for_indexes,
 )
+from .evaluation_protocol import DatasetPartition, partition_rows
 from .gepa_evidence import write_gepa_evidence_artifact as _write_gepa_evidence_artifact
 from .module_registry import ModuleOptimizationSpec
 from .optimization_insights import build_manifest_insights as _build_manifest_insights
+from .promotion import PromotionEvidence, PromotionGatePolicy, evaluate_promotion_gate
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +215,25 @@ def _persist_run_artifacts(
         )
 
 
+def _resolve_configured_lm(lm_config: dict[str, Any]) -> Any:
+    """Build a DSPy LM from a sanitized resolved profile configuration."""
+    import dspy
+
+    lm_kwargs = dict(lm_config.get("lm_kwargs") or {})
+    if not lm_kwargs:
+        raise RuntimeError("Selected model is missing DSPy LM configuration.")
+    from fleet_rlm.integrations.llm_profiles.resolver import infer_provider_type_from_model
+    from fleet_rlm.integrations.llm_profiles.types import WIRE_FORMAT_TO_MODEL_TYPE
+
+    model = lm_kwargs.get("model", "")
+    provider_type = infer_provider_type_from_model(model, api_base=lm_kwargs.get("api_base"))
+    model_type = WIRE_FORMAT_TO_MODEL_TYPE[provider_type]
+    lm_kwargs["model_type"] = model_type
+    if model_type == "responses" and "max_tokens" in lm_kwargs:
+        lm_kwargs["max_output_tokens"] = lm_kwargs.pop("max_tokens")
+    return dspy.LM(**lm_kwargs)
+
+
 def _resolve_reflection_lm(reflection_lm_config: dict[str, Any] | None = None) -> Any:
     """Resolve a DSPy LM suitable for GEPA's reflection pass.
 
@@ -220,23 +242,7 @@ def _resolve_reflection_lm(reflection_lm_config: dict[str, Any] | None = None) -
     first, planner fallback); this helper ensures a concrete LM is provided.
     """
     if reflection_lm_config:
-        import dspy
-
-        lm_kwargs = dict(reflection_lm_config.get("lm_kwargs") or {})
-        if not lm_kwargs:
-            raise RuntimeError("Selected reflection model is missing DSPy LM configuration.")
-        from fleet_rlm.integrations.llm_profiles.resolver import infer_provider_type_from_model
-        from fleet_rlm.integrations.llm_profiles.types import WIRE_FORMAT_TO_MODEL_TYPE
-
-        # Normalized LM API: model_type is derived from the inferred wire format.
-        model = lm_kwargs.get("model", "")
-        provider_type = infer_provider_type_from_model(model, api_base=lm_kwargs.get("api_base"))
-        model_type = WIRE_FORMAT_TO_MODEL_TYPE[provider_type]
-        lm_kwargs["model_type"] = model_type
-        # The Response API path expects max_output_tokens (max_tokens is silently dropped).
-        if model_type == "responses" and "max_tokens" in lm_kwargs:
-            lm_kwargs["max_output_tokens"] = lm_kwargs.pop("max_tokens")
-        return dspy.LM(**lm_kwargs)
+        return _resolve_configured_lm(reflection_lm_config)
 
     from fleet_rlm.runtime.config import resolve_lm
 
@@ -473,7 +479,7 @@ def _build_feedback_summary(results: list[dict[str, Any]], validation_score: flo
     )
 
 
-def _optimization_dspy_context() -> Any:
+def _optimization_dspy_context(task_lm_config: dict[str, Any] | None = None) -> Any:
     """Return a ``dspy.context`` scoping the planner LM for this run.
 
     Never mutates global ``dspy.settings``: if an outer caller already
@@ -484,6 +490,15 @@ def _optimization_dspy_context() -> Any:
 
     from fleet_rlm.runtime.config import build_dspy_context, resolve_lm
 
+    if task_lm_config:
+        task_lm = _resolve_configured_lm(task_lm_config)
+        adapter_name = str(task_lm_config.get("adapter") or "chat")
+        adapter = None
+        if adapter_name == "chat":
+            adapter = dspy.ChatAdapter()
+        elif adapter_name == "json":
+            adapter = dspy.JSONAdapter()
+        return build_dspy_context(lm=task_lm, adapter=adapter)
     if getattr(dspy.settings, "lm", None) is not None:
         return build_dspy_context()
     planner_lm = resolve_lm("planner")
@@ -501,28 +516,35 @@ def _build_optimizer(
     metric: Any,
     auto: Literal["light", "medium", "heavy"] | None,
     max_metric_calls: int | None = None,
+    max_full_evals: int | None = None,
     instruction_proposer: Any | None = None,
     reflection_lm_config: dict[str, Any] | None = None,
     log_dir: str | Path | None = None,
+    search_config: dict[str, Any] | None = None,
+    evaluation_concurrency: int = 1,
 ) -> tuple[Any, dict[str, str]]:
     """Instantiate GEPA and its reflection provenance."""
     if optimizer == "gepa":
         from dspy.teleprompt import GEPA
 
         reflection_lm = _resolve_reflection_lm(reflection_lm_config)
-        auto_budget = None if max_metric_calls is not None else auto
+        auto_budget = None if max_metric_calls is not None or max_full_evals is not None else auto
+        search = dict(search_config or {})
         gepa_kwargs = _supported_kwargs(
             GEPA,
             {
                 "metric": metric,
                 "auto": auto_budget,
                 "max_metric_calls": max_metric_calls,
+                "max_full_evals": max_full_evals,
                 "reflection_lm": reflection_lm,
                 "instruction_proposer": instruction_proposer,
                 "log_dir": str(log_dir) if log_dir is not None else None,
                 "track_stats": True,
-                "track_best_outputs": True,
+                "track_best_outputs": False,
                 "use_mlflow": False,
+                "num_threads": evaluation_concurrency,
+                **search,
                 "gepa_kwargs": {"use_cloudpickle": True},
             },
         )
@@ -546,6 +568,10 @@ def run_module_optimization(
     reflection_lm_config: dict[str, Any] | None = None,
     trace_bundle_paths: list[str] | None = None,
     max_metric_calls: int | None = None,
+    max_full_evals: int | None = None,
+    task_lm_config: dict[str, Any] | None = None,
+    search_config: dict[str, Any] | None = None,
+    run_spec: OptimizationRunSpec | None = None,
 ) -> OptimizationResult:
     """Run the full offline optimization pipeline for a module spec.
 
@@ -593,25 +619,45 @@ def run_module_optimization(
     rows = load_dataset_rows(dataset_path)
     valid_rows = validate_required_keys(rows, spec.required_dataset_keys, spec.label)
 
-    # 2. Convert
-    examples = spec.row_converter(valid_rows)
-
-    # 3. Split
-    split = split_examples_with_metadata(examples, train_ratio=train_ratio)
-    trainset, valset = split.train, split.validation
+    # 2-3. Convert + partition. Explicit Phase 8 partitions are authoritative.
+    # Legacy/unassigned datasets retain the historical deterministic split for
+    # exploration, but can never produce promotion evidence.
+    has_explicit_partitions = any(
+        str(row.get("partition") or (row.get("metadata") or {}).get("partition") or "unassigned")
+        != DatasetPartition.UNASSIGNED
+        for row in valid_rows
+    )
+    promotion_testset: list[Any] = []
+    if has_explicit_partitions:
+        partitioned = partition_rows(valid_rows)
+        trainset = spec.row_converter(list(partitioned.training))
+        valset = spec.row_converter(list(partitioned.selection))
+        promotion_testset = spec.row_converter(list(partitioned.promotion_test))
+        validation_dataset_indexes = [valid_rows.index(row) for row in partitioned.selection]
+        promotion_test_dataset_indexes = [valid_rows.index(row) for row in partitioned.promotion_test]
+        split_strategy = "explicit-partitions"
+        split_strata: dict[str, dict[str, int]] = {}
+    else:
+        examples = spec.row_converter(valid_rows)
+        split = split_examples_with_metadata(examples, train_ratio=train_ratio)
+        trainset, valset = split.train, split.validation
+        validation_dataset_indexes = split.validation_indexes
+        promotion_test_dataset_indexes = []
+        split_strategy = f"legacy-{split.strategy}"
+        split_strata = split.strata
 
     # 4. Build metric
     metric = spec.metric_builder()
 
     # 5-7. Compile + evaluate inside a request-scoped LM context (no global
     # dspy.configure — see _optimization_dspy_context).
-    with _optimization_dspy_context():
+    with _optimization_dspy_context(task_lm_config):
         program = spec.module_factory()
         before_snapshots = _capture_prompt_snapshots(program, "before")
-        validation_dataset_indexes = split.validation_indexes
         has_val = len(valset) >= _MIN_VAL_EXAMPLES
-        baseline_results = _evaluate_validation_set(program, valset, metric) if has_val else []
-        baseline_validation_score = _mean_score(baseline_results)
+        selection_baseline_results = _evaluate_validation_set(program, valset, metric) if has_val else []
+        baseline_test_results = _evaluate_validation_set(program, promotion_testset, metric)
+        baseline_validation_score = _mean_score(baseline_test_results)
 
         instruction_proposer = spec.instruction_proposer_factory() if spec.instruction_proposer_factory else None
         teleprompter, reflection_provenance = _build_optimizer(
@@ -619,9 +665,12 @@ def run_module_optimization(
             metric=metric,
             auto=auto,
             max_metric_calls=max_metric_calls,
+            max_full_evals=max_full_evals,
             instruction_proposer=instruction_proposer,
             reflection_lm_config=reflection_lm_config,
             log_dir=gepa_log_dir,
+            search_config=search_config,
+            evaluation_concurrency=max(1, spec.evaluation_concurrency),
         )
         optimized = teleprompter.compile(
             program,
@@ -631,16 +680,17 @@ def run_module_optimization(
 
         after_snapshots = _capture_prompt_snapshots(optimized, "after")
 
-        # dspy.Evaluate over the validation set (when one exists)
+        # GEPA selection scores are not promotion evidence. Only the sealed
+        # promotion-test partition is compared after compilation.
+        selection_results = _evaluate_validation_set(optimized, valset, metric) if has_val else []
         validation_score: float | None = None
         per_example_results: list[dict[str, Any]] = []
-        if has_val:
-            per_example_results = _evaluate_validation_set(optimized, valset, metric)
+        if promotion_testset:
+            per_example_results = _evaluate_validation_set(optimized, promotion_testset, metric)
             validation_score = _mean_score(per_example_results)
         else:
             logger.warning(
-                "Validation split is empty for %s — skipping evaluation. "
-                "Provide more examples or a lower --train-ratio for validation scoring.",
+                "Promotion-test partition is empty for %s — run is exploratory and cannot be promoted.",
                 spec.module_slug,
             )
 
@@ -650,6 +700,27 @@ def run_module_optimization(
         writer_metadata = dict(spec.artifact_writer(optimized, str(resolved_path)) or {})
     else:
         optimized.save(str(resolved_path))
+
+    # 8b. Artifact round-trip: load saved state and re-score sealed promotion_test once.
+    artifact_round_trip_passed: bool | None = None
+    if promotion_testset:
+        try:
+            reloaded = type(optimized)()
+            loader = getattr(reloaded, "load", None)
+            if callable(loader):
+                loader(str(resolved_path))
+                reloaded_results = _evaluate_validation_set(reloaded, promotion_testset, metric)
+                reloaded_score = _mean_score(reloaded_results)
+                artifact_round_trip_passed = (
+                    validation_score is not None
+                    and reloaded_score is not None
+                    and abs(float(reloaded_score) - float(validation_score)) < 1e-6
+                )
+            else:
+                artifact_round_trip_passed = False
+        except Exception:
+            logger.exception("Artifact round-trip re-evaluation failed for %s", resolved_path)
+            artifact_round_trip_passed = False
 
     # 9. Write manifest
     gepa_evidence, gepa_candidate_decisions = _write_gepa_evidence_artifact(
@@ -661,9 +732,54 @@ def run_module_optimization(
         after_snapshots,
     )
     holdout_comparisons = _build_holdout_comparisons(
-        dataset_indexes=validation_dataset_indexes,
-        baseline_results=baseline_results,
+        dataset_indexes=promotion_test_dataset_indexes,
+        baseline_results=baseline_test_results,
         optimized_results=per_example_results,
+    )
+    metric_profile = spec.metric_profile
+
+    def _failure_rate(results: list[dict[str, Any]]) -> float | None:
+        if not results:
+            return None
+        failures = 0
+        for row in results:
+            score = row.get("score")
+            try:
+                if score is None or float(score) <= 0.0:
+                    failures += 1
+            except (TypeError, ValueError):
+                failures += 1
+        return failures / len(results)
+
+    # Fail closed for unmeasured dimensions: None => *_evidence_missing in the gate.
+    # Only emit zeros/empty maps when the MetricProfile declares no such requirements.
+    profile_hard_gates = tuple(getattr(metric_profile, "hard_gates", ()) or ()) if metric_profile else ()
+    profile_critical_slices = tuple(getattr(metric_profile, "critical_slices", ()) or ()) if metric_profile else ()
+    promotion_gate = evaluate_promotion_gate(
+        PromotionEvidence(
+            baseline_score=baseline_validation_score,
+            candidate_score=validation_score,
+            test_examples=len(promotion_testset),
+            hard_gate_failures=0 if not profile_hard_gates else None,
+            critical_slice_deltas={} if not profile_critical_slices else None,
+            baseline_failure_rate=_failure_rate(baseline_test_results),
+            candidate_failure_rate=_failure_rate(per_example_results),
+            # Cost/latency instrumentation is not yet produced by the offline runner.
+            baseline_cost=None,
+            candidate_cost=None,
+            baseline_p95_latency_ms=None,
+            candidate_p95_latency_ms=None,
+            artifact_round_trip_passed=artifact_round_trip_passed,
+            metric_call_budget_used=run_spec is not None and run_spec.budget.kind == "max_metric_calls",
+        ),
+        PromotionGatePolicy(
+            minimum_test_examples=metric_profile.minimum_test_examples if metric_profile else 1,
+            minimum_score_delta=metric_profile.minimum_score_delta if metric_profile else 0.0,
+            maximum_cost_increase_ratio=(metric_profile.maximum_cost_increase_ratio if metric_profile else 0.20),
+            maximum_p95_latency_increase_ratio=(
+                metric_profile.maximum_p95_latency_increase_ratio if metric_profile else 0.20
+            ),
+        ),
     )
     artifact_metadata = {
         "path": str(resolved_path),
@@ -680,7 +796,7 @@ def run_module_optimization(
         validation_score=validation_score,
         baseline_validation_score=baseline_validation_score,
         candidate_decisions=gepa_candidate_decisions,
-        has_external_validation=has_val,
+        has_external_validation=bool(promotion_testset),
     )
     review_bundle = {
         "version": 1,
@@ -688,18 +804,20 @@ def run_module_optimization(
         "holdout": {
             "split_reference": {
                 "train_ratio": train_ratio,
-                "strategy": split.strategy,
-                "stratify_by": split.stratify_by,
+                "strategy": split_strategy,
+                "stratify_by": [],
                 "train_examples": len(trainset),
-                "validation_examples": len(valset),
-                "train_dataset_indexes": split.train_indexes,
+                "selection_examples": len(valset),
+                "promotion_test_examples": len(promotion_testset),
                 "validation_dataset_indexes": validation_dataset_indexes,
-                "validation_range": validation_range_for_indexes(validation_dataset_indexes),
-                "strata": split.strata,
+                "promotion_test_dataset_indexes": promotion_test_dataset_indexes,
+                "validation_range": validation_range_for_indexes(promotion_test_dataset_indexes),
+                "strata": split_strata,
             },
-            "external_validation_available": has_val,
-            "gepa_internal_valset": "validation" if has_val else "trainset_fallback",
-            "promotion_ready": bool(has_val and validation_score is not None),
+            "external_validation_available": bool(promotion_testset),
+            "gepa_internal_valset": "selection" if has_val else "trainset_fallback",
+            "promotion_ready": promotion_gate.ready,
+            "promotion_gate_failures": list(promotion_gate.failures),
             "baseline_score": baseline_validation_score,
             "optimized_score": validation_score,
             "score_delta": (
@@ -708,6 +826,8 @@ def run_module_optimization(
                 else None
             ),
             "comparisons": holdout_comparisons,
+            "selection_baseline_score": _mean_score(selection_baseline_results),
+            "selection_candidate_score": _mean_score(selection_results),
         },
         "prompt_snapshots": {
             "matched_predictors": prompt_snapshot_pairs,
@@ -733,15 +853,33 @@ def run_module_optimization(
         "reflection_profile_id": reflection_provenance.get("profile_id"),
         "reflection_model_id": reflection_provenance.get("model"),
         "max_metric_calls": max_metric_calls,
+        "max_full_evals": max_full_evals,
+        "search": dict(search_config or {}),
+        "task_model": {
+            key: task_lm_config.get(key)
+            for key in ("profile_id", "profile_name", "model_id", "resolved_model_id", "adapter")
+            if task_lm_config and task_lm_config.get(key) is not None
+        },
+        "dataset_protocol": "phase8-explicit" if has_explicit_partitions else "legacy-unassigned",
+        "protocol_version": run_spec.protocol_version if run_spec is not None else "legacy",
+        "run_spec": run_spec.model_dump(mode="json") if run_spec is not None else None,
         "trace_bundle_paths": list(trace_bundle_paths or []),
         "distilled_trace_bundle_path": (trace_bundle_paths or [None])[0],
         "review_bundle": review_bundle,
+        # Flat aliases for scorecard API (also nested under review_bundle.holdout).
+        "holdout": review_bundle["holdout"],
+        "metric_call_budget_used": run_spec is not None and run_spec.budget.kind == "max_metric_calls",
+        "gepa_valset_role": "selection",
+        "target": {
+            "kind": "skill" if (spec.module_slug or "").startswith("skill:") else "module",
+            "target_id": spec.module_slug,
+        },
     }
     manifest_data = build_manifest(
         module_spec=spec.program_spec,
         dataset_path=dataset_path,
         train_count=len(trainset),
-        val_count=len(valset),
+        val_count=len(promotion_testset),
         validation_score=validation_score,
         optimizer=optimizer_label,
         metric_name=spec.metric_name or None,
@@ -765,7 +903,7 @@ def run_module_optimization(
     # 11. Return summary
     return OptimizationResult(
         train_examples=len(trainset),
-        validation_examples=len(valset),
+        validation_examples=len(promotion_testset),
         baseline_validation_score=baseline_validation_score,
         validation_score=validation_score,
         output_path=str(resolved_path),

@@ -2,15 +2,120 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class ManagedOptimizationTargetRef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["module", "skill"] = Field(description="Managed optimization target kind.")
+    id: str = Field(min_length=1, description="Registered module slug or catalog-resolved Skill id.")
+    version: str = Field(default="1", min_length=1, description="Managed target version.")
+
+
+class OptimizationModelSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: str = Field(min_length=1, description="Saved provider profile identifier.")
+    model_id: str = Field(min_length=1, description="Provider-native model identifier.")
+
+
+class _OptimizationBudgetBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    wall_clock_seconds: int = Field(
+        default=3600, ge=1, le=86_400, description="Requested wall-clock limit before the server ceiling is applied."
+    )
+
+
+class OptimizationAutoBudget(_OptimizationBudgetBase):
+    kind: Literal["auto"] = Field(default="auto", description="Automatic GEPA budget discriminator.")
+    value: Literal["light", "medium", "heavy"] = Field(description="Automatic GEPA intensity.")
+
+
+class OptimizationMetricCallsBudget(_OptimizationBudgetBase):
+    kind: Literal["max_metric_calls"] = Field(
+        default="max_metric_calls", description="Metric-call budget discriminator."
+    )
+    value: int = Field(ge=1, description="Maximum metric calls allowed for the run.")
+
+
+class OptimizationFullEvalsBudget(_OptimizationBudgetBase):
+    kind: Literal["max_full_evals"] = Field(
+        default="max_full_evals", description="Full-evaluation budget discriminator."
+    )
+    value: int = Field(ge=1, description="Maximum full evaluations allowed for the run.")
+
+
+OptimizationBudget = Annotated[
+    OptimizationAutoBudget | OptimizationMetricCallsBudget | OptimizationFullEvalsBudget,
+    Field(discriminator="kind"),
+]
+
+
+class GEPASearchConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reflection_minibatch_size: int = Field(default=3, ge=1, le=50, description="GEPA reflection minibatch size.")
+    candidate_selection_strategy: Literal["pareto", "current_best"] = Field(
+        default="pareto", description="GEPA candidate-selection strategy."
+    )
+    component_selector: Literal["round_robin", "all"] = Field(
+        default="round_robin", description="Predictor component-selection strategy."
+    )
+    skip_perfect_score: bool = Field(default=True, description="Skip reflection for perfectly scored examples.")
+    add_format_failure_as_feedback: bool = Field(
+        default=False, description="Whether formatting failures become GEPA feedback."
+    )
+    use_merge: bool = Field(default=True, description="Enable GEPA candidate merging.")
+    max_merge_invocations: int | None = Field(default=5, ge=0, le=100, description="Maximum candidate merge attempts.")
+    seed: int = Field(default=0, description="Deterministic GEPA search seed.")
+
+
+class OptimizationTrackingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    restricted_payloads: bool = Field(default=False, description="Allow restricted optimization payload logging.")
+
+
+class DatasetReviewRequest(BaseModel):
+    """Review-state transition for a draft managed Dataset Version."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    consent_status: Literal["approved", "rejected"] | None = Field(
+        default=None, description="Updated consent review state."
+    )
+    redaction_status: Literal["approved", "rejected"] | None = Field(
+        default=None, description="Updated redaction review state."
+    )
+
+    @model_validator(mode="after")
+    def require_review_status(self) -> DatasetReviewRequest:
+        if self.consent_status is None and self.redaction_status is None:
+            raise ValueError("consent_status or redaction_status is required")
+        return self
 
 
 class GEPAOptimizationRequest(BaseModel):
     """Request body for triggering a GEPA prompt optimization run."""
 
     model_config = ConfigDict(extra="forbid")
+
+    target: ManagedOptimizationTargetRef | None = Field(default=None, description="Canonical managed target reference.")
+    dataset_version_id: str | None = Field(default=None, description="Approved immutable Dataset Version identifier.")
+    metric_profile_id: str | None = Field(default=None, description="Qualified Metric Profile id in name@version form.")
+    task_model: OptimizationModelSelection | None = Field(default=None, description="Explicit task-model selection.")
+    reflection_model: OptimizationModelSelection | None = Field(
+        default=None, description="Explicit reflection-model selection."
+    )
+    budget: OptimizationBudget | None = Field(default=None, description="Canonical discriminated GEPA budget.")
+    search: GEPASearchConfig = Field(default_factory=GEPASearchConfig, description="GEPA search configuration.")
+    tracking: OptimizationTrackingRequest = Field(
+        default_factory=OptimizationTrackingRequest, description="Optimization tracking policy."
+    )
 
     dataset_path: str | None = Field(
         default=None,
@@ -74,6 +179,49 @@ class GEPAOptimizationRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_dataset_target(self) -> GEPAOptimizationRequest:
+        canonical = any(
+            value is not None
+            for value in (
+                self.target,
+                self.dataset_version_id,
+                self.metric_profile_id,
+                self.task_model,
+                self.reflection_model,
+                self.budget,
+            )
+        )
+        if canonical:
+            missing = [
+                name
+                for name, value in (
+                    ("target", self.target),
+                    ("dataset_version_id", self.dataset_version_id),
+                    ("metric_profile_id", self.metric_profile_id),
+                    ("task_model", self.task_model),
+                    ("reflection_model", self.reflection_model),
+                    ("budget", self.budget),
+                )
+                if value is None
+            ]
+            if missing:
+                raise ValueError(f"Canonical optimization requests require: {', '.join(missing)}")
+            if any((self.program_spec, self.module_slug, self.skill_name, self.skill_path, self.dataset_path)):
+                raise ValueError("Canonical optimization requests cannot include legacy target or dataset path fields")
+            if self.output_path or self.trace_bundle_paths:
+                raise ValueError("Canonical server requests cannot include filesystem output or trace bundle paths")
+            assert self.target is not None
+            assert self.budget is not None
+            assert self.reflection_model is not None
+            self.dataset_id = self.dataset_version_id
+            if self.target.kind == "module":
+                self.module_slug = self.target.id
+            else:
+                self.skill_name = self.target.id
+            self.reflection_profile_id = self.reflection_model.profile_id
+            self.reflection_model_id = self.reflection_model.model_id
+            self.auto = self.budget.value if self.budget.kind == "auto" else "light"
+            self.max_metric_calls = self.budget.value if self.budget.kind == "max_metric_calls" else None
+            return self
         if bool(self.reflection_profile_id) != bool(self.reflection_model_id):
             raise ValueError("reflection_profile_id and reflection_model_id must be provided together")
         if self.dataset_id is not None or (self.dataset_path or "").strip():
@@ -438,6 +586,14 @@ class DatasetResponse(BaseModel):
     row_count: int = Field(description="Number of rows/examples in the dataset.")
     format: str = Field(description="File format (json or jsonl).")
     module_slug: str | None = Field(default=None, description="Associated module slug, when provided.")
+    version: int = Field(default=1, description="Immutable version number within the dataset lineage.")
+    supersedes_dataset_id: str | None = Field(default=None, description="Previous Dataset Version, when present.")
+    eligibility: str = Field(default="draft", description="Dataset lifecycle eligibility state.")
+    consent_status: str = Field(default="unreviewed", description="Consent review state.")
+    redaction_status: str = Field(default="unreviewed", description="Redaction review state.")
+    content_sha256: str | None = Field(default=None, description="Canonical ordered-row SHA-256 digest.")
+    approved_at: str | None = Field(default=None, description="Approval timestamp for sealed versions.")
+    approved_by_user_id: str | None = Field(default=None, description="Approving user identifier.")
     created_at: str = Field(description="ISO-8601 creation timestamp.")
 
 
@@ -500,3 +656,54 @@ class RunComparisonResponse(BaseModel):
     """Cross-run comparison payload."""
 
     runs: list[RunComparisonItem] = Field(description="Compared run summaries.")
+
+
+class SealedPromotionScorecard(BaseModel):
+    """Sealed promotion-test scorecard (not GEPA selection scores)."""
+
+    protocol_version: str | None = Field(default=None, description="phase8-v1 or legacy.")
+    gepa_valset_role: Literal["selection"] = Field(
+        default="selection",
+        description="DSPy GEPA valset is selection-only; not a promotion holdout.",
+    )
+    promotion_ready: bool = Field(description="Whether evaluate_promotion_gate returned ready.")
+    promotion_gate_failures: list[str] = Field(default_factory=list, description="Gate failure codes.")
+    baseline_score: float | None = Field(default=None, description="Baseline score on sealed promotion_test.")
+    candidate_score: float | None = Field(default=None, description="Winner score on sealed promotion_test.")
+    score_delta: float | None = Field(default=None, description="candidate - baseline on sealed test.")
+    promotion_test_examples: int | None = Field(default=None, description="Sealed promotion_test row count.")
+    selection_examples: int | None = Field(default=None, description="GEPA valset/selection row count.")
+    metric_call_budget_used: bool | None = Field(
+        default=None, description="Whether promotion-grade max_metric_calls budget was used."
+    )
+
+
+class OptimizationArtifactVersionResponse(BaseModel):
+    """Persisted optimization artifact version."""
+
+    id: str = Field(description="Artifact version identifier.")
+    optimization_run_id: str = Field(description="Source optimization run.")
+    target_kind: Literal["module", "skill"] = Field(description="Managed target kind.")
+    target_id: str = Field(description="Managed target id.")
+    artifact_kind: str = Field(description="module_state_json or skill_markdown.")
+    artifact_path: str = Field(description="Filesystem path to the immutable artifact payload.")
+    artifact_sha256: str = Field(description="SHA-256 of the artifact payload.")
+    status: str = Field(description="candidate | approved | active.")
+    approved_at: str | None = Field(default=None, description="Approval timestamp.")
+    activated_at: str | None = Field(default=None, description="Activation timestamp.")
+    created_at: str = Field(description="Creation timestamp.")
+
+
+class OptimizationTargetActivationResponse(BaseModel):
+    """Workspace-scoped activation pointer for a Managed Target."""
+
+    target_kind: Literal["module", "skill"] = Field(description="Managed target kind.")
+    target_id: str = Field(description="Managed target id.")
+    active_artifact_version_id: str = Field(description="Currently active artifact version.")
+    previous_artifact_version_id: str | None = Field(
+        default=None, description="Previous artifact retained for rollback."
+    )
+    active_artifact: OptimizationArtifactVersionResponse | None = Field(
+        default=None, description="Resolved active artifact metadata when available."
+    )
+    updated_at: str = Field(description="Last activation update timestamp.")

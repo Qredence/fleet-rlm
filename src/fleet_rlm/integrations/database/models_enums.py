@@ -184,10 +184,12 @@ class DatasetSource(str, enum.Enum):
 
 
 class OptimizationRunStatus(str, enum.Enum):
+    QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    INTERRUPTED = "interrupted"
 
 
 class PromptSnapshotType(str, enum.Enum):

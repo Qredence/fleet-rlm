@@ -84,6 +84,8 @@ from fleet_rlm.integrations.database.repository_identity import IdentityUpsertRe
 from fleet_rlm.integrations.database.repository_memory import MemoryItemCreateRequest
 from fleet_rlm.integrations.database.repository_optimization import (
     DatasetCreateRequest,
+    DatasetReviewUpdate,
+    OptimizationArtifactCreateRequest,
     OptimizationRunCreateRequest,
 )
 from fleet_rlm.integrations.persistence_protocol import (
@@ -1108,6 +1110,8 @@ class LocalStore(PersistenceProtocol):
     equivalent return sensible defaults or raise ``NotImplementedError``.
     """
 
+    supports_managed_dataset_versions = False
+
     # ------------------------------------------------------------------
     # Identity
     # ------------------------------------------------------------------
@@ -1499,6 +1503,27 @@ class LocalStore(PersistenceProtocol):
         result = await asyncio.to_thread(get_dataset, dataset_id_int)
         return cast(DbDataset | None, result)
 
+    async def review_dataset_version(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        dataset_id: uuid.UUID,
+        update_request: DatasetReviewUpdate,
+        workspace_id: uuid.UUID | None = None,
+        reviewed_by_user_id: uuid.UUID | None = None,
+    ) -> DbDataset | None:
+        raise UnsupportedLocalCapabilityError("review_dataset_version")
+
+    async def approve_dataset_version(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        dataset_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        approved_by_user_id: uuid.UUID | None = None,
+    ) -> DbDataset | None:
+        raise UnsupportedLocalCapabilityError("approve_dataset_version")
+
     async def list_dataset_examples(
         self,
         *,
@@ -1630,7 +1655,9 @@ class LocalStore(PersistenceProtocol):
         error: str,
         workspace_id: uuid.UUID | None = None,
         created_by_user_id: uuid.UUID | None = None,
+        status: Any = None,
     ) -> DbOptimizationRun | None:
+        _ = status  # Local SQLite path only supports a generic failed terminal state.
         run_id_int = _uuid_to_int(run_id)
         if run_id_int is None:
             return None
@@ -1640,6 +1667,23 @@ class LocalStore(PersistenceProtocol):
             error=error,
         )
         return cast(DbOptimizationRun | None, result)
+
+    async def cancel_optimization_run(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        error: str = "Optimization cancelled.",
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> DbOptimizationRun | None:
+        return await self.fail_optimization_run(
+            tenant_id=tenant_id,
+            run_id=run_id,
+            error=error,
+            workspace_id=workspace_id,
+            created_by_user_id=created_by_user_id,
+        )
 
     async def recover_stale_optimization_runs(self) -> int:
         return await asyncio.to_thread(recover_stale_optimization_runs)
@@ -1716,3 +1760,92 @@ class LocalStore(PersistenceProtocol):
             return []
         items = await asyncio.to_thread(get_prompt_snapshots, run_id_int)
         return cast(list[DbPromptSnapshot], items)
+
+    async def request_cancel_optimization_run(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> DbOptimizationRun | None:
+        raise UnsupportedLocalCapabilityError("request_cancel_optimization_run")
+
+    async def resume_optimization_run(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        expected_fingerprint: str | None = None,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> DbOptimizationRun | None:
+        raise UnsupportedLocalCapabilityError("resume_optimization_run")
+
+    async def create_optimization_artifact_version(
+        self,
+        request: OptimizationArtifactCreateRequest,
+    ) -> Any:
+        raise UnsupportedLocalCapabilityError("create_optimization_artifact_version")
+
+    async def get_optimization_artifact_version(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        artifact_version_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> Any:
+        raise UnsupportedLocalCapabilityError("get_optimization_artifact_version")
+
+    async def get_optimization_artifact_for_run(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> Any:
+        raise UnsupportedLocalCapabilityError("get_optimization_artifact_for_run")
+
+    async def approve_optimization_artifact_version(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        artifact_version_id: uuid.UUID,
+        approved_by_user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> Any:
+        raise UnsupportedLocalCapabilityError("approve_optimization_artifact_version")
+
+    async def activate_optimization_target(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        artifact_version_id: uuid.UUID,
+        activated_by_user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> Any:
+        raise UnsupportedLocalCapabilityError("activate_optimization_target")
+
+    async def rollback_optimization_target(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        target_kind: str,
+        target_id: str,
+        rolled_back_by_user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> Any:
+        raise UnsupportedLocalCapabilityError("rollback_optimization_target")
+
+    async def get_target_activation(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        target_kind: str,
+        target_id: str,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> tuple[Any, Any]:
+        raise UnsupportedLocalCapabilityError("get_target_activation")

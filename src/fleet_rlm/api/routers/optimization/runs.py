@@ -17,6 +17,7 @@ from fastapi import (
 )
 
 from fleet_rlm.integrations.database import OptimizationRunStatus
+from fleet_rlm.integrations.persistence_protocol import UnsupportedLocalCapabilityError
 
 from ...dependencies import ConfigDepsDep, HTTPIdentityDep, PersistenceDep, PersistenceDepsDep
 from ...schemas.optimization import (
@@ -31,6 +32,7 @@ from ...schemas.optimization import (
     PromptSnapshotItem,
     RunComparisonItem,
     RunComparisonResponse,
+    SealedPromotionScorecard,
 )
 from ._deps import (
     AUTH_ERROR_RESPONSES,
@@ -49,6 +51,7 @@ from .orchestration import (
     mark_blocking_run_complete,
     mark_blocking_run_failed,
     prepare_optimization_request,
+    resume_async_run_and_enqueue,
 )
 from .run_details import (
     build_optimization_run_detail,
@@ -104,6 +107,10 @@ async def run_optimization(
         program_spec=prepared.program_spec,
         dataset_ref=prepared.dataset_ref,
         reflection_lm_config=prepared.reflection_lm_config,
+        task_lm_config=prepared.task_lm_config,
+        run_spec=prepared.run_spec,
+        run_fingerprint=prepared.run_fingerprint,
+        dataset_id=prepared.dataset_id,
     )
 
     try:
@@ -114,6 +121,9 @@ async def run_optimization(
             resolved_skill_path=prepared.skill_path,
             program_spec=prepared.program_spec,
             reflection_lm_config=prepared.reflection_lm_config,
+            task_lm_config=prepared.task_lm_config,
+            run_spec=prepared.run_spec,
+            timeout_seconds=prepared.timeout_seconds,
         )
     except Exception as exc:
         logger.exception("GEPA optimization failed")
@@ -368,6 +378,157 @@ async def get_run_details(
     return build_optimization_run_detail(
         run=_db_run_to_response(row),
         prompt_snapshots=snapshots,
+    )
+
+
+@router.post(
+    "/runs/{run_id}/cancel",
+    response_model=OptimizationRunResponse,
+    responses=cast(
+        OpenAPIResponses,
+        {
+            **AUTH_ERROR_RESPONSES,
+            404: {"description": "Run not found."},
+            501: {"description": "Requires managed Postgres persistence."},
+        },
+    ),
+)
+async def cancel_optimization_run(
+    config_deps: ConfigDepsDep,
+    identity: HTTPIdentityDep,
+    persistence: PersistenceDep,
+    run_id: Annotated[str, ApiPath(description="Identifier of the optimization run to cancel.")],
+) -> OptimizationRunResponse:
+    """Request cooperative cancellation of a running optimization job."""
+    persisted_identity = await _resolve_persisted_identity(
+        config_deps=config_deps,
+        persistence=persistence,
+        identity=identity,
+    )
+    run_uuid = parse_run_uuid(run_id)
+    try:
+        row = await persistence.request_cancel_optimization_run(
+            tenant_id=persisted_identity.tenant_id,
+            run_id=run_uuid,
+            workspace_id=persisted_identity.workspace_id,
+            created_by_user_id=persisted_identity.user_id,
+        )
+    except UnsupportedLocalCapabilityError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Optimization run {run_id} not found.")
+    return _db_run_to_response(row)
+
+
+@router.post(
+    "/runs/{run_id}/resume",
+    response_model=OptimizationRunCreatedResponse,
+    responses=cast(
+        OpenAPIResponses,
+        {
+            **AUTH_ERROR_RESPONSES,
+            404: {"description": "Run not found."},
+            409: {"description": "Resume not allowed (status or fingerprint)."},
+            501: {"description": "Requires managed Postgres persistence."},
+        },
+    ),
+)
+async def resume_optimization_run(
+    config_deps: ConfigDepsDep,
+    identity: HTTPIdentityDep,
+    persistence: PersistenceDep,
+    background_tasks: BackgroundTasks,
+    run_id: Annotated[str, ApiPath(description="Identifier of the optimization run to resume.")],
+) -> OptimizationRunCreatedResponse:
+    """Explicitly resume a terminal run after exact fingerprint validation (never automatic)."""
+    persisted_identity = await _resolve_persisted_identity(
+        config_deps=config_deps,
+        persistence=persistence,
+        identity=identity,
+    )
+    return await resume_async_run_and_enqueue(
+        run_id=run_id,
+        background_tasks=background_tasks,
+        persistence=persistence,
+        persisted_identity=persisted_identity,
+        expected_fingerprint=None,
+    )
+
+
+@router.get(
+    "/runs/{run_id}/scorecard",
+    response_model=SealedPromotionScorecard,
+    responses=cast(
+        OpenAPIResponses,
+        {
+            **AUTH_ERROR_RESPONSES,
+            404: {"description": "Run not found."},
+        },
+    ),
+)
+async def get_run_scorecard(
+    config_deps: ConfigDepsDep,
+    identity: HTTPIdentityDep,
+    persistence: PersistenceDep,
+    run_id: Annotated[str, ApiPath(description="Identifier of the optimization run.")],
+) -> SealedPromotionScorecard:
+    """Return sealed promotion-test scorecard from run metadata (not GEPA selection scores)."""
+    persisted_identity = await _resolve_persisted_identity(
+        config_deps=config_deps,
+        persistence=persistence,
+        identity=identity,
+    )
+    run_uuid = parse_run_uuid(run_id)
+    row = await persistence.get_optimization_run(
+        tenant_id=persisted_identity.tenant_id,
+        run_id=run_uuid,
+        workspace_id=persisted_identity.workspace_id,
+        created_by_user_id=persisted_identity.user_id,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Optimization run {run_id} not found.")
+
+    metadata = getattr(row, "metadata_json", None) or {}
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    holdout = metadata.get("holdout") if isinstance(metadata.get("holdout"), dict) else {}
+    if not holdout:
+        review_bundle = metadata.get("review_bundle") if isinstance(metadata.get("review_bundle"), dict) else {}
+        holdout = review_bundle.get("holdout") if isinstance(review_bundle.get("holdout"), dict) else {}
+    split_ref = holdout.get("split_reference") if isinstance(holdout.get("split_reference"), dict) else {}
+    baseline = holdout.get("baseline_score")
+    optimized = holdout.get("optimized_score")
+    score_delta = holdout.get("score_delta")
+    if score_delta is None and baseline is not None and optimized is not None:
+        try:
+            score_delta = float(optimized) - float(baseline)
+        except (TypeError, ValueError):
+            score_delta = None
+
+    return SealedPromotionScorecard(
+        protocol_version=str(metadata.get("protocol_version")) if metadata.get("protocol_version") else None,
+        promotion_ready=bool(holdout.get("promotion_ready", False)),
+        promotion_gate_failures=[str(item) for item in (holdout.get("promotion_gate_failures") or [])],
+        baseline_score=float(baseline) if baseline is not None else None,
+        candidate_score=float(optimized) if optimized is not None else None,
+        score_delta=float(score_delta) if score_delta is not None else None,
+        promotion_test_examples=(
+            int(split_ref["promotion_test_examples"]) if split_ref.get("promotion_test_examples") is not None else None
+        ),
+        selection_examples=(
+            int(split_ref["selection_examples"]) if split_ref.get("selection_examples") is not None else None
+        ),
+        metric_call_budget_used=(
+            bool(metadata.get("metric_call_budget_used"))
+            if metadata.get("metric_call_budget_used") is not None
+            else None
+        ),
     )
 
 

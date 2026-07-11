@@ -669,9 +669,11 @@ class EscalatingFleetModule(dspy.Module):
         if volume_mount_path != self._skill_selector._volume_mount_path:
             self._skill_selector._volume_mount_path = volume_mount_path
         explicit_ids = list(selected_skill_ids or [])
+        activated_markdown = dict(getattr(self, "activated_skill_markdown", None) or {})
         skill_context = SkillRuntimeContext(
             volume_mount_path=volume_mount_path,
             selected_skill_ids=explicit_ids,
+            activated_skill_markdown=activated_markdown,
         )
         try:
             selection = self._skill_selector(

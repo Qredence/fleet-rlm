@@ -17,6 +17,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from fleet_rlm.quality.module_registry import (
+    MetricProfile,
     ModuleOptimizationSpec,
     register_module,
 )
@@ -357,6 +358,7 @@ _LONGCOT_SPEC = ModuleOptimizationSpec(
     signature_class_name="LongCoTQASignature",
     output_keys=["answer"],
     optimization_target_kind="runtime-signature",
+    metric_profile=MetricProfile(profile_id="longcot-reasoner"),
 )
 
 register_module(_LONGCOT_SPEC)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from . import datasets, runs, status
+from . import activations, datasets, runs, status
 
 router = APIRouter(
     prefix="/optimization",
@@ -18,5 +18,6 @@ router = APIRouter(
 router.include_router(status.router)
 router.include_router(runs.router)
 router.include_router(datasets.router)
+router.include_router(activations.router)
 
 __all__ = ["router"]

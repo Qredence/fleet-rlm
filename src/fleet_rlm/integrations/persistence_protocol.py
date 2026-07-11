@@ -41,7 +41,9 @@ from fleet_rlm.integrations.database.models_optimization import (
     Dataset,
     DatasetExample,
     EvaluationResult,
+    OptimizationArtifactVersion,
     OptimizationRun,
+    OptimizationTargetActivation,
     PromptSnapshot,
 )
 from fleet_rlm.integrations.database.models_runs import (
@@ -60,6 +62,8 @@ from fleet_rlm.integrations.database.repository_identity import IdentityUpsertRe
 from fleet_rlm.integrations.database.repository_memory import MemoryItemCreateRequest
 from fleet_rlm.integrations.database.repository_optimization import (
     DatasetCreateRequest,
+    DatasetReviewUpdate,
+    OptimizationArtifactCreateRequest,
     OptimizationRunCreateRequest,
 )
 
@@ -83,6 +87,8 @@ class UnsupportedLocalCapabilityError(NotImplementedError):
 @runtime_checkable
 class PersistenceProtocol(Protocol):
     """Unified interface for all persistence backends."""
+
+    supports_managed_dataset_versions: bool
 
     # ------------------------------------------------------------------
     # Identity
@@ -373,6 +379,29 @@ class PersistenceProtocol(Protocol):
         """Return a single dataset or None if not found."""
         pass
 
+    async def approve_dataset_version(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        dataset_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        approved_by_user_id: uuid.UUID | None = None,
+    ) -> Dataset | None:
+        """Seal an immutable dataset version after protocol preflight."""
+        pass
+
+    async def review_dataset_version(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        dataset_id: uuid.UUID,
+        update_request: DatasetReviewUpdate,
+        workspace_id: uuid.UUID | None = None,
+        reviewed_by_user_id: uuid.UUID | None = None,
+    ) -> Dataset | None:
+        """Update consent or redaction review state on a draft Dataset Version."""
+        pass
+
     async def list_dataset_examples(
         self,
         *,
@@ -458,8 +487,21 @@ class PersistenceProtocol(Protocol):
         error: str,
         workspace_id: uuid.UUID | None = None,
         created_by_user_id: uuid.UUID | None = None,
+        status: OptimizationRunStatus = OptimizationRunStatus.FAILED,
     ) -> OptimizationRun | None:
-        """Mark an optimization run as failed."""
+        """Mark an optimization run as failed (or cancelled/interrupted when status is set)."""
+        pass
+
+    async def cancel_optimization_run(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        error: str = "Optimization cancelled.",
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> OptimizationRun | None:
+        """Mark an optimization run as cancelled."""
         pass
 
     async def recover_stale_optimization_runs(self) -> int:
@@ -512,6 +554,104 @@ class PersistenceProtocol(Protocol):
         created_by_user_id: uuid.UUID | None = None,
     ) -> list[PromptSnapshot]:
         """Return all prompt snapshots for a run."""
+        pass
+
+    async def request_cancel_optimization_run(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> OptimizationRun | None:
+        """Request cooperative cancellation of a running optimization job."""
+        pass
+
+    async def resume_optimization_run(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        expected_fingerprint: str | None = None,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> OptimizationRun | None:
+        """Explicitly re-queue a terminal run after exact fingerprint validation."""
+        pass
+
+    async def create_optimization_artifact_version(
+        self,
+        request: OptimizationArtifactCreateRequest,
+    ) -> OptimizationArtifactVersion:
+        """Persist a candidate or approved artifact version for one run."""
+        pass
+
+    async def get_optimization_artifact_version(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        artifact_version_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> OptimizationArtifactVersion | None:
+        """Return one artifact version or None."""
+        pass
+
+    async def get_optimization_artifact_for_run(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        run_id: uuid.UUID,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> OptimizationArtifactVersion | None:
+        """Return the artifact version bound to a run, if any."""
+        pass
+
+    async def approve_optimization_artifact_version(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        artifact_version_id: uuid.UUID,
+        approved_by_user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> OptimizationArtifactVersion | None:
+        """Human-approve a candidate artifact without activating it."""
+        pass
+
+    async def activate_optimization_target(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        artifact_version_id: uuid.UUID,
+        activated_by_user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> OptimizationTargetActivation:
+        """Atomically activate an approved artifact for a Managed Target."""
+        pass
+
+    async def rollback_optimization_target(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        target_kind: str,
+        target_id: str,
+        rolled_back_by_user_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> OptimizationTargetActivation | None:
+        """Roll back to the previous retained artifact version."""
+        pass
+
+    async def get_target_activation(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        target_kind: str,
+        target_id: str,
+        workspace_id: uuid.UUID | None = None,
+        created_by_user_id: uuid.UUID | None = None,
+    ) -> tuple[OptimizationTargetActivation | None, OptimizationArtifactVersion | None]:
+        """Return the activation pointer and active artifact version."""
         pass
 
 

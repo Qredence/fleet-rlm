@@ -339,5 +339,17 @@ def _dataset_to_response(row: Any) -> DatasetResponse:
         row_count=row.row_count or 0,
         format=row.format.value if hasattr(row.format, "value") else str(row.format or ""),
         module_slug=getattr(row, "module_slug", None) or _extract_metadata_str(metadata, "module_slug"),
+        version=int(getattr(row, "version", 1) or 1),
+        supersedes_dataset_id=(
+            str(row.supersedes_dataset_id) if getattr(row, "supersedes_dataset_id", None) is not None else None
+        ),
+        eligibility=str(getattr(row, "eligibility", "draft") or "draft"),
+        consent_status=str(getattr(row, "consent_status", "unreviewed") or "unreviewed"),
+        redaction_status=str(getattr(row, "redaction_status", "unreviewed") or "unreviewed"),
+        content_sha256=getattr(row, "content_sha256", None),
+        approved_at=(row.approved_at.isoformat() if getattr(row, "approved_at", None) else None),
+        approved_by_user_id=(
+            str(row.approved_by_user_id) if getattr(row, "approved_by_user_id", None) is not None else None
+        ),
         created_at=row.created_at.isoformat(),
     )

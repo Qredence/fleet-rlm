@@ -20,3 +20,5 @@ class FleetRepository(
     PersistenceProtocol,
 ):
     """Backward-compatible facade combining all domain repositories."""
+
+    supports_managed_dataset_versions = True

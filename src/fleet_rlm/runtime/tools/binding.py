@@ -154,6 +154,9 @@ def _bound_runtime_tool_factories(
 
     if volume_mount_path:
         skill_context = default_skill_runtime_context(volume_mount_path=volume_mount_path)
+        activated_markdown = dict(getattr(runtime, "activated_skill_markdown", None) or {})
+        if activated_markdown:
+            skill_context = skill_context.model_copy(update={"activated_skill_markdown": activated_markdown})
 
         def remember(key: str, value: str) -> dict[str, Any]:
             return _remember_impl(key, value, volume_mount_path=volume_mount_path, agent_depth=agent_depth)

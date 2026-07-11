@@ -9,7 +9,7 @@ from typing import Any
 
 import dspy
 
-from fleet_rlm.quality.module_registry import ModuleOptimizationSpec, register_module
+from fleet_rlm.quality.module_registry import MetricProfile, ModuleOptimizationSpec, register_module
 from fleet_rlm.quality.scoring_helpers import set_overlap_score
 from fleet_rlm.runtime.agent.signatures import (
     ClarificationQuestionSignature,
@@ -21,7 +21,7 @@ from fleet_rlm.runtime.agent.signatures import (
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RuntimeSignatureTarget:
     slug: str
     runtime_module_name: str
@@ -194,6 +194,7 @@ def spec_for_runtime_signature(target: RuntimeSignatureTarget) -> ModuleOptimiza
         signature_class_name=target.signature.__name__,
         output_keys=output_keys,
         optimization_target_kind="runtime-signature",
+        metric_profile=MetricProfile(profile_id=target.slug),
     )
 
 

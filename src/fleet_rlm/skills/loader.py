@@ -137,6 +137,9 @@ def load_skill_impl(
     context: SkillRuntimeContext | None = None,
 ) -> LoadSkillOutput:
     ctx = context or default_skill_runtime_context(volume_mount_path=volume_mount_path)
+    # Activated Markdown overrides must not be served from the uncached path cache.
+    if getattr(ctx, "activated_skill_markdown", None):
+        return _load_skill_impl_uncached(name, volume_mount_path=volume_mount_path, context=ctx)
     excluded = tuple(sorted(ctx.visibility.excluded_skill_ids))
     included = (
         tuple(sorted(ctx.visibility.included_skill_ids)) if ctx.visibility.included_skill_ids is not None else None
@@ -172,6 +175,12 @@ _load_skill_impl = load_skill_impl
 
 
 def _read_skill_instructions(metadata: SkillMetadata, *, context: SkillRuntimeContext) -> str:
+    activated = getattr(context, "activated_skill_markdown", None) or {}
+    if isinstance(activated, dict):
+        override = activated.get(metadata.name)
+        if isinstance(override, str) and override.strip():
+            return override
+
     if metadata.scope == SkillScope.SCAFFOLD:
         for dir_name, instructions in iter_scaffold_skill_markdown():
             frontmatter_name, _ = parse_skill_frontmatter(instructions)
