@@ -22,3 +22,7 @@ class Settings(BaseSettings):
     app_name: str = Field(default="fleet-rlm-clean")
     daytona_api_key: SecretStr | None = Field(default=None)
     llm_api_key: SecretStr | None = Field(default=None)
+    database_url: str | None = Field(
+        default=None,
+        description="Async SQLAlchemy URL (e.g. sqlite+aiosqlite:///:memory: or postgresql+asyncpg://...)",
+    )
