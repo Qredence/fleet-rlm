@@ -10,13 +10,43 @@ from uuid import uuid4
 from fleet_rlm_clean.chat.commands import ChatTurnCommand
 from fleet_rlm_clean.rlm.budgets import RLMBudget
 from fleet_rlm_clean.rlm.context import InterpreterLeaseLike, RLMTurnContext
-from fleet_rlm_clean.rlm.events import RuntimeEvent
+from fleet_rlm_clean.rlm.events import RuntimeEvent, RuntimeEventKind
 from fleet_rlm_clean.rlm.model_bundle import RLMModelBundle
 from fleet_rlm_clean.rlm.runner import RLMRunner
+from fleet_rlm_clean.sessions.history import turns_to_history
 
 
 class TurnRunner(Protocol):
     def stream(self, context: RLMTurnContext) -> AsyncIterator[RuntimeEvent]: ...
+
+
+class SessionStore(Protocol):
+    async def load(self, session_id: Any) -> Any: ...
+
+    async def begin_run(
+        self,
+        session_id: Any,
+        *,
+        idempotency_key: str | None = None,
+        run_id: Any | None = None,
+    ) -> Any: ...
+
+    async def append_completed_exchange(
+        self,
+        session_id: Any,
+        *,
+        user_text: str,
+        assistant_text: str,
+        run_id: Any | None = None,
+    ) -> Any: ...
+
+    async def finish_failed_run(
+        self,
+        session_id: Any,
+        run_id: Any,
+        *,
+        message: str | None = None,
+    ) -> Any: ...
 
 
 class _EphemeralLease:
@@ -57,20 +87,92 @@ class TurnCoordinator:
         *,
         runner: TurnRunner | None = None,
         context_builder: Callable[[ChatTurnCommand], RLMTurnContext] | None = None,
+        session_repository: SessionStore | None = None,
     ) -> None:
         self._runner: TurnRunner = runner if runner is not None else RLMRunner()
         self._context_builder = (
             context_builder if context_builder is not None else _default_kernel_context
         )
+        self._sessions = session_repository
 
     async def stream(self, command: ChatTurnCommand) -> AsyncIterator[RuntimeEvent]:
         """Stream public RuntimeEvents for a single chat command."""
         if not command.message or not command.message.strip():
             msg = "message is required"
             raise ValueError(msg)
+
         context = self._context_builder(command)
-        async for event in self._runner.stream(context):
-            yield event
+        if self._sessions is not None:
+            context = await self._attach_history(context, command)
+
+        terminal: RuntimeEvent | None = None
+        try:
+            async for event in self._runner.stream(context):
+                if event.kind in {RuntimeEventKind.RUN_COMPLETED, RuntimeEventKind.ERROR}:
+                    terminal = event
+                yield event
+        finally:
+            if self._sessions is not None:
+                await self._persist_terminal(command, context, terminal)
+
+    async def _attach_history(
+        self, context: RLMTurnContext, command: ChatTurnCommand
+    ) -> RLMTurnContext:
+        assert self._sessions is not None
+        snapshot = await self._sessions.load(command.session_id)
+        history = turns_to_history(snapshot.turns)
+        run_id = await self._sessions.begin_run(
+            command.session_id,
+            idempotency_key=command.idempotency_key or None,
+            run_id=context.run_id,
+        )
+        # frozen dataclass — rebuild with history + run_id from begin_run
+        return RLMTurnContext(
+            run_id=run_id,
+            session_id=context.session_id,
+            user_id=context.user_id,
+            workspace_id=context.workspace_id,
+            request=context.request,
+            models=context.models,
+            budget=context.budget,
+            lease=context.lease,
+            history=history,
+            session_summary=context.session_summary,
+            skill_cards=context.skill_cards,
+            attachments=context.attachments,
+            artifacts=context.artifacts,
+            tools=context.tools,
+        )
+
+    async def _persist_terminal(
+        self,
+        command: ChatTurnCommand,
+        context: RLMTurnContext,
+        terminal: RuntimeEvent | None,
+    ) -> None:
+        assert self._sessions is not None
+        if terminal is None:
+            await self._sessions.finish_failed_run(
+                command.session_id,
+                context.run_id,
+                message="stream ended without terminal event",
+            )
+            return
+        if terminal.kind == RuntimeEventKind.RUN_COMPLETED:
+            assistant = str(terminal.payload.get("assistant_text") or "")
+            await self._sessions.append_completed_exchange(
+                command.session_id,
+                user_text=command.message,
+                assistant_text=assistant,
+                run_id=context.run_id,
+            )
+            return
+        message = str(terminal.payload.get("message") or "turn failed")
+        await self._sessions.finish_failed_run(
+            command.session_id,
+            context.run_id,
+            message=message,
+        )
 
 
 def ephemeral_lease(interpreter: Any) -> InterpreterLeaseLike:
