@@ -34,6 +34,7 @@ Read these after you've seen the product:
 - [ADR-0003: API Chat AI SDK UIMessage Stream](adr/0003-api-chat-ai-sdk-uimessage-stream.md)
 - [ADR-0004: Chat Execution Context Seam](adr/0004-chat-execution-context-seam.md)
 - [ADR-0005: Execution Backend Seam](adr/0005-execution-backend-seam.md)
+- [ADR-0006: Offline GEPA Selection and Workspace-Scoped Activation](adr/0006-workspace-scoped-optimized-artifacts.md)
 
 ## Current Product Surfaces
 

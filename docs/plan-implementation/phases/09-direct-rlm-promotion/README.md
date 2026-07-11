@@ -14,6 +14,10 @@ attachments, artifact creation/readback, resumed sessions, runtime-event and
 trace-debug parity, optional MLflow spans, and configured live Daytona/LLM runs.
 The legacy runtime and WebSocket compatibility remain available during rollout.
 
+[Phase 8.5 — Persistence DB](../08.5-persistence-db/README.md) is **not** a
+promotion prerequisite. A cleaner `db/` package improves maintainability only;
+the live matrix and default-backend flip do not wait on that structural work.
+
 ### Required live matrix
 
 Run `scripts/validate_rlm_e2e_trace.py --promotion-gate` against two distinct

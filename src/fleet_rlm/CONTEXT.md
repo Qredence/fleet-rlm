@@ -19,3 +19,23 @@ _Avoid_: primary runtime, permanent duplicate implementation
 **Runtime Event**:
 The backend-neutral record of turn progress and completion consumed by observability and transport projection.
 _Avoid_: SSE part, WebSocket frame
+
+**Managed Target**:
+A server-registered DSPy module or catalog-resolved Skill with a versioned Metric Profile, proposer policy, concurrency cap, artifact codec, and promotion gates.
+_Avoid_: arbitrary import, filesystem target
+
+**Selection Set**:
+The explicit dataset partition passed to GEPA as `valset` and used during Pareto search. It is optimizer-visible and is not a holdout.
+_Avoid_: validation holdout, promotion set
+
+**Promotion Test**:
+The sealed dataset partition hidden from GEPA and evaluated once on the baseline and selected winner after compilation.
+_Avoid_: GEPA valset, selection set
+
+**Approved Artifact**:
+An immutable state-only JSON module artifact or Skill Markdown artifact that passed sealed-test and round-trip gates and received human approval. Approval does not activate it.
+_Avoid_: checkpoint, GEPA winner, active prompt
+
+**Activation Pointer**:
+The tenant- and workspace-scoped reference selecting an approved artifact for one Managed Target, with one retained previous version for rollback.
+_Avoid_: global default, promotion draft

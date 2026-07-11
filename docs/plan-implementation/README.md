@@ -16,8 +16,11 @@ detailed phase dossiers.
 4. Consult the canonical [architecture decision records](../adr/) for decisions;
    ADRs are linked, not copied into phase dossiers.
 
-The current implementation phase is [Phase 8 — GEPA quality](phases/08-gepa-quality/README.md).
-Direct RLM remains [promotion-gated in Phase 9](phases/09-direct-rlm-promotion/README.md).
+The current product phase is [Phase 8 — GEPA quality](phases/08-gepa-quality/README.md)
+(status `partial`). [Phase 8.5 — Persistence DB](phases/08.5-persistence-db/README.md)
+is planned structural work that may run in parallel when cheap and **must not
+gate** promotion. Direct RLM remains
+[promotion-gated in Phase 9](phases/09-direct-rlm-promotion/README.md).
 
 ## Status vocabulary
 
@@ -47,18 +50,25 @@ unchecked remediation criterion.
 5. [Phase 5 — Tools, artifacts, attachments](phases/05-tools-artifacts-attachments/README.md) — complete.
 6. [Phase 6 — Observability](phases/06-observability/README.md) — complete.
 7. [Phase 7 — Typed config](phases/07-typed-config/README.md) — complete in `f61fd045`.
-8. [Phase 8 — GEPA quality](phases/08-gepa-quality/README.md) — planned.
+8. [Phase 8 — GEPA quality](phases/08-gepa-quality/README.md) — partial.
+8.5. [Phase 8.5 — Persistence DB package](phases/08.5-persistence-db/README.md) — planned (structural; non-blocking for Phase 9).
 9. [Phase 9 — Direct RLM promotion](phases/09-direct-rlm-promotion/README.md) — promotion gated.
 10. [Phase 10 — Frontend SSE and cleanup](phases/10-frontend-sse-cleanup/README.md) — planned.
 
 ## Dependency path
 
 ```text
+Product critical path:
 Phase 6 observability
   -> Phase 7 typed configuration
-  -> Phase 8 offline GEPA quality
+  -> Phase 8 offline GEPA quality (product)
   -> Phase 9 direct-RLM promotion evidence and default switch
   -> Phase 10 frontend SSE adoption and evidence-backed legacy cleanup
+
+Structural side path (non-blocking for Phase 9):
+Phase 8.5A model registry + db package move + re-exports
+  -> Phase 8.5B optional tiny model domain merge (ops.py)
+  parallel after Phase 8 schema freeze, or between 8 and 9 only if cheap
 ```
 
 Completed phases remain prerequisites where their public contracts are consumed.
@@ -88,6 +98,10 @@ acceptance criteria, and validation evidence. Across all phases:
 - MLflow is optional and disabled unless configured; default tests do not need it.
 - GEPA and other optimization work remain outside normal `/api/chat` turns.
 - Config work begins with the Phase 7 audit and has no import-time side effects.
+- Postgres/Neon is the durable system of record; LocalStore remains a limited
+  dual backend for dev/test and must not be treated as full Neon parity.
+- Persistence package moves (Phase 8.5) are behavior-preserving, produce no
+  intentional schema delta, and do not gate direct-RLM promotion.
 
 ## Maintaining the module
 

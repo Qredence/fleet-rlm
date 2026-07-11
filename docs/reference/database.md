@@ -15,6 +15,15 @@ tenant + workspace scoped, and all new primary keys are generated with `app.uuid
 | Typed request DTOs | Domain-specific dataclasses in `repository_*.py` modules |
 | Alembic migrations | `migrations/versions/` |
 
+## Roadmap
+
+[Phase 8.5 — Persistence DB](../plan-implementation/phases/08.5-persistence-db/README.md)
+plans a behavior-preserving move to `src/fleet_rlm/db/` (domain `models/` +
+`repos/`, one Alembic registry, temporary re-exports from
+`integrations/database`). Until that phase’s code lands, the table above is the
+live layout. Postgres remains the system of record; LocalStore stays a limited
+dual backend and is not required to match Neon capability.
+
 ## Schema Baseline
 
 `0010_target_postgres_schema` is a clean-break baseline migration:

@@ -21,6 +21,7 @@ EXPECTED_DOSSIERS = (
     "06-observability",
     "07-typed-config",
     "08-gepa-quality",
+    "08.5-persistence-db",
     "09-direct-rlm-promotion",
     "10-frontend-sse-cleanup",
 )
@@ -74,6 +75,9 @@ TRACK_BY_CODE: dict[str, str] = {
     "6": "Observability",
     "7": "Config",
     "8": "Config",
+    "8.5": "Persistence",
+    "8.5A": "Persistence",
+    "8.5B": "Persistence",
     "10": "Frontend",
 }
 
