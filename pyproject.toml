@@ -161,6 +161,7 @@ namespaces = false
 [tool.setuptools.package-data]
 "fleet_rlm.integrations.config" = ["*.yaml", "*.yml"]
 "fleet_rlm" = ["py.typed"]
+"fleet_rlm_clean" = ["py.typed"]
 "fleet_rlm.ui" = ["dist/**/*", "dist/*"]
 "fleet_rlm.scaffold" = [
     "skills/README.md",
@@ -295,7 +296,7 @@ builtins-ignorelist = []
 convention = "google"  # Use Google-style docstrings
 
 [tool.ruff.lint.isort]
-known-first-party = ["fleet_rlm"]
+known-first-party = ["fleet_rlm", "fleet_rlm_clean"]
 known-third-party = ["dspy", "daytona"]
 force-single-line = false
 
@@ -321,7 +322,7 @@ ignore = ["DEP001", "DEP002"]
 # Mark dev extra as development dependencies
 pep621_dev_dependency_groups = ["dev"]
 # Known first-party modules
-known_first_party = ["fleet_rlm"]
+known_first_party = ["fleet_rlm", "fleet_rlm_clean"]
 
 [tool.deptry.package_module_name_map]
 pydantic-settings = "pydantic_settings"

@@ -4,6 +4,11 @@ This directory is the canonical planning package for rebuilding the Fleet RLM ba
 
 It does not preserve migration-era runtime parity, WebSocket transcript compatibility, backend-selection machinery, or the `DirectRLMRunner` name. The existing parent-directory dossiers remain historical migration evidence; this clean-backend package is the source of truth for a greenfield implementation.
 
+**Delivery path until cutover:** implement tickets in the parallel package
+`src/fleet_rlm_clean/` so the live `src/fleet_rlm/` backend stays untouched.
+Cutover replaces or retires the migration package only after foundation
+evidence passes.
+
 ## Product kernel
 
 ```text

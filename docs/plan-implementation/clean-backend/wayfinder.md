@@ -20,6 +20,7 @@ If it does none of those things, defer it.
 | What blocks approval? | `code-review.md` |
 | What do current frameworks guarantee? | `context7-contracts.md` |
 | What supersedes the migration roadmap for a clean build? | This directory |
+| Where is code delivered before cutover? | `src/fleet_rlm_clean/` (live `src/fleet_rlm/` stays untouched) |
 
 ## Priority ladder
 

@@ -29,14 +29,14 @@ A dependency change requires contract tests for DSPy RLM construction, FastAPI S
 
 Create the import-safe package, typed configuration, and framework contract tests.
 
-**Files**
+**Files** (parallel package until cutover)
 
 ```text
-src/fleet_rlm/__init__.py
-src/fleet_rlm/app.py
-src/fleet_rlm/config.py
-tests/unit/test_import_safety.py
-tests/contracts/test_framework_contracts.py
+src/fleet_rlm_clean/__init__.py
+src/fleet_rlm_clean/app.py
+src/fleet_rlm_clean/config.py
+tests/unit/clean_backend/test_import_safety.py
+tests/contracts/clean_backend/test_framework_contracts.py
 ```
 
 **Acceptance**
