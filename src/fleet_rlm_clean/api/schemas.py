@@ -59,3 +59,16 @@ class ArtifactResponse(BaseModel):
     byte_size: int
     checksum_sha256: str
 
+
+class SkillCardResponse(BaseModel):
+    """Bounded Skill discovery metadata — no instructions body."""
+
+    id: UUID
+    name: str
+    description: str
+    scope: str
+    version: str
+    trust: str
+    affordances: list[str]
+    resources_available: bool
+

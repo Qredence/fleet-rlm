@@ -22,8 +22,8 @@ class InterpreterLeaseLike(Protocol):
 class RLMTurnContext:
     """Everything required to execute one recursive turn.
 
-    Skill/attachment/artifact types stay opaque until Phase 3 packages land;
-    the kernel uses empty tuples.
+    ``skill_cards`` holds authorized SkillCard-like metadata (no instruction bodies).
+    Attachment/artifact refs remain opaque until wired into the runner tools.
     """
 
     run_id: UUID

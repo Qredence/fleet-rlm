@@ -22,8 +22,10 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     from fleet_rlm_clean.api.routes.artifacts import router as artifacts_router
     from fleet_rlm_clean.api.routes.chat import router as chat_router
     from fleet_rlm_clean.api.routes.files import router as files_router
+    from fleet_rlm_clean.api.routes.skills import router as skills_router
 
     app.include_router(chat_router)
     app.include_router(files_router)
     app.include_router(artifacts_router)
+    app.include_router(skills_router)
     return app
