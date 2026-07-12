@@ -36,9 +36,7 @@ def _fresh_cancel_registry() -> Any:
 
 def test_sanitize_redacts_secrets_dsns_paths_stacks() -> None:
     assert "[redacted]" in sanitize_public_error("api_key=sk-abc123secret")
-    assert "[redacted-dsn]" in sanitize_public_error(
-        "failed postgres://user:pass@host:5432/db"
-    )
+    assert "[redacted-dsn]" in sanitize_public_error("failed postgres://user:pass@host:5432/db")
     assert "[path]" in sanitize_public_error("open /Users/zocho/secret.txt")
     assert sanitize_public_error('Traceback (most recent call last):\n  File "x.py"') == "Turn failed"
     assert sanitize_public_error(TurnCancelled()) == "Turn cancelled"
@@ -109,7 +107,7 @@ async def test_runner_honors_cancel_before_execute() -> None:
 async def test_runner_timeout_maps_to_stable_status() -> None:
     class SlowFactory:
         def create(self, **kwargs: Any) -> Any:
-            def slow_rlm(*, request: str) -> Any:
+            def slow_rlm(*, request: str, **_kwargs: Any) -> Any:
                 import time
 
                 time.sleep(2)
@@ -136,7 +134,7 @@ async def test_runner_timeout_maps_to_stable_status() -> None:
 async def test_runner_budget_error_maps_to_budget_exhausted() -> None:
     class BudgetFactory:
         def create(self, **kwargs: Any) -> Any:
-            def boom(*, request: str) -> Any:
+            def boom(*, request: str, **_kwargs: Any) -> Any:
                 raise TurnBudgetExhausted()
 
             return boom
@@ -228,10 +226,7 @@ async def test_failed_turn_does_not_advance_checkpoint() -> None:
         session_repository=Store(),  # type: ignore[arg-type]
     )
     events = [
-        e
-        async for e in coord.stream(
-            ChatTurnCommand(user_id=owner, workspace_id=ws, session_id=sid, message="hi")
-        )
+        e async for e in coord.stream(ChatTurnCommand(user_id=owner, workspace_id=ws, session_id=sid, message="hi"))
     ]
     assert events[-1].kind == RuntimeEventKind.ERROR
     assert calls["append"] == 0

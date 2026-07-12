@@ -132,9 +132,7 @@ def test_observability_trace_and_safe_export() -> None:
     apply_event_to_trace(trace, "attachment.read", {"attachment_id": "a1"})
     apply_event_to_trace(trace, "artifact.created", {"artifact_id": "art1"})
     apply_event_to_trace(trace, "usage", {"usage": {"tokens": 3}})
-    apply_event_to_trace(
-        trace, "run.completed", {"status": "completed", "duration_ms": 12}
-    )
+    apply_event_to_trace(trace, "run.completed", {"status": "completed", "duration_ms": 12})
     assert trace.skill_ids == ["s1"]
     assert trace.attachment_ids == ["a1"]
     assert trace.artifact_ids == ["art1"]
@@ -154,7 +152,7 @@ async def test_runner_records_trace_via_exporter() -> None:
 
     class Factory:
         def create(self, **kwargs: Any) -> Any:
-            def rlm(*, request: str) -> Any:
+            def rlm(*, request: str, **_kwargs: Any) -> Any:
                 return MagicMock(answer="ok", get_lm_usage=MagicMock(return_value={"n": 1}))
 
             return rlm
@@ -174,9 +172,7 @@ async def test_runner_records_trace_via_exporter() -> None:
     context.lease.volume_id = "vol"  # type: ignore[attr-defined]
     context.lease.mount_path = "/home/daytona/fleet"  # type: ignore[attr-defined]
 
-    events = [
-        e async for e in RLMRunner(factory=Factory(), turn_exporter=store).stream(context)
-    ]
+    events = [e async for e in RLMRunner(factory=Factory(), turn_exporter=store).stream(context)]
     assert events[-1].kind == RuntimeEventKind.RUN_COMPLETED
     assert len(store.traces) == 1
     assert store.traces[0].terminal_status == "completed"

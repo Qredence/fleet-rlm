@@ -19,6 +19,7 @@ from fleet_rlm_clean.rlm.errors import (
 )
 from fleet_rlm_clean.rlm.events import EventRecorder, RuntimeEvent, RuntimeEventKind
 from fleet_rlm_clean.rlm.factory import RLMFactory
+from fleet_rlm_clean.rlm.inputs import build_rlm_input_kwargs
 from fleet_rlm_clean.rlm.sanitize import sanitize_public_error
 
 
@@ -287,8 +288,15 @@ class RLMRunner:
 
     async def _execute_rlm(self, rlm: Any, context: RLMTurnContext) -> Any:
         """Apply root LM via scoped DSPy context; run off the event loop when sync."""
+
         root_lm = context.models.root_lm
-        request = context.request
+        call_kwargs = build_rlm_input_kwargs(
+            request=context.request,
+            history=context.history,
+            session_summary=context.session_summary,
+            skill_cards=context.skill_cards,
+            attachments=context.attachments,
+        )
         _raise_if_cancelled(context.run_id)
 
         aforward = getattr(rlm, "aforward", None)
@@ -296,17 +304,17 @@ class RLMRunner:
 
             async def _async_call() -> Any:
                 with dspy.settings.context(lm=root_lm):
-                    return await aforward(request=request)
+                    return await aforward(**call_kwargs)
 
             return await _async_call()
 
         def _sync_call() -> Any:
             with dspy.settings.context(lm=root_lm):
                 if callable(rlm):
-                    return rlm(request=request)
+                    return rlm(**call_kwargs)
                 forward = getattr(rlm, "forward", None)
                 if callable(forward):
-                    return forward(request=request)
+                    return forward(**call_kwargs)
                 msg = "RLM module is not callable"
                 raise TypeError(msg)
 
