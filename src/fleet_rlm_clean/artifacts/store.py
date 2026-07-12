@@ -1,4 +1,4 @@
-"""Atomic local blob store for durable artifacts (offline / Volume host cache)."""
+"""Atomic local blob store for durable artifacts (catalog + Volume promote)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from threading import Lock
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -20,10 +21,16 @@ from fleet_rlm_clean.artifacts.safety import (
     validate_content_size,
 )
 from fleet_rlm_clean.daytona.paths import VolumePaths, as_posix
+from fleet_rlm_clean.daytona.volume_fs import VolumeBlobFs
 
 
 class LocalArtifactStore:
-    """Store artifact blobs + metadata under a host root (never exposed publicly)."""
+    """Store artifact catalog under a host root; promote bytes into Volume scope.
+
+    Host ``root`` is a hermetic offline catalog. When ``volume_fs`` is set, durable
+    blob+meta are written under Workspace Volume Scope (``artifacts/{id}/``) and
+    the run-scoped logical sandbox path.
+    """
 
     def __init__(
         self,
@@ -31,10 +38,13 @@ class LocalArtifactStore:
         *,
         max_bytes: int,
         volume_paths: VolumePaths | None = None,
+        volume_fs: VolumeBlobFs | None = None,
     ) -> None:
         self.root = Path(root)
         self.max_bytes = max_bytes
         self._paths = volume_paths or VolumePaths.from_mount()
+        self._volume_fs = volume_fs
+        self._write_lock = Lock()
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _meta_path(self, artifact_id: UUID) -> Path:
@@ -70,15 +80,10 @@ class LocalArtifactStore:
         """Create under a session write guard so concurrent creates stay deterministic.
 
         Content is stored under a unique artifact id; logical Volume path is
-        run-scoped (sessions/{sid}/runs/{rid}/artifacts/{id}.ext).
+        run-scoped (sessions/{sid}/runs/{rid}/artifacts/{id}.ext) with a durable
+        workspace copy under artifacts/{id}/ when volume_fs is configured.
         """
-        # Thread-safe lock for concurrent host-side writers (sync API).
-        from threading import Lock
-
-        if not hasattr(self, "_write_lock"):
-            self._write_lock = Lock()  # type: ignore[attr-defined]
-
-        with self._write_lock:  # type: ignore[attr-defined]
+        with self._write_lock:
             return self._create_unlocked(
                 user_id=user_id,
                 workspace_id=workspace_id,
@@ -114,6 +119,8 @@ class LocalArtifactStore:
             artifact_id=artifact_id,
             kind=parsed_kind,
         )
+        durable_blob = as_posix(self._paths.artifact_blob_path(artifact_id))
+        durable_meta = as_posix(self._paths.artifact_meta_path(artifact_id))
 
         blob = self._blob_path(artifact_id)
         meta = self._meta_path(artifact_id)
@@ -145,6 +152,7 @@ class LocalArtifactStore:
             # Private fields — never return in API
             "storage_key": f"{artifact_id}.bin",
             "sandbox_path": sandbox_path,
+            "volume_blob_path": durable_blob,
         }
         try:
             meta.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
@@ -154,6 +162,14 @@ class LocalArtifactStore:
             except OSError:
                 pass
             raise
+
+        if self._volume_fs is not None:
+            self._volume_fs.write_bytes(sandbox_path, data)
+            self._volume_fs.write_bytes(durable_blob, data)
+            self._volume_fs.write_bytes(
+                durable_meta,
+                (json.dumps(record, indent=2) + "\n").encode("utf-8"),
+            )
 
         return ArtifactRef(
             id=artifact_id,
@@ -203,7 +219,11 @@ class LocalArtifactStore:
         user_id: UUID,
         workspace_id: UUID,
     ) -> bytes:
-        self.get(artifact_id, user_id=user_id, workspace_id=workspace_id)
+        record = self._load_record(artifact_id)
+        self._authorize(record, user_id=user_id, workspace_id=workspace_id)
+        volume_blob = record.get("volume_blob_path")
+        if self._volume_fs is not None and isinstance(volume_blob, str) and self._volume_fs.exists(volume_blob):
+            return self._volume_fs.read_bytes(volume_blob)
         blob = self._blob_path(artifact_id)
         if not blob.is_file():
             raise ArtifactNotFoundError("artifact not found")
@@ -223,3 +243,18 @@ class LocalArtifactStore:
         if not path or not isinstance(path, str):
             raise ArtifactValidationError("missing sandbox path metadata")
         return path
+
+    def durable_volume_blob_path(
+        self,
+        artifact_id: UUID,
+        *,
+        user_id: UUID,
+        workspace_id: UUID,
+    ) -> str:
+        """Internal: Fleet durable Artifact path under Workspace Volume Scope."""
+        record = self._load_record(artifact_id)
+        self._authorize(record, user_id=user_id, workspace_id=workspace_id)
+        path = record.get("volume_blob_path")
+        if isinstance(path, str) and path:
+            return path
+        return as_posix(self._paths.artifact_blob_path(artifact_id))

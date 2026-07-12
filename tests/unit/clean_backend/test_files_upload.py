@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm_clean.app import create_app
 from fleet_rlm_clean.config import Settings
+from fleet_rlm_clean.daytona.volume_fs import HostVolumeMirror
 from fleet_rlm_clean.files.errors import AttachmentNotFoundError, AttachmentValidationError
 from fleet_rlm_clean.files.safety import sanitize_filename, validate_upload_size
 from fleet_rlm_clean.files.staging import AttachmentStager
@@ -57,8 +58,14 @@ def test_local_store_upload_and_reauth(tmp_path: Path) -> None:
 
 
 def test_stage_returns_fleet_sandbox_path_only(tmp_path: Path) -> None:
-    store = LocalAttachmentStore(tmp_path / "blobs", max_bytes=1024)
-    stager = AttachmentStager(store, host_stage_root=tmp_path / "stage")
+    mirror = HostVolumeMirror(tmp_path / "volume")
+    store = LocalAttachmentStore(
+        tmp_path / "blobs",
+        max_bytes=1024,
+        volume_fs=mirror,
+        volume_paths=mirror.volume_paths,
+    )
+    stager = AttachmentStager(store, volume_fs=mirror, volume_paths=mirror.volume_paths)
     user, ws = uuid4(), uuid4()
     ref = store.upload(
         user_id=user,
@@ -79,8 +86,9 @@ def test_stage_returns_fleet_sandbox_path_only(tmp_path: Path) -> None:
     assert str(ref.id) in staged.sandbox_path
     assert "doc.txt" in staged.sandbox_path
     assert not staged.sandbox_path.startswith(str(tmp_path))
-    # host mirror exists for offline tests
-    assert list((tmp_path / "stage").rglob("doc.txt"))
+    # Workspace Volume Scope mirror has the staged bytes
+    assert mirror.exists(staged.sandbox_path)
+    assert mirror.read_bytes(staged.sandbox_path) == b"payload"
 
 
 def test_api_upload_get_and_stage_no_path_leak(tmp_path: Path) -> None:

@@ -14,12 +14,27 @@ from fleet_rlm_clean.artifacts.errors import ArtifactNotFoundError, ArtifactVali
 from fleet_rlm_clean.artifacts.models import ArtifactRef
 from fleet_rlm_clean.artifacts.store import LocalArtifactStore
 from fleet_rlm_clean.config import Settings
+from fleet_rlm_clean.daytona.paths import volume_paths_from_settings
+from fleet_rlm_clean.daytona.volume_fs import HostVolumeMirror
 
 router = APIRouter(tags=["artifacts"])
 
 
 def _settings(request: Request) -> Settings:
     return getattr(request.app.state, "settings", None) or Settings()
+
+
+def _workspace_volume_mirror(request: Request, settings: Settings) -> HostVolumeMirror:
+    mirror = getattr(request.app.state, "workspace_volume_mirror", None)
+    if mirror is not None:
+        return mirror
+    upload_root = settings.upload_root or str(Path.cwd() / ".fleet_clean_uploads")
+    mirror = HostVolumeMirror(
+        Path(upload_root) / "_workspace_volume",
+        volume_paths=volume_paths_from_settings(settings),
+    )
+    request.app.state.workspace_volume_mirror = mirror
+    return mirror
 
 
 def get_artifact_store(request: Request) -> LocalArtifactStore:
@@ -33,7 +48,13 @@ def get_artifact_store(request: Request) -> LocalArtifactStore:
         root = str(Path(settings.upload_root).parent / "artifacts")
     else:
         root = str(Path.cwd() / ".fleet_clean_artifacts")
-    store = LocalArtifactStore(root, max_bytes=settings.max_artifact_bytes)
+    mirror = _workspace_volume_mirror(request, settings)
+    store = LocalArtifactStore(
+        root,
+        max_bytes=settings.max_artifact_bytes,
+        volume_fs=mirror,
+        volume_paths=mirror.volume_paths,
+    )
     request.app.state.artifact_store = store
     return store
 

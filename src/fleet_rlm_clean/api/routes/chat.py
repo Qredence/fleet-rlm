@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
@@ -14,27 +15,45 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fleet_rlm_clean.api.identity import RequestIdentity, get_request_identity
 from fleet_rlm_clean.api.schemas import ChatRequest
 from fleet_rlm_clean.api.sse import SSEProjector, _event_to_public_dict
+from fleet_rlm_clean.artifacts.store import LocalArtifactStore
 from fleet_rlm_clean.chat.commands import ChatTurnCommand
 from fleet_rlm_clean.chat.turn_coordinator import TurnCoordinator
+from fleet_rlm_clean.config import Settings
+from fleet_rlm_clean.daytona.paths import volume_paths_from_settings
+from fleet_rlm_clean.daytona.volume_fs import HostVolumeMirror
+from fleet_rlm_clean.files.uploads import LocalAttachmentStore
 from fleet_rlm_clean.rlm.events import RuntimeEvent
 from fleet_rlm_clean.sessions.errors import SessionNotFoundError
 
 router = APIRouter(tags=["chat"])
 
 
+def _workspace_volume_mirror(request: Request, settings: Settings) -> HostVolumeMirror:
+    mirror = getattr(request.app.state, "workspace_volume_mirror", None)
+    if mirror is not None:
+        return mirror
+    upload_root = settings.upload_root or str(Path.cwd() / ".fleet_clean_uploads")
+    mirror = HostVolumeMirror(
+        Path(upload_root) / "_workspace_volume",
+        volume_paths=volume_paths_from_settings(settings),
+    )
+    request.app.state.workspace_volume_mirror = mirror
+    return mirror
+
+
 def _default_file_stores(request: Request) -> tuple[Any, Any]:
     """Lazy host stores matching files/artifacts route defaults."""
-    from pathlib import Path
-
-    from fleet_rlm_clean.artifacts.store import LocalArtifactStore
-    from fleet_rlm_clean.config import Settings
-    from fleet_rlm_clean.files.uploads import LocalAttachmentStore
-
     settings = getattr(request.app.state, "settings", None) or Settings()
+    mirror = _workspace_volume_mirror(request, settings)
     attachment_store = getattr(request.app.state, "attachment_store", None)
     if attachment_store is None:
         root = settings.upload_root or str(Path.cwd() / ".fleet_clean_uploads")
-        attachment_store = LocalAttachmentStore(root, max_bytes=settings.max_upload_bytes)
+        attachment_store = LocalAttachmentStore(
+            root,
+            max_bytes=settings.max_upload_bytes,
+            volume_fs=mirror,
+            volume_paths=mirror.volume_paths,
+        )
         request.app.state.attachment_store = attachment_store
     artifact_store = getattr(request.app.state, "artifact_store", None)
     if artifact_store is None:
@@ -44,7 +63,12 @@ def _default_file_stores(request: Request) -> tuple[Any, Any]:
             art_root = str(Path(settings.upload_root).parent / "artifacts")
         else:
             art_root = str(Path.cwd() / ".fleet_clean_artifacts")
-        artifact_store = LocalArtifactStore(art_root, max_bytes=settings.max_artifact_bytes)
+        artifact_store = LocalArtifactStore(
+            art_root,
+            max_bytes=settings.max_artifact_bytes,
+            volume_fs=mirror,
+            volume_paths=mirror.volume_paths,
+        )
         request.app.state.artifact_store = artifact_store
     return attachment_store, artifact_store
 

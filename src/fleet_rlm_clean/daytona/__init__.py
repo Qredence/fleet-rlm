@@ -14,6 +14,7 @@ from fleet_rlm_clean.daytona.paths import (
     VolumePaths,
 )
 from fleet_rlm_clean.daytona.session_manager import DaytonaSessionManager, LeaseRequest
+from fleet_rlm_clean.daytona.volume_fs import DaytonaSandboxVolumeFs, HostVolumeMirror
 from fleet_rlm_clean.daytona.volumes import DEFAULT_VOLUME_NAME, VolumeConfig
 
 __all__ = [
@@ -21,7 +22,9 @@ __all__ = [
     "DEFAULT_VOLUME_NAME",
     "DaytonaAdapterError",
     "DaytonaCodeInterpreter",
+    "DaytonaSandboxVolumeFs",
     "DaytonaSessionManager",
+    "HostVolumeMirror",
     "InMemoryBindingStore",
     "InterpreterLease",
     "LeaseRequest",

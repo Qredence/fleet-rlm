@@ -15,6 +15,8 @@ from fleet_rlm_clean.api.schemas import (
     StagedAttachmentResponse,
 )
 from fleet_rlm_clean.config import Settings
+from fleet_rlm_clean.daytona.paths import volume_paths_from_settings
+from fleet_rlm_clean.daytona.volume_fs import HostVolumeMirror
 from fleet_rlm_clean.files.errors import AttachmentNotFoundError, AttachmentValidationError
 from fleet_rlm_clean.files.staging import AttachmentStager
 from fleet_rlm_clean.files.uploads import LocalAttachmentStore
@@ -26,13 +28,33 @@ def _settings(request: Request) -> Settings:
     return getattr(request.app.state, "settings", None) or Settings()
 
 
+def _workspace_volume_mirror(request: Request, settings: Settings) -> HostVolumeMirror:
+    mirror = getattr(request.app.state, "workspace_volume_mirror", None)
+    if mirror is not None:
+        return mirror
+    upload_root = settings.upload_root or str(Path.cwd() / ".fleet_clean_uploads")
+    # Offline / process-local stand-in for Workspace Volume Scope (not production SoT).
+    mirror = HostVolumeMirror(
+        Path(upload_root) / "_workspace_volume",
+        volume_paths=volume_paths_from_settings(settings),
+    )
+    request.app.state.workspace_volume_mirror = mirror
+    return mirror
+
+
 def get_attachment_store(request: Request) -> LocalAttachmentStore:
     store = getattr(request.app.state, "attachment_store", None)
     if store is not None:
         return store
     settings = _settings(request)
     root = settings.upload_root or str(Path.cwd() / ".fleet_clean_uploads")
-    store = LocalAttachmentStore(root, max_bytes=settings.max_upload_bytes)
+    mirror = _workspace_volume_mirror(request, settings)
+    store = LocalAttachmentStore(
+        root,
+        max_bytes=settings.max_upload_bytes,
+        volume_fs=mirror,
+        volume_paths=mirror.volume_paths,
+    )
     request.app.state.attachment_store = store
     return store
 
@@ -45,8 +67,12 @@ def get_attachment_stager(
     if stager is not None:
         return stager
     settings = _settings(request)
-    host_stage = settings.upload_root or str(Path.cwd() / ".fleet_clean_uploads")
-    stager = AttachmentStager(store, host_stage_root=Path(host_stage) / "_stage")
+    mirror = _workspace_volume_mirror(request, settings)
+    stager = AttachmentStager(
+        store,
+        volume_fs=mirror,
+        volume_paths=mirror.volume_paths,
+    )
     request.app.state.attachment_stager = stager
     return stager
 
@@ -85,9 +111,7 @@ async def get_file(
     store: Annotated[LocalAttachmentStore, Depends(get_attachment_store)],
 ) -> AttachmentResponse:
     try:
-        ref = store.get(
-            file_id, user_id=identity.user_id, workspace_id=identity.workspace_id
-        )
+        ref = store.get(file_id, user_id=identity.user_id, workspace_id=identity.workspace_id)
     except AttachmentNotFoundError as exc:
         raise HTTPException(status_code=404, detail="attachment not found") from exc
     return AttachmentResponse(

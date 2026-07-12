@@ -172,6 +172,46 @@ class VolumePaths:
         """Run-scoped durable artifacts: sessions/{session}/runs/{run}/artifacts/."""
         return resolve_under_root(self.run_dir(session_id, run_id), "artifacts")
 
+    def attachment_dir(self, attachment_id: str | UUID) -> PurePosixPath:
+        """Durable Attachment catalog root: attachments/{attachment_id}/."""
+        aid = validate_path_id(attachment_id, label="attachment_id")
+        return resolve_under_root(self.mount_path, "attachments", aid)
+
+    def attachment_blob_path(self, attachment_id: str | UUID) -> PurePosixPath:
+        return resolve_under_root(self.attachment_dir(attachment_id), "blob")
+
+    def attachment_meta_path(self, attachment_id: str | UUID) -> PurePosixPath:
+        return resolve_under_root(self.attachment_dir(attachment_id), "meta.json")
+
+    def run_attachment_file(
+        self,
+        session_id: str | UUID,
+        run_id: str | UUID,
+        attachment_id: str | UUID,
+        filename: str,
+    ) -> PurePosixPath:
+        """Run-scoped staged Attachment: sessions/.../attachments/{id}/{filename}."""
+        if not filename or "/" in filename or "\\" in filename or filename in {".", ".."}:
+            raise UnsafePathError("unsafe attachment filename")
+        aid = validate_path_id(attachment_id, label="attachment_id")
+        return resolve_under_root(
+            self.run_dir(session_id, run_id),
+            "attachments",
+            aid,
+            filename,
+        )
+
+    def artifact_dir(self, artifact_id: str | UUID) -> PurePosixPath:
+        """Workspace-durable Artifact root: artifacts/{artifact_id}/."""
+        aid = validate_path_id(artifact_id, label="artifact_id")
+        return resolve_under_root(self.mount_path, "artifacts", aid)
+
+    def artifact_blob_path(self, artifact_id: str | UUID) -> PurePosixPath:
+        return resolve_under_root(self.artifact_dir(artifact_id), "blob")
+
+    def artifact_meta_path(self, artifact_id: str | UUID) -> PurePosixPath:
+        return resolve_under_root(self.artifact_dir(artifact_id), "meta.json")
+
 
 def as_posix(path: PurePosixPath | str) -> str:
     """String form for tool payloads and Sandbox APIs."""
