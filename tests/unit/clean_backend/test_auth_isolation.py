@@ -60,11 +60,24 @@ def test_dev_mode_headers(tmp_path=None) -> None:
 
 
 def test_neon_mode_rejects_missing_bearer() -> None:
-    app = create_app(settings=Settings(auth_mode="neon"))
+    app = create_app(
+        settings=Settings(
+            auth_mode="neon",
+            neon_auth_url="https://example.test/neondb/auth",
+        )
+    )
     client = TestClient(app)
     r = client.post("/api/chat", json={"message": "hi"})
     assert r.status_code == 401
-    assert "Bearer" in r.json()["detail"] or "bearer" in r.json()["detail"].lower()
+    assert r.json()["detail"] == "authentication required"
+
+
+def test_neon_mode_empty_url_is_unavailable() -> None:
+    app = create_app(settings=Settings(auth_mode="neon", neon_auth_url=""))
+    client = TestClient(app)
+    r = client.post("/api/chat", json={"message": "hi"}, headers={"Authorization": "Bearer x"})
+    assert r.status_code == 503
+    assert r.json()["detail"] == "authentication unavailable"
 
 
 def test_neon_mode_accepts_injected_verifier() -> None:
@@ -74,7 +87,7 @@ def test_neon_mode_accepts_injected_verifier() -> None:
     class FakeVerifier:
         async def authenticate_bearer(self, authorization: str | None) -> NeonClaims:
             if not authorization or "good-token" not in authorization:
-                raise AuthError("bad", status_code=401)
+                raise AuthError("bad", status_code=401, kind="invalid")
             return NeonClaims(
                 subject=user_sub,
                 email="a@b.co",
@@ -82,7 +95,7 @@ def test_neon_mode_accepts_injected_verifier() -> None:
                 raw={"sub": user_sub},
             )
 
-    app = create_app(settings=Settings(auth_mode="neon"))
+    app = create_app(settings=Settings(auth_mode="neon", neon_auth_url=""))
     app.state.auth_verifier = FakeVerifier()
     client = TestClient(app)
     r = client.post(
@@ -103,6 +116,8 @@ def test_neon_mode_accepts_injected_verifier() -> None:
         json={"message": "hello"},
     )
     assert r2.status_code == 401
+    assert r2.json()["detail"] == "invalid token"
+    assert "bad" not in r2.json()["detail"]
 
     # workspace header mismatch → 403
     r3 = client.post(
@@ -114,6 +129,7 @@ def test_neon_mode_accepts_injected_verifier() -> None:
         json={"message": "hello"},
     )
     assert r3.status_code == 403
+    assert r3.json()["detail"] == "workspace header does not match authenticated tenant"
 
 
 def test_auth_mode_unknown_fails_closed() -> None:

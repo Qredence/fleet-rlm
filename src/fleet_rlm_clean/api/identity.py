@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Annotated, Literal
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from fastapi import Depends, Header, HTTPException, Request
 
-from fleet_rlm_clean.api.auth_errors import AuthError
+from fleet_rlm_clean.api.auth_errors import (
+    PUBLIC_WORKSPACE_MISMATCH_DETAIL,
+    AuthError,
+)
 from fleet_rlm_clean.api.neon_auth import (
-    DEFAULT_NEON_AUTH_URL,
     NeonAuthVerifier,
     subject_to_user_id,
     tenant_to_workspace_id,
 )
 from fleet_rlm_clean.config import Settings
+
+logger = logging.getLogger(__name__)
 
 # Stable defaults so local/dev runs are deterministic without Neon.
 _DEFAULT_USER = uuid5(NAMESPACE_URL, "fleet-rlm-clean/dev-user")
@@ -39,6 +44,27 @@ def _settings(request: Request) -> Settings:
     return getattr(request.app.state, "settings", None) or Settings()
 
 
+def _correlation_id(request: Request) -> str:
+    for header in ("x-request-id", "x-correlation-id"):
+        value = request.headers.get(header)
+        if value and value.strip():
+            return value.strip()
+    return str(uuid4())
+
+
+def _raise_public_auth_error(request: Request, exc: AuthError) -> NoReturn:
+    """Log internal cause; raise allowlisted public HTTPException."""
+    cid = _correlation_id(request)
+    logger.warning(
+        "auth_failure correlation_id=%s status=%s kind=%s cause=%s",
+        cid,
+        exc.status_code,
+        exc.kind,
+        exc.message,
+    )
+    raise HTTPException(status_code=exc.status_code, detail=exc.public_detail) from exc
+
+
 def _get_verifier(request: Request, settings: Settings) -> NeonAuthVerifier:
     verifier = getattr(request.app.state, "auth_verifier", None)
     if verifier is not None:
@@ -47,7 +73,13 @@ def _get_verifier(request: Request, settings: Settings) -> NeonAuthVerifier:
 
     if is_live_mode(request.app):
         raise HTTPException(status_code=503, detail="live composition is not ready")
-    url = settings.neon_auth_url or DEFAULT_NEON_AUTH_URL
+    url = (settings.neon_auth_url or "").strip()
+    if not url:
+        raise AuthError(
+            "FLEET_CLEAN_NEON_AUTH_URL is required when auth_mode=neon",
+            status_code=503,
+            kind="unavailable",
+        )
     verifier = NeonAuthVerifier(neon_auth_url=url)
     request.app.state.auth_verifier = verifier
     return verifier
@@ -75,7 +107,7 @@ async def get_request_identity(
         verifier = _get_verifier(request, settings)
         claims = await verifier.authenticate_bearer(authorization)
     except AuthError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        _raise_public_auth_error(request, exc)
 
     user_id = subject_to_user_id(claims.subject)
     # Workspace is server-derived from JWT/tenant config only — client header cannot escalate.
@@ -89,7 +121,7 @@ async def get_request_identity(
     if x_fleet_workspace_id is not None and x_fleet_workspace_id != workspace_id:
         raise HTTPException(
             status_code=403,
-            detail="workspace header does not match authenticated tenant",
+            detail=PUBLIC_WORKSPACE_MISMATCH_DETAIL,
         )
     # Ignore X-Fleet-User-Id in neon mode (identity comes only from JWT sub)
 

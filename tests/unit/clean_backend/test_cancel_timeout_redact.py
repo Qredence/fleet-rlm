@@ -78,9 +78,15 @@ def test_api_cancel_requires_identity_and_ownership() -> None:
     assert r2.json()["already_cancelled"] is True
 
     # neon mode without bearer
-    app_neon = create_app(settings=Settings(auth_mode="neon"))
+    app_neon = create_app(
+        settings=Settings(
+            auth_mode="neon",
+            neon_auth_url="https://example.test/neondb/auth",
+        )
+    )
     r3 = TestClient(app_neon).post(f"/api/runs/{run_id}/cancel")
     assert r3.status_code == 401
+    assert r3.json()["detail"] == "authentication required"
 
 
 @pytest.mark.asyncio
