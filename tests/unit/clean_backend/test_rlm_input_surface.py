@@ -112,12 +112,16 @@ async def test_runner_passes_full_input_surface_to_rlm() -> None:
     events = [event async for event in runner.stream(ctx)]
     assert events
     assert capture.kwargs["request"] == "next"
-    assert capture.kwargs["history"] is history
+    assert capture.kwargs["history"] == [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "world"},
+    ]
     assert capture.kwargs["session_summary"] == ""
     assert capture.kwargs["skill_cards"] == [skill_card_metadata(skill)]
     assert capture.kwargs["attachments"] == [attachment_metadata(attachment)]
     assert "instructions" not in capture.kwargs["skill_cards"][0]
     assert "path" not in str(capture.kwargs["attachments"][0]).lower()
+    assert not isinstance(capture.kwargs["history"], dspy.History)
 
 
 def test_skill_card_metadata_excludes_instruction_bodies() -> None:

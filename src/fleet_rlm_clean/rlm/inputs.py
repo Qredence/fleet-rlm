@@ -71,10 +71,15 @@ def build_rlm_input_kwargs(
     skill_cards: tuple[Any, ...] | list[Any] = (),
     attachments: tuple[Any, ...] | list[Any] = (),
 ) -> dict[str, Any]:
-    """Kwargs for ``rlm.aforward`` / ``forward`` matching FleetRLMSignature."""
+    """Kwargs for ``rlm.aforward`` / ``forward`` matching FleetRLMSignature.
+
+    History is passed as a plain message list (sandbox-safe). Callers may still
+    supply ``dspy.History``; it is normalized here.
+    """
+    resolved = resolve_history(history)
     return {
         "request": request,
-        "history": resolve_history(history),
+        "history": [dict(item) for item in list(resolved.messages or [])],
         "session_summary": session_summary or "",
         "skill_cards": [skill_card_metadata(card) for card in skill_cards],
         "attachments": [attachment_metadata(ref) for ref in attachments],
