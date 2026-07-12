@@ -126,19 +126,21 @@ class TurnCoordinator:
 
     async def _stream_locked(self, command: ChatTurnCommand) -> AsyncIterator[RuntimeEvent]:
         assert self._sessions is not None
-        context = self._context_builder(command)
-        snapshot = await self._sessions.load(command.session_id)
-        # Isolation: reject cross-workspace/user before runtime resources run
-        from fleet_rlm_clean.api.auth_errors import SessionAccessDenied
-        from fleet_rlm_clean.sessions.errors import SessionNotFoundError
+        # Isolation first: load + ownership before any context builder / Sandbox acquire
+        from fleet_rlm_clean.sessions.errors import SessionAccessDenied, SessionNotFoundError
 
+        snapshot = await self._sessions.load(command.session_id)
         sess = snapshot.session
         if sess.user_id != command.user_id or sess.workspace_id != command.workspace_id:
-            # Same public shape as missing session
-            raise SessionNotFoundError(f"session {command.session_id} not found") from SessionAccessDenied()
-        history = turns_to_history(snapshot.turns)
+            # Same public shape as missing session (no existence leak)
+            raise SessionNotFoundError(
+                f"session {command.session_id} not found"
+            ) from SessionAccessDenied()
 
-        claim = await self._claim(command, context.run_id)
+        history = turns_to_history(snapshot.turns)
+        # Preferred run id for claim (builder may still mint its own run_id; claim wins)
+        preferred_run_id = uuid4()
+        claim = await self._claim(command, preferred_run_id)
         if claim.replay:
             async for event in self._replay_events(
                 session_id=command.session_id,
@@ -148,23 +150,25 @@ class TurnCoordinator:
                 yield event
             return
 
+        # Only after authz: build context (may acquire Daytona lease)
+        built = self._context_builder(command)
         context = RLMTurnContext(
             run_id=claim.run_id,
-            session_id=context.session_id,
-            user_id=context.user_id,
-            workspace_id=context.workspace_id,
-            request=context.request,
-            models=context.models,
-            budget=context.budget,
-            lease=context.lease,
+            session_id=built.session_id,
+            user_id=built.user_id,
+            workspace_id=built.workspace_id,
+            request=built.request,
+            models=built.models,
+            budget=built.budget,
+            lease=built.lease,
             history=history,
-            session_summary=context.session_summary,
-            skill_cards=context.skill_cards,
-            attachments=context.attachments,
-            artifacts=context.artifacts,
-            tools=context.tools,
-            skill_tool_host=getattr(context, "skill_tool_host", None),
-            file_tool_host=getattr(context, "file_tool_host", None),
+            session_summary=built.session_summary,
+            skill_cards=built.skill_cards,
+            attachments=built.attachments,
+            artifacts=built.artifacts,
+            tools=built.tools,
+            skill_tool_host=getattr(built, "skill_tool_host", None),
+            file_tool_host=getattr(built, "file_tool_host", None),
         )
         base_version = claim.base_checkpoint_version
         terminal: RuntimeEvent | None = None

@@ -5,6 +5,7 @@ Release never deletes a Sandbox. Volume identity is preserved across replace.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -86,14 +87,16 @@ class DaytonaSessionManager:
 
     async def acquire(self, request: LeaseRequest) -> InterpreterLease:
         """Ensure a running Sandbox with Volume mounted; return an interpreter lease."""
-        volume_id = get_or_create_volume_id(self._volume_client, self._volume_config)
+        volume_id = await asyncio.to_thread(
+            get_or_create_volume_id, self._volume_client, self._volume_config
+        )
         mount_path = self._volume_config.mount_path
         binding = await self._bindings.get(request.session_id)
 
         sandbox: Any | None = None
         if binding and binding.sandbox_id:
             try:
-                sandbox = self._platform.get(binding.sandbox_id)
+                sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id)
             except Exception as exc:  # noqa: BLE001
                 raise map_provider_error(exc) from exc
 
@@ -115,11 +118,18 @@ class DaytonaSessionManager:
                             provider_state="unrecoverable",
                         )
                     )
-                    sandbox = self._platform.get(replaced.sandbox_id or "")
+                    sandbox = await asyncio.to_thread(
+                        self._platform.get, replaced.sandbox_id or ""
+                    )
                 else:
                     sandbox = None
         if sandbox is None:
-            sandbox = self._create_sandbox(volume_id=volume_id, mount_path=mount_path, request=request)
+            sandbox = await asyncio.to_thread(
+                self._create_sandbox,
+                volume_id=volume_id,
+                mount_path=mount_path,
+                request=request,
+            )
 
         sid = _sandbox_id(sandbox)
         now = datetime.now(UTC)
@@ -197,13 +207,13 @@ class DaytonaSessionManager:
 
     async def replace(self, binding: SandboxBinding) -> SandboxBinding:
         """Replace an unrecoverable Sandbox; keep the same Volume id and mount path."""
-        volume_id = binding.volume_id or get_or_create_volume_id(
-            self._volume_client, self._volume_config
+        volume_id = binding.volume_id or await asyncio.to_thread(
+            get_or_create_volume_id, self._volume_client, self._volume_config
         )
         mount_path = binding.mount_path or self._volume_config.mount_path
         if binding.sandbox_id:
             try:
-                self._platform.delete(binding.sandbox_id)
+                await asyncio.to_thread(self._platform.delete, binding.sandbox_id)
             except Exception:  # noqa: BLE001 - best-effort delete of broken sandbox
                 pass
         request = LeaseRequest(
@@ -211,7 +221,12 @@ class DaytonaSessionManager:
             user_id=UUID(int=0),
             workspace_id=UUID(int=0),
         )
-        sandbox = self._create_sandbox(volume_id=volume_id, mount_path=mount_path, request=request)
+        sandbox = await asyncio.to_thread(
+            self._create_sandbox,
+            volume_id=volume_id,
+            mount_path=mount_path,
+            request=request,
+        )
         new_binding = SandboxBinding(
             session_id=binding.session_id,
             sandbox_id=_sandbox_id(sandbox),
@@ -245,23 +260,23 @@ class DaytonaSessionManager:
         if state == "running":
             return sandbox
         if state == "stopped":
-            call_if_supported(sandbox, "start")
+            await asyncio.to_thread(call_if_supported, sandbox, "start")
             return sandbox
         if state == "paused":
             try:
-                call_if_supported(sandbox, "resume")
+                await asyncio.to_thread(call_if_supported, sandbox, "resume")
             except LifecycleCapabilityError:
-                call_if_supported(sandbox, "start")
+                await asyncio.to_thread(call_if_supported, sandbox, "start")
             return sandbox
         if state == "archived":
             try:
-                call_if_supported(sandbox, "restore")
+                await asyncio.to_thread(call_if_supported, sandbox, "restore")
             except LifecycleCapabilityError as exc:
                 raise LifecycleCapabilityError("restore") from exc
             # After restore, may still need start
             if sandbox_state(sandbox) != "running":
                 try:
-                    call_if_supported(sandbox, "start")
+                    await asyncio.to_thread(call_if_supported, sandbox, "start")
                 except LifecycleCapabilityError:
                     pass
             return sandbox

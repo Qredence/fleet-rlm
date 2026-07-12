@@ -74,16 +74,20 @@ async def get_request_identity(
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
     user_id = subject_to_user_id(claims.subject)
-    # Workspace: explicit header wins if present; else tenant claim / default
-    if x_fleet_workspace_id is not None:
-        workspace_id = x_fleet_workspace_id
-    else:
-        tenant = (
-            str(claims.raw.get("tenant") or claims.raw.get("workspace_id") or "").strip()
-            or settings.neon_tenant_claim
-            or "default"
+    # Workspace is server-derived from JWT/tenant config only — client header cannot escalate.
+    # Optional header may be supplied for clients that mirror server state; it must match.
+    tenant = (
+        str(claims.raw.get("tenant") or claims.raw.get("workspace_id") or "").strip()
+        or settings.neon_tenant_claim
+        or "default"
+    )
+    workspace_id = tenant_to_workspace_id(tenant)
+    if x_fleet_workspace_id is not None and x_fleet_workspace_id != workspace_id:
+        raise HTTPException(
+            status_code=403,
+            detail="workspace header does not match authenticated tenant",
         )
-        workspace_id = tenant_to_workspace_id(tenant)
+    # Ignore X-Fleet-User-Id in neon mode (identity comes only from JWT sub)
 
     return RequestIdentity(
         user_id=user_id,
@@ -102,7 +106,7 @@ def require_session_access(
 ) -> None:
     """Reject cross-workspace/user session access (public shape: not found)."""
     if session_user_id != identity.user_id or session_workspace_id != identity.workspace_id:
-        from fleet_rlm_clean.api.auth_errors import SessionAccessDenied
+        from fleet_rlm_clean.sessions.errors import SessionAccessDenied
 
         raise SessionAccessDenied()
 

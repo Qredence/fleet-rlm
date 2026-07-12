@@ -85,7 +85,8 @@ class Settings(BaseSettings):
     def _normalize_auth_mode(cls, value: object) -> str:
         text = str(value or "dev").strip().lower()
         if text not in {"dev", "neon"}:
-            return "dev"
+            # Fail closed: refuse unknown modes (do not silently fall back to dev)
+            raise ValueError("FLEET_CLEAN_AUTH_MODE must be 'dev' or 'neon'")
         return text
 
     @field_validator("llm_base_url", mode="before")

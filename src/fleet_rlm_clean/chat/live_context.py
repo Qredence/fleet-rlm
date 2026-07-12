@@ -152,6 +152,9 @@ class LiveKernelResources:
         )
 
     async def build_context(self, command: ChatTurnCommand) -> RLMTurnContext:
+        """Acquire lease and build turn context (platform I/O uses to_thread)."""
+        import asyncio
+
         self.last_used_ephemeral = False
         try:
             lease = await self.session_manager.acquire(
@@ -166,7 +169,7 @@ class LiveKernelResources:
                 raise
             # Disk/volume limits: fall back to ephemeral sandbox without Volume mount.
             self.last_used_ephemeral = True
-            lease = self._acquire_ephemeral_lease()
+            lease = await asyncio.to_thread(self._acquire_ephemeral_lease)
         self.track_sandbox(lease.sandbox_id)
         return RLMTurnContext(
             run_id=uuid4(),

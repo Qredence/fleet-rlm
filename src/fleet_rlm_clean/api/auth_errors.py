@@ -10,10 +10,3 @@ class AuthError(Exception):
         super().__init__(message)
         self.message = message
         self.status_code = status_code
-
-
-class SessionAccessDenied(AuthError):
-    """Caller cannot access the requested session (map to 404 publicly)."""
-
-    def __init__(self, message: str = "session not found") -> None:
-        super().__init__(message, status_code=404)

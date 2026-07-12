@@ -12,7 +12,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fleet_rlm_clean.api.identity import RequestIdentity, require_session_access
-from fleet_rlm_clean.api.auth_errors import AuthError, SessionAccessDenied
+from fleet_rlm_clean.api.auth_errors import AuthError
+from fleet_rlm_clean.sessions.errors import SessionAccessDenied
 from fleet_rlm_clean.api.neon_auth import (
     NeonAuthVerifier,
     NeonClaims,
@@ -69,8 +70,7 @@ def test_neon_mode_rejects_missing_bearer() -> None:
 
 def test_neon_mode_accepts_injected_verifier() -> None:
     user_sub = "neon-user-1"
-    expected_user = subject_to_user_id(user_sub)
-    ws = uuid4()
+    derived_ws = tenant_to_workspace_id("default")
 
     class FakeVerifier:
         async def authenticate_bearer(self, authorization: str | None) -> NeonClaims:
@@ -90,7 +90,8 @@ def test_neon_mode_accepts_injected_verifier() -> None:
         "/api/chat",
         headers={
             "Authorization": "Bearer good-token",
-            "X-Fleet-Workspace-Id": str(ws),
+            # matching derived workspace is allowed
+            "X-Fleet-Workspace-Id": str(derived_ws),
         },
         json={"message": "hello"},
     )
@@ -103,6 +104,22 @@ def test_neon_mode_accepts_injected_verifier() -> None:
         json={"message": "hello"},
     )
     assert r2.status_code == 401
+
+    # workspace header mismatch → 403
+    r3 = client.post(
+        "/api/chat",
+        headers={
+            "Authorization": "Bearer good-token",
+            "X-Fleet-Workspace-Id": str(uuid4()),
+        },
+        json={"message": "hello"},
+    )
+    assert r3.status_code == 403
+
+
+def test_auth_mode_unknown_fails_closed() -> None:
+    with pytest.raises(Exception):
+        Settings(auth_mode="oops")
 
 
 def test_require_session_access() -> None:
@@ -184,12 +201,18 @@ async def test_coordinator_rejects_cross_workspace_session() -> None:
     owner_user, owner_ws = uuid4(), uuid4()
     session_id = uuid4()
     store = _OwnedSessionStore(owner_user=owner_user, owner_ws=owner_ws, session_id=session_id)
+    acquire_calls: list[UUID] = []
+
+    def tracking_builder(command: ChatTurnCommand) -> RLMTurnContext:
+        acquire_calls.append(command.session_id)
+        return _builder(command)
+
     coordinator = TurnCoordinator(
         runner=_ScriptedRunner(),
-        context_builder=_builder,
+        context_builder=tracking_builder,
         session_repository=store,  # type: ignore[arg-type]
     )
-    # Same identity: ok
+    # Same identity: ok — builder runs after ownership
     ok_cmd = ChatTurnCommand(
         user_id=owner_user,
         workspace_id=owner_ws,
@@ -198,8 +221,10 @@ async def test_coordinator_rejects_cross_workspace_session() -> None:
     )
     events = [e async for e in coordinator.stream(ok_cmd)]
     assert events[-1].kind == RuntimeEventKind.RUN_COMPLETED
+    assert len(acquire_calls) == 1
 
-    # Different workspace: SessionNotFoundError
+    # Different workspace: SessionNotFoundError — builder must NOT run (no acquire)
+    acquire_calls.clear()
     bad_cmd = ChatTurnCommand(
         user_id=owner_user,
         workspace_id=uuid4(),
@@ -208,6 +233,7 @@ async def test_coordinator_rejects_cross_workspace_session() -> None:
     )
     with pytest.raises(SessionNotFoundError):
         _ = [e async for e in coordinator.stream(bad_cmd)]
+    assert acquire_calls == []
 
 
 def test_files_reauth_still_workspace_scoped(tmp_path) -> None:
