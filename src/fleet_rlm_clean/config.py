@@ -51,6 +51,14 @@ class Settings(BaseSettings):
         default=False,
         description="When true, app wiring may construct live LM/Daytona clients",
     )
+    upload_root: str | None = Field(
+        default=None,
+        description="Host directory for attachment blobs (never exposed in API)",
+    )
+    max_upload_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        description="Maximum upload size in bytes",
+    )
 
     @field_validator("llm_base_url", mode="before")
     @classmethod

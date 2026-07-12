@@ -13,3 +13,26 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=100_000)
     session_id: UUID | None = None
     attachment_ids: list[UUID] = Field(default_factory=list)
+
+
+class AttachmentResponse(BaseModel):
+    """Public attachment metadata — no host or Volume paths."""
+
+    id: UUID
+    filename: str
+    content_type: str | None = None
+    byte_size: int
+    checksum_sha256: str
+
+
+class StageAttachmentRequest(BaseModel):
+    session_id: UUID
+    run_id: UUID
+
+
+class StagedAttachmentResponse(BaseModel):
+    """Staging result exposes only a Fleet-controlled Sandbox path."""
+
+    attachment_id: UUID
+    sandbox_path: str
+
