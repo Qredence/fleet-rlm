@@ -41,3 +41,8 @@ class SkillRecord:
     resources_available: bool
     instructions: str
     resources: tuple[str, ...] = field(default_factory=tuple)
+    # Relative path -> body (host only; never on SkillCard)
+    resource_bodies: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+
+    def resource_body_map(self) -> dict[str, str]:
+        return dict(self.resource_bodies)

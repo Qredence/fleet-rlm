@@ -52,6 +52,7 @@ class InMemorySkillRegistry:
         workspace_id: UUID | None = None,
         affordances: tuple[str, ...] = ("load", "read_resource"),
         resources: tuple[str, ...] = (),
+        resource_bodies: dict[str, str] | None = None,
         skill_id: UUID | None = None,
     ) -> SkillRecord:
         safe_name = _validate_name(name)
@@ -62,6 +63,10 @@ class InMemorySkillRegistry:
             raise SkillValidationError("system skills must not set workspace_id")
         if not isinstance(instructions, str) or not instructions.strip():
             raise SkillValidationError("instructions are required on host records")
+
+        bodies = dict(resource_bodies or {})
+        # Resource inventory is union of explicit names and body keys
+        resource_names = tuple(dict.fromkeys([*resources, *bodies.keys()]))
 
         sid = skill_id or uuid4()
         if sid in self._items:
@@ -77,9 +82,10 @@ class InMemorySkillRegistry:
             visibility=visibility,
             workspace_id=workspace_id,
             affordances=tuple(affordances),
-            resources_available=bool(resources),
+            resources_available=bool(resource_names),
             instructions=instructions,
-            resources=tuple(resources),
+            resources=resource_names,
+            resource_bodies=tuple(sorted(bodies.items())),
         )
         self._items[sid] = record
         return record

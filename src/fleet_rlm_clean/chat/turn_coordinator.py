@@ -155,6 +155,7 @@ class TurnCoordinator:
             attachments=context.attachments,
             artifacts=context.artifacts,
             tools=context.tools,
+            skill_tool_host=getattr(context, "skill_tool_host", None),
         )
         base_version = claim.base_checkpoint_version
         terminal: RuntimeEvent | None = None

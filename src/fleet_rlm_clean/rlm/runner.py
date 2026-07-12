@@ -51,6 +51,35 @@ def _usage_payload(prediction: Any) -> dict[str, Any]:
     return {"usage": {}}
 
 
+def _drain_skill_loaded_events(context: RLMTurnContext) -> list[dict[str, Any]]:
+    host = getattr(context, "skill_tool_host", None)
+    if host is None:
+        return []
+    drain = getattr(host, "drain_public_events", None)
+    if not callable(drain):
+        return []
+    try:
+        events = drain()
+    except Exception:  # noqa: BLE001 - event drain must not break the turn
+        return []
+    if not events:
+        return []
+    safe: list[dict[str, Any]] = []
+    for item in events:
+        if not isinstance(item, dict):
+            continue
+        # Strip any accidental body fields
+        safe.append(
+            {
+                "skill_id": str(item.get("skill_id", "")),
+                "name": str(item.get("name", "")),
+                "version": str(item.get("version", "")),
+                "trust": str(item.get("trust", "")),
+            }
+        )
+    return safe
+
+
 class RLMRunner:
     """Deep module: one turn in, ordered RuntimeEvents out, lease always released."""
 
@@ -89,6 +118,10 @@ class RLMRunner:
                 yield emit(RuntimeEventKind.TEXT_DELTA, {"text": text})
                 yield emit(RuntimeEventKind.TEXT_COMPLETED, {"text": text})
 
+            # Safe skill.loaded events (no instruction bodies) from host-mediated tools
+            for payload in _drain_skill_loaded_events(context):
+                yield emit(RuntimeEventKind.SKILL_LOADED, payload)
+
             yield emit(RuntimeEventKind.USAGE, _usage_payload(prediction))
 
             duration_ms = int((time.perf_counter() - started) * 1000)
@@ -102,7 +135,10 @@ class RLMRunner:
             )
             terminal_emitted = True
         except Exception as exc:  # noqa: BLE001 - public stream must never raise raw failures
+            # Still surface skill.loaded that completed before the failure
             if not terminal_emitted:
+                for payload in _drain_skill_loaded_events(context):
+                    yield emit(RuntimeEventKind.SKILL_LOADED, payload)
                 duration_ms = int((time.perf_counter() - started) * 1000)
                 yield emit(
                     RuntimeEventKind.ERROR,

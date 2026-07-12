@@ -13,3 +13,11 @@ class SkillNotFoundError(SkillError):
 
 class SkillValidationError(SkillError):
     """Rejected registration or skill metadata."""
+
+
+class SkillPathError(SkillValidationError):
+    """Invalid skill-relative resource path."""
+
+
+class SkillBudgetError(SkillError):
+    """Skill load budget exhausted for the turn."""

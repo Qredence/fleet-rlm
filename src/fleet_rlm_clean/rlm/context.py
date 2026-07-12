@@ -40,3 +40,5 @@ class RLMTurnContext:
     attachments: tuple[Any, ...] = field(default_factory=tuple)
     artifacts: tuple[Any, ...] = field(default_factory=tuple)
     tools: tuple[Any, ...] = field(default_factory=tuple)
+    # Optional SkillToolHost for progressive load tools + skill.loaded events
+    skill_tool_host: Any | None = None
