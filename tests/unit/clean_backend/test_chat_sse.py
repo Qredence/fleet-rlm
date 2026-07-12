@@ -129,6 +129,33 @@ def test_chat_openapi_contains_request_contract() -> None:
     assert "attachment_ids" in props
 
 
+def test_chat_rejects_invalid_attachment_before_stream(tmp_path: Path) -> None:
+    """Invalid attachment_ids → HTTP 400; coordinator must not run."""
+    from fleet_rlm_clean.app import create_app
+    from fleet_rlm_clean.files.uploads import LocalAttachmentStore
+
+    app = create_app()
+    app.state.attachment_store = LocalAttachmentStore(tmp_path / "up", max_bytes=1024)
+    runner = _FakeRunner()
+    app.state.turn_coordinator = TurnCoordinator(
+        runner=runner,  # type: ignore[arg-type]
+        context_builder=_minimal_context,
+    )
+    client = TestClient(app)
+    response = client.post(
+        "/api/chat",
+        json={"message": "hello", "attachment_ids": [str(uuid4())]},
+        headers={
+            "X-Fleet-User-Id": str(uuid4()),
+            "X-Fleet-Workspace-Id": str(uuid4()),
+        },
+    )
+    assert response.status_code == 400
+    assert "invalid attachment" in response.json()["detail"].lower()
+    assert runner.closed == 0
+    assert runner.seen == []
+
+
 def test_chat_route_module_has_no_dspy_or_daytona_imports() -> None:
     route_path = (
         Path(__file__).resolve().parents[3]

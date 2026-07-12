@@ -113,6 +113,10 @@ class LiveKernelResources:
         self.allow_ephemeral_fallback = allow_ephemeral_fallback
         self._sandbox_ids: list[str] = []
         self.last_used_ephemeral = False
+        # Optional capability hosts (wired by live proofs / app composition)
+        self.skill_registry: Any | None = None
+        self.attachment_store: Any | None = None
+        self.artifact_store: Any | None = None
 
     @classmethod
     async def with_sqlite_file(
@@ -171,7 +175,7 @@ class LiveKernelResources:
             self.last_used_ephemeral = True
             lease = await asyncio.to_thread(self._acquire_ephemeral_lease)
         self.track_sandbox(lease.sandbox_id)
-        return RLMTurnContext(
+        context = RLMTurnContext(
             run_id=uuid4(),
             session_id=command.session_id,
             user_id=command.user_id,
@@ -181,6 +185,19 @@ class LiveKernelResources:
             budget=RLMBudget(max_iterations=6, max_llm_calls=16, max_output_chars=3000),
             lease=lease,
         )
+        if self.skill_registry is not None or (
+            self.attachment_store is not None and self.artifact_store is not None
+        ):
+            from fleet_rlm_clean.chat.capabilities import assemble_turn_capabilities
+
+            return assemble_turn_capabilities(
+                context,
+                command,
+                skill_registry=self.skill_registry,
+                attachment_store=self.attachment_store,
+                artifact_store=self.artifact_store,
+            )
+        return context
 
     def track_sandbox(self, sandbox_id: str | None) -> None:
         if sandbox_id and sandbox_id not in self._sandbox_ids:

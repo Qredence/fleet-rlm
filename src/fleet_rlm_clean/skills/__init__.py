@@ -9,6 +9,11 @@ from fleet_rlm_clean.skills.errors import (
     SkillPathError,
     SkillValidationError,
 )
+from fleet_rlm_clean.skills.loader import (
+    bundled_skills_root,
+    seed_bundled_skills,
+    stable_skill_id,
+)
 from fleet_rlm_clean.skills.models import SkillCard, SkillRecord
 from fleet_rlm_clean.skills.paths import normalize_skill_resource_path
 from fleet_rlm_clean.skills.ranking import rank_authorized_cards
@@ -26,8 +31,11 @@ __all__ = [
     "SkillRecord",
     "SkillToolHost",
     "SkillValidationError",
+    "bundled_skills_root",
     "normalize_skill_resource_path",
     "rank_authorized_cards",
+    "seed_bundled_skills",
     "skill_loaded_public_payload",
+    "stable_skill_id",
     "to_card",
 ]

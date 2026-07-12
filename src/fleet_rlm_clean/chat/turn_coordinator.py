@@ -2,20 +2,30 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from typing import Any, Protocol
-from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 from fleet_rlm_clean.chat.commands import ChatTurnCommand
-from fleet_rlm_clean.rlm.budgets import RLMBudget
-from fleet_rlm_clean.rlm.context import InterpreterLeaseLike, RLMTurnContext
+from fleet_rlm_clean.chat.context_builder import (
+    OfflineContextBuilder,
+    ephemeral_lease,
+    rebind_turn_context,
+)
+from fleet_rlm_clean.rlm.context import RLMTurnContext
 from fleet_rlm_clean.rlm.events import EventRecorder, RuntimeEvent, RuntimeEventKind
-from fleet_rlm_clean.rlm.model_bundle import RLMModelBundle
 from fleet_rlm_clean.rlm.runner import RLMRunner
 from fleet_rlm_clean.sessions.checkpoints import TurnClaim
 from fleet_rlm_clean.sessions.history import turns_to_history
 from fleet_rlm_clean.sessions.locks import SessionLockRegistry
+
+__all__ = [
+    "SessionStore",
+    "TurnCoordinator",
+    "TurnRunner",
+    "ephemeral_lease",
+    "rebind_turn_context",
+]
 
 
 class TurnRunner(Protocol):
@@ -60,36 +70,6 @@ class SessionStore(Protocol):
     ) -> Any: ...
 
 
-class _EphemeralLease:
-    """Kernel-phase lease: holds an interpreter handle; release is idempotent."""
-
-    def __init__(self, interpreter: Any) -> None:
-        self.interpreter = interpreter
-        self._released = False
-
-    def release(self) -> None:
-        if self._released:
-            return
-        self._released = True
-        shutdown = getattr(self.interpreter, "shutdown", None)
-        if callable(shutdown):
-            shutdown()
-
-
-def _default_kernel_context(command: ChatTurnCommand) -> RLMTurnContext:
-    """Build a kernel context with placeholder models/interpreter (no live providers)."""
-    return RLMTurnContext(
-        run_id=uuid4(),
-        session_id=command.session_id,
-        user_id=command.user_id,
-        workspace_id=command.workspace_id,
-        request=command.message,
-        models=RLMModelBundle(root_lm=MagicMock(name="root_lm"), sub_lm=MagicMock(name="sub_lm")),
-        budget=RLMBudget(),
-        lease=_EphemeralLease(MagicMock(name="interpreter")),
-    )
-
-
 class TurnCoordinator:
     """Application service for one chat turn. No DSPy or Daytona SDK calls here."""
 
@@ -97,16 +77,27 @@ class TurnCoordinator:
         self,
         *,
         runner: TurnRunner | None = None,
-        context_builder: Callable[[ChatTurnCommand], RLMTurnContext] | None = None,
+        context_builder: Any | None = None,
         session_repository: SessionStore | None = None,
         locks: SessionLockRegistry | None = None,
     ) -> None:
         self._runner: TurnRunner = runner if runner is not None else RLMRunner()
-        self._context_builder = (
-            context_builder if context_builder is not None else _default_kernel_context
+        # Callable[[ChatTurnCommand], RLMTurnContext] or object with .build(command)
+        self._context_builder: Any = (
+            OfflineContextBuilder() if context_builder is None else context_builder
         )
         self._sessions = session_repository
         self._locks = locks if locks is not None else SessionLockRegistry()
+
+    def _build_context(self, command: ChatTurnCommand) -> RLMTurnContext:
+        builder = self._context_builder
+        build = getattr(builder, "build", None)
+        if callable(build):
+            return build(command)
+        if callable(builder):
+            return builder(command)
+        msg = "context_builder must be callable or provide build(command)"
+        raise TypeError(msg)
 
     async def stream(self, command: ChatTurnCommand) -> AsyncIterator[RuntimeEvent]:
         """Stream public RuntimeEvents for a single chat command."""
@@ -115,7 +106,7 @@ class TurnCoordinator:
             raise ValueError(msg)
 
         if self._sessions is None:
-            context = self._context_builder(command)
+            context = self._build_context(command)
             async for event in self._runner.stream(context):
                 yield event
             return
@@ -138,7 +129,6 @@ class TurnCoordinator:
             ) from SessionAccessDenied()
 
         history = turns_to_history(snapshot.turns)
-        # Preferred run id for claim (builder may still mint its own run_id; claim wins)
         preferred_run_id = uuid4()
         claim = await self._claim(command, preferred_run_id)
         if claim.replay:
@@ -150,25 +140,12 @@ class TurnCoordinator:
                 yield event
             return
 
-        # Only after authz: build context (may acquire Daytona lease)
-        built = self._context_builder(command)
-        context = RLMTurnContext(
+        # Only after authz: build context (may acquire Daytona lease), then rebind claim
+        built = self._build_context(command)
+        context = rebind_turn_context(
+            built,
             run_id=claim.run_id,
-            session_id=built.session_id,
-            user_id=built.user_id,
-            workspace_id=built.workspace_id,
-            request=built.request,
-            models=built.models,
-            budget=built.budget,
-            lease=built.lease,
             history=history,
-            session_summary=built.session_summary,
-            skill_cards=built.skill_cards,
-            attachments=built.attachments,
-            artifacts=built.artifacts,
-            tools=built.tools,
-            skill_tool_host=getattr(built, "skill_tool_host", None),
-            file_tool_host=getattr(built, "file_tool_host", None),
         )
         base_version = claim.base_checkpoint_version
         terminal: RuntimeEvent | None = None
@@ -260,8 +237,3 @@ class TurnCoordinator:
             context.run_id,
             message=message,
         )
-
-
-def ephemeral_lease(interpreter: Any) -> InterpreterLeaseLike:
-    """Public helper for tests and kernel wiring."""
-    return _EphemeralLease(interpreter)

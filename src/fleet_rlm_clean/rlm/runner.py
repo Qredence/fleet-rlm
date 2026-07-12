@@ -58,71 +58,75 @@ def _usage_payload(prediction: Any) -> dict[str, Any]:
     return {"usage": {}}
 
 
+class HostEventSource(Protocol):
+    """Internal seam: host tool ledgers that emit safe public event dicts."""
+
+    def drain_public_events(self) -> list[dict[str, Any]]: ...
+
+
+def _map_host_ledger_item(
+    item: dict[str, Any],
+) -> tuple[RuntimeEventKind, dict[str, Any]] | None:
+    """Map one host ledger dict to a public RuntimeEvent kind + payload."""
+    kind = item.get("event_kind")
+    if kind == "attachment.read":
+        return (
+            RuntimeEventKind.ATTACHMENT_READ,
+            {
+                "attachment_id": str(item.get("attachment_id", "")),
+                "filename": str(item.get("filename", "")),
+                "byte_size": int(item.get("byte_size") or 0),
+            },
+        )
+    if kind == "artifact.created":
+        return (
+            RuntimeEventKind.ARTIFACT_CREATED,
+            {
+                "artifact_id": str(item.get("artifact_id", "")),
+                "kind": str(item.get("kind", "")),
+                "title": item.get("title"),
+                "byte_size": int(item.get("byte_size") or 0),
+                "checksum_sha256": str(item.get("checksum_sha256", "")),
+            },
+        )
+    # skill_loaded_public_payload omits event_kind; accept explicit skill.loaded too
+    if kind in (None, "skill.loaded") and item.get("skill_id"):
+        return (
+            RuntimeEventKind.SKILL_LOADED,
+            {
+                "skill_id": str(item.get("skill_id", "")),
+                "name": str(item.get("name", "")),
+                "version": str(item.get("version", "")),
+                "trust": str(item.get("trust", "")),
+            },
+        )
+    return None
+
+
+def _iter_host_event_sources(context: RLMTurnContext) -> list[Any]:
+    sources: list[Any] = []
+    for attr in ("skill_tool_host", "file_tool_host"):
+        host = getattr(context, attr, None)
+        if host is not None and callable(getattr(host, "drain_public_events", None)):
+            sources.append(host)
+    return sources
+
+
 def _drain_host_public_events(
     context: RLMTurnContext,
 ) -> list[tuple[RuntimeEventKind, dict[str, Any]]]:
-    """Collect safe skill/file host events for SSE (never bodies/paths)."""
+    """Collect safe host-tool events for SSE (never bodies/paths)."""
     out: list[tuple[RuntimeEventKind, dict[str, Any]]] = []
-
-    skill_host = getattr(context, "skill_tool_host", None)
-    if skill_host is not None:
-        drain = getattr(skill_host, "drain_public_events", None)
-        if callable(drain):
-            try:
-                for item in drain() or []:
-                    if not isinstance(item, dict):
-                        continue
-                    if item.get("event_kind") in (None, "skill.loaded"):
-                        out.append(
-                            (
-                                RuntimeEventKind.SKILL_LOADED,
-                                {
-                                    "skill_id": str(item.get("skill_id", "")),
-                                    "name": str(item.get("name", "")),
-                                    "version": str(item.get("version", "")),
-                                    "trust": str(item.get("trust", "")),
-                                },
-                            )
-                        )
-            except Exception:  # noqa: BLE001
-                pass
-
-    file_host = getattr(context, "file_tool_host", None)
-    if file_host is not None:
-        drain = getattr(file_host, "drain_public_events", None)
-        if callable(drain):
-            try:
-                for item in drain() or []:
-                    if not isinstance(item, dict):
-                        continue
-                    kind = str(item.get("event_kind", ""))
-                    if kind == "attachment.read":
-                        out.append(
-                            (
-                                RuntimeEventKind.ATTACHMENT_READ,
-                                {
-                                    "attachment_id": str(item.get("attachment_id", "")),
-                                    "filename": str(item.get("filename", "")),
-                                    "byte_size": int(item.get("byte_size") or 0),
-                                },
-                            )
-                        )
-                    elif kind == "artifact.created":
-                        out.append(
-                            (
-                                RuntimeEventKind.ARTIFACT_CREATED,
-                                {
-                                    "artifact_id": str(item.get("artifact_id", "")),
-                                    "kind": str(item.get("kind", "")),
-                                    "title": item.get("title"),
-                                    "byte_size": int(item.get("byte_size") or 0),
-                                    "checksum_sha256": str(item.get("checksum_sha256", "")),
-                                },
-                            )
-                        )
-            except Exception:  # noqa: BLE001
-                pass
-
+    for host in _iter_host_event_sources(context):
+        try:
+            for item in host.drain_public_events() or []:
+                if not isinstance(item, dict):
+                    continue
+                mapped = _map_host_ledger_item(item)
+                if mapped is not None:
+                    out.append(mapped)
+        except Exception:  # noqa: BLE001 - host ledger must not break the public stream
+            continue
     return out
 
 

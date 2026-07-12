@@ -22,13 +22,85 @@ from fleet_rlm_clean.sessions.errors import SessionNotFoundError
 router = APIRouter(tags=["chat"])
 
 
+def _default_file_stores(request: Request) -> tuple[Any, Any]:
+    """Lazy host stores matching files/artifacts route defaults."""
+    from pathlib import Path
+
+    from fleet_rlm_clean.artifacts.store import LocalArtifactStore
+    from fleet_rlm_clean.config import Settings
+    from fleet_rlm_clean.files.uploads import LocalAttachmentStore
+
+    settings = getattr(request.app.state, "settings", None) or Settings()
+    attachment_store = getattr(request.app.state, "attachment_store", None)
+    if attachment_store is None:
+        root = settings.upload_root or str(Path.cwd() / ".fleet_clean_uploads")
+        attachment_store = LocalAttachmentStore(root, max_bytes=settings.max_upload_bytes)
+        request.app.state.attachment_store = attachment_store
+    artifact_store = getattr(request.app.state, "artifact_store", None)
+    if artifact_store is None:
+        if settings.artifact_root:
+            art_root = settings.artifact_root
+        elif settings.upload_root:
+            art_root = str(Path(settings.upload_root).parent / "artifacts")
+        else:
+            art_root = str(Path.cwd() / ".fleet_clean_artifacts")
+        artifact_store = LocalArtifactStore(art_root, max_bytes=settings.max_artifact_bytes)
+        request.app.state.artifact_store = artifact_store
+    return attachment_store, artifact_store
+
+
 def get_turn_coordinator(request: Request) -> TurnCoordinator:
-    """Resolve coordinator from app.state (tests inject fakes here)."""
+    """Resolve coordinator from app.state (tests inject fakes here).
+
+    Default coordinator wraps OfflineContextBuilder with capability assembly so
+    Skill/File tools bind when registry and stores are present.
+    """
     coordinator = getattr(request.app.state, "turn_coordinator", None)
-    if coordinator is None:
-        coordinator = TurnCoordinator()
-        request.app.state.turn_coordinator = coordinator
+    if coordinator is not None:
+        return coordinator
+
+    from fleet_rlm_clean.chat.capabilities import CapabilityContextBuilder
+    from fleet_rlm_clean.chat.context_builder import OfflineContextBuilder
+
+    registry = getattr(request.app.state, "skill_registry", None)
+    attachment_store, artifact_store = _default_file_stores(request)
+    builder = CapabilityContextBuilder(
+        OfflineContextBuilder(),
+        skill_registry=registry,
+        attachment_store=attachment_store,
+        artifact_store=artifact_store,
+    )
+    coordinator = TurnCoordinator(context_builder=builder)
+    request.app.state.turn_coordinator = coordinator
     return coordinator
+
+
+def validate_chat_attachments(
+    body: ChatRequest,
+    request: Request,
+    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+) -> None:
+    """Dependency: reject invalid attachment_ids with HTTP 400 before SSE starts."""
+    from fleet_rlm_clean.chat.capabilities import (
+        AttachmentValidationError,
+        validate_attachment_ids,
+    )
+
+    if not body.attachment_ids:
+        return
+    attachment_store, _artifact_store = _default_file_stores(request)
+    try:
+        validate_attachment_ids(
+            attachment_store,
+            tuple(body.attachment_ids),
+            user_id=identity.user_id,
+            workspace_id=identity.workspace_id,
+        )
+    except AttachmentValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="invalid attachment reference",
+        ) from exc
 
 
 def _json_default(value: Any) -> Any:
@@ -58,7 +130,9 @@ def runtime_event_to_sse(event: RuntimeEvent) -> ServerSentEvent:
         200: {
             "description": "SSE stream of RuntimeEvent v1 envelopes",
             "content": {"text/event-stream": {}},
-        }
+        },
+        400: {"description": "Invalid attachment reference"},
+        404: {"description": "Session not found"},
     },
 )
 async def chat(
@@ -66,8 +140,11 @@ async def chat(
     request: Request,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
     coordinator: Annotated[TurnCoordinator, Depends(get_turn_coordinator)],
+    _: Annotated[None, Depends(validate_chat_attachments)],
 ) -> AsyncIterator[ServerSentEvent]:
     """Stream one chat turn as typed SSE. Route performs no DSPy/Daytona SDK calls."""
+    from fleet_rlm_clean.rlm.cancel import get_run_cancel_registry
+
     command = ChatTurnCommand(
         user_id=identity.user_id,
         workspace_id=identity.workspace_id,
@@ -75,7 +152,6 @@ async def chat(
         message=body.message,
         attachment_ids=tuple(body.attachment_ids),
     )
-    from fleet_rlm_clean.rlm.cancel import get_run_cancel_registry
 
     stream = coordinator.stream(command)
     run_id: UUID | None = None
@@ -83,7 +159,6 @@ async def chat(
         async for event in stream:
             run_id = event.run_id
             if await request.is_disconnected():
-                # Cooperative cancel so runner can emit one terminal + release lease
                 get_run_cancel_registry().request_cancel(event.run_id)
                 break
             yield runtime_event_to_sse(event)

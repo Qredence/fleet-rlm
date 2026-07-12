@@ -1,106 +1,126 @@
 # Fleet-RLM Context
 
 Fleet-RLM is a Daytona-backed recursive DSPy workbench. This glossary fixes the
-project language used in docs, code review, and future agent sessions.
+shared product language used across packages, docs, and agent sessions.
 
 ## Language
+
+### Identity and conversation
+
+**User**:
+An authenticated principal who acts inside a Workspace.
+_Avoid_: account, client, customer
+
+**Workspace**:
+A tenant isolation scope that owns Sessions, Skills, Attachments, and Artifacts
+for its members.
+_Avoid_: Sandbox Workspace, repo checkout, Volume, Sandbox filesystem
+
+**Session**:
+A durable chat conversation for a User within a Workspace, with ordered Turns
+and concurrency-safe history.
+_Avoid_: Sandbox, Run, transcript alone
+
+**Turn**:
+One user message processed to a terminal outcome within a Session.
+_Avoid_: request, job, Run (when meaning the user message)
+
+**Run**:
+One execution attempt of a Turn, including progress, cancel, and completion.
+_Avoid_: Turn, Session, Sandbox
+
+**Root Session**:
+A Session that owns a long-lived root Sandbox, Sandbox Workspace,
+Code-Interpreter Context, and optional Volume for ongoing chat.
+_Avoid_: Child Session, Sandbox alone
+
+**Child Session**:
+A bounded delegated session used for recursive work, normally backed by its own
+child Sandbox and discarded after the task.
+_Avoid_: Root Session, tenant Workspace
+
+### Compute and storage
 
 **Sandbox**:
 An isolated Daytona compute environment with its own filesystem, process space,
 network context, and lifecycle.
-_Avoid_: workspace, volume, session
+_Avoid_: Workspace, Volume, Session
 
-**Workspace**:
-The live repo checkout, staged inputs, and execution files inside a sandbox.
-_Avoid_: volume, durable memory
+**Sandbox Workspace**:
+The live repo checkout, staged inputs, and execution files inside a Sandbox.
+_Avoid_: Workspace (tenant), Volume, durable Memory
 
 **Code-Interpreter Context**:
-The persistent Python state associated with Daytona code execution inside a live
-sandbox.
-_Avoid_: durable state, memory
-
-**Root Session**:
-The primary Fleet-RLM runtime session for a user chat, backed by a root sandbox,
-workspace, code-interpreter context, optional mounted volume, and session
-metadata.
-_Avoid_: child session, sandbox alone
-
-**Child Session**:
-A bounded delegated RLM session used for recursive work, normally backed by its
-own child sandbox and deleted after the task.
-_Avoid_: root session, shared workspace
+The persistent Python state associated with code execution inside a live Sandbox.
+_Avoid_: durable Memory, Volume contents, Session history
 
 **Volume**:
-Mounted Daytona storage that can survive sandbox deletion when data is
+Mounted Daytona storage that can survive Sandbox deletion when data is
 explicitly written into its durable roots.
-_Avoid_: workspace, code-interpreter context
+_Avoid_: Sandbox Workspace, Code-Interpreter Context, tenant Workspace
 
 **Memory**:
 Reusable learned state, facts, preferences, or summaries stored for future
 runtime use.
-_Avoid_: transcript, log, artifact
+_Avoid_: transcript, log, Artifact, Attachment
+
+**Attachment**:
+A user-provided input file owned within a Workspace and referenced on a Turn.
+_Avoid_: Artifact, Volume file, Memory
 
 **Artifact**:
-A durable generated output such as Markdown, a report, JSON, or a file that
-should remain inspectable after the sandbox that produced it is gone.
-_Avoid_: log, scratch file, transcript
+A durable generated output that should remain inspectable after the Sandbox
+that produced it is gone.
+_Avoid_: log, scratch file, transcript, Attachment
 
 **Skill**:
-A reusable runtime instruction or callable capability discovered from packaged
-or volume-backed skill roots.
-_Avoid_: memory, artifact
+A reusable runtime instruction or capability package available to authorized
+Turns.
+_Avoid_: Memory, Artifact, Attachment
+
+### Large inputs
 
 **Inline Context Payload**:
-A large pasted block embedded directly in a user chat message, such as a
-`CONTEXT:` section or full copied document.
-_Avoid_: prompt context, model memory
+A large pasted block embedded directly in a user chat message.
+_Avoid_: prompt context, model memory, Attachment
 
 **Staged Context**:
-Large input data moved out of repeated action prompts and into RLM REPL
-variables, typically `context["document_text"]`, `context["manifest"]`, and
-`context["metadata"]`.
+Large input data moved out of repeated action prompts into REPL variables for
+programmatic inspection.
 _Avoid_: hidden prompt, assistant scratchpad
 
 **Shortened User Request**:
-The prompt-facing instruction retained after an inline context payload is
-staged. It names the task and tells the RLM where to inspect the full data.
+The prompt-facing instruction retained after an Inline Context Payload is
+staged. It names the task and where to inspect the full data.
 _Avoid_: summary of the document, lossy context
+
+### Progress and (live) turn contracts
 
 **Log Event**:
 A product-facing observability record for sandbox execution, process output,
-bridge callbacks, volume/file activity, memory access, diagnostics, or runtime
-progress.
-_Avoid_: transcript message, artifact
+volume or file activity, memory access, diagnostics, or runtime progress.
+_Avoid_: transcript message, Artifact
+
+**Runtime Event**:
+The transport-neutral record of Run progress and completion used by
+observability and by transports that project a transcript.
+_Avoid_: frame, wire message, part
 
 **Execution Mode**:
-The explicit per-turn contract a caller chooses for a chat turn, either
-`simple` (one lightweight DSPy response, no tools/sandbox/recursion) or `rlm`
-(Daytona-backed recursive execution with the full tool surface). The caller's
-choice is honored with no auto-escalation.
-_Avoid_: auto, route, escalation, tools_only, rlm_only (legacy aliases)
+The explicit per-turn contract a caller may choose on the live product path:
+lightweight single-shot response versus Daytona-backed recursive execution.
+_Avoid_: auto, route, escalation (as silent substitutes for an explicit choice)
 
 **RLMAgent**:
-The first-class agent that owns the `rlm` execution path: it binds a Daytona
-interpreter, selects among the standard/workspace/url-document RLM variants,
-runs the retry/fallback resilience, and spawns sub-agents via `rlm_query()`.
+The live product agent role that owns recursive Daytona-backed execution for a
+Turn, including interpreter binding and delegated child work.
 _Avoid_: EscalatingFleetModule, FleetAgent, dispatcher
 
-**ChatExecutionContext**:
-The transport-neutral dataclass that carries prepared runtime dependencies,
-identity, resolved session ids, a cancel flag, and per-turn `TurnControls`
-into `stream_turn()`. Both the websocket and SSE transports build one from
-their transport-specific inputs.
-_Avoid_: WebSocket, request, SSE context
+**Chat Execution Context**:
+Transport-neutral prepared dependencies and identity for executing a live Turn.
+_Avoid_: raw HTTP request, wire-only session bag
 
-**TurnControls**:
-The per-request control fields isolated inside `ChatExecutionContext`
-(execution_mode, repo_url, repo_ref, context_paths, batch_concurrency,
-docs_path, trace, trace_mode, selected_skill_ids). Distinct from prepared
-runtime dependencies because they vary per message.
+**Turn Controls**:
+Per-message controls for a live Turn (mode, repo, paths, skills, tracing)
+distinct from long-lived prepared runtime dependencies.
 _Avoid_: options, params, flags
-
-**RuntimeEvent**:
-The transport-neutral event model yielded by `AgentRuntime.aiter_chat_turn_stream()`
-and `stream_turn()`. Both transports project it to their wire format (WS
-frames via `project_chat()`, SSE via the AI SDK UIMessage projector).
-_Avoid_: frame, message, part

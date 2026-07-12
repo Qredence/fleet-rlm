@@ -161,7 +161,13 @@ namespaces = false
 [tool.setuptools.package-data]
 "fleet_rlm.integrations.config" = ["*.yaml", "*.yml"]
 "fleet_rlm" = ["py.typed"]
-"fleet_rlm_clean" = ["py.typed"]
+"fleet_rlm_clean" = [
+    "py.typed",
+    "skills/skills/README.md",
+    "skills/skills/**/SKILL.md",
+    "skills/skills/**/*.md",
+    "skills/skills/**/*.py",
+]
 "fleet_rlm.ui" = ["dist/**/*", "dist/*"]
 "fleet_rlm.scaffold" = [
     "skills/README.md",

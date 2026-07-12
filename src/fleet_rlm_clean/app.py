@@ -30,4 +30,14 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     app.include_router(artifacts_router)
     app.include_router(skills_router)
     app.include_router(runs_router)
+
+    # Seed bundled SKILL.md catalog once per app (metadata on cards; bodies host-only).
+    from fleet_rlm_clean.skills.authorize import SkillAuthorizer
+    from fleet_rlm_clean.skills.loader import seed_bundled_skills
+    from fleet_rlm_clean.skills.registry import InMemorySkillRegistry
+
+    skill_registry = InMemorySkillRegistry()
+    seed_bundled_skills(skill_registry)
+    app.state.skill_registry = skill_registry
+    app.state.skill_authorizer = SkillAuthorizer(skill_registry)
     return app

@@ -22,7 +22,10 @@ def get_skill_registry(request: Request) -> InMemorySkillRegistry:
     registry = getattr(request.app.state, "skill_registry", None)
     if registry is not None:
         return registry
+    from fleet_rlm_clean.skills.loader import seed_bundled_skills
+
     registry = InMemorySkillRegistry()
+    seed_bundled_skills(registry)
     request.app.state.skill_registry = registry
     return registry
 

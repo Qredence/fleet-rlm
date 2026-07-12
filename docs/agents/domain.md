@@ -14,6 +14,7 @@ Fleet RLM uses a multi-context glossary layout.
 
 - `CONTEXT.md` contains concepts shared across the whole product.
 - `src/fleet_rlm/CONTEXT.md` contains backend runtime language.
+- `src/fleet_rlm_clean/CONTEXT.md` contains clean parallel backend language (RLM-native turns, leases, skill cards).
 - `src/frontend/CONTEXT.md` contains frontend interaction language.
 
 Create context-local ADR directories only when a genuinely context-scoped, hard-to-reverse trade-off requires one. System-wide decisions remain in `docs/adr/`.
