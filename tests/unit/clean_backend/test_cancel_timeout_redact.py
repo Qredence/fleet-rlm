@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -11,14 +10,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fleet_rlm_clean.app import create_app
+from fleet_rlm_clean.chat.turn_coordinator import ephemeral_lease
+from fleet_rlm_clean.config import Settings
+from fleet_rlm_clean.rlm.budgets import RLMBudget
 from fleet_rlm_clean.rlm.cancel import (
     RunCancelRegistry,
     get_run_cancel_registry,
     set_run_cancel_registry,
 )
-from fleet_rlm_clean.chat.turn_coordinator import ephemeral_lease
-from fleet_rlm_clean.config import Settings
-from fleet_rlm_clean.rlm.budgets import RLMBudget
 from fleet_rlm_clean.rlm.context import RLMTurnContext
 from fleet_rlm_clean.rlm.errors import TurnBudgetExhausted, TurnCancelled, TurnTimeout
 from fleet_rlm_clean.rlm.events import RuntimeEventKind
@@ -41,7 +40,7 @@ def test_sanitize_redacts_secrets_dsns_paths_stacks() -> None:
         "failed postgres://user:pass@host:5432/db"
     )
     assert "[path]" in sanitize_public_error("open /Users/zocho/secret.txt")
-    assert sanitize_public_error("Traceback (most recent call last):\n  File \"x.py\"") == "Turn failed"
+    assert sanitize_public_error('Traceback (most recent call last):\n  File "x.py"') == "Turn failed"
     assert sanitize_public_error(TurnCancelled()) == "Turn cancelled"
     assert sanitize_public_error(TurnTimeout()) == "Turn timed out"
     assert sanitize_public_error(TurnBudgetExhausted()) == "Turn budget exhausted"

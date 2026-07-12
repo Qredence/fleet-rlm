@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.error import URLError
 from urllib.parse import urlparse
-from uuid import UUID, uuid5, NAMESPACE_URL
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from joserfc import jwt
 from joserfc.errors import JoseError, SecurityWarning

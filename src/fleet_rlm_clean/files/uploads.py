@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
-from fleet_rlm_clean.files.errors import AttachmentNotFoundError, AttachmentValidationError
+from fleet_rlm_clean.files.errors import AttachmentNotFoundError
 from fleet_rlm_clean.files.models import AttachmentRef
 from fleet_rlm_clean.files.safety import sanitize_filename, validate_upload_size
 
