@@ -36,3 +36,26 @@ class StagedAttachmentResponse(BaseModel):
     attachment_id: UUID
     sandbox_path: str
 
+
+class CreateArtifactRequest(BaseModel):
+    """Create a durable text/markdown/json artifact for a session run."""
+
+    session_id: UUID
+    run_id: UUID
+    kind: str = Field(..., description="text | markdown | json")
+    content: str = Field(..., min_length=1)
+    title: str | None = None
+
+
+class ArtifactResponse(BaseModel):
+    """Public artifact metadata — no host or Volume paths."""
+
+    id: UUID
+    session_id: UUID
+    run_id: UUID
+    kind: str
+    title: str | None = None
+    media_type: str
+    byte_size: int
+    checksum_sha256: str
+

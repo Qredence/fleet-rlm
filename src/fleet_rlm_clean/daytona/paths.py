@@ -168,6 +168,10 @@ class VolumePaths:
         """Unique staging root for one run (under the run directory)."""
         return resolve_under_root(self.run_dir(session_id, run_id), "staging")
 
+    def run_artifacts_dir(self, session_id: str | UUID, run_id: str | UUID) -> PurePosixPath:
+        """Run-scoped durable artifacts: sessions/{session}/runs/{run}/artifacts/."""
+        return resolve_under_root(self.run_dir(session_id, run_id), "artifacts")
+
 
 def as_posix(path: PurePosixPath | str) -> str:
     """String form for tool payloads and Sandbox APIs."""

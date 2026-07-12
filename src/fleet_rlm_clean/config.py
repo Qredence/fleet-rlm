@@ -59,6 +59,14 @@ class Settings(BaseSettings):
         default=10 * 1024 * 1024,
         description="Maximum upload size in bytes",
     )
+    artifact_root: str | None = Field(
+        default=None,
+        description="Host directory for artifact blobs (never exposed in API)",
+    )
+    max_artifact_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        description="Maximum artifact body size in bytes",
+    )
 
     @field_validator("llm_base_url", mode="before")
     @classmethod
