@@ -72,3 +72,61 @@ class SkillCardResponse(BaseModel):
     affordances: list[str]
     resources_available: bool
 
+
+# ---------------------------------------------------------------------------
+# Sessions (durable conversation CRUD)
+# ---------------------------------------------------------------------------
+
+
+class SessionCreateRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=255)
+
+
+class SessionPatchRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=255)
+    status: str | None = Field(default=None, description="active | archived")
+
+
+class SessionSummaryResponse(BaseModel):
+    id: UUID
+    title: str
+    status: str
+    checkpoint_version: int
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class SessionDetailResponse(BaseModel):
+    id: UUID
+    title: str
+    status: str
+    checkpoint_version: int
+    turn_count: int
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class SessionListResponse(BaseModel):
+    items: list[SessionSummaryResponse]
+    total: int
+    offset: int
+    limit: int
+    has_more: bool
+
+
+class TurnResponse(BaseModel):
+    id: UUID
+    sequence: int
+    role: str
+    content: str
+    status: str
+    run_id: UUID | None = None
+
+
+class TurnListResponse(BaseModel):
+    items: list[TurnResponse]
+    total: int
+    offset: int
+    limit: int
+    has_more: bool
+

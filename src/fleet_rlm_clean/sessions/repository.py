@@ -89,6 +89,152 @@ class SessionRepository:
         async with self._session_factory() as db:
             return await self._load_in_session(db, session_id)
 
+    async def get_owned(
+        self,
+        session_id: UUID,
+        *,
+        user_id: UUID,
+        workspace_id: UUID,
+    ) -> SessionRecord:
+        """Return session metadata if owned; raise SessionNotFoundError otherwise."""
+        async with self._session_factory() as db:
+            row = await db.get(SessionRow, session_id)
+            if row is None or row.user_id != user_id or row.workspace_id != workspace_id:
+                raise SessionNotFoundError(f"session {session_id} not found")
+            return _to_session_record(row)
+
+    async def list(
+        self,
+        *,
+        user_id: UUID,
+        workspace_id: UUID,
+        status: str | None = None,
+        search: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[tuple[SessionRecord, ...], int]:
+        """List sessions for one principal. Ordered by updated_at descending."""
+        limit = max(1, min(int(limit), 100))
+        offset = max(0, int(offset))
+        async with self._session_factory() as db:
+            filters = [
+                SessionRow.user_id == user_id,
+                SessionRow.workspace_id == workspace_id,
+            ]
+            if status is not None and status.strip():
+                filters.append(SessionRow.status == status.strip())
+            if search is not None and search.strip():
+                # Portable contains match (SQLite + Postgres)
+                filters.append(SessionRow.title.ilike(f"%{search.strip()}%"))
+
+            count_stmt = select(func.count()).select_from(SessionRow).where(*filters)
+            total = int((await db.execute(count_stmt)).scalar_one())
+
+            stmt = (
+                select(SessionRow)
+                .where(*filters)
+                .order_by(SessionRow.updated_at.desc(), SessionRow.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            rows = (await db.execute(stmt)).scalars().all()
+            return tuple(_to_session_record(r) for r in rows), total
+
+    async def update(
+        self,
+        session_id: UUID,
+        *,
+        user_id: UUID,
+        workspace_id: UUID,
+        title: str | None = None,
+        status: str | None = None,
+    ) -> SessionRecord:
+        """Patch title and/or status for an owned session."""
+        async with self._session_factory() as db:
+            row = await db.get(SessionRow, session_id)
+            if row is None or row.user_id != user_id or row.workspace_id != workspace_id:
+                raise SessionNotFoundError(f"session {session_id} not found")
+            if title is not None:
+                cleaned = title.strip()
+                if not cleaned:
+                    msg = "title must not be empty"
+                    raise ValueError(msg)
+                row.title = cleaned[:255]
+            if status is not None:
+                normalized = status.strip().lower()
+                if normalized not in {"active", "archived"}:
+                    msg = f"invalid session status: {status!r}"
+                    raise ValueError(msg)
+                row.status = normalized
+            row.updated_at = datetime.now(UTC)
+            await db.commit()
+            await db.refresh(row)
+            return _to_session_record(row)
+
+    async def archive(
+        self,
+        session_id: UUID,
+        *,
+        user_id: UUID,
+        workspace_id: UUID,
+    ) -> SessionRecord:
+        """Soft-delete: set status=archived."""
+        return await self.update(
+            session_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            status="archived",
+        )
+
+    async def list_turns(
+        self,
+        session_id: UUID,
+        *,
+        user_id: UUID,
+        workspace_id: UUID,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[tuple[TurnRecord, ...], int]:
+        """Paginated completed turns for an owned session (sequence ascending)."""
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        async with self._session_factory() as db:
+            session = await db.get(SessionRow, session_id)
+            if (
+                session is None
+                or session.user_id != user_id
+                or session.workspace_id != workspace_id
+            ):
+                raise SessionNotFoundError(f"session {session_id} not found")
+
+            turn_filters = [
+                TurnRow.session_id == session_id,
+                TurnRow.status == "completed",
+            ]
+            count_stmt = select(func.count()).select_from(TurnRow).where(*turn_filters)
+            total = int((await db.execute(count_stmt)).scalar_one())
+
+            stmt = (
+                select(TurnRow)
+                .where(*turn_filters)
+                .order_by(TurnRow.sequence.asc())
+                .limit(limit)
+                .offset(offset)
+            )
+            turns = tuple(_to_turn_record(t) for t in (await db.execute(stmt)).scalars().all())
+            return turns, total
+
+    async def turn_count(self, session_id: UUID) -> int:
+        """Count completed turns for a session (caller must already own)."""
+        async with self._session_factory() as db:
+            result = await db.execute(
+                select(func.count())
+                .select_from(TurnRow)
+                .where(TurnRow.session_id == session_id)
+                .where(TurnRow.status == "completed")
+            )
+            return int(result.scalar_one())
+
     async def _load_in_session(self, db: AsyncSession, session_id: UUID) -> SessionSnapshot:
         row = await db.get(SessionRow, session_id)
         if row is None:
