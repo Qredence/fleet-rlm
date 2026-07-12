@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm_clean.persistence.models import (
@@ -19,6 +20,8 @@ from fleet_rlm_clean.persistence.models import (
 from fleet_rlm_clean.sessions.checkpoints import StaleCheckpointError, TurnClaim
 from fleet_rlm_clean.sessions.errors import IdempotencyConflictError, SessionNotFoundError
 from fleet_rlm_clean.sessions.models import SessionRecord, SessionSnapshot, TurnRecord
+
+DEFAULT_WORKER_ID = "worker-local"
 
 
 def _to_session_record(row: SessionRow) -> SessionRecord:
@@ -258,9 +261,11 @@ class SessionRepository:
         *,
         idempotency_key: str | None = None,
         run_id: UUID | None = None,
+        lease_owner: str | None = None,
     ) -> TurnClaim:
         """Claim a turn under optional idempotency key; may return a completed replay."""
         key = self._normalize_idempotency_key(idempotency_key)
+        owner = (lease_owner or DEFAULT_WORKER_ID).strip() or DEFAULT_WORKER_ID
         async with self._session_factory() as db:
             session = await db.get(SessionRow, session_id)
             if session is None:
@@ -293,15 +298,44 @@ class SessionRepository:
                     await db.flush()
 
             rid = run_id or uuid4()
+            now = datetime.now(UTC)
             db.add(
                 RunRow(
                     id=rid,
                     session_id=session_id,
                     status="running",
                     idempotency_key=key,
+                    lease_owner=owner,
+                    lease_heartbeat_at=now,
                 )
             )
-            await db.commit()
+            try:
+                await db.commit()
+            except IntegrityError as exc:
+                await db.rollback()
+                if key is None:
+                    raise IdempotencyConflictError(f"concurrent run claim failed for session {session_id}") from exc
+                result = await db.execute(
+                    select(RunRow).where(
+                        RunRow.session_id == session_id,
+                        RunRow.idempotency_key == key,
+                    )
+                )
+                winner = result.scalar_one_or_none()
+                if winner is None:
+                    raise IdempotencyConflictError(
+                        f"idempotency key {key!r} conflict for session {session_id}"
+                    ) from exc
+                if winner.status == "completed":
+                    return TurnClaim(
+                        run_id=winner.id,
+                        base_checkpoint_version=base_version,
+                        replay=True,
+                        assistant_text=winner.result_assistant_text,
+                    )
+                raise IdempotencyConflictError(
+                    f"idempotency key {key!r} already in-flight for session {session_id}"
+                ) from exc
             return TurnClaim(
                 run_id=rid,
                 base_checkpoint_version=base_version,
@@ -314,9 +348,15 @@ class SessionRepository:
         *,
         idempotency_key: str | None = None,
         run_id: UUID | None = None,
+        lease_owner: str | None = None,
     ) -> UUID:
         """Record a running turn attempt. Prefer ``claim_turn`` for idempotency."""
-        claim = await self.claim_turn(session_id, idempotency_key=idempotency_key, run_id=run_id)
+        claim = await self.claim_turn(
+            session_id,
+            idempotency_key=idempotency_key,
+            run_id=run_id,
+            lease_owner=lease_owner,
+        )
         if claim.replay:
             return claim.run_id
         return claim.run_id
@@ -330,15 +370,32 @@ class SessionRepository:
         run_id: UUID | None = None,
         expected_checkpoint_version: int | None = None,
     ) -> SessionSnapshot:
-        """Persist user+assistant completed turns and advance checkpoint_version."""
+        """Persist user+assistant completed turns and CAS-advance checkpoint_version."""
         async with self._session_factory() as db:
             session = await db.get(SessionRow, session_id)
             if session is None:
                 raise SessionNotFoundError(f"session {session_id} not found")
 
             actual = int(session.checkpoint_version)
-            if expected_checkpoint_version is not None and actual != expected_checkpoint_version:
-                raise StaleCheckpointError(session_id, expected=expected_checkpoint_version, actual=actual)
+            expected = actual if expected_checkpoint_version is None else int(expected_checkpoint_version)
+            if expected != actual:
+                raise StaleCheckpointError(session_id, expected=expected, actual=actual)
+
+            # CAS first so concurrent workers fail closed before mutating turns.
+            new_version = expected + 1
+            cas = await db.execute(
+                update(SessionRow)
+                .where(
+                    SessionRow.id == session_id,
+                    SessionRow.checkpoint_version == expected,
+                )
+                .values(checkpoint_version=new_version)
+            )
+            if cas.rowcount != 1:
+                refreshed = await db.get(SessionRow, session_id)
+                current = int(refreshed.checkpoint_version) if refreshed is not None else -1
+                await db.rollback()
+                raise StaleCheckpointError(session_id, expected=expected, actual=current)
 
             seq = await self._next_sequence(db, session_id)
             db.add(
@@ -361,8 +418,6 @@ class SessionRepository:
                     status="completed",
                 )
             )
-            new_version = actual + 1
-            session.checkpoint_version = new_version
             db.add(
                 SessionCheckpointRow(
                     session_id=session_id,
@@ -380,6 +435,8 @@ class SessionRepository:
                     run.status = "completed"
                     run.finished_at = datetime.now(UTC)
                     run.result_assistant_text = assistant_text
+                    run.lease_owner = None
+                    run.lease_heartbeat_at = None
             await db.commit()
         # Fresh session after commit avoids expired attribute lazy-loads.
         return await self.load(session_id)
@@ -401,6 +458,8 @@ class SessionRepository:
                 run.status = "failed"
                 run.error_message = message
                 run.finished_at = datetime.now(UTC)
+                run.lease_owner = None
+                run.lease_heartbeat_at = None
             await db.commit()
         return await self.load(session_id)
 
@@ -467,3 +526,61 @@ class SessionRepository:
             run.cancel_requested_at = datetime.now(UTC)
             await db.commit()
             return "cancelled"
+
+    async def is_cancel_requested(self, run_id: UUID) -> bool:
+        """True when durable cancel intent is set (holder poll / cross-worker observe)."""
+        async with self._session_factory() as db:
+            run = await db.get(RunRow, run_id)
+            if run is None:
+                return False
+            return run.cancel_requested_at is not None or run.status == "cancelled"
+
+    async def heartbeat_run_lease(
+        self,
+        run_id: UUID,
+        *,
+        lease_owner: str,
+    ) -> bool:
+        """Refresh lease heartbeat when ``lease_owner`` still holds the Run."""
+        owner = lease_owner.strip() or DEFAULT_WORKER_ID
+        async with self._session_factory() as db:
+            result = await db.execute(
+                update(RunRow)
+                .where(
+                    RunRow.id == run_id,
+                    RunRow.lease_owner == owner,
+                    RunRow.status == "running",
+                )
+                .values(lease_heartbeat_at=datetime.now(UTC))
+            )
+            await db.commit()
+            return result.rowcount == 1
+
+    async def reclaim_stale_run_lease(
+        self,
+        run_id: UUID,
+        *,
+        lease_owner: str,
+        stale_after_seconds: int = 60,
+    ) -> bool:
+        """Take over a running Run whose heartbeat is older than the stale window."""
+        owner = lease_owner.strip() or DEFAULT_WORKER_ID
+        cutoff = datetime.now(UTC) - timedelta(seconds=max(1, stale_after_seconds))
+        async with self._session_factory() as db:
+            run = await db.get(RunRow, run_id)
+            if run is None or run.status != "running":
+                return False
+            if run.lease_owner == owner:
+                run.lease_heartbeat_at = datetime.now(UTC)
+                await db.commit()
+                return True
+            heartbeat = run.lease_heartbeat_at
+            if heartbeat is not None:
+                if heartbeat.tzinfo is None:
+                    heartbeat = heartbeat.replace(tzinfo=UTC)
+                if heartbeat > cutoff:
+                    return False
+            run.lease_owner = owner
+            run.lease_heartbeat_at = datetime.now(UTC)
+            await db.commit()
+            return True

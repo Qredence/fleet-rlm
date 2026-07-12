@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 from uuid import UUID
@@ -16,6 +17,9 @@ class InterpreterLeaseLike(Protocol):
     interpreter: Any
 
     def release(self) -> None: ...
+
+
+CancelProbe = Callable[[UUID], Awaitable[bool]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,3 +48,5 @@ class RLMTurnContext:
     skill_tool_host: Any | None = None
     # Optional FileToolHost for read_attachment / create_artifact + public events
     file_tool_host: Any | None = None
+    # Optional durable cancel probe (DB cancel_requested_at); process-local is mirrored.
+    cancel_probe: CancelProbe | None = None

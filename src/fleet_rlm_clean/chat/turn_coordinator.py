@@ -164,10 +164,16 @@ class TurnCoordinator:
             return
 
         built = self._build_context(command)
+        sessions = self._sessions
+
+        async def _cancel_probe(run_id: UUID) -> bool:
+            return await sessions.is_cancel_requested(run_id)
+
         context = rebind_turn_context(
             built,
             run_id=claim.run_id,
             history=history,
+            cancel_probe=_cancel_probe,
         )
         base_version = claim.base_checkpoint_version
         async for event in self._stream_runner_then_terminal(

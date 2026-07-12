@@ -92,6 +92,7 @@ def rebind_turn_context(
     run_id: UUID | None = None,
     history: Any = ...,
     session_summary: str | None = None,
+    cancel_probe: Any = ...,
 ) -> RLMTurnContext:
     """Return a new context with claim/session fields applied.
 
@@ -99,6 +100,7 @@ def rebind_turn_context(
     Pass ``history`` explicitly (including ``None``) to override; omit to keep.
     """
     resolved_history = context.history if history is ... else history
+    resolved_probe = context.cancel_probe if cancel_probe is ... else cancel_probe
     return RLMTurnContext(
         run_id=run_id if run_id is not None else context.run_id,
         session_id=context.session_id,
@@ -109,13 +111,12 @@ def rebind_turn_context(
         budget=context.budget,
         lease=context.lease,
         history=resolved_history,
-        session_summary=(
-            session_summary if session_summary is not None else context.session_summary
-        ),
+        session_summary=(session_summary if session_summary is not None else context.session_summary),
         skill_cards=context.skill_cards,
         attachments=context.attachments,
         artifacts=context.artifacts,
         tools=context.tools,
         skill_tool_host=getattr(context, "skill_tool_host", None),
         file_tool_host=getattr(context, "file_tool_host", None),
+        cancel_probe=resolved_probe,
     )

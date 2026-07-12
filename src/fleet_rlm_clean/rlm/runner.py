@@ -166,10 +166,15 @@ def _drain_host_public_events(
     return out
 
 
-def _raise_if_cancelled(run_id: Any) -> None:
+async def _raise_if_cancelled(run_id: Any, *, cancel_probe: Any = None) -> None:
     registry = get_run_cancel_registry()
     if registry.is_cancelled(run_id):
         raise TurnCancelled()
+    if cancel_probe is not None:
+        requested = await cancel_probe(run_id)
+        if requested:
+            registry.request_cancel(run_id)
+            raise TurnCancelled()
 
 
 def _terminal_status_for(exc: BaseException) -> TerminalStatus:
@@ -253,7 +258,7 @@ class RLMRunner:
                 )
                 yield emit(RuntimeEventKind.STATUS, {"message": "running"})
 
-                _raise_if_cancelled(context.run_id)
+                await _raise_if_cancelled(context.run_id, cancel_probe=context.cancel_probe)
 
                 rlm = self._factory.create(
                     models=context.models,
@@ -271,7 +276,7 @@ class RLMRunner:
                 except TimeoutError as exc:
                     raise TurnTimeout() from exc
 
-                _raise_if_cancelled(context.run_id)
+                await _raise_if_cancelled(context.run_id, cancel_probe=context.cancel_probe)
                 text = _prediction_text(prediction)
 
                 if text:
@@ -354,7 +359,7 @@ class RLMRunner:
             skill_cards=context.skill_cards,
             attachments=context.attachments,
         )
-        _raise_if_cancelled(context.run_id)
+        await _raise_if_cancelled(context.run_id, cancel_probe=context.cancel_probe)
 
         aforward = getattr(rlm, "aforward", None)
         if callable(aforward):
