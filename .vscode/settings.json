@@ -5,9 +5,13 @@
     "{git,gitlens,conflictResolution,vscode-local-history}:/**/*.{asl.json,asl.yaml,asl.yml}": "default",
     "file:/**/*.jsonl": "jupyter-data-wrangler"
   },
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
   "python.analysis.languageServerMode": "default",
   "python.analysis.typeCheckingMode": "standard",
   "python.analysis.extraPaths": [
+    "src"
+  ],
+  "basedpyright.analysis.extraPaths": [
     "src"
   ],
   "fastapi.entryPoint": "src.fleet_rlm.api.main:app",
