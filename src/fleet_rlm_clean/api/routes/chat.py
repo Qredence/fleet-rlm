@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from fleet_rlm_clean.api.identity import RequestIdentity, get_request_identity
@@ -17,6 +17,7 @@ from fleet_rlm_clean.api.sse import SSEProjector, _event_to_public_dict
 from fleet_rlm_clean.chat.commands import ChatTurnCommand
 from fleet_rlm_clean.chat.turn_coordinator import TurnCoordinator
 from fleet_rlm_clean.rlm.events import RuntimeEvent
+from fleet_rlm_clean.sessions.errors import SessionNotFoundError
 
 router = APIRouter(tags=["chat"])
 
@@ -80,6 +81,8 @@ async def chat(
             if await request.is_disconnected():
                 break
             yield runtime_event_to_sse(event)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="session not found") from exc
     finally:
         await stream.aclose()
 

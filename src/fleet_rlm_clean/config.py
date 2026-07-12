@@ -67,6 +67,26 @@ class Settings(BaseSettings):
         default=10 * 1024 * 1024,
         description="Maximum artifact body size in bytes",
     )
+    auth_mode: str = Field(
+        default="dev",
+        description="dev = synthetic headers; neon = require Neon Auth Bearer JWT",
+    )
+    neon_auth_url: str | None = Field(
+        default=None,
+        description="Override Neon Auth base URL (default: product Neon project auth origin)",
+    )
+    neon_tenant_claim: str | None = Field(
+        default=None,
+        description="Default tenant/workspace key when JWT has no workspace claim",
+    )
+
+    @field_validator("auth_mode", mode="before")
+    @classmethod
+    def _normalize_auth_mode(cls, value: object) -> str:
+        text = str(value or "dev").strip().lower()
+        if text not in {"dev", "neon"}:
+            return "dev"
+        return text
 
     @field_validator("llm_base_url", mode="before")
     @classmethod

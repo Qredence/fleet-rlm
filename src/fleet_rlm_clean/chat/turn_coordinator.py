@@ -128,6 +128,14 @@ class TurnCoordinator:
         assert self._sessions is not None
         context = self._context_builder(command)
         snapshot = await self._sessions.load(command.session_id)
+        # Isolation: reject cross-workspace/user before runtime resources run
+        from fleet_rlm_clean.api.auth_errors import SessionAccessDenied
+        from fleet_rlm_clean.sessions.errors import SessionNotFoundError
+
+        sess = snapshot.session
+        if sess.user_id != command.user_id or sess.workspace_id != command.workspace_id:
+            # Same public shape as missing session
+            raise SessionNotFoundError(f"session {command.session_id} not found") from SessionAccessDenied()
         history = turns_to_history(snapshot.turns)
 
         claim = await self._claim(command, context.run_id)
