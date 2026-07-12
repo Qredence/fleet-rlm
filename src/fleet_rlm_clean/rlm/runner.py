@@ -9,7 +9,15 @@ from typing import Any, Protocol
 
 import dspy
 
+from fleet_rlm_clean.rlm.cancel import get_run_cancel_registry
 from fleet_rlm_clean.rlm.context import RLMTurnContext
+from fleet_rlm_clean.rlm.errors import (
+    RLMBudgetError,
+    TurnBudgetExhausted,
+    TurnCancelled,
+    TurnTerminalError,
+    TurnTimeout,
+)
 from fleet_rlm_clean.rlm.events import EventRecorder, RuntimeEvent, RuntimeEventKind
 from fleet_rlm_clean.rlm.factory import RLMFactory
 from fleet_rlm_clean.rlm.sanitize import sanitize_public_error
@@ -65,7 +73,6 @@ def _drain_host_public_events(
                 for item in drain() or []:
                     if not isinstance(item, dict):
                         continue
-                    # Skill host: payloads without event_kind are skill.loaded
                     if item.get("event_kind") in (None, "skill.loaded"):
                         out.append(
                             (
@@ -120,6 +127,29 @@ def _drain_host_public_events(
     return out
 
 
+def _raise_if_cancelled(run_id: Any) -> None:
+    registry = get_run_cancel_registry()
+    if registry.is_cancelled(run_id):
+        raise TurnCancelled()
+
+
+def _terminal_status_for(exc: BaseException) -> str:
+    if isinstance(exc, TurnTerminalError):
+        return exc.status
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+        return "timeout"
+    if isinstance(exc, RLMBudgetError):
+        return "budget_exhausted"
+    name = type(exc).__name__.lower()
+    if "budget" in name or "max_llm" in str(exc).lower() or "max_iter" in str(exc).lower():
+        return "budget_exhausted"
+    if "cancel" in name:
+        return "cancelled"
+    if "timeout" in name:
+        return "timeout"
+    return "failed"
+
+
 class RLMRunner:
     """Deep module: one turn in, ordered RuntimeEvents out, lease always released."""
 
@@ -131,6 +161,7 @@ class RLMRunner:
         recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
         started = time.perf_counter()
         terminal_emitted = False
+        registry = get_run_cancel_registry()
 
         def emit(kind: RuntimeEventKind, payload: dict[str, Any] | None = None) -> RuntimeEvent:
             return recorder.emit(kind, payload)
@@ -145,20 +176,31 @@ class RLMRunner:
             )
             yield emit(RuntimeEventKind.STATUS, {"message": "running"})
 
+            _raise_if_cancelled(context.run_id)
+
             rlm = self._factory.create(
                 models=context.models,
                 budget=context.budget,
                 interpreter=context.lease.interpreter,
                 tools=list(context.tools) if context.tools else None,
             )
-            prediction = await self._execute_rlm(rlm, context)
+
+            wall = max(1, int(getattr(context.budget, "max_wall_seconds", 300) or 300))
+            try:
+                prediction = await asyncio.wait_for(
+                    self._execute_rlm(rlm, context),
+                    timeout=wall,
+                )
+            except TimeoutError as exc:
+                raise TurnTimeout() from exc
+
+            _raise_if_cancelled(context.run_id)
             text = _prediction_text(prediction)
 
             if text:
                 yield emit(RuntimeEventKind.TEXT_DELTA, {"text": text})
                 yield emit(RuntimeEventKind.TEXT_COMPLETED, {"text": text})
 
-            # Safe host tool events (no bodies/paths)
             for kind, payload in _drain_host_public_events(context):
                 yield emit(kind, payload)
 
@@ -174,8 +216,20 @@ class RLMRunner:
                 },
             )
             terminal_emitted = True
+        except asyncio.CancelledError:
+            if not terminal_emitted:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                yield emit(
+                    RuntimeEventKind.ERROR,
+                    {
+                        "status": "cancelled",
+                        "duration_ms": duration_ms,
+                        "message": "Turn cancelled",
+                    },
+                )
+                terminal_emitted = True
+            raise
         except Exception as exc:  # noqa: BLE001 - public stream must never raise raw failures
-            # Still surface host tool events that completed before the failure
             if not terminal_emitted:
                 for kind, payload in _drain_host_public_events(context):
                     yield emit(kind, payload)
@@ -183,7 +237,7 @@ class RLMRunner:
                 yield emit(
                     RuntimeEventKind.ERROR,
                     {
-                        "status": "failed",
+                        "status": _terminal_status_for(exc),
                         "duration_ms": duration_ms,
                         "message": sanitize_public_error(exc),
                     },
@@ -192,7 +246,7 @@ class RLMRunner:
         finally:
             try:
                 context.lease.release()
-            except Exception:  # noqa: BLE001 - lease release must not replace terminal event
+            except Exception:  # noqa: BLE001
                 if not terminal_emitted:
                     yield emit(
                         RuntimeEventKind.ERROR,
@@ -201,11 +255,13 @@ class RLMRunner:
                             "message": "Turn failed during cleanup",
                         },
                     )
+            registry.clear(context.run_id)
 
     async def _execute_rlm(self, rlm: Any, context: RLMTurnContext) -> Any:
         """Apply root LM via scoped DSPy context; run off the event loop when sync."""
         root_lm = context.models.root_lm
         request = context.request
+        _raise_if_cancelled(context.run_id)
 
         aforward = getattr(rlm, "aforward", None)
         if callable(aforward):

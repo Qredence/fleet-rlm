@@ -75,15 +75,23 @@ async def chat(
         message=body.message,
         attachment_ids=tuple(body.attachment_ids),
     )
+    from fleet_rlm_clean.rlm.cancel import get_run_cancel_registry
+
     stream = coordinator.stream(command)
+    run_id: UUID | None = None
     try:
         async for event in stream:
+            run_id = event.run_id
             if await request.is_disconnected():
+                # Cooperative cancel so runner can emit one terminal + release lease
+                get_run_cancel_registry().request_cancel(event.run_id)
                 break
             yield runtime_event_to_sse(event)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
     finally:
+        if run_id is not None and await request.is_disconnected():
+            get_run_cancel_registry().request_cancel(run_id)
         await stream.aclose()
 
 
