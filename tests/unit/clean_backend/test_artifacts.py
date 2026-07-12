@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,12 +15,6 @@ from fleet_rlm_clean.artifacts.errors import ArtifactNotFoundError, ArtifactVali
 from fleet_rlm_clean.artifacts.safety import parse_kind, sanitize_title, validate_content_size
 from fleet_rlm_clean.artifacts.store import LocalArtifactStore
 from fleet_rlm_clean.config import Settings
-from fleet_rlm_clean.persistence.database import (
-    create_async_engine_from_url,
-    create_session_factory,
-    create_tables,
-)
-from fleet_rlm_clean.sessions.repository import SessionRepository
 
 
 def test_parse_kind_and_title() -> None:
@@ -146,34 +140,25 @@ def test_content_survives_store_reload(tmp_path: Path) -> None:
     assert "/home/daytona/fleet/sessions/" in path_after
 
 
-@pytest.mark.asyncio
-async def test_api_create_get_no_path_leak(tmp_path: Path) -> None:
-    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
-    await create_tables(engine)
+def test_api_get_committed_artifact_has_no_path_leak(tmp_path: Path) -> None:
     settings = Settings(artifact_root=str(tmp_path / "arts"), max_artifact_bytes=2048)
     app = create_app(settings=settings)
-    app.state.session_repository = SessionRepository(create_session_factory(engine))
     user, ws = uuid4(), uuid4()
     headers = {
         "X-Fleet-User-Id": str(user),
         "X-Fleet-Workspace-Id": str(ws),
     }
     client = TestClient(app)
-    created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
-    session_id = UUID(created.json()["id"])
-    repo: SessionRepository = app.state.session_repository
-    claim = await repo.claim_turn(session_id)
-    response = client.post(
-        "/api/artifacts",
-        headers=headers,
-        json={
-            "session_id": str(session_id),
-            "run_id": str(claim.run_id),
-            "kind": "markdown",
-            "title": "summary",
-            "content": "## Result\n\nok",
-        },
+    ref = app.state.artifact_store.create(
+        user_id=user,
+        workspace_id=ws,
+        session_id=uuid4(),
+        run_id=uuid4(),
+        kind="markdown",
+        title="summary",
+        content="## Result\n\nok",
     )
+    response = client.get(f"/api/artifacts/{ref.id}", headers=headers)
     assert response.status_code == 200
     body = response.json()
     assert set(body.keys()) == {
@@ -194,55 +179,23 @@ async def test_api_create_get_no_path_leak(tmp_path: Path) -> None:
     assert body["kind"] == "markdown"
     assert body["title"] == "summary"
 
-    artifact_id = body["id"]
-    got = client.get(f"/api/artifacts/{artifact_id}", headers=headers)
-    assert got.status_code == 200
-    assert got.json()["checksum_sha256"] == body["checksum_sha256"]
-
     other = client.get(
-        f"/api/artifacts/{artifact_id}",
+        f"/api/artifacts/{ref.id}",
         headers={
             "X-Fleet-User-Id": str(user),
             "X-Fleet-Workspace-Id": str(uuid4()),
         },
     )
     assert other.status_code == 404
-    await engine.dispose()
 
 
-@pytest.mark.asyncio
-async def test_api_rejects_bad_kind_and_oversize(tmp_path: Path) -> None:
-    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
-    await create_tables(engine)
-    settings = Settings(artifact_root=str(tmp_path), max_artifact_bytes=8)
-    app = create_app(settings=settings)
-    app.state.session_repository = SessionRepository(create_session_factory(engine))
+def test_public_artifact_create_is_removed(tmp_path: Path) -> None:
+    app = create_app(settings=Settings(artifact_root=str(tmp_path), max_artifact_bytes=8))
     client = TestClient(app)
-    user, ws = uuid4(), uuid4()
     headers = {
-        "X-Fleet-User-Id": str(user),
-        "X-Fleet-Workspace-Id": str(ws),
+        "X-Fleet-User-Id": str(uuid4()),
+        "X-Fleet-Workspace-Id": str(uuid4()),
     }
-    created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
-    session_id = UUID(created.json()["id"])
-    repo: SessionRepository = app.state.session_repository
-    claim = await repo.claim_turn(session_id)
-    base = {
-        "session_id": str(session_id),
-        "run_id": str(claim.run_id),
-        "content": "abcdefghij",
-    }
-    bad_kind = client.post(
-        "/api/artifacts",
-        headers=headers,
-        json={**base, "kind": "pdf", "content": "x"},
-    )
-    assert bad_kind.status_code == 400
-
-    oversize = client.post(
-        "/api/artifacts",
-        headers=headers,
-        json={**base, "kind": "text"},
-    )
-    assert oversize.status_code == 400
-    await engine.dispose()
+    response = client.post("/api/artifacts", headers=headers, json={})
+    assert response.status_code == 404
+    assert "/api/artifacts" not in app.openapi()["paths"]

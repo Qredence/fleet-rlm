@@ -172,7 +172,7 @@ async def test_runner_budget_error_maps_to_budget_exhausted() -> None:
 
 @pytest.mark.asyncio
 async def test_failed_turn_does_not_advance_checkpoint() -> None:
-    """finish_failed_run path: ERROR terminal does not call append_completed_exchange."""
+    """finish_failed_run path: ERROR terminal does not call commit_completed_turn."""
     from datetime import UTC, datetime
 
     from fleet_rlm_clean.chat.commands import ChatTurnCommand
@@ -207,7 +207,7 @@ async def test_failed_turn_does_not_advance_checkpoint() -> None:
                 replay=False,
             )
 
-        async def append_completed_exchange(self, *a: Any, **k: Any) -> None:
+        async def commit_completed_turn(self, *a: Any, **k: Any) -> None:
             calls["append"] += 1
 
         async def finish_failed_run(self, *a: Any, **k: Any) -> None:

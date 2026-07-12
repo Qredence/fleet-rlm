@@ -27,7 +27,7 @@ from fleet_rlm_clean.rlm.context import RLMTurnContext
 from fleet_rlm_clean.rlm.events import EventRecorder, RuntimeEvent, RuntimeEventKind
 from fleet_rlm_clean.rlm.model_bundle import RLMModelBundle
 from fleet_rlm_clean.rlm.runner import TurnEventStream
-from fleet_rlm_clean.sessions.errors import SessionAccessDenied, SessionNotFoundError
+from fleet_rlm_clean.sessions.errors import SessionAccessDenied
 from fleet_rlm_clean.sessions.models import SessionRecord, SessionSnapshot
 
 
@@ -199,7 +199,7 @@ class _OwnedSessionStore:
             replay=False,
         )
 
-    async def append_completed_exchange(self, *args: Any, **kwargs: Any) -> None:
+    async def commit_completed_turn(self, *args: Any, **kwargs: Any) -> None:
         return None
 
     async def finish_failed_run(self, *args: Any, **kwargs: Any) -> None:
@@ -246,7 +246,7 @@ async def test_coordinator_rejects_cross_workspace_session() -> None:
     assert events[-1].kind == RuntimeEventKind.RUN_COMPLETED
     assert len(acquire_calls) == 1
 
-    # Different workspace: SessionNotFoundError — builder must NOT run (no acquire)
+    # Different workspace: sanitized error terminal — builder must NOT run (no acquire)
     acquire_calls.clear()
     bad_cmd = ChatTurnCommand(
         user_id=owner_user,
@@ -254,8 +254,9 @@ async def test_coordinator_rejects_cross_workspace_session() -> None:
         session_id=session_id,
         message="hi",
     )
-    with pytest.raises(SessionNotFoundError):
-        _ = [e async for e in coordinator.stream(bad_cmd)]
+    rejected = [e async for e in coordinator.stream(bad_cmd)]
+    assert [event.kind for event in rejected] == [RuntimeEventKind.ERROR]
+    assert rejected[0].payload["message"] == "Turn could not be prepared"
     assert acquire_calls == []
 
 

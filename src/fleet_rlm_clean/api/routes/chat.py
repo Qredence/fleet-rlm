@@ -2,146 +2,73 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from collections.abc import AsyncIterator
 from datetime import datetime
-from pathlib import Path
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
+from fleet_rlm_clean.api.dependencies import (
+    AttachmentStoreDep,
+    OptionalSessionRepositoryDep,
+    TurnCoordinatorDep,
+)
 from fleet_rlm_clean.api.identity import RequestIdentity, get_request_identity
 from fleet_rlm_clean.api.schemas import ChatRequest
 from fleet_rlm_clean.api.sse import SSEProjector, _event_to_public_dict
-from fleet_rlm_clean.artifacts.store import LocalArtifactStore
 from fleet_rlm_clean.chat.commands import ChatTurnCommand
-from fleet_rlm_clean.chat.turn_coordinator import TurnCoordinator
-from fleet_rlm_clean.config import Settings
-from fleet_rlm_clean.daytona.paths import volume_paths_from_settings
-from fleet_rlm_clean.daytona.volume_fs import HostVolumeMirror
-from fleet_rlm_clean.files.uploads import LocalAttachmentStore
+from fleet_rlm_clean.files.errors import AttachmentNotFoundError
 from fleet_rlm_clean.rlm.events import RuntimeEvent
 from fleet_rlm_clean.sessions.errors import SessionNotFoundError
 
 router = APIRouter(tags=["chat"])
 
 
-def _workspace_volume_mirror(request: Request, settings: Settings) -> HostVolumeMirror:
-    mirror = getattr(request.app.state, "workspace_volume_mirror", None)
-    if mirror is not None:
-        return mirror
-    upload_root = settings.upload_root or str(Path.cwd() / ".fleet_clean_uploads")
-    mirror = HostVolumeMirror(
-        Path(upload_root) / "_workspace_volume",
-        volume_paths=volume_paths_from_settings(settings),
-    )
-    request.app.state.workspace_volume_mirror = mirror
-    return mirror
-
-
-def get_turn_coordinator(request: Request) -> TurnCoordinator:
-    """Resolve coordinator from app.state (tests inject fakes here).
-
-    Offline default wraps OfflineContextBuilder with capability assembly.
-    Live mode must already have turn_coordinator from lifespan — never falls back.
-    """
-    coordinator = getattr(request.app.state, "turn_coordinator", None)
-    if coordinator is not None:
-        return coordinator
-
-    from fleet_rlm_clean.composition import is_live_mode
-
-    if is_live_mode(request.app):
-        raise HTTPException(
-            status_code=503,
-            detail="live composition is not ready",
-        )
-
-    from fleet_rlm_clean.chat.capabilities import CapabilityContextBuilder
-    from fleet_rlm_clean.chat.context_builder import OfflineContextBuilder
-
-    registry = getattr(request.app.state, "skill_registry", None)
-    attachment_store, artifact_store = _default_file_stores(request)
-    builder = CapabilityContextBuilder(
-        OfflineContextBuilder(),
-        skill_registry=registry,
-        attachment_store=attachment_store,
-        artifact_store=artifact_store,
-    )
-    coordinator = TurnCoordinator(context_builder=builder)
-    request.app.state.turn_coordinator = coordinator
-    return coordinator
-
-
-def _default_file_stores(request: Request) -> tuple[Any, Any]:
-    """Lazy host stores matching files/artifacts route defaults (offline only)."""
-    from fleet_rlm_clean.composition import is_live_mode
-
-    if is_live_mode(request.app):
-        attachment_store = getattr(request.app.state, "attachment_store", None)
-        artifact_store = getattr(request.app.state, "artifact_store", None)
-        if attachment_store is None or artifact_store is None:
-            raise HTTPException(status_code=503, detail="live composition is not ready")
-        return attachment_store, artifact_store
-
-    settings = getattr(request.app.state, "settings", None) or Settings()
-    mirror = _workspace_volume_mirror(request, settings)
-    attachment_store = getattr(request.app.state, "attachment_store", None)
-    if attachment_store is None:
-        root = settings.upload_root or str(Path.cwd() / ".fleet_clean_uploads")
-        attachment_store = LocalAttachmentStore(
-            root,
-            max_bytes=settings.max_upload_bytes,
-            volume_fs=mirror,
-            volume_paths=mirror.volume_paths,
-        )
-        request.app.state.attachment_store = attachment_store
-    artifact_store = getattr(request.app.state, "artifact_store", None)
-    if artifact_store is None:
-        if settings.artifact_root:
-            art_root = settings.artifact_root
-        elif settings.upload_root:
-            art_root = str(Path(settings.upload_root).parent / "artifacts")
-        else:
-            art_root = str(Path.cwd() / ".fleet_clean_artifacts")
-        artifact_store = LocalArtifactStore(
-            art_root,
-            max_bytes=settings.max_artifact_bytes,
-            volume_fs=mirror,
-            volume_paths=mirror.volume_paths,
-        )
-        request.app.state.artifact_store = artifact_store
-    return attachment_store, artifact_store
-
-
-def validate_chat_attachments(
+async def validate_chat_attachments(
     body: ChatRequest,
-    request: Request,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    attachment_store: AttachmentStoreDep,
 ) -> None:
     """Dependency: reject invalid attachment_ids with HTTP 400 before SSE starts."""
-    from fleet_rlm_clean.chat.capabilities import (
-        AttachmentValidationError,
-        validate_attachment_ids,
-    )
-
     if not body.attachment_ids:
         return
-    attachment_store, _artifact_store = _default_file_stores(request)
     try:
-        validate_attachment_ids(
-            attachment_store,
-            tuple(body.attachment_ids),
-            user_id=identity.user_id,
-            workspace_id=identity.workspace_id,
-        )
-    except AttachmentValidationError as exc:
+        for attachment_id in body.attachment_ids:
+            result = attachment_store.get(
+                attachment_id,
+                user_id=identity.user_id,
+                workspace_id=identity.workspace_id,
+            )
+            if inspect.isawaitable(result):
+                await result
+    except AttachmentNotFoundError as exc:
         raise HTTPException(
             status_code=400,
             detail="invalid attachment reference",
         ) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="attachment storage unavailable") from exc
+
+
+async def validate_chat_session(
+    body: ChatRequest,
+    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    repository: OptionalSessionRepositoryDep,
+) -> None:
+    """Reject missing or foreign Sessions before EventSourceResponse starts."""
+    if body.session_id is None or repository is None:
+        return
+    try:
+        snapshot = await repository.load(body.session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="session not found") from exc
+    session = snapshot.session
+    if session.user_id != identity.user_id or session.workspace_id != identity.workspace_id:
+        raise HTTPException(status_code=404, detail="session not found")
 
 
 def _json_default(value: Any) -> Any:
@@ -180,7 +107,8 @@ async def chat(
     body: ChatRequest,
     request: Request,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    coordinator: Annotated[TurnCoordinator, Depends(get_turn_coordinator)],
+    coordinator: TurnCoordinatorDep,
+    __: Annotated[None, Depends(validate_chat_session)],
     _: Annotated[None, Depends(validate_chat_attachments)],
 ) -> AsyncIterator[ServerSentEvent]:
     """Stream one chat turn as typed SSE. Route performs no DSPy/Daytona SDK calls."""
@@ -194,7 +122,7 @@ async def chat(
         attachment_ids=tuple(body.attachment_ids),
     )
 
-    stream = coordinator.stream(command)
+    stream: Any = coordinator.stream(command)
     run_id: UUID | None = None
     try:
         async for event in stream:
@@ -212,4 +140,4 @@ async def chat(
 
 
 # Re-export projector for tests that assert route composition stays thin.
-__all__ = ["router", "runtime_event_to_sse", "get_turn_coordinator", "SSEProjector"]
+__all__ = ["router", "runtime_event_to_sse", "SSEProjector"]

@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from fleet_rlm_clean.api.dependencies import OptionalSessionRepositoryDep
 from fleet_rlm_clean.api.identity import RequestIdentity, get_request_identity
 from fleet_rlm_clean.rlm.cancel import get_run_cancel_registry
-from fleet_rlm_clean.sessions.repository import SessionRepository
 
 router = APIRouter(tags=["runs"])
 
@@ -21,15 +21,11 @@ class CancelRunResponse(BaseModel):
     already_cancelled: bool
 
 
-def _session_repository(request: Request) -> SessionRepository | None:
-    return getattr(request.app.state, "session_repository", None)
-
-
 @router.post("/api/runs/{run_id}/cancel", response_model=CancelRunResponse)
 async def cancel_run(
     run_id: UUID,
-    request: Request,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    repo: OptionalSessionRepositoryDep,
 ) -> CancelRunResponse:
     """Request cancellation of an owned in-flight Run. Idempotent.
 
@@ -38,8 +34,6 @@ async def cancel_run(
     always receives the signal for the local worker.
     """
     registry = get_run_cancel_registry()
-    repo = _session_repository(request)
-
     if repo is not None:
         outcome = await repo.request_cancel(
             run_id,

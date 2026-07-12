@@ -14,8 +14,8 @@ from fleet_rlm_clean.persistence.database import (
     normalize_database_url,
 )
 from fleet_rlm_clean.persistence.models import Base
+from fleet_rlm_clean.persistence.repositories import SqlAlchemySessionRepository
 from fleet_rlm_clean.sessions.errors import SessionNotFoundError
-from fleet_rlm_clean.sessions.repository import SessionRepository
 
 
 def test_normalize_database_url_upgrades_drivers() -> None:
@@ -48,7 +48,7 @@ async def test_empty_database_boots_and_session_round_trip() -> None:
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     await create_tables(engine)
     factory = create_session_factory(engine)
-    repo = SessionRepository(factory)
+    repo = SqlAlchemySessionRepository(factory)
 
     user_id = uuid4()
     workspace_id = uuid4()
@@ -68,7 +68,7 @@ async def test_empty_database_boots_and_session_round_trip() -> None:
 async def test_load_missing_session_raises() -> None:
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     await create_tables(engine)
-    repo = SessionRepository(create_session_factory(engine))
+    repo = SqlAlchemySessionRepository(create_session_factory(engine))
 
     with pytest.raises(SessionNotFoundError):
         await repo.load(uuid4())

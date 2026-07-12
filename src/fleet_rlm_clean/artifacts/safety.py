@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import get_args
+from typing import cast, get_args
 
 from fleet_rlm_clean.artifacts.errors import ArtifactValidationError
 from fleet_rlm_clean.artifacts.models import (
@@ -20,10 +20,8 @@ _ALLOWED_KINDS = frozenset(get_args(ArtifactKind))
 def parse_kind(kind: str) -> ArtifactKind:
     raw = (kind or "").strip().lower()
     if raw not in _ALLOWED_KINDS:
-        raise ArtifactValidationError(
-            f"unsupported artifact kind; expected one of {sorted(_ALLOWED_KINDS)}"
-        )
-    return raw  # type: ignore[return-value]
+        raise ArtifactValidationError(f"unsupported artifact kind; expected one of {sorted(_ALLOWED_KINDS)}")
+    return cast(ArtifactKind, raw)
 
 
 def media_type_for(kind: ArtifactKind) -> str:

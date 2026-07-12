@@ -5,80 +5,52 @@ Staging is Turn-internal only (AttachmentStager); there is no public stage route
 
 from __future__ import annotations
 
-from pathlib import Path
+import inspect
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
+from fleet_rlm_clean.api.dependencies import AttachmentStoreDep, SettingsDep
 from fleet_rlm_clean.api.identity import RequestIdentity, get_request_identity
 from fleet_rlm_clean.api.schemas import AttachmentResponse
-from fleet_rlm_clean.config import Settings
-from fleet_rlm_clean.daytona.paths import volume_paths_from_settings
-from fleet_rlm_clean.daytona.volume_fs import HostVolumeMirror
 from fleet_rlm_clean.files.errors import AttachmentNotFoundError, AttachmentValidationError
-from fleet_rlm_clean.files.uploads import LocalAttachmentStore
 
 router = APIRouter(tags=["files"])
 
 
-def _settings(request: Request) -> Settings:
-    return getattr(request.app.state, "settings", None) or Settings()
-
-
-def _workspace_volume_mirror(request: Request, settings: Settings) -> HostVolumeMirror:
-    mirror = getattr(request.app.state, "workspace_volume_mirror", None)
-    if mirror is not None:
-        return mirror
-    upload_root = settings.upload_root or str(Path.cwd() / ".fleet_clean_uploads")
-    # Offline / process-local stand-in for Workspace Volume Scope (not production SoT).
-    mirror = HostVolumeMirror(
-        Path(upload_root) / "_workspace_volume",
-        volume_paths=volume_paths_from_settings(settings),
-    )
-    request.app.state.workspace_volume_mirror = mirror
-    return mirror
-
-
-def get_attachment_store(request: Request) -> LocalAttachmentStore:
-    store = getattr(request.app.state, "attachment_store", None)
-    if store is not None:
-        return store
-    from fleet_rlm_clean.composition import is_live_mode
-
-    if is_live_mode(request.app):
-        raise HTTPException(status_code=503, detail="live composition is not ready")
-    settings = _settings(request)
-    root = settings.upload_root or str(Path.cwd() / ".fleet_clean_uploads")
-    mirror = _workspace_volume_mirror(request, settings)
-    store = LocalAttachmentStore(
-        root,
-        max_bytes=settings.max_upload_bytes,
-        volume_fs=mirror,
-        volume_paths=mirror.volume_paths,
-    )
-    request.app.state.attachment_store = store
-    return store
-
-
 @router.post("/api/files", response_model=AttachmentResponse)
 async def upload_file(
+    file: Annotated[UploadFile, File()],
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    store: Annotated[LocalAttachmentStore, Depends(get_attachment_store)],
-    file: UploadFile = File(...),
+    store: AttachmentStoreDep,
+    settings: SettingsDep,
 ) -> AttachmentResponse:
     """Upload one file; return opaque AttachmentRef metadata only."""
-    data = await file.read()
     try:
-        ref = store.upload(
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = await file.read(min(1024 * 1024, settings.max_upload_bytes + 1))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > settings.max_upload_bytes:
+                raise AttachmentValidationError(f"attachment exceeds max size of {settings.max_upload_bytes} bytes")
+            chunks.append(chunk)
+        data = b"".join(chunks)
+        result = store.upload(
             user_id=identity.user_id,
             workspace_id=identity.workspace_id,
             filename=file.filename or "upload.bin",
             content_type=file.content_type,
             data=data,
         )
+        ref = await result if inspect.isawaitable(result) else result
     except AttachmentValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="attachment storage unavailable") from exc
     return AttachmentResponse(
         id=ref.id,
         filename=ref.filename,
@@ -92,12 +64,15 @@ async def upload_file(
 async def get_file(
     file_id: UUID,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    store: Annotated[LocalAttachmentStore, Depends(get_attachment_store)],
+    store: AttachmentStoreDep,
 ) -> AttachmentResponse:
     try:
-        ref = store.get(file_id, user_id=identity.user_id, workspace_id=identity.workspace_id)
+        result = store.get(file_id, user_id=identity.user_id, workspace_id=identity.workspace_id)
+        ref = await result if inspect.isawaitable(result) else result
     except AttachmentNotFoundError as exc:
         raise HTTPException(status_code=404, detail="attachment not found") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="attachment storage unavailable") from exc
     return AttachmentResponse(
         id=ref.id,
         filename=ref.filename,

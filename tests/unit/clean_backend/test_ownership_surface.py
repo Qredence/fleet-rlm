@@ -14,12 +14,12 @@ from fleet_rlm_clean.persistence.database import (
     create_session_factory,
     create_tables,
 )
+from fleet_rlm_clean.persistence.repositories import SqlAlchemySessionRepository
 from fleet_rlm_clean.rlm.cancel import (
     RunCancelRegistry,
     get_run_cancel_registry,
     set_run_cancel_registry,
 )
-from fleet_rlm_clean.sessions.repository import SessionRepository
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ async def _wired_app():
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     await create_tables(engine)
     app = create_app(settings=Settings(auth_mode="dev"))
-    app.state.session_repository = SessionRepository(create_session_factory(engine))
+    app.state.session_repository = SqlAlchemySessionRepository(create_session_factory(engine))
     return app, engine
 
 
@@ -60,7 +60,7 @@ async def test_cancel_foreign_or_missing_run_returns_404() -> None:
     created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
     assert created.status_code == 201
     session_id = UUID(created.json()["id"])
-    repo: SessionRepository = app.state.session_repository
+    repo: SqlAlchemySessionRepository = app.state.session_repository
     claim = await repo.claim_turn(session_id)
     foreign = client.post(
         f"/api/runs/{claim.run_id}/cancel",
@@ -78,7 +78,7 @@ async def test_cancel_owned_run_records_intent_and_is_idempotent() -> None:
     headers = _headers(user, ws)
     created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
     session_id = UUID(created.json()["id"])
-    repo: SessionRepository = app.state.session_repository
+    repo: SqlAlchemySessionRepository = app.state.session_repository
     claim = await repo.claim_turn(session_id)
 
     r1 = client.post(f"/api/runs/{claim.run_id}/cancel", headers=headers)
@@ -131,71 +131,8 @@ def test_public_stage_route_removed(tmp_path) -> None:
     assert staged.status_code == 404
 
 
-@pytest.mark.asyncio
-async def test_artifact_create_requires_owned_session_and_run(tmp_path) -> None:
-    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
-    await create_tables(engine)
-    settings = Settings(
-        artifact_root=str(tmp_path / "arts"),
-        max_artifact_bytes=2048,
-        auth_mode="dev",
-    )
-    app = create_app(settings=settings)
-    app.state.session_repository = SessionRepository(create_session_factory(engine))
+def test_public_artifact_create_is_not_an_ownership_surface(tmp_path) -> None:
+    app = create_app(settings=Settings(artifact_root=str(tmp_path / "arts"), auth_mode="dev"))
     client = TestClient(app)
-    user, ws = uuid4(), uuid4()
-    headers = _headers(user, ws)
-
-    foreign = client.post(
-        "/api/artifacts",
-        headers=headers,
-        json={
-            "session_id": str(uuid4()),
-            "run_id": str(uuid4()),
-            "kind": "text",
-            "content": "nope",
-        },
-    )
-    assert foreign.status_code == 404
-
-    created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
-    session_id = UUID(created.json()["id"])
-    repo: SessionRepository = app.state.session_repository
-    claim = await repo.claim_turn(session_id)
-
-    mismatch = client.post(
-        "/api/artifacts",
-        headers=headers,
-        json={
-            "session_id": str(session_id),
-            "run_id": str(uuid4()),
-            "kind": "text",
-            "content": "nope",
-        },
-    )
-    assert mismatch.status_code == 404
-
-    ok = client.post(
-        "/api/artifacts",
-        headers=headers,
-        json={
-            "session_id": str(session_id),
-            "run_id": str(claim.run_id),
-            "kind": "text",
-            "content": "hello",
-            "title": "n",
-        },
-    )
-    assert ok.status_code == 200
-    artifact_id = ok.json()["id"]
-    assert "path" not in ok.json()
-
-    other_ws = client.get(
-        f"/api/artifacts/{artifact_id}",
-        headers=_headers(user, uuid4()),
-    )
-    assert other_ws.status_code == 404
-
-    owned = client.get(f"/api/artifacts/{artifact_id}", headers=headers)
-    assert owned.status_code == 200
-    await engine.dispose()
+    response = client.post("/api/artifacts", headers=_headers(), json={})
+    assert response.status_code == 404

@@ -118,5 +118,6 @@ def rebind_turn_context(
         tools=context.tools,
         skill_tool_host=getattr(context, "skill_tool_host", None),
         file_tool_host=getattr(context, "file_tool_host", None),
+        volume_fs=getattr(context, "volume_fs", None),
         cancel_probe=resolved_probe,
     )

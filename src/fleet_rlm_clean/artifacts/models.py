@@ -33,3 +33,21 @@ class ArtifactRef:
     media_type: str
     byte_size: int
     checksum_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactCandidate:
+    """Private Run output that becomes an Artifact only through Turn Commit."""
+
+    id: UUID
+    user_id: UUID
+    workspace_id: UUID
+    session_id: UUID
+    run_id: UUID
+    kind: ArtifactKind
+    title: str | None
+    media_type: str
+    byte_size: int
+    checksum_sha256: str
+    staging_path: str
+    durable_path: str

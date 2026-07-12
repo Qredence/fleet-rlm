@@ -16,18 +16,19 @@ from fleet_rlm_clean.persistence.database import (
     create_session_factory,
     create_tables,
 )
+from fleet_rlm_clean.persistence.repositories import SqlAlchemySessionRepository
 from fleet_rlm_clean.rlm.budgets import RLMBudget
 from fleet_rlm_clean.rlm.context import RLMTurnContext
 from fleet_rlm_clean.rlm.events import EventRecorder, RuntimeEvent, RuntimeEventKind
 from fleet_rlm_clean.rlm.model_bundle import RLMModelBundle
+from fleet_rlm_clean.rlm.runner import TurnEventStream
 from fleet_rlm_clean.sessions.history import history_message_count, turns_to_history
-from fleet_rlm_clean.sessions.repository import SessionRepository
 
 
-async def _open_repo() -> tuple[SessionRepository, AsyncEngine]:
+async def _open_repo() -> tuple[SqlAlchemySessionRepository, AsyncEngine]:
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     await create_tables(engine)
-    return SessionRepository(create_session_factory(engine)), engine
+    return SqlAlchemySessionRepository(create_session_factory(engine)), engine
 
 
 @pytest.mark.asyncio
@@ -37,9 +38,9 @@ async def test_completed_exchanges_rebuild_history() -> None:
         user_id, workspace_id = uuid4(), uuid4()
         session = await repo.create(user_id=user_id, workspace_id=workspace_id)
         run1 = await repo.begin_run(session.id)
-        await repo.append_completed_exchange(session.id, user_text="hello", assistant_text="world", run_id=run1)
+        await repo.commit_completed_turn(session.id, user_text="hello", assistant_text="world", run_id=run1)
         run2 = await repo.begin_run(session.id)
-        await repo.append_completed_exchange(session.id, user_text="again", assistant_text="ok", run_id=run2)
+        await repo.commit_completed_turn(session.id, user_text="again", assistant_text="ok", run_id=run2)
 
         loaded = await repo.load(session.id)
         history = turns_to_history(loaded.turns)
@@ -62,7 +63,7 @@ async def test_failed_run_does_not_advance_checkpoint_or_history() -> None:
         user_id, workspace_id = uuid4(), uuid4()
         session = await repo.create(user_id=user_id, workspace_id=workspace_id)
         run_ok = await repo.begin_run(session.id)
-        await repo.append_completed_exchange(session.id, user_text="u1", assistant_text="a1", run_id=run_ok)
+        await repo.commit_completed_turn(session.id, user_text="u1", assistant_text="a1", run_id=run_ok)
         before = await repo.load(session.id)
         run_fail = await repo.begin_run(session.id)
         after_fail = await repo.finish_failed_run(session.id, run_fail, message="boom")
@@ -79,12 +80,12 @@ async def test_reload_after_new_repository_instance_preserves_history() -> None:
     await create_tables(engine)
     factory = create_session_factory(engine)
     try:
-        repo_a = SessionRepository(factory)
+        repo_a = SqlAlchemySessionRepository(factory)
         session = await repo_a.create(user_id=uuid4(), workspace_id=uuid4())
         run_id = await repo_a.begin_run(session.id)
-        await repo_a.append_completed_exchange(session.id, user_text="persist", assistant_text="me", run_id=run_id)
+        await repo_a.commit_completed_turn(session.id, user_text="persist", assistant_text="me", run_id=run_id)
 
-        repo_b = SessionRepository(factory)
+        repo_b = SqlAlchemySessionRepository(factory)
         loaded = await repo_b.load(session.id)
         history = turns_to_history(loaded.turns)
         assert history_message_count(history) == 2

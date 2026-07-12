@@ -161,7 +161,7 @@ def test_public_attachment_and_artifact_responses_omit_paths(tmp_path: Path) -> 
     assert "/home/" not in json.dumps(up_body)
     assert str(tmp_path) not in json.dumps(up_body)
 
-    # Without SessionRepository, public artifact create is unavailable (503).
+    # Host-Mediated creation is the only foundation path; public create is absent.
     art = client.post(
         "/api/artifacts",
         headers=headers,
@@ -173,7 +173,7 @@ def test_public_attachment_and_artifact_responses_omit_paths(tmp_path: Path) -> 
             "title": "n",
         },
     )
-    assert art.status_code == 503
+    assert art.status_code == 404
 
 
 def test_host_volume_mirror_rejects_escape(tmp_path: Path) -> None:

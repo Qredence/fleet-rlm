@@ -13,7 +13,7 @@ from fleet_rlm_clean.persistence.database import (
     create_session_factory,
     create_tables,
 )
-from fleet_rlm_clean.sessions.repository import SessionRepository
+from fleet_rlm_clean.persistence.repositories import SqlAlchemySessionRepository
 
 
 def _headers(user_id=None, workspace_id=None):
@@ -27,7 +27,7 @@ async def _wired_app():
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     await create_tables(engine)
     app = create_app()
-    app.state.session_repository = SessionRepository(create_session_factory(engine))
+    app.state.session_repository = SqlAlchemySessionRepository(create_session_factory(engine))
     return app, engine
 
 
@@ -110,10 +110,10 @@ async def test_session_turns_endpoint() -> None:
     client = TestClient(app)
     sid = client.post("/api/sessions", json={}, headers=headers).json()["id"]
 
-    repo: SessionRepository = app.state.session_repository
+    repo: SqlAlchemySessionRepository = app.state.session_repository
     session_uuid = UUID(sid)
     claim = await repo.claim_turn(session_uuid)
-    await repo.append_completed_exchange(
+    await repo.commit_completed_turn(
         session_uuid,
         user_text="u",
         assistant_text="a",

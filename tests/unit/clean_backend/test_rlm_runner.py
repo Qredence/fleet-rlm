@@ -118,7 +118,7 @@ async def test_runner_emits_start_text_usage_and_one_terminal() -> None:
     assert outcome is not None
     assert outcome.terminal_status == "completed"
     assert outcome.assistant_text == "world"
-    assert lease.released == 1
+    assert lease.released == 0
     assert factory.last_kwargs["models"].sub_lm is sub
     assert factory.last_kwargs["interpreter"] is lease.interpreter
 
@@ -137,7 +137,7 @@ async def test_runner_applies_root_lm_via_dspy_settings_context() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_sanitizes_failures_and_still_releases_lease() -> None:
+async def test_runner_sanitizes_failures_without_releasing_coordinator_owned_lease() -> None:
     secret = "api_key=sk-super-secret-value"
     fake_rlm = _FakeRLM(fail=RuntimeError(f"provider boom {secret} /Users/zoe/secret/path"))
     ctx, lease = _context()
@@ -151,7 +151,7 @@ async def test_runner_sanitizes_failures_and_still_releases_lease() -> None:
     message = outcome.public_error_message or ""
     assert "sk-super-secret-value" not in message
     assert "/Users/zoe" not in message
-    assert lease.released == 1
+    assert lease.released == 0
 
 
 @pytest.mark.asyncio
@@ -173,8 +173,8 @@ async def test_concurrent_runs_use_distinct_rlm_instances() -> None:
     assert len(factory.created) == 2
     assert factory.created[0] is not factory.created[1]
     assert all(outcome is not None and outcome.terminal_status == "completed" for _events, outcome in results)
-    assert lease_a.released == 1
-    assert lease_b.released == 1
+    assert lease_a.released == 0
+    assert lease_b.released == 0
 
 
 @pytest.mark.asyncio

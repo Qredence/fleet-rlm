@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import inspect
 from collections.abc import AsyncIterator
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
+from fleet_rlm_clean.artifacts.models import ArtifactCandidate
 from fleet_rlm_clean.chat.commands import ChatTurnCommand
 from fleet_rlm_clean.chat.context_builder import (
     OfflineContextBuilder,
@@ -54,7 +57,7 @@ class SessionStore(Protocol):
         run_id: Any | None = None,
     ) -> Any: ...
 
-    async def append_completed_exchange(
+    async def commit_completed_turn(
         self,
         session_id: Any,
         *,
@@ -62,6 +65,7 @@ class SessionStore(Protocol):
         assistant_text: str,
         run_id: Any | None = None,
         expected_checkpoint_version: int | None = None,
+        artifact_candidates: tuple[ArtifactCandidate, ...] = (),
     ) -> Any: ...
 
     async def finish_failed_run(
@@ -71,6 +75,8 @@ class SessionStore(Protocol):
         *,
         message: str | None = None,
     ) -> Any: ...
+
+    async def is_cancel_requested(self, run_id: Any) -> bool: ...
 
 
 def public_terminal_from_outcome(
@@ -129,7 +135,12 @@ class TurnCoordinator:
         msg = "context_builder must be callable or provide build(command)"
         raise TypeError(msg)
 
-    async def _abuild_context(self, command: ChatTurnCommand) -> RLMTurnContext:
+    async def _abuild_context(
+        self,
+        command: ChatTurnCommand,
+        *,
+        run_id: UUID | None = None,
+    ) -> RLMTurnContext:
         """Build context; await async builders (e.g. LiveKernelResources.build_context)."""
 
         builder = self._context_builder
@@ -137,7 +148,11 @@ class TurnCoordinator:
             method = getattr(builder, name, None)
             if not callable(method):
                 continue
-            result = method(command)
+            try:
+                accepts_run_id = "run_id" in inspect.signature(method).parameters
+            except (TypeError, ValueError):
+                accepts_run_id = False
+            result = method(command, run_id=run_id) if run_id is not None and accepts_run_id else method(command)
             if inspect.isawaitable(result):
                 return await result
             return result
@@ -167,14 +182,29 @@ class TurnCoordinator:
 
     async def _stream_locked(self, command: ChatTurnCommand) -> AsyncIterator[RuntimeEvent]:
         assert self._sessions is not None
-        snapshot = await self._sessions.load(command.session_id)
-        sess = snapshot.session
-        if sess.user_id != command.user_id or sess.workspace_id != command.workspace_id:
-            raise SessionNotFoundError(f"session {command.session_id} not found") from SessionAccessDenied()
-
-        history = turns_to_history(snapshot.turns)
         preferred_run_id = uuid4()
-        claim = await self._claim(command, preferred_run_id)
+        try:
+            snapshot = await self._sessions.load(command.session_id)
+            sess = snapshot.session
+            if sess.user_id != command.user_id or sess.workspace_id != command.workspace_id:
+                raise SessionNotFoundError(f"session {command.session_id} not found") from SessionAccessDenied()
+            history = turns_to_history(snapshot.turns)
+            claim = await self._claim(command, preferred_run_id)
+        except Exception:  # noqa: BLE001 - preparation details are never public
+            try:
+                await self._sessions.finish_failed_run(
+                    command.session_id,
+                    preferred_run_id,
+                    message="Turn could not be prepared",
+                )
+            except Exception:  # noqa: BLE001 - preserve exactly one public terminal
+                pass
+            recorder = EventRecorder(run_id=preferred_run_id, session_id=command.session_id)
+            yield recorder.emit(
+                RuntimeEventKind.ERROR,
+                {"status": "failed", "message": "Turn could not be prepared"},
+            )
+            return
         if claim.replay:
             async for event in self._replay_events(
                 session_id=command.session_id,
@@ -184,8 +214,25 @@ class TurnCoordinator:
                 yield event
             return
 
-        built = await self._abuild_context(command)
         sessions = self._sessions
+
+        try:
+            built = await self._abuild_context(command, run_id=claim.run_id)
+        except Exception:  # noqa: BLE001 - preparation details are never public
+            try:
+                await sessions.finish_failed_run(
+                    command.session_id,
+                    claim.run_id,
+                    message="Turn could not be prepared",
+                )
+            except Exception:  # noqa: BLE001 - preserve exactly one public terminal
+                pass
+            recorder = EventRecorder(run_id=claim.run_id, session_id=command.session_id)
+            yield recorder.emit(
+                RuntimeEventKind.ERROR,
+                {"status": "failed", "message": "Turn could not be prepared"},
+            )
+            return
 
         async def _cancel_probe(run_id: UUID) -> bool:
             return await sessions.is_cancel_requested(run_id)
@@ -213,37 +260,68 @@ class TurnCoordinator:
         *,
         persist: _PersistArgs | None,
     ) -> AsyncIterator[RuntimeEvent]:
-        stream = self._runner.stream(context)
         last_sequence = 0
-        async for event in stream:
-            if event.kind in {RuntimeEventKind.RUN_COMPLETED, RuntimeEventKind.ERROR}:
-                # Protocol violation if a runner yields public terminals.
-                msg = "runner emitted a public terminal event"
-                raise RuntimeError(msg)
-            last_sequence = event.sequence
-            yield event
+        try:
+            stream = self._runner.stream(context)
+            async for event in stream:
+                if event.kind in {RuntimeEventKind.RUN_COMPLETED, RuntimeEventKind.ERROR}:
+                    # Protocol violation if a runner yields public terminals.
+                    msg = "runner emitted a public terminal event"
+                    raise RuntimeError(msg)
+                last_sequence = event.sequence
+                yield event
 
-        outcome = stream.outcome
-        if outcome is None:
-            outcome = TurnExecutionOutcome(
-                terminal_status="failed",
-                public_error_message="stream ended without outcome",
+            outcome = stream.outcome
+            if outcome is None:
+                outcome = TurnExecutionOutcome(
+                    terminal_status="failed",
+                    public_error_message="stream ended without outcome",
+                )
+
+            recorder = EventRecorder(
+                run_id=context.run_id,
+                session_id=context.session_id,
+                start_sequence=last_sequence,
             )
+            checkpoint_version: int | None = None
+            if persist is not None:
+                try:
+                    checkpoint_version = await self._persist_outcome(persist, outcome)
+                except Exception:  # noqa: BLE001 - persistence details are never public
+                    yield public_terminal_from_outcome(
+                        recorder,
+                        TurnExecutionOutcome(
+                            terminal_status="failed",
+                            public_error_message="Turn could not be committed",
+                            duration_ms=outcome.duration_ms,
+                        ),
+                    )
+                    return
 
-        checkpoint_version: int | None = None
-        if persist is not None:
-            checkpoint_version = await self._persist_outcome(persist, outcome)
+            if outcome.succeeded and persist is not None:
+                for candidate in outcome.artifact_candidates:
+                    yield recorder.emit(
+                        RuntimeEventKind.ARTIFACT_CREATED,
+                        {
+                            "artifact_id": str(candidate.id),
+                            "kind": candidate.kind,
+                            "title": candidate.title,
+                            "media_type": candidate.media_type,
+                            "byte_size": candidate.byte_size,
+                            "checksum_sha256": candidate.checksum_sha256,
+                        },
+                    )
 
-        recorder = EventRecorder(
-            run_id=context.run_id,
-            session_id=context.session_id,
-            start_sequence=last_sequence,
-        )
-        yield public_terminal_from_outcome(
-            recorder,
-            outcome,
-            checkpoint_version=checkpoint_version,
-        )
+            yield public_terminal_from_outcome(
+                recorder,
+                outcome,
+                checkpoint_version=checkpoint_version,
+            )
+        finally:
+            try:
+                context.lease.release()
+            except Exception:  # noqa: BLE001 - committed outcome cannot be retracted by cleanup
+                pass
 
     async def _claim(self, command: ChatTurnCommand, preferred_run_id: UUID) -> TurnClaim:
         assert self._sessions is not None
@@ -296,12 +374,14 @@ class TurnCoordinator:
         command = args.command
         context = args.context
         if outcome.succeeded:
-            snapshot = await self._sessions.append_completed_exchange(
+            await self._promote_artifact_candidates(context, outcome.artifact_candidates)
+            snapshot = await self._sessions.commit_completed_turn(
                 command.session_id,
                 user_text=command.message,
                 assistant_text=outcome.assistant_text,
                 run_id=context.run_id,
                 expected_checkpoint_version=args.expected_checkpoint_version,
+                artifact_candidates=outcome.artifact_candidates,
             )
             session = getattr(snapshot, "session", None)
             if session is not None:
@@ -314,6 +394,31 @@ class TurnCoordinator:
             message=outcome.public_error_message or "turn failed",
         )
         return None
+
+    @staticmethod
+    async def _promote_artifact_candidates(
+        context: RLMTurnContext,
+        candidates: tuple[ArtifactCandidate, ...],
+    ) -> None:
+        if not candidates:
+            return
+        if context.volume_fs is None:
+            raise RuntimeError("artifact promotion requires a Workspace Volume Scope")
+
+        for candidate in candidates:
+            if (
+                candidate.user_id != context.user_id
+                or candidate.workspace_id != context.workspace_id
+                or candidate.session_id != context.session_id
+                or candidate.run_id != context.run_id
+            ):
+                raise RuntimeError("artifact candidate does not belong to this Turn")
+            data = await asyncio.to_thread(context.volume_fs.read_bytes, candidate.staging_path)
+            if len(data) != candidate.byte_size:
+                raise RuntimeError("artifact candidate size mismatch")
+            if hashlib.sha256(data).hexdigest() != candidate.checksum_sha256:
+                raise RuntimeError("artifact candidate checksum mismatch")
+            await asyncio.to_thread(context.volume_fs.write_bytes, candidate.durable_path, data)
 
 
 class _PersistArgs:

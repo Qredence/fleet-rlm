@@ -6,8 +6,9 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from fleet_rlm_clean.api.dependencies import SessionRepositoryDep
 from fleet_rlm_clean.api.identity import RequestIdentity, get_request_identity
 from fleet_rlm_clean.api.schemas import (
     SessionCreateRequest,
@@ -20,16 +21,8 @@ from fleet_rlm_clean.api.schemas import (
 )
 from fleet_rlm_clean.sessions.errors import SessionNotFoundError
 from fleet_rlm_clean.sessions.models import SessionRecord, TurnRecord
-from fleet_rlm_clean.sessions.repository import SessionRepository
 
 router = APIRouter(tags=["sessions"])
-
-
-def get_session_repository(request: Request) -> SessionRepository:
-    repo = getattr(request.app.state, "session_repository", None)
-    if repo is None:
-        raise HTTPException(status_code=503, detail="database not configured")
-    return repo
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -64,7 +57,7 @@ def _to_turn(record: TurnRecord) -> TurnResponse:
 async def create_session(
     body: SessionCreateRequest,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    repo: Annotated[SessionRepository, Depends(get_session_repository)],
+    repo: SessionRepositoryDep,
 ) -> SessionDetailResponse:
     title = (body.title or "New Session").strip() or "New Session"
     record = await repo.create(
@@ -86,7 +79,7 @@ async def create_session(
 @router.get("/api/sessions", response_model=SessionListResponse)
 async def list_sessions(
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    repo: Annotated[SessionRepository, Depends(get_session_repository)],
+    repo: SessionRepositoryDep,
     status: Annotated[str | None, Query(description="active | archived")] = None,
     search: Annotated[str | None, Query(description="Title contains")] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -113,7 +106,7 @@ async def list_sessions(
 async def get_session(
     session_id: UUID,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    repo: Annotated[SessionRepository, Depends(get_session_repository)],
+    repo: SessionRepositoryDep,
 ) -> SessionDetailResponse:
     try:
         record = await repo.get_owned(
@@ -140,7 +133,7 @@ async def patch_session(
     session_id: UUID,
     body: SessionPatchRequest,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    repo: Annotated[SessionRepository, Depends(get_session_repository)],
+    repo: SessionRepositoryDep,
 ) -> SessionDetailResponse:
     if body.title is None and body.status is None:
         raise HTTPException(status_code=422, detail="no fields to update")
@@ -176,7 +169,7 @@ async def patch_session(
 async def delete_session(
     session_id: UUID,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    repo: Annotated[SessionRepository, Depends(get_session_repository)],
+    repo: SessionRepositoryDep,
 ) -> SessionDetailResponse:
     """Soft-delete: archive the session."""
     try:
@@ -203,7 +196,7 @@ async def delete_session(
 async def list_session_turns(
     session_id: UUID,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    repo: Annotated[SessionRepository, Depends(get_session_repository)],
+    repo: SessionRepositoryDep,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> TurnListResponse:

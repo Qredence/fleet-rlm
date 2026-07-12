@@ -157,10 +157,16 @@ Attachment record. Public clients receive identity and metadata only—not host 
 provider paths as product surface.
 _Avoid_: public Sandbox path API, upload record alone, Artifact
 
+**Artifact Candidate**:
+Private output produced during a Run and awaiting Turn Commit. Its identity and
+bytes are not public until promotion and the metadata transaction succeed.
+_Avoid_: Artifact, Runtime Event, public creation response
+
 **Artifact**:
-Generated output retained for inspection after the Run, owned by User and
-Workspace.
-_Avoid_: Attachment, Staged Attachment, log, transcript
+Committed, publicly retrievable Run output owned by User and Workspace. An
+Artifact exists only after its Artifact Candidate is promoted through Turn
+Commit.
+_Avoid_: Artifact Candidate, Attachment, Staged Attachment, log, transcript
 
 ### Public progress
 

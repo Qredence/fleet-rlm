@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 from collections.abc import Callable
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fleet_rlm_clean.artifacts.errors import ArtifactValidationError
-from fleet_rlm_clean.artifacts.store import LocalArtifactStore
-from fleet_rlm_clean.files.errors import AttachmentNotFoundError
-from fleet_rlm_clean.files.uploads import LocalAttachmentStore
+from fleet_rlm_clean.artifacts.models import KIND_EXTENSIONS, ArtifactCandidate
+from fleet_rlm_clean.artifacts.safety import (
+    encode_content,
+    media_type_for,
+    parse_kind,
+    sanitize_title,
+    validate_content_size,
+)
+from fleet_rlm_clean.daytona.paths import VolumePaths, as_posix
+from fleet_rlm_clean.daytona.volume_fs import VolumeBlobFs
+from fleet_rlm_clean.files.models import AttachmentRef, StagedAttachment
 
 
 class FileToolHost:
@@ -19,32 +27,44 @@ class FileToolHost:
     def __init__(
         self,
         *,
-        attachment_store: LocalAttachmentStore,
-        artifact_store: LocalArtifactStore,
+        attachments: tuple[AttachmentRef, ...],
+        staged_attachments: tuple[StagedAttachment, ...],
+        volume_fs: VolumeBlobFs,
         user_id: UUID,
         workspace_id: UUID,
         session_id: UUID,
         run_id: UUID,
         max_attachment_reads: int = 16,
         max_artifact_creates: int = 8,
+        max_artifact_bytes: int = 10 * 1024 * 1024,
+        volume_paths: VolumePaths | None = None,
     ) -> None:
-        self._attachments = attachment_store
-        self._artifacts = artifact_store
+        self._attachments = {ref.id: ref for ref in attachments}
+        self._staged = {item.attachment_id: item for item in staged_attachments}
+        self._volume_fs = volume_fs
         self._user_id = user_id
         self._workspace_id = workspace_id
         self._session_id = session_id
         self._run_id = run_id
         self._max_attachment_reads = max(0, int(max_attachment_reads))
         self._max_artifact_creates = max(0, int(max_artifact_creates))
+        self._max_artifact_bytes = max(1, int(max_artifact_bytes))
+        self._paths = volume_paths or VolumePaths.from_mount()
         self._read_count = 0
         self._create_count = 0
         self._pending_events: list[dict[str, Any]] = []
+        self._artifact_candidates: list[ArtifactCandidate] = []
 
     def drain_public_events(self) -> list[dict[str, Any]]:
         """Return and clear ledger entries with ``event_kind`` + safe payload fields."""
         events = list(self._pending_events)
         self._pending_events.clear()
         return events
+
+    def drain_artifact_candidates(self) -> tuple[ArtifactCandidate, ...]:
+        candidates = tuple(self._artifact_candidates)
+        self._artifact_candidates.clear()
+        return candidates
 
     def read_attachment(self, attachment_id: str) -> dict[str, Any]:
         """Return attachment body after reauth. Public event omits content."""
@@ -54,14 +74,13 @@ class FileToolHost:
             aid = UUID(str(attachment_id).strip())
         except (ValueError, AttributeError, TypeError):
             return {"ok": False, "error": "invalid_id"}
+        ref = self._attachments.get(aid)
+        staged = self._staged.get(aid)
+        if ref is None or staged is None:
+            return {"ok": False, "error": "not_found"}
         try:
-            ref = self._attachments.get(
-                aid, user_id=self._user_id, workspace_id=self._workspace_id
-            )
-            data = self._attachments.read_bytes(
-                aid, user_id=self._user_id, workspace_id=self._workspace_id
-            )
-        except AttachmentNotFoundError:
+            data = self._volume_fs.read_bytes(staged.sandbox_path)
+        except Exception:  # noqa: BLE001 - provider details never reach the model
             return {"ok": False, "error": "not_found"}
 
         self._read_count += 1
@@ -103,42 +122,49 @@ class FileToolHost:
         content: str,
         title: str | None = None,
     ) -> dict[str, Any]:
-        """Create durable artifact after identity-bound store write. No paths in result."""
+        """Stage a private Artifact Candidate. Turn Commit owns publication."""
         if self._create_count >= self._max_artifact_creates:
             return {"ok": False, "error": "budget_exceeded"}
         try:
-            ref = self._artifacts.create(
+            parsed_kind = parse_kind(kind)
+            safe_title = sanitize_title(title)
+            data = encode_content(parsed_kind, content)
+            validate_content_size(len(data), max_bytes=self._max_artifact_bytes)
+            artifact_id = uuid4()
+            extension = KIND_EXTENSIONS[parsed_kind]
+            staging_path = as_posix(
+                self._paths.run_artifacts_dir(self._session_id, self._run_id) / f"{artifact_id}{extension}"
+            )
+            durable_path = as_posix(self._paths.artifact_blob_path(artifact_id))
+            self._volume_fs.write_bytes(staging_path, data)
+            candidate = ArtifactCandidate(
+                id=artifact_id,
                 user_id=self._user_id,
                 workspace_id=self._workspace_id,
                 session_id=self._session_id,
                 run_id=self._run_id,
-                kind=kind,
-                content=content,
-                title=title,
+                kind=parsed_kind,
+                title=safe_title,
+                media_type=media_type_for(parsed_kind),
+                byte_size=len(data),
+                checksum_sha256=hashlib.sha256(data).hexdigest(),
+                staging_path=staging_path,
+                durable_path=durable_path,
             )
-        except ArtifactValidationError as exc:
+        except ValueError as exc:
             return {"ok": False, "error": "validation", "message": str(exc)[:200]}
         except Exception:  # noqa: BLE001 - never leak internals to model
             return {"ok": False, "error": "validation"}
 
         self._create_count += 1
-        self._pending_events.append(
-            {
-                "event_kind": "artifact.created",
-                "artifact_id": str(ref.id),
-                "kind": ref.kind,
-                "title": ref.title,
-                "byte_size": ref.byte_size,
-                "checksum_sha256": ref.checksum_sha256,
-            }
-        )
+        self._artifact_candidates.append(candidate)
         return {
             "ok": True,
-            "artifact_id": str(ref.id),
-            "kind": ref.kind,
-            "title": ref.title,
-            "byte_size": ref.byte_size,
-            "checksum_sha256": ref.checksum_sha256,
+            "artifact_candidate_id": str(candidate.id),
+            "kind": candidate.kind,
+            "title": candidate.title,
+            "byte_size": candidate.byte_size,
+            "checksum_sha256": candidate.checksum_sha256,
         }
 
     def as_tool_callables(self) -> tuple[Callable[..., Any], ...]:
@@ -153,7 +179,7 @@ class FileToolHost:
             content: str,
             title: str | None = None,
         ) -> dict[str, Any]:
-            """Create a durable text/markdown/json artifact for this turn."""
+            """Stage a text/markdown/json Artifact Candidate for Turn Commit."""
             return self.create_artifact(kind, content, title=title)
 
         return (read_attachment, create_artifact)

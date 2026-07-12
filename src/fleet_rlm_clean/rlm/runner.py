@@ -115,17 +115,6 @@ def _map_host_ledger_item(
                 "byte_size": int(item.get("byte_size") or 0),
             },
         )
-    if kind == "artifact.created":
-        return (
-            RuntimeEventKind.ARTIFACT_CREATED,
-            {
-                "artifact_id": str(item.get("artifact_id", "")),
-                "kind": str(item.get("kind", "")),
-                "title": item.get("title"),
-                "byte_size": int(item.get("byte_size") or 0),
-                "checksum_sha256": str(item.get("checksum_sha256", "")),
-            },
-        )
     if kind in (None, "skill.loaded") and item.get("skill_id"):
         return (
             RuntimeEventKind.SKILL_LOADED,
@@ -289,11 +278,18 @@ class RLMRunner:
                 usage = _usage_payload(prediction)
                 yield emit(RuntimeEventKind.USAGE, {"usage": usage})
 
+                artifact_candidates = ()
+                file_host = getattr(context, "file_tool_host", None)
+                drain_candidates = getattr(file_host, "drain_artifact_candidates", None)
+                if callable(drain_candidates):
+                    artifact_candidates = tuple(drain_candidates())
+
                 duration_ms = int((time.perf_counter() - started) * 1000)
                 outcome_holder["value"] = TurnExecutionOutcome(
                     terminal_status="completed",
                     assistant_text=text,
                     usage=usage,
+                    artifact_candidates=artifact_candidates,
                     duration_ms=duration_ms,
                 )
             except asyncio.CancelledError:
@@ -314,14 +310,6 @@ class RLMRunner:
                     duration_ms=duration_ms,
                 )
             finally:
-                try:
-                    context.lease.release()
-                except Exception as cleanup_exc:  # noqa: BLE001
-                    if outcome_holder["value"] is None:
-                        outcome_holder["value"] = TurnExecutionOutcome(
-                            terminal_status="failed",
-                            public_error_message=sanitize_public_error(cleanup_exc) or "Turn failed during cleanup",
-                        )
                 registry.mark_terminal(context.run_id)
                 if outcome_holder["value"] is None:
                     outcome_holder["value"] = TurnExecutionOutcome(

@@ -6,8 +6,6 @@ Requires Daytona + LLM credentials (FLEET_CLEAN_* / DAYTONA_API_KEY).
 
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
 import hashlib
 import json
 import os
@@ -24,8 +22,6 @@ from fleet_rlm_clean.app import create_live_app
 from fleet_rlm_clean.chat.live_context import settings_with_env_fallbacks
 from fleet_rlm_clean.config import Settings
 from fleet_rlm_clean.daytona.bindings import SandboxBinding
-from fleet_rlm_clean.daytona.session_manager import LeaseRequest
-from fleet_rlm_clean.daytona.volume_fs import DaytonaSandboxVolumeFs
 from fleet_rlm_clean.rlm.events import RuntimeEventKind
 
 pytestmark = [pytest.mark.live_daytona]
@@ -101,15 +97,6 @@ def _parse_sse_kinds(body: str) -> list[str]:
 def _write_evidence(payload: dict[str, Any]) -> None:
     _EVIDENCE.parent.mkdir(parents=True, exist_ok=True)
     _EVIDENCE.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-
-
-def _run_async(coro: Any) -> Any:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
 
 
 @pytest.mark.timeout(900)
@@ -188,9 +175,6 @@ def test_exit_bar_l1_promotion_live_composition(tmp_path: Path) -> None:
         session_id = UUID(sess.json()["id"])
         observed["session_id"] = str(session_id)
 
-        run_id = _run_async(app.state.session_repository.begin_run(session_id, lease_owner="l1-exit-bar"))
-        observed["run_id"] = str(run_id)
-
         attachment_secret = "l1-attachment-secret-7f3a"
         up = client.post(
             "/api/files",
@@ -211,21 +195,6 @@ def test_exit_bar_l1_promotion_live_composition(tmp_path: Path) -> None:
         )
         observed["skill_id"] = str(skill.id)
 
-        art = client.post(
-            "/api/artifacts",
-            headers=headers,
-            json={
-                "session_id": str(session_id),
-                "run_id": str(run_id),
-                "kind": "text",
-                "title": "l1-art",
-                "content": "l1-artifact-on-volume",
-            },
-        )
-        assert art.status_code in {200, 201}, art.text
-        artifact_id = UUID(art.json()["id"])
-        observed["artifact_id"] = str(artifact_id)
-
         chat1 = client.post(
             "/api/chat",
             headers=headers,
@@ -234,7 +203,8 @@ def test_exit_bar_l1_promotion_live_composition(tmp_path: Path) -> None:
                     "In the REPL, call host tools then submit. Exact sequence:\n"
                     f"1) load_skill(skill_id='{skill.id}')\n"
                     f"2) read_attachment(attachment_id='{attachment_id}')\n"
-                    "3) SUBMIT(answer=<the attachment text content>)\n"
+                    "3) create_artifact(kind='text', content='l1-artifact-on-volume', title='l1-art')\n"
+                    "4) SUBMIT(answer=<the attachment text content>)\n"
                     "Do not invent other tools. Keep the trajectory short."
                 ),
                 "session_id": str(session_id),
@@ -256,8 +226,24 @@ def test_exit_bar_l1_promotion_live_composition(tmp_path: Path) -> None:
         assert RuntimeEventKind.ATTACHMENT_READ.value in kinds1, (
             f"L1 requires Host-Mediated attachment read; kinds={kinds1}"
         )
+        assert RuntimeEventKind.ARTIFACT_CREATED.value in kinds1, (
+            f"L1 requires Artifact publication after Turn Commit; kinds={kinds1}"
+        )
+        assert kinds1.index(RuntimeEventKind.ARTIFACT_CREATED.value) < kinds1.index(
+            RuntimeEventKind.RUN_COMPLETED.value
+        )
         observed["skill_loaded"] = True
         observed["attachment_read"] = True
+        artifact_event = next(
+            event
+            for event in events1
+            if (event.get("kind") or event.get("type")) == RuntimeEventKind.ARTIFACT_CREATED.value
+        )
+        artifact_payload = (
+            artifact_event.get("payload") if isinstance(artifact_event.get("payload"), dict) else artifact_event
+        )
+        artifact_id = UUID(str((artifact_payload or {}).get("artifact_id")))
+        observed["artifact_id"] = str(artifact_id)
         text_done = next(
             (e for e in events1 if (e.get("kind") or e.get("type")) == RuntimeEventKind.TEXT_COMPLETED.value),
             None,
@@ -277,11 +263,18 @@ def test_exit_bar_l1_promotion_live_composition(tmp_path: Path) -> None:
         observed["history_turns_after_turn1"] = len(turn_items)
         assert len(turn_items) >= 2
 
+        committed_artifact = client.get(f"/api/artifacts/{artifact_id}", headers=headers)
+        assert committed_artifact.status_code == 200, committed_artifact.text
+        observed["artifact_checksum"] = committed_artifact.json()["checksum_sha256"]
+
         chat2 = client.post(
             "/api/chat",
             headers=headers,
             json={
-                "message": "Submit the answer 'l1-turn2' using final_answer. Keep it short.",
+                "message": (
+                    "Using only the prior Session History, submit the exact attachment secret "
+                    "that appeared in the previous assistant answer. Do not call tools."
+                ),
                 "session_id": str(session_id),
             },
         )
@@ -289,6 +282,19 @@ def test_exit_bar_l1_promotion_live_composition(tmp_path: Path) -> None:
         kinds2 = _parse_sse_kinds(chat2.text)
         observed["turn2_event_kinds"] = kinds2
         assert kinds2[-1] in {RuntimeEventKind.RUN_COMPLETED.value, "run.completed"}
+        events2 = _parse_sse_events(chat2.text)
+        text_done2 = next(
+            (e for e in events2 if (e.get("kind") or e.get("type")) == RuntimeEventKind.TEXT_COMPLETED.value),
+            None,
+        )
+        payload2 = (
+            text_done2.get("payload")
+            if text_done2 is not None and isinstance(text_done2.get("payload"), dict)
+            else text_done2
+        )
+        answer2 = str((payload2 or {}).get("text") or "")
+        observed["turn2_history_answer_excerpt"] = answer2[:120]
+        assert attachment_secret in answer2
 
         resources = app.state.live_kernel_resources
 
@@ -310,32 +316,20 @@ def test_exit_bar_l1_promotion_live_composition(tmp_path: Path) -> None:
                 user_id=user_id,
             )
             assert new_binding.sandbox_id != old_sid
-            lease = await resources.session_manager.acquire(
-                LeaseRequest(
-                    session_id=session_id,
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                )
-            )
-            resources.track_sandbox(lease.sandbox_id)
-            sandbox = resources.platform.get(lease.sandbox_id)
-            assert sandbox is not None
-            volume_fs = DaytonaSandboxVolumeFs(sandbox)
+            resources.track_sandbox(new_binding.sandbox_id)
             store = app.state.artifact_store
-            if hasattr(store, "_volume_fs"):
-                store._volume_fs = volume_fs  # noqa: SLF001
-            body = store.read_bytes(artifact_id, user_id=user_id, workspace_id=workspace_id)
+            body = await store.read_bytes(artifact_id, user_id=user_id, workspace_id=workspace_id)
             assert body == b"l1-artifact-on-volume"
-            await resources.session_manager.release(lease)
             return {
                 "volume_id": binding.volume_id,
                 "volume_subpath": binding.volume_subpath,
                 "sandbox_id_before_replace": old_sid,
                 "sandbox_id_after_replace": new_binding.sandbox_id,
                 "artifact_survived_replace": True,
+                "private_volume_fs_mutation": False,
             }
 
-        observed.update(_run_async(_replace_and_verify()))
+        observed.update(client.portal.call(_replace_and_verify))
 
         turns2 = client.get(f"/api/sessions/{session_id}/turns", headers=headers)
         assert turns2.status_code == 200

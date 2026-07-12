@@ -25,16 +25,6 @@ class AttachmentResponse(BaseModel):
     checksum_sha256: str
 
 
-class CreateArtifactRequest(BaseModel):
-    """Create a durable text/markdown/json artifact for a session run."""
-
-    session_id: UUID
-    run_id: UUID
-    kind: str = Field(..., description="text | markdown | json")
-    content: str = Field(..., min_length=1)
-    title: str | None = None
-
-
 class ArtifactResponse(BaseModel):
     """Public artifact metadata — no host or Volume paths."""
 

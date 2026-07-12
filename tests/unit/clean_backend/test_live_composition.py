@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -75,10 +76,13 @@ def test_create_live_app_fails_closed_without_secrets() -> None:
 def test_create_app_offline_still_hermetic() -> None:
     app = create_app(settings=Settings(live_kernel=False))
     assert app.state.live_mode is False
-    assert getattr(app.state, "turn_coordinator", None) is None
+    assert app.state.live_composition_ready is False
+    assert app.state.turn_coordinator is not None
+    assert app.state.attachment_store is not None
+    assert app.state.artifact_store is not None
     assert is_live_mode(app) is False
     with TestClient(app) as client:
-        # Offline chat still works via lazy OfflineContextBuilder (not live).
+        # Offline chat works through the eagerly composed hermetic modules.
         response = client.post(
             "/api/chat",
             json={"message": "ping", "session_id": str(uuid4())},
@@ -88,6 +92,24 @@ def test_create_app_offline_still_hermetic() -> None:
             },
         )
         assert response.status_code == 200
+
+
+def test_offline_database_is_created_and_closed_by_lifespan() -> None:
+    app = create_app(
+        settings=Settings(
+            live_kernel=False,
+            database_url="sqlite+aiosqlite:///:memory:",
+        )
+    )
+    assert app.state.db_engine is None
+    assert not hasattr(app.state, "session_repository")
+
+    with TestClient(app):
+        assert app.state.db_engine is not None
+        assert app.state.session_repository is not None
+
+    assert app.state.db_engine is None
+    assert app.state.session_repository is None
 
 
 def test_live_mode_coordinator_never_falls_back_to_offline() -> None:
@@ -125,3 +147,163 @@ def test_main_exports_create_live_app() -> None:
 
     assert callable(main_mod.create_live_app)
     assert main_mod.app is not None
+
+
+@pytest.mark.asyncio
+async def test_live_context_releases_claimed_lease_when_post_acquire_preparation_fails() -> None:
+    from fleet_rlm_clean.chat.commands import ChatTurnCommand
+    from fleet_rlm_clean.chat.live_context import LiveKernelResources
+    from fleet_rlm_clean.rlm.model_bundle import RLMModelBundle
+
+    run_id = uuid4()
+    lease = SimpleNamespace(sandbox_id="sb-1", release=lambda: None)
+
+    class Manager:
+        def __init__(self) -> None:
+            self.request = None
+            self.released = 0
+
+        async def acquire(self, request):
+            self.request = request
+            return lease
+
+        async def release(self, value) -> None:
+            assert value is lease
+            self.released += 1
+
+    manager = Manager()
+    resources = object.__new__(LiveKernelResources)
+    resources.settings = Settings()
+    resources.session_manager = manager
+    resources.allow_ephemeral_fallback = False
+    resources.last_used_ephemeral = False
+    resources._sandbox_ids = []
+    resources.models = RLMModelBundle(root_lm=object(), sub_lm=object())
+    resources.skill_registry = object()
+    resources.attachment_store = None
+    resources.artifact_store = None
+    resources.platform = SimpleNamespace(get=lambda _sandbox_id: None)
+
+    command = ChatTurnCommand(
+        user_id=uuid4(),
+        workspace_id=uuid4(),
+        session_id=uuid4(),
+        message="prepare",
+    )
+    with pytest.raises(RuntimeError, match="unavailable"):
+        await resources.build_context(command, run_id=run_id)
+
+    assert manager.request.run_id == run_id
+    assert manager.released == 1
+
+
+@pytest.mark.asyncio
+async def test_install_live_composition_disposes_handles_when_table_creation_fails(monkeypatch) -> None:
+    import fleet_rlm_clean.composition as composition
+    import fleet_rlm_clean.persistence.database as database
+
+    disposed: list[str] = []
+
+    class Resources:
+        _engine = object()
+
+        async def adispose(self) -> None:
+            disposed.append("resources")
+
+    class Gateway:
+        async def close(self) -> None:
+            disposed.append("gateway")
+
+    handles = composition.LiveCompositionHandles(
+        resources=Resources(),
+        turn_coordinator=object(),
+        session_repository=object(),
+        attachment_store=object(),
+        artifact_store=object(),
+        workspace_volume_gateway=Gateway(),
+    )
+
+    async def fake_build(_settings):
+        return handles
+
+    async def fail_tables(_engine):
+        raise RuntimeError("schema unavailable")
+
+    monkeypatch.setattr(composition, "build_live_composition", fake_build)
+    monkeypatch.setattr(database, "create_tables", fail_tables)
+
+    with pytest.raises(RuntimeError, match="schema unavailable"):
+        await composition.install_live_composition(SimpleNamespace(state=SimpleNamespace()), Settings())
+
+    assert disposed == ["gateway", "resources"]
+
+
+def test_offline_lifespan_disposes_engine_when_table_creation_fails(monkeypatch) -> None:
+    import fleet_rlm_clean.persistence.database as database
+
+    disposed: list[str] = []
+
+    class Engine:
+        async def dispose(self) -> None:
+            disposed.append("engine")
+
+    def fake_engine(_url: str):
+        return Engine()
+
+    def fake_factory(_engine):
+        return object()
+
+    async def fail_tables(_engine):
+        raise RuntimeError("schema unavailable")
+
+    monkeypatch.setattr(database, "create_async_engine_from_url", fake_engine)
+    monkeypatch.setattr(database, "create_session_factory", fake_factory)
+    monkeypatch.setattr(database, "create_tables", fail_tables)
+    app = create_app(settings=Settings(database_url="sqlite+aiosqlite:///:memory:"))
+
+    with pytest.raises(RuntimeError, match="schema unavailable"), TestClient(app):
+        pass
+
+    assert disposed == ["engine"]
+
+
+@pytest.mark.asyncio
+async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(monkeypatch) -> None:
+    import fleet_rlm_clean.composition as composition
+    import fleet_rlm_clean.persistence.database as database
+
+    disposed: list[str] = []
+
+    class Resources:
+        _engine = object()
+
+        async def adispose(self) -> None:
+            disposed.append("resources")
+
+    class Gateway:
+        async def close(self) -> None:
+            disposed.append("gateway")
+            raise RuntimeError("cleanup failed")
+
+    handles = composition.LiveCompositionHandles(
+        resources=Resources(),
+        turn_coordinator=object(),
+        session_repository=object(),
+        attachment_store=object(),
+        artifact_store=object(),
+        workspace_volume_gateway=Gateway(),
+    )
+
+    async def fake_build(_settings):
+        return handles
+
+    async def fail_tables(_engine):
+        raise RuntimeError("schema unavailable")
+
+    monkeypatch.setattr(composition, "build_live_composition", fake_build)
+    monkeypatch.setattr(database, "create_tables", fail_tables)
+
+    with pytest.raises(RuntimeError, match="schema unavailable"):
+        await composition.install_live_composition(SimpleNamespace(state=SimpleNamespace()), Settings())
+
+    assert disposed == ["gateway", "resources"]

@@ -16,6 +16,7 @@ from fleet_rlm_clean.persistence.database import (
     create_session_factory,
     create_tables,
 )
+from fleet_rlm_clean.persistence.repositories import SqlAlchemySessionRepository
 from fleet_rlm_clean.rlm.budgets import RLMBudget
 from fleet_rlm_clean.rlm.context import RLMTurnContext
 from fleet_rlm_clean.rlm.events import EventRecorder, RuntimeEvent, RuntimeEventKind
@@ -23,13 +24,12 @@ from fleet_rlm_clean.rlm.model_bundle import RLMModelBundle
 from fleet_rlm_clean.rlm.runner import TurnEventStream
 from fleet_rlm_clean.sessions.checkpoints import StaleCheckpointError
 from fleet_rlm_clean.sessions.locks import SessionLockRegistry
-from fleet_rlm_clean.sessions.repository import SessionRepository
 
 
-async def _open_repo() -> tuple[SessionRepository, object]:
+async def _open_repo() -> tuple[SqlAlchemySessionRepository, object]:
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     await create_tables(engine)
-    return SessionRepository(create_session_factory(engine)), engine
+    return SqlAlchemySessionRepository(create_session_factory(engine)), engine
 
 
 class _CountingRunner:
@@ -109,7 +109,7 @@ async def test_stale_checkpoint_commit_fails() -> None:
     try:
         session = await repo.create(user_id=uuid4(), workspace_id=uuid4())
         run = await repo.begin_run(session.id)
-        await repo.append_completed_exchange(
+        await repo.commit_completed_turn(
             session.id,
             user_text="u",
             assistant_text="a",
@@ -118,7 +118,7 @@ async def test_stale_checkpoint_commit_fails() -> None:
         )
         run2 = await repo.begin_run(session.id)
         with pytest.raises(StaleCheckpointError) as excinfo:
-            await repo.append_completed_exchange(
+            await repo.commit_completed_turn(
                 session.id,
                 user_text="u2",
                 assistant_text="a2",

@@ -10,8 +10,10 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm_clean.artifacts.store import LocalArtifactStore
 from fleet_rlm_clean.chat.turn_coordinator import ephemeral_lease
+from fleet_rlm_clean.daytona.paths import VolumePaths
+from fleet_rlm_clean.daytona.volume_fs import HostVolumeMirror
+from fleet_rlm_clean.files.staging import AttachmentStager
 from fleet_rlm_clean.files.tools import FileToolHost
 from fleet_rlm_clean.files.uploads import LocalAttachmentStore
 from fleet_rlm_clean.rlm.budgets import RLMBudget
@@ -21,14 +23,17 @@ from fleet_rlm_clean.rlm.model_bundle import RLMModelBundle
 from fleet_rlm_clean.rlm.runner import RLMRunner
 
 
-def _host(tmp_path: Path) -> tuple[FileToolHost, LocalAttachmentStore, LocalArtifactStore, Any, Any]:
+def _host(tmp_path: Path) -> tuple[FileToolHost, LocalAttachmentStore, Any, Any]:
     user, ws = uuid4(), uuid4()
     session_id, run_id = uuid4(), uuid4()
     attachments = LocalAttachmentStore(tmp_path / "att", max_bytes=1024 * 1024)
-    artifacts = LocalArtifactStore(tmp_path / "art", max_bytes=1024 * 1024)
+    paths = VolumePaths.from_mount()
+    volume_fs = HostVolumeMirror(tmp_path / "volume", volume_paths=paths)
+    staged: tuple[Any, ...] = ()
     host = FileToolHost(
-        attachment_store=attachments,
-        artifact_store=artifacts,
+        attachments=(),
+        staged_attachments=staged,
+        volume_fs=volume_fs,
         user_id=user,
         workspace_id=ws,
         session_id=session_id,
@@ -36,18 +41,52 @@ def _host(tmp_path: Path) -> tuple[FileToolHost, LocalAttachmentStore, LocalArti
         max_attachment_reads=3,
         max_artifact_creates=2,
     )
-    return host, attachments, artifacts, user, ws
+    return host, attachments, user, ws
 
 
-def test_read_attachment_reauth_and_content(tmp_path: Path) -> None:
-    host, attachments, _arts, user, ws = _host(tmp_path)
+def _authorize_attachment(
+    host: FileToolHost,
+    attachments: LocalAttachmentStore,
+    *,
+    user: Any,
+    workspace: Any,
+    tmp_path: Path,
+) -> tuple[FileToolHost, Any]:
     ref = attachments.upload(
         user_id=user,
-        workspace_id=ws,
+        workspace_id=workspace,
         filename="note.txt",
         content_type="text/plain",
         data=b"hello capability",
     )
+    paths = VolumePaths.from_mount()
+    volume_fs = HostVolumeMirror(tmp_path / "volume-authorized", volume_paths=paths)
+    staged = AttachmentStager(attachments, volume_fs=volume_fs, volume_paths=paths).stage(
+        ref.id,
+        user_id=user,
+        workspace_id=workspace,
+        session_id=host._session_id,  # noqa: SLF001 - fixture reconstructs the public turn setup
+        run_id=host._run_id,  # noqa: SLF001
+    )
+    return (
+        FileToolHost(
+            attachments=(ref,),
+            staged_attachments=(staged,),
+            volume_fs=volume_fs,
+            user_id=user,
+            workspace_id=workspace,
+            session_id=host._session_id,  # noqa: SLF001
+            run_id=host._run_id,  # noqa: SLF001
+            max_attachment_reads=3,
+            max_artifact_creates=2,
+        ),
+        ref,
+    )
+
+
+def test_read_attachment_reauth_and_content(tmp_path: Path) -> None:
+    host, attachments, user, ws = _host(tmp_path)
+    host, ref = _authorize_attachment(host, attachments, user=user, workspace=ws, tmp_path=tmp_path)
     ok = host.read_attachment(str(ref.id))
     assert ok["ok"] is True
     assert ok["content"] == "hello capability"
@@ -65,45 +104,29 @@ def test_read_attachment_reauth_and_content(tmp_path: Path) -> None:
     assert host.read_attachment(str(uuid4()))["error"] == "not_found"
     assert host.read_attachment("not-a-uuid")["error"] == "invalid_id"
 
-    other = FileToolHost(
-        attachment_store=attachments,
-        artifact_store=LocalArtifactStore(tmp_path / "art2", max_bytes=1024),
-        user_id=user,
-        workspace_id=uuid4(),
-        session_id=uuid4(),
-        run_id=uuid4(),
-    )
-    assert other.read_attachment(str(ref.id))["error"] == "not_found"
-
 
 def test_create_artifact_no_path_leak(tmp_path: Path) -> None:
-    host, _att, _arts, _user, _ws = _host(tmp_path)
+    host, _att, _user, _ws = _host(tmp_path)
     result = host.create_artifact("markdown", "# Report\n\nok", title="report")
     assert result["ok"] is True
-    assert "artifact_id" in result
+    assert "artifact_candidate_id" in result
     assert result["kind"] == "markdown"
     assert "path" not in result
     assert "storage" not in json.dumps(result)
     assert str(tmp_path) not in json.dumps(result)
 
-    events = host.drain_public_events()
-    assert events[0]["event_kind"] == "artifact.created"
-    assert "content" not in events[0]
-    assert events[0]["checksum_sha256"]
+    assert host.drain_public_events() == []
+    candidates = host.drain_artifact_candidates()
+    assert len(candidates) == 1
+    assert candidates[0].checksum_sha256
 
     bad = host.create_artifact("pdf", "x")
     assert bad["ok"] is False
 
 
 def test_budgets(tmp_path: Path) -> None:
-    host, attachments, _arts, user, ws = _host(tmp_path)
-    ref = attachments.upload(
-        user_id=user,
-        workspace_id=ws,
-        filename="a.txt",
-        content_type="text/plain",
-        data=b"x",
-    )
+    host, attachments, user, ws = _host(tmp_path)
+    host, ref = _authorize_attachment(host, attachments, user=user, workspace=ws, tmp_path=tmp_path)
     for _ in range(3):
         assert host.read_attachment(str(ref.id))["ok"] is True
     assert host.read_attachment(str(ref.id))["error"] == "budget_exceeded"
@@ -121,14 +144,8 @@ def test_as_tool_callables_names(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_runner_emits_file_tool_events(tmp_path: Path) -> None:
-    host, attachments, _arts, user, ws = _host(tmp_path)
-    ref = attachments.upload(
-        user_id=user,
-        workspace_id=ws,
-        filename="in.txt",
-        content_type="text/plain",
-        data=b"payload",
-    )
+    host, attachments, user, ws = _host(tmp_path)
+    host, ref = _authorize_attachment(host, attachments, user=user, workspace=ws, tmp_path=tmp_path)
 
     class Factory:
         def create(self, **kwargs: Any) -> Any:
@@ -160,13 +177,12 @@ async def test_runner_emits_file_tool_events(tmp_path: Path) -> None:
     events = [e async for e in stream]
     kinds = [e.kind for e in events]
     assert RuntimeEventKind.ATTACHMENT_READ in kinds
-    assert RuntimeEventKind.ARTIFACT_CREATED in kinds
+    assert RuntimeEventKind.ARTIFACT_CREATED not in kinds
     att_ev = next(e for e in events if e.kind == RuntimeEventKind.ATTACHMENT_READ)
     att_payload = dict(att_ev.payload)
     assert "content" not in att_payload
     assert str(tmp_path) not in json.dumps(att_payload)
-    art_ev = next(e for e in events if e.kind == RuntimeEventKind.ARTIFACT_CREATED)
-    assert "path" not in dict(art_ev.payload)
     assert RuntimeEventKind.RUN_COMPLETED not in kinds
     assert stream.outcome is not None
     assert stream.outcome.terminal_status == "completed"
+    assert len(stream.outcome.artifact_candidates) == 1

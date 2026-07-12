@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from fleet_rlm_clean.artifacts.models import ArtifactCandidate
+
 TerminalStatus = Literal[
     "completed",
     "cancelled",
@@ -21,7 +23,7 @@ class TurnExecutionOutcome:
     terminal_status: TerminalStatus
     assistant_text: str = ""
     usage: dict[str, Any] = field(default_factory=dict)
-    artifact_candidates: tuple[Any, ...] = ()
+    artifact_candidates: tuple[ArtifactCandidate, ...] = ()
     public_error_message: str | None = None
     duration_ms: int | None = None
 

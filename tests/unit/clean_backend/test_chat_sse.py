@@ -183,6 +183,44 @@ def test_chat_rejects_invalid_attachment_before_stream(tmp_path: Path) -> None:
     assert runner.seen == []
 
 
+def test_chat_rejects_foreign_session_before_stream() -> None:
+    from fleet_rlm_clean.app import create_app
+    from fleet_rlm_clean.sessions.models import SessionRecord, SessionSnapshot
+
+    owner_user, owner_workspace, session_id = uuid4(), uuid4(), uuid4()
+
+    class Repository:
+        async def load(self, _session_id):
+            return SessionSnapshot(
+                session=SessionRecord(
+                    id=session_id,
+                    user_id=owner_user,
+                    workspace_id=owner_workspace,
+                    status="active",
+                    title="private",
+                    checkpoint_version=0,
+                ),
+                turns=(),
+            )
+
+    app = create_app()
+    app.state.session_repository = Repository()
+    runner = _FakeRunner()
+    app.state.turn_coordinator = TurnCoordinator(runner=runner, context_builder=_minimal_context)
+    response = TestClient(app).post(
+        "/api/chat",
+        json={"message": "hello", "session_id": str(session_id)},
+        headers={
+            "X-Fleet-User-Id": str(owner_user),
+            "X-Fleet-Workspace-Id": str(uuid4()),
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "session not found"
+    assert runner.seen == []
+
+
 def test_chat_route_module_has_no_dspy_or_daytona_imports() -> None:
     route_path = Path(__file__).resolve().parents[3] / "src" / "fleet_rlm_clean" / "api" / "routes" / "chat.py"
     tree = ast.parse(route_path.read_text(encoding="utf-8"))

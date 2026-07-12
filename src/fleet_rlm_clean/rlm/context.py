@@ -48,5 +48,7 @@ class RLMTurnContext:
     skill_tool_host: Any | None = None
     # Optional FileToolHost for read_attachment / create_artifact + public events
     file_tool_host: Any | None = None
+    # Mounted Workspace Volume Scope filesystem for staging/promotion.
+    volume_fs: Any | None = None
     # Optional durable cancel probe (DB cancel_requested_at); process-local is mirrored.
     cancel_probe: CancelProbe | None = None

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -20,10 +20,10 @@ from fleet_rlm_clean.persistence.database import (
     create_session_factory,
     create_tables,
 )
+from fleet_rlm_clean.persistence.repositories import SqlAlchemySessionRepository
 from fleet_rlm_clean.rlm.budgets import RLMBudget
 from fleet_rlm_clean.rlm.context import RLMTurnContext
 from fleet_rlm_clean.rlm.lm_factory import build_model_bundle
-from fleet_rlm_clean.sessions.repository import SessionRepository
 
 
 def _load_dotenv_into_environ() -> None:
@@ -107,8 +107,8 @@ class LiveKernelResources:
             bindings=self.bindings,
         )
         self.models = build_model_bundle(self.settings)
-        self.sessions: SessionRepository | None = (
-            SessionRepository(session_factory) if session_factory is not None else None
+        self.sessions: SqlAlchemySessionRepository | None = (
+            SqlAlchemySessionRepository(session_factory) if session_factory is not None else None
         )
         self.allow_ephemeral_fallback = allow_ephemeral_fallback
         self._sandbox_ids: list[str] = []
@@ -155,17 +155,24 @@ class LiveKernelResources:
             allow_ephemeral_fallback=allow_ephemeral_fallback,
         )
 
-    async def build_context(self, command: ChatTurnCommand) -> RLMTurnContext:
+    async def build_context(
+        self,
+        command: ChatTurnCommand,
+        *,
+        run_id: UUID | None = None,
+    ) -> RLMTurnContext:
         """Acquire lease and build turn context (platform I/O uses to_thread)."""
         import asyncio
 
         self.last_used_ephemeral = False
+        turn_run_id = run_id or uuid4()
         try:
             lease = await self.session_manager.acquire(
                 LeaseRequest(
                     session_id=command.session_id,
                     user_id=command.user_id,
                     workspace_id=command.workspace_id,
+                    run_id=turn_run_id,
                 )
             )
         except Exception:
@@ -174,28 +181,43 @@ class LiveKernelResources:
             # Disk/volume limits: fall back to ephemeral sandbox without Volume mount.
             self.last_used_ephemeral = True
             lease = await asyncio.to_thread(self._acquire_ephemeral_lease)
-        self.track_sandbox(lease.sandbox_id)
-        context = RLMTurnContext(
-            run_id=uuid4(),
-            session_id=command.session_id,
-            user_id=command.user_id,
-            workspace_id=command.workspace_id,
-            request=command.message,
-            models=self.models,
-            budget=RLMBudget(max_iterations=6, max_llm_calls=16, max_output_chars=3000),
-            lease=lease,
-        )
-        if self.skill_registry is not None or (self.attachment_store is not None and self.artifact_store is not None):
-            from fleet_rlm_clean.chat.capabilities import assemble_turn_capabilities
-
-            return assemble_turn_capabilities(
-                context,
-                command,
-                skill_registry=self.skill_registry,
-                attachment_store=self.attachment_store,
-                artifact_store=self.artifact_store,
+        try:
+            self.track_sandbox(lease.sandbox_id)
+            context = RLMTurnContext(
+                run_id=turn_run_id,
+                session_id=command.session_id,
+                user_id=command.user_id,
+                workspace_id=command.workspace_id,
+                request=command.message,
+                models=self.models,
+                budget=RLMBudget(max_iterations=6, max_llm_calls=16, max_output_chars=3000),
+                lease=lease,
             )
-        return context
+            if self.skill_registry is not None or (
+                self.attachment_store is not None and self.artifact_store is not None
+            ):
+                from fleet_rlm_clean.chat.capabilities import assemble_turn_capabilities
+                from fleet_rlm_clean.daytona.paths import volume_paths_from_settings
+                from fleet_rlm_clean.daytona.volume_fs import DaytonaSandboxVolumeFs
+
+                sandbox = await asyncio.to_thread(self.platform.get, lease.sandbox_id)
+                if sandbox is None:
+                    msg = "acquired Sandbox is unavailable"
+                    raise RuntimeError(msg)
+                volume_fs = DaytonaSandboxVolumeFs(sandbox)
+                return await assemble_turn_capabilities(
+                    context,
+                    command,
+                    skill_registry=self.skill_registry,
+                    attachment_store=self.attachment_store,
+                    volume_fs=volume_fs,
+                    volume_paths=volume_paths_from_settings(self.settings),
+                    max_artifact_bytes=self.settings.max_artifact_bytes,
+                )
+            return context
+        except Exception:
+            await self.session_manager.release(lease)
+            raise
 
     def track_sandbox(self, sandbox_id: str | None) -> None:
         if sandbox_id and sandbox_id not in self._sandbox_ids:

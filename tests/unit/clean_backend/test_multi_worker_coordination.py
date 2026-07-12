@@ -17,6 +17,7 @@ from fleet_rlm_clean.persistence.database import (
     create_tables,
 )
 from fleet_rlm_clean.persistence.models import RunRow
+from fleet_rlm_clean.persistence.repositories import SqlAlchemySessionRepository
 from fleet_rlm_clean.rlm.budgets import RLMBudget
 from fleet_rlm_clean.rlm.cancel import RunCancelRegistry, set_run_cancel_registry
 from fleet_rlm_clean.rlm.context import RLMTurnContext
@@ -25,15 +26,14 @@ from fleet_rlm_clean.rlm.model_bundle import RLMModelBundle
 from fleet_rlm_clean.rlm.runner import RLMRunner
 from fleet_rlm_clean.sessions.checkpoints import StaleCheckpointError
 from fleet_rlm_clean.sessions.errors import IdempotencyConflictError
-from fleet_rlm_clean.sessions.repository import SessionRepository
 
 
-async def _open_repo(tmp_path: Path) -> tuple[SessionRepository, object]:
+async def _open_repo(tmp_path: Path) -> tuple[SqlAlchemySessionRepository, object]:
     # File-backed SQLite so concurrent AsyncSessions do not share one connection.
     db_path = tmp_path / "b7.sqlite"
     engine = create_async_engine_from_url(f"sqlite+aiosqlite:///{db_path}")
     await create_tables(engine)
-    return SessionRepository(create_session_factory(engine)), engine
+    return SqlAlchemySessionRepository(create_session_factory(engine)), engine
 
 
 @pytest.fixture(autouse=True)
@@ -52,7 +52,7 @@ async def test_concurrent_checkpoint_cas_one_wins(tmp_path: Path) -> None:
         run_b = await repo.begin_run(session.id, lease_owner="worker-b")
 
         async def _commit(run_id, text: str):
-            return await repo.append_completed_exchange(
+            return await repo.commit_completed_turn(
                 session.id,
                 user_text="u",
                 assistant_text=text,
@@ -145,7 +145,7 @@ async def test_concurrent_idempotency_claim_one_wins(tmp_path: Path) -> None:
         assert len(conflicts) == 1, results
         assert claims[0].replay is False
 
-        await repo.append_completed_exchange(
+        await repo.commit_completed_turn(
             session.id,
             user_text="u",
             assistant_text="done",

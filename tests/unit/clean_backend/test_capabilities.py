@@ -7,9 +7,9 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm_clean.artifacts.store import LocalArtifactStore
 from fleet_rlm_clean.chat.capabilities import (
     AttachmentValidationError,
+    CapabilityContextBuilder,
     assemble_turn_capabilities,
     validate_attachment_ids,
 )
@@ -56,7 +56,8 @@ def test_validate_attachment_ids_rejects_foreign_or_missing(tmp_path: Path) -> N
         )
 
 
-def test_assemble_turn_capabilities_binds_skill_and_file_tools(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_assemble_turn_capabilities_binds_skill_and_file_tools(tmp_path: Path) -> None:
     registry = InMemorySkillRegistry()
     skill = registry.register(
         name="cap-skill",
@@ -65,7 +66,11 @@ def test_assemble_turn_capabilities_binds_skill_and_file_tools(tmp_path: Path) -
         version="1.0.0",
     )
     att = LocalAttachmentStore(tmp_path / "up", max_bytes=1024)
-    art = LocalArtifactStore(tmp_path / "art", max_bytes=1024)
+    from fleet_rlm_clean.daytona.paths import VolumePaths
+    from fleet_rlm_clean.daytona.volume_fs import HostVolumeMirror
+
+    paths = VolumePaths.from_mount()
+    volume_fs = HostVolumeMirror(tmp_path / "volume", volume_paths=paths)
     user, ws = uuid4(), uuid4()
     session_id, run_id = uuid4(), uuid4()
     ref = att.upload(
@@ -82,17 +87,18 @@ def test_assemble_turn_capabilities_binds_skill_and_file_tools(tmp_path: Path) -
         message="use skills and files",
         attachment_ids=(ref.id,),
     )
-    base = OfflineContextBuilder(
-        budget=RLMBudget(max_iterations=3, max_llm_calls=4, max_output_chars=500)
-    ).build(command)
+    base = OfflineContextBuilder(budget=RLMBudget(max_iterations=3, max_llm_calls=4, max_output_chars=500)).build(
+        command
+    )
     base = rebind_turn_context(base, run_id=run_id)
 
-    enriched = assemble_turn_capabilities(
+    enriched = await assemble_turn_capabilities(
         base,
         command,
         skill_registry=registry,
         attachment_store=att,
-        artifact_store=art,
+        volume_fs=volume_fs,
+        volume_paths=paths,
     )
     assert skill.id in {c.id for c in enriched.skill_cards}
     assert enriched.skill_tool_host is not None
@@ -107,7 +113,8 @@ def test_assemble_turn_capabilities_binds_skill_and_file_tools(tmp_path: Path) -
         assert not hasattr(card, "instructions")
 
 
-def test_assemble_without_stores_is_skills_only() -> None:
+@pytest.mark.asyncio
+async def test_assemble_without_stores_is_skills_only() -> None:
     registry = InMemorySkillRegistry()
     registry.register(name="only", description="d", instructions="body")
     command = ChatTurnCommand(
@@ -117,7 +124,52 @@ def test_assemble_without_stores_is_skills_only() -> None:
         message="hi",
     )
     base = OfflineContextBuilder().build(command)
-    enriched = assemble_turn_capabilities(base, command, skill_registry=registry)
+    enriched = await assemble_turn_capabilities(base, command, skill_registry=registry)
     assert enriched.skill_tool_host is not None
     assert enriched.file_tool_host is None
     assert any(getattr(t, "__name__", "") == "load_skill" for t in enriched.tools)
+
+
+@pytest.mark.asyncio
+async def test_capabilities_bind_staging_and_candidates_to_claimed_run_id(tmp_path: Path) -> None:
+    from fleet_rlm_clean.daytona.paths import VolumePaths
+    from fleet_rlm_clean.daytona.volume_fs import HostVolumeMirror
+
+    paths = VolumePaths.from_mount()
+    volume_fs = HostVolumeMirror(tmp_path / "volume", volume_paths=paths)
+    store = LocalAttachmentStore(
+        tmp_path / "uploads",
+        max_bytes=1024,
+        volume_fs=volume_fs,
+        volume_paths=paths,
+    )
+    user_id, workspace_id, session_id, claimed_run_id = (uuid4() for _ in range(4))
+    attachment = store.upload(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        filename="claimed.txt",
+        content_type="text/plain",
+        data=b"claimed",
+    )
+    command = ChatTurnCommand(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        session_id=session_id,
+        message="create",
+        attachment_ids=(attachment.id,),
+    )
+    builder = CapabilityContextBuilder(
+        OfflineContextBuilder(),
+        attachment_store=store,
+        volume_fs=volume_fs,
+        volume_paths=paths,
+    )
+
+    context = await builder.build(command, run_id=claimed_run_id)
+    assert context.run_id == claimed_run_id
+    assert context.file_tool_host is not None
+    created = context.file_tool_host.create_artifact("text", "candidate")
+    assert created["ok"] is True
+    (candidate,) = context.file_tool_host.drain_artifact_candidates()
+    assert candidate.run_id == claimed_run_id
+    assert str(claimed_run_id) in candidate.staging_path

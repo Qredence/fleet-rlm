@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Any
 
 from fastapi import FastAPI
 
@@ -25,42 +24,50 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
 
         require_live_settings(resolved)
 
-    db_engine: Any = None
-    session_repository: Any = None
-    if resolved.database_url and not resolved.live_kernel:
-        from fleet_rlm_clean.persistence.database import (
-            create_async_engine_from_url,
-            create_session_factory,
-        )
-        from fleet_rlm_clean.sessions.repository import SessionRepository
-
-        db_engine = create_async_engine_from_url(resolved.database_url)
-        session_repository = SessionRepository(create_session_factory(db_engine))
-
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         settings_obj: Settings = app.state.settings
         if settings_obj.live_kernel:
             from fleet_rlm_clean.composition import dispose_live_composition, install_live_composition
 
-            await install_live_composition(app, settings_obj)
+            installed = False
             try:
+                await install_live_composition(app, settings_obj)
+                installed = True
                 yield
             finally:
-                await dispose_live_composition(app)
+                if installed:
+                    await dispose_live_composition(app)
             return
 
+        owns_engine = False
         engine = getattr(app.state, "db_engine", None)
-        if engine is not None:
-            from fleet_rlm_clean.persistence.database import create_tables
+        if engine is None and settings_obj.database_url:
+            from fleet_rlm_clean.persistence.database import (
+                create_async_engine_from_url,
+                create_session_factory,
+            )
+            from fleet_rlm_clean.persistence.repositories import SqlAlchemySessionRepository
 
-            await create_tables(engine)
+            engine = create_async_engine_from_url(settings_obj.database_url)
+            app.state.db_engine = engine
+            app.state.session_repository = SqlAlchemySessionRepository(create_session_factory(engine))
+            owns_engine = True
         try:
+            if engine is not None:
+                from fleet_rlm_clean.persistence.database import create_tables
+
+                await create_tables(engine)
+            if owns_engine:
+                from fleet_rlm_clean.composition import install_offline_composition
+
+                install_offline_composition(app, settings_obj)
             yield
         finally:
-            engine = getattr(app.state, "db_engine", None)
-            if engine is not None:
+            if owns_engine and engine is not None:
                 await engine.dispose()
+                app.state.db_engine = None
+                app.state.session_repository = None
 
     app = FastAPI(
         title=resolved.app_name,
@@ -69,9 +76,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = resolved
     app.state.live_mode = False
-    app.state.db_engine = db_engine
-    if session_repository is not None:
-        app.state.session_repository = session_repository
+    app.state.db_engine = None
 
     from fleet_rlm_clean.api.routes.artifacts import router as artifacts_router
     from fleet_rlm_clean.api.routes.chat import router as chat_router
@@ -95,6 +100,10 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     seed_bundled_skills(skill_registry)
     app.state.skill_registry = skill_registry
     app.state.skill_authorizer = SkillAuthorizer(skill_registry)
+    if not resolved.live_kernel:
+        from fleet_rlm_clean.composition import install_offline_composition
+
+        install_offline_composition(app, resolved)
     return app
 
 
