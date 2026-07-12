@@ -2,6 +2,11 @@
 
 Uses ``sandbox.code_interpreter.run_code`` (stateful REPL context), not
 ``process.code_run`` (stateless per Daytona docs).
+
+Host-tool / SUBMIT mediation (B1):
+- In-process backends bind host callables directly (offline seam).
+- Daytona sandbox backends use an HTTP-in-sandbox broker + host poll
+  (Daytona-appropriate channel; mirrors DSPy host-tool + FinalOutput outcomes).
 """
 
 from __future__ import annotations
@@ -9,17 +14,22 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
+from dspy.primitives.code_interpreter import FinalOutput
+
 from fleet_rlm_clean.daytona.errors import (
     DaytonaAdapterError,
     map_provider_error,
     sanitize_provider_message,
 )
+from fleet_rlm_clean.daytona.http_broker import DaytonaHttpToolBroker
+from fleet_rlm_clean.daytona.in_process import BackendExecutionResult, InProcessInterpreterBackend
+from fleet_rlm_clean.daytona.submit import extract_final_payload
 
 
 class InterpreterBackend(Protocol):
     """Narrow execute/close surface; SDK details stay behind this protocol."""
 
-    def run(self, code: str, variables: dict[str, object] | None = None) -> str: ...
+    def run(self, code: str, variables: dict[str, object] | None = None) -> str | BackendExecutionResult: ...
 
     def close(self) -> None: ...
 
@@ -37,12 +47,16 @@ class _SandboxCodeInterpreterBackend:
         self._sandbox = sandbox
         self._context: Any | None = None
 
+    @property
+    def sandbox(self) -> Any:
+        return self._sandbox
+
     def _ensure_context(self) -> Any:
         if self._context is None:
             self._context = self._sandbox.code_interpreter.create_context()
         return self._context
 
-    def run(self, code: str, variables: dict[str, object] | None = None) -> str:
+    def run(self, code: str, variables: dict[str, object] | None = None) -> BackendExecutionResult:
         context = self._ensure_context()
         try:
             result = self._sandbox.code_interpreter.run_code(
@@ -52,15 +66,21 @@ class _SandboxCodeInterpreterBackend:
         except Exception as exc:  # noqa: BLE001 - normalize at the SDK boundary
             raise map_provider_error(exc) from exc
 
+        stdout = str(getattr(result, "stdout", None) or "")
+        final = extract_final_payload(stdout)
         error = getattr(result, "error", None)
         if error is not None:
+            error_name = str(getattr(error, "name", "") or "")
+            if error_name in {"FleetFinalOutput", "_FleetFinalOutput"} and final is not None:
+                return BackendExecutionResult(stdout=stdout, final=final)
             raw = f"{getattr(error, 'name', 'Error')}: {getattr(error, 'value', error)}"
             raise DaytonaAdapterError(
                 message=sanitize_provider_message(raw),
                 cause_type="SandboxCodeInterpreterError",
             )
-        stdout = getattr(result, "stdout", None) or ""
-        return str(stdout)
+        if final is not None:
+            return BackendExecutionResult(stdout=stdout, final=final)
+        return BackendExecutionResult(stdout=stdout)
 
     def close(self) -> None:
         # Delete only the lease-owned context. Never delete the Sandbox here.
@@ -75,21 +95,25 @@ class _SandboxCodeInterpreterBackend:
 
 
 class DaytonaCodeInterpreter:
-    """CodeInterpreter-compatible adapter with idempotent shutdown."""
+    """CodeInterpreter-compatible adapter with host-tool / SUBMIT mediation."""
 
     def __init__(
         self,
         *,
         backend: InterpreterBackend | None = None,
-        tools: Mapping[str, Callable[..., str]] | None = None,
+        tools: Mapping[str, Callable[..., Any]] | None = None,
+        output_fields: list[dict[str, Any]] | None = None,
     ) -> None:
         self._backend = backend
-        self._tools: dict[str, Callable[..., str]] = dict(tools or {})
+        self._tools: dict[str, Callable[..., Any]] = dict(tools or {})
+        self.output_fields: list[dict[str, Any]] | None = list(output_fields) if output_fields is not None else None
+        self._tools_registered = False
         self._started = False
         self._shutdown = False
+        self._http_broker: DaytonaHttpToolBroker | None = None
 
     @property
-    def tools(self) -> dict[str, Callable[..., str]]:
+    def tools(self) -> dict[str, Callable[..., Any]]:
         return self._tools
 
     def start(self) -> None:
@@ -108,7 +132,11 @@ class DaytonaCodeInterpreter:
             msg = "interpreter backend is not configured"
             raise DaytonaAdapterError(message=msg, cause_type="InterpreterConfigurationError")
         try:
-            return self._backend.run(code, variables)
+            self._ensure_bindings()
+            if self._http_broker is not None:
+                return self._execute_with_http_broker(code, variables)
+            raw = self._backend.run(code, variables)
+            return self._finalize(raw)
         except DaytonaAdapterError:
             raise
         except Exception as exc:  # noqa: BLE001 - map all provider failures
@@ -118,8 +146,82 @@ class DaytonaCodeInterpreter:
         if self._shutdown:
             return
         self._shutdown = True
+        if self._http_broker is not None:
+            try:
+                self._http_broker.stop()
+            except Exception:  # noqa: BLE001 - shutdown must stay idempotent
+                pass
+            self._http_broker = None
         if self._backend is not None:
             self._backend.close()
+
+    def _ensure_bindings(self) -> None:
+        backend = self._backend
+        if backend is None:
+            return
+        if isinstance(backend, InProcessInterpreterBackend):
+            backend.bind_host_tools(self._tools)
+            backend.ensure_submit(self.output_fields)
+            self._tools_registered = True
+            return
+        if not isinstance(backend, _SandboxCodeInterpreterBackend):
+            self._tools_registered = True
+            return
+        # dspy.RLM sets `_tools_registered = False` before each inject so fresh
+        # llm_query callables bind; skip only when already registered this cycle.
+        if self._tools_registered and self._http_broker is not None:
+            return
+        if self._http_broker is None:
+            self._http_broker = DaytonaHttpToolBroker(sandbox=backend.sandbox)
+            self._http_broker.ensure_started()
+        self._http_broker.register_tools(self._tools)
+        backend.run(self._http_broker.submit_setup_code(self.output_fields))
+        self._tools_registered = True
+
+    def _execute_with_http_broker(
+        self,
+        code: str,
+        variables: dict[str, Any] | None,
+    ) -> Any:
+        broker = self._http_broker
+        backend = self._backend
+        if broker is None or backend is None:
+            msg = "http broker is not configured"
+            raise DaytonaAdapterError(message=msg, cause_type="InterpreterConfigurationError")
+
+        def tool_executor(name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+            fn = self._tools.get(name)
+            if fn is None:
+                msg = f"unknown tool: {name}"
+                raise DaytonaAdapterError(message=msg, cause_type="UnknownToolError")
+            try:
+                return fn(*args, **kwargs)
+            except Exception as exc:  # noqa: BLE001 - sanitize tool failures
+                raise DaytonaAdapterError(
+                    message=sanitize_provider_message(str(exc)),
+                    cause_type=type(exc).__name__,
+                ) from exc
+
+        raw = broker.execute_with_callbacks(
+            run_code=lambda: backend.run(code, variables),
+            tool_executor=tool_executor,
+        )
+        return self._finalize(raw)
+
+    def _finalize(self, raw: str | BackendExecutionResult) -> Any:
+        if isinstance(raw, BackendExecutionResult):
+            if raw.error:
+                raise DaytonaAdapterError(
+                    message=sanitize_provider_message(raw.error),
+                    cause_type="SandboxCodeInterpreterError",
+                )
+            if raw.final is not None:
+                return FinalOutput(raw.final)
+            return raw.stdout
+        final = extract_final_payload(str(raw))
+        if final is not None:
+            return FinalOutput(final)
+        return raw
 
 
 def sandbox_backend(sandbox: Any) -> InterpreterBackend:
