@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from fleet_rlm_clean.daytona.errors import is_sandbox_not_found, map_provider_error
 from fleet_rlm_clean.daytona.volumes import require_scoped_volume_subpath
 
 
@@ -24,10 +25,16 @@ class LiveDaytonaPlatform:
         self._client = client
 
     def get(self, sandbox_id: str) -> Any | None:
+        """Return sandbox or ``None`` only for explicit not-found.
+
+        Auth / network / 5xx / timeout raise typed ``ProviderRequestError``.
+        """
         try:
             return self._client.get(sandbox_id)
-        except Exception:  # noqa: BLE001 - missing sandbox is a None binding
-            return None
+        except Exception as exc:  # noqa: BLE001 - classify provider outcomes
+            if is_sandbox_not_found(exc):
+                return None
+            raise map_provider_error(exc) from exc
 
     def create(
         self,
@@ -37,6 +44,7 @@ class LiveDaytonaPlatform:
         volume_subpath: str | None = None,
         labels: dict[str, str] | None = None,
         with_volume: bool = True,
+        ephemeral: bool = False,
     ) -> Any:
         from daytona import CreateSandboxFromSnapshotParams, VolumeMount
 
@@ -57,7 +65,7 @@ class LiveDaytonaPlatform:
             language="python",
             labels=labels or {},
             volumes=volumes,
-            ephemeral=True,
+            ephemeral=ephemeral,
         )
         return self._client.create(params)
 

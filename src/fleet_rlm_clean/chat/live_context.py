@@ -185,9 +185,7 @@ class LiveKernelResources:
             budget=RLMBudget(max_iterations=6, max_llm_calls=16, max_output_chars=3000),
             lease=lease,
         )
-        if self.skill_registry is not None or (
-            self.attachment_store is not None and self.artifact_store is not None
-        ):
+        if self.skill_registry is not None or (self.attachment_store is not None and self.artifact_store is not None):
             from fleet_rlm_clean.chat.capabilities import assemble_turn_capabilities
 
             return assemble_turn_capabilities(
@@ -212,6 +210,7 @@ class LiveKernelResources:
             mount_path=None,
             labels={"fleet_package": "fleet_rlm_clean", "mode": "ephemeral"},
             with_volume=False,
+            ephemeral=True,
         )
         sid = str(getattr(sandbox, "id", sandbox))
         interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(sandbox))

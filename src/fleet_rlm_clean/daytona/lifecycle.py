@@ -46,11 +46,13 @@ def normalize_state(raw: Any) -> ProviderState:
         return "paused"
     if text in ARCHIVED_STATES:
         return "archived"
-    if text in {"missing", "deleted", "error", "unhealthy", "unknown", ""}:
-        return "unrecoverable" if text in {"error", "unhealthy"} else "missing"
-    # Unknown positive-looking states treated as running when present.
+    if text in {"missing", "deleted", ""}:
+        return "missing"
+    if text in {"error", "unhealthy", "unknown"}:
+        return "unrecoverable"
+    # Unrecognized non-empty states are unavailable — never treat as running.
     if text:
-        return "running"
+        return "unrecoverable"
     return "missing"
 
 

@@ -247,6 +247,7 @@ async def test_live_capability_skill_attachment_artifact_replace(tmp_path: Path)
                 provider_state="unrecoverable",
             ),
             workspace_id=workspace_id,
+            user_id=user_id,
         )
         assert new_binding.volume_id == volume_id
         assert new_binding.sandbox_id != old_sid

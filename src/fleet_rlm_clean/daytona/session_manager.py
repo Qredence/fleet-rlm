@@ -13,7 +13,7 @@ from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from fleet_rlm_clean.daytona.bindings import SandboxBinding
-from fleet_rlm_clean.daytona.errors import DaytonaAdapterError, map_provider_error
+from fleet_rlm_clean.daytona.errors import DaytonaAdapterError, ProviderRequestError, map_provider_error
 from fleet_rlm_clean.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 from fleet_rlm_clean.daytona.leases import InterpreterLease
 from fleet_rlm_clean.daytona.lifecycle import (
@@ -200,11 +200,19 @@ class DaytonaSessionManager:
             sandbox: Any | None = None
             if binding is not None and binding.sandbox_id:
                 if not binding_matches_expected(binding, expected):
-                    binding = await self.replace(binding, workspace_id=request.workspace_id)
+                    binding = await self.replace(
+                        binding,
+                        workspace_id=request.workspace_id,
+                        user_id=request.user_id,
+                    )
                     sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id or "")
                 else:
                     try:
                         sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id)
+                    except ProviderRequestError:
+                        raise
+                    except DaytonaAdapterError:
+                        raise
                     except Exception as exc:  # noqa: BLE001
                         raise map_provider_error(exc) from exc
 
@@ -232,6 +240,7 @@ class DaytonaSessionManager:
                                 provider_state="unrecoverable",
                             ),
                             workspace_id=request.workspace_id,
+                            user_id=request.user_id,
                         )
                         sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id or "")
                     else:
@@ -339,10 +348,16 @@ class DaytonaSessionManager:
         binding: SandboxBinding,
         *,
         workspace_id: UUID | None = None,
+        user_id: UUID | None = None,
     ) -> SandboxBinding:
         """Replace an unrecoverable Sandbox; keep Volume id and Workspace scope."""
         resolved_workspace = workspace_id or binding.workspace_id
         require_non_zero_workspace_id(resolved_workspace)
+        if user_id is None or user_id == UUID(int=0):
+            raise DaytonaAdapterError(
+                message="replace requires a real user_id (zero UUID is forbidden)",
+                cause_type="SandboxReplaceIdentityError",
+            )
         volume_id = binding.volume_id or await asyncio.to_thread(
             get_or_create_volume_id, self._volume_client, self._volume_config
         )
@@ -354,7 +369,7 @@ class DaytonaSessionManager:
                 pass
         request = LeaseRequest(
             session_id=binding.session_id,
-            user_id=UUID(int=0),
+            user_id=user_id,
             workspace_id=resolved_workspace,
         )
         sandbox = await asyncio.to_thread(
@@ -444,6 +459,7 @@ class DaytonaSessionManager:
                 volume_subpath=scoped,
                 labels={
                     "session_id": str(request.session_id),
+                    "user_id": str(request.user_id),
                     "workspace_id": str(request.workspace_id),
                     "fleet_package": "fleet_rlm_clean",
                     "volume_subpath": scoped,

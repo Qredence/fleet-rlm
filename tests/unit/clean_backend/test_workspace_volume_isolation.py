@@ -288,8 +288,8 @@ async def test_replace_rejects_zero_workspace_id() -> None:
     binding = await store.get(req.session_id)
     assert binding is not None
     with pytest.raises(ValueError, match="zero UUID"):
-        await mgr.replace(binding, workspace_id=UUID(int=0))
+        await mgr.replace(binding, workspace_id=UUID(int=0), user_id=req.user_id)
     # Binding still usable with real workspace.
-    replaced = await mgr.replace(binding, workspace_id=req.workspace_id)
+    replaced = await mgr.replace(binding, workspace_id=req.workspace_id, user_id=req.user_id)
     assert replaced.workspace_id == req.workspace_id
     assert replaced.sandbox_id != lease.sandbox_id

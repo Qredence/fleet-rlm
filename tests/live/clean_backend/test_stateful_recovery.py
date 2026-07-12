@@ -323,6 +323,7 @@ async def test_stateful_live_recovery_scenarios(tmp_path: Path) -> None:
                 provider_state="unrecoverable",
             ),
             workspace_id=workspace_id,
+            user_id=user_id,
         )
         assert new_binding.volume_id == volume_id
         assert new_binding.sandbox_id != old_sid

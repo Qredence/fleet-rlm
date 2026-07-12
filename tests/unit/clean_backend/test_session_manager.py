@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from fleet_rlm_clean.daytona.bindings import InMemoryBindingStore, SandboxBinding
+from fleet_rlm_clean.daytona.errors import DaytonaAdapterError
 from fleet_rlm_clean.daytona.lifecycle import LifecycleCapabilityError
 from fleet_rlm_clean.daytona.session_manager import DaytonaSessionManager, LeaseRequest
 from fleet_rlm_clean.daytona.volumes import VolumeConfig
@@ -296,17 +297,56 @@ async def test_replace_keeps_volume_id() -> None:
     volume_id = lease.volume_id
     binding = await store.get(req.session_id)
     assert binding is not None
-    new_binding = await mgr.replace(binding, workspace_id=req.workspace_id)
+    new_binding = await mgr.replace(binding, workspace_id=req.workspace_id, user_id=req.user_id)
     assert new_binding.volume_id == volume_id
     assert new_binding.sandbox_id != old_sid
     assert new_binding.workspace_id == req.workspace_id
     assert new_binding.volume_subpath == f"workspaces/{req.workspace_id}"
     assert old_sid in plat.deleted
     assert new_binding.sandbox_id in plat.sandboxes
+    labels = plat.created[-1]["labels"]
+    assert labels["user_id"] == str(req.user_id)
+    assert labels["workspace_id"] == str(req.workspace_id)
+    assert labels["user_id"] != str(UUID(int=0))
 
 
 @pytest.mark.asyncio
-async def test_acquire_recreates_when_sandbox_missing() -> None:
+async def test_replace_rejects_zero_user_id() -> None:
+    mgr, _plat, store, _volumes = _manager()
+    req = _request()
+    await mgr.acquire(req)
+    binding = await store.get(req.session_id)
+    assert binding is not None
+    with pytest.raises(DaytonaAdapterError, match="user_id"):
+        await mgr.replace(binding, workspace_id=req.workspace_id, user_id=UUID(int=0))
+    with pytest.raises(DaytonaAdapterError, match="user_id"):
+        await mgr.replace(binding, workspace_id=req.workspace_id)
+
+
+@pytest.mark.asyncio
+async def test_acquire_replaces_unrecoverable_provider_state() -> None:
+    mgr, plat, store, _volumes = _manager()
+    req = _request()
+    lease = await mgr.acquire(req)
+    old_sid = lease.sandbox_id
+    plat.sandboxes[old_sid].state = "booting"
+    await store.upsert(
+        SandboxBinding(
+            session_id=req.session_id,
+            sandbox_id=old_sid,
+            workspace_id=req.workspace_id,
+            volume_id=lease.volume_id,
+            volume_subpath=lease.volume_subpath or f"workspaces/{req.workspace_id}",
+            mount_path=lease.mount_path,
+            provider_state="running",
+        )
+    )
+    await mgr.release(lease)
+    again = await mgr.acquire(req)
+    assert again.sandbox_id != old_sid
+    assert old_sid in plat.deleted
+    assert plat.created[-1]["labels"]["user_id"] == str(req.user_id)
+
     mgr, plat, store, _volumes = _manager()
     req = _request()
     first = await mgr.acquire(req)

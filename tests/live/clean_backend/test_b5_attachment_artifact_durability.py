@@ -161,6 +161,7 @@ async def test_live_b5_stage_readable_and_artifact_survives_replace(tmp_path: Pa
                 provider_state="unrecoverable",
             ),
             workspace_id=workspace_id,
+            user_id=user_id,
         )
         assert new_binding.sandbox_id != old_sid
         resources.track_sandbox(new_binding.sandbox_id)
