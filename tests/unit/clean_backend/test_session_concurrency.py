@@ -20,6 +20,7 @@ from fleet_rlm_clean.rlm.budgets import RLMBudget
 from fleet_rlm_clean.rlm.context import RLMTurnContext
 from fleet_rlm_clean.rlm.events import EventRecorder, RuntimeEvent, RuntimeEventKind
 from fleet_rlm_clean.rlm.model_bundle import RLMModelBundle
+from fleet_rlm_clean.rlm.runner import TurnEventStream
 from fleet_rlm_clean.sessions.checkpoints import StaleCheckpointError
 from fleet_rlm_clean.sessions.locks import SessionLockRegistry
 from fleet_rlm_clean.sessions.repository import SessionRepository
@@ -37,15 +38,24 @@ class _CountingRunner:
         self.delay = delay
         self.calls = 0
 
-    async def stream(self, context: RLMTurnContext) -> AsyncIterator[RuntimeEvent]:
+    def stream(self, context: RLMTurnContext) -> TurnEventStream:
+        from fleet_rlm_clean.rlm.outcome import TurnExecutionOutcome
+        from fleet_rlm_clean.rlm.runner import TurnEventStream
+
         self.calls += 1
-        if self.delay:
-            await asyncio.sleep(self.delay)
-        recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
-        yield recorder.emit(RuntimeEventKind.RUN_STARTED, {})
-        yield recorder.emit(
-            RuntimeEventKind.RUN_COMPLETED,
-            {"status": "completed", "assistant_text": self.answer},
+
+        async def _agen() -> AsyncIterator[RuntimeEvent]:
+            if self.delay:
+                await asyncio.sleep(self.delay)
+            recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
+            yield recorder.emit(RuntimeEventKind.RUN_STARTED, {})
+
+        return TurnEventStream(
+            _agen(),
+            outcome=TurnExecutionOutcome(
+                terminal_status="completed",
+                assistant_text=self.answer,
+            ),
         )
 
 

@@ -1,14 +1,16 @@
-"""Execute one recursive DSPy turn and stream public RuntimeEvents."""
+"""Execute one recursive DSPy turn and stream non-terminal RuntimeEvents."""
 
 from __future__ import annotations
 
 import asyncio
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
-from typing import Any, Protocol
+from typing import Any, Protocol, Self
 
 import dspy
 
+from fleet_rlm_clean.observability.exporters import safe_export
+from fleet_rlm_clean.observability.record import TurnTrace, apply_event_to_trace
 from fleet_rlm_clean.rlm.cancel import get_run_cancel_registry
 from fleet_rlm_clean.rlm.context import RLMTurnContext
 from fleet_rlm_clean.rlm.errors import (
@@ -20,6 +22,7 @@ from fleet_rlm_clean.rlm.errors import (
 from fleet_rlm_clean.rlm.events import EventRecorder, RuntimeEvent, RuntimeEventKind
 from fleet_rlm_clean.rlm.factory import RLMFactory
 from fleet_rlm_clean.rlm.inputs import build_rlm_input_kwargs
+from fleet_rlm_clean.rlm.outcome import TerminalStatus, TurnExecutionOutcome
 from fleet_rlm_clean.rlm.sanitize import sanitize_public_error
 
 
@@ -34,6 +37,39 @@ class RLMFactoryLike(Protocol):
         signature: Any = None,
         verbose: bool = False,
     ) -> Any: ...
+
+
+class TurnEventStream:
+    """Async iterator of non-terminal events; ``outcome`` after the stream ends."""
+
+    def __init__(
+        self,
+        agen: AsyncIterator[RuntimeEvent],
+        *,
+        outcome: TurnExecutionOutcome | None = None,
+        outcome_factory: Callable[[], TurnExecutionOutcome] | None = None,
+    ) -> None:
+        self._agen = agen.__aiter__()
+        self._outcome = outcome
+        self._outcome_factory = outcome_factory
+        self._finished = False
+
+    @property
+    def outcome(self) -> TurnExecutionOutcome | None:
+        return self._outcome
+
+    def __aiter__(self) -> Self:
+        return self
+
+    async def __anext__(self) -> RuntimeEvent:
+        try:
+            return await self._agen.__anext__()
+        except StopAsyncIteration:
+            if not self._finished:
+                self._finished = True
+                if self._outcome is None and self._outcome_factory is not None:
+                    self._outcome = self._outcome_factory()
+            raise
 
 
 def _prediction_text(prediction: Any) -> str:
@@ -55,8 +91,8 @@ def _usage_payload(prediction: Any) -> dict[str, Any]:
         except Exception:  # noqa: BLE001 - usage is best-effort for public events
             usage = None
         if usage:
-            return {"usage": usage}
-    return {"usage": {}}
+            return dict(usage) if isinstance(usage, dict) else {"usage": usage}
+    return {}
 
 
 class HostEventSource(Protocol):
@@ -90,7 +126,6 @@ def _map_host_ledger_item(
                 "checksum_sha256": str(item.get("checksum_sha256", "")),
             },
         )
-    # skill_loaded_public_payload omits event_kind; accept explicit skill.loaded too
     if kind in (None, "skill.loaded") and item.get("skill_id"):
         return (
             RuntimeEventKind.SKILL_LOADED,
@@ -137,9 +172,18 @@ def _raise_if_cancelled(run_id: Any) -> None:
         raise TurnCancelled()
 
 
-def _terminal_status_for(exc: BaseException) -> str:
+def _terminal_status_for(exc: BaseException) -> TerminalStatus:
     if isinstance(exc, TurnTerminalError):
-        return exc.status
+        status = exc.status
+        mapping: dict[str, TerminalStatus] = {
+            "completed": "completed",
+            "cancelled": "cancelled",
+            "timeout": "timeout",
+            "budget_exhausted": "budget_exhausted",
+            "failed": "failed",
+        }
+        if status in mapping:
+            return mapping[status]
     if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
         return "timeout"
     if isinstance(exc, RLMBudgetError):
@@ -155,7 +199,7 @@ def _terminal_status_for(exc: BaseException) -> str:
 
 
 class RLMRunner:
-    """Deep module: one turn in, ordered RuntimeEvents out, lease always released."""
+    """Deep module: one turn in, non-terminal RuntimeEvents + TurnExecutionOutcome."""
 
     def __init__(
         self,
@@ -166,129 +210,136 @@ class RLMRunner:
         self._factory: RLMFactoryLike = factory if factory is not None else RLMFactory()
         self._turn_exporter = turn_exporter
 
-    async def stream(self, context: RLMTurnContext) -> AsyncIterator[RuntimeEvent]:
-        """Run one turn. Always emits exactly one terminal event and releases the lease."""
-        from fleet_rlm_clean.observability.exporters import safe_export
-        from fleet_rlm_clean.observability.record import TurnTrace, apply_event_to_trace
+    def stream(self, context: RLMTurnContext) -> TurnEventStream:
+        """Run one turn. Yields non-terminal events only; outcome on the stream handle."""
+        outcome_holder: dict[str, TurnExecutionOutcome | None] = {"value": None}
 
-        recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
-        started = time.perf_counter()
-        terminal_emitted = False
-        registry = get_run_cancel_registry()
-        lease = context.lease
-        trace = TurnTrace(
-            run_id=context.run_id,
-            session_id=context.session_id,
-            user_id=context.user_id,
-            workspace_id=context.workspace_id,
-            sandbox_id=getattr(lease, "sandbox_id", None),
-            volume_id=getattr(lease, "volume_id", None),
-            mount_path=getattr(lease, "mount_path", None),
-        )
+        async def _agen() -> AsyncIterator[RuntimeEvent]:
+            recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
+            started = time.perf_counter()
+            registry = get_run_cancel_registry()
+            lease = context.lease
+            trace = TurnTrace(
+                run_id=context.run_id,
+                session_id=context.session_id,
+                user_id=context.user_id,
+                workspace_id=context.workspace_id,
+                sandbox_id=getattr(lease, "sandbox_id", None),
+                volume_id=getattr(lease, "volume_id", None),
+                mount_path=getattr(lease, "mount_path", None),
+            )
 
-        def emit(kind: RuntimeEventKind, payload: dict[str, Any] | None = None) -> RuntimeEvent:
-            event = recorder.emit(kind, payload)
+            def emit(kind: RuntimeEventKind, payload: dict[str, Any] | None = None) -> RuntimeEvent:
+                event = recorder.emit(kind, payload)
+                try:
+                    apply_event_to_trace(trace, kind.value, dict(event.payload))
+                except Exception:  # noqa: BLE001
+                    pass
+                return event
+
             try:
-                apply_event_to_trace(trace, kind.value, dict(event.payload))
-            except Exception:  # noqa: BLE001
-                pass
-            return event
-
-        try:
-            yield emit(
-                RuntimeEventKind.RUN_STARTED,
-                {
-                    "user_id": str(context.user_id),
-                    "workspace_id": str(context.workspace_id),
-                },
-            )
-            yield emit(RuntimeEventKind.STATUS, {"message": "running"})
-
-            _raise_if_cancelled(context.run_id)
-
-            rlm = self._factory.create(
-                models=context.models,
-                budget=context.budget,
-                interpreter=context.lease.interpreter,
-                tools=list(context.tools) if context.tools else None,
-            )
-
-            wall = max(1, int(getattr(context.budget, "max_wall_seconds", 300) or 300))
-            try:
-                prediction = await asyncio.wait_for(
-                    self._execute_rlm(rlm, context),
-                    timeout=wall,
-                )
-            except TimeoutError as exc:
-                raise TurnTimeout() from exc
-
-            _raise_if_cancelled(context.run_id)
-            text = _prediction_text(prediction)
-
-            if text:
-                yield emit(RuntimeEventKind.TEXT_DELTA, {"text": text})
-                yield emit(RuntimeEventKind.TEXT_COMPLETED, {"text": text})
-
-            for kind, payload in _drain_host_public_events(context):
-                yield emit(kind, payload)
-
-            yield emit(RuntimeEventKind.USAGE, _usage_payload(prediction))
-
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            yield emit(
-                RuntimeEventKind.RUN_COMPLETED,
-                {
-                    "status": "completed",
-                    "duration_ms": duration_ms,
-                    "assistant_text": text,
-                },
-            )
-            terminal_emitted = True
-        except asyncio.CancelledError:
-            if not terminal_emitted:
-                duration_ms = int((time.perf_counter() - started) * 1000)
                 yield emit(
-                    RuntimeEventKind.ERROR,
+                    RuntimeEventKind.RUN_STARTED,
                     {
-                        "status": "cancelled",
-                        "duration_ms": duration_ms,
-                        "message": "Turn cancelled",
+                        "user_id": str(context.user_id),
+                        "workspace_id": str(context.workspace_id),
                     },
                 )
-                terminal_emitted = True
-            raise
-        except Exception as exc:  # noqa: BLE001 - public stream must never raise raw failures
-            if not terminal_emitted:
+                yield emit(RuntimeEventKind.STATUS, {"message": "running"})
+
+                _raise_if_cancelled(context.run_id)
+
+                rlm = self._factory.create(
+                    models=context.models,
+                    budget=context.budget,
+                    interpreter=context.lease.interpreter,
+                    tools=list(context.tools) if context.tools else None,
+                )
+
+                wall = max(1, int(getattr(context.budget, "max_wall_seconds", 300) or 300))
+                try:
+                    prediction = await asyncio.wait_for(
+                        self._execute_rlm(rlm, context),
+                        timeout=wall,
+                    )
+                except TimeoutError as exc:
+                    raise TurnTimeout() from exc
+
+                _raise_if_cancelled(context.run_id)
+                text = _prediction_text(prediction)
+
+                if text:
+                    yield emit(RuntimeEventKind.TEXT_DELTA, {"text": text})
+                    yield emit(RuntimeEventKind.TEXT_COMPLETED, {"text": text})
+
+                for kind, payload in _drain_host_public_events(context):
+                    yield emit(kind, payload)
+
+                usage = _usage_payload(prediction)
+                yield emit(RuntimeEventKind.USAGE, {"usage": usage})
+
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                outcome_holder["value"] = TurnExecutionOutcome(
+                    terminal_status="completed",
+                    assistant_text=text,
+                    usage=usage,
+                    duration_ms=duration_ms,
+                )
+            except asyncio.CancelledError:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                outcome_holder["value"] = TurnExecutionOutcome(
+                    terminal_status="cancelled",
+                    public_error_message="Turn cancelled",
+                    duration_ms=duration_ms,
+                )
+                raise
+            except Exception as exc:  # noqa: BLE001 - map to outcome; never emit public terminal
                 for kind, payload in _drain_host_public_events(context):
                     yield emit(kind, payload)
                 duration_ms = int((time.perf_counter() - started) * 1000)
-                yield emit(
-                    RuntimeEventKind.ERROR,
-                    {
-                        "status": _terminal_status_for(exc),
-                        "duration_ms": duration_ms,
-                        "message": sanitize_public_error(exc),
-                    },
+                outcome_holder["value"] = TurnExecutionOutcome(
+                    terminal_status=_terminal_status_for(exc),
+                    public_error_message=sanitize_public_error(exc),
+                    duration_ms=duration_ms,
                 )
-                terminal_emitted = True
-        finally:
-            try:
-                context.lease.release()
-            except Exception:  # noqa: BLE001
-                if not terminal_emitted:
-                    yield emit(
-                        RuntimeEventKind.ERROR,
-                        {
-                            "status": "failed",
-                            "message": "Turn failed during cleanup",
-                        },
+            finally:
+                try:
+                    context.lease.release()
+                except Exception as cleanup_exc:  # noqa: BLE001
+                    if outcome_holder["value"] is None:
+                        outcome_holder["value"] = TurnExecutionOutcome(
+                            terminal_status="failed",
+                            public_error_message=sanitize_public_error(cleanup_exc) or "Turn failed during cleanup",
+                        )
+                registry.clear(context.run_id)
+                if outcome_holder["value"] is None:
+                    outcome_holder["value"] = TurnExecutionOutcome(
+                        terminal_status="failed",
+                        public_error_message="Turn ended without outcome",
                     )
-            registry.clear(context.run_id)
-            safe_export(self._turn_exporter, trace)
+                outcome = outcome_holder["value"]
+                trace.terminal_status = outcome.terminal_status
+                if outcome.usage:
+                    trace.usage = dict(outcome.usage)
+                if outcome.duration_ms is not None:
+                    trace.duration_ms = outcome.duration_ms
+                if outcome.public_error_message:
+                    trace.error_message = outcome.public_error_message
+                safe_export(self._turn_exporter, trace)
+
+        return TurnEventStream(
+            _agen(),
+            outcome_factory=lambda: (
+                outcome_holder["value"]
+                or TurnExecutionOutcome(
+                    terminal_status="failed",
+                    public_error_message="Turn ended without outcome",
+                )
+            ),
+        )
 
     async def _execute_rlm(self, rlm: Any, context: RLMTurnContext) -> Any:
         """Apply root LM via scoped DSPy context; run off the event loop when sync."""
-
         root_lm = context.models.root_lm
         call_kwargs = build_rlm_input_kwargs(
             request=context.request,

@@ -176,13 +176,15 @@ async def test_live_capability_skill_attachment_artifact_replace(tmp_path: Path)
     )
 
     # Stream host-tool events through runner (no live LM required for tools)
-    events = [e async for e in CapabilityRunner(factory=Factory()).stream(context)]
+    stream = CapabilityRunner(factory=Factory()).stream(context)
+    events = [e async for e in stream]
     kinds = [e.kind for e in events]
     assert RuntimeEventKind.SKILL_LOADED in kinds
     assert RuntimeEventKind.ATTACHMENT_READ in kinds
     assert RuntimeEventKind.ARTIFACT_CREATED in kinds
-    assert kinds[-1] == RuntimeEventKind.RUN_COMPLETED
-
+    assert RuntimeEventKind.RUN_COMPLETED not in kinds
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "completed"
     skill_ev = next(e for e in events if e.kind == RuntimeEventKind.SKILL_LOADED)
     assert "instructions" not in dict(skill_ev.payload)
     assert "FULL BODY" not in json.dumps(dict(skill_ev.payload))

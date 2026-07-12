@@ -60,8 +60,12 @@ class EventRecorder:
 
     run_id: UUID
     session_id: UUID
-    _sequence: int = field(default=0, init=False, repr=False)
+    start_sequence: int = 0
+    _sequence: int = field(init=False, repr=False)
     _terminal_emitted: bool = field(default=False, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._sequence = int(self.start_sequence)
 
     def emit(self, kind: RuntimeEventKind, payload: Mapping[str, Any] | None = None) -> RuntimeEvent:
         """Emit the next public event for this run."""

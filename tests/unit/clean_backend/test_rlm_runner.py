@@ -92,8 +92,10 @@ def _context(
     return ctx, lease
 
 
-async def _collect(runner: RLMRunner, context: RLMTurnContext) -> list[Any]:
-    return [event async for event in runner.stream(context)]
+async def _collect(runner: RLMRunner, context: RLMTurnContext) -> tuple[list[Any], Any]:
+    stream = runner.stream(context)
+    events = [event async for event in stream]
+    return events, stream.outcome
 
 
 @pytest.mark.asyncio
@@ -103,7 +105,7 @@ async def test_runner_emits_start_text_usage_and_one_terminal() -> None:
     factory = _FakeFactory(fake_rlm)
     ctx, lease = _context(sub=sub)
 
-    events = await _collect(RLMRunner(factory=factory), ctx)
+    events, outcome = await _collect(RLMRunner(factory=factory), ctx)
     kinds = [e.kind for e in events]
 
     assert kinds[0] == RuntimeEventKind.RUN_STARTED
@@ -111,10 +113,11 @@ async def test_runner_emits_start_text_usage_and_one_terminal() -> None:
     assert RuntimeEventKind.TEXT_DELTA in kinds
     assert RuntimeEventKind.TEXT_COMPLETED in kinds
     assert RuntimeEventKind.USAGE in kinds
-    assert kinds[-1] == RuntimeEventKind.RUN_COMPLETED
-    assert sum(1 for k in kinds if k in {RuntimeEventKind.RUN_COMPLETED, RuntimeEventKind.ERROR}) == 1
-    assert events[-1].payload["status"] == "completed"
-    assert events[-1].payload["assistant_text"] == "world"
+    assert RuntimeEventKind.RUN_COMPLETED not in kinds
+    assert RuntimeEventKind.ERROR not in kinds
+    assert outcome is not None
+    assert outcome.terminal_status == "completed"
+    assert outcome.assistant_text == "world"
     assert lease.released == 1
     assert factory.last_kwargs["models"].sub_lm is sub
     assert factory.last_kwargs["interpreter"] is lease.interpreter
@@ -139,12 +142,13 @@ async def test_runner_sanitizes_failures_and_still_releases_lease() -> None:
     fake_rlm = _FakeRLM(fail=RuntimeError(f"provider boom {secret} /Users/zoe/secret/path"))
     ctx, lease = _context()
 
-    events = await _collect(RLMRunner(factory=_FakeFactory(fake_rlm)), ctx)
+    events, outcome = await _collect(RLMRunner(factory=_FakeFactory(fake_rlm)), ctx)
     kinds = [e.kind for e in events]
 
-    assert kinds[-1] == RuntimeEventKind.ERROR
-    assert sum(1 for k in kinds if k == RuntimeEventKind.ERROR) == 1
-    message = events[-1].payload["message"]
+    assert RuntimeEventKind.ERROR not in kinds
+    assert outcome is not None
+    assert outcome.terminal_status == "failed"
+    message = outcome.public_error_message or ""
     assert "sk-super-secret-value" not in message
     assert "/Users/zoe" not in message
     assert lease.released == 1
@@ -168,7 +172,7 @@ async def test_concurrent_runs_use_distinct_rlm_instances() -> None:
 
     assert len(factory.created) == 2
     assert factory.created[0] is not factory.created[1]
-    assert all(r[-1].kind == RuntimeEventKind.RUN_COMPLETED for r in results)
+    assert all(outcome is not None and outcome.terminal_status == "completed" for _events, outcome in results)
     assert lease_a.released == 1
     assert lease_b.released == 1
 
@@ -176,6 +180,6 @@ async def test_concurrent_runs_use_distinct_rlm_instances() -> None:
 @pytest.mark.asyncio
 async def test_sequences_strictly_increase_for_one_run() -> None:
     ctx, _ = _context()
-    events = await _collect(RLMRunner(factory=_FakeFactory(_FakeRLM())), ctx)
+    events, _outcome = await _collect(RLMRunner(factory=_FakeFactory(_FakeRLM())), ctx)
     sequences = [e.sequence for e in events]
     assert sequences == list(range(1, len(sequences) + 1))

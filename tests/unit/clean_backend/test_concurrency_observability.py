@@ -172,7 +172,10 @@ async def test_runner_records_trace_via_exporter() -> None:
     context.lease.volume_id = "vol"  # type: ignore[attr-defined]
     context.lease.mount_path = "/home/daytona/fleet"  # type: ignore[attr-defined]
 
-    events = [e async for e in RLMRunner(factory=Factory(), turn_exporter=store).stream(context)]
-    assert events[-1].kind == RuntimeEventKind.RUN_COMPLETED
+    stream = RLMRunner(factory=Factory(), turn_exporter=store).stream(context)
+    events = [e async for e in stream]
+    assert RuntimeEventKind.RUN_COMPLETED not in {e.kind for e in events}
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "completed"
     assert len(store.traces) == 1
     assert store.traces[0].terminal_status == "completed"

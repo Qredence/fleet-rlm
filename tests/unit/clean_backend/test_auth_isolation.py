@@ -26,6 +26,7 @@ from fleet_rlm_clean.rlm.budgets import RLMBudget
 from fleet_rlm_clean.rlm.context import RLMTurnContext
 from fleet_rlm_clean.rlm.events import EventRecorder, RuntimeEvent, RuntimeEventKind
 from fleet_rlm_clean.rlm.model_bundle import RLMModelBundle
+from fleet_rlm_clean.rlm.runner import TurnEventStream
 from fleet_rlm_clean.sessions.errors import SessionAccessDenied, SessionNotFoundError
 from fleet_rlm_clean.sessions.models import SessionRecord, SessionSnapshot
 
@@ -136,12 +137,20 @@ def test_require_session_access() -> None:
 
 
 class _ScriptedRunner:
-    async def stream(self, context: RLMTurnContext) -> AsyncIterator[RuntimeEvent]:
-        recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
-        yield recorder.emit(RuntimeEventKind.RUN_STARTED, {})
-        yield recorder.emit(
-            RuntimeEventKind.RUN_COMPLETED,
-            {"status": "completed", "assistant_text": "ok"},
+    def stream(self, context: RLMTurnContext) -> TurnEventStream:
+        from fleet_rlm_clean.rlm.outcome import TurnExecutionOutcome
+        from fleet_rlm_clean.rlm.runner import TurnEventStream
+
+        async def _agen() -> AsyncIterator[RuntimeEvent]:
+            recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
+            yield recorder.emit(RuntimeEventKind.RUN_STARTED, {})
+
+        return TurnEventStream(
+            _agen(),
+            outcome=TurnExecutionOutcome(
+                terminal_status="completed",
+                assistant_text="ok",
+            ),
         )
 
 

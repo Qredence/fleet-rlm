@@ -97,10 +97,12 @@ async def test_runner_honors_cancel_before_execute() -> None:
         budget=RLMBudget(max_wall_seconds=30),
         lease=ephemeral_lease(MagicMock()),
     )
-    events = [e async for e in RLMRunner(factory=Factory()).stream(context)]
-    assert events[-1].kind == RuntimeEventKind.ERROR
-    assert events[-1].payload["status"] == "cancelled"
-    assert "message" in events[-1].payload
+    stream = RLMRunner(factory=Factory()).stream(context)
+    events = [e async for e in stream]
+    assert RuntimeEventKind.ERROR not in {e.kind for e in events}
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "cancelled"
+    assert stream.outcome.public_error_message
 
 
 @pytest.mark.asyncio
@@ -125,9 +127,10 @@ async def test_runner_timeout_maps_to_stable_status() -> None:
         budget=RLMBudget(max_wall_seconds=1),
         lease=ephemeral_lease(MagicMock()),
     )
-    events = [e async for e in RLMRunner(factory=SlowFactory()).stream(context)]
-    assert events[-1].kind == RuntimeEventKind.ERROR
-    assert events[-1].payload["status"] == "timeout"
+    stream = RLMRunner(factory=SlowFactory()).stream(context)
+    _ = [e async for e in stream]
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "timeout"
 
 
 @pytest.mark.asyncio
@@ -149,9 +152,11 @@ async def test_runner_budget_error_maps_to_budget_exhausted() -> None:
         budget=RLMBudget(max_wall_seconds=30),
         lease=ephemeral_lease(MagicMock()),
     )
-    events = [e async for e in RLMRunner(factory=BudgetFactory()).stream(context)]
-    assert events[-1].payload["status"] == "budget_exhausted"
-    assert events[-1].payload["message"] == "Turn budget exhausted"
+    stream = RLMRunner(factory=BudgetFactory()).stream(context)
+    _ = [e async for e in stream]
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "budget_exhausted"
+    assert stream.outcome.public_error_message == "Turn budget exhausted"
 
 
 @pytest.mark.asyncio
@@ -198,14 +203,21 @@ async def test_failed_turn_does_not_advance_checkpoint() -> None:
             calls["fail"] += 1
 
     class FailRunner:
-        async def stream(self, context: Any) -> Any:
+        def stream(self, context: Any) -> Any:
             from fleet_rlm_clean.rlm.events import EventRecorder
+            from fleet_rlm_clean.rlm.outcome import TurnExecutionOutcome
+            from fleet_rlm_clean.rlm.runner import TurnEventStream
 
-            rec = EventRecorder(run_id=context.run_id, session_id=context.session_id)
-            yield rec.emit(RuntimeEventKind.RUN_STARTED, {})
-            yield rec.emit(
-                RuntimeEventKind.ERROR,
-                {"status": "cancelled", "message": "Turn cancelled"},
+            async def _agen() -> Any:
+                rec = EventRecorder(run_id=context.run_id, session_id=context.session_id)
+                yield rec.emit(RuntimeEventKind.RUN_STARTED, {})
+
+            return TurnEventStream(
+                _agen(),
+                outcome=TurnExecutionOutcome(
+                    terminal_status="cancelled",
+                    public_error_message="Turn cancelled",
+                ),
             )
 
     def builder(cmd: ChatTurnCommand) -> RLMTurnContext:

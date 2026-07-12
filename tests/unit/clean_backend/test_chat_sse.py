@@ -15,6 +15,8 @@ from fastapi.testclient import TestClient
 from fleet_rlm_clean.chat.commands import ChatTurnCommand
 from fleet_rlm_clean.chat.turn_coordinator import TurnCoordinator
 from fleet_rlm_clean.rlm.events import EventRecorder, RuntimeEvent, RuntimeEventKind
+from fleet_rlm_clean.rlm.outcome import TurnExecutionOutcome
+from fleet_rlm_clean.rlm.runner import TurnEventStream
 
 
 class _FakeRunner:
@@ -24,24 +26,49 @@ class _FakeRunner:
         self.seen: list[Any] = []
         self.closed = 0
 
-    async def stream(self, context: Any) -> AsyncIterator[RuntimeEvent]:
+    def stream(self, context: Any) -> TurnEventStream:
         self.seen.append(context)
-        try:
-            if self.fail:
-                raise RuntimeError("api_key=sk-should-not-leak /Users/secret/path")
-            if self.events is not None:
-                for event in self.events:
-                    yield event
-                return
-            recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
-            yield recorder.emit(RuntimeEventKind.RUN_STARTED, {})
-            yield recorder.emit(RuntimeEventKind.TEXT_DELTA, {"text": "hi"})
-            yield recorder.emit(
-                RuntimeEventKind.RUN_COMPLETED,
-                {"status": "completed", "assistant_text": "hi"},
+
+        async def _agen() -> AsyncIterator[RuntimeEvent]:
+            try:
+                if self.fail:
+                    return
+                if self.events is not None:
+                    for event in self.events:
+                        if event.kind in {
+                            RuntimeEventKind.RUN_COMPLETED,
+                            RuntimeEventKind.ERROR,
+                        }:
+                            continue
+                        yield event
+                    return
+                recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
+                yield recorder.emit(RuntimeEventKind.RUN_STARTED, {})
+                yield recorder.emit(RuntimeEventKind.TEXT_DELTA, {"text": "hi"})
+            finally:
+                self.closed += 1
+
+        if self.fail:
+            outcome = TurnExecutionOutcome(
+                terminal_status="failed",
+                public_error_message="Turn failed",
             )
-        finally:
-            self.closed += 1
+        elif self.events is not None:
+            outcome = TurnExecutionOutcome(terminal_status="completed", assistant_text="hi")
+            for event in self.events:
+                if event.kind == RuntimeEventKind.RUN_COMPLETED:
+                    outcome = TurnExecutionOutcome(
+                        terminal_status="completed",
+                        assistant_text=str(event.payload.get("assistant_text") or "hi"),
+                    )
+                elif event.kind == RuntimeEventKind.ERROR:
+                    outcome = TurnExecutionOutcome(
+                        terminal_status=str(event.payload.get("status") or "failed"),  # type: ignore[arg-type]
+                        public_error_message=str(event.payload.get("message") or "failed"),
+                    )
+        else:
+            outcome = TurnExecutionOutcome(terminal_status="completed", assistant_text="hi")
+        return TurnEventStream(_agen(), outcome=outcome)
 
 
 def _parse_sse_data_lines(body: str) -> list[dict[str, Any]]:
@@ -157,14 +184,7 @@ def test_chat_rejects_invalid_attachment_before_stream(tmp_path: Path) -> None:
 
 
 def test_chat_route_module_has_no_dspy_or_daytona_imports() -> None:
-    route_path = (
-        Path(__file__).resolve().parents[3]
-        / "src"
-        / "fleet_rlm_clean"
-        / "api"
-        / "routes"
-        / "chat.py"
-    )
+    route_path = Path(__file__).resolve().parents[3] / "src" / "fleet_rlm_clean" / "api" / "routes" / "chat.py"
     tree = ast.parse(route_path.read_text(encoding="utf-8"))
     imported: set[str] = set()
     for node in ast.walk(tree):

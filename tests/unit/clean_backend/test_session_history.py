@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from fleet_rlm_clean.chat.commands import ChatTurnCommand
 from fleet_rlm_clean.chat.turn_coordinator import TurnCoordinator, ephemeral_lease
@@ -38,13 +37,9 @@ async def test_completed_exchanges_rebuild_history() -> None:
         user_id, workspace_id = uuid4(), uuid4()
         session = await repo.create(user_id=user_id, workspace_id=workspace_id)
         run1 = await repo.begin_run(session.id)
-        await repo.append_completed_exchange(
-            session.id, user_text="hello", assistant_text="world", run_id=run1
-        )
+        await repo.append_completed_exchange(session.id, user_text="hello", assistant_text="world", run_id=run1)
         run2 = await repo.begin_run(session.id)
-        await repo.append_completed_exchange(
-            session.id, user_text="again", assistant_text="ok", run_id=run2
-        )
+        await repo.append_completed_exchange(session.id, user_text="again", assistant_text="ok", run_id=run2)
 
         loaded = await repo.load(session.id)
         history = turns_to_history(loaded.turns)
@@ -67,9 +62,7 @@ async def test_failed_run_does_not_advance_checkpoint_or_history() -> None:
         user_id, workspace_id = uuid4(), uuid4()
         session = await repo.create(user_id=user_id, workspace_id=workspace_id)
         run_ok = await repo.begin_run(session.id)
-        await repo.append_completed_exchange(
-            session.id, user_text="u1", assistant_text="a1", run_id=run_ok
-        )
+        await repo.append_completed_exchange(session.id, user_text="u1", assistant_text="a1", run_id=run_ok)
         before = await repo.load(session.id)
         run_fail = await repo.begin_run(session.id)
         after_fail = await repo.finish_failed_run(session.id, run_fail, message="boom")
@@ -89,9 +82,7 @@ async def test_reload_after_new_repository_instance_preserves_history() -> None:
         repo_a = SessionRepository(factory)
         session = await repo_a.create(user_id=uuid4(), workspace_id=uuid4())
         run_id = await repo_a.begin_run(session.id)
-        await repo_a.append_completed_exchange(
-            session.id, user_text="persist", assistant_text="me", run_id=run_id
-        )
+        await repo_a.append_completed_exchange(session.id, user_text="persist", assistant_text="me", run_id=run_id)
 
         repo_b = SessionRepository(factory)
         loaded = await repo_b.load(session.id)
@@ -108,21 +99,29 @@ class _ScriptedRunner:
         self.answer = answer
         self.seen_history_lens: list[int] = []
 
-    async def stream(self, context: RLMTurnContext) -> AsyncIterator[RuntimeEvent]:
+    def stream(self, context: RLMTurnContext) -> TurnEventStream:
+        from fleet_rlm_clean.rlm.outcome import TurnExecutionOutcome
+        from fleet_rlm_clean.rlm.runner import TurnEventStream
+
         self.seen_history_lens.append(history_message_count(context.history))
-        recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
-        yield recorder.emit(RuntimeEventKind.RUN_STARTED, {})
+
+        async def _agen() -> AsyncIterator[RuntimeEvent]:
+            recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
+            yield recorder.emit(RuntimeEventKind.RUN_STARTED, {})
+            if not self.fail:
+                yield recorder.emit(RuntimeEventKind.TEXT_DELTA, {"text": self.answer})
+
         if self.fail:
-            yield recorder.emit(
-                RuntimeEventKind.ERROR,
-                {"status": "failed", "message": "nope"},
+            outcome = TurnExecutionOutcome(
+                terminal_status="failed",
+                public_error_message="nope",
             )
-            return
-        yield recorder.emit(RuntimeEventKind.TEXT_DELTA, {"text": self.answer})
-        yield recorder.emit(
-            RuntimeEventKind.RUN_COMPLETED,
-            {"status": "completed", "assistant_text": self.answer},
-        )
+        else:
+            outcome = TurnExecutionOutcome(
+                terminal_status="completed",
+                assistant_text=self.answer,
+            )
+        return TurnEventStream(_agen(), outcome=outcome)
 
 
 def _builder(command: ChatTurnCommand) -> RLMTurnContext:

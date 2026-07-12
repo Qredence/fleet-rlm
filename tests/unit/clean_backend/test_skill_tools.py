@@ -165,10 +165,13 @@ async def test_runner_emits_skill_loaded_from_host() -> None:
         skill_tool_host=host,
     )
     runner = RunnerWithToolUse(factory=Factory())
-    events = [e async for e in runner.stream(context)]
+    stream = runner.stream(context)
+    events = [e async for e in stream]
     kinds = [e.kind for e in events]
     assert RuntimeEventKind.SKILL_LOADED in kinds
     loaded = next(e for e in events if e.kind == RuntimeEventKind.SKILL_LOADED)
     assert loaded.payload["skill_id"] == str(system.id)
     assert "instructions" not in loaded.payload
-    assert kinds[-1] == RuntimeEventKind.RUN_COMPLETED
+    assert RuntimeEventKind.RUN_COMPLETED not in kinds
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "completed"

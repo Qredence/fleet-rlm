@@ -156,7 +156,8 @@ async def test_runner_emits_file_tool_events(tmp_path: Path) -> None:
         tools=host.as_tool_callables(),
         file_tool_host=host,
     )
-    events = [e async for e in RunnerWithFileTools(factory=Factory()).stream(context)]
+    stream = RunnerWithFileTools(factory=Factory()).stream(context)
+    events = [e async for e in stream]
     kinds = [e.kind for e in events]
     assert RuntimeEventKind.ATTACHMENT_READ in kinds
     assert RuntimeEventKind.ARTIFACT_CREATED in kinds
@@ -166,4 +167,6 @@ async def test_runner_emits_file_tool_events(tmp_path: Path) -> None:
     assert str(tmp_path) not in json.dumps(att_payload)
     art_ev = next(e for e in events if e.kind == RuntimeEventKind.ARTIFACT_CREATED)
     assert "path" not in dict(art_ev.payload)
-    assert kinds[-1] == RuntimeEventKind.RUN_COMPLETED
+    assert RuntimeEventKind.RUN_COMPLETED not in kinds
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "completed"

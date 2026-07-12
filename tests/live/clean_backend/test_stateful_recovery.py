@@ -82,16 +82,25 @@ class _ScriptedRunner:
         self.seen_history_lens: list[int] = []
         self.seen_history_messages: list[list[dict[str, Any]]] = []
 
-    async def stream(self, context: RLMTurnContext) -> AsyncIterator[RuntimeEvent]:
+    def stream(self, context: RLMTurnContext) -> TurnEventStream:
+        from fleet_rlm_clean.rlm.outcome import TurnExecutionOutcome
+        from fleet_rlm_clean.rlm.runner import TurnEventStream
+
         self.seen_history_lens.append(history_message_count(context.history))
         messages = list(getattr(context.history, "messages", None) or []) if context.history else []
         self.seen_history_messages.append(messages)
-        recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
-        yield recorder.emit(RuntimeEventKind.RUN_STARTED, {})
-        yield recorder.emit(RuntimeEventKind.TEXT_DELTA, {"text": self.answer})
-        yield recorder.emit(
-            RuntimeEventKind.RUN_COMPLETED,
-            {"status": "completed", "assistant_text": self.answer},
+
+        async def _agen() -> AsyncIterator[RuntimeEvent]:
+            recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
+            yield recorder.emit(RuntimeEventKind.RUN_STARTED, {})
+            yield recorder.emit(RuntimeEventKind.TEXT_DELTA, {"text": self.answer})
+
+        return TurnEventStream(
+            _agen(),
+            outcome=TurnExecutionOutcome(
+                terminal_status="completed",
+                assistant_text=self.answer,
+            ),
         )
 
 
