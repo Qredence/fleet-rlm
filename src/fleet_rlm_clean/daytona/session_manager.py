@@ -1,6 +1,7 @@
 """DaytonaSessionManager: acquire/release leases and capability-aware lifecycle.
 
 Release never deletes a Sandbox. Volume identity is preserved across replace.
+Workspace Volume Scope uses VolumeMount subpath ``workspaces/<workspace_id>``.
 """
 
 from __future__ import annotations
@@ -24,7 +25,10 @@ from fleet_rlm_clean.daytona.volumes import (
     VolumeClient,
     VolumeConfig,
     get_or_create_volume_id,
+    require_non_zero_workspace_id,
+    require_scoped_volume_subpath,
     volume_mount_spec,
+    workspace_volume_subpath,
 )
 
 
@@ -34,6 +38,14 @@ class LeaseRequest:
     user_id: UUID
     workspace_id: UUID
     run_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectedWorkspaceMount:
+    volume_id: str
+    volume_subpath: str
+    mount_path: str
+    workspace_id: UUID
 
 
 class BindingStoreLike(Protocol):
@@ -47,7 +59,14 @@ class SandboxPlatform(Protocol):
 
     def get(self, sandbox_id: str) -> Any | None: ...
 
-    def create(self, *, volume_id: str, mount_path: str, labels: dict[str, str] | None = None) -> Any: ...
+    def create(
+        self,
+        *,
+        volume_id: str,
+        mount_path: str,
+        volume_subpath: str,
+        labels: dict[str, str] | None = None,
+    ) -> Any: ...
 
     def delete(self, sandbox_id: str) -> None: ...
 
@@ -70,6 +89,75 @@ def _build_interpreter(sandbox: Any) -> DaytonaCodeInterpreter:
     return DaytonaCodeInterpreter(backend=getattr(sandbox, "backend", None))
 
 
+def _mount_field(mount: Any, key: str) -> str | None:
+    if isinstance(mount, dict):
+        value = mount.get(key)
+    else:
+        value = getattr(mount, key, None)
+    if value is None:
+        return None
+    return str(value)
+
+
+def binding_matches_expected(binding: SandboxBinding, expected: ExpectedWorkspaceMount) -> bool:
+    try:
+        require_non_zero_workspace_id(binding.workspace_id)
+        require_scoped_volume_subpath(binding.volume_subpath, workspace_id=binding.workspace_id)
+    except (TypeError, ValueError):
+        return False
+    return (
+        binding.workspace_id == expected.workspace_id
+        and binding.volume_id == expected.volume_id
+        and binding.volume_subpath == expected.volume_subpath
+        and binding.mount_path == expected.mount_path
+    )
+
+
+def verify_sandbox_workspace_mount(
+    sandbox: Any,
+    expected: ExpectedWorkspaceMount,
+) -> None:
+    """Fail closed when the live Sandbox mount/labels disagree with expected scope."""
+    labels = getattr(sandbox, "labels", None)
+    if isinstance(labels, dict) and labels:
+        labeled = str(labels.get("workspace_id") or "").strip()
+        if labeled and labeled != str(expected.workspace_id):
+            raise DaytonaAdapterError(
+                message="sandbox workspace label does not match lease workspace",
+                cause_type="WorkspaceMountMismatch",
+            )
+
+    mounts = getattr(sandbox, "volumes", None)
+    if mounts is None:
+        mounts = getattr(sandbox, "mounts", None)
+    if not mounts:
+        # Fake/limited sandboxes may only expose flat fields.
+        flat_sub = getattr(sandbox, "volume_subpath", None)
+        flat_vid = getattr(sandbox, "volume_id", None)
+        flat_mount = getattr(sandbox, "mount_path", None)
+        if flat_sub is None and flat_vid is None and flat_mount is None:
+            return
+        mounts = [
+            {
+                "volume_id": flat_vid,
+                "mount_path": flat_mount,
+                "subpath": flat_sub,
+            }
+        ]
+
+    for mount in mounts:
+        vid = _mount_field(mount, "volume_id")
+        mpath = _mount_field(mount, "mount_path")
+        sub = _mount_field(mount, "subpath") or _mount_field(mount, "volume_subpath")
+        if vid == expected.volume_id and mpath == expected.mount_path and sub == expected.volume_subpath:
+            return
+
+    raise DaytonaAdapterError(
+        message="sandbox volume mount does not match workspace scope",
+        cause_type="WorkspaceMountMismatch",
+    )
+
+
 class DaytonaSessionManager:
     """Owns Sandbox lifecycle policy for clean-backend sessions."""
 
@@ -86,56 +174,77 @@ class DaytonaSessionManager:
         self._volume_config = volume_config
         self._bindings = bindings
 
+    def _expected_mount(self, *, volume_id: str, workspace_id: UUID) -> ExpectedWorkspaceMount:
+        require_non_zero_workspace_id(workspace_id)
+        spec = volume_mount_spec(self._volume_config, volume_id, workspace_id=workspace_id)
+        return ExpectedWorkspaceMount(
+            volume_id=spec["volume_id"],
+            volume_subpath=spec["subpath"],
+            mount_path=spec["mount_path"],
+            workspace_id=workspace_id,
+        )
+
     async def acquire(self, request: LeaseRequest) -> InterpreterLease:
-        """Ensure a running Sandbox with Volume mounted; return an interpreter lease."""
+        """Ensure a running Sandbox with Workspace Volume Scope; return a lease."""
         from fleet_rlm_clean.daytona.active_leases import get_active_lease_registry
 
+        require_non_zero_workspace_id(request.workspace_id)
         run_id = request.run_id or uuid4()
         session_id = request.session_id
         get_active_lease_registry().acquire(session_id, run_id)
         try:
-            volume_id = await asyncio.to_thread(
-                get_or_create_volume_id, self._volume_client, self._volume_config
-            )
-            mount_path = self._volume_config.mount_path
+            volume_id = await asyncio.to_thread(get_or_create_volume_id, self._volume_client, self._volume_config)
+            expected = self._expected_mount(volume_id=volume_id, workspace_id=request.workspace_id)
             binding = await self._bindings.get(session_id)
 
             sandbox: Any | None = None
-            if binding and binding.sandbox_id:
-                try:
-                    sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id)
-                except Exception as exc:  # noqa: BLE001
-                    raise map_provider_error(exc) from exc
+            if binding is not None and binding.sandbox_id:
+                if not binding_matches_expected(binding, expected):
+                    binding = await self.replace(binding, workspace_id=request.workspace_id)
+                    sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id or "")
+                else:
+                    try:
+                        sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id)
+                    except Exception as exc:  # noqa: BLE001
+                        raise map_provider_error(exc) from exc
 
             if sandbox is not None:
-                state = sandbox_state(sandbox)
                 try:
+                    verify_sandbox_workspace_mount(sandbox, expected)
+                    state = sandbox_state(sandbox)
                     sandbox = await self._ensure_running(
-                        sandbox, state, volume_id=volume_id, mount_path=mount_path
+                        sandbox,
+                        state,
+                        volume_id=expected.volume_id,
+                        mount_path=expected.mount_path,
                     )
+                    verify_sandbox_workspace_mount(sandbox, expected)
                 except (DaytonaAdapterError, LifecycleCapabilityError):
                     if binding is not None:
-                        replaced = await self.replace(
+                        binding = await self.replace(
                             SandboxBinding(
                                 session_id=session_id,
                                 sandbox_id=binding.sandbox_id,
-                                volume_id=volume_id,
-                                mount_path=mount_path,
+                                workspace_id=request.workspace_id,
+                                volume_id=expected.volume_id,
+                                volume_subpath=expected.volume_subpath,
+                                mount_path=expected.mount_path,
                                 provider_state="unrecoverable",
-                            )
+                            ),
+                            workspace_id=request.workspace_id,
                         )
-                        sandbox = await asyncio.to_thread(
-                            self._platform.get, replaced.sandbox_id or ""
-                        )
+                        sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id or "")
                     else:
                         sandbox = None
             if sandbox is None:
                 sandbox = await asyncio.to_thread(
                     self._create_sandbox,
-                    volume_id=volume_id,
-                    mount_path=mount_path,
+                    volume_id=expected.volume_id,
+                    mount_path=expected.mount_path,
+                    volume_subpath=expected.volume_subpath,
                     request=request,
                 )
+                verify_sandbox_workspace_mount(sandbox, expected)
 
             sid = _sandbox_id(sandbox)
             now = datetime.now(UTC)
@@ -143,8 +252,10 @@ class DaytonaSessionManager:
                 SandboxBinding(
                     session_id=session_id,
                     sandbox_id=sid,
-                    volume_id=volume_id,
-                    mount_path=mount_path,
+                    workspace_id=request.workspace_id,
+                    volume_id=expected.volume_id,
+                    volume_subpath=expected.volume_subpath,
+                    mount_path=expected.mount_path,
                     provider_state="running",
                     last_verified_at=now,
                 )
@@ -155,8 +266,9 @@ class DaytonaSessionManager:
             lease = InterpreterLease(
                 sandbox_id=sid,
                 interpreter_id=interpreter_id,
-                volume_id=volume_id,
-                mount_path=mount_path,
+                volume_id=expected.volume_id,
+                mount_path=expected.mount_path,
+                volume_subpath=expected.volume_subpath,
                 interpreter=interpreter,
                 session_id=str(session_id),
                 run_id=str(run_id),
@@ -222,12 +334,19 @@ class DaytonaSessionManager:
         sandbox = self._require(sandbox_id)
         call_if_supported(sandbox, "restore")
 
-    async def replace(self, binding: SandboxBinding) -> SandboxBinding:
-        """Replace an unrecoverable Sandbox; keep the same Volume id and mount path."""
+    async def replace(
+        self,
+        binding: SandboxBinding,
+        *,
+        workspace_id: UUID | None = None,
+    ) -> SandboxBinding:
+        """Replace an unrecoverable Sandbox; keep Volume id and Workspace scope."""
+        resolved_workspace = workspace_id or binding.workspace_id
+        require_non_zero_workspace_id(resolved_workspace)
         volume_id = binding.volume_id or await asyncio.to_thread(
             get_or_create_volume_id, self._volume_client, self._volume_config
         )
-        mount_path = binding.mount_path or self._volume_config.mount_path
+        expected = self._expected_mount(volume_id=volume_id, workspace_id=resolved_workspace)
         if binding.sandbox_id:
             try:
                 await asyncio.to_thread(self._platform.delete, binding.sandbox_id)
@@ -236,19 +355,23 @@ class DaytonaSessionManager:
         request = LeaseRequest(
             session_id=binding.session_id,
             user_id=UUID(int=0),
-            workspace_id=UUID(int=0),
+            workspace_id=resolved_workspace,
         )
         sandbox = await asyncio.to_thread(
             self._create_sandbox,
-            volume_id=volume_id,
-            mount_path=mount_path,
+            volume_id=expected.volume_id,
+            mount_path=expected.mount_path,
+            volume_subpath=expected.volume_subpath,
             request=request,
         )
+        verify_sandbox_workspace_mount(sandbox, expected)
         new_binding = SandboxBinding(
             session_id=binding.session_id,
             sandbox_id=_sandbox_id(sandbox),
-            volume_id=volume_id,
-            mount_path=mount_path,
+            workspace_id=resolved_workspace,
+            volume_id=expected.volume_id,
+            volume_subpath=expected.volume_subpath,
+            mount_path=expected.mount_path,
             provider_state="running",
             last_verified_at=datetime.now(UTC),
         )
@@ -274,6 +397,7 @@ class DaytonaSessionManager:
         volume_id: str,
         mount_path: str,
     ) -> Any:
+        del volume_id, mount_path  # reserved for future remount checks
         if state == "running":
             return sandbox
         if state == "stopped":
@@ -308,27 +432,36 @@ class DaytonaSessionManager:
         *,
         volume_id: str,
         mount_path: str,
+        volume_subpath: str,
         request: LeaseRequest,
     ) -> Any:
+        require_non_zero_workspace_id(request.workspace_id)
+        scoped = require_scoped_volume_subpath(volume_subpath, workspace_id=request.workspace_id)
         try:
             return self._platform.create(
                 volume_id=volume_id,
                 mount_path=mount_path,
+                volume_subpath=scoped,
                 labels={
                     "session_id": str(request.session_id),
                     "workspace_id": str(request.workspace_id),
                     "fleet_package": "fleet_rlm_clean",
+                    "volume_subpath": scoped,
                 },
             )
         except Exception as exc:  # noqa: BLE001
             raise map_provider_error(exc) from exc
 
 
-# Re-export mount helper for SessionManager callers
+# Re-export mount helpers for SessionManager callers
 __all__ = [
     "BindingStoreLike",
     "DaytonaSessionManager",
+    "ExpectedWorkspaceMount",
     "LeaseRequest",
     "SandboxPlatform",
+    "binding_matches_expected",
+    "verify_sandbox_workspace_mount",
     "volume_mount_spec",
+    "workspace_volume_subpath",
 ]

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -19,6 +19,7 @@ from fleet_rlm_clean.daytona.volumes import (
     DEFAULT_VOLUME_NAME,
     VolumeConfig,
     get_or_create_volume_id,
+    require_scoped_volume_subpath,
     volume_config_from_settings,
     volume_mount_spec,
 )
@@ -94,13 +95,24 @@ def test_volume_config_and_mount_spec() -> None:
     assert cfg.name == DEFAULT_VOLUME_NAME
     assert cfg.mount_path == DEFAULT_VOLUME_MOUNT_PATH
     assert cfg.paths().root == PurePosixPath(DEFAULT_VOLUME_MOUNT_PATH)
-    spec = volume_mount_spec(cfg, "vol-123")
-    assert spec == {"volume_id": "vol-123", "mount_path": DEFAULT_VOLUME_MOUNT_PATH}
+    workspace_id = uuid4()
+    spec = volume_mount_spec(cfg, "vol-123", workspace_id=workspace_id)
+    assert spec == {
+        "volume_id": "vol-123",
+        "mount_path": DEFAULT_VOLUME_MOUNT_PATH,
+        "subpath": f"workspaces/{workspace_id}",
+    }
 
     with pytest.raises(ValueError):
         VolumeConfig(name="../evil")
     with pytest.raises(UnsafePathError):
         VolumeConfig(mount_path="/etc")
+    with pytest.raises(ValueError, match="zero UUID"):
+        volume_mount_spec(cfg, "vol-123", workspace_id=UUID(int=0))
+    with pytest.raises(ValueError, match="without workspace subpath"):
+        require_scoped_volume_subpath("")
+    with pytest.raises(ValueError, match="under workspaces"):
+        require_scoped_volume_subpath("/home/daytona/fleet")
 
 
 def test_get_or_create_volume_id_uses_injected_client() -> None:

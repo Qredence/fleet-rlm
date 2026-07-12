@@ -240,10 +240,13 @@ async def test_live_capability_skill_attachment_artifact_replace(tmp_path: Path)
             SandboxBinding(
                 session_id=session_id,
                 sandbox_id=old_sid,
+                workspace_id=workspace_id,
                 volume_id=volume_id,
+                volume_subpath=f"workspaces/{workspace_id}",
                 mount_path=lease.mount_path,
                 provider_state="unrecoverable",
-            )
+            ),
+            workspace_id=workspace_id,
         )
         assert new_binding.volume_id == volume_id
         assert new_binding.sandbox_id != old_sid

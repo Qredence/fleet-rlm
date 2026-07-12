@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -28,11 +28,35 @@ class _FakeVolumeClient:
 
 
 class _FakeSandbox:
-    def __init__(self, sandbox_id: str, state: str = "running") -> None:
+    def __init__(
+        self,
+        sandbox_id: str,
+        state: str = "running",
+        *,
+        volume_id: str | None = None,
+        mount_path: str | None = None,
+        volume_subpath: str | None = None,
+        labels: dict[str, str] | None = None,
+    ) -> None:
         self.id = sandbox_id
         self.state = state
         self.ops: list[str] = []
         self.backend = None  # interpreter will tolerate missing backend until execute
+        self.volume_id = volume_id
+        self.mount_path = mount_path
+        self.volume_subpath = volume_subpath
+        self.labels = labels or {}
+        self.volumes = (
+            [
+                {
+                    "volume_id": volume_id,
+                    "mount_path": mount_path,
+                    "subpath": volume_subpath,
+                }
+            ]
+            if volume_id and mount_path and volume_subpath
+            else []
+        )
 
     def start(self) -> None:
         self.ops.append("start")
@@ -92,14 +116,30 @@ class _FakePlatform:
         *,
         volume_id: str,
         mount_path: str,
+        volume_subpath: str,
         labels: dict[str, str] | None = None,
     ) -> _FakeSandbox:
+        if not volume_subpath:
+            raise ValueError("VolumeMount without workspace subpath is rejected")
         self._n += 1
         sid = f"sb-{self._n}"
-        sb = _FakeSandbox(sid, state="running")
+        sb = _FakeSandbox(
+            sid,
+            state="running",
+            volume_id=volume_id,
+            mount_path=mount_path,
+            volume_subpath=volume_subpath,
+            labels=labels or {},
+        )
         self.sandboxes[sid] = sb
         self.created.append(
-            {"volume_id": volume_id, "mount_path": mount_path, "labels": labels or {}, "id": sid}
+            {
+                "volume_id": volume_id,
+                "mount_path": mount_path,
+                "volume_subpath": volume_subpath,
+                "labels": labels or {},
+                "id": sid,
+            }
         )
         return sb
 
@@ -137,11 +177,22 @@ async def test_acquire_creates_running_sandbox_and_lease() -> None:
     assert lease.sandbox_id in plat.sandboxes
     assert lease.volume_id.startswith("vol-")
     assert lease.mount_path == "/home/daytona/fleet"
+    assert lease.volume_subpath == f"workspaces/{req.workspace_id}"
     assert volumes.gets  # volume resolved
+    assert plat.created[0]["volume_subpath"] == lease.volume_subpath
     binding = await store.get(req.session_id)
     assert binding is not None
     assert binding.provider_state == "running"
     assert binding.sandbox_id == lease.sandbox_id
+    assert binding.workspace_id == req.workspace_id
+    assert binding.volume_subpath == lease.volume_subpath
+
+
+@pytest.mark.asyncio
+async def test_acquire_rejects_zero_workspace_id() -> None:
+    mgr, _plat, _store, _volumes = _manager()
+    with pytest.raises(ValueError, match="zero UUID"):
+        await mgr.acquire(LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=UUID(int=0)))
 
 
 @pytest.mark.asyncio
@@ -223,7 +274,9 @@ async def test_acquire_starts_stopped_sandbox() -> None:
         SandboxBinding(
             session_id=req.session_id,
             sandbox_id=lease.sandbox_id,
+            workspace_id=req.workspace_id,
             volume_id=lease.volume_id,
+            volume_subpath=lease.volume_subpath or f"workspaces/{req.workspace_id}",
             mount_path=lease.mount_path,
             provider_state="stopped",
         )
@@ -243,9 +296,11 @@ async def test_replace_keeps_volume_id() -> None:
     volume_id = lease.volume_id
     binding = await store.get(req.session_id)
     assert binding is not None
-    new_binding = await mgr.replace(binding)
+    new_binding = await mgr.replace(binding, workspace_id=req.workspace_id)
     assert new_binding.volume_id == volume_id
     assert new_binding.sandbox_id != old_sid
+    assert new_binding.workspace_id == req.workspace_id
+    assert new_binding.volume_subpath == f"workspaces/{req.workspace_id}"
     assert old_sid in plat.deleted
     assert new_binding.sandbox_id in plat.sandboxes
 

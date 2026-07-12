@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from fleet_rlm_clean.daytona.volumes import require_scoped_volume_subpath
+
 
 class LiveDaytonaVolumeClient:
     """Wraps ``client.volume.get(name, create=...)``."""
@@ -32,14 +34,25 @@ class LiveDaytonaPlatform:
         *,
         volume_id: str | None = None,
         mount_path: str | None = None,
+        volume_subpath: str | None = None,
         labels: dict[str, str] | None = None,
         with_volume: bool = True,
     ) -> Any:
         from daytona import CreateSandboxFromSnapshotParams, VolumeMount
 
         volumes = None
-        if with_volume and volume_id and mount_path:
-            volumes = [VolumeMount(volume_id=volume_id, mount_path=mount_path)]
+        if with_volume:
+            if not volume_id or not mount_path:
+                msg = "volume_id and mount_path are required when with_volume=True"
+                raise ValueError(msg)
+            scoped = require_scoped_volume_subpath(volume_subpath or "")
+            volumes = [
+                VolumeMount(
+                    volume_id=volume_id,
+                    mount_path=mount_path,
+                    subpath=scoped,
+                )
+            ]
         params = CreateSandboxFromSnapshotParams(
             language="python",
             labels=labels or {},

@@ -46,9 +46,7 @@ class WorkspaceRow(Base):
 
 class SessionRow(Base):
     __tablename__ = "clean_sessions"
-    __table_args__ = (
-        Index("ix_clean_sessions_workspace_updated", "workspace_id", "updated_at"),
-    )
+    __table_args__ = (Index("ix_clean_sessions_workspace_updated", "workspace_id", "updated_at"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=_uuid)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -112,9 +110,7 @@ class RunRow(Base):
 
 class SessionCheckpointRow(Base):
     __tablename__ = "clean_session_checkpoints"
-    __table_args__ = (
-        UniqueConstraint("session_id", "version", name="uq_clean_session_checkpoints_version"),
-    )
+    __table_args__ = (UniqueConstraint("session_id", "version", name="uq_clean_session_checkpoints_version"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=_uuid)
     session_id: Mapped[uuid.UUID] = mapped_column(
@@ -136,7 +132,9 @@ class SandboxBindingRow(Base):
         unique=True,
     )
     sandbox_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     volume_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    volume_subpath: Mapped[str] = mapped_column(String(512), nullable=False)
     mount_path: Mapped[str] = mapped_column(String(512), nullable=False, default="/home/daytona/fleet")
     provider_state: Mapped[str] = mapped_column(String(64), nullable=False, default="missing")
     last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -1,13 +1,15 @@
 """Volume name and mount configuration (no SDK clients at import time).
 
 Live ``get_or_create`` is intentionally thin and injectable so unit tests never
-open network connections. SessionManager (impl-08) owns full lifecycle.
+open network connections. SessionManager owns full lifecycle and Workspace
+Volume Scope isolation via VolumeMount ``subpath``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Protocol
+from uuid import UUID
 
 from fleet_rlm_clean.daytona.paths import (
     DEFAULT_VOLUME_MOUNT_PATH,
@@ -16,6 +18,7 @@ from fleet_rlm_clean.daytona.paths import (
 )
 
 DEFAULT_VOLUME_NAME = "rlm-volume-dspy"
+_ZERO_UUID = UUID(int=0)
 
 
 class VolumeClient(Protocol):
@@ -63,14 +66,65 @@ def get_or_create_volume_id(client: VolumeClient, config: VolumeConfig) -> str:
     return str(volume_id)
 
 
-def volume_mount_spec(config: VolumeConfig, volume_id: str) -> dict[str, str]:
-    """Dict shape suitable for constructing a Daytona VolumeMount later.
+def require_non_zero_workspace_id(workspace_id: UUID) -> UUID:
+    """Reject the zero UUID — bindings must never create/replace with it."""
+    if not isinstance(workspace_id, UUID):
+        msg = "workspace_id must be a UUID"
+        raise TypeError(msg)
+    if workspace_id == _ZERO_UUID:
+        msg = "workspace_id must not be the zero UUID"
+        raise ValueError(msg)
+    return workspace_id
 
-    Keys align with SDK ``VolumeMount(volume_id=..., mount_path=...)``.
-    Subpath isolation (per workspace) can be added when SessionManager lands.
+
+def workspace_volume_subpath(workspace_id: UUID) -> str:
+    """Canonical Workspace Volume Scope subpath on the shared server Volume."""
+    wid = require_non_zero_workspace_id(workspace_id)
+    return f"workspaces/{wid}"
+
+
+def require_scoped_volume_subpath(subpath: str, *, workspace_id: UUID | None = None) -> str:
+    """Reject unscoped / empty mounts; optionally check workspace match."""
+    if not isinstance(subpath, str) or not subpath.strip():
+        msg = "VolumeMount without workspace subpath is rejected"
+        raise ValueError(msg)
+    normalized = subpath.strip().strip("/")
+    if ".." in normalized.split("/") or normalized.startswith("workspaces/../"):
+        msg = "volume subpath must not contain path traversal"
+        raise ValueError(msg)
+    if not normalized.startswith("workspaces/"):
+        msg = "volume subpath must be under workspaces/<workspace_id>"
+        raise ValueError(msg)
+    rest = normalized.removeprefix("workspaces/")
+    if not rest or "/" in rest:
+        msg = "volume subpath must be exactly workspaces/<workspace_id>"
+        raise ValueError(msg)
+    if workspace_id is not None:
+        expected = workspace_volume_subpath(workspace_id)
+        if normalized != expected:
+            msg = "volume subpath does not match workspace_id"
+            raise ValueError(msg)
+    return normalized
+
+
+def volume_mount_spec(
+    config: VolumeConfig,
+    volume_id: str,
+    *,
+    workspace_id: UUID,
+) -> dict[str, str]:
+    """Dict shape suitable for constructing a Daytona VolumeMount.
+
+    Keys align with SDK ``VolumeMount(volume_id=..., mount_path=..., subpath=...)``.
+    Full shared Volume mounts without workspace subpath are rejected.
     """
+    if not volume_id or not str(volume_id).strip():
+        msg = "volume_id is required"
+        raise ValueError(msg)
     validate_mount_path(config.mount_path)
+    subpath = workspace_volume_subpath(workspace_id)
     return {
-        "volume_id": volume_id,
+        "volume_id": str(volume_id),
         "mount_path": config.mount_path,
+        "subpath": subpath,
     }

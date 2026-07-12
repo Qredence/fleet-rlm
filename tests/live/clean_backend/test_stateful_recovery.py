@@ -316,10 +316,13 @@ async def test_stateful_live_recovery_scenarios(tmp_path: Path) -> None:
             SandboxBinding(
                 session_id=session_id,
                 sandbox_id=old_sid,
+                workspace_id=workspace_id,
                 volume_id=volume_id,
+                volume_subpath=f"workspaces/{workspace_id}",
                 mount_path=mount,
                 provider_state="unrecoverable",
-            )
+            ),
+            workspace_id=workspace_id,
         )
         assert new_binding.volume_id == volume_id
         assert new_binding.sandbox_id != old_sid

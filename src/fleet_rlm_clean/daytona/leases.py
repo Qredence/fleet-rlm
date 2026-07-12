@@ -19,6 +19,7 @@ class InterpreterLease:
     interpreter: DaytonaCodeInterpreter
     session_id: str | None = None
     run_id: str | None = None
+    volume_subpath: str | None = None
     delete_sandbox: Callable[[str], None] | None = None
     _released: bool = field(default=False, init=False, repr=False)
     _on_release: Callable[[], None] | None = field(default=None, init=False, repr=False)
