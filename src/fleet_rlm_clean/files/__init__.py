@@ -9,6 +9,7 @@ from fleet_rlm_clean.files.errors import (
 )
 from fleet_rlm_clean.files.models import AttachmentRef, StagedAttachment
 from fleet_rlm_clean.files.staging import AttachmentStager
+from fleet_rlm_clean.files.tools import FileToolHost
 from fleet_rlm_clean.files.uploads import LocalAttachmentStore
 
 __all__ = [
@@ -17,6 +18,7 @@ __all__ = [
     "AttachmentRef",
     "AttachmentStager",
     "AttachmentValidationError",
+    "FileToolHost",
     "LocalAttachmentStore",
     "StagedAttachment",
 ]
