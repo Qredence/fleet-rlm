@@ -42,6 +42,10 @@ def get_artifact_store(request: Request) -> LocalArtifactStore:
     store = getattr(request.app.state, "artifact_store", None)
     if store is not None:
         return store
+    from fleet_rlm_clean.composition import is_live_mode
+
+    if is_live_mode(request.app):
+        raise HTTPException(status_code=503, detail="live composition is not ready")
     settings = _settings(request)
     if settings.artifact_root:
         root = settings.artifact_root

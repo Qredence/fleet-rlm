@@ -12,12 +12,22 @@ from .config import Settings
 
 
 def create_app(*, settings: Settings | None = None) -> FastAPI:
-    """Create a FastAPI app. Routes are attached without constructing LM/Daytona clients."""
+    """Create a FastAPI app.
+
+    Offline (default ``live_kernel=False``): routes + skills; optional DB; no LM/Daytona.
+    Live (``live_kernel=True``): validates required settings at factory time, then
+    constructs the full inventory in lifespan. Never silently falls back to offline.
+    """
     resolved = settings if settings is not None else Settings()
+
+    if resolved.live_kernel:
+        from fleet_rlm_clean.composition import require_live_settings
+
+        require_live_settings(resolved)
 
     db_engine: Any = None
     session_repository: Any = None
-    if resolved.database_url:
+    if resolved.database_url and not resolved.live_kernel:
         from fleet_rlm_clean.persistence.database import (
             create_async_engine_from_url,
             create_session_factory,
@@ -29,15 +39,28 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        settings_obj: Settings = app.state.settings
+        if settings_obj.live_kernel:
+            from fleet_rlm_clean.composition import dispose_live_composition, install_live_composition
+
+            await install_live_composition(app, settings_obj)
+            try:
+                yield
+            finally:
+                await dispose_live_composition(app)
+            return
+
         engine = getattr(app.state, "db_engine", None)
         if engine is not None:
             from fleet_rlm_clean.persistence.database import create_tables
 
             await create_tables(engine)
-        yield
-        engine = getattr(app.state, "db_engine", None)
-        if engine is not None:
-            await engine.dispose()
+        try:
+            yield
+        finally:
+            engine = getattr(app.state, "db_engine", None)
+            if engine is not None:
+                await engine.dispose()
 
     app = FastAPI(
         title=resolved.app_name,
@@ -45,6 +68,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = resolved
+    app.state.live_mode = False
     app.state.db_engine = db_engine
     if session_repository is not None:
         app.state.session_repository = session_repository
@@ -72,3 +96,9 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     app.state.skill_registry = skill_registry
     app.state.skill_authorizer = SkillAuthorizer(skill_registry)
     return app
+
+
+def create_live_app(*, settings: Settings | None = None) -> FastAPI:
+    """Explicit live entrypoint — never enabled by credentials alone."""
+    base = settings if settings is not None else Settings()
+    return create_app(settings=base.model_copy(update={"live_kernel": True}))

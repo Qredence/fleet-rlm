@@ -43,6 +43,10 @@ def _get_verifier(request: Request, settings: Settings) -> NeonAuthVerifier:
     verifier = getattr(request.app.state, "auth_verifier", None)
     if verifier is not None:
         return verifier
+    from fleet_rlm_clean.composition import is_live_mode
+
+    if is_live_mode(request.app):
+        raise HTTPException(status_code=503, detail="live composition is not ready")
     url = settings.neon_auth_url or DEFAULT_NEON_AUTH_URL
     verifier = NeonAuthVerifier(neon_auth_url=url)
     request.app.state.auth_verifier = verifier

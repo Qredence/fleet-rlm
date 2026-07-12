@@ -44,6 +44,10 @@ def get_attachment_store(request: Request) -> LocalAttachmentStore:
     store = getattr(request.app.state, "attachment_store", None)
     if store is not None:
         return store
+    from fleet_rlm_clean.composition import is_live_mode
+
+    if is_live_mode(request.app):
+        raise HTTPException(status_code=503, detail="live composition is not ready")
     settings = _settings(request)
     root = settings.upload_root or str(Path.cwd() / ".fleet_clean_uploads")
     mirror = _workspace_volume_mirror(request, settings)

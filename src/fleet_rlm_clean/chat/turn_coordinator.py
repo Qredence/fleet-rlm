@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import AsyncIterator
 from typing import Any, Protocol
 from uuid import UUID, uuid4
@@ -128,6 +129,26 @@ class TurnCoordinator:
         msg = "context_builder must be callable or provide build(command)"
         raise TypeError(msg)
 
+    async def _abuild_context(self, command: ChatTurnCommand) -> RLMTurnContext:
+        """Build context; await async builders (e.g. LiveKernelResources.build_context)."""
+
+        builder = self._context_builder
+        for name in ("build_context", "abuild", "build"):
+            method = getattr(builder, name, None)
+            if not callable(method):
+                continue
+            result = method(command)
+            if inspect.isawaitable(result):
+                return await result
+            return result
+        if callable(builder):
+            result = builder(command)
+            if inspect.isawaitable(result):
+                return await result
+            return result
+        msg = "context_builder must be callable or provide build/build_context"
+        raise TypeError(msg)
+
     async def stream(self, command: ChatTurnCommand) -> AsyncIterator[RuntimeEvent]:
         """Stream public RuntimeEvents for a single chat command."""
         if not command.message or not command.message.strip():
@@ -135,7 +156,7 @@ class TurnCoordinator:
             raise ValueError(msg)
 
         if self._sessions is None:
-            context = self._build_context(command)
+            context = await self._abuild_context(command)
             async for event in self._stream_runner_then_terminal(context, persist=None):
                 yield event
             return
@@ -163,7 +184,7 @@ class TurnCoordinator:
                 yield event
             return
 
-        built = self._build_context(command)
+        built = await self._abuild_context(command)
         sessions = self._sessions
 
         async def _cancel_probe(run_id: UUID) -> bool:

@@ -41,8 +41,51 @@ def _workspace_volume_mirror(request: Request, settings: Settings) -> HostVolume
     return mirror
 
 
+def get_turn_coordinator(request: Request) -> TurnCoordinator:
+    """Resolve coordinator from app.state (tests inject fakes here).
+
+    Offline default wraps OfflineContextBuilder with capability assembly.
+    Live mode must already have turn_coordinator from lifespan — never falls back.
+    """
+    coordinator = getattr(request.app.state, "turn_coordinator", None)
+    if coordinator is not None:
+        return coordinator
+
+    from fleet_rlm_clean.composition import is_live_mode
+
+    if is_live_mode(request.app):
+        raise HTTPException(
+            status_code=503,
+            detail="live composition is not ready",
+        )
+
+    from fleet_rlm_clean.chat.capabilities import CapabilityContextBuilder
+    from fleet_rlm_clean.chat.context_builder import OfflineContextBuilder
+
+    registry = getattr(request.app.state, "skill_registry", None)
+    attachment_store, artifact_store = _default_file_stores(request)
+    builder = CapabilityContextBuilder(
+        OfflineContextBuilder(),
+        skill_registry=registry,
+        attachment_store=attachment_store,
+        artifact_store=artifact_store,
+    )
+    coordinator = TurnCoordinator(context_builder=builder)
+    request.app.state.turn_coordinator = coordinator
+    return coordinator
+
+
 def _default_file_stores(request: Request) -> tuple[Any, Any]:
-    """Lazy host stores matching files/artifacts route defaults."""
+    """Lazy host stores matching files/artifacts route defaults (offline only)."""
+    from fleet_rlm_clean.composition import is_live_mode
+
+    if is_live_mode(request.app):
+        attachment_store = getattr(request.app.state, "attachment_store", None)
+        artifact_store = getattr(request.app.state, "artifact_store", None)
+        if attachment_store is None or artifact_store is None:
+            raise HTTPException(status_code=503, detail="live composition is not ready")
+        return attachment_store, artifact_store
+
     settings = getattr(request.app.state, "settings", None) or Settings()
     mirror = _workspace_volume_mirror(request, settings)
     attachment_store = getattr(request.app.state, "attachment_store", None)
@@ -71,32 +114,6 @@ def _default_file_stores(request: Request) -> tuple[Any, Any]:
         )
         request.app.state.artifact_store = artifact_store
     return attachment_store, artifact_store
-
-
-def get_turn_coordinator(request: Request) -> TurnCoordinator:
-    """Resolve coordinator from app.state (tests inject fakes here).
-
-    Default coordinator wraps OfflineContextBuilder with capability assembly so
-    Skill/File tools bind when registry and stores are present.
-    """
-    coordinator = getattr(request.app.state, "turn_coordinator", None)
-    if coordinator is not None:
-        return coordinator
-
-    from fleet_rlm_clean.chat.capabilities import CapabilityContextBuilder
-    from fleet_rlm_clean.chat.context_builder import OfflineContextBuilder
-
-    registry = getattr(request.app.state, "skill_registry", None)
-    attachment_store, artifact_store = _default_file_stores(request)
-    builder = CapabilityContextBuilder(
-        OfflineContextBuilder(),
-        skill_registry=registry,
-        attachment_store=attachment_store,
-        artifact_store=artifact_store,
-    )
-    coordinator = TurnCoordinator(context_builder=builder)
-    request.app.state.turn_coordinator = coordinator
-    return coordinator
 
 
 def validate_chat_attachments(
