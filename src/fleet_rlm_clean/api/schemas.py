@@ -25,18 +25,6 @@ class AttachmentResponse(BaseModel):
     checksum_sha256: str
 
 
-class StageAttachmentRequest(BaseModel):
-    session_id: UUID
-    run_id: UUID
-
-
-class StagedAttachmentResponse(BaseModel):
-    """Staging result exposes only a Fleet-controlled Sandbox path."""
-
-    attachment_id: UUID
-    sandbox_path: str
-
-
 class CreateArtifactRequest(BaseModel):
     """Create a durable text/markdown/json artifact for a session run."""
 
@@ -129,4 +117,3 @@ class TurnListResponse(BaseModel):
     offset: int
     limit: int
     has_more: bool
-

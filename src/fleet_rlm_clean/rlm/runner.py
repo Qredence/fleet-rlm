@@ -218,6 +218,12 @@ class RLMRunner:
             recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
             started = time.perf_counter()
             registry = get_run_cancel_registry()
+            registry.bind(
+                context.run_id,
+                user_id=context.user_id,
+                workspace_id=context.workspace_id,
+                session_id=context.session_id,
+            )
             lease = context.lease
             trace = TurnTrace(
                 run_id=context.run_id,
@@ -311,7 +317,7 @@ class RLMRunner:
                             terminal_status="failed",
                             public_error_message=sanitize_public_error(cleanup_exc) or "Turn failed during cleanup",
                         )
-                registry.clear(context.run_id)
+                registry.mark_terminal(context.run_id)
                 if outcome_holder["value"] is None:
                     outcome_holder["value"] = TurnExecutionOutcome(
                         terminal_status="failed",

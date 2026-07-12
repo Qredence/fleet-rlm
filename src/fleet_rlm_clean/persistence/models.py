@@ -104,6 +104,7 @@ class RunRow(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     usage_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     result_assistant_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

@@ -1,4 +1,7 @@
-"""POST /api/files — upload and authorize attachment metadata (no path leaks)."""
+"""POST /api/files — upload and authorize attachment metadata (no path leaks).
+
+Staging is Turn-internal only (AttachmentStager); there is no public stage route.
+"""
 
 from __future__ import annotations
 
@@ -9,16 +12,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
 from fleet_rlm_clean.api.identity import RequestIdentity, get_request_identity
-from fleet_rlm_clean.api.schemas import (
-    AttachmentResponse,
-    StageAttachmentRequest,
-    StagedAttachmentResponse,
-)
+from fleet_rlm_clean.api.schemas import AttachmentResponse
 from fleet_rlm_clean.config import Settings
 from fleet_rlm_clean.daytona.paths import volume_paths_from_settings
 from fleet_rlm_clean.daytona.volume_fs import HostVolumeMirror
 from fleet_rlm_clean.files.errors import AttachmentNotFoundError, AttachmentValidationError
-from fleet_rlm_clean.files.staging import AttachmentStager
 from fleet_rlm_clean.files.uploads import LocalAttachmentStore
 
 router = APIRouter(tags=["files"])
@@ -57,24 +55,6 @@ def get_attachment_store(request: Request) -> LocalAttachmentStore:
     )
     request.app.state.attachment_store = store
     return store
-
-
-def get_attachment_stager(
-    request: Request,
-    store: Annotated[LocalAttachmentStore, Depends(get_attachment_store)],
-) -> AttachmentStager:
-    stager = getattr(request.app.state, "attachment_stager", None)
-    if stager is not None:
-        return stager
-    settings = _settings(request)
-    mirror = _workspace_volume_mirror(request, settings)
-    stager = AttachmentStager(
-        store,
-        volume_fs=mirror,
-        volume_paths=mirror.volume_paths,
-    )
-    request.app.state.attachment_stager = stager
-    return stager
 
 
 @router.post("/api/files", response_model=AttachmentResponse)
@@ -120,30 +100,4 @@ async def get_file(
         content_type=ref.content_type,
         byte_size=ref.byte_size,
         checksum_sha256=ref.checksum_sha256,
-    )
-
-
-@router.post("/api/files/{file_id}/stage", response_model=StagedAttachmentResponse)
-async def stage_file(
-    file_id: UUID,
-    body: StageAttachmentRequest,
-    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    stager: Annotated[AttachmentStager, Depends(get_attachment_stager)],
-) -> StagedAttachmentResponse:
-    """Re-authorize and stage into a session/run Sandbox path (logical only)."""
-    try:
-        staged = stager.stage(
-            file_id,
-            user_id=identity.user_id,
-            workspace_id=identity.workspace_id,
-            session_id=body.session_id,
-            run_id=body.run_id,
-        )
-    except AttachmentNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="attachment not found") from exc
-    except AttachmentValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return StagedAttachmentResponse(
-        attachment_id=staged.attachment_id,
-        sandbox_path=staged.sandbox_path,
     )

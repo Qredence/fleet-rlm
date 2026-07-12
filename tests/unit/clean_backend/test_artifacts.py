@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,6 +15,12 @@ from fleet_rlm_clean.artifacts.errors import ArtifactNotFoundError, ArtifactVali
 from fleet_rlm_clean.artifacts.safety import parse_kind, sanitize_title, validate_content_size
 from fleet_rlm_clean.artifacts.store import LocalArtifactStore
 from fleet_rlm_clean.config import Settings
+from fleet_rlm_clean.persistence.database import (
+    create_async_engine_from_url,
+    create_session_factory,
+    create_tables,
+)
+from fleet_rlm_clean.sessions.repository import SessionRepository
 
 
 def test_parse_kind_and_title() -> None:
@@ -140,22 +146,29 @@ def test_content_survives_store_reload(tmp_path: Path) -> None:
     assert "/home/daytona/fleet/sessions/" in path_after
 
 
-def test_api_create_get_no_path_leak(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_api_create_get_no_path_leak(tmp_path: Path) -> None:
+    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
+    await create_tables(engine)
     settings = Settings(artifact_root=str(tmp_path / "arts"), max_artifact_bytes=2048)
     app = create_app(settings=settings)
+    app.state.session_repository = SessionRepository(create_session_factory(engine))
     user, ws = uuid4(), uuid4()
     headers = {
         "X-Fleet-User-Id": str(user),
         "X-Fleet-Workspace-Id": str(ws),
     }
     client = TestClient(app)
-    session_id, run_id = uuid4(), uuid4()
+    created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
+    session_id = UUID(created.json()["id"])
+    repo: SessionRepository = app.state.session_repository
+    claim = await repo.claim_turn(session_id)
     response = client.post(
         "/api/artifacts",
         headers=headers,
         json={
             "session_id": str(session_id),
-            "run_id": str(run_id),
+            "run_id": str(claim.run_id),
             "kind": "markdown",
             "title": "summary",
             "content": "## Result\n\nok",
@@ -194,19 +207,29 @@ def test_api_create_get_no_path_leak(tmp_path: Path) -> None:
         },
     )
     assert other.status_code == 404
+    await engine.dispose()
 
 
-def test_api_rejects_bad_kind_and_oversize(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_api_rejects_bad_kind_and_oversize(tmp_path: Path) -> None:
+    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
+    await create_tables(engine)
     settings = Settings(artifact_root=str(tmp_path), max_artifact_bytes=8)
     app = create_app(settings=settings)
+    app.state.session_repository = SessionRepository(create_session_factory(engine))
     client = TestClient(app)
+    user, ws = uuid4(), uuid4()
     headers = {
-        "X-Fleet-User-Id": str(uuid4()),
-        "X-Fleet-Workspace-Id": str(uuid4()),
+        "X-Fleet-User-Id": str(user),
+        "X-Fleet-Workspace-Id": str(ws),
     }
+    created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
+    session_id = UUID(created.json()["id"])
+    repo: SessionRepository = app.state.session_repository
+    claim = await repo.claim_turn(session_id)
     base = {
-        "session_id": str(uuid4()),
-        "run_id": str(uuid4()),
+        "session_id": str(session_id),
+        "run_id": str(claim.run_id),
         "content": "abcdefghij",
     }
     bad_kind = client.post(
@@ -222,3 +245,4 @@ def test_api_rejects_bad_kind_and_oversize(tmp_path: Path) -> None:
         json={**base, "kind": "text"},
     )
     assert oversize.status_code == 400
+    await engine.dispose()

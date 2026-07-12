@@ -54,14 +54,19 @@ def test_cancel_registry_idempotent() -> None:
     assert reg.is_cancelled(rid) is False
 
 
-def test_api_cancel_requires_identity_and_is_idempotent() -> None:
+def test_api_cancel_requires_identity_and_ownership() -> None:
     app = create_app(settings=Settings(auth_mode="dev"))
     client = TestClient(app)
-    run_id = uuid4()
+    user, ws = uuid4(), uuid4()
     headers = {
-        "X-Fleet-User-Id": str(uuid4()),
-        "X-Fleet-Workspace-Id": str(uuid4()),
+        "X-Fleet-User-Id": str(user),
+        "X-Fleet-Workspace-Id": str(ws),
     }
+    run_id = uuid4()
+    # Unbound run → not found
+    assert client.post(f"/api/runs/{run_id}/cancel", headers=headers).status_code == 404
+
+    get_run_cancel_registry().bind(run_id, user_id=user, workspace_id=ws, session_id=uuid4())
     r1 = client.post(f"/api/runs/{run_id}/cancel", headers=headers)
     assert r1.status_code == 200
     body = r1.json()

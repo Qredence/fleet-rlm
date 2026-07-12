@@ -16,6 +16,7 @@ from fleet_rlm_clean.artifacts.store import LocalArtifactStore
 from fleet_rlm_clean.config import Settings
 from fleet_rlm_clean.daytona.paths import volume_paths_from_settings
 from fleet_rlm_clean.daytona.volume_fs import HostVolumeMirror
+from fleet_rlm_clean.sessions.repository import SessionRepository
 
 router = APIRouter(tags=["artifacts"])
 
@@ -59,6 +60,10 @@ def get_artifact_store(request: Request) -> LocalArtifactStore:
     return store
 
 
+def _session_repository(request: Request) -> SessionRepository | None:
+    return getattr(request.app.state, "session_repository", None)
+
+
 def _to_response(ref: ArtifactRef) -> ArtifactResponse:
     return ArtifactResponse(
         id=ref.id,
@@ -75,10 +80,25 @@ def _to_response(ref: ArtifactRef) -> ArtifactResponse:
 @router.post("/api/artifacts", response_model=ArtifactResponse)
 async def create_artifact(
     body: CreateArtifactRequest,
+    request: Request,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
     store: Annotated[LocalArtifactStore, Depends(get_artifact_store)],
 ) -> ArtifactResponse:
-    """Create one durable artifact; return opaque metadata only."""
+    """Create one durable artifact; return opaque metadata only.
+
+    Session and Run must belong to the caller and match each other (404 otherwise).
+    """
+    repo = _session_repository(request)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="database not configured")
+    owned = await repo.session_run_owned(
+        session_id=body.session_id,
+        run_id=body.run_id,
+        user_id=identity.user_id,
+        workspace_id=identity.workspace_id,
+    )
+    if not owned:
+        raise HTTPException(status_code=404, detail="session not found")
     try:
         ref = store.create(
             user_id=identity.user_id,

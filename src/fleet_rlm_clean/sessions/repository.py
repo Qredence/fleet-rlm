@@ -200,11 +200,7 @@ class SessionRepository:
         offset = max(0, int(offset))
         async with self._session_factory() as db:
             session = await db.get(SessionRow, session_id)
-            if (
-                session is None
-                or session.user_id != user_id
-                or session.workspace_id != workspace_id
-            ):
+            if session is None or session.user_id != user_id or session.workspace_id != workspace_id:
                 raise SessionNotFoundError(f"session {session_id} not found")
 
             turn_filters = [
@@ -214,13 +210,7 @@ class SessionRepository:
             count_stmt = select(func.count()).select_from(TurnRow).where(*turn_filters)
             total = int((await db.execute(count_stmt)).scalar_one())
 
-            stmt = (
-                select(TurnRow)
-                .where(*turn_filters)
-                .order_by(TurnRow.sequence.asc())
-                .limit(limit)
-                .offset(offset)
-            )
+            stmt = select(TurnRow).where(*turn_filters).order_by(TurnRow.sequence.asc()).limit(limit).offset(offset)
             turns = tuple(_to_turn_record(t) for t in (await db.execute(stmt)).scalars().all())
             return turns, total
 
@@ -326,9 +316,7 @@ class SessionRepository:
         run_id: UUID | None = None,
     ) -> UUID:
         """Record a running turn attempt. Prefer ``claim_turn`` for idempotency."""
-        claim = await self.claim_turn(
-            session_id, idempotency_key=idempotency_key, run_id=run_id
-        )
+        claim = await self.claim_turn(session_id, idempotency_key=idempotency_key, run_id=run_id)
         if claim.replay:
             return claim.run_id
         return claim.run_id
@@ -350,9 +338,7 @@ class SessionRepository:
 
             actual = int(session.checkpoint_version)
             if expected_checkpoint_version is not None and actual != expected_checkpoint_version:
-                raise StaleCheckpointError(
-                    session_id, expected=expected_checkpoint_version, actual=actual
-                )
+                raise StaleCheckpointError(session_id, expected=expected_checkpoint_version, actual=actual)
 
             seq = await self._next_sequence(db, session_id)
             db.add(
@@ -417,3 +403,67 @@ class SessionRepository:
                 run.finished_at = datetime.now(UTC)
             await db.commit()
         return await self.load(session_id)
+
+    async def get_owned_session(
+        self,
+        session_id: UUID,
+        *,
+        user_id: UUID,
+        workspace_id: UUID,
+    ) -> SessionRecord | None:
+        """Load a Session owned by the principal; None when missing or foreign."""
+        try:
+            snap = await self.load(session_id)
+        except SessionNotFoundError:
+            return None
+        if snap.session.user_id != user_id or snap.session.workspace_id != workspace_id:
+            return None
+        return snap.session
+
+    async def session_run_owned(
+        self,
+        *,
+        session_id: UUID,
+        run_id: UUID,
+        user_id: UUID,
+        workspace_id: UUID,
+    ) -> bool:
+        """True when Session and Run exist, match each other, and belong to principal."""
+        async with self._session_factory() as db:
+            session = await db.get(SessionRow, session_id)
+            if session is None:
+                return False
+            if session.user_id != user_id or session.workspace_id != workspace_id:
+                return False
+            run = await db.get(RunRow, run_id)
+            if run is None or run.session_id != session_id:
+                return False
+            return True
+
+    async def request_cancel(
+        self,
+        run_id: UUID,
+        *,
+        user_id: UUID,
+        workspace_id: UUID,
+    ) -> str:
+        """Record durable cancel intent for an owned Run.
+
+        Returns ``cancelled``, ``already_cancelled``, or ``not_found``.
+        """
+        async with self._session_factory() as db:
+            run = await db.get(RunRow, run_id)
+            if run is None:
+                return "not_found"
+            session = await db.get(SessionRow, run.session_id)
+            if session is None:
+                return "not_found"
+            if session.user_id != user_id or session.workspace_id != workspace_id:
+                return "not_found"
+            if run.status in {"completed", "failed", "cancelled"}:
+                return "already_cancelled"
+            if run.cancel_requested_at is not None:
+                return "already_cancelled"
+            run.cancel_requested_at = datetime.now(UTC)
+            await db.commit()
+            return "cancelled"

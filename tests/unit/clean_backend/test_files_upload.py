@@ -91,7 +91,7 @@ def test_stage_returns_fleet_sandbox_path_only(tmp_path: Path) -> None:
     assert mirror.read_bytes(staged.sandbox_path) == b"payload"
 
 
-def test_api_upload_get_and_stage_no_path_leak(tmp_path: Path) -> None:
+def test_api_upload_get_no_path_leak_and_no_public_stage(tmp_path: Path) -> None:
     settings = Settings(upload_root=str(tmp_path / "uploads"), max_upload_bytes=1024)
     app = create_app(settings=settings)
     user, ws = uuid4(), uuid4()
@@ -133,15 +133,13 @@ def test_api_upload_get_and_stage_no_path_leak(tmp_path: Path) -> None:
     )
     assert other.status_code == 404
 
+    # Public stage removed (B6)
     staged = client.post(
         f"/api/files/{file_id}/stage",
         headers=headers,
         json={"session_id": str(uuid4()), "run_id": str(uuid4())},
     )
-    assert staged.status_code == 200
-    sp = staged.json()
-    assert sp["sandbox_path"].startswith("/home/daytona/fleet/")
-    assert tmp_path.as_posix() not in sp["sandbox_path"]
+    assert staged.status_code == 404
 
 
 def test_api_rejects_oversize(tmp_path: Path) -> None:
