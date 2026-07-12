@@ -149,6 +149,7 @@ async def test_acquire_reuses_running_sandbox() -> None:
     mgr, plat, store, _volumes = _manager()
     req = _request()
     first = await mgr.acquire(req)
+    await mgr.release(first)  # release active lease before re-acquire
     second = await mgr.acquire(req)
     assert first.sandbox_id == second.sandbox_id
     assert len(plat.created) == 1
@@ -227,6 +228,7 @@ async def test_acquire_starts_stopped_sandbox() -> None:
             provider_state="stopped",
         )
     )
+    await mgr.release(lease)
     again = await mgr.acquire(req)
     assert again.sandbox_id == lease.sandbox_id
     assert "start" in plat.sandboxes[lease.sandbox_id].ops
@@ -253,6 +255,7 @@ async def test_acquire_recreates_when_sandbox_missing() -> None:
     mgr, plat, store, _volumes = _manager()
     req = _request()
     first = await mgr.acquire(req)
+    await mgr.release(first)
     # Simulate gone sandbox
     plat.sandboxes.clear()
     second = await mgr.acquire(req)

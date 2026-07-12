@@ -67,6 +67,39 @@ class LocalArtifactStore:
         content: str,
         title: str | None = None,
     ) -> ArtifactRef:
+        """Create under a session write guard so concurrent creates stay deterministic.
+
+        Content is stored under a unique artifact id; logical Volume path is
+        run-scoped (sessions/{sid}/runs/{rid}/artifacts/{id}.ext).
+        """
+        # Thread-safe lock for concurrent host-side writers (sync API).
+        from threading import Lock
+
+        if not hasattr(self, "_write_lock"):
+            self._write_lock = Lock()  # type: ignore[attr-defined]
+
+        with self._write_lock:  # type: ignore[attr-defined]
+            return self._create_unlocked(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                session_id=session_id,
+                run_id=run_id,
+                kind=kind,
+                content=content,
+                title=title,
+            )
+
+    def _create_unlocked(
+        self,
+        *,
+        user_id: UUID,
+        workspace_id: UUID,
+        session_id: UUID,
+        run_id: UUID,
+        kind: str,
+        content: str,
+        title: str | None = None,
+    ) -> ArtifactRef:
         parsed_kind = parse_kind(kind)
         safe_title = sanitize_title(title)
         data = encode_content(parsed_kind, content)

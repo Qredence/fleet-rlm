@@ -6,16 +6,14 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
-from fleet_rlm_clean.api.identity import RequestIdentity, require_session_access
 from fleet_rlm_clean.api.auth_errors import AuthError
-from fleet_rlm_clean.sessions.errors import SessionAccessDenied
+from fleet_rlm_clean.api.identity import RequestIdentity, require_session_access
 from fleet_rlm_clean.api.neon_auth import (
-    NeonAuthVerifier,
     NeonClaims,
     subject_to_user_id,
     tenant_to_workspace_id,
@@ -28,7 +26,7 @@ from fleet_rlm_clean.rlm.budgets import RLMBudget
 from fleet_rlm_clean.rlm.context import RLMTurnContext
 from fleet_rlm_clean.rlm.events import EventRecorder, RuntimeEvent, RuntimeEventKind
 from fleet_rlm_clean.rlm.model_bundle import RLMModelBundle
-from fleet_rlm_clean.sessions.errors import SessionNotFoundError
+from fleet_rlm_clean.sessions.errors import SessionAccessDenied, SessionNotFoundError
 from fleet_rlm_clean.sessions.models import SessionRecord, SessionSnapshot
 
 
@@ -118,7 +116,7 @@ def test_neon_mode_accepts_injected_verifier() -> None:
 
 
 def test_auth_mode_unknown_fails_closed() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match="AUTH_MODE"):
         Settings(auth_mode="oops")
 
 

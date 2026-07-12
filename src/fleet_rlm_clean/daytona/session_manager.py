@@ -33,6 +33,7 @@ class LeaseRequest:
     session_id: UUID
     user_id: UUID
     workspace_id: UUID
+    run_id: UUID | None = None
 
 
 class BindingStoreLike(Protocol):
@@ -87,73 +88,89 @@ class DaytonaSessionManager:
 
     async def acquire(self, request: LeaseRequest) -> InterpreterLease:
         """Ensure a running Sandbox with Volume mounted; return an interpreter lease."""
-        volume_id = await asyncio.to_thread(
-            get_or_create_volume_id, self._volume_client, self._volume_config
-        )
-        mount_path = self._volume_config.mount_path
-        binding = await self._bindings.get(request.session_id)
+        from fleet_rlm_clean.daytona.active_leases import get_active_lease_registry
 
-        sandbox: Any | None = None
-        if binding and binding.sandbox_id:
-            try:
-                sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id)
-            except Exception as exc:  # noqa: BLE001
-                raise map_provider_error(exc) from exc
+        run_id = request.run_id or uuid4()
+        session_id = request.session_id
+        get_active_lease_registry().acquire(session_id, run_id)
+        try:
+            volume_id = await asyncio.to_thread(
+                get_or_create_volume_id, self._volume_client, self._volume_config
+            )
+            mount_path = self._volume_config.mount_path
+            binding = await self._bindings.get(session_id)
 
-        if sandbox is not None:
-            state = sandbox_state(sandbox)
-            try:
-                sandbox = await self._ensure_running(
-                    sandbox, state, volume_id=volume_id, mount_path=mount_path
-                )
-            except (DaytonaAdapterError, LifecycleCapabilityError):
-                # Missing/unhealthy/unsupported → replace while keeping Volume.
-                if binding is not None:
-                    replaced = await self.replace(
-                        SandboxBinding(
-                            session_id=request.session_id,
-                            sandbox_id=binding.sandbox_id,
-                            volume_id=volume_id,
-                            mount_path=mount_path,
-                            provider_state="unrecoverable",
+            sandbox: Any | None = None
+            if binding and binding.sandbox_id:
+                try:
+                    sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id)
+                except Exception as exc:  # noqa: BLE001
+                    raise map_provider_error(exc) from exc
+
+            if sandbox is not None:
+                state = sandbox_state(sandbox)
+                try:
+                    sandbox = await self._ensure_running(
+                        sandbox, state, volume_id=volume_id, mount_path=mount_path
+                    )
+                except (DaytonaAdapterError, LifecycleCapabilityError):
+                    if binding is not None:
+                        replaced = await self.replace(
+                            SandboxBinding(
+                                session_id=session_id,
+                                sandbox_id=binding.sandbox_id,
+                                volume_id=volume_id,
+                                mount_path=mount_path,
+                                provider_state="unrecoverable",
+                            )
                         )
-                    )
-                    sandbox = await asyncio.to_thread(
-                        self._platform.get, replaced.sandbox_id or ""
-                    )
-                else:
-                    sandbox = None
-        if sandbox is None:
-            sandbox = await asyncio.to_thread(
-                self._create_sandbox,
-                volume_id=volume_id,
-                mount_path=mount_path,
-                request=request,
+                        sandbox = await asyncio.to_thread(
+                            self._platform.get, replaced.sandbox_id or ""
+                        )
+                    else:
+                        sandbox = None
+            if sandbox is None:
+                sandbox = await asyncio.to_thread(
+                    self._create_sandbox,
+                    volume_id=volume_id,
+                    mount_path=mount_path,
+                    request=request,
+                )
+
+            sid = _sandbox_id(sandbox)
+            now = datetime.now(UTC)
+            await self._bindings.upsert(
+                SandboxBinding(
+                    session_id=session_id,
+                    sandbox_id=sid,
+                    volume_id=volume_id,
+                    mount_path=mount_path,
+                    provider_state="running",
+                    last_verified_at=now,
+                )
             )
 
-        sid = _sandbox_id(sandbox)
-        now = datetime.now(UTC)
-        await self._bindings.upsert(
-            SandboxBinding(
-                session_id=request.session_id,
+            interpreter = _build_interpreter(sandbox)
+            interpreter_id = f"interp-{sid}-{uuid4().hex[:8]}"
+            lease = InterpreterLease(
                 sandbox_id=sid,
+                interpreter_id=interpreter_id,
                 volume_id=volume_id,
                 mount_path=mount_path,
-                provider_state="running",
-                last_verified_at=now,
+                interpreter=interpreter,
+                session_id=str(session_id),
+                run_id=str(run_id),
+                delete_sandbox=None,
             )
-        )
 
-        interpreter = _build_interpreter(sandbox)
-        interpreter_id = f"interp-{sid}-{uuid4().hex[:8]}"
-        return InterpreterLease(
-            sandbox_id=sid,
-            interpreter_id=interpreter_id,
-            volume_id=volume_id,
-            mount_path=mount_path,
-            interpreter=interpreter,
-            delete_sandbox=None,  # release must never delete
-        )
+            def _clear_active() -> None:
+                get_active_lease_registry().release(session_id, run_id)
+
+            lease._on_release = _clear_active  # noqa: SLF001
+            return lease
+        except Exception:
+            get_active_lease_registry().release(session_id, run_id)
+            raise
 
     async def release(self, lease: InterpreterLease) -> None:
         """Release interpreter resources only — never deletes the Sandbox."""

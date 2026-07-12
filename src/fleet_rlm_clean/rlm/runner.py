@@ -13,7 +13,6 @@ from fleet_rlm_clean.rlm.cancel import get_run_cancel_registry
 from fleet_rlm_clean.rlm.context import RLMTurnContext
 from fleet_rlm_clean.rlm.errors import (
     RLMBudgetError,
-    TurnBudgetExhausted,
     TurnCancelled,
     TurnTerminalError,
     TurnTimeout,
@@ -153,18 +152,42 @@ def _terminal_status_for(exc: BaseException) -> str:
 class RLMRunner:
     """Deep module: one turn in, ordered RuntimeEvents out, lease always released."""
 
-    def __init__(self, *, factory: RLMFactoryLike | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        factory: RLMFactoryLike | None = None,
+        turn_exporter: Any | None = None,
+    ) -> None:
         self._factory: RLMFactoryLike = factory if factory is not None else RLMFactory()
+        self._turn_exporter = turn_exporter
 
     async def stream(self, context: RLMTurnContext) -> AsyncIterator[RuntimeEvent]:
         """Run one turn. Always emits exactly one terminal event and releases the lease."""
+        from fleet_rlm_clean.observability.exporters import safe_export
+        from fleet_rlm_clean.observability.record import TurnTrace, apply_event_to_trace
+
         recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
         started = time.perf_counter()
         terminal_emitted = False
         registry = get_run_cancel_registry()
+        lease = context.lease
+        trace = TurnTrace(
+            run_id=context.run_id,
+            session_id=context.session_id,
+            user_id=context.user_id,
+            workspace_id=context.workspace_id,
+            sandbox_id=getattr(lease, "sandbox_id", None),
+            volume_id=getattr(lease, "volume_id", None),
+            mount_path=getattr(lease, "mount_path", None),
+        )
 
         def emit(kind: RuntimeEventKind, payload: dict[str, Any] | None = None) -> RuntimeEvent:
-            return recorder.emit(kind, payload)
+            event = recorder.emit(kind, payload)
+            try:
+                apply_event_to_trace(trace, kind.value, dict(event.payload))
+            except Exception:  # noqa: BLE001
+                pass
+            return event
 
         try:
             yield emit(
@@ -256,6 +279,7 @@ class RLMRunner:
                         },
                     )
             registry.clear(context.run_id)
+            safe_export(self._turn_exporter, trace)
 
     async def _execute_rlm(self, rlm: Any, context: RLMTurnContext) -> Any:
         """Apply root LM via scoped DSPy context; run off the event loop when sync."""
