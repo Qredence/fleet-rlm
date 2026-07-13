@@ -2,61 +2,80 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Protocol
+from typing import Annotated, Protocol
 
 from fastapi import Depends, HTTPException, Request
 
+from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactContent, ArtifactRef
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+from fleet_rlm.chat.turn_lifecycle import TurnLifecycle
 from fleet_rlm.config import Settings
-from fleet_rlm.sessions.repository import SessionRepository
+from fleet_rlm.files.models import (
+    AttachmentAccess,
+    AttachmentRef,
+    AttachmentRun,
+    AttachmentUpload,
+    PreparedAttachments,
+    RunAttachmentSink,
+)
+from fleet_rlm.sessions.catalog import SessionCatalog
 
 
-class AttachmentStore(Protocol):
-    def upload(self, **kwargs: Any) -> Any: ...
+class AttachmentLifecyclePort(Protocol):
+    async def upload(self, access: AttachmentAccess, upload: AttachmentUpload) -> AttachmentRef: ...
 
-    def get(self, attachment_id: Any, **kwargs: Any) -> Any: ...
+    async def metadata(self, access: AttachmentAccess, attachment_ids: tuple) -> tuple[AttachmentRef, ...]: ...
+
+    async def prepare_run(
+        self,
+        access: AttachmentAccess,
+        attachment_ids: tuple,
+        run: AttachmentRun,
+        sink: RunAttachmentSink,
+    ) -> PreparedAttachments: ...
 
 
-class ArtifactStore(Protocol):
-    def get(self, artifact_id: Any, **kwargs: Any) -> Any: ...
+class ArtifactReaderPort(Protocol):
+    async def metadata(self, access: ArtifactAccess, artifact_id) -> ArtifactRef: ...
+
+    async def content(self, access: ArtifactAccess, artifact_id) -> ArtifactContent: ...
 
 
 def get_turn_coordinator(request: Request) -> TurnCoordinator:
-    if getattr(request.app.state, "live_mode", False) and not getattr(
-        request.app.state,
-        "live_composition_ready",
-        False,
-    ):
-        raise HTTPException(status_code=503, detail="live composition is not ready")
+    if not getattr(request.app.state, "composition_ready", False):
+        raise HTTPException(status_code=503, detail="application composition is not ready")
     coordinator = getattr(request.app.state, "turn_coordinator", None)
     if coordinator is None:
         raise HTTPException(status_code=503, detail="application composition is not ready")
     return coordinator
 
 
-def get_attachment_store(request: Request) -> AttachmentStore:
-    store = getattr(request.app.state, "attachment_store", None)
-    if store is None:
+def get_attachment_lifecycle(request: Request) -> AttachmentLifecyclePort:
+    lifecycle = getattr(request.app.state, "attachment_lifecycle", None)
+    if lifecycle is None:
         raise HTTPException(status_code=503, detail="application composition is not ready")
-    return store
+    return lifecycle
 
 
-def get_artifact_store(request: Request) -> ArtifactStore:
-    store = getattr(request.app.state, "artifact_store", None)
-    if store is None:
+def get_artifact_reader(request: Request) -> ArtifactReaderPort:
+    reader = getattr(request.app.state, "artifact_reader", None)
+    if reader is None:
         raise HTTPException(status_code=503, detail="application composition is not ready")
-    return store
+    return reader
 
 
-def get_session_repository(request: Request) -> SessionRepository:
-    repository = getattr(request.app.state, "session_repository", None)
-    if repository is None:
+def get_session_catalog(request: Request) -> SessionCatalog:
+    catalog = getattr(request.app.state, "session_catalog", None)
+    if catalog is None:
         raise HTTPException(status_code=503, detail="database not configured")
-    return repository
+    return catalog
 
 
-def get_optional_session_repository(request: Request) -> SessionRepository | None:
-    return getattr(request.app.state, "session_repository", None)
+def get_turn_lifecycle(request: Request) -> TurnLifecycle:
+    lifecycle = getattr(request.app.state, "turn_lifecycle", None)
+    if lifecycle is None:
+        raise HTTPException(status_code=503, detail="application composition is not ready")
+    return lifecycle
 
 
 def get_settings(request: Request) -> Settings:
@@ -64,17 +83,17 @@ def get_settings(request: Request) -> Settings:
 
 
 TurnCoordinatorDep = Annotated[TurnCoordinator, Depends(get_turn_coordinator)]
-AttachmentStoreDep = Annotated[AttachmentStore, Depends(get_attachment_store)]
-ArtifactStoreDep = Annotated[ArtifactStore, Depends(get_artifact_store)]
-SessionRepositoryDep = Annotated[SessionRepository, Depends(get_session_repository)]
-OptionalSessionRepositoryDep = Annotated[SessionRepository | None, Depends(get_optional_session_repository)]
+ArtifactReaderDep = Annotated[ArtifactReaderPort, Depends(get_artifact_reader)]
+AttachmentLifecycleDep = Annotated[AttachmentLifecyclePort, Depends(get_attachment_lifecycle)]
+SessionCatalogDep = Annotated[SessionCatalog, Depends(get_session_catalog)]
+TurnLifecycleDep = Annotated[TurnLifecycle, Depends(get_turn_lifecycle)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 __all__ = [
-    "ArtifactStoreDep",
-    "AttachmentStoreDep",
-    "OptionalSessionRepositoryDep",
-    "SessionRepositoryDep",
+    "ArtifactReaderDep",
+    "AttachmentLifecycleDep",
+    "SessionCatalogDep",
     "SettingsDep",
     "TurnCoordinatorDep",
+    "TurnLifecycleDep",
 ]

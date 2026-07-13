@@ -1,4 +1,4 @@
-"""HTTP Session CRUD for fleet_rlm."""
+"""Canonical Session Catalog HTTP surface."""
 
 from __future__ import annotations
 
@@ -8,12 +8,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fleet_rlm.app import create_app
-from fleet_rlm.persistence.database import (
-    create_async_engine_from_url,
-    create_session_factory,
-    create_tables,
-)
-from fleet_rlm.persistence.repositories import SqlAlchemySessionRepository
+from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn
+from fleet_rlm.rlm.outcome import RLMOutcome
+from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
 
 def _headers(user_id=None, workspace_id=None):
@@ -23,130 +20,79 @@ def _headers(user_id=None, workspace_id=None):
     }
 
 
-async def _wired_app():
-    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
-    await create_tables(engine)
+def test_sessions_crud_happy_path() -> None:
     app = create_app()
-    app.state.session_repository = SqlAlchemySessionRepository(create_session_factory(engine))
-    return app, engine
-
-
-@pytest.mark.asyncio
-async def test_sessions_crud_happy_path() -> None:
-    app, engine = await _wired_app()
-    user, ws = uuid4(), uuid4()
-    headers = _headers(user, ws)
+    user, workspace = uuid4(), uuid4()
+    headers = _headers(user, workspace)
     client = TestClient(app)
 
     created = client.post("/api/sessions", json={"title": "My chat"}, headers=headers)
     assert created.status_code == 201
     body = created.json()
-    sid = body["id"]
+    session_id = body["id"]
     assert body["title"] == "My chat"
     assert body["status"] == "active"
-    assert body["turn_count"] == 0
+    assert body["checkpoint_version"] == 0
 
     listed = client.get("/api/sessions", headers=headers)
     assert listed.status_code == 200
     assert listed.json()["total"] == 1
-    assert listed.json()["items"][0]["id"] == sid
-
-    got = client.get(f"/api/sessions/{sid}", headers=headers)
-    assert got.status_code == 200
-    assert got.json()["checkpoint_version"] == 0
+    assert listed.json()["items"][0]["id"] == session_id
 
     patched = client.patch(
-        f"/api/sessions/{sid}",
+        f"/api/sessions/{session_id}",
         json={"title": "Renamed"},
         headers=headers,
     )
     assert patched.status_code == 200
     assert patched.json()["title"] == "Renamed"
 
-    deleted = client.delete(f"/api/sessions/{sid}", headers=headers)
-    assert deleted.status_code == 200
-    assert deleted.json()["status"] == "archived"
+    archived = client.patch(
+        f"/api/sessions/{session_id}",
+        json={"status": "archived"},
+        headers=headers,
+    )
+    assert archived.status_code == 200
+    assert archived.json()["status"] == "archived"
 
-    listed_arch = client.get("/api/sessions", params={"status": "archived"}, headers=headers)
-    assert listed_arch.json()["total"] == 1
-    await engine.dispose()
 
-
-@pytest.mark.asyncio
-async def test_sessions_cross_workspace_404() -> None:
-    app, engine = await _wired_app()
-    user, ws_a, ws_b = uuid4(), uuid4(), uuid4()
+def test_sessions_are_workspace_isolated() -> None:
+    app = create_app()
+    user, workspace_a, workspace_b = uuid4(), uuid4(), uuid4()
     client = TestClient(app)
     created = client.post(
         "/api/sessions",
         json={"title": "private"},
-        headers=_headers(user, ws_a),
+        headers=_headers(user, workspace_a),
     )
-    sid = created.json()["id"]
+    session_id = created.json()["id"]
 
-    foreign = client.get(f"/api/sessions/{sid}", headers=_headers(user, ws_b))
+    foreign = client.get(f"/api/sessions/{session_id}", headers=_headers(user, workspace_b))
     assert foreign.status_code == 404
-    assert foreign.json()["detail"] == "session not found"
-
-    foreign_list = client.get("/api/sessions", headers=_headers(user, ws_b))
-    assert foreign_list.status_code == 200
-    assert foreign_list.json()["total"] == 0
-    await engine.dispose()
-
-
-def test_sessions_without_database_503() -> None:
-    app = create_app()
-    client = TestClient(app)
-    response = client.get("/api/sessions", headers=_headers())
-    assert response.status_code == 503
-    assert "database" in response.json()["detail"].lower()
+    assert client.get("/api/sessions", headers=_headers(user, workspace_b)).json()["total"] == 0
 
 
 @pytest.mark.asyncio
-async def test_session_turns_endpoint() -> None:
-    app, engine = await _wired_app()
-    user, ws = uuid4(), uuid4()
-    headers = _headers(user, ws)
+async def test_session_turns_are_canonical_ui_messages() -> None:
+    app = create_app()
+    user, workspace = uuid4(), uuid4()
+    access = TurnAccess(user, workspace)
+    headers = _headers(user, workspace)
     client = TestClient(app)
-    sid = client.post("/api/sessions", json={}, headers=headers).json()["id"]
-
-    repo: SqlAlchemySessionRepository = app.state.session_repository
-    session_uuid = UUID(sid)
-    claim = await repo.claim_turn(session_uuid)
-    await repo.commit_completed_turn(
-        session_uuid,
-        user_text="u",
-        assistant_text="a",
-        run_id=claim.run_id,
-        expected_checkpoint_version=0,
-        detail_parts=({"kind": "rlm.reasoning", "payload": {"step": 1, "text": "safe"}},),
-        structured_output={"answer": "a"},
-        result_schema_id="typed-answer",
-        result_schema_version="1",
+    session_id = UUID(client.post("/api/sessions", json={}, headers=headers).json()["id"])
+    started = await app.state.turn_lifecycle.begin(
+        BeginTurn(access, session_id, TurnInput("question"), "turn-key", uuid4())
+    )
+    assert isinstance(started, ExecuteTurn)
+    await app.state.turn_lifecycle.finish(
+        started,
+        RLMOutcome("completed", text="answer", usage={"total_tokens": 3}),
     )
 
-    turns = client.get(f"/api/sessions/{sid}/turns", headers=headers)
-    assert turns.status_code == 200
-    payload = turns.json()
-    assert payload["total"] == 2
-    assert payload["items"][0]["role"] == "user"
-    assert payload["items"][1]["content"] == "a"
-    assert payload["items"][1]["id"] == str(claim.run_id)
-    assert payload["items"][1]["parts"] == [
-        {"type": "reasoning", "text": "safe", "state": "done"},
-        {
-            "type": "data-structured-result",
-            "data": {
-                "schemaId": "typed-answer",
-                "schemaVersion": "1",
-                "value": {"answer": "a"},
-            },
-        },
-        {"type": "text", "text": "a", "state": "done"},
-    ]
-    assert payload["items"][1]["metadata"]["structuredResult"] == {
-        "schemaId": "typed-answer",
-        "schemaVersion": "1",
-        "value": {"answer": "a"},
-    }
-    await engine.dispose()
+    response = client.get(f"/api/sessions/{session_id}/turns", headers=headers)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["next_after_sequence"] is None
+    assert [message["role"] for message in payload["items"]] == ["user", "assistant"]
+    assert payload["items"][0]["parts"][0]["text"] == "question"
+    assert payload["items"][1]["parts"][-1]["text"] == "answer"

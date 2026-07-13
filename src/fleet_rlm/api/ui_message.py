@@ -1,89 +1,136 @@
-"""Deterministic conversion of committed Turn details to AI SDK UIMessage parts."""
+"""Exhaustive canonical Turn to deterministic AI SDK UIMessage projection."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, assert_never
+
+from fleet_rlm.sessions.committed_turn import (
+    ArtifactPart,
+    AttachmentPart,
+    CodePart,
+    CommittedPart,
+    OutputPart,
+    ReasoningPart,
+    SkillPart,
+    StepPart,
+    StructuredResultPart,
+    TextPart,
+    ToolCallPart,
+    UsagePart,
+    WarningPart,
+)
+from fleet_rlm.sessions.models import AssistantTurnRecord, UserTurnRecord
 
 
-def detail_parts_to_ui_parts(
-    details: tuple[dict[str, Any], ...],
-    *,
-    answer_text: str,
-    structured_result: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
-    """Build durable AI SDK UI 7 parts without replaying transport chunks."""
-    parts: list[dict[str, Any]] = []
-    tool_parts: dict[str, dict[str, Any]] = {}
-    tool_indexes: dict[str, int] = {}
-    saw_text = False
-    saw_structured = False
+def _assistant_part(part: CommittedPart) -> dict[str, Any]:
+    if isinstance(part, StepPart):
+        return {
+            "type": "data-step",
+            "data": {"state": part.state, "step": part.step, "durationMs": part.duration_ms},
+        }
+    if isinstance(part, ReasoningPart):
+        return {"type": "reasoning", "text": part.text, "state": "done"}
+    if isinstance(part, CodePart):
+        return {"type": "data-rlm-code", "data": {"code": part.code, "step": part.step}}
+    if isinstance(part, OutputPart):
+        return {"type": "data-rlm-output", "data": {"output": part.output, "step": part.step}}
+    if isinstance(part, ToolCallPart):
+        value: dict[str, Any] = {
+            "type": "dynamic-tool",
+            "toolName": part.tool_name,
+            "toolCallId": part.tool_call_id,
+            "input": part.input,
+            "providerExecuted": True,
+        }
+        if part.state == "completed":
+            value.update(state="output-available", output=part.output)
+        else:
+            value.update(state="output-error", errorText=part.error)
+        return value
+    if isinstance(part, SkillPart):
+        return {
+            "type": "data-skill",
+            "id": part.skill_id,
+            "data": {
+                "skillId": part.skill_id,
+                "name": part.name,
+                "phase": part.phase,
+                "version": part.version,
+                "trust": part.trust,
+                "affordances": list(part.affordances),
+            },
+        }
+    if isinstance(part, AttachmentPart):
+        return {
+            "type": "data-attachment",
+            "data": {
+                "attachmentId": str(part.attachment_id),
+                "phase": part.phase,
+                "filename": part.filename,
+                "byteSize": part.byte_size,
+            },
+        }
+    if isinstance(part, WarningPart):
+        return {"type": "data-warning", "data": {"message": part.message, "code": part.code}}
+    if isinstance(part, ArtifactPart):
+        return {
+            "type": "data-artifact",
+            "data": {
+                "artifactId": str(part.artifact_id),
+                "kind": part.kind,
+                "title": part.title,
+                "mediaType": part.media_type,
+                "byteSize": part.byte_size,
+                "checksumSha256": part.checksum_sha256,
+            },
+        }
+    if isinstance(part, UsagePart):
+        return {"type": "data-usage", "data": dict(part.value)}
+    if isinstance(part, StructuredResultPart):
+        return {
+            "type": "data-structured-result",
+            "data": {
+                "schemaId": part.schema_id,
+                "schemaVersion": part.schema_version,
+                "value": part.value,
+            },
+        }
+    if isinstance(part, TextPart):
+        return {"type": "text", "text": part.text, "state": "done"}
+    assert_never(part)
 
-    for detail in details:
-        kind = str(detail.get("kind") or "")
-        payload = detail.get("payload")
-        data = dict(payload) if isinstance(payload, dict) else {}
-        if kind == "step.started":
-            parts.append({"type": "step-start"})
-        elif kind == "rlm.reasoning":
-            parts.append({"type": "reasoning", "text": str(data.get("text") or ""), "state": "done"})
-        elif kind == "rlm.code":
-            parts.append({"type": "data-rlm-code", "data": data})
-        elif kind == "rlm.output":
-            parts.append({"type": "data-rlm-output", "data": data})
-        elif kind in {"skill.activated", "skill.loaded"}:
-            parts.append({"type": "data-skill", "id": str(data.get("skill_id") or ""), "data": data})
-        elif kind in {"attachment.read", "artifact.created", "usage", "warning"}:
-            name = {
-                "attachment.read": "attachment",
-                "artifact.created": "artifact",
-                "usage": "usage",
-                "warning": "run",
-            }[kind]
-            parts.append({"type": f"data-{name}", "data": data})
-        elif kind == "structured.result":
-            saw_structured = True
-            parts.append({"type": "data-structured-result", "data": data})
-        elif kind == "tool.started":
-            call_id = str(data.get("tool_call_id") or "")
-            part = {
-                "type": "dynamic-tool",
-                "toolName": str(data.get("tool_name") or "tool"),
-                "toolCallId": call_id,
-                "state": "input-available",
-                "input": data.get("input"),
-                "providerExecuted": True,
-            }
-            tool_indexes[call_id] = len(parts)
-            tool_parts[call_id] = part
-            parts.append(part)
-        elif kind in {"tool.completed", "tool.failed"}:
-            call_id = str(data.get("tool_call_id") or "")
-            part = tool_parts.get(call_id)
-            if part is None:
-                part = {
-                    "type": "dynamic-tool",
-                    "toolName": str(data.get("tool_name") or "tool"),
-                    "toolCallId": call_id,
-                    "input": None,
-                    "providerExecuted": True,
-                }
-                tool_indexes[call_id] = len(parts)
-                parts.append(part)
-            if kind == "tool.completed":
-                part.update(state="output-available", output=data.get("output"))
-            else:
-                part.update(state="output-error", errorText=str(data.get("error") or "Tool failed"))
-            parts[tool_indexes[call_id]] = part
-        elif kind == "text.delta":
-            saw_text = True
-            text = str(data.get("text") or "")
-            if parts and parts[-1].get("type") == "text":
-                parts[-1]["text"] = str(parts[-1].get("text") or "") + text
-            else:
-                parts.append({"type": "text", "text": text, "state": "done"})
 
-    if structured_result is not None and not saw_structured:
-        parts.append({"type": "data-structured-result", "data": structured_result})
-    if answer_text and not saw_text:
-        parts.append({"type": "text", "text": answer_text, "state": "done"})
-    return parts
+def user_turn_to_ui_message(record: UserTurnRecord) -> dict[str, Any]:
+    parts: list[dict[str, Any]] = [{"type": "text", "text": record.input.text, "state": "done"}]
+    parts.extend(
+        {
+            "type": "data-attachment",
+            "data": {"attachmentId": str(attachment_id), "phase": "selected"},
+        }
+        for attachment_id in record.input.attachment_ids
+    )
+    return {
+        "id": str(record.id),
+        "role": "user",
+        "parts": parts,
+        "metadata": {
+            "schemaVersion": 1,
+            "sessionId": str(record.session_id),
+            "sequence": record.sequence,
+            "attachmentIds": [str(value) for value in record.input.attachment_ids],
+        },
+    }
+
+
+def assistant_turn_to_ui_message(record: AssistantTurnRecord) -> dict[str, Any]:
+    return {
+        "id": str(record.run_id),
+        "role": "assistant",
+        "parts": [_assistant_part(part) for part in record.committed.parts],
+        "metadata": {
+            "schemaVersion": 1,
+            "runId": str(record.run_id),
+            "sessionId": str(record.session_id),
+            "sequence": record.sequence,
+        },
+    }

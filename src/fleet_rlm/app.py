@@ -2,24 +2,50 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 
 from . import __version__
 from .config import Settings
 
+_RETIRED_ENVIRONMENT_VARIABLES = frozenset(
+    {
+        "FLEET_LIVE_KERNEL",
+        "FLEET_UPLOAD_ROOT",
+        "FLEET_ARTIFACT_ROOT",
+        "FLEET_MAX_TURN_WALL_SECONDS",
+    }
+)
+
+
+def _reject_retired_environment_variables() -> None:
+    configured = set(_RETIRED_ENVIRONMENT_VARIABLES.intersection(os.environ))
+    env_file = Path(".env")
+    if env_file.is_file():
+        for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            name = line.split("=", 1)[0].removeprefix("export ").strip()
+            if name in _RETIRED_ENVIRONMENT_VARIABLES:
+                configured.add(name)
+    if configured:
+        names = ", ".join(sorted(configured))
+        raise ValueError(f"retired Fleet environment variable(s): {names}")
+
 
 def create_app(*, settings: Settings | None = None) -> FastAPI:
     """Create a FastAPI app.
 
-    Offline (default ``live_kernel=False``): routes + skills; optional DB; no LM/Daytona.
-    Live (``live_kernel=True``): validates required settings at factory time, then
-    constructs the full inventory in lifespan. Never silently falls back to offline.
+    Hermetic is the default. Daytona validates its complete inventory before serving.
     """
+    _reject_retired_environment_variables()
     resolved = settings if settings is not None else Settings()
 
-    if resolved.live_kernel:
+    if resolved.run_environment == "daytona":
         from fleet_rlm.composition import require_live_settings
 
         require_live_settings(resolved)
@@ -27,7 +53,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         settings_obj: Settings = app.state.settings
-        if settings_obj.live_kernel:
+        if settings_obj.run_environment == "daytona":
             from fleet_rlm.composition import dispose_live_composition, install_live_composition
 
             installed = False
@@ -47,12 +73,10 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
                 create_async_engine_from_url,
                 create_session_factory,
             )
-            from fleet_rlm.persistence.repositories import SqlAlchemySessionRepository
 
             engine = create_async_engine_from_url(settings_obj.database_url)
             session_factory = create_session_factory(engine)
             app.state.db_engine = engine
-            app.state.session_repository = SqlAlchemySessionRepository(session_factory)
             owns_engine = True
         try:
             if engine is not None:
@@ -72,7 +96,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
             if owns_engine and engine is not None:
                 await engine.dispose()
                 app.state.db_engine = None
-                app.state.session_repository = None
+                app.state.session_catalog = None
 
     app = FastAPI(
         title=resolved.app_name,
@@ -80,19 +104,26 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = resolved
-    app.state.live_mode = False
+    app.state.composition_ready = False
     app.state.db_engine = None
+    app.state.session_catalog = None
+
+    from fleet_rlm.api.errors import install_error_handlers
+    from fleet_rlm.api.openapi import install_openapi_contract
+
+    install_error_handlers(app)
+    install_openapi_contract(app)
 
     from fleet_rlm.api.routes.artifacts import router as artifacts_router
-    from fleet_rlm.api.routes.chat import router as chat_router
-    from fleet_rlm.api.routes.files import router as files_router
+    from fleet_rlm.api.routes.attachments import router as attachments_router
     from fleet_rlm.api.routes.runs import router as runs_router
     from fleet_rlm.api.routes.sessions import router as sessions_router
     from fleet_rlm.api.routes.skills import router as skills_router
+    from fleet_rlm.api.routes.turns import router as turns_router
 
-    app.include_router(chat_router)
+    app.include_router(turns_router)
     app.include_router(sessions_router)
-    app.include_router(files_router)
+    app.include_router(attachments_router)
     app.include_router(artifacts_router)
     app.include_router(skills_router)
     app.include_router(runs_router)
@@ -107,14 +138,9 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     app.state.skill_registry = skill_registry
     app.state.skill_authorizer = SkillAuthorizer(skill_registry)
     app.state.capability_registry = CapabilityRegistry()
-    if not resolved.live_kernel:
+    if resolved.run_environment == "hermetic":
         from fleet_rlm.composition import install_offline_composition
 
         install_offline_composition(app, resolved)
+        app.state.composition_ready = True
     return app
-
-
-def create_live_app(*, settings: Settings | None = None) -> FastAPI:
-    """Explicit live entrypoint — never enabled by credentials alone."""
-    base = settings if settings is not None else Settings()
-    return create_app(settings=base.model_copy(update={"live_kernel": True}))

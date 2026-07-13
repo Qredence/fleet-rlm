@@ -26,23 +26,13 @@ def test_rlm_events_module_does_not_import_fastapi() -> None:
 
 def test_sse_projector_emits_ai_sdk_ui_message_chunks() -> None:
     from fleet_rlm.api.sse import SSEProjector
-    from fleet_rlm.rlm.events import EventRecorder, RuntimeEventKind
+    from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted, TextDelta
 
     recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
     events = [
-        recorder.emit(RuntimeEventKind.RUN_STARTED, {}),
-        recorder.emit(RuntimeEventKind.TEXT_DELTA, {"text": "hello"}),
-        recorder.emit(
-            RuntimeEventKind.RUN_COMPLETED,
-            {
-                "status": "completed",
-                "duration_ms": 1,
-                "usage": {},
-                "artifact_ids": [],
-                "checkpoint_version": 0,
-                "degraded": False,
-            },
-        ),
+        recorder.record(RunStarted("live")),
+        recorder.record(TextDelta("hello")),
+        recorder.record(RunCompleted(0, "live", 1)),
     ]
     lines = list(SSEProjector().project(events))
     assert all(line.startswith("data: ") and line.endswith("\n\n") for line in lines)
@@ -59,17 +49,18 @@ def test_sse_projector_emits_ai_sdk_ui_message_chunks() -> None:
 
 def test_keepalive_does_not_consume_sequence() -> None:
     from fleet_rlm.api.sse import SSEProjector
-    from fleet_rlm.rlm.events import EventRecorder, RuntimeEventKind
+    from fleet_rlm.rlm.events import EventRecorder, RunStarted, Status
 
     recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
     projector = SSEProjector()
-    before = recorder.emit(RuntimeEventKind.RUN_STARTED, {})
+    before = recorder.record(RunStarted("live"))
     keepalive = projector.keepalive()
-    after = recorder.emit(RuntimeEventKind.STATUS, {"message": "working"})
+    after = recorder.record(Status("execution", "running", "working"))
 
     assert keepalive == ": keepalive\n\n"
     assert before.sequence == 1
     assert after.sequence == 2
+    assert next(iter(projector.project((after,)))).startswith('data: {"type": "data-status"')
 
 
 def test_committed_fixture_is_valid_sse_transcript() -> None:

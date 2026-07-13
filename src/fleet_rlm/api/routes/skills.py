@@ -55,7 +55,7 @@ def _to_response(card: SkillCard) -> SkillCardResponse:
     )
 
 
-@router.get("/api/skills", response_model=list[SkillCardResponse])
+@router.get("/api/skills", response_model=list[SkillCardResponse], operation_id="list_skills")
 async def list_skills(
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
     authorizer: Annotated[SkillAuthorizer, Depends(get_skill_authorizer)],
@@ -70,7 +70,11 @@ async def list_skills(
     return [_to_response(c) for c in ranked]
 
 
-@router.get("/api/skills/{skill_id}", response_model=SkillCardResponse)
+@router.get(
+    "/api/skills/{skill_id}",
+    response_model=SkillCardResponse,
+    operation_id="get_skill",
+)
 async def get_skill(
     skill_id: UUID,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],

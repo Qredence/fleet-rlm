@@ -49,6 +49,7 @@ dependencies = [
     "fastapi[standard]==0.139.0",
     "joserfc>=1.7.2",
     "uvicorn>=0.47.0,<1",
+    "httpx2>=2.5.0",
 ]
 
 [project.urls]

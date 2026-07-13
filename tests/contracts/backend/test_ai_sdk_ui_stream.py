@@ -7,37 +7,41 @@ from uuid import uuid4
 
 def test_projector_maps_detailed_runtime_events_to_ui_message_chunks() -> None:
     from fleet_rlm.api.sse import AISDKUIProjector
-    from fleet_rlm.rlm.events import EventRecorder, RuntimeEventKind
+    from fleet_rlm.rlm.events import (
+        EventRecorder,
+        RLMCode,
+        RLMOutput,
+        RLMReasoning,
+        RunCompleted,
+        RunStarted,
+        SkillActivated,
+        StepFinished,
+        StepStarted,
+        StructuredResult,
+        TextCompleted,
+        TextDelta,
+        ToolCompleted,
+        ToolStarted,
+        Usage,
+    )
 
     recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
     projector = AISDKUIProjector()
     events = [
-        recorder.emit(RuntimeEventKind.RUN_STARTED, {}),
-        recorder.emit(RuntimeEventKind.SKILL_ACTIVATED, {"skill_id": "s1", "name": "long-context"}),
-        recorder.emit(RuntimeEventKind.STEP_STARTED, {"step": 1}),
-        recorder.emit(RuntimeEventKind.RLM_REASONING, {"step": 1, "text": "Inspect the corpus"}),
-        recorder.emit(RuntimeEventKind.RLM_CODE, {"step": 1, "code": "print(len(context))"}),
-        recorder.emit(
-            RuntimeEventKind.TOOL_STARTED,
-            {"tool_call_id": "call-1", "tool_name": "lookup", "input": {"key": "x"}},
-        ),
-        recorder.emit(
-            RuntimeEventKind.TOOL_COMPLETED,
-            {"tool_call_id": "call-1", "tool_name": "lookup", "output": {"value": 1}},
-        ),
-        recorder.emit(RuntimeEventKind.RLM_OUTPUT, {"step": 1, "output": "42"}),
-        recorder.emit(RuntimeEventKind.STEP_FINISHED, {"step": 1}),
-        recorder.emit(RuntimeEventKind.USAGE, {"usage": {"totalTokens": 12}}),
-        recorder.emit(
-            RuntimeEventKind.STRUCTURED_RESULT,
-            {"schemaId": "report", "schemaVersion": "1", "value": {"score": 1}},
-        ),
-        recorder.emit(RuntimeEventKind.TEXT_DELTA, {"text": "answer"}),
-        recorder.emit(RuntimeEventKind.TEXT_COMPLETED, {"text": "answer"}),
-        recorder.emit(
-            RuntimeEventKind.RUN_COMPLETED,
-            {"status": "completed", "checkpoint_version": 1},
-        ),
+        recorder.record(RunStarted("live")),
+        recorder.record(SkillActivated("s1", "long-context", "1", "system")),
+        recorder.record(StepStarted(1)),
+        recorder.record(RLMReasoning("Inspect the corpus", 1)),
+        recorder.record(RLMCode("print(len(context))", 1)),
+        recorder.record(ToolStarted("call-1", "lookup", {"key": "x"})),
+        recorder.record(ToolCompleted("call-1", "lookup", {"value": 1})),
+        recorder.record(RLMOutput("42", 1)),
+        recorder.record(StepFinished(1)),
+        recorder.record(Usage({"totalTokens": 12})),
+        recorder.record(StructuredResult("report", "1", {"score": 1})),
+        recorder.record(TextDelta("answer")),
+        recorder.record(TextCompleted("answer")),
+        recorder.record(RunCompleted(1, "live")),
     ]
 
     chunks = [chunk for event in events for chunk in projector.project(event)]
@@ -60,16 +64,10 @@ def test_projector_maps_detailed_runtime_events_to_ui_message_chunks() -> None:
 
 def test_projector_maps_failure_and_cancel_to_ai_sdk_terminal_parts() -> None:
     from fleet_rlm.api.sse import AISDKUIProjector
-    from fleet_rlm.rlm.events import EventRecorder, RuntimeEventKind
+    from fleet_rlm.rlm.events import EventRecorder, RunCancelled, RunFailed
 
-    failed = EventRecorder(run_id=uuid4(), session_id=uuid4()).emit(
-        RuntimeEventKind.ERROR,
-        {"status": "failed", "message": "Turn failed"},
-    )
-    cancelled = EventRecorder(run_id=uuid4(), session_id=uuid4()).emit(
-        RuntimeEventKind.ERROR,
-        {"status": "cancelled", "message": "Turn cancelled"},
-    )
+    failed = EventRecorder(run_id=uuid4(), session_id=uuid4()).record(RunFailed("execution_failed", "Turn failed"))
+    cancelled = EventRecorder(run_id=uuid4(), session_id=uuid4()).record(RunCancelled())
 
     assert AISDKUIProjector().project(failed) == [
         {"type": "error", "errorText": "Turn failed"},
@@ -78,3 +76,12 @@ def test_projector_maps_failure_and_cancel_to_ai_sdk_terminal_parts() -> None:
     assert AISDKUIProjector().project(cancelled) == [
         {"type": "abort", "reason": "Turn cancelled"},
     ]
+
+
+def test_projector_does_not_create_an_empty_reasoning_panel() -> None:
+    from fleet_rlm.api.sse import AISDKUIProjector
+    from fleet_rlm.rlm.events import EventRecorder, RLMReasoning
+
+    event = EventRecorder(run_id=uuid4(), session_id=uuid4()).record(RLMReasoning("   ", 1))
+
+    assert AISDKUIProjector().project(event) == []

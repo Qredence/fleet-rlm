@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -80,20 +81,25 @@ def test_http_surface_logs_correlation_and_hides_cause(caplog: pytest.LogCapture
     client = TestClient(app)
     with caplog.at_level(logging.WARNING, logger="fleet_rlm.api.identity"):
         r = client.post(
-            "/api/chat",
+            f"/api/sessions/{uuid4()}/turns",
             headers={
                 "Authorization": "Bearer anything",
                 "X-Request-Id": "corr-b10-1",
+                "Idempotency-Key": "auth-test",
             },
-            json={"message": "hi"},
+            json={"text": "hi"},
         )
     assert r.status_code == 401
-    assert r.json()["detail"] == "invalid token"
+    assert r.json() == {"code": "invalid_token", "message": "Invalid token"}
     assert "secret-jwks-url" not in r.text
     assert any("corr-b10-1" in rec.message and "secret-jwks-url" in rec.message for rec in caplog.records)
 
 
-def test_dev_mode_unchanged() -> None:
+def test_dev_mode_requires_an_existing_session() -> None:
     app = create_app(settings=Settings(auth_mode="dev"))
-    r = TestClient(app).post("/api/chat", json={"message": "hi"})
-    assert r.status_code == 200
+    r = TestClient(app).post(
+        f"/api/sessions/{uuid4()}/turns",
+        headers={"Idempotency-Key": "dev-test"},
+        json={"text": "hi"},
+    )
+    assert r.status_code == 404

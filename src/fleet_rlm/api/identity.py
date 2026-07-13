@@ -69,10 +69,8 @@ def _get_verifier(request: Request, settings: Settings) -> NeonAuthVerifier:
     verifier = getattr(request.app.state, "auth_verifier", None)
     if verifier is not None:
         return verifier
-    from fleet_rlm.composition import is_live_mode
-
-    if is_live_mode(request.app):
-        raise HTTPException(status_code=503, detail="live composition is not ready")
+    if settings.run_environment == "daytona":
+        raise HTTPException(status_code=503, detail="application composition is not ready")
     url = (settings.neon_auth_url or "").strip()
     if not url:
         raise AuthError(

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from fleet_rlm.api.dependencies import SessionRepositoryDep
+from fleet_rlm.api.dependencies import SessionCatalogDep
 from fleet_rlm.api.identity import RequestIdentity, get_request_identity
 from fleet_rlm.api.schemas import (
     SessionCreateRequest,
@@ -16,12 +16,13 @@ from fleet_rlm.api.schemas import (
     SessionListResponse,
     SessionPatchRequest,
     SessionSummaryResponse,
-    TurnListResponse,
-    TurnResponse,
+    SessionTurnPageResponse,
+    UIMessageResponse,
 )
-from fleet_rlm.api.ui_message import detail_parts_to_ui_parts
+from fleet_rlm.api.ui_message import assistant_turn_to_ui_message, user_turn_to_ui_message
+from fleet_rlm.sessions.catalog import SequenceCursor
 from fleet_rlm.sessions.errors import SessionNotFoundError
-from fleet_rlm.sessions.models import SessionRecord, TurnRecord
+from fleet_rlm.sessions.models import AssistantTurnRecord, SessionRecord
 
 router = APIRouter(tags=["sessions"])
 
@@ -32,56 +33,31 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat()
 
 
+def _status(value: str) -> Literal["active", "archived"]:
+    return cast(Literal["active", "archived"], value)
+
+
 def _to_summary(record: SessionRecord) -> SessionSummaryResponse:
     return SessionSummaryResponse(
         id=record.id,
         title=record.title,
-        status=record.status,
+        status=_status(record.status),
         checkpoint_version=record.checkpoint_version,
         created_at=_iso(record.created_at),
         updated_at=_iso(record.updated_at),
     )
 
 
-def _to_turn(record: TurnRecord) -> TurnResponse:
-    metadata: dict[str, object] = {}
-    if record.run_id is not None:
-        metadata["runId"] = str(record.run_id)
-    if record.structured_output is not None:
-        metadata["structuredResult"] = {
-            "schemaId": record.result_schema_id,
-            "schemaVersion": record.result_schema_version,
-            "value": record.structured_output,
-        }
-    return TurnResponse(
-        id=record.id,
-        sequence=record.sequence,
-        role=record.role,
-        content=record.content,
-        status=record.status,
-        run_id=record.run_id,
-        parts=detail_parts_to_ui_parts(
-            record.detail_parts,
-            answer_text=record.content,
-            structured_result=(
-                {
-                    "schemaId": record.result_schema_id,
-                    "schemaVersion": record.result_schema_version,
-                    "value": record.structured_output,
-                }
-                if record.structured_output is not None
-                else None
-            ),
-        ),
-        metadata=metadata or None,
-    )
-
-
-@router.post("/api/sessions", response_model=SessionDetailResponse, status_code=201)
+@router.post(
+    "/api/sessions",
+    response_model=SessionDetailResponse,
+    status_code=201,
+    operation_id="create_session",
+)
 async def create_session(
     body: SessionCreateRequest,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    repo: SessionRepositoryDep,
+    repo: SessionCatalogDep,
 ) -> SessionDetailResponse:
     title = (body.title or "New Session").strip() or "New Session"
     record = await repo.create(
@@ -92,24 +68,23 @@ async def create_session(
     return SessionDetailResponse(
         id=record.id,
         title=record.title,
-        status=record.status,
+        status=_status(record.status),
         checkpoint_version=record.checkpoint_version,
-        turn_count=0,
         created_at=_iso(record.created_at),
         updated_at=_iso(record.updated_at),
     )
 
 
-@router.get("/api/sessions", response_model=SessionListResponse)
+@router.get("/api/sessions", response_model=SessionListResponse, operation_id="list_sessions")
 async def list_sessions(
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    repo: SessionRepositoryDep,
-    status: Annotated[str | None, Query(description="active | archived")] = None,
+    repo: SessionCatalogDep,
+    status: Annotated[Literal["active", "archived"] | None, Query()] = None,
     search: Annotated[str | None, Query(description="Title contains")] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> SessionListResponse:
-    items, total = await repo.list(
+    page = await repo.list(
         user_id=identity.user_id,
         workspace_id=identity.workspace_id,
         status=status,
@@ -118,46 +93,52 @@ async def list_sessions(
         offset=offset,
     )
     return SessionListResponse(
-        items=[_to_summary(r) for r in items],
-        total=total,
+        items=[_to_summary(r) for r in page.items],
+        total=page.total,
         offset=offset,
         limit=limit,
-        has_more=offset + len(items) < total,
+        has_more=offset + len(page.items) < page.total,
     )
 
 
-@router.get("/api/sessions/{session_id}", response_model=SessionDetailResponse)
+@router.get(
+    "/api/sessions/{session_id}",
+    response_model=SessionDetailResponse,
+    operation_id="get_session",
+)
 async def get_session(
     session_id: UUID,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    repo: SessionRepositoryDep,
+    repo: SessionCatalogDep,
 ) -> SessionDetailResponse:
     try:
-        record = await repo.get_owned(
+        record = await repo.get(
             session_id,
             user_id=identity.user_id,
             workspace_id=identity.workspace_id,
         )
-        count = await repo.turn_count(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
     return SessionDetailResponse(
         id=record.id,
         title=record.title,
-        status=record.status,
+        status=_status(record.status),
         checkpoint_version=record.checkpoint_version,
-        turn_count=count,
         created_at=_iso(record.created_at),
         updated_at=_iso(record.updated_at),
     )
 
 
-@router.patch("/api/sessions/{session_id}", response_model=SessionDetailResponse)
+@router.patch(
+    "/api/sessions/{session_id}",
+    response_model=SessionDetailResponse,
+    operation_id="update_session",
+)
 async def patch_session(
     session_id: UUID,
     body: SessionPatchRequest,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    repo: SessionRepositoryDep,
+    repo: SessionCatalogDep,
 ) -> SessionDetailResponse:
     if body.title is None and body.status is None:
         raise HTTPException(status_code=422, detail="no fields to update")
@@ -173,7 +154,6 @@ async def patch_session(
             title=body.title,
             status=body.status,
         )
-        count = await repo.turn_count(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
     except ValueError as exc:
@@ -181,63 +161,40 @@ async def patch_session(
     return SessionDetailResponse(
         id=record.id,
         title=record.title,
-        status=record.status,
+        status=_status(record.status),
         checkpoint_version=record.checkpoint_version,
-        turn_count=count,
         created_at=_iso(record.created_at),
         updated_at=_iso(record.updated_at),
     )
 
 
-@router.delete("/api/sessions/{session_id}", response_model=SessionDetailResponse)
-async def delete_session(
-    session_id: UUID,
-    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    repo: SessionRepositoryDep,
-) -> SessionDetailResponse:
-    """Soft-delete: archive the session."""
-    try:
-        record = await repo.archive(
-            session_id,
-            user_id=identity.user_id,
-            workspace_id=identity.workspace_id,
-        )
-        count = await repo.turn_count(session_id)
-    except SessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="session not found") from exc
-    return SessionDetailResponse(
-        id=record.id,
-        title=record.title,
-        status=record.status,
-        checkpoint_version=record.checkpoint_version,
-        turn_count=count,
-        created_at=_iso(record.created_at),
-        updated_at=_iso(record.updated_at),
-    )
-
-
-@router.get("/api/sessions/{session_id}/turns", response_model=TurnListResponse)
+@router.get(
+    "/api/sessions/{session_id}/turns",
+    response_model=SessionTurnPageResponse,
+    operation_id="list_session_turns",
+)
 async def list_session_turns(
     session_id: UUID,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
-    repo: SessionRepositoryDep,
+    repo: SessionCatalogDep,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
-) -> TurnListResponse:
+    after_sequence: Annotated[int | None, Query(ge=0)] = None,
+) -> SessionTurnPageResponse:
     try:
-        items, total = await repo.list_turns(
+        page = await repo.turns(
             session_id,
             user_id=identity.user_id,
             workspace_id=identity.workspace_id,
+            cursor=SequenceCursor(after_sequence),
             limit=limit,
-            offset=offset,
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
-    return TurnListResponse(
-        items=[_to_turn(t) for t in items],
-        total=total,
-        offset=offset,
-        limit=limit,
-        has_more=offset + len(items) < total,
+    messages = [
+        assistant_turn_to_ui_message(item) if isinstance(item, AssistantTurnRecord) else user_turn_to_ui_message(item)
+        for item in page.items
+    ]
+    return SessionTurnPageResponse(
+        items=[UIMessageResponse.model_validate(message) for message in messages],
+        next_after_sequence=page.next_after_sequence,
     )

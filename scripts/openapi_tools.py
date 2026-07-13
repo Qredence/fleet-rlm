@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 OUTPUT = ROOT / "openapi.yaml"
+TUI_ROOT = ROOT / "tools" / "fleet-tui"
+TUI_OUTPUT = TUI_ROOT / "src" / "generated" / "openapi.ts"
 
 
 class _Dumper(yaml.SafeDumper):
@@ -41,7 +45,9 @@ def _render(schema: dict[str, Any]) -> str:
 def generate(_args: argparse.Namespace) -> int:
     schema = _schema()
     OUTPUT.write_text(_render(schema), encoding="utf-8")
-    print(f"Generated {len(schema.get('paths', {}))} backend paths in {OUTPUT}")
+    TUI_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    _generate_typescript(TUI_OUTPUT)
+    print(f"Generated {len(schema.get('paths', {}))} backend paths and TUI HTTP types")
     return 0
 
 
@@ -63,8 +69,32 @@ def check(_args: argparse.Namespace) -> int:
     if "post" in paths.get("/api/artifacts/{artifact_id}", {}):
         print("Public Artifact creation must not exist", file=sys.stderr)
         return 1
-    print(f"Backend OpenAPI is current ({len(paths)} paths)")
+    if not TUI_OUTPUT.exists():
+        print("Missing generated TUI HTTP types; run `make api-sync`", file=sys.stderr)
+        return 1
+    with tempfile.TemporaryDirectory() as directory:
+        expected_types = Path(directory) / "openapi.ts"
+        _generate_typescript(expected_types)
+        if TUI_OUTPUT.read_text(encoding="utf-8") != expected_types.read_text(encoding="utf-8"):
+            print("TUI HTTP types are stale; run `make api-sync`", file=sys.stderr)
+            return 1
+    print(f"Backend OpenAPI and TUI HTTP types are current ({len(paths)} paths)")
     return 0
+
+
+def _generate_typescript(output: Path) -> None:
+    subprocess.run(
+        (
+            "pnpm",
+            "exec",
+            "openapi-typescript",
+            str(OUTPUT),
+            "-o",
+            str(output),
+        ),
+        cwd=TUI_ROOT,
+        check=True,
+    )
 
 
 def main() -> int:

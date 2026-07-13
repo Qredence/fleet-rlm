@@ -3,22 +3,28 @@ info:
   title: fleet-rlm
   version: 0.6.2
 paths:
-  /api/chat:
+  /api/sessions/{session_id}/turns:
     post:
       tags:
-      - chat
-      summary: Chat
-      description: Stream one chat Turn as an AI SDK UI 7 message stream.
-      operationId: chat_api_chat_post
+      - turns
+      summary: Create Turn
+      description: Open the Turn fully, then construct its public SSE response.
+      operationId: create_turn
       parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Session Id
       - name: Idempotency-Key
         in: header
-        required: false
+        required: true
         schema:
-          anyOf:
-          - type: string
-            maxLength: 128
-          - type: 'null'
+          type: string
+          minLength: 1
+          maxLength: 128
           title: Idempotency-Key
       - name: Authorization
         in: header
@@ -51,46 +57,124 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ChatRequest'
+              $ref: '#/components/schemas/CreateTurnRequest'
       responses:
         '200':
-          description: AI SDK UI 7 v1 UIMessage SSE stream
+          description: AI SDK UI v1 UIMessage SSE stream
           content:
+            application/json:
+              schema: {}
             text/event-stream:
-              itemSchema:
-                type: object
-                properties:
-                  data:
-                    type: string
-                  event:
-                    type: string
-                  id:
-                    type: string
-                  retry:
-                    type: integer
-                    minimum: 0
-          headers:
-            x-vercel-ai-ui-message-stream:
-              description: AI SDK UI message stream protocol version
               schema:
                 type: string
-                const: v1
-        '400':
-          description: Invalid attachment reference
+              x-event-data-schema:
+                $ref: '#/components/schemas/FleetUIMessageChunk'
         '404':
           description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Turn conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Turn unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Turn preparation timed out
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      tags:
+      - sessions
+      summary: List Session Turns
+      operationId: list_session_turns
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Session Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: after_sequence
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            minimum: 0
+          - type: 'null'
+          title: After Sequence
+      - name: Authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      - name: X-Fleet-User-Id
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: X-Fleet-User-Id
+      - name: X-Fleet-Workspace-Id
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: X-Fleet-Workspace-Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionTurnPageResponse'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/ErrorResponse'
   /api/sessions:
     post:
       tags:
       - sessions
       summary: Create Session
-      operationId: create_session_api_sessions_post
+      operationId: create_session
       parameters:
       - name: Authorization
         in: header
@@ -136,23 +220,24 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/ErrorResponse'
     get:
       tags:
       - sessions
       summary: List Sessions
-      operationId: list_sessions_api_sessions_get
+      operationId: list_sessions
       parameters:
       - name: status
         in: query
         required: false
         schema:
           anyOf:
-          - type: string
+          - enum:
+            - active
+            - archived
+            type: string
           - type: 'null'
-          description: active | archived
           title: Status
-        description: active | archived
       - name: search
         in: query
         required: false
@@ -218,13 +303,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/ErrorResponse'
   /api/sessions/{session_id}:
     get:
       tags:
       - sessions
       summary: Get Session
-      operationId: get_session_api_sessions__session_id__get
+      operationId: get_session
       parameters:
       - name: session_id
         in: path
@@ -271,12 +356,12 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/ErrorResponse'
     patch:
       tags:
       - sessions
       summary: Patch Session
-      operationId: patch_session_api_sessions__session_id__patch
+      operationId: update_session
       parameters:
       - name: session_id
         in: path
@@ -329,137 +414,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    delete:
-      tags:
-      - sessions
-      summary: Delete Session
-      description: 'Soft-delete: archive the session.'
-      operationId: delete_session_api_sessions__session_id__delete
-      parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Session Id
-      - name: Authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: X-Fleet-User-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-User-Id
-      - name: X-Fleet-Workspace-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-Workspace-Id
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SessionDetailResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/sessions/{session_id}/turns:
-    get:
-      tags:
-      - sessions
-      summary: List Session Turns
-      operationId: list_session_turns_api_sessions__session_id__turns_get
-      parameters:
-      - name: session_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Session Id
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 200
-          minimum: 1
-          default: 50
-          title: Limit
-      - name: offset
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 0
-          default: 0
-          title: Offset
-      - name: Authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: X-Fleet-User-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-User-Id
-      - name: X-Fleet-Workspace-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-Workspace-Id
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TurnListResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/files:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/attachments:
     post:
       tags:
-      - files
-      summary: Upload File
-      description: Upload one file; return opaque AttachmentRef metadata only.
-      operationId: upload_file_api_files_post
+      - attachments
+      summary: Upload Attachment
+      operationId: create_attachment
       parameters:
       - name: Authorization
         in: header
@@ -492,9 +453,9 @@ paths:
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/Body_upload_file_api_files_post'
+              $ref: '#/components/schemas/Body_create_attachment'
       responses:
-        '200':
+        '201':
           description: Successful Response
           content:
             application/json:
@@ -505,21 +466,21 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/files/{file_id}:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/attachments/{attachment_id}:
     get:
       tags:
-      - files
-      summary: Get File
-      operationId: get_file_api_files__file_id__get
+      - attachments
+      summary: Get Attachment
+      operationId: get_attachment
       parameters:
-      - name: file_id
+      - name: attachment_id
         in: path
         required: true
         schema:
           type: string
           format: uuid
-          title: File Id
+          title: Attachment Id
       - name: Authorization
         in: header
         required: false
@@ -558,13 +519,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/ErrorResponse'
   /api/artifacts/{artifact_id}:
     get:
       tags:
       - artifacts
       summary: Get Artifact
-      operationId: get_artifact_api_artifacts__artifact_id__get
+      operationId: get_artifact
       parameters:
       - name: artifact_id
         in: path
@@ -611,14 +572,63 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/artifacts/{artifact_id}/content:
+    get:
+      tags:
+      - artifacts
+      summary: Download Artifact
+      operationId: download_artifact
+      parameters:
+      - name: artifact_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Artifact Id
+      - name: Authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      - name: X-Fleet-User-Id
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: X-Fleet-User-Id
+      - name: X-Fleet-Workspace-Id
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: X-Fleet-Workspace-Id
+      responses:
+        '200':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/skills:
     get:
       tags:
       - skills
       summary: List Skills
       description: List SkillCards authorized for the caller (metadata only).
-      operationId: list_skills_api_skills_get
+      operationId: list_skills
       parameters:
       - name: q
         in: query
@@ -665,19 +675,19 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/SkillCardResponse'
-                title: Response List Skills Api Skills Get
+                title: Response List Skills
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/ErrorResponse'
   /api/skills/{skill_id}:
     get:
       tags:
       - skills
       summary: Get Skill
-      operationId: get_skill_api_skills__skill_id__get
+      operationId: get_skill
       parameters:
       - name: skill_id
         in: path
@@ -724,21 +734,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/runs/{run_id}/cancel:
-    post:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/runs/{run_id}/cancellation:
+    put:
       tags:
       - runs
-      summary: Cancel Run
-      description: 'Request cancellation of an owned in-flight Run. Idempotent.
-
-
-        Missing or foreign runs return 404 (never 403). Durable cancel intent is
-
-        recorded when a SessionRepository is configured; the in-process registry
-
-        always receives the signal for the local worker.'
-      operationId: cancel_run_api_runs__run_id__cancel_post
+      summary: Request Run Cancellation
+      operationId: request_run_cancellation
       parameters:
       - name: run_id
         in: path
@@ -779,13 +781,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CancelRunResponse'
+                $ref: '#/components/schemas/CancellationResponse'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
     ArtifactResponse:
@@ -804,6 +806,10 @@ components:
           title: Run Id
         kind:
           type: string
+          enum:
+          - text
+          - markdown
+          - json
           title: Kind
         title:
           anyOf:
@@ -858,67 +864,54 @@ components:
       - checksum_sha256
       title: AttachmentResponse
       description: Public attachment metadata — no host or Volume paths.
-    Body_upload_file_api_files_post:
+    Body_create_attachment:
       properties:
-        file:
+        attachment:
           type: string
           contentMediaType: application/octet-stream
-          title: File
+          title: Attachment
       type: object
       required:
-      - file
-      title: Body_upload_file_api_files_post
-    CancelRunResponse:
+      - attachment
+      title: Body_create_attachment
+    CancellationResponse:
       properties:
         run_id:
           type: string
           format: uuid
           title: Run Id
-        cancelled:
-          type: boolean
-          title: Cancelled
-        already_cancelled:
-          type: boolean
-          title: Already Cancelled
+        state:
+          type: string
+          enum:
+          - requested
+          - already_requested
+          - already_terminal
+          title: State
       type: object
       required:
       - run_id
-      - cancelled
-      - already_cancelled
-      title: CancelRunResponse
-    ChatRequest:
+      - state
+      title: CancellationResponse
+    CreateTurnRequest:
       properties:
-        message:
+        text:
           type: string
           maxLength: 100000
           minLength: 1
-          title: Message
-        session_id:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: Session Id
+          title: Text
         attachment_ids:
           items:
             type: string
             format: uuid
           type: array
           title: Attachment Ids
+      additionalProperties: false
       type: object
       required:
-      - message
-      title: ChatRequest
-      description: Body for POST /api/chat.
-    HTTPValidationError:
-      properties:
-        detail:
-          items:
-            $ref: '#/components/schemas/ValidationError'
-          type: array
-          title: Detail
-      type: object
-      title: HTTPValidationError
+      - text
+      title: CreateTurnRequest
+      description: Canonical body for POST /api/sessions/{session_id}/turns.
+    JsonValue: {}
     SessionCreateRequest:
       properties:
         title:
@@ -927,6 +920,7 @@ components:
             maxLength: 255
           - type: 'null'
           title: Title
+      additionalProperties: false
       type: object
       title: SessionCreateRequest
     SessionDetailResponse:
@@ -940,13 +934,13 @@ components:
           title: Title
         status:
           type: string
+          enum:
+          - active
+          - archived
           title: Status
         checkpoint_version:
           type: integer
           title: Checkpoint Version
-        turn_count:
-          type: integer
-          title: Turn Count
         created_at:
           anyOf:
           - type: string
@@ -963,7 +957,6 @@ components:
       - title
       - status
       - checkpoint_version
-      - turn_count
       title: SessionDetailResponse
     SessionListResponse:
       properties:
@@ -1003,9 +996,12 @@ components:
         status:
           anyOf:
           - type: string
+            enum:
+            - active
+            - archived
           - type: 'null'
           title: Status
-          description: active | archived
+      additionalProperties: false
       type: object
       title: SessionPatchRequest
     SessionSummaryResponse:
@@ -1019,6 +1015,9 @@ components:
           title: Title
         status:
           type: string
+          enum:
+          - active
+          - archived
           title: Status
         checkpoint_version:
           type: integer
@@ -1040,6 +1039,22 @@ components:
       - status
       - checkpoint_version
       title: SessionSummaryResponse
+    SessionTurnPageResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/UIMessageResponse'
+          type: array
+          title: Items
+        next_after_sequence:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Next After Sequence
+      type: object
+      required:
+      - items
+      title: SessionTurnPageResponse
     SkillCardResponse:
       properties:
         id:
@@ -1054,12 +1069,19 @@ components:
           title: Description
         scope:
           type: string
+          enum:
+          - system
+          - workspace
           title: Scope
         version:
           type: string
           title: Version
         trust:
           type: string
+          enum:
+          - system
+          - workspace
+          - untrusted
           title: Trust
         affordances:
           items:
@@ -1081,101 +1103,440 @@ components:
       - resources_available
       title: SkillCardResponse
       description: Bounded Skill discovery metadata — no instructions body.
-    TurnListResponse:
+    UIMessagePart:
       properties:
-        items:
-          items:
-            $ref: '#/components/schemas/TurnResponse'
-          type: array
-          title: Items
-        total:
-          type: integer
-          title: Total
-        offset:
-          type: integer
-          title: Offset
-        limit:
-          type: integer
-          title: Limit
-        has_more:
-          type: boolean
-          title: Has More
+        type:
+          type: string
+          enum:
+          - text
+          - reasoning
+          - dynamic-tool
+          - step-start
+          - data-status
+          - data-step
+          - data-rlm-code
+          - data-rlm-output
+          - data-skill
+          - data-attachment
+          - data-warning
+          - data-artifact
+          - data-usage
+          - data-structured-result
+          title: Type
+        text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Text
+        state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: State
+        id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Id
+        toolName:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Toolname
+        toolCallId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Toolcallid
+        input:
+          $ref: '#/components/schemas/JsonValue'
+        output:
+          $ref: '#/components/schemas/JsonValue'
+        errorText:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Errortext
+        providerExecuted:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Providerexecuted
+        data:
+          $ref: '#/components/schemas/JsonValue'
+      additionalProperties: false
       type: object
       required:
-      - items
-      - total
-      - offset
-      - limit
-      - has_more
-      title: TurnListResponse
-    TurnResponse:
+      - type
+      title: UIMessagePart
+      description: Closed reload part vocabulary; variant-specific values remain bounded
+        JSON.
+    UIMessageResponse:
       properties:
         id:
           type: string
-          format: uuid
           title: Id
-        sequence:
-          type: integer
-          title: Sequence
         role:
           type: string
+          enum:
+          - user
+          - assistant
           title: Role
-        content:
-          type: string
-          title: Content
-        status:
-          type: string
-          title: Status
-        run_id:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: Run Id
         parts:
           items:
-            additionalProperties: true
-            type: object
+            $ref: '#/components/schemas/UIMessagePart'
           type: array
           title: Parts
         metadata:
           anyOf:
-          - additionalProperties: true
+          - additionalProperties:
+              $ref: '#/components/schemas/JsonValue'
             type: object
           - type: 'null'
           title: Metadata
       type: object
       required:
       - id
-      - sequence
       - role
-      - content
-      - status
       - parts
-      title: TurnResponse
-    ValidationError:
+      title: UIMessageResponse
+    ErrorResponse:
       properties:
-        loc:
-          items:
-            anyOf:
-            - type: string
-            - type: integer
-          type: array
-          title: Location
-        msg:
+        code:
+          title: Code
           type: string
+        message:
           title: Message
-        type:
           type: string
-          title: Error Type
-        input:
-          title: Input
-        ctx:
-          type: object
-          title: Context
-      type: object
       required:
-      - loc
-      - msg
-      - type
-      title: ValidationError
+      - code
+      - message
+      title: ErrorResponse
+      type: object
+    FleetUIMessageChunk:
+      title: FleetUIMessageChunk
+      oneOf:
+      - type: object
+        properties:
+          type:
+            type: string
+            const: start
+          messageId:
+            type: string
+            format: uuid
+          messageMetadata:
+            type: object
+            additionalProperties: true
+        required:
+        - type
+        - messageId
+        - messageMetadata
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: start-step
+        required:
+        - type
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: finish-step
+        required:
+        - type
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: reasoning-start
+          id:
+            type: string
+        required:
+        - type
+        - id
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: reasoning-delta
+          id:
+            type: string
+          delta:
+            type: string
+        required:
+        - type
+        - id
+        - delta
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: reasoning-end
+          id:
+            type: string
+        required:
+        - type
+        - id
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: data-status
+          id:
+            type: string
+          data: {}
+          transient:
+            type: boolean
+        required:
+        - type
+        - data
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: data-skill
+          id:
+            type: string
+          data: {}
+          transient:
+            type: boolean
+        required:
+        - type
+        - data
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: data-rlm-code
+          id:
+            type: string
+          data: {}
+          transient:
+            type: boolean
+        required:
+        - type
+        - data
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: data-rlm-output
+          id:
+            type: string
+          data: {}
+          transient:
+            type: boolean
+        required:
+        - type
+        - data
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: tool-input-available
+          toolCallId:
+            type: string
+          toolName:
+            type: string
+          input: {}
+          dynamic:
+            type: boolean
+          providerExecuted:
+            type: boolean
+        required:
+        - type
+        - toolCallId
+        - toolName
+        - input
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: tool-output-available
+          toolCallId:
+            type: string
+          output: {}
+          dynamic:
+            type: boolean
+          providerExecuted:
+            type: boolean
+        required:
+        - type
+        - toolCallId
+        - output
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: tool-output-error
+          toolCallId:
+            type: string
+          errorText:
+            type: string
+          dynamic:
+            type: boolean
+          providerExecuted:
+            type: boolean
+        required:
+        - type
+        - toolCallId
+        - errorText
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: data-attachment
+          id:
+            type: string
+          data: {}
+          transient:
+            type: boolean
+        required:
+        - type
+        - data
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: data-warning
+          id:
+            type: string
+          data: {}
+          transient:
+            type: boolean
+        required:
+        - type
+        - data
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: data-artifact
+          id:
+            type: string
+          data: {}
+          transient:
+            type: boolean
+        required:
+        - type
+        - data
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: data-usage
+          id:
+            type: string
+          data: {}
+          transient:
+            type: boolean
+        required:
+        - type
+        - data
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: data-structured-result
+          id:
+            type: string
+          data: {}
+          transient:
+            type: boolean
+        required:
+        - type
+        - data
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: text-start
+          id:
+            type: string
+        required:
+        - type
+        - id
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: text-delta
+          id:
+            type: string
+          delta:
+            type: string
+        required:
+        - type
+        - id
+        - delta
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: text-end
+          id:
+            type: string
+        required:
+        - type
+        - id
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: finish
+          finishReason:
+            type: string
+            enum:
+            - stop
+            - error
+          messageMetadata:
+            type: object
+            additionalProperties: true
+        required:
+        - type
+        - finishReason
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: abort
+          reason:
+            type: string
+        required:
+        - type
+        - reason
+        additionalProperties: false
+      - type: object
+        properties:
+          type:
+            type: string
+            const: error
+          errorText:
+            type: string
+        required:
+        - type
+        - errorText
+        additionalProperties: false
