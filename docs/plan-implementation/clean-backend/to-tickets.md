@@ -1,4 +1,8 @@
-# Fleet RLM clean-backend ticket plan
+# Fleet RLM backend-foundation ticket plan
+
+> Historical ticket record. Paths containing `fleet_rlm_clean` or
+> `clean_backend` show the parallel delivery phase before the completed hard
+> cutover; active paths are canonical `fleet_rlm` and `tests/*/backend`.
 
 ## Delivery rules
 

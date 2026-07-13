@@ -1,7 +1,7 @@
 [project]
 name = "fleet-rlm"
 version = "0.6.2"
-description = "Recursive Language Models with DSPy + Daytona and an integrated Web UI for secure long-context code execution"
+description = "RLM-native FastAPI backend with DSPy and Daytona"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = "MIT"
@@ -30,33 +30,18 @@ dependencies = [
     # large-input handling. Pinned exactly: pre-release, and the runtime relies
     # on RLM internals that are private API.
     "dspy==3.3.0b1",
-    # Core orchestration and CLI/runtime ergonomics.
+    # Sandboxed execution.
     "daytona==0.192.0",
-    "prompt-toolkit>=3.0.50,<4",
-    "rich>=15.0.0,<16",
-    "structlog>=25.5.0,<26",
-    "typer>=0.26.8,<1",
-    # Data, document, and persistence layers.
+    # Persistence and migrations.
     "aiosqlite>=0.20.0",
+    "alembic>=1.18.5,<2",
     "asyncpg>=0.31.0,<1",
-    # Core markitdown only. PDF ingestion falls back to `pypdf` in
-    # `runtime/content/ingestion.py::read_document_content` when markitdown
-    # returns no text, so the `[all]` extra (speechrecognition, pdfminer-six,
-    # pdfplumber, mammoth, python-pptx, openpyxl, xlrd, pydub,
-    # youtube-transcript-api, lxml, olefile, azure-ai-documentintelligence,
-    # azure-identity) is unused weight.
-    "markitdown>=0.1.6,<1",
     "psycopg>=3.3.4,<4",
     "pydantic>=2.13.4,<3",
     "pydantic-settings>=2.14.2,<3",
-    "pypdf>=6.14.2",
-    # Capped <49 because mlflow==3.14.0 declares cryptography<49; 48.x is the
-    # patched floor and satisfies both. Drop the cap once mlflow relaxes it.
-    "cryptography>=48.0.1,<49",
     "python-dotenv>=1.2.2",
     "pyyaml>=6.0.3,<7",
     "sqlalchemy[asyncio]>=2.0.51,<3",
-    "sqlmodel>=0.0.39",
     "tomli>=2.4.1; python_version < '3.11'",
     # Web API surface. Pinned exactly to 0.139.0 (latest PyPI release, Jul 1
     # 2026) for reproducible installs; bump deliberately when a newer release is
@@ -64,14 +49,6 @@ dependencies = [
     "fastapi[standard]==0.139.0",
     "joserfc>=1.7.2",
     "uvicorn>=0.47.0,<1",
-    # Observability and external services.
-    # boto3 intentionally not a direct dep: zero imports in src/; litellm (DSPy's
-    # transitive dep) lazily imports boto3 only for Bedrock, which is not
-    # configured here.
-    "mlflow[mcp]==3.14.0",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.42.1",
-    "posthog>=7.21.0",
-    "fastapi-cloud-cli>=0.22.0",
 ]
 
 [project.urls]
@@ -81,8 +58,8 @@ Issues = "https://github.com/qredence/fleet-rlm/issues"
 Documentation = "https://fleet-rlm.readthedocs.io/"
 
 [project.scripts]
-fleet = "fleet_rlm.cli.main:main"
-fleet-rlm = "fleet_rlm.cli.fleet_cli:main"
+fleet = "fleet_rlm.cli.main:fleet_main"
+fleet-rlm = "fleet_rlm.cli.main:fleet_rlm_main"
 
 [project.optional-dependencies]
 # Keep this list mirrored with [dependency-groups].dev for packaged installs
@@ -97,13 +74,8 @@ dev = [
     "ty>=0.0.57",
 ]
 server = [
-    "alembic>=1.18.5,<2",
     "psycopg[binary]>=3.3.4,<4",
-    "scalar-fastapi>=1.8.2,<2",
     "uvicorn[standard]>=0.47.0,<1",
-]
-datasets = [
-    "datasets>=5.0.0",
 ]
 
 [build-system]
@@ -111,7 +83,7 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.fastapi]
-entrypoint = "fleet_rlm.api.main:app"
+entrypoint = "fleet_rlm.main:app"
 
 [dependency-groups]
 # Mirrors the published dev extra for local workspace management via uv.
@@ -159,21 +131,12 @@ include = ["fleet_rlm*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-"fleet_rlm.integrations.config" = ["*.yaml", "*.yml"]
-"fleet_rlm" = ["py.typed"]
-"fleet_rlm_clean" = [
+"fleet_rlm" = [
     "py.typed",
     "skills/skills/README.md",
     "skills/skills/**/SKILL.md",
     "skills/skills/**/*.md",
     "skills/skills/**/*.py",
-]
-"fleet_rlm.ui" = ["dist/**/*", "dist/*"]
-"fleet_rlm.scaffold" = [
-    "skills/README.md",
-    "skills/**/SKILL.md",
-    "skills/**/*.md",
-    "skills/**/*.py",
 ]
 
 [tool.pytest.ini_options]
@@ -302,7 +265,7 @@ builtins-ignorelist = []
 convention = "google"  # Use Google-style docstrings
 
 [tool.ruff.lint.isort]
-known-first-party = ["fleet_rlm", "fleet_rlm_clean"]
+known-first-party = ["fleet_rlm"]
 known-third-party = ["dspy", "daytona"]
 force-single-line = false
 
@@ -328,7 +291,7 @@ ignore = ["DEP001", "DEP002"]
 # Mark dev extra as development dependencies
 pep621_dev_dependency_groups = ["dev"]
 # Known first-party modules
-known_first_party = ["fleet_rlm", "fleet_rlm_clean"]
+known_first_party = ["fleet_rlm"]
 
 [tool.deptry.package_module_name_map]
 pydantic-settings = "pydantic_settings"

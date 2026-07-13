@@ -177,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
         base = args.server_url.rstrip("/")
         probes = [
             probe_url(f"{base}/health"),
-            probe_url(f"{base}/api/v1/runtime/status"),
+            probe_url(f"{base}/openapi.json"),
         ]
 
     report = {

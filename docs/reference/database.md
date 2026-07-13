@@ -1,154 +1,18 @@
-# Database Architecture
+# Database
 
-Fleet-RLM uses Neon/Postgres as the canonical durable data store for product state.
-As of migration `0010_target_postgres_schema`, the runtime persistence contract is
-tenant + workspace scoped, and all new primary keys are generated with `app.uuid_v7()`.
-
-## Locations
-
-| Component | Location |
-| --- | --- |
-| Engine and session lifecycle | `src/fleet_rlm/db/engine.py` |
-| Repository boundary | `src/fleet_rlm/db/repos/fleet.py` (`FleetRepository`) |
-| Shared repository context helpers | `src/fleet_rlm/db/repos/shared.py` |
-| SQLAlchemy models | `src/fleet_rlm/db/models/` (domain modules + registry) |
-| Typed request DTOs | Domain-specific dataclasses in `src/fleet_rlm/db/repos/*.py` |
-| Alembic migrations | `migrations/versions/` (registry import via `fleet_rlm.db.models`) |
-| Dual-backend port | `src/fleet_rlm/integrations/persistence_protocol.py` |
-| Local SQLite backend | `src/fleet_rlm/integrations/local_store.py` |
-
-## Roadmap
-
-[Phase 8.5 — Persistence DB](../plan-implementation/phases/08.5-persistence-db/README.md)
-moved ownership to `src/fleet_rlm/db/` (domain `models/` + `repos/`, one Alembic
-registry) and removed the flat `integrations/database/` package. Postgres remains
-the system of record; LocalStore stays a limited dual backend and is not required
-to match Neon capability.
-
-## Schema Baseline
-
-`0010_target_postgres_schema` is a clean-break baseline migration:
-
-- Drops retired `public` objects (except `alembic_version`) and recreates schema from model metadata.
-- Installs `app.uuid_v7()` with compatibility fallback:
-  - Uses native `uuidv7()` when available.
-  - Falls back to `uuid_generate_v7()` when available.
-  - Falls back to `gen_random_uuid()` if neither v7 function exists.
-- Reapplies baseline RLS policies for tenant/workspace-scoped tables.
-
-This migration is intentionally destructive and is designed for disposable/dev databases and clean branch cutovers.
-
-## Bounded Context Tables
-
-### Identity and workspace
-
-- `tenants`
-- `users`
-- `tenant_memberships`
-- `workspaces`
-- `workspace_memberships`
-- `workspace_runtime_settings`
-
-### Runtime and session history
-
-- `chat_sessions`
-- `chat_turns`
-- `execution_runs`
-- `execution_steps`
-- `execution_events`
-- `session_state_snapshots`
-
-### Sandbox, volumes, and artifacts
-
-- `sandbox_sessions`
-- `workspace_volumes`
-- `volume_objects`
-- `artifacts`
-
-### Memory
-
-- `memory_items`
-- `memory_links`
-
-### Optimization and datasets
-
-- `optimization_modules`
-- `datasets`
-- `dataset_examples`
-- `optimization_runs`
-- `evaluation_results`
-- `prompt_snapshots`
-- `program_versions`
-
-### Trace feedback
-
-- `external_traces`
-- `trace_feedback`
-
-### Jobs and billing
-
-- `jobs`
-- `outbox_events`
-- `tenant_subscriptions`
-
-## Request Context and RLS
-
-Repository operations set transaction-local request context before tenant/workspace data access:
-
-- `app.tenant_id`
-- `app.user_id`
-- `app.workspace_id`
-
-RLS policies are enabled and forced on tenant/workspace scoped tables and evaluate
-the context above. `app.workspace_id` is optional at query time; repository helpers
-auto-resolve a default workspace when callers provide only `tenant_id`.
-
-`FleetRepository` and shared repository helpers own this context setup through
-`set_config(...)`. Do not bypass that boundary from routers, runtime services, or browser-facing
-code when reading or writing tenant/workspace-scoped product data.
-
-## Neon Security Hardening
-
-The Neon hardening migration moves extension ownership and function lookup out of unsafe defaults:
-
-- `pgcrypto` and `uuid-ossp` are relocated to the `app` schema when needed.
-- `app.uuid_v7()` and `app.set_updated_at()` get explicit `search_path` settings.
-- Managed Neon helper `public.show_db_tree()` is hardened when present.
-
-Keep future database functions schema-qualified or explicitly pinned to a safe `search_path`; do
-not rely on role-mutable lookup paths for security-sensitive helpers.
-
-## Environment
-
-| Variable | Description |
-| --- | --- |
-| `DATABASE_URL` | Pooled Postgres connection string for the application runtime (required when database-backed runtime is enabled) |
-| `DATABASE_ADMIN_URL` | Direct Postgres connection string for Alembic, schema management, and admin/debug scripts. Falls back to `DATABASE_URL` when unset. |
-| `DATABASE_REQUIRED` | Enforces startup failure when database is unavailable |
-
-## Operational Commands
+Fleet RLM starts from an empty database and one Alembic baseline under
+`migrations/versions/`.
 
 ```bash
-# Apply migrations
-DATABASE_ADMIN_URL=postgresql://... uv run alembic upgrade head
-
-# Apply migrations through the maintained helper script
-DATABASE_ADMIN_URL=postgresql://... uv run python scripts/db_init.py
-
-# Run a repository-level Postgres smoke workflow against a disposable database
-DATABASE_URL=postgresql://... uv run python scripts/db_smoke.py
-
-# Generate/validate OpenAPI after persistence-facing API changes
-uv run python scripts/openapi_tools.py generate
-uv run python scripts/openapi_tools.py validate
-
-# DB integration validation (requires disposable DATABASE_URL)
-uv run pytest -q tests/integration/test_db_migrations.py tests/integration/test_db_repository.py
+export FLEET_DATABASE_URL='postgresql+asyncpg://...'
+uv run python scripts/db_init.py
+uv run alembic check
 ```
 
-## Notes
+The canonical tables are `fleet_users`, `fleet_workspaces`, `fleet_sessions`,
+`fleet_turns`, `fleet_runs`, `fleet_session_checkpoints`,
+`fleet_sandbox_bindings`, `fleet_attachments`, `fleet_artifacts`, and
+`fleet_skills`. SQLAlchemy models live in `fleet_rlm.persistence.models`.
 
-- SQLite sidecar persistence remains available only for local retired/import workflows; Postgres is the source of truth for durable product state.
-- Large file bytes remain in Daytona volumes/object storage; Postgres stores metadata and linkable indexes.
-- Neon guidance for this repo is: pooled URL for runtime traffic, direct non-pooler URL for migrations/admin work, and disposable branches for destructive validation before touching long-lived branches.
-- The maintained helper-script inventory for DB and operator workflows lives in [`../../scripts/README.md`](../../scripts/README.md).
+Production startup assumes migrations have already run. Test and offline SQLite
+helpers may call `create_tables` explicitly.

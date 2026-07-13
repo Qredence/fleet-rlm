@@ -1,169 +1,371 @@
-"""Direct RLM runner behind the ExecutionBackend seam."""
+"""Execute one recursive DSPy turn and stream non-terminal RuntimeEvents."""
 
 from __future__ import annotations
 
 import asyncio
-import inspect
-import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any
+import time
+from collections.abc import AsyncIterator, Callable, Sequence
+from typing import Any, Protocol, Self
 
-from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext
+import dspy
+
+from fleet_rlm.observability.exporters import safe_export
+from fleet_rlm.observability.record import TurnTrace, apply_event_to_trace
+from fleet_rlm.rlm.cancel import get_run_cancel_registry
+from fleet_rlm.rlm.context import RLMTurnContext
 from fleet_rlm.rlm.errors import (
-    MISSING_INTERPRETER,
-    MISSING_PLANNER_LM,
-    RLM_EXECUTION_FAILED,
-    TURN_CANCELLED,
-    DirectRLMErrorDetail,
-    direct_rlm_error_event,
-    direct_rlm_status_event,
+    RLMBudgetError,
+    TurnCancelled,
+    TurnTerminalError,
+    TurnTimeout,
 )
-from fleet_rlm.rlm.execution import DirectRLMTurnExecutor, extract_direct_rlm_response, run_direct_rlm_turn
-from fleet_rlm.rlm.inputs import build_direct_rlm_turn_inputs, history_turn_count
-from fleet_rlm.rlm.trajectory import build_direct_rlm_done_event, iter_trajectory_runtime_events
-from fleet_rlm.runtime.agent.runtime_helpers import append_turn_to_history
-from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
-
-logger = logging.getLogger(__name__)
-
-CancelCheck = Callable[[], bool | Awaitable[bool]]
+from fleet_rlm.rlm.events import EventRecorder, RuntimeEvent, RuntimeEventKind
+from fleet_rlm.rlm.factory import RLMFactory
+from fleet_rlm.rlm.inputs import build_rlm_input_kwargs
+from fleet_rlm.rlm.outcome import TerminalStatus, TurnExecutionOutcome
+from fleet_rlm.rlm.sanitize import sanitize_public_error
 
 
-class DirectRLMRunner:
-    """Direct-RLM backend used by ``stream_turn()`` when opted in.
+class RLMFactoryLike(Protocol):
+    def create(
+        self,
+        *,
+        models: Any,
+        budget: Any,
+        interpreter: Any,
+        tools: Sequence[Callable[..., Any]] | None = None,
+        signature: Any = None,
+        verbose: bool = False,
+    ) -> Any: ...
 
-    Phase 2C runs one real ``RLMTurnSignature`` turn through the acquired
-    Daytona interpreter when available. Unit tests can inject ``stream_override``
-    or ``turn_executor`` without live credentials.
-    """
+
+class TurnEventStream:
+    """Async iterator of non-terminal events; ``outcome`` after the stream ends."""
+
+    def __init__(
+        self,
+        agen: AsyncIterator[RuntimeEvent],
+        *,
+        outcome: TurnExecutionOutcome | None = None,
+        outcome_factory: Callable[[], TurnExecutionOutcome] | None = None,
+    ) -> None:
+        self._agen = agen.__aiter__()
+        self._outcome = outcome
+        self._outcome_factory = outcome_factory
+        self._finished = False
+
+    @property
+    def outcome(self) -> TurnExecutionOutcome | None:
+        return self._outcome
+
+    def __aiter__(self) -> Self:
+        return self
+
+    async def __anext__(self) -> RuntimeEvent:
+        try:
+            return await self._agen.__anext__()
+        except StopAsyncIteration:
+            if not self._finished:
+                self._finished = True
+                if self._outcome is None and self._outcome_factory is not None:
+                    self._outcome = self._outcome_factory()
+            raise
+
+
+def _prediction_text(prediction: Any) -> str:
+    if prediction is None:
+        return ""
+    answer = getattr(prediction, "answer", None)
+    if answer is not None:
+        return str(answer)
+    if isinstance(prediction, dict) and "answer" in prediction:
+        return str(prediction["answer"])
+    return str(prediction)
+
+
+def _usage_payload(prediction: Any) -> dict[str, Any]:
+    getter = getattr(prediction, "get_lm_usage", None)
+    if callable(getter):
+        try:
+            usage = getter()
+        except Exception:  # noqa: BLE001 - usage is best-effort for public events
+            usage = None
+        if usage:
+            return dict(usage) if isinstance(usage, dict) else {"usage": usage}
+    return {}
+
+
+class HostEventSource(Protocol):
+    """Internal seam: host tool ledgers that emit safe public event dicts."""
+
+    def drain_public_events(self) -> list[dict[str, Any]]: ...
+
+
+def _map_host_ledger_item(
+    item: dict[str, Any],
+) -> tuple[RuntimeEventKind, dict[str, Any]] | None:
+    """Map one host ledger dict to a public RuntimeEvent kind + payload."""
+    kind = item.get("event_kind")
+    if kind == "attachment.read":
+        return (
+            RuntimeEventKind.ATTACHMENT_READ,
+            {
+                "attachment_id": str(item.get("attachment_id", "")),
+                "filename": str(item.get("filename", "")),
+                "byte_size": int(item.get("byte_size") or 0),
+            },
+        )
+    if kind in (None, "skill.loaded") and item.get("skill_id"):
+        return (
+            RuntimeEventKind.SKILL_LOADED,
+            {
+                "skill_id": str(item.get("skill_id", "")),
+                "name": str(item.get("name", "")),
+                "version": str(item.get("version", "")),
+                "trust": str(item.get("trust", "")),
+            },
+        )
+    return None
+
+
+def _iter_host_event_sources(context: RLMTurnContext) -> list[Any]:
+    sources: list[Any] = []
+    for attr in ("skill_tool_host", "file_tool_host"):
+        host = getattr(context, attr, None)
+        if host is not None and callable(getattr(host, "drain_public_events", None)):
+            sources.append(host)
+    return sources
+
+
+def _drain_host_public_events(
+    context: RLMTurnContext,
+) -> list[tuple[RuntimeEventKind, dict[str, Any]]]:
+    """Collect safe host-tool events for SSE (never bodies/paths)."""
+    out: list[tuple[RuntimeEventKind, dict[str, Any]]] = []
+    for host in _iter_host_event_sources(context):
+        try:
+            for item in host.drain_public_events() or []:
+                if not isinstance(item, dict):
+                    continue
+                mapped = _map_host_ledger_item(item)
+                if mapped is not None:
+                    out.append(mapped)
+        except Exception:  # noqa: BLE001 - host ledger must not break the public stream
+            continue
+    return out
+
+
+async def _raise_if_cancelled(run_id: Any, *, cancel_probe: Any = None) -> None:
+    registry = get_run_cancel_registry()
+    if registry.is_cancelled(run_id):
+        raise TurnCancelled()
+    if cancel_probe is not None:
+        requested = await cancel_probe(run_id)
+        if requested:
+            registry.request_cancel(run_id)
+            raise TurnCancelled()
+
+
+def _terminal_status_for(exc: BaseException) -> TerminalStatus:
+    if isinstance(exc, TurnTerminalError):
+        status = exc.status
+        mapping: dict[str, TerminalStatus] = {
+            "completed": "completed",
+            "cancelled": "cancelled",
+            "timeout": "timeout",
+            "budget_exhausted": "budget_exhausted",
+            "failed": "failed",
+        }
+        if status in mapping:
+            return mapping[status]
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+        return "timeout"
+    if isinstance(exc, RLMBudgetError):
+        return "budget_exhausted"
+    name = type(exc).__name__.lower()
+    if "budget" in name or "max_llm" in str(exc).lower() or "max_iter" in str(exc).lower():
+        return "budget_exhausted"
+    if "cancel" in name:
+        return "cancelled"
+    if "timeout" in name:
+        return "timeout"
+    return "failed"
+
+
+class RLMRunner:
+    """Deep module: one turn in, non-terminal RuntimeEvents + TurnExecutionOutcome."""
 
     def __init__(
         self,
         *,
-        stream_override: Callable[..., AsyncIterator[RuntimeEvent]] | None = None,
-        turn_executor: DirectRLMTurnExecutor | None = None,
+        factory: RLMFactoryLike | None = None,
+        turn_exporter: Any | None = None,
     ) -> None:
-        self._stream_override = stream_override
-        self._turn_executor = turn_executor
+        self._factory: RLMFactoryLike = factory if factory is not None else RLMFactory()
+        self._turn_exporter = turn_exporter
 
-    async def stream(
-        self,
-        *,
-        ctx: ChatExecutionContext,
-        message: str,
-        agent_runtime: Any | None = None,
-        cancel_check: CancelCheck | None = None,
-    ) -> AsyncIterator[RuntimeEvent]:
-        """Stream one direct-RLM turn as canonical RuntimeEvent objects."""
-        if cancel_check is None:
+    def stream(self, context: RLMTurnContext) -> TurnEventStream:
+        """Run one turn. Yields non-terminal events only; outcome on the stream handle."""
+        outcome_holder: dict[str, TurnExecutionOutcome | None] = {"value": None}
 
-            def _default_cancel_check() -> bool:
-                return bool(ctx.cancel_flag.get("cancelled", False))
-
-            resolved_cancel_check = _default_cancel_check
-        else:
-            resolved_cancel_check = cancel_check
-
-        if self._stream_override is not None:
-            async for event in self._stream_override(
-                ctx=ctx,
-                message=message,
-                agent_runtime=agent_runtime,
-                cancel_check=resolved_cancel_check,
-            ):
-                yield event
-            return
-
-        async for event in self._stream_turn_events(
-            ctx=ctx,
-            message=message,
-            agent_runtime=agent_runtime,
-            cancel_check=resolved_cancel_check,
-        ):
-            yield event
-
-    async def _stream_turn_events(
-        self,
-        *,
-        ctx: ChatExecutionContext,
-        message: str,
-        agent_runtime: Any | None,
-        cancel_check: CancelCheck | None,
-    ) -> AsyncIterator[RuntimeEvent]:
-        yield direct_rlm_status_event("Starting direct RLM turn")
-
-        if await _is_cancelled(cancel_check):
-            yield direct_rlm_error_event(TURN_CANCELLED)
-            return
-
-        missing = _missing_dependencies(ctx)
-        if missing is not None:
-            yield direct_rlm_error_event(missing)
-            return
-
-        interpreter = getattr(agent_runtime, "interpreter", None) if agent_runtime is not None else None
-        if interpreter is None:
-            yield direct_rlm_error_event(MISSING_INTERPRETER)
-            return
-
-        yield RuntimeEvent.turn_inputs(build_direct_rlm_turn_inputs(ctx, message, agent_runtime))
-
-        yield direct_rlm_status_event("Running direct RLM analysis", phase="direct_rlm_execute")
-
-        try:
-            prediction = await asyncio.to_thread(
-                self._turn_executor or run_direct_rlm_turn,
-                ctx=ctx,
-                message=message,
-                interpreter=interpreter,
-                agent_runtime=agent_runtime,
+        async def _agen() -> AsyncIterator[RuntimeEvent]:
+            recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
+            started = time.perf_counter()
+            registry = get_run_cancel_registry()
+            registry.bind(
+                context.run_id,
+                user_id=context.user_id,
+                workspace_id=context.workspace_id,
+                session_id=context.session_id,
             )
-        except Exception as exc:
-            logger.exception("direct_rlm turn failed")
-            yield direct_rlm_error_event(RLM_EXECUTION_FAILED, error=str(exc))
-            return
-
-        if await _is_cancelled(cancel_check):
-            yield direct_rlm_error_event(TURN_CANCELLED)
-            return
-
-        trajectory_raw = getattr(prediction, "trajectory", None)
-        for event in iter_trajectory_runtime_events(trajectory_raw):
-            yield event
-
-        response = extract_direct_rlm_response(prediction)
-        if response:
-            yield RuntimeEvent(kind=RuntimeEventKind.TEXT, text=response)
-
-        history = getattr(agent_runtime, "history", None)
-        if agent_runtime is not None and history is not None:
-            agent_runtime.history = append_turn_to_history(
-                history,
-                user_message=message,
-                response=response,
-                history_max_turns=getattr(agent_runtime, "history_max_turns", None),
+            lease = context.lease
+            trace = TurnTrace(
+                run_id=context.run_id,
+                session_id=context.session_id,
+                user_id=context.user_id,
+                workspace_id=context.workspace_id,
+                sandbox_id=getattr(lease, "sandbox_id", None),
+                volume_id=getattr(lease, "volume_id", None),
+                mount_path=getattr(lease, "mount_path", None),
             )
 
-        yield build_direct_rlm_done_event(
-            response=response,
-            trajectory_raw=trajectory_raw,
-            history_turns=history_turn_count(agent_runtime),
+            def emit(kind: RuntimeEventKind, payload: dict[str, Any] | None = None) -> RuntimeEvent:
+                event = recorder.emit(kind, payload)
+                try:
+                    apply_event_to_trace(trace, kind.value, dict(event.payload))
+                except Exception:  # noqa: BLE001
+                    pass
+                return event
+
+            try:
+                yield emit(
+                    RuntimeEventKind.RUN_STARTED,
+                    {
+                        "user_id": str(context.user_id),
+                        "workspace_id": str(context.workspace_id),
+                    },
+                )
+                yield emit(RuntimeEventKind.STATUS, {"message": "running"})
+
+                await _raise_if_cancelled(context.run_id, cancel_probe=context.cancel_probe)
+
+                rlm = self._factory.create(
+                    models=context.models,
+                    budget=context.budget,
+                    interpreter=context.lease.interpreter,
+                    tools=list(context.tools) if context.tools else None,
+                )
+
+                wall = max(1, int(getattr(context.budget, "max_wall_seconds", 300) or 300))
+                try:
+                    prediction = await asyncio.wait_for(
+                        self._execute_rlm(rlm, context),
+                        timeout=wall,
+                    )
+                except TimeoutError as exc:
+                    raise TurnTimeout() from exc
+
+                await _raise_if_cancelled(context.run_id, cancel_probe=context.cancel_probe)
+                text = _prediction_text(prediction)
+
+                if text:
+                    yield emit(RuntimeEventKind.TEXT_DELTA, {"text": text})
+                    yield emit(RuntimeEventKind.TEXT_COMPLETED, {"text": text})
+
+                for kind, payload in _drain_host_public_events(context):
+                    yield emit(kind, payload)
+
+                usage = _usage_payload(prediction)
+                yield emit(RuntimeEventKind.USAGE, {"usage": usage})
+
+                artifact_candidates = ()
+                file_host = getattr(context, "file_tool_host", None)
+                drain_candidates = getattr(file_host, "drain_artifact_candidates", None)
+                if callable(drain_candidates):
+                    artifact_candidates = tuple(drain_candidates())
+
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                outcome_holder["value"] = TurnExecutionOutcome(
+                    terminal_status="completed",
+                    assistant_text=text,
+                    usage=usage,
+                    artifact_candidates=artifact_candidates,
+                    duration_ms=duration_ms,
+                )
+            except asyncio.CancelledError:
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                outcome_holder["value"] = TurnExecutionOutcome(
+                    terminal_status="cancelled",
+                    public_error_message="Turn cancelled",
+                    duration_ms=duration_ms,
+                )
+                raise
+            except Exception as exc:  # noqa: BLE001 - map to outcome; never emit public terminal
+                for kind, payload in _drain_host_public_events(context):
+                    yield emit(kind, payload)
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                outcome_holder["value"] = TurnExecutionOutcome(
+                    terminal_status=_terminal_status_for(exc),
+                    public_error_message=sanitize_public_error(exc),
+                    duration_ms=duration_ms,
+                )
+            finally:
+                registry.mark_terminal(context.run_id)
+                if outcome_holder["value"] is None:
+                    outcome_holder["value"] = TurnExecutionOutcome(
+                        terminal_status="failed",
+                        public_error_message="Turn ended without outcome",
+                    )
+                outcome = outcome_holder["value"]
+                trace.terminal_status = outcome.terminal_status
+                if outcome.usage:
+                    trace.usage = dict(outcome.usage)
+                if outcome.duration_ms is not None:
+                    trace.duration_ms = outcome.duration_ms
+                if outcome.public_error_message:
+                    trace.error_message = outcome.public_error_message
+                safe_export(self._turn_exporter, trace)
+
+        return TurnEventStream(
+            _agen(),
+            outcome_factory=lambda: (
+                outcome_holder["value"]
+                or TurnExecutionOutcome(
+                    terminal_status="failed",
+                    public_error_message="Turn ended without outcome",
+                )
+            ),
         )
 
+    async def _execute_rlm(self, rlm: Any, context: RLMTurnContext) -> Any:
+        """Apply root LM via scoped DSPy context; run off the event loop when sync."""
+        root_lm = context.models.root_lm
+        call_kwargs = build_rlm_input_kwargs(
+            request=context.request,
+            history=context.history,
+            session_summary=context.session_summary,
+            skill_cards=context.skill_cards,
+            attachments=context.attachments,
+        )
+        await _raise_if_cancelled(context.run_id, cancel_probe=context.cancel_probe)
 
-def _missing_dependencies(ctx: ChatExecutionContext) -> DirectRLMErrorDetail | None:
-    if ctx.prepared.planner_lm is None:
-        return MISSING_PLANNER_LM
-    return None
+        aforward = getattr(rlm, "aforward", None)
+        if callable(aforward):
 
+            async def _async_call() -> Any:
+                with dspy.settings.context(lm=root_lm):
+                    return await aforward(**call_kwargs)
 
-async def _is_cancelled(cancel_check: CancelCheck | None) -> bool:
-    if cancel_check is None:
-        return False
-    result = cancel_check()
-    if inspect.isawaitable(result):
-        return bool(await result)
-    return bool(result)
+            return await _async_call()
 
+        def _sync_call() -> Any:
+            with dspy.settings.context(lm=root_lm):
+                if callable(rlm):
+                    return rlm(**call_kwargs)
+                forward = getattr(rlm, "forward", None)
+                if callable(forward):
+                    return forward(**call_kwargs)
+                msg = "RLM module is not callable"
+                raise TypeError(msg)
 
-__all__ = ["CancelCheck", "DirectRLMRunner"]
+        return await asyncio.to_thread(_sync_call)

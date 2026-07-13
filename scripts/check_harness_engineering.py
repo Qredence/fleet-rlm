@@ -20,33 +20,12 @@ REQUIRED_HARNESS_DOCS = (
     "docs/agent-harness/drift-control.md",
 )
 DOC_INDEXES = ("docs/README.md", "docs/index.md", "docs/SUMMARY.md")
-GENERATED_ARTIFACTS = (
-    "openapi.yaml",
-    "src/frontend/src/lib/rlm-api/generated/openapi.ts",
-    "src/frontend/openapi/fleet-rlm.openapi.yaml",
-    "src/frontend/src/routeTree.gen.ts",
-    "src/frontend/dist",
-    "src/fleet_rlm/ui/dist",
-)
-GENERATED_COMMANDS = ("make api-sync", "make api-check", "make build-ui")
+GENERATED_ARTIFACTS = ("openapi.yaml",)
+GENERATED_COMMANDS = ("make api-sync", "make api-check")
 HEAVY_IMPORTS = ("dspy", "mlflow", "posthog", "daytona")
 CONFIG_MODULES = (
     "src/fleet_rlm/__init__.py",
-    "src/fleet_rlm/integrations/config/__init__.py",
-    "src/fleet_rlm/integrations/config/settings.py",
-)
-FRONTEND_SHARED_DIRS = (
-    "src/frontend/src/components/ui",
-    "src/frontend/src/components/ai-elements",
-    "src/frontend/src/components/product",
-)
-FRONTEND_FORBIDDEN_IMPORTS = (
-    "@/features/",
-    "@/routes/",
-    "../features/",
-    "../../features/",
-    "../routes/",
-    "../../routes/",
+    "src/fleet_rlm/config.py",
 )
 
 
@@ -75,7 +54,6 @@ class HarnessChecker:
         self._check_generated_artifact_controls()
         self._check_script_inventory()
         self._check_backend_import_boundaries()
-        self._check_frontend_import_boundaries()
         return self.errors
 
     def _check_root_agents_budget(self) -> None:
@@ -183,20 +161,6 @@ class HarnessChecker:
             for module in self._extract_import_roots(path):
                 if module in HEAVY_IMPORTS:
                     self._error(rel_path, f"config/package-root module imports heavy runtime provider: {module}")
-
-    def _check_frontend_import_boundaries(self) -> None:
-        for rel_dir in FRONTEND_SHARED_DIRS:
-            root = self.repo_root / rel_dir
-            if not root.is_dir():
-                continue
-            for path in sorted(root.rglob("*")):
-                if path.suffix not in {".ts", ".tsx"}:
-                    continue
-                content = path.read_text(encoding="utf-8", errors="ignore")
-                for forbidden in FRONTEND_FORBIDDEN_IMPORTS:
-                    if forbidden in content:
-                        rel_path = path.relative_to(self.repo_root).as_posix()
-                        self._error(rel_path, f"shared frontend component imports forbidden boundary: {forbidden}")
 
     def _parse_toml(self, path: Path) -> None:
         rel_path = path.relative_to(self.repo_root).as_posix()

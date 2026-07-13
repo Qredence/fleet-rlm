@@ -1,13 +1,12 @@
-# Fleet RLM clean-backend plan
+# Fleet RLM backend foundation plan
 
-This directory is the canonical planning package for rebuilding the Fleet RLM backend from an empty `src/fleet_rlm/` tree.
+This directory preserves the accepted plan and evidence used to rebuild the
+Fleet RLM backend. The result now lives at canonical `src/fleet_rlm/`.
 
 It does not preserve migration-era runtime parity, WebSocket transcript compatibility, backend-selection machinery, or the `DirectRLMRunner` name. The existing parent-directory dossiers remain historical migration evidence; this clean-backend package is the source of truth for a greenfield implementation.
 
-**Delivery path until cutover:** implement tickets in the parallel package
-`src/fleet_rlm_clean/` so the live `src/fleet_rlm/` backend stays untouched.
-Cutover replaces or retires the migration package only after foundation
-evidence passes.
+Pre-cutover file paths in the detailed tickets are historical evidence. Active
+implementation and tests use `src/fleet_rlm/` and `tests/*/backend/`.
 
 ## Product kernel
 
@@ -43,12 +42,12 @@ docs/plan-implementation/clean-backend/
 └── context7-contracts.md
 ```
 
-- `wayfinder.md`: navigation, priority, ownership, and decision rules.
-- `to-spec.md`: product and behavioral specification.
-- `codebase-design.md`: source tree, module ownership, interfaces, and data flow.
-- `to-tickets.md`: ordered TDD delivery plan and phase gates.
-- `code-review.md`: review rubric, severity policy, and blocker ownership.
-- `context7-contracts.md`: framework facts verified against current official DSPy, Daytona, and FastAPI documentation.
+- [Wayfinder](wayfinder.md): navigation, priority, ownership, and decision rules.
+- [Product specification](to-spec.md): product and behavioral requirements.
+- [Codebase design](codebase-design.md): source tree, module ownership, interfaces, and data flow.
+- [Ticket plan](to-tickets.md): ordered TDD delivery plan and phase gates.
+- [Code-review rubric](code-review.md): severity policy and blocker ownership.
+- [Framework contracts](context7-contracts.md): verified DSPy, Daytona, and FastAPI facts.
 
 ## Reading order
 

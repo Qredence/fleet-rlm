@@ -14,8 +14,8 @@ BIN_DIR = REPO_ROOT / ".venv" / "bin"
 @pytest.mark.parametrize(
     ("command", "expected_terms"),
     [
-        ("fleet", ("web", "--trace-mode")),
-        ("fleet-rlm", ("chat", "serve-api", "daytona-smoke")),
+        ("fleet", ("web",)),
+        ("fleet-rlm", ("serve-api",)),
     ],
 )
 def test_cli_help_smoke(command: str, expected_terms: tuple[str, ...]) -> None:

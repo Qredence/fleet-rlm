@@ -1,34 +1,51 @@
-"""Interfaces for future Daytona attachment staging."""
+"""Stage authorized attachments into Workspace Volume Scope (Run-scoped paths)."""
 
 from __future__ import annotations
 
-from typing import Protocol
+from uuid import UUID
 
-from pydantic import BaseModel, Field
-
-from .schemas import AttachmentRef
-
-
-class AttachmentStagingRequest(BaseModel):
-    """Request shape for staging an uploaded file later."""
-
-    attachment: AttachmentRef
-    session_id: str
-    content: bytes = Field(repr=False)
+from fleet_rlm.daytona.paths import VolumePaths, as_posix
+from fleet_rlm.daytona.volume_fs import VolumeBlobFs
+from fleet_rlm.files.models import StagedAttachment
+from fleet_rlm.files.uploads import LocalAttachmentStore
 
 
-class AttachmentStagingResult(BaseModel):
-    """Result shape for a staged attachment."""
+class AttachmentStager:
+    """Materialize Attachment bytes into a Fleet-controlled Run path on the Volume.
 
-    attachment: AttachmentRef
-    sandbox_path: str
+    Staging always writes through ``volume_fs`` so Sandbox / Host-Mediated Tools
+    can read under Workspace Volume Scope. Optional host-only skip is rejected.
+    """
 
+    def __init__(
+        self,
+        store: LocalAttachmentStore,
+        *,
+        volume_fs: VolumeBlobFs,
+        volume_paths: VolumePaths | None = None,
+    ) -> None:
+        self._store = store
+        self._volume_fs = volume_fs
+        self._paths = volume_paths or VolumePaths.from_mount()
 
-class AttachmentStagingTarget(Protocol):
-    """Protocol implemented by future Daytona attachment stagers."""
-
-    def stage_attachment(self, request: AttachmentStagingRequest) -> AttachmentStagingResult:
-        """Stage an attachment into a sandbox/volume path."""
-
-
-__all__ = ["AttachmentStagingRequest", "AttachmentStagingResult", "AttachmentStagingTarget"]
+    def stage(
+        self,
+        attachment_id: UUID,
+        *,
+        user_id: UUID,
+        workspace_id: UUID,
+        session_id: UUID,
+        run_id: UUID,
+    ) -> StagedAttachment:
+        data = self._store.read_bytes(attachment_id, user_id=user_id, workspace_id=workspace_id)
+        ref = self._store.get(attachment_id, user_id=user_id, workspace_id=workspace_id)
+        sandbox_path = as_posix(
+            self._paths.run_attachment_file(
+                session_id,
+                run_id,
+                attachment_id,
+                ref.filename,
+            )
+        )
+        self._volume_fs.write_bytes(sandbox_path, data)
+        return StagedAttachment(attachment_id=attachment_id, sandbox_path=sandbox_path)

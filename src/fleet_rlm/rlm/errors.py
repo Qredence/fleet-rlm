@@ -1,86 +1,42 @@
-"""Structured errors for the direct RLM execution path."""
+"""Typed errors for RLM construction, budgets, and turn termination."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 
-from fleet_rlm.runtime.events import RuntimeEvent, RuntimeEventKind
-
-
-@dataclass(frozen=True, slots=True)
-class DirectRLMErrorDetail:
-    """Machine-readable direct-RLM failure surfaced as a terminal RuntimeEvent."""
-
-    code: str
-    message: str
-    recoverable: bool = False
+class RLMConfigError(ValueError):
+    """Base class for Fleet RLM RLM configuration failures."""
 
 
-DIRECT_RLM_NOT_IMPLEMENTED = DirectRLMErrorDetail(
-    code="direct_rlm_not_implemented",
-    message="Direct RLM execution is not yet available in this release.",
-)
-
-MISSING_PLANNER_LM = DirectRLMErrorDetail(
-    code="missing_planner_lm",
-    message="Direct RLM execution requires a configured planner LM.",
-)
-
-MISSING_INTERPRETER = DirectRLMErrorDetail(
-    code="missing_interpreter",
-    message="Direct RLM execution requires an acquired Daytona interpreter.",
-)
-
-RLM_EXECUTION_FAILED = DirectRLMErrorDetail(
-    code="rlm_execution_failed",
-    message="Direct RLM execution failed.",
-)
-
-TURN_CANCELLED = DirectRLMErrorDetail(
-    code="turn_cancelled",
-    message="Turn cancelled before direct RLM execution could start.",
-    recoverable=True,
-)
+class RLMBudgetError(RLMConfigError):
+    """Raised when an RLMBudget is invalid before external execution."""
 
 
-def direct_rlm_status_event(text: str, *, phase: str = "direct_rlm_start") -> RuntimeEvent:
-    """Emit a STATUS event marking direct-RLM turn startup."""
-    return RuntimeEvent.status(
-        text,
-        payload={
-            "phase": phase,
-            "execution_backend": "direct_rlm",
-        },
-    )
+class RLMModelBundleError(RLMConfigError):
+    """Raised when required model roles are missing or invalid."""
 
 
-def direct_rlm_error_event(detail: DirectRLMErrorDetail, *, error: str | None = None) -> RuntimeEvent:
-    """Emit a terminal ERROR event with structured, client-safe metadata.
+class TurnTerminalError(RuntimeError):
+    """Base for clean turn termination with a stable public status."""
 
-    ``error`` is intentionally retained as a compatibility parameter for
-    callers that log it server-side, but raw provider/runtime details must not
-    enter a ``RuntimeEvent`` payload or visible text.
-    """
-    del error
-    payload: dict[str, object] = {
-        "code": detail.code,
-        "execution_backend": "direct_rlm",
-        "recoverable": detail.recoverable,
-    }
-    return RuntimeEvent(
-        kind=RuntimeEventKind.ERROR,
-        text=detail.message,
-        payload=payload,
-    )
+    status: str = "failed"
+    public_message: str = "Turn failed"
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or self.public_message)
+        if message:
+            self.public_message = message
 
 
-__all__ = [
-    "DIRECT_RLM_NOT_IMPLEMENTED",
-    "MISSING_INTERPRETER",
-    "MISSING_PLANNER_LM",
-    "RLM_EXECUTION_FAILED",
-    "TURN_CANCELLED",
-    "DirectRLMErrorDetail",
-    "direct_rlm_error_event",
-    "direct_rlm_status_event",
-]
+class TurnCancelled(TurnTerminalError):
+    status = "cancelled"
+    public_message = "Turn cancelled"
+
+
+class TurnTimeout(TurnTerminalError):
+    status = "timeout"
+    public_message = "Turn timed out"
+
+
+class TurnBudgetExhausted(TurnTerminalError):
+    status = "budget_exhausted"
+    public_message = "Turn budget exhausted"

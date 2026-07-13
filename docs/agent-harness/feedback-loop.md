@@ -1,110 +1,40 @@
 # Local Codex Feedback Loop
 
-This loop gives Codex a local, repeatable path from bootstrap to evidence. The default lane avoids
-live Daytona and live LLM requirements; use explicit live commands when testing the runtime
-substrate.
-
 ## Safe Loop
 
 ```bash
 # from repo root
 zsh .codex/workspace-bootstrap.zsh
 uv run python scripts/codex_feedback_loop.py --profile safe
+make check
 ```
 
-The safe profile runs configuration and docs checks, confirms `.codex` syntax, verifies harness
-drift controls, and records a concise JSON report under `artifacts/codex-feedback-loop/`.
+The safe loop requires no live Daytona or LLM credentials.
 
-Equivalent manual lane:
-
-```bash
-# from repo root
-uv run python scripts/check_harness_engineering.py
-uv run python scripts/check_agents_md_freshness.py
-uv run python scripts/check_docs_quality.py
-make format-check
-```
-
-## App Boot
-
-Start the local app in a separate terminal:
+## API Smoke
 
 ```bash
-# from repo root
 uv run fleet web
-```
-
-The integrated FastAPI app serves on `:8000` by default.
-
-Or run the API directly:
-
-```bash
-# from repo root
+# or
 uv run fleet-rlm serve-api --port 8000
 ```
 
-For frontend-only iteration:
+Verify that the ASGI application imports from `fleet_rlm.main:app` and that
+`openapi.yaml` matches the running backend. The supported routes are documented
+in `docs/reference/http-api.md`.
+
+## Live Runtime Evidence
+
+Run live checks only when runtime behavior changes or the exit bar requires it:
 
 ```bash
-# from src/frontend
-pnpm run dev
+FLEET_LIVE=1 uv run pytest tests/live/backend/test_exit_bar_l1_promotion.py -q
+FLEET_LIVE=1 uv run pytest tests/live/backend/test_exit_bar_l2_adversarial.py -q
 ```
 
-The frontend dev server uses Vite on `:5173` and proxies `/api/v1`, `/health`, and `/ready` to
-`localhost:8000`. MLflow uses `:5001` when started through `make mlflow`.
-
-## Browser Smoke
-
-With the app running, smoke-test:
-
-1. Workbench loads and the composer is usable.
-2. One secondary surface loads: `Settings` or full-page `Volumes`.
-3. The Workbench sidepanel can show its `Trajectories`, `Graph`, and `Volume`
-   tabs without replacing chat as the primary surface.
-4. `GET /health` returns a healthy response.
-5. `GET /api/v1/runtime/status` returns structured runtime status, even when live Daytona or LLM
-   credentials are not configured.
-
-Use the local browser tool already available in the session. Prefer the built-in Cursor Browser
-(`cursor-ide-browser`) when it is available or explicitly requested; otherwise use the Codex browser
-or Playwright. Do not invent a second UI test framework for this smoke path.
-
-## Runtime And MLflow Evidence
-
-Capture these values when available:
-
-- server URL,
-- `/health` status,
-- `/api/v1/runtime/status` summary,
-- MLflow tracking URI,
-- trace IDs created by the run,
-- Daytona diagnostic result when a live lane was explicitly requested.
-
-MLflow is optional in the safe loop. Start it only when the task needs trace evidence:
-
-```bash
-# from repo root
-make mlflow
-```
-
-## Live Lane
-
-Only run live Daytona or LLM checks when the user requested them or the task changes runtime
-execution behavior:
-
-```bash
-# from repo root
-uv run python scripts/validate_env.py daytona --skip-smoke
-uv run fleet-rlm daytona-smoke
-uv run python scripts/validate_rlm_e2e_trace.py --server-url http://127.0.0.1:8000
-```
+Record the exact git tip, test result, and any provider-side cleanup needed.
 
 ## Final Report
 
-Every Codex completion should name:
-
-- changed files,
-- validation commands that ran,
-- important command failures or skips,
-- generated artifacts touched by sync commands,
-- live surfaces that were not verified.
+Report changed behavior, validation commands and results, generated artifacts,
+the exact reviewed tip, and any explicitly deferred work.

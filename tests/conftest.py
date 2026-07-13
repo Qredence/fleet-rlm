@@ -14,18 +14,6 @@ logger = logging.getLogger(__name__)
 # Prevent remote model-cost fetch during test collection.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
 
-# Disable MLflow and PostHog by default during all test runs to prevent outbound network hangs/connections.
-os.environ.setdefault("MLFLOW_ENABLED", "false")
-os.environ.setdefault("POSTHOG_ENABLED", "false")
-
-# Register fixture packages.
-pytest_plugins = (
-    "tests.fixtures.app",
-    "tests.fixtures.daytona",
-    "tests.fixtures.agent",
-    "tests.fixtures.env",
-)
-
 
 def _suite_from_path(path: Path) -> str | None:
     """Derive the test-suite marker from the file path."""
@@ -61,17 +49,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         # Auto-mark DB-dependent integration tests.
         if suite == "integration" and item_path.name.startswith("test_db_"):
             item.add_marker(pytest.mark.db)
-
-
-@pytest.fixture
-def auth_headers() -> dict[str, str]:
-    """Canonical debug-auth headers for local/dev API route tests."""
-    return {
-        "X-Debug-Tenant-Id": "tenant-a",
-        "X-Debug-User-Id": "user-a",
-        "X-Debug-Email": "alice@example.com",
-        "X-Debug-Name": "Alice",
-    }
 
 
 @pytest.hookimpl(trylast=True)

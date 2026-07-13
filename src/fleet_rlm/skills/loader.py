@@ -1,271 +1,143 @@
-"""Load human-curated markdown skills from volume or scaffold fallback."""
+"""Load bundled SKILL.md trees into InMemorySkillRegistry."""
 
 from __future__ import annotations
 
-import functools
+import re
 from pathlib import Path
+from typing import Any
+from uuid import UUID, uuid5
 
-from fleet_rlm.skills.catalog import (
-    discover_scaffold_skills,
-    inventory_skill_resources,
-    iter_scaffold_skill_markdown,
-    parse_skill_frontmatter,
-    resolve_skill_directory,
-    resolve_skill_metadata,
-    scaffold_catalog_mtime,
-)
-from fleet_rlm.skills.errors import (
-    SkillError,
-    SkillNotFoundError,
-    SkillNotVisibleError,
-    SkillResourceNotFoundError,
-    SkillResourcePathError,
-    SkillValidationError,
-)
-from fleet_rlm.skills.paths import skills_root
-from fleet_rlm.skills.permissions import is_skill_visible
-from fleet_rlm.skills.schemas import (
-    LoadSkillOutput,
-    SkillBundle,
-    SkillMetadata,
-    SkillResourceItem,
-    SkillRuntimeContext,
-    SkillScope,
-    SkillVisibilityPolicy,
-)
-from fleet_rlm.skills.validator import require_valid_resource_path, safe_skill_name
+from fleet_rlm.skills.errors import SkillValidationError
+from fleet_rlm.skills.models import SkillRecord
+from fleet_rlm.skills.registry import InMemorySkillRegistry
+
+# Stable ids across process restarts for the same skill name.
+_BUNDLED_SKILL_NAMESPACE = UUID("6f1e0c2a-9b3d-4e5f-8a1b-2c3d4e5f6071")
+
+_FRONTMATTER_FENCE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
 
-def default_skill_runtime_context(
-    *,
-    volume_mount_path: str | None = None,
-    selected_skill_ids: list[str] | None = None,
-    visibility: SkillVisibilityPolicy | None = None,
-) -> SkillRuntimeContext:
-    """Build a conservative default runtime context for skill loads.
-
-    When no tenant policy is available, all bundled scopes remain visible and
-    only explicit ``excluded_skill_ids`` / ``included_skill_ids`` on the policy
-    object restrict access.
-    """
-    mount = volume_mount_path
-    if mount is None:
-        root = skills_root()
-        mount = str(root.parent) if root is not None else None
-    return SkillRuntimeContext(
-        volume_mount_path=mount,
-        selected_skill_ids=list(selected_skill_ids or []),
-        visibility=visibility or SkillVisibilityPolicy(),
-    )
+def bundled_skills_root() -> Path:
+    """Return the on-disk root of package skills (editable install / src layout)."""
+    return Path(__file__).resolve().parent / "skills"
 
 
-def _volume_skill_mtime(path: Path) -> float:
-    try:
-        return path.stat().st_mtime
-    except OSError:
-        return 0.0
+def stable_skill_id(name: str) -> UUID:
+    """Deterministic UUID for a bundled skill name."""
+    return uuid5(_BUNDLED_SKILL_NAMESPACE, name.strip())
 
 
-@functools.lru_cache(maxsize=256)
-def _cached_load_skill(
-    name: str,
-    volume_mount_path: str | None,
-    volume_mtime_key: str,
-    scaffold_mtime_key: float,
-    excluded_skill_ids: tuple[str, ...],
-    included_skill_ids: tuple[str, ...] | None,
-) -> LoadSkillOutput:
-    _ = volume_mtime_key, scaffold_mtime_key
-    policy = SkillVisibilityPolicy(
-        excluded_skill_ids=list(excluded_skill_ids),
-        included_skill_ids=list(included_skill_ids) if included_skill_ids is not None else None,
-    )
-    ctx = default_skill_runtime_context(volume_mount_path=volume_mount_path, visibility=policy)
-    return _load_skill_impl_uncached(name, context=ctx)
+def _parse_scalar(raw: str) -> Any:
+    text = raw.strip()
+    if not text:
+        return ""
+    if (text.startswith('"') and text.endswith('"')) or (text.startswith("'") and text.endswith("'")):
+        return text[1:-1]
+    lower = text.lower()
+    if lower == "true":
+        return True
+    if lower == "false":
+        return False
+    return text
 
 
-def clear_skill_cache() -> None:
-    """Clear cached skill loads (for tests and after user skill writes)."""
-    _cached_load_skill.cache_clear()
-    discover_scaffold_skills.cache_clear()
+def parse_skill_markdown(text: str) -> tuple[dict[str, Any], str]:
+    """Split SKILL.md into frontmatter dict and instruction body."""
+    if not isinstance(text, str) or not text.strip():
+        raise SkillValidationError("empty skill markdown")
+    match = _FRONTMATTER_FENCE.match(text)
+    if not match:
+        raise SkillValidationError("skill markdown requires YAML frontmatter")
+    meta: dict[str, Any] = {}
+    for line in match.group(1).splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if ":" not in stripped:
+            continue
+        key, value = stripped.split(":", 1)
+        meta[key.strip()] = _parse_scalar(value)
+    body = text[match.end() :].strip()
+    if not body:
+        raise SkillValidationError("skill instructions body is required")
+    return meta, body
 
 
-def _load_skill_impl_uncached(
-    name: str,
-    *,
-    volume_mount_path: str | None = None,
-    context: SkillRuntimeContext | None = None,
-) -> LoadSkillOutput:
-    ctx = context or default_skill_runtime_context(volume_mount_path=volume_mount_path)
-    try:
-        normalized = safe_skill_name(name)
-    except SkillValidationError as exc:
-        return LoadSkillOutput(status="error", name=name, error=str(exc))
-    try:
-        bundle = load_skill_bundle(normalized, ctx)
-    except SkillNotFoundError as exc:
-        return LoadSkillOutput(status="not_found", name=normalized, error=str(exc))
-    except SkillError as exc:
-        return LoadSkillOutput(status="error", name=normalized, error=str(exc))
-    scope = bundle.metadata.scope.value
-    source = bundle.metadata.source
-    path = source.split(":", 1)[-1] if ":" in source else source
-    safe_source = source.split(":", 1)[0] if ":" in source else source
-    resources = [
-        SkillResourceItem(
-            kind=resource.kind.value,
-            path=resource.path,
-            description=resource.description,
-        )
-        for resource in bundle.resources
-    ]
-    return LoadSkillOutput(
-        status="ok",
-        name=normalized,
-        scope=scope,
-        path=path,
-        source=safe_source,
-        instructions=bundle.instructions,
-        resources=resources,
-    )
-
-
-def load_skill_impl(
-    name: str,
-    *,
-    volume_mount_path: str | None = None,
-    context: SkillRuntimeContext | None = None,
-) -> LoadSkillOutput:
-    ctx = context or default_skill_runtime_context(volume_mount_path=volume_mount_path)
-    # Activated Markdown overrides must not be served from the uncached path cache.
-    if getattr(ctx, "activated_skill_markdown", None):
-        return _load_skill_impl_uncached(name, volume_mount_path=volume_mount_path, context=ctx)
-    excluded = tuple(sorted(ctx.visibility.excluded_skill_ids))
-    included = (
-        tuple(sorted(ctx.visibility.included_skill_ids)) if ctx.visibility.included_skill_ids is not None else None
-    )
-    volume_mtime_key = ""
-    root = skills_root(ctx.volume_mount_path)
-    if root is not None:
+def _collect_resource_bodies(skill_dir: Path) -> dict[str, str]:
+    bodies: dict[str, str] = {}
+    for path in sorted(skill_dir.rglob("*.md")):
+        if path.name == "SKILL.md":
+            continue
+        if path.name == "README.md" and path.parent == skill_dir.parent:
+            continue
+        rel = path.relative_to(skill_dir).as_posix()
+        if any(part.startswith(".") for part in path.relative_to(skill_dir).parts):
+            continue
         try:
-            normalized = safe_skill_name(name)
-        except SkillValidationError:
-            normalized = name
-        mtimes: list[str] = []
-        for scope in ("user", "system"):
-            flat_path = root / scope / f"{normalized}.md"
-            if flat_path.exists():
-                mtimes.append(f"{scope}:flat:{_volume_skill_mtime(flat_path)}")
-            dir_path = root / scope / normalized / "SKILL.md"
-            if dir_path.exists():
-                mtimes.append(f"{scope}:dir:{_volume_skill_mtime(dir_path)}")
-        volume_mtime_key = "|".join(mtimes)
-    return _cached_load_skill(
-        name,
-        ctx.volume_mount_path,
-        volume_mtime_key,
-        scaffold_catalog_mtime(),
-        excluded,
-        included,
-    )
+            bodies[rel] = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+    return bodies
 
 
-# Backward-compatible alias used across runtime and quality modules.
-_load_skill_impl = load_skill_impl
+def load_skill_directory(skill_dir: Path) -> dict[str, Any]:
+    """Parse one skill directory into registry.register kwargs (no side effects)."""
+    skill_md = skill_dir / "SKILL.md"
+    if not skill_md.is_file():
+        raise SkillValidationError(f"missing SKILL.md in {skill_dir}")
+    meta, instructions = parse_skill_markdown(skill_md.read_text(encoding="utf-8"))
+    name = str(meta.get("name") or skill_dir.name).strip()
+    description = str(meta.get("description") or "").strip()
+    version = str(meta.get("version") or "1.0.0").strip()
+    disable = bool(meta.get("disable-model-invocation", False))
+    resources = _collect_resource_bodies(skill_dir)
+    return {
+        "name": name,
+        "description": description,
+        "instructions": instructions,
+        "version": version,
+        "scope": "system",
+        "trust": "system",
+        "visibility": "hidden" if disable else "visible",
+        "affordances": ("load", "read_resource") if not disable else ("load",),
+        "resources": tuple(resources.keys()),
+        "resource_bodies": resources,
+        "skill_id": stable_skill_id(name),
+    }
 
 
-def _read_skill_instructions(metadata: SkillMetadata, *, context: SkillRuntimeContext) -> str:
-    activated = getattr(context, "activated_skill_markdown", None) or {}
-    if isinstance(activated, dict):
-        override = activated.get(metadata.name)
-        if isinstance(override, str) and override.strip():
-            return override
-
-    if metadata.scope == SkillScope.SCAFFOLD:
-        for dir_name, instructions in iter_scaffold_skill_markdown():
-            frontmatter_name, _ = parse_skill_frontmatter(instructions)
-            if (frontmatter_name or dir_name) == metadata.name:
-                return instructions
-        return ""
-
-    if metadata.directory_style:
-        skill_dir = resolve_skill_directory(metadata, context)
-        if skill_dir is not None:
-            skill_md = skill_dir / "SKILL.md"
-            if skill_md.is_file():
-                return skill_md.read_text(encoding="utf-8")
-        return ""
-
-    if context.volume_mount_path and ":" in metadata.source:
-        _, raw_path = metadata.source.split(":", 1)
-        path = Path(raw_path)
-        if path.is_file():
-            return path.read_text(encoding="utf-8")
-    return ""
+def iter_skill_directories(root: Path | None = None) -> tuple[Path, ...]:
+    base = root if root is not None else bundled_skills_root()
+    if not base.is_dir():
+        return ()
+    dirs: list[Path] = []
+    for child in sorted(base.iterdir()):
+        if not child.is_dir():
+            continue
+        if child.name.startswith(".") or child.name == "__pycache__":
+            continue
+        if (child / "SKILL.md").is_file():
+            dirs.append(child)
+    return tuple(dirs)
 
 
-def load_skill_bundle(name: str, context: SkillRuntimeContext) -> SkillBundle:
-    metadata = resolve_skill_metadata(name, context)
-    if metadata is None:
-        raise SkillNotFoundError(name)
-    if not is_skill_visible(metadata.name, metadata.scope, context.visibility):
-        raise SkillNotVisibleError(name)
-
-    instructions = _read_skill_instructions(metadata, context=context)
-    skill_dir = resolve_skill_directory(metadata, context)
-    resources = inventory_skill_resources(skill_dir) if skill_dir is not None else []
-    return SkillBundle(metadata=metadata, instructions=instructions, resources=resources)
-
-
-def load_resource(name: str, resource_path: str, context: SkillRuntimeContext) -> str:
-    require_valid_resource_path(resource_path)
-
-    metadata = resolve_skill_metadata(name, context)
-    if metadata is None:
-        raise SkillNotFoundError(name)
-    if not is_skill_visible(metadata.name, metadata.scope, context.visibility):
-        raise SkillNotVisibleError(name)
-    if not metadata.directory_style:
-        raise SkillValidationError(
-            "Legacy flat skills do not expose resource directories.",
-            code="legacy_flat_no_resources",
-        )
-
-    skill_dir = resolve_skill_directory(metadata, context)
-    if skill_dir is None:
-        raise SkillNotFoundError(name)
-
-    if metadata.scope == SkillScope.SCAFFOLD:
-        import importlib.resources
-
-        skill_root = importlib.resources.files("fleet_rlm.scaffold") / "skills"
-        for entry in skill_root.iterdir():
-            skill_md = entry / "SKILL.md"
-            if not skill_md.is_file():
-                continue
-            frontmatter_name, _ = parse_skill_frontmatter(skill_md.read_text(encoding="utf-8"))
-            if (frontmatter_name or entry.name) != metadata.name:
-                continue
-            target = entry / resource_path
-            if not target.is_file():
-                raise SkillResourceNotFoundError()
-            return target.read_text(encoding="utf-8")
-        raise SkillNotFoundError(name)
-
-    target = (skill_dir / resource_path).resolve()
-    resolved_root = skill_dir.resolve()
-    if not target.is_relative_to(resolved_root):
-        raise SkillResourcePathError("Resource path escapes skill root.", code="traversal")
-    if not target.is_file():
-        raise SkillResourceNotFoundError()
-    return target.read_text(encoding="utf-8")
-
-
-__all__ = [
-    "clear_skill_cache",
-    "default_skill_runtime_context",
-    "load_resource",
-    "load_skill_bundle",
-    "load_skill_impl",
-    "_load_skill_impl",
-]
+def seed_bundled_skills(
+    registry: InMemorySkillRegistry,
+    *,
+    root: Path | None = None,
+    skip_existing_names: bool = True,
+) -> tuple[SkillRecord, ...]:
+    """Register all bundled skills. Returns records created in this call."""
+    created: list[SkillRecord] = []
+    existing_names = {r.name for r in registry.list_records()} if skip_existing_names else set()
+    for skill_dir in iter_skill_directories(root):
+        kwargs = load_skill_directory(skill_dir)
+        if kwargs["name"] in existing_names:
+            continue
+        # Skip if stable id already present (re-seed safety)
+        if registry.get(kwargs["skill_id"]) is not None:
+            continue
+        record = registry.register(**kwargs)
+        created.append(record)
+        existing_names.add(record.name)
+    return tuple(created)

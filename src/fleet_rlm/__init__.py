@@ -1,13 +1,15 @@
-"""Top-level package exports for fleet_rlm."""
+"""Fleet RLM package bootstrap.
+
+Importing the package does not open network connections or construct external
+clients; process-lifetime resources are owned by FastAPI lifespan.
+"""
 
 from __future__ import annotations
 
 import re
-from importlib import import_module
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
 
 _PYPROJECT_VERSION_PATTERN = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
 
@@ -30,38 +32,4 @@ def _resolve_version() -> str:
 
 __version__ = _resolve_version()
 
-__all__ = [
-    "DaytonaInterpreter",
-    "__version__",
-    "configure_planner_from_env",
-    "get_planner_lm_from_env",
-]
-
-if TYPE_CHECKING:
-    from .runtime import (
-        DaytonaInterpreter,
-        configure_planner_from_env,
-        get_planner_lm_from_env,
-    )
-
-_LAZY_ATTRS: dict[str, tuple[str, str]] = {
-    "configure_planner_from_env": ("fleet_rlm.runtime", "configure_planner_from_env"),
-    "get_planner_lm_from_env": ("fleet_rlm.runtime", "get_planner_lm_from_env"),
-    "DaytonaInterpreter": ("fleet_rlm.runtime", "DaytonaInterpreter"),
-}
-
-
-def __getattr__(name: str) -> Any:
-    """Load exported symbols lazily to reduce top-level import cost."""
-    attr_spec = _LAZY_ATTRS.get(name)
-    if attr_spec is not None:
-        module_name, attr_name = attr_spec
-        value = getattr(import_module(module_name), attr_name)
-        globals()[name] = value
-        return value
-
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(__all__) | set(_LAZY_ATTRS))
+__all__ = ["__version__"]

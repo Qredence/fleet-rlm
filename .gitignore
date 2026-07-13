@@ -103,11 +103,8 @@ artifacts/
 artifacts/eval/
 !src/fleet_rlm/artifacts/
 !src/fleet_rlm/artifacts/*.py
-!src/fleet_rlm_clean/artifacts/
-!src/fleet_rlm_clean/artifacts/*.py
 !tests/unit/artifacts/
 !tests/unit/artifacts/*.py
-!tests/unit/clean_backend/test_artifacts.py
 !src/frontend/src/features/artifacts/
 !src/frontend/src/features/artifacts/*.tsx
 

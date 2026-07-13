@@ -1,51 +1,5 @@
-from __future__ import annotations
-
-import os
-import subprocess
-import sys
-from pathlib import Path
+"""Setuptools compatibility entrypoint for the backend-only distribution."""
 
 from setuptools import setup
-from setuptools.command.build_py import build_py as _build_py
-from setuptools.command.sdist import sdist as _sdist
 
-_REPO_ROOT = Path(__file__).resolve().parent
-_FRONTEND_DIR = _REPO_ROOT / "src" / "frontend"
-_BUILD_UI_SCRIPT = _REPO_ROOT / "src" / "fleet_rlm" / "ui" / "build.py"
-_BUILD_SENTINEL_ENV = "FLEET_RLM_UI_BUILD_DONE"
-
-
-def _maybe_build_frontend_ui() -> None:
-    """Build/sync frontend assets before packaging when source frontend is present."""
-    if os.environ.get(_BUILD_SENTINEL_ENV) == "1":
-        return
-
-    if not _FRONTEND_DIR.exists():
-        # Downstream sdist builds may not include the frontend source tree.
-        print("Skipping frontend UI build: src/frontend not present.")
-        return
-
-    if not _BUILD_UI_SCRIPT.exists():
-        if (_REPO_ROOT / ".git").exists():
-            raise RuntimeError(f"Missing frontend build helper script: {_BUILD_UI_SCRIPT}")
-        print("Skipping frontend UI build: src/fleet_rlm/ui/build.py not present.")
-        return
-
-    print("Running frontend packaging build via src/fleet_rlm/ui/build.py ...")
-    subprocess.run([sys.executable, str(_BUILD_UI_SCRIPT)], cwd=_REPO_ROOT, check=True)
-    os.environ[_BUILD_SENTINEL_ENV] = "1"
-
-
-class BuildPy(_build_py):
-    def run(self) -> None:
-        _maybe_build_frontend_ui()
-        super().run()
-
-
-class Sdist(_sdist):
-    def run(self) -> None:
-        _maybe_build_frontend_ui()
-        super().run()
-
-
-setup(cmdclass={"build_py": BuildPy, "sdist": Sdist})
+setup()

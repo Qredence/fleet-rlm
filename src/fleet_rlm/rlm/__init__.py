@@ -1,24 +1,37 @@
-"""Direct RLM execution package (Phase 2B skeleton)."""
+"""RLM domain types for the Fleet RLM backend."""
 
-from fleet_rlm.rlm.errors import (
-    DIRECT_RLM_NOT_IMPLEMENTED,
-    DirectRLMErrorDetail,
-    direct_rlm_error_event,
-    direct_rlm_status_event,
+from __future__ import annotations
+
+from fleet_rlm.rlm.budgets import RLMBudget
+from fleet_rlm.rlm.context import RLMTurnContext
+from fleet_rlm.rlm.errors import RLMBudgetError, RLMConfigError, RLMModelBundleError
+from fleet_rlm.rlm.events import (
+    TERMINAL_KINDS,
+    DuplicateTerminalEventError,
+    EventRecorder,
+    RuntimeEvent,
+    RuntimeEventKind,
 )
-from fleet_rlm.rlm.execution import run_direct_rlm_turn
-from fleet_rlm.rlm.inputs import build_direct_rlm_turn_inputs
-from fleet_rlm.rlm.runner import DirectRLMRunner
-from fleet_rlm.rlm.trajectory import build_direct_rlm_done_event, iter_trajectory_runtime_events
+from fleet_rlm.rlm.factory import RLMFactory
+from fleet_rlm.rlm.lm_factory import build_model_bundle
+from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.runner import RLMRunner
+from fleet_rlm.rlm.signature import FleetRLMSignature
 
 __all__ = [
-    "DIRECT_RLM_NOT_IMPLEMENTED",
-    "DirectRLMErrorDetail",
-    "DirectRLMRunner",
-    "build_direct_rlm_done_event",
-    "build_direct_rlm_turn_inputs",
-    "direct_rlm_error_event",
-    "direct_rlm_status_event",
-    "iter_trajectory_runtime_events",
-    "run_direct_rlm_turn",
+    "DuplicateTerminalEventError",
+    "EventRecorder",
+    "FleetRLMSignature",
+    "RLMBudget",
+    "RLMBudgetError",
+    "RLMConfigError",
+    "RLMFactory",
+    "RLMModelBundle",
+    "RLMModelBundleError",
+    "RLMRunner",
+    "RLMTurnContext",
+    "RuntimeEvent",
+    "RuntimeEventKind",
+    "TERMINAL_KINDS",
+    "build_model_bundle",
 ]

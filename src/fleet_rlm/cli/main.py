@@ -1,138 +1,38 @@
-"""Entry point for the standalone `fleet` interactive chat command."""
+"""Thin launchers for the canonical Fleet RLM ASGI application."""
 
 from __future__ import annotations
 
 import argparse
-import sys
-from pathlib import Path
-from typing import TYPE_CHECKING, cast
-
-from .config import initialize_app_config, split_config_overrides
-
-if TYPE_CHECKING:
-    from fleet_rlm.integrations.config.process import ProcessConfig
-
-    from .terminal.chat import TerminalChatOptions
+from collections.abc import Sequence
 
 
-def _build_terminal_chat_options(
-    *,
-    docs_path: Path | None = None,
-    trace_mode: str = "compact",
-    volume_name: str | None = None,
-) -> TerminalChatOptions:
-    from fleet_rlm.cli.terminal.chat import TerminalChatOptions
-    from fleet_rlm.runtime.schemas import TraceMode
-
-    return TerminalChatOptions(
-        docs_path=docs_path,
-        trace_mode=cast(TraceMode, trace_mode),
-        volume_name=volume_name,
-    )
-
-
-def run_terminal_chat(*, config: ProcessConfig, options: TerminalChatOptions) -> None:
-    from fleet_rlm.cli.terminal.chat import run_terminal_chat as _run_terminal_chat
-
-    _run_terminal_chat(config=config, options=options)
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="fleet",
-        description=(
-            "Start standalone fleet interactive chat. "
-            "Typed configuration overrides are supported as dotted.path=value tokens.\n"
-            "Use 'fleet web' to launch the Web UI server."
-        ),
-    )
-    # Support optional subcommands loosely
-    parser.add_argument(
-        "command",
-        nargs="?",
-        choices=["web"],
-        help="Optional subcommand (e.g., 'web' to launch the Web UI).",
-    )
-    parser.add_argument(
-        "--docs-path",
-        type=Path,
-        default=None,
-        help="Optional document path to preload into the chat session.",
-    )
-    parser.add_argument(
-        "--trace-mode",
-        choices=("compact", "verbose", "off"),
-        default="compact",
-        help="Trace display mode.",
-    )
-    parser.add_argument(
-        "--volume-name",
-        type=str,
-        default=None,
-        help="Daytona volume name for persistent storage.",
-    )
+def _serve_parser(*, program: str, command: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=program, description="Serve the Fleet RLM backend")
+    subcommands = parser.add_subparsers(dest="command", required=True)
+    serve = subcommands.add_parser(command, help="start the FastAPI backend")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument("--reload", action="store_true")
     return parser
 
 
-def _run_web_ui() -> None:
-    """Delegate `fleet web` to the canonical `fleet-rlm serve-api` command."""
-    try:
-        import fastapi  # noqa: F401
-        import jwt  # noqa: F401
-        import uvicorn  # noqa: F401
-    except ImportError:
-        print(
-            "Error: Required Web UI dependencies not found. "
-            "Reinstall/upgrade fleet-rlm (plain install should include Web UI support). "
-            "Optional server extras remain available via `fleet-rlm[server]`.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
+def _run(*, program: str, command: str, argv: Sequence[str] | None = None) -> None:
+    args = _serve_parser(program=program, command=command).parse_args(argv)
+    import uvicorn
 
-    from fleet_rlm.integrations.config.process import load_process_config
-
-    api_config = load_process_config().config.api
-    print(f"Starting Web UI and API server on http://{api_config.host}:{api_config.port} ...")
-    from .fleet_cli import main as cli_main
-
-    config_overrides = [arg for arg in sys.argv[2:] if "=" in arg and not arg.startswith("-")]
-    sys.argv = [
-        "fleet-rlm",
-        "serve-api",
-        *config_overrides,
-    ]
-    cli_main()
-
-
-def main() -> None:
-    # Quick check for 'web' subcommand before strict parsing
-    if len(sys.argv) > 1 and sys.argv[1] == "web":
-        _run_web_ui()
-        return
-
-    parser = _build_parser()
-    args, remainder = parser.parse_known_args(sys.argv[1:])
-
-    config_overrides, unknown_args = split_config_overrides(remainder)
-
-    if unknown_args:
-        parser.error(f"Unknown arguments: {' '.join(unknown_args)}")
-
-    try:
-        config = initialize_app_config(config_overrides)
-    except Exception as exc:
-        print(f"Configuration Error: {exc}", file=sys.stderr)
-        raise SystemExit(1) from exc
-
-    run_terminal_chat(
-        config=config,
-        options=_build_terminal_chat_options(
-            docs_path=args.docs_path,
-            trace_mode=args.trace_mode,
-            volume_name=args.volume_name,
-        ),
+    uvicorn.run(
+        "fleet_rlm.main:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
     )
 
 
-if __name__ == "__main__":
-    main()
+def fleet_main(argv: Sequence[str] | None = None) -> None:
+    """Run ``fleet web``."""
+    _run(program="fleet", command="web", argv=argv)
+
+
+def fleet_rlm_main(argv: Sequence[str] | None = None) -> None:
+    """Run ``fleet-rlm serve-api``."""
+    _run(program="fleet-rlm", command="serve-api", argv=argv)

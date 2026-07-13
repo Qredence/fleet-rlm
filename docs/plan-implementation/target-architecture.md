@@ -15,11 +15,9 @@ classification, selection, extraction, and scoring. Deterministic Python owns
 authentication, permissions, validation, trust, path safety, persistence,
 storage policy, and redaction. RLM-native does not mean RLM-only.
 
-The backend must not remain a legacy runtime with an RLM feature attached. The
-refactor is incremental rather than a rewrite: the compatibility runtime remains
-available for migration and rollback while direct RLM earns parity and promotion
-evidence, then Phase 10 isolates or removes legacy-only paths whose consumers
-have been retired.
+The legacy runtime has been removed. `src/fleet_rlm/` is the RLM-native backend;
+there is no compatibility runtime, dual-serve path, or backend-selection surface.
+Phase 10 owns the separate frontend contract adaptation.
 
 ## Canonical architecture
 
@@ -65,7 +63,7 @@ projectors.
   repositories, and the Postgres store façade. Live layout is domain modules
   under `db/models/` (schema only) and `db/repos/` (transactions, RLS context,
   and queries), with one model registry for Alembic
-  ([Phase 8.5](phases/08.5-persistence-db/README.md)). The former flat
+  (historical Phase 8.5, preserved under `docs/internal/legacy-backend/`). The former flat
   `integrations/database/` package is removed.
 - `integrations/persistence_protocol.py` and `integrations/local_store.py` own
   the dual-backend persistence port and the limited local backend. Postgres is

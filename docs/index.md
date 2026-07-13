@@ -1,61 +1,35 @@
 # Documentation Home
 
-`fleet-rlm` is a Daytona-backed recursive DSPy workbench. Start with the tutorials and how-to guides below; move down into explanation and reference when you need conceptual or implementation detail.
+`fleet-rlm` now has one Python backend: the RLM-native package at
+`src/fleet_rlm/`. It exposes a compact FastAPI/SSE contract backed by DSPy,
+Daytona, and SQLAlchemy/Alembic.
 
-## Start Here (User Path)
+## Start Here
 
-1. **[Tutorials](tutorials/index.md)** — learn by doing: basic usage, document analysis, interactive chat.
-2. **[How-to Guides](how-to-guides/index.md)** — solve specific problems: installation, Codex local setup, deployment, DSPy integration, troubleshooting, MLflow workflows.
-3. **[Explanation](explanation/index.md)** — understand the product: spec, concepts, user flows.
-4. **[Agent Harness](agent-harness/README.md)** — Codex operating model, local feedback loop, architecture invariants, and drift control.
-5. **[Agent Skills Configuration](agents/domain.md)** — local tracker, triage vocabulary, and domain-context reading rules.
+1. [Architecture](architecture.md)
+2. [Backend API](reference/http-api.md)
+3. [CLI](reference/cli.md)
+4. [Testing strategy](how-to-guides/testing-strategy.md)
+5. [Agent harness](agent-harness/README.md)
 
 ## Reference
 
-- **[Reference Index](reference/index.md)** — CLI, HTTP/WebSocket API, Python API, auth modes, database, sandbox surfaces, source layout.
-- **[Frontend Product Surface Guide](explanation/frontend-product-surface.md)**
-- **[RLM Capability Evaluation](explanation/rlm-capability-evaluation.md)** — paper-comparable S-NIAH / OOLONG benchmark results and methodology.
-
-## Architecture & Internals
-
-Read these after you've seen the product:
-
-- **[Architecture Overview](architecture.md)** — current layer ownership model.
-- **[Implementation Phases](plan-implementation/README.md)** — canonical roadmap, phase status, acceptance criteria, and implementation evidence.
-- **[Configuration Audit](config-audit.md)** — typed process defaults, ownership, precedence, aliases, and secret boundaries.
-- **[Agent Harness](agent-harness/README.md)** — repo-local harness engineering controls.
-- **[Wiring Analysis](explanation/wiring-analysis.md)**
-- **[Releasing to PyPI](how-to-guides/releasing.md)** — automated and manual release flow
-
-## Architecture Decision Records
-
-- [ADR-0001: Explicit Execution Modes](adr/0001-explicit-execution-modes.md)
-- [ADR-0002: RLM Agent Class](adr/0002-rlm-agent-class.md)
-- [ADR-0003: API Chat AI SDK UIMessage Stream](adr/0003-api-chat-ai-sdk-uimessage-stream.md)
-- [ADR-0004: Chat Execution Context Seam](adr/0004-chat-execution-context-seam.md)
-- [ADR-0005: Execution Backend Seam](adr/0005-execution-backend-seam.md)
-- [ADR-0006: Offline GEPA Selection and Workspace-Scoped Activation](adr/0006-workspace-scoped-optimized-artifacts.md)
-
-## Current Product Surfaces
-
-- [Workbench](explanation/product-spec.md)
-- [Volumes](explanation/product-spec.md)
-- [Settings](explanation/product-spec.md)
-
-## API Reference Surfaces
-
-- [Sandbox API](reference/sandbox-api.md) — Daytona sandbox lifecycle management
-- [Runs API](reference/runs-api.md) — Execution trace step browsing
-
-## Complete Table Of Contents
-
-- [SUMMARY.md](SUMMARY.md)
+- [Documentation overview](README.md)
+- [Complete table of contents](SUMMARY.md)
+- [Reference index](reference/index.md)
+- [Codebase map](reference/codebase-map.md)
+- [Source layout](reference/source-layout.md)
+- [Database](reference/database.md)
+- [Runtime execution flow](explanation/agent-runtime-execution-flow.md)
+- [Backend foundation and cutover history](plan-implementation/README.md)
 
 ## Source of Truth
 
-When docs disagree with the code, trust the code and generated contracts:
+- Python backend: `src/fleet_rlm/`
+- HTTP contract: `openapi.yaml`
+- schema: `migrations/`
+- backend validation: `Makefile`, `tests/unit/backend/`,
+  `tests/contracts/backend/`, and `tests/live/backend/`
 
-- backend routes and websocket behavior in `src/fleet_rlm/api/`
-- transport, auth, and websocket lifecycle in `src/fleet_rlm/api/`
-- runtime and Daytona execution in `src/fleet_rlm/runtime/` and `src/fleet_rlm/integrations/daytona/`
-- frontend route and workspace behavior in `src/frontend/src/`
+Documents under `docs/internal/legacy-backend/` are historical records for the
+removed backend. They are not current product or compatibility documentation.

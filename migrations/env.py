@@ -1,4 +1,4 @@
-"""Alembic environment for fleet-rlm Neon Postgres migrations."""
+"""Alembic environment for the canonical Fleet RLM schema."""
 
 from __future__ import annotations
 
@@ -16,49 +16,40 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-load_dotenv(ROOT / ".env", override=True)
+load_dotenv(ROOT / ".env", override=False)
 
-# Single model registry registers every table on Base.metadata.
-from fleet_rlm.db.engine import select_database_url, to_sync_database_url  # noqa: E402
-from fleet_rlm.db.models import Base  # noqa: E402, F401
+from fleet_rlm.persistence.models import Base  # noqa: E402
 
 config = context.config
-
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
-
 
 target_metadata = Base.metadata
 
 
-def _resolve_database_url() -> str:
-    database_url = select_database_url(
-        runtime_url=os.getenv("DATABASE_URL"),
-        admin_url=os.getenv("DATABASE_ADMIN_URL"),
-        prefer_admin=True,
+def _to_sync_url(url: str) -> str:
+    return (
+        url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
+        .replace("postgres://", "postgresql+psycopg://", 1)
+        .replace("sqlite+aiosqlite://", "sqlite://", 1)
     )
+
+
+def _resolve_database_url() -> str:
+    database_url = os.getenv("FLEET_DATABASE_URL") or config.get_main_option("sqlalchemy.url")
     if not database_url:
-        configured = config.get_main_option("sqlalchemy.url")
-        database_url = configured
-    if not database_url:
-        raise RuntimeError(
-            "DATABASE_ADMIN_URL or DATABASE_URL is not set. "
-            "Set DATABASE_ADMIN_URL for direct admin access, DATABASE_URL as a fallback, "
-            "or sqlalchemy.url before running migrations."
-        )
-    return to_sync_database_url(database_url)
+        raise RuntimeError("FLEET_DATABASE_URL is required for migrations, or set sqlalchemy.url in alembic.ini")
+    return _to_sync_url(database_url.strip())
 
 
 def run_migrations_offline() -> None:
-    url = _resolve_database_url()
     context.configure(
-        url=url,
+        url=_resolve_database_url(),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
     )
-
     with context.begin_transaction():
         context.run_migrations()
 
@@ -66,21 +57,18 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     configuration = config.get_section(config.config_ini_section) or {}
     configuration["sqlalchemy.url"] = _resolve_database_url()
-
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
         future=True,
     )
-
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
         )
-
         with context.begin_transaction():
             context.run_migrations()
 

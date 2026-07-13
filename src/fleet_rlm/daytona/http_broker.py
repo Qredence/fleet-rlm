@@ -1,0 +1,431 @@
+"""HTTP-in-sandbox host-tool broker for Daytona RLM mediation.
+
+Transport choice for B1: Daytona-appropriate HTTP broker inside the sandbox
+with host-side poll (mirrors legacy Fleet bridge semantics; not Deno JSON-RPC).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import inspect
+import json
+import keyword
+import secrets
+import time
+import urllib.error
+import urllib.request
+import uuid
+from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from threading import Thread
+from typing import Any
+
+from daytona import SessionExecuteRequest
+
+from fleet_rlm.daytona.errors import DaytonaAdapterError, sanitize_provider_message
+from fleet_rlm.daytona.in_process import BackendExecutionResult
+from fleet_rlm.daytona.submit import extract_final_payload, remote_submit_setup_code
+
+_BROKER_PORT = 3000
+_BROKER_SERVER_PATH = "/home/daytona/fleet_rlm_broker_server.py"
+_BROKER_SESSION_COMMAND = f"cd /home/daytona && python {_BROKER_SERVER_PATH.rsplit('/', 1)[-1]}"
+
+_BROKER_SERVER_CODE = """
+import hmac
+import json
+import threading
+import time
+import uuid
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
+from urllib.parse import parse_qs, urlparse
+
+_lock = threading.Lock()
+_pending_requests = {}
+_results = {}
+_BROKER_SECRET = __BROKER_SECRET__
+
+
+def _read_json(handler):
+    length = int(handler.headers.get("Content-Length", 0))
+    return json.loads(handler.rfile.read(length).decode("utf-8")) if length else {}
+
+
+def _send_json(handler, data, status=200):
+    body = json.dumps(data).encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+class _BrokerHandler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        pass
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/health":
+            _send_json(self, {"status": "ok"})
+            return
+        if parsed.path == "/pending":
+            qs = parse_qs(parsed.query)
+            try:
+                max_items = max(1, int(qs.get("max", ["1"])[0]))
+            except ValueError:
+                max_items = 1
+            out = []
+            with _lock:
+                for call_id, req in list(_pending_requests.items()):
+                    if req.get("lease_token"):
+                        continue
+                    token = uuid.uuid4().hex
+                    req["lease_token"] = token
+                    out.append({
+                        "id": call_id,
+                        "tool_name": req.get("tool_name"),
+                        "args": req.get("args") or [],
+                        "kwargs": req.get("kwargs") or {},
+                        "lease_token": token,
+                    })
+                    if len(out) >= max_items:
+                        break
+            _send_json(self, {"requests": out})
+            return
+        _send_json(self, {"error": "not found"}, 404)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        secret = self.headers.get("X-Broker-Secret", "")
+        if not hmac.compare_digest(secret, _BROKER_SECRET):
+            _send_json(self, {"error": "unauthorized"}, 401)
+            return
+        data = _read_json(self)
+        if parsed.path == "/tool_call":
+            call_id = str(data.get("id") or uuid.uuid4())
+            event = threading.Event()
+            with _lock:
+                _pending_requests[call_id] = {
+                    "tool_name": data.get("tool_name"),
+                    "args": data.get("args") or [],
+                    "kwargs": data.get("kwargs") or {},
+                    "lease_token": None,
+                    "event": event,
+                }
+            if not event.wait(timeout=180.0):
+                with _lock:
+                    _pending_requests.pop(call_id, None)
+                _send_json(self, {"error": "tool call timed out"}, 504)
+                return
+            with _lock:
+                result = _results.pop(call_id, None)
+                _pending_requests.pop(call_id, None)
+            if result is None:
+                _send_json(self, {"error": "missing result"}, 500)
+                return
+            if isinstance(result, dict) and "error" in result:
+                _send_json(self, result, 500)
+                return
+            _send_json(self, {"result": result})
+            return
+        if parsed.path == "/result":
+            call_id = str(data.get("id") or "")
+            claim = data.get("lease_token")
+            with _lock:
+                req = _pending_requests.get(call_id)
+                if req is None:
+                    _send_json(self, {"error": "unknown call"}, 404)
+                    return
+                if claim != req.get("lease_token"):
+                    _send_json(self, {"error": "stale claim"}, 409)
+                    return
+                if "error" in data:
+                    _results[call_id] = {"error": data.get("error")}
+                else:
+                    _results[call_id] = data.get("result")
+                req["lease_token"] = None
+                event = req.get("event")
+            if event is not None:
+                event.set()
+            _send_json(self, {"status": "ok"})
+            return
+        _send_json(self, {"error": "not found"}, 404)
+
+
+class _ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+
+
+if __name__ == "__main__":
+    server = _ThreadedHTTPServer(("0.0.0.0", 3000), _BrokerHandler)
+    server.serve_forever()
+""".strip()
+
+_TOOL_WRAPPER_TEMPLATE = """
+def {tool_name}({signature}):
+    import json as _json
+    import urllib.request as _urllib_request
+    import uuid as _uuid
+
+    call_id = str(_uuid.uuid4())
+    payload = _json.dumps(
+        {{
+            "id": call_id,
+            "tool_name": "{tool_name}",
+            "args": [{args_list}],
+            "kwargs": {{{kwargs_dict}}},
+        }}
+    ).encode("utf-8")
+    req = _urllib_request.Request(
+        "http://localhost:{broker_port}/tool_call",
+        data=payload,
+        headers={{"Content-Type": "application/json", "X-Broker-Secret": "{broker_secret}"}},
+        method="POST",
+    )
+    with _urllib_request.urlopen(req, timeout=130) as resp:
+        data = _json.loads(resp.read().decode("utf-8"))
+    if "error" in data:
+        raise RuntimeError(f"Tool call failed: {{data['error']}}")
+    return data.get("result")
+""".strip()
+
+
+class DaytonaHttpToolBroker:
+    """Start/register/poll host-tool mediation against a Daytona sandbox."""
+
+    def __init__(self, *, sandbox: Any, poll_interval_s: float = 0.05) -> None:
+        self._sandbox = sandbox
+        self._poll_interval_s = poll_interval_s
+        self._broker_secret = secrets.token_urlsafe(32)
+        self._broker_url: str | None = None
+        self._broker_token: str | None = None
+        self._broker_session_id: str | None = None
+        self._injected_tools: set[str] = set()
+        self._pending_wrappers: list[str] = []
+        self._stopped = False
+
+    def ensure_started(self) -> None:
+        if self._broker_url is not None or self._stopped:
+            return
+        server_code = _BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(self._broker_secret))
+        self._sandbox.fs.upload_file(server_code.encode("utf-8"), _BROKER_SERVER_PATH)
+        expected_sha = hashlib.sha256(server_code.encode("utf-8")).hexdigest()
+        verify = self._sandbox.process.code_run(
+            "import hashlib; print(hashlib.sha256("
+            "open('/home/daytona/fleet_rlm_broker_server.py','rb').read()).hexdigest())"
+        )
+        actual_sha = str(getattr(verify, "result", "") or "").strip()
+        if actual_sha != expected_sha:
+            msg = "broker asset integrity check failed"
+            raise DaytonaAdapterError(message=msg, cause_type="BrokerIntegrityError")
+
+        session_id = f"fleet-clean-broker-{uuid.uuid4().hex[:8]}"
+        self._sandbox.process.create_session(session_id)
+        self._sandbox.process.execute_session_command(
+            session_id,
+            SessionExecuteRequest(command=_BROKER_SESSION_COMMAND, run_async=True),
+        )
+        preview = self._sandbox.get_preview_link(_BROKER_PORT)
+        self._broker_session_id = session_id
+        self._broker_url = str(preview.url).rstrip("/")
+        self._broker_token = str(getattr(preview, "token", "") or "")
+        self._wait_health(timeout_s=60.0)
+
+    def register_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
+        self.ensure_started()
+        for name, fn in tools.items():
+            if name in self._injected_tools:
+                continue
+            if not name.isidentifier() or keyword.iskeyword(name):
+                msg = f"invalid tool name: {name}"
+                raise DaytonaAdapterError(message=msg, cause_type="InvalidToolNameError")
+            self._pending_wrappers.append(self._tool_wrapper_source(name, fn))
+            self._injected_tools.add(name)
+
+    def drain_wrapper_sources(self) -> str:
+        wrappers = self._pending_wrappers
+        self._pending_wrappers = []
+        return "\n\n".join(wrappers)
+
+    def submit_setup_code(self, output_fields: list[dict[str, Any]] | None) -> str:
+        wrappers = self.drain_wrapper_sources()
+        submit = remote_submit_setup_code(output_fields)
+        if wrappers:
+            return f"{wrappers}\n\n{submit}"
+        return submit
+
+    def execute_with_callbacks(
+        self,
+        *,
+        run_code: Callable[[], str | BackendExecutionResult],
+        tool_executor: Callable[[str, list[Any], dict[str, Any]], Any],
+    ) -> BackendExecutionResult:
+        self.ensure_started()
+        if self._stopped:
+            msg = "broker already stopped"
+            raise DaytonaAdapterError(message=msg, cause_type="InterpreterLifecycleError")
+
+        bucket: list[str | BackendExecutionResult | BaseException] = []
+
+        def _runner() -> None:
+            try:
+                bucket.append(run_code())
+            except BaseException as exc:  # noqa: BLE001 - deliver to waiter
+                bucket.append(exc)
+
+        thread = Thread(target=_runner, daemon=True)
+        thread.start()
+        while thread.is_alive():
+            if self._stopped:
+                break
+            self._poll_once(tool_executor)
+            time.sleep(self._poll_interval_s)
+        thread.join(timeout=1.0)
+        for _ in range(5):
+            if not self._poll_once(tool_executor):
+                break
+            time.sleep(self._poll_interval_s)
+
+        if not bucket:
+            msg = "sandbox execution produced no result"
+            raise DaytonaAdapterError(message=msg, cause_type="BrokerExecutionError")
+        outcome = bucket[0]
+        if isinstance(outcome, BaseException):
+            if isinstance(outcome, DaytonaAdapterError):
+                raise outcome
+            raise DaytonaAdapterError(
+                message=sanitize_provider_message(str(outcome)),
+                cause_type=type(outcome).__name__,
+            ) from outcome
+        if isinstance(outcome, BackendExecutionResult):
+            return outcome
+        final = extract_final_payload(str(outcome))
+        return BackendExecutionResult(stdout=str(outcome), final=final)
+
+    def stop(self) -> None:
+        self._stopped = True
+        session_id = self._broker_session_id
+        self._broker_session_id = None
+        self._broker_url = None
+        self._broker_token = None
+        if session_id is None:
+            return
+        try:
+            self._sandbox.process.delete_session(session_id)
+        except Exception:  # noqa: BLE001 - best-effort
+            pass
+
+    def _wait_health(self, *, timeout_s: float) -> None:
+        deadline = time.monotonic() + timeout_s
+        last_error = "unreachable"
+        while time.monotonic() < deadline:
+            try:
+                req = urllib.request.Request(
+                    f"{self._broker_url}/health",
+                    headers=self._preview_headers(),
+                    method="GET",
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    if resp.status == 200:
+                        return
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                last_error = str(exc)
+            time.sleep(0.25)
+        raise DaytonaAdapterError(
+            message=sanitize_provider_message(f"broker health check failed: {last_error}"),
+            cause_type="BrokerHealthError",
+        )
+
+    def _poll_once(self, tool_executor: Callable[[str, list[Any], dict[str, Any]], Any]) -> bool:
+        assert self._broker_url is not None
+        req = urllib.request.Request(
+            f"{self._broker_url}/pending?max=8",
+            headers=self._preview_headers(),
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+            return False
+        requests_out = payload.get("requests") or []
+        if not requests_out:
+            return False
+        with ThreadPoolExecutor(max_workers=min(8, len(requests_out))) as pool:
+            list(pool.map(lambda item: self._fulfill(item, tool_executor), requests_out))
+        return True
+
+    def _fulfill(
+        self,
+        item: dict[str, Any],
+        tool_executor: Callable[[str, list[Any], dict[str, Any]], Any],
+    ) -> None:
+        call_id = str(item.get("id") or "")
+        lease = item.get("lease_token")
+        name = str(item.get("tool_name") or "")
+        args = list(item.get("args") or [])
+        kwargs = dict(item.get("kwargs") or {})
+        try:
+            result = tool_executor(name, args, kwargs)
+            body: dict[str, Any] = {"id": call_id, "lease_token": lease, "result": result}
+        except Exception as exc:  # noqa: BLE001 - return sanitized error to sandbox
+            body = {
+                "id": call_id,
+                "lease_token": lease,
+                "error": sanitize_provider_message(str(exc)),
+            }
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self._broker_url}/result",
+            data=data,
+            headers={
+                **self._preview_headers(),
+                "Content-Type": "application/json",
+                "X-Broker-Secret": self._broker_secret,
+            },
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(req, timeout=10).read()
+        except (urllib.error.URLError, TimeoutError, OSError):
+            return
+
+    def _preview_headers(self) -> dict[str, str]:
+        headers = {"X-Broker-Secret": self._broker_secret}
+        if self._broker_token:
+            headers["Authorization"] = f"Bearer {self._broker_token}"
+            headers["X-Daytona-Preview-Token"] = self._broker_token
+        return headers
+
+    def _tool_wrapper_source(self, tool_name: str, tool_func: Callable[..., Any]) -> str:
+        signature = inspect.signature(tool_func)
+        params = list(signature.parameters.values())
+        sig_parts: list[str] = []
+        args_list: list[str] = []
+        kwargs_parts: list[str] = []
+        for param in params:
+            if param.kind in {
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            }:
+                continue
+            name = param.name
+            if param.default is inspect.Parameter.empty:
+                sig_parts.append(name)
+            else:
+                sig_parts.append(f"{name}={param.default!r}")
+            if param.kind == inspect.Parameter.KEYWORD_ONLY or (
+                param.default is not inspect.Parameter.empty and param.kind != inspect.Parameter.POSITIONAL_ONLY
+            ):
+                kwargs_parts.append(f'"{name}": {name}')
+            else:
+                args_list.append(name)
+        return _TOOL_WRAPPER_TEMPLATE.format(
+            tool_name=tool_name,
+            signature=", ".join(sig_parts),
+            args_list=", ".join(args_list),
+            kwargs_dict=", ".join(kwargs_parts),
+            broker_port=_BROKER_PORT,
+            broker_secret=self._broker_secret,
+        )

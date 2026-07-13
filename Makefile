@@ -1,4 +1,4 @@
-PYTHON_SOURCES = src tests
+PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/contracts/backend tests/e2e scripts/openapi_tools.py scripts/db_init.py migrations
 PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db
 PYTEST := uv run --no-sync pytest
 PYTEST_XDIST_MAX_WORKERS ?= 2
@@ -8,11 +8,11 @@ PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
 	help \
 	install install-dev install-all \
 	dev format format-check lint typecheck \
-	test test-fast test-unit test-integration test-e2e \
+	test test-fast test-unit test-contract test-e2e \
 	check quality-gate check-release check-docs check-duplicates check-security check-deps check-frontend check-codebase-tree api-check api-sync \
-	build build-ui build-release release release-check \
+	build build-release release release-check \
 	clean cli mlflow precommit-install precommit-run precommit \
-	sync sync-dev sync-all metadata-check docs-check security-check dependency-check frontend-check sync-ui release-artifacts cli-help mlflow-server mlflow-upgrade \
+	sync sync-dev sync-all metadata-check docs-check security-check dependency-check frontend-check release-artifacts cli-help mlflow-server mlflow-upgrade \
 	cloud-preflight
 
 help:
@@ -31,7 +31,7 @@ help:
 	@echo "Testing:"
 	@echo "  make test             - Run default non-live/non-benchmark tests"
 	@echo "  make test-unit        - Run unit tests (non-live/non-benchmark)"
-	@echo "  make test-integration - Run integration + e2e tests (non-live/non-benchmark)"
+	@echo "  make test-contract    - Run backend contracts and CLI smoke tests"
 	@echo "  make test-e2e         - Run frontend Playwright tests when frontend exists"
 	@echo ""
 	@echo "Quality:"
@@ -43,13 +43,12 @@ help:
 	@echo "  make check-deps       - Check for unused dependencies (deptry, knip)"
 	@echo "  make check-frontend   - Run frontend checks when src/frontend exists"
 	@echo "  make check-codebase-tree - Enforce import boundaries defined in codebase map"
-	@echo "  make api-check        - Validate OpenAPI artifacts and frontend API sync"
-	@echo "  make api-sync         - Regenerate OpenAPI and frontend API artifacts"
+	@echo "  make api-check        - Verify the backend-only OpenAPI artifact"
+	@echo "  make api-sync         - Regenerate the backend-only OpenAPI artifact"
 	@echo ""
 	@echo "Build & release:"
 	@echo "  make build            - Build Python distributions"
-	@echo "  make build-ui         - Build the frontend and sync packaged UI assets"
-	@echo "  make build-release    - Build + verify publishable distributions with synced UI assets"
+	@echo "  make build-release    - Build and verify the backend-only distribution"
 	@echo "  make release          - Run clean + check + security + release artifacts"
 	@echo "  make release-check    - Alias for release"
 	@echo ""
@@ -85,19 +84,18 @@ lint:
 	uv run ruff check $(PYTHON_SOURCES)
 
 typecheck:
-	uv run ty check src
+	uv run ty check src/fleet_rlm
 
 test:
-	$(PYTEST) -q $(PYTEST_PARALLEL) tests/unit tests/contracts -m "$(PYTEST_FAST_MARKERS)"
-	$(PYTEST) -q tests/integration -m "$(PYTEST_FAST_MARKERS)" -n 0
+	$(PYTEST) -q $(PYTEST_PARALLEL) tests/unit/backend tests/contracts/backend tests/unit/test_litellm_invariant.py tests/e2e -m "$(PYTEST_FAST_MARKERS)"
 
 test-fast: test
 
 test-unit:
-	$(PYTEST) -q $(PYTEST_PARALLEL) tests/unit -m "$(PYTEST_FAST_MARKERS)"
+	$(PYTEST) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/test_litellm_invariant.py -m "$(PYTEST_FAST_MARKERS)"
 
-test-integration:
-	$(PYTEST) -q tests/integration tests/contracts -m "$(PYTEST_FAST_MARKERS)" -n 0
+test-contract:
+	$(PYTEST) -q tests/contracts/backend tests/e2e -m "$(PYTEST_FAST_MARKERS)" -n 0
 
 test-db:
 	$(PYTEST) -q -m "db" -n 0
@@ -109,7 +107,7 @@ test-e2e:
 		echo "No src/frontend/package.json found, skipping frontend e2e tests."; \
 	fi
 
-check: lint format-check typecheck test check-release check-docs check-duplicates check-frontend check-codebase-tree
+check: lint format-check typecheck test api-check check-codebase-tree
 
 quality-gate: check
 
@@ -152,35 +150,16 @@ check-codebase-tree:
 	uv run python scripts/check_codebase_tree.py
 
 api-check:
-	uv run python scripts/openapi_tools.py validate
-	@if [ -f src/frontend/package.json ]; then \
-		cd src/frontend && pnpm run api:check; \
-	fi
+	uv run python scripts/openapi_tools.py check
 
 api-sync:
 	uv run python scripts/openapi_tools.py generate
-	@if [ -f src/frontend/package.json ]; then \
-		cd src/frontend && pnpm run api:sync; \
-	fi
 
 build:
 	rm -rf dist build
 	uv build
 
-sync-ui:
-	@echo "Syncing frontend dist to packaged UI assets..."
-	rm -rf src/fleet_rlm/ui/dist
-	mkdir -p src/fleet_rlm/ui
-	cp -R src/frontend/dist src/fleet_rlm/ui/dist
-
-build-ui:
-	cd src/frontend && pnpm install --frozen-lockfile && CI=true ./node_modules/.bin/vp build
-	node src/frontend/scripts/ensure-entrypoint.mjs --dist-dir src/frontend/dist
-	$(MAKE) sync-ui
-
-build-release: build-ui
-	rm -rf dist build
-	uv build
+build-release: build
 	uv run python scripts/validate_release.py wheel
 	uvx twine check dist/*
 
@@ -250,9 +229,7 @@ cloud-preflight:
 	@echo "Checking fastapi CLI is available in the locked env..."
 	uv run fastapi --help >/dev/null
 	@echo "Importing configured FastAPI entrypoint..."
-	FLEET_RLM_SERVE_UI=false APP_ENV=local DATABASE_REQUIRED=false \
-		uv run python -c "from fleet_rlm.api.main import app; print(f'{app.title} {app.version}')"
+	uv run python -c "from fleet_rlm.main import app; print(f'{app.title} {app.version}')"
 	@echo "Enumerating routes from create_app()..."
-	FLEET_RLM_SERVE_UI=false APP_ENV=local DATABASE_REQUIRED=false \
-		uv run python -c "from fleet_rlm.api.main import create_app; a = create_app(); print('\n'.join(sorted({getattr(r, 'path', '<?>') for r in a.routes})))"
+	uv run python -c "from fleet_rlm.app import create_app; a = create_app(); print('\n'.join(sorted({getattr(r, 'path', '<?>') for r in a.routes})))"
 	@echo "cloud-preflight OK"

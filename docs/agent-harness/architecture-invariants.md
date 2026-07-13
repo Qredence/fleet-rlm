@@ -1,119 +1,90 @@
 # Architecture Invariants
 
-These rules are the fast path for agent review. If a change violates one of them, either remediate
-the code or update this document and the matching checks in the same patch.
+If a change violates an invariant, remediate the code or update this document
+and its matching automated check in the same patch.
 
-## Backend Layers
+## Backend layers
 
-Keep the backend layered from transport to runtime to substrate:
+- `api/` owns HTTP identity, dependency aliases, schemas, routes, and SSE
+  projection. Routes retrieve lifespan-composed modules and do not construct
+  stores, repositories, engines, or provider clients.
+- `chat/` owns Turn context construction, orchestration, Turn Commit, terminal
+  ordering, and final Interpreter Lease release.
+- `rlm/` owns DSPy model roles, signature inputs, fresh-per-Turn RLM creation,
+  Runtime Events, budgets, cancellation, and execution.
+- `daytona/` is the exclusive Daytona SDK boundary and owns Sandbox, lease,
+  Volume, interpreter, and provider-error normalization.
+- `sessions/`, `files/`, `artifacts/`, and `skills/` own domain interfaces and
+  deterministic policy. `persistence/` owns SQLAlchemy adapters.
+- Application-lifetime resources are created and disposed by FastAPI lifespan.
+  Package imports remain credential-free and side-effect-free.
 
-- `src/fleet_rlm/api/` owns FastAPI app assembly, auth, HTTP routers, websocket endpoints, runtime
-  services, and SPA serving.
-- `src/fleet_rlm/runtime/` owns the DSPy ReAct agent, chat orchestration, execution event assembly,
-  tool registry, session state, and module construction.
-- `src/fleet_rlm/integrations/daytona/` owns Daytona interpreter lifecycle, sandbox execution,
-  volumes, diagnostics, and substrate-specific cleanup.
-- `src/fleet_rlm/db/` and `src/fleet_rlm/integrations/local_store.py` own
-  persistence (Postgres domain models/repos vs limited LocalStore dual backend).
-- `src/fleet_rlm/quality/` owns offline DSPy evaluation and optimization machinery.
+## Turn and async boundary
 
-Transport code may call runtime services and schemas. Runtime code should not import frontend,
-FastAPI route modules, or test-only helpers. Configuration/package-root modules must not pull in
-heavy runtime providers such as DSPy, MLflow, PostHog, or Daytona at import time.
+- Construct a fresh `dspy.RLM`, custom `CodeInterpreter`, and host-tool list per
+  Turn; custom interpreters are not shared concurrently.
+- Preserve sandbox-safe `history: list[dict]` and invoke
+  `await rlm.aforward(**named_signature_inputs)`.
+- Attachment ownership validation finishes before SSE begins.
+- Artifact Candidates remain private until byte promotion and transactional Turn
+  Commit succeed.
+- Success ordering is `artifact.created*` then exactly one `run.completed`.
+  Failure produces exactly one sanitized error terminal and no history advance.
+- `TurnCoordinator` holds the Interpreter Lease through persistence and terminal
+  projection and releases it in `finally`.
 
-Observability callback registration is the exception only after an explicit runtime setup call.
-Register MLflow and PostHog DSPy callbacks through
-`integrations/observability/callback_registry.py` so callback registration stays lazy,
-deduplicated by callback type, and safe when `dspy.configure(...)` rejects non-owner
-threads or async tasks. The registry must preserve active thread-local callback overrides;
-otherwise worker-thread warmup can report success while immediately following DSPy calls miss
-the callbacks.
+The custom Daytona interpreter bridges blocking provider calls without exposing
+them to FastAPI routes. Do not move provider calls or raw exceptions across the
+`daytona/` boundary.
 
-## Async Execution Boundary
+## Persistence and storage
 
-The sandbox interpreter (Daytona) exposes a synchronous, blocking `execute(...)` that
-performs a network round-trip per code iteration. `dspy.RLM.aforward` only awaits the LM predictor
-calls — it still runs sandbox code through the **synchronous** `repl.execute(...)` (verified in
-dspy 3.3.0b1). Therefore the heavy RLM turn is driven sync-in-a-thread via
-`asyncio.to_thread(self.agent, ...)` in `runtime/agent/runtime.py`, which offloads both the LM
-calls and the blocking sandbox I/O to a worker thread and keeps the event loop free.
+- Alembic owns live schema evolution; live startup never calls `create_all`.
+  Explicit SQLite test/offline helpers may call `create_tables`.
+- Durable Attachment and Artifact bytes live in Workspace Volume Scope.
+  Non-Turn I/O uses short-lived, workspace-labelled Sandboxes that mount only
+  `workspaces/<workspace_id>` and are explicitly deleted in `finally`.
+- Bytes are written before metadata. UUID-unique orphan bytes are acceptable;
+  rows or public success claims without committed metadata are not.
 
-Do not replace this `asyncio.to_thread` wrapping with a direct `await agent.acall(...)`/`aforward`
-on the RLM heavy path while the interpreter's `execute` stays synchronous — doing so would block the
-event loop on every code-execution iteration and regress server concurrency. Lightweight branches
-are the exception: the unified streaming path wraps the whole turn in `dspy.streamify`, and the
-direct/tools branches use `acall` so their `response` predictors stream tokens natively. Worker
-threads spawned for blocking work must disable token streaming (`dspy.context(send_stream=None)`),
-because sync LM calls cannot forward stream chunks from plain `asyncio.to_thread` workers.
+## Configuration and compatibility
 
-See also [docs/reference/dspy-daytona-interpreter-boundary.md](../reference/dspy-daytona-interpreter-boundary.md)
-for Daytona snapshot/volume lifecycle notes and RLM budget knobs.
+- Runtime settings use only the `FLEET_*` surface. Do not add environment,
+  import, schema, route, or command aliases for the deleted backend.
+- There is no `/api/v1`, WebSocket execution, dual-serve, legacy data migration,
+  runtime-admin, optimization/evaluation API, or public Artifact creation.
+- `src/frontend/` is a separate consumer until its SSE adaptation; backend work
+  does not synchronize or package frontend artifacts.
 
-MCP-backed ReAct tools are the other async exception. Tools converted with
-`dspy.Tool.from_mcp_tool(session, tool)` are bound to a live MCP `ClientSession` and must be invoked
-through an async ReAct path (`acall`) while that session remains open. Keep MCP tools out of sync
-ReAct calls, close the provider when the runtime shuts down, and rebuild the agent from base tools
-plus the current MCP attachment when servers are reattached.
+## Frontend boundaries
 
-## Frontend Boundaries
+Existing frontend source remains governed by its own `AGENTS.md`. Backend-only
+work must not edit frontend source, generated OpenAPI copies, route trees, or
+build artifacts.
 
-Keep shared UI primitives reusable:
+## Generated artifacts
 
-- `src/frontend/src/components/{ui,agent-elements,product}/*` must
-  not import from route files or feature implementation modules.
-- `src/frontend/src/lib/workspace/*` must stay UI-independent.
-- `src/frontend/src/features/layout/*` should import product surfaces through feature contracts
-  rather than reaching into deep implementation files.
-- New handwritten feature files use `kebab-case`; React components use `PascalCase`.
-- Use the canonical `cn()` import path: `@/lib/utils`.
-
-## Generated And Synced Artifacts
-
-Do not hand-edit:
-
-- `openapi.yaml`
-- `src/frontend/src/lib/rlm-api/generated/openapi.ts`
-- `src/frontend/openapi/fleet-rlm.openapi.yaml`
-- `src/frontend/src/routeTree.gen.ts`
-- `src/frontend/dist`
-- `src/fleet_rlm/ui/dist`
-
-Use these commands:
+Do not hand-edit root `openapi.yaml`. Use:
 
 ```bash
-# from repo root
-make api-sync
-make api-check
-make build-ui
-```
-
-Backend API shape changes require:
-
-```bash
-# from repo root
-uv run python scripts/openapi_tools.py generate
 make api-sync
 make api-check
 ```
 
-## Script Boundary
+These commands are backend-only. Frontend generated contracts are intentionally
+not synchronized by the backend gate.
 
-`scripts/README.md` is the retained helper inventory. Top-level Python scripts under `scripts/`
-must be listed there and support:
+## Script boundary
 
-```bash
-# from repo root
-uv run python scripts/<name>.py --help
-```
-
-Daily workflows should remain on `make`, `fleet`, `fleet-rlm`, or documented `.codex` actions.
+Every top-level Python helper under `scripts/` is listed in `scripts/README.md`
+and supports `uv run python scripts/<name>.py --help` where applicable.
 
 ## Remediation
 
 When a boundary check fails:
 
-1. Move the code back to the owning layer when possible.
-2. Prefer an existing service or feature contract over a new cross-layer import.
-3. If the invariant is obsolete, update this document, the root `AGENTS.md` map, and
-   `scripts/check_harness_engineering.py` in the same change.
+1. Move code back to its owning module.
+2. Prefer an existing domain interface over a new cross-layer import.
+3. If the invariant is obsolete, update this file, root `AGENTS.md`, and the
+   matching harness check together.
 4. Run `make check-docs` before finishing.

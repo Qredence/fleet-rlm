@@ -1,9 +1,16 @@
-"""Provider-neutral observability primitives for runtime event streams.
+"""Observability: turn traces and optional non-fatal exporters."""
 
-The runtime event contract remains in :mod:`fleet_rlm.runtime.events`. This
-package records and redacts those events without defining a second wire enum.
-"""
+from fleet_rlm.observability.exporters import (
+    InMemoryTurnStore,
+    LoggingTurnExporter,
+    safe_export,
+)
+from fleet_rlm.observability.record import TurnTrace, apply_event_to_trace
 
-from __future__ import annotations
-
-__all__ = []
+__all__ = [
+    "InMemoryTurnStore",
+    "LoggingTurnExporter",
+    "TurnTrace",
+    "apply_event_to_trace",
+    "safe_export",
+]

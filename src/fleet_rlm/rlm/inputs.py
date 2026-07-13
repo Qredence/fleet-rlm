@@ -1,110 +1,92 @@
-"""Turn-input rows for the direct-RLM execution path."""
+"""Serialize Turn Context discovery metadata for FleetRLMSignature inputs.
+
+Bodies stay behind Host-Mediated Tools; signature fields are metadata only.
+"""
 
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
-from fleet_rlm.api.runtime_services.chat_context import ChatExecutionContext
-from fleet_rlm.files.schemas import AttachedFiles
-from fleet_rlm.runtime.events import TurnInputRow
+import dspy
+
+from fleet_rlm.files.models import AttachmentRef
+from fleet_rlm.skills.models import SkillCard
 
 
-def history_turn_count(agent_runtime: Any | None) -> int:
-    """Return the number of history messages on the agent runtime, if present."""
-    if agent_runtime is None:
-        return 0
-    history = getattr(agent_runtime, "history", None)
+def skill_card_metadata(card: SkillCard | Any) -> dict[str, Any]:
+    """Public Skill Card keys only — never instructions or resource bodies."""
+    return {
+        "id": _id_str(getattr(card, "id", "")),
+        "name": str(getattr(card, "name", "")),
+        "description": str(getattr(card, "description", "")),
+        "scope": str(getattr(card, "scope", "")),
+        "version": str(getattr(card, "version", "")),
+        "trust": str(getattr(card, "trust", "")),
+        "affordances": list(getattr(card, "affordances", ()) or ()),
+        "resources_available": bool(getattr(card, "resources_available", False)),
+    }
+
+
+def attachment_metadata(ref: AttachmentRef | Any) -> dict[str, Any]:
+    """Attachment identity + bounded metadata — never bytes or paths."""
+    meta: dict[str, Any] = {
+        "id": _id_str(getattr(ref, "id", "")),
+        "filename": str(getattr(ref, "filename", "")),
+        "byte_size": int(getattr(ref, "byte_size", 0) or 0),
+    }
+    content_type = getattr(ref, "content_type", None)
+    if content_type is not None:
+        meta["content_type"] = str(content_type)
+    checksum = getattr(ref, "checksum_sha256", None)
+    if checksum:
+        meta["checksum_sha256"] = str(checksum)
+    return meta
+
+
+def empty_history() -> dspy.History:
+    return dspy.History(messages=[])
+
+
+def resolve_history(history: Any) -> dspy.History:
+    if isinstance(history, dspy.History):
+        return history
     if history is None:
-        return 0
-    return len(getattr(history, "messages", []) or [])
+        return empty_history()
+    messages = getattr(history, "messages", None)
+    if isinstance(messages, list):
+        normalized: list[dict[str, Any]] = []
+        for item in messages:
+            if isinstance(item, dict):
+                normalized.append(dict(item))
+        return dspy.History(messages=normalized)
+    return empty_history()
 
 
-def _attachment_metadata_rows(attached: AttachedFiles) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for attachment in attached.attachments:
-        rows.append(
-            {
-                "id": attachment.id,
-                "filename": attachment.filename,
-                "mime_type": attachment.mime_type,
-                "size_bytes": attachment.size_bytes,
-                "staging_path": attachment.staging_path,
-            }
-        )
-    return rows
+def build_rlm_input_kwargs(
+    *,
+    request: str,
+    history: Any = None,
+    session_summary: str = "",
+    skill_cards: tuple[Any, ...] | list[Any] = (),
+    attachments: tuple[Any, ...] | list[Any] = (),
+) -> dict[str, Any]:
+    """Kwargs for ``rlm.aforward`` / ``forward`` matching FleetRLMSignature.
+
+    History is passed as a plain message list (sandbox-safe). Callers may still
+    supply ``dspy.History``; it is normalized here.
+    """
+    resolved = resolve_history(history)
+    return {
+        "request": request,
+        "history": [dict(item) for item in list(resolved.messages or [])],
+        "session_summary": session_summary or "",
+        "skill_cards": [skill_card_metadata(card) for card in skill_cards],
+        "attachments": [attachment_metadata(ref) for ref in attachments],
+    }
 
 
-def build_direct_rlm_turn_inputs(
-    ctx: ChatExecutionContext,
-    message: str,
-    agent_runtime: Any | None,
-) -> list[TurnInputRow]:
-    """Build turn-input rows mirroring the legacy RLM path's assembled inputs."""
-    preview_limit = 160
-    rows = [
-        TurnInputRow(
-            label="Request",
-            kind="request",
-            value=message,
-            preview=message[:preview_limit],
-        )
-    ]
-
-    skills = list(ctx.controls.selected_skill_ids or [])
-    if skills:
-        preview = ", ".join(skills)
-        rows.append(
-            TurnInputRow(
-                label="Active skills",
-                kind="skills",
-                value=skills,
-                preview=preview[:preview_limit],
-            )
-        )
-
-    attached = ctx.controls.attached_files
-    if attached is not None and attached.attachments:
-        metadata_rows = _attachment_metadata_rows(attached)
-        max_visible = 20
-        visible = metadata_rows[:max_visible]
-        total = len(metadata_rows)
-        if total > max_visible:
-            preview = f"{total} file(s) (showing first {max_visible})"
-        else:
-            preview = ", ".join(str(row.get("filename") or row.get("id") or "") for row in visible)
-        rows.append(
-            TurnInputRow(
-                label="Attached files",
-                kind="context",
-                value=visible,
-                preview=preview[:preview_limit],
-            )
-        )
-
-    history = getattr(agent_runtime, "history", None) if agent_runtime is not None else None
-    if history is not None:
-        messages = list(getattr(history, "messages", []) or [])
-        rows.append(
-            TurnInputRow(
-                label="History",
-                kind="history",
-                value=messages,
-                preview=f"{len(messages)} turn(s)",
-            )
-        )
-
-    core_memory = str(getattr(agent_runtime, "core_memory", "") or "") if agent_runtime is not None else ""
-    if core_memory:
-        rows.append(
-            TurnInputRow(
-                label="Core memory",
-                kind="core_memory",
-                value=core_memory,
-                preview=core_memory[:preview_limit],
-            )
-        )
-
-    return rows
-
-
-__all__ = ["build_direct_rlm_turn_inputs", "history_turn_count"]
+def _id_str(value: Any) -> str:
+    if isinstance(value, UUID):
+        return str(value)
+    return str(value)

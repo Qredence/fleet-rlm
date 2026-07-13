@@ -1,354 +1,64 @@
-# Testing Strategy
+# Backend Testing Strategy
 
-This guide documents the fleet-rlm test system, including pytest markers, test organization, and common test commands for both backend and frontend code.
+The cutover gate is backend-only. It does not run frontend tests or synchronize
+frontend-generated API contracts.
 
-## Test Markers
+## Test Suites
 
-fleet-rlm uses pytest markers to categorize tests by scope and runtime requirements. All markers are defined in `pyproject.toml` under `[tool.pytest.ini_options]`.
+| Suite | Path | Purpose |
+| --- | --- | --- |
+| Unit | `tests/unit/backend/` | domain, adapters, configuration, and route modules |
+| Contract | `tests/contracts/backend/` | API, persistence, packaging, and boundary contracts |
+| Live L1 | `tests/live/backend/test_exit_bar_l1_promotion.py` | one-workspace Daytona/DSPy lifecycle |
+| Live L2 | `tests/live/backend/test_exit_bar_l2_adversarial.py` | cross-workspace isolation and cancellation |
 
-### Backend Markers
-
-| Marker        | Description                                    | Typical Duration               |
-| ------------- | ---------------------------------------------- | ------------------------------ |
-| `unit`        | Fast unit tests for isolated modules           | Milliseconds                   |
-| `integration` | Integration tests across DB/runtime boundaries | Seconds                        |
-| `db`          | Database-backed integration tests              | Seconds                        |
-| `e2e`         | End-to-end workflow smoke tests                | Seconds to minutes             |
-| `benchmark`   | Performance/throughput benchmark tests         | Variable                       |
-| `live_llm`    | Tests requiring live Daytona + configured LLM  | Variable, requires credentials |
-| `live_daytona` | Tests requiring an explicitly enabled live Daytona backend | Variable, requires credentials |
-
-### Marker Usage
-
-**Default Local Development**
-
-The default test command excludes `live_llm` and `benchmark` tests:
-
-```bash
-uv run pytest -q -m "not live_llm and not benchmark"
-```
-
-This ensures fast feedback during development without requiring:
-
-- Daytona credentials
-- Configured LLM API keys
-- External service connections
-
-**Running Specific Suites**
-
-```bash
-# Unit tests only
-uv run pytest -q tests/unit -m "not live_llm and not benchmark"
-
-# Integration tests
-uv run pytest -q tests/integration -m "not live_llm and not benchmark"
-
-# E2E tests
-uv run pytest -q tests/e2e -m "not live_llm and not benchmark"
-```
-
-**Running Live LLM Tests**
-
-Live LLM tests require Daytona connectivity and configured LLM credentials:
-
-```bash
-# Validate Daytona connectivity first
-uv run fleet-rlm daytona-smoke --repo https://github.com/qredence/fleet-rlm.git --ref main
-
-# Run live LLM tests
-uv run pytest -q -m "live_llm"
-```
-
-**Running Live Daytona Restore and Concurrency Checks**
-
-Use these scripts after changing Daytona volume layout, memory bootstrap,
-session restore, or sandbox concurrency behavior:
-
-```bash
-# Recreate a sandbox with a persistent volume and verify session restore paths
-uv run python scripts/live_daytona_verify.py
-
-# Fill the sandbox slot limit, verify the busy error, then verify release
-FLEET_MAX_CONCURRENT_SANDBOXES=2 uv run python scripts/live_concurrency_verify.py
-```
-
-Both scripts require `DAYTONA_API_KEY`, `DAYTONA_API_URL`, and optional
-`DAYTONA_TARGET`. Live web-search evidence additionally requires
-`BRAVE_SEARCH_API_KEY` or `BRAVE_API_KEY`; record that check as skipped when no
-provider key is configured.
-
-**Running Benchmarks**
-
-Benchmark tests measure performance and throughput:
-
-```bash
-uv run pytest -q -m "benchmark"
-```
-
-## Test Directory Structure
-
-Tests are organized by scope in the `tests/` directory:
-
-```text
-tests/
-├── conftest.py           # Shared fixtures and marker registration
-├── unit/                 # Fast unit tests for isolated modules
-├── integration/          # Integration tests across DB/runtime
-│   └── conftest.py       # Integration runtime gates + DB fixtures
-└── e2e/                  # End-to-end workflow smoke tests
-```
-
-### Directory Guidelines
-
-| Directory            | Purpose                                          | Dependencies        |
-| -------------------- | ------------------------------------------------ | ------------------- |
-| `tests/unit/`        | Isolated module tests, no external services      | None                |
-| `tests/integration/` | Cross-boundary tests, database operations        | Database, runtime   |
-| `tests/e2e/`         | Full workflow smoke tests                        | Full stack          |
-
-### Fixture Organization
-
-- **Root fixtures**: `tests/conftest.py` contains shared suite fixtures
-- **Integration fixtures**: `tests/integration/conftest.py` has DB fixtures
-
-## Backend Test Commands
-
-### Makefile Targets
-
-The `Makefile` provides convenient targets for running tests:
-
-| Command                 | Description                                                    |
-| ----------------------- | -------------------------------------------------------------- |
-| `make test-fast`        | Run default test suite (excludes `live_llm` and `benchmark`)   |
-| `make test-unit`        | Run unit tests only                                            |
-| `make test-integration` | Run integration + e2e tests                                    |
-| `make quality-gate`     | Run backend lint/type/tests, metadata/docs checks, and the repo frontend gate |
-| `make release-check`    | Run release-oriented validation, including security and packaging |
-
-The unit and contract targets retain pytest-xdist auto-detection but cap local
-fan-out at two workers to avoid resource-contention timeouts on supported
-developer hosts. Larger CI runners can override the cap explicitly, for example:
-
-```bash
-make test PYTEST_XDIST_MAX_WORKERS=4
-```
-
-### Direct pytest Commands
-
-```bash
-# Default fast test suite
-uv run pytest -q -m "not live_llm and not benchmark"
-
-# Verbose output
-uv run pytest -v -m "not live_llm and not benchmark"
-
-# Specific test file
-uv run pytest -q tests/unit/test_example.py
-
-# Specific test function
-uv run pytest -q tests/unit/test_example.py::test_function_name
-
-# With coverage
-uv run pytest -q --cov=src/fleet_rlm -m "not live_llm and not benchmark"
-```
-
-## Frontend Test Commands
-
-Frontend tests use **Vitest** for unit tests and **Playwright** for end-to-end tests. All frontend commands run from `src/frontend/`.
-
-### Package.json Scripts
-
-| Command                   | Description                                                       |
-| ------------------------- | ----------------------------------------------------------------- |
-| `pnpm run api:sync`       | Copy the root OpenAPI spec and regenerate TS types                |
-| `pnpm run api:check`      | Verify committed frontend OpenAPI artifacts match the backend spec |
-| `pnpm run type-check`     | Run TypeScript type checks                                        |
-| `pnpm run lint:robustness`| Run the repo lint lane                                            |
-| `pnpm run test:unit`      | Run Vitest unit tests                                             |
-| `pnpm run test:e2e`       | Run Playwright end-to-end tests                                   |
-| `pnpm run test:watch`     | Run Vitest in watch mode                                          |
-| `pnpm run test:coverage`  | Run Vitest with coverage report                                   |
-| `pnpm run check`          | Run type-check, lint, unit tests, build, and e2e tests            |
-
-### Running Frontend Tests
-
-```bash
-# From repository root
-cd src/frontend
-
-# Run unit tests
-pnpm run test:unit
-
-# Run e2e tests
-pnpm run test:e2e
-
-# Run repo-aligned frontend checks
-pnpm run api:check
-pnpm run type-check
-pnpm run lint:robustness
-pnpm run test:unit
-pnpm run build
-
-# After backend contract or OpenAPI-facing schema changes
-cd ..
-uv run python scripts/openapi_tools.py generate
-cd src/frontend
-pnpm run api:check
-
-# Run the full frontend suite (adds Playwright e2e)
-pnpm run check
-
-# Watch mode for development
-pnpm run test:watch
-```
-
-### Frontend Test Organization
-
-```text
-src/frontend/src/
-├── app/                  # Bootstrap and provider composition
-├── routes/               # File-based route tree
-├── features/             # Product-surface entrypoints and UI ownership
-├── components/           # ui/, ai-elements/, and product compositions
-├── lib/                  # API clients, workspace adapters, and shared helpers
-├── stores/               # Shared Zustand shell state
-└── ...
-```
-
-## Quality Gates
-
-### Full Quality Gate
-
-Run all checks before submitting a PR:
-
-```bash
-make quality-gate
-```
-
-This runs:
-
-1. `lint` - Ruff linting
-2. `format-check` - Ruff format verification
-3. `typecheck` - Type checking with ty
-4. `test-fast` - Default test suite
-5. `metadata-check` - Release metadata and hygiene validation
-6. `docs-check` - Markdown/docs quality validation
-7. `frontend-check` - Frontend OpenAPI sync check, type-check, lint, unit tests, and build
-
-### Release Gate
-
-Run the release-oriented validation lane before tagging:
-
-```bash
-make release-check
-```
-
-This extends `make quality-gate` with:
-
-1. security checks (`pip-audit`, `bandit`)
-2. frontend UI build sync
-3. wheel/sdist build validation
-4. `twine check` for publishability
-
-### Pre-commit Hooks
-
-Install pre-commit hooks for automatic checks:
-
-```bash
-uv run pre-commit install
-uv run pre-commit install --hook-type pre-push
-```
-
-Run pre-commit manually:
-
-```bash
-uv run pre-commit run --all-files
-uv run pre-commit run --hook-stage pre-push --all-files
-```
-
-## Test Anti-Patterns
-
-Avoid these common anti-patterns when writing tests:
-
-### Backend Anti-Patterns
-
-- **Duplicating debug-auth header constants** across test files
-- **Rebuilding `create_app()` boilerplate** inside every test module
-- **Hidden startup side effects** in tests (analytics/network calls)
-- **Embedding shared fake agent logic** directly in individual test files
-
-### Recommended Patterns
-
-- Use fixtures from `conftest.py` for shared test setup
-- Use the `auth_headers` fixture for API route tests
-- Use the `websocket_auth_headers` fixture for WebSocket tests
-- Consolidate related tests in appropriate suite files
-
-## CI/CD Integration
-
-### CircleCI Pipeline
-
-The repository includes `.circleci/config.yml` for the default CI lane. It runs separate jobs for:
-
-- release, docs, security, and dependency checks
-- Ruff formatting/linting and `ty` type checks
-- unit and contract tests with JUnit result upload
-- integration and e2e tests
-- frontend API, type, lint, unit, duplicate-code, and build checks
-
-The CircleCI backend test jobs write JUnit XML into `test-results/` and upload it with
-`store_test_results` so CircleCI can track timing data, flaky tests, and reruns. Dependency caches are
-keyed by `uv.lock` for Python and `src/frontend/pnpm-lock.yaml` for frontend dependencies; do not
-replace those with broad source-tree or virtualenv caches unless measured CI timing shows a clear
-benefit.
-
-Validate config-only changes before opening a PR:
+## Local Gate
 
 ```bash
 # from repo root
-circleci config validate .circleci/config.yml
+make check
 ```
 
-If the CircleCI CLI is unavailable locally, at minimum parse the YAML and run the docs lane:
+This runs format, Ruff, type, unit/contract tests, backend OpenAPI drift, and
+the codebase boundary check. The focused commands are:
 
 ```bash
-# from repo root
-yq e '.' .circleci/config.yml >/dev/null
-make check-docs
+uv run pytest tests/unit/backend tests/contracts/backend -q
+uv run ruff check src/fleet_rlm tests/unit/backend tests/contracts/backend
+uv run ty check src/fleet_rlm
+uv run python scripts/openapi_tools.py check
+uv run python scripts/check_harness_engineering.py
+git diff --check
 ```
 
-### Live LLM Tests in CI
+## Database Gate
 
-Live LLM tests require secrets configuration:
-
-```yaml
-- name: Run live LLM tests
-  if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-  env:
-    DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
-    DAYTONA_API_URL: ${{ secrets.DAYTONA_API_URL }}
-    DSPY_LM_MODEL: ${{ secrets.DSPY_LM_MODEL }}
-    DSPY_LM_API_KEY: ${{ secrets.DSPY_LM_API_KEY }}
-  run: uv run pytest -q -m "live_llm"
-```
-
-## MLflow verification lane
-
-For MLflow tracing regressions, use the maintained live harness with optional trace
-assertions (see [MLflow workflows](mlflow-workflows.md)):
+Alembic owns production schema creation. Against an empty configured database:
 
 ```bash
-uv run python scripts/validate_rlm_e2e_trace.py \
-  --server-url http://127.0.0.1:8000 \
-  --require-mlflow-trace-id \
-  --verify-mlflow
+uv run alembic upgrade head
+uv run alembic check
 ```
 
-The optional `.github/workflows/mlflow-smoke.yml` workflow runs the same harness on
-`workflow_dispatch` when database secrets are configured.
+Tests may use explicit helpers to create ephemeral SQLite schemas.
 
-## Related Documentation
+## Live Gate
 
-- [Developer Setup Guide](developer-setup.md) - Setting up a local development environment
-- [CONTRIBUTING.md](../../CONTRIBUTING.md) - Contribution guidelines
-- [AGENTS.md](../../AGENTS.md) - Project architecture and conventions
+Live tests require canonical `FLEET_*` credentials and explicit opt-in:
+
+```bash
+FLEET_LIVE=1 uv run pytest tests/live/backend/test_exit_bar_l1_promotion.py -q
+FLEET_LIVE=1 uv run pytest tests/live/backend/test_exit_bar_l2_adversarial.py -q
+```
+
+No pre-cutover or provider-specific environment aliases are supported.
+
+## Packaging and Smoke
+
+```bash
+uv build
+uv run python scripts/validate_release.py wheel
+uv run fleet --help
+uv run fleet-rlm --help
+uv run python -c 'from fleet_rlm.main import app; print(app.title)'
+```

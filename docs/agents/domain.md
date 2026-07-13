@@ -5,16 +5,16 @@ Fleet RLM uses a multi-context glossary layout.
 ## Reading rules
 
 1. Read `CONTEXT-MAP.md` and the context relevant to the work.
-2. Read system-wide ADRs under `docs/adr/` that touch the area.
-3. Use glossary terms consistently in issues, plans, tests, and review findings.
-4. Surface conflicts with an existing ADR instead of silently overriding it.
-5. Keep `CONTEXT.md` files free of implementation plans and code-level workflow detail.
+2. Use glossary terms consistently in issues, plans, tests, and review findings.
+3. Keep `CONTEXT.md` files free of implementation plans and code-level workflow detail.
 
 ## Contexts
 
 - `CONTEXT.md` contains concepts shared across the whole product.
-- `src/fleet_rlm/CONTEXT.md` contains backend runtime language.
-- `src/fleet_rlm_clean/CONTEXT.md` contains clean parallel backend language (RLM-native turns, leases, skill cards).
+- `src/fleet_rlm/CONTEXT.md` contains the canonical RLM-native backend language
+  (Turns, Runs, leases, Skill Cards, staged Attachments, and Artifact Candidates).
 - `src/frontend/CONTEXT.md` contains frontend interaction language.
 
-Create context-local ADR directories only when a genuinely context-scoped, hard-to-reverse trade-off requires one. System-wide decisions remain in `docs/adr/`.
+ADRs for the deleted backend are preserved under
+`docs/internal/legacy-backend/adr/` as history and are not current authority.
+Record new hard-to-reverse decisions alongside the active planning artifact.

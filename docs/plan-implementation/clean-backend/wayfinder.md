@@ -1,4 +1,8 @@
-# Fleet RLM clean-backend wayfinder
+# Fleet RLM backend-foundation wayfinder
+
+> Historical planning guide. The hard cutover is complete; active code is
+> `src/fleet_rlm/`. References to `fleet_rlm_clean` describe the pre-cutover
+> delivery sequence only.
 
 ## Purpose
 
@@ -20,7 +24,7 @@ If it does none of those things, defer it.
 | What blocks approval? | `code-review.md` |
 | What do current frameworks guarantee? | `context7-contracts.md` |
 | What supersedes the migration roadmap for a clean build? | This directory |
-| Where is code delivered before cutover? | `src/fleet_rlm_clean/` (live `src/fleet_rlm/` stays untouched) |
+| Where is active backend code now? | `src/fleet_rlm/` |
 
 ## Priority ladder
 
