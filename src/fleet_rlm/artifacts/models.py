@@ -22,6 +22,12 @@ KIND_EXTENSIONS: dict[ArtifactKind, str] = {
 
 
 @dataclass(frozen=True, slots=True)
+class ArtifactAccess:
+    user_id: UUID
+    workspace_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
 class ArtifactRef:
     """Safe metadata returned to API clients and turn context."""
 
@@ -51,3 +57,9 @@ class ArtifactCandidate:
     checksum_sha256: str
     staging_path: str
     durable_path: str
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactContent:
+    metadata: ArtifactRef
+    data: bytes

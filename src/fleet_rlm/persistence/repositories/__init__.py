@@ -1,13 +1,21 @@
 """Concrete persistence adapters for Fleet RLM domain interfaces."""
 
-from fleet_rlm.persistence.repositories.files import (
-    SqlAlchemyArtifactRepository,
-    SqlAlchemyAttachmentRepository,
+from fleet_rlm.persistence.repositories.artifacts import SqlAlchemyArtifactCatalog
+from fleet_rlm.persistence.repositories.attachments import SqlAlchemyAttachmentCatalog
+from fleet_rlm.persistence.repositories.session_catalog import (
+    InMemorySessionCatalog,
+    SqlAlchemySessionCatalog,
 )
-from fleet_rlm.persistence.repositories.sessions import SqlAlchemySessionRepository
+from fleet_rlm.persistence.repositories.turns import (
+    InMemoryTurnStateStore,
+    SqlAlchemyTurnStateStore,
+)
 
 __all__ = [
-    "SqlAlchemyArtifactRepository",
-    "SqlAlchemyAttachmentRepository",
-    "SqlAlchemySessionRepository",
+    "SqlAlchemyArtifactCatalog",
+    "SqlAlchemyAttachmentCatalog",
+    "InMemorySessionCatalog",
+    "InMemoryTurnStateStore",
+    "SqlAlchemySessionCatalog",
+    "SqlAlchemyTurnStateStore",
 ]

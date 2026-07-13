@@ -1,19 +1,15 @@
-"""Session repository errors."""
+"""Public-safe Session domain errors."""
 
 from __future__ import annotations
 
 
-class SessionRepositoryError(RuntimeError):
-    """Base error for session persistence failures."""
+class SessionError(RuntimeError):
+    """Base error for Session domain failures."""
 
 
-class SessionNotFoundError(SessionRepositoryError):
+class SessionNotFoundError(SessionError):
     """Raised when a session id cannot be loaded."""
 
 
-class SessionAccessDenied(SessionRepositoryError):
+class SessionAccessDenied(SessionError):
     """Caller is not allowed to access the session (map publicly to not-found)."""
-
-
-class IdempotencyConflictError(SessionRepositoryError):
-    """Raised when an idempotency key is already bound to an in-flight run."""

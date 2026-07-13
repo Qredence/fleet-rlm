@@ -1,8 +1,8 @@
-"""canonical rlm backend baseline
+"""canonical coordinated turn baseline
 
-Revision ID: 7528a210a339
+Revision ID: 019f5b3c96bd
 Revises:
-Create Date: 2026-07-13 02:34:46.096261
+Create Date: 2026-07-13 16:31:39.904546
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "7528a210a339"
+revision = "019f5b3c96bd"
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -46,11 +46,13 @@ def upgrade() -> None:
         sa.Column("filename", sa.String(length=512), nullable=False),
         sa.Column("content_type", sa.String(length=255), nullable=True),
         sa.Column("byte_size", sa.Integer(), nullable=False),
-        sa.Column("checksum_sha256", sa.String(length=64), nullable=True),
-        sa.Column("storage_ref", sa.Text(), nullable=True),
+        sa.Column("checksum_sha256", sa.String(length=64), nullable=False),
+        sa.Column("storage_ref", sa.Text(), nullable=False),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=False
         ),
+        sa.CheckConstraint("byte_size >= 0", name="ck_fleet_attachments_byte_size"),
+        sa.CheckConstraint("length(checksum_sha256) = 64", name="ck_fleet_attachments_checksum"),
         sa.ForeignKeyConstraint(["user_id"], ["fleet_users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["workspace_id"], ["fleet_workspaces.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -92,47 +94,53 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_table(
-        "fleet_artifacts",
-        sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("workspace_id", sa.Uuid(), nullable=False),
-        sa.Column("user_id", sa.Uuid(), nullable=False),
-        sa.Column("session_id", sa.Uuid(), nullable=True),
-        sa.Column("run_id", sa.Uuid(), nullable=True),
-        sa.Column("kind", sa.String(length=64), nullable=False),
-        sa.Column("title", sa.String(length=512), nullable=True),
-        sa.Column("media_type", sa.String(length=255), nullable=False),
-        sa.Column("byte_size", sa.Integer(), nullable=False),
-        sa.Column("checksum_sha256", sa.String(length=64), nullable=True),
-        sa.Column("storage_ref", sa.Text(), nullable=True),
-        sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=False
-        ),
-        sa.ForeignKeyConstraint(["session_id"], ["fleet_sessions.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(["user_id"], ["fleet_users.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["workspace_id"], ["fleet_workspaces.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_table(
         "fleet_runs",
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("session_id", sa.Uuid(), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
-        sa.Column("idempotency_key", sa.String(length=128), nullable=True),
-        sa.Column("error_message", sa.Text(), nullable=True),
-        sa.Column("usage_json", sa.JSON(), nullable=True),
-        sa.Column("result_assistant_text", sa.Text(), nullable=True),
-        sa.Column("lease_owner", sa.String(length=128), nullable=True),
-        sa.Column("lease_heartbeat_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("idempotency_key", sa.String(length=128), nullable=False),
+        sa.Column("input_fingerprint", sa.String(length=64), nullable=False),
+        sa.Column("base_checkpoint_version", sa.Integer(), nullable=False),
+        sa.Column("commit_checkpoint_version", sa.Integer(), nullable=True),
+        sa.Column("claim_owner", sa.String(length=128), nullable=True),
+        sa.Column("claim_heartbeat_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("cancel_requested_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("failure_code", sa.String(length=64), nullable=True),
+        sa.Column("failure_public_message", sa.Text(), nullable=True),
+        sa.Column("failure_usage_json", sa.JSON(), nullable=True),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=False
         ),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
+        sa.CheckConstraint(
+            "(status = 'running' AND claim_owner IS NOT NULL AND claim_heartbeat_at IS NOT NULL AND commit_checkpoint_version IS NULL AND failure_code IS NULL) OR (status = 'completed' AND claim_owner IS NULL AND commit_checkpoint_version IS NOT NULL AND failure_code IS NULL) OR (status IN ('failed', 'cancelled', 'timeout', 'budget_exhausted') AND claim_owner IS NULL AND commit_checkpoint_version IS NULL AND failure_code IS NOT NULL)",
+            name="ck_fleet_runs_terminal_shape",
+        ),
+        sa.CheckConstraint(
+            "status IN ('running', 'completed', 'failed', 'cancelled', 'timeout', 'budget_exhausted')",
+            name="ck_fleet_runs_status",
+        ),
+        sa.CheckConstraint("length(input_fingerprint) = 64", name="ck_fleet_runs_fingerprint"),
         sa.ForeignKeyConstraint(["session_id"], ["fleet_sessions.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("session_id", "idempotency_key", name="uq_fleet_runs_session_idempotency_key"),
     )
     op.create_index("ix_fleet_runs_session_created", "fleet_runs", ["session_id", "created_at"], unique=False)
+    op.create_index(
+        "uq_fleet_runs_live_idempotency",
+        "fleet_runs",
+        ["session_id", "idempotency_key"],
+        unique=True,
+        sqlite_where=sa.text("status IN ('running', 'completed')"),
+        postgresql_where=sa.text("status IN ('running', 'completed')"),
+    )
+    op.create_index(
+        "uq_fleet_runs_one_running",
+        "fleet_runs",
+        ["session_id"],
+        unique=True,
+        sqlite_where=sa.text("status = 'running'"),
+        postgresql_where=sa.text("status = 'running'"),
+    )
     op.create_table(
         "fleet_sandbox_bindings",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -155,47 +163,74 @@ def upgrade() -> None:
         sa.UniqueConstraint("session_id"),
     )
     op.create_table(
-        "fleet_session_checkpoints",
-        sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("session_id", sa.Uuid(), nullable=False),
-        sa.Column("version", sa.Integer(), nullable=False),
-        sa.Column("payload_json", sa.JSON(), nullable=False),
-        sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=False
-        ),
-        sa.ForeignKeyConstraint(["session_id"], ["fleet_sessions.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("session_id", "version", name="uq_fleet_session_checkpoints_version"),
-    )
-    op.create_table(
         "fleet_turns",
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("session_id", sa.Uuid(), nullable=False),
-        sa.Column("run_id", sa.Uuid(), nullable=True),
+        sa.Column("run_id", sa.Uuid(), nullable=False),
         sa.Column("sequence", sa.Integer(), nullable=False),
         sa.Column("role", sa.String(length=32), nullable=False),
-        sa.Column("content", sa.Text(), nullable=False),
-        sa.Column("status", sa.String(length=32), nullable=False),
+        sa.Column("user_input_json", sa.JSON(none_as_null=True), nullable=True),
+        sa.Column("committed_turn_json", sa.JSON(none_as_null=True), nullable=True),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=False
         ),
+        sa.CheckConstraint(
+            "(role = 'user' AND user_input_json IS NOT NULL AND committed_turn_json IS NULL) OR (role = 'assistant' AND user_input_json IS NULL AND committed_turn_json IS NOT NULL)",
+            name="ck_fleet_turns_role_shape",
+        ),
         sa.ForeignKeyConstraint(["session_id"], ["fleet_sessions.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("run_id", "role", name="uq_fleet_turns_run_role"),
         sa.UniqueConstraint("session_id", "sequence", name="uq_fleet_turns_session_sequence"),
     )
     op.create_index("ix_fleet_turns_session_sequence", "fleet_turns", ["session_id", "sequence"], unique=False)
+    op.create_table(
+        "fleet_artifacts",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("workspace_id", sa.Uuid(), nullable=False),
+        sa.Column("user_id", sa.Uuid(), nullable=False),
+        sa.Column("session_id", sa.Uuid(), nullable=False),
+        sa.Column("run_id", sa.Uuid(), nullable=False),
+        sa.Column("kind", sa.String(length=64), nullable=False),
+        sa.Column("title", sa.String(length=512), nullable=True),
+        sa.Column("media_type", sa.String(length=255), nullable=False),
+        sa.Column("byte_size", sa.Integer(), nullable=False),
+        sa.Column("checksum_sha256", sa.String(length=64), nullable=False),
+        sa.Column("storage_ref", sa.Text(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=False
+        ),
+        sa.CheckConstraint("byte_size >= 0", name="ck_fleet_artifacts_byte_size"),
+        sa.CheckConstraint("length(checksum_sha256) = 64", name="ck_fleet_artifacts_checksum"),
+        sa.ForeignKeyConstraint(["run_id"], ["fleet_runs.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["session_id"], ["fleet_sessions.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["user_id"], ["fleet_users.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["workspace_id"], ["fleet_workspaces.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+    )
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_table("fleet_artifacts")
     op.drop_index("ix_fleet_turns_session_sequence", table_name="fleet_turns")
     op.drop_table("fleet_turns")
-    op.drop_table("fleet_session_checkpoints")
     op.drop_table("fleet_sandbox_bindings")
+    op.drop_index(
+        "uq_fleet_runs_one_running",
+        table_name="fleet_runs",
+        sqlite_where=sa.text("status = 'running'"),
+        postgresql_where=sa.text("status = 'running'"),
+    )
+    op.drop_index(
+        "uq_fleet_runs_live_idempotency",
+        table_name="fleet_runs",
+        sqlite_where=sa.text("status IN ('running', 'completed')"),
+        postgresql_where=sa.text("status IN ('running', 'completed')"),
+    )
     op.drop_index("ix_fleet_runs_session_created", table_name="fleet_runs")
     op.drop_table("fleet_runs")
-    op.drop_table("fleet_artifacts")
     op.drop_table("fleet_skills")
     op.drop_index("ix_fleet_sessions_workspace_updated", table_name="fleet_sessions")
     op.drop_table("fleet_sessions")

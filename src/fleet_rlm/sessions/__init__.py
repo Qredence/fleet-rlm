@@ -1,28 +1,17 @@
-"""Session domain for Fleet RLM durable conversation state."""
+"""Closed Session domain for durable conversation state."""
 
-from __future__ import annotations
-
-from fleet_rlm.sessions.checkpoints import StaleCheckpointError, TurnClaim
-from fleet_rlm.sessions.errors import (
-    IdempotencyConflictError,
-    SessionNotFoundError,
-    SessionRepositoryError,
-)
-from fleet_rlm.sessions.history import history_message_count, turns_to_history
-from fleet_rlm.sessions.locks import SessionLockRegistry
-from fleet_rlm.sessions.models import SessionRecord, SessionSnapshot
-from fleet_rlm.sessions.repository import SessionRepository
+from fleet_rlm.sessions.catalog import SessionCatalog
+from fleet_rlm.sessions.committed_turn import CommittedTurn
+from fleet_rlm.sessions.errors import SessionAccessDenied, SessionNotFoundError
+from fleet_rlm.sessions.models import SessionHistory, SessionRecord, TurnAccess, TurnInput
 
 __all__ = [
-    "IdempotencyConflictError",
-    "SessionLockRegistry",
+    "CommittedTurn",
+    "SessionAccessDenied",
+    "SessionCatalog",
+    "SessionHistory",
     "SessionNotFoundError",
     "SessionRecord",
-    "SessionRepository",
-    "SessionRepositoryError",
-    "SessionSnapshot",
-    "StaleCheckpointError",
-    "TurnClaim",
-    "history_message_count",
-    "turns_to_history",
+    "TurnAccess",
+    "TurnInput",
 ]

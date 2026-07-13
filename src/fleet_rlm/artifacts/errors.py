@@ -13,3 +13,7 @@ class ArtifactNotFoundError(ArtifactError):
 
 class ArtifactValidationError(ArtifactError):
     """Rejected kind, size, title, or content."""
+
+
+class ArtifactStorageError(ArtifactError):
+    """Committed Artifact catalog or byte storage is unavailable."""
