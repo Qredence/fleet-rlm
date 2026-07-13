@@ -25,6 +25,8 @@ def skill_card_metadata(card: SkillCard | Any) -> dict[str, Any]:
         "trust": str(getattr(card, "trust", "")),
         "affordances": list(getattr(card, "affordances", ()) or ()),
         "resources_available": bool(getattr(card, "resources_available", False)),
+        "capability_refs": list(getattr(card, "capability_refs", ()) or ()),
+        "task_contract_ref": getattr(card, "task_contract_ref", None),
     }
 
 

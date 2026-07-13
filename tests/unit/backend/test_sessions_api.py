@@ -119,6 +119,10 @@ async def test_session_turns_endpoint() -> None:
         assistant_text="a",
         run_id=claim.run_id,
         expected_checkpoint_version=0,
+        detail_parts=({"kind": "rlm.reasoning", "payload": {"step": 1, "text": "safe"}},),
+        structured_output={"answer": "a"},
+        result_schema_id="typed-answer",
+        result_schema_version="1",
     )
 
     turns = client.get(f"/api/sessions/{sid}/turns", headers=headers)
@@ -127,4 +131,22 @@ async def test_session_turns_endpoint() -> None:
     assert payload["total"] == 2
     assert payload["items"][0]["role"] == "user"
     assert payload["items"][1]["content"] == "a"
+    assert payload["items"][1]["id"] == str(claim.run_id)
+    assert payload["items"][1]["parts"] == [
+        {"type": "reasoning", "text": "safe", "state": "done"},
+        {
+            "type": "data-structured-result",
+            "data": {
+                "schemaId": "typed-answer",
+                "schemaVersion": "1",
+                "value": {"answer": "a"},
+            },
+        },
+        {"type": "text", "text": "a", "state": "done"},
+    ]
+    assert payload["items"][1]["metadata"]["structuredResult"] == {
+        "schemaId": "typed-answer",
+        "schemaVersion": "1",
+        "value": {"answer": "a"},
+    }
     await engine.dispose()

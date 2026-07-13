@@ -12,8 +12,10 @@ import os
 import subprocess
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 from uuid import UUID, uuid4
 
+import dspy
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
@@ -22,7 +24,11 @@ from fleet_rlm.app import create_live_app
 from fleet_rlm.chat.live_context import resolve_settings
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.bindings import SandboxBinding
-from fleet_rlm.rlm.events import RuntimeEventKind
+from fleet_rlm.skills.capabilities import (
+    DSPySkillSelector,
+    SkillSelection,
+    TaskContract,
+)
 from tests.live.backend._database import upgrade_to_head
 
 pytestmark = [pytest.mark.live_daytona]
@@ -83,12 +89,38 @@ def _parse_sse_events(body: str) -> list[dict[str, Any]]:
 
 
 def _parse_sse_kinds(body: str) -> list[str]:
-    kinds: list[str] = []
-    for payload in _parse_sse_events(body):
-        kind = payload.get("kind") or payload.get("type")
-        if isinstance(kind, str):
-            kinds.append(kind)
-    return kinds
+    return [str(payload["type"]) for payload in _parse_sse_events(body) if isinstance(payload.get("type"), str)]
+
+
+def _text_from_chunks(events: list[dict[str, Any]]) -> str:
+    return "".join(str(event.get("delta") or "") for event in events if event.get("type") == "text-delta")
+
+
+class _LongContextAttachment(dspy.SandboxSerializable):
+    """Host-approved Attachment body reconstructed as text in the Run REPL."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def sandbox_setup(self) -> str:
+        return ""
+
+    def to_sandbox(self) -> bytes:
+        return self.text.encode("utf-8")
+
+    def sandbox_assignment(self, var_name: str, data_expr: str) -> str:
+        return f"{var_name} = {data_expr}.decode('utf-8')"
+
+    def rlm_preview(self, max_chars: int = 500) -> str:
+        return f"Authorized long-context Attachment: {self.text[:max_chars]}"
+
+
+class _L1TypedResult(dspy.Signature):
+    request: str = dspy.InputField()
+    corpus: _LongContextAttachment = dspy.InputField()
+    capability_knowledge: list[str] = dspy.InputField()
+    answer: str = dspy.OutputField()
+    evidence: str = dspy.OutputField()
 
 
 def _write_evidence(payload: dict[str, Any]) -> None:
@@ -171,72 +203,131 @@ def test_exit_bar_l1_promotion_live_composition(tmp_path: Path) -> None:
         observed["attachment_id"] = attachment_id
 
         registry = app.state.skill_registry
-        skill = registry.register(
+        capability_registry = app.state.capability_registry
+
+        def _attachment_input(context: Any) -> dict[str, Any]:
+            assert context.file_tool_host is not None
+            assert context.attachments
+            read = context.file_tool_host.read_attachment(str(context.attachments[0].id))
+            assert read.get("ok") is True
+            return {"corpus": _LongContextAttachment(str(read["content"]))}
+
+        def verify_corpus(value: str) -> str:
+            """Return a short marker after inspecting serialized corpus text."""
+            return f"verified:{value[:40]}"
+
+        corpus_hint = dspy.Tool(
+            lambda: "Use the corpus variable and create one Artifact Candidate.",
+            name="corpus_hint",
+            desc="Return the registered long-context workflow hint",
+        )
+        typed_contract = TaskContract(
+            id="l1-typed-result",
+            signature=_L1TypedResult,
+            input_mapper=lambda context: {"request": context.request},
+            output_serializer=lambda prediction: {
+                "answer": prediction.answer,
+                "evidence": prediction.evidence,
+            },
+        )
+        capability_registry.register(
+            "l1-primary",
+            tools=(verify_corpus,),
+            task_contract=typed_contract,
+            input_adapters=(_attachment_input,),
+        )
+        capability_registry.register(
+            "l1-auxiliary",
+            tools=(corpus_hint,),
+            knowledge=("Preserve exact evidence strings from authorized Attachments.",),
+        )
+
+        primary_skill = registry.register(
             name="l1-exit-helper",
-            description="Exit-bar L1 progressive-load skill",
+            description="Primary typed long-context analysis capability",
             instructions="After load, tell the agent to read the attached file then submit its text.",
             version="1.0.0",
             trust="system",
+            capability_refs=("l1-primary",),
+            task_contract_ref="l1-primary",
         )
-        observed["skill_id"] = str(skill.id)
+        auxiliary_skill = registry.register(
+            name="l1-evidence-helper",
+            description="Auxiliary evidence and Artifact capability",
+            instructions="Use exact Attachment evidence and create the requested Artifact Candidate.",
+            version="1.0.0",
+            trust="system",
+            capability_refs=("l1-auxiliary",),
+        )
+        observed["skill_ids"] = [str(primary_skill.id), str(auxiliary_skill.id)]
 
-        chat1 = client.post(
-            "/api/chat",
-            headers=headers,
-            json={
-                "message": (
-                    "In the REPL, call host tools then submit. Exact sequence:\n"
-                    f"1) load_skill(skill_id='{skill.id}')\n"
-                    f"2) read_attachment(attachment_id='{attachment_id}')\n"
-                    "3) create_artifact(kind='text', content='l1-artifact-on-volume', title='l1-art')\n"
-                    "4) SUBMIT(answer=<the attachment text content>)\n"
-                    "Do not invent other tools. Keep the trajectory short."
-                ),
-                "session_id": str(session_id),
-                "attachment_ids": [attachment_id],
-            },
-        )
+        async def _select_two(_selector: Any, **_kwargs: Any) -> SkillSelection:
+            return SkillSelection(
+                selected_skill_ids=(primary_skill.id, auxiliary_skill.id),
+                primary_skill_id=primary_skill.id,
+            )
+
+        with patch.object(DSPySkillSelector, "select", _select_two):
+            chat1 = client.post(
+                "/api/chat",
+                headers=headers,
+                json={
+                    "message": (
+                        "Use the serialized corpus variable and registered tools. Exact sequence:\n"
+                        f"1) load_skill(skill_id='{primary_skill.id}')\n"
+                        f"2) load_skill(skill_id='{auxiliary_skill.id}')\n"
+                        "3) corpus_hint() and verify_corpus(corpus)\n"
+                        "4) create_artifact(kind='text', content='l1-artifact-on-volume', title='l1-art')\n"
+                        "5) SUBMIT(answer=corpus, evidence='typed-live-evidence')\n"
+                        "Keep the trajectory short."
+                    ),
+                    "session_id": str(session_id),
+                    "attachment_ids": [attachment_id],
+                },
+            )
         assert chat1.status_code == 200, chat1.text
         events1 = _parse_sse_events(chat1.text)
         kinds1 = _parse_sse_kinds(chat1.text)
         observed["turn1_event_kinds"] = kinds1
         assert kinds1, "expected SSE events"
-        assert kinds1[-1] in {RuntimeEventKind.RUN_COMPLETED.value, "run.completed"}, (
-            f"L1 requires successful terminal after Turn Commit; got {kinds1[-1]!r}"
-        )
+        assert kinds1[-1] == "finish", f"L1 requires AI SDK finish; got {kinds1[-1]!r}"
+        assert events1[-1].get("finishReason") == "stop"
         observed["turn1_terminal"] = kinds1[-1]
-        assert RuntimeEventKind.SKILL_LOADED.value in kinds1, (
-            f"L1 requires Host-Mediated Skill Progressive Load; kinds={kinds1}"
-        )
-        assert RuntimeEventKind.ATTACHMENT_READ.value in kinds1, (
-            f"L1 requires Host-Mediated attachment read; kinds={kinds1}"
-        )
-        assert RuntimeEventKind.ARTIFACT_CREATED.value in kinds1, (
-            f"L1 requires Artifact publication after Turn Commit; kinds={kinds1}"
-        )
-        assert kinds1.index(RuntimeEventKind.ARTIFACT_CREATED.value) < kinds1.index(
-            RuntimeEventKind.RUN_COMPLETED.value
+        assert kinds1.count("data-skill") >= 4, f"expected two activated and two loaded Skills; kinds={kinds1}"
+        for required in (
+            "reasoning-start",
+            "reasoning-delta",
+            "reasoning-end",
+            "data-rlm-code",
+            "tool-input-available",
+            "tool-output-available",
+            "data-rlm-output",
+            "data-attachment",
+            "data-artifact",
+            "data-usage",
+            "data-structured-result",
+            "text-start",
+            "text-delta",
+            "text-end",
+        ):
+            assert required in kinds1, f"L1 missing {required}; kinds={kinds1}"
+        assert (
+            kinds1.index("data-artifact")
+            < kinds1.index("data-usage")
+            < kinds1.index("data-structured-result")
+            < kinds1.index("text-start")
+            < kinds1.index("finish")
         )
         observed["skill_loaded"] = True
         observed["attachment_read"] = True
-        artifact_event = next(
-            event
-            for event in events1
-            if (event.get("kind") or event.get("type")) == RuntimeEventKind.ARTIFACT_CREATED.value
-        )
-        artifact_payload = (
-            artifact_event.get("payload") if isinstance(artifact_event.get("payload"), dict) else artifact_event
-        )
+        artifact_event = next(event for event in events1 if event.get("type") == "data-artifact")
+        artifact_payload = artifact_event.get("data")
         artifact_id = UUID(str((artifact_payload or {}).get("artifact_id")))
         observed["artifact_id"] = str(artifact_id)
-        text_done = next(
-            (e for e in events1 if (e.get("kind") or e.get("type")) == RuntimeEventKind.TEXT_COMPLETED.value),
-            None,
-        )
-        answer_text = ""
-        if text_done is not None:
-            payload = text_done.get("payload") if isinstance(text_done.get("payload"), dict) else text_done
-            answer_text = str((payload or {}).get("text") or "")
+        structured = next(event["data"] for event in events1 if event.get("type") == "data-structured-result")
+        assert structured["schemaId"] == "l1-typed-result"
+        assert structured["value"]["evidence"] == "typed-live-evidence"
+        answer_text = _text_from_chunks(events1)
         observed["turn1_answer_excerpt"] = answer_text[:120]
         assert attachment_secret in answer_text, (
             f"L1 answer must include attachment body after read_attachment; got {answer_text!r}"
@@ -247,37 +338,44 @@ def test_exit_bar_l1_promotion_live_composition(tmp_path: Path) -> None:
         turn_items = turns1.json().get("items") or []
         observed["history_turns_after_turn1"] = len(turn_items)
         assert len(turn_items) >= 2
+        assistant_parts = turn_items[-1].get("parts") or []
+        assistant_part_types = [part.get("type") for part in assistant_parts]
+        observed["reloaded_assistant_part_types"] = assistant_part_types
+        for required in (
+            "reasoning",
+            "data-rlm-code",
+            "dynamic-tool",
+            "data-artifact",
+            "data-structured-result",
+            "text",
+        ):
+            assert required in assistant_part_types
 
         committed_artifact = client.get(f"/api/artifacts/{artifact_id}", headers=headers)
         assert committed_artifact.status_code == 200, committed_artifact.text
         observed["artifact_checksum"] = committed_artifact.json()["checksum_sha256"]
 
-        chat2 = client.post(
-            "/api/chat",
-            headers=headers,
-            json={
-                "message": (
-                    "Using only the prior Session History, submit the exact attachment secret "
-                    "that appeared in the previous assistant answer. Do not call tools."
-                ),
-                "session_id": str(session_id),
-            },
-        )
+        async def _select_none(_selector: Any, **_kwargs: Any) -> SkillSelection:
+            return SkillSelection()
+
+        with patch.object(DSPySkillSelector, "select", _select_none):
+            chat2 = client.post(
+                "/api/chat",
+                headers=headers,
+                json={
+                    "message": (
+                        "Using only the prior Session History, submit the exact attachment secret "
+                        "that appeared in the previous assistant answer. Do not call tools."
+                    ),
+                    "session_id": str(session_id),
+                },
+            )
         assert chat2.status_code == 200, chat2.text
         kinds2 = _parse_sse_kinds(chat2.text)
         observed["turn2_event_kinds"] = kinds2
-        assert kinds2[-1] in {RuntimeEventKind.RUN_COMPLETED.value, "run.completed"}
+        assert kinds2[-1] == "finish"
         events2 = _parse_sse_events(chat2.text)
-        text_done2 = next(
-            (e for e in events2 if (e.get("kind") or e.get("type")) == RuntimeEventKind.TEXT_COMPLETED.value),
-            None,
-        )
-        payload2 = (
-            text_done2.get("payload")
-            if text_done2 is not None and isinstance(text_done2.get("payload"), dict)
-            else text_done2
-        )
-        answer2 = str((payload2 or {}).get("text") or "")
+        answer2 = _text_from_chunks(events2)
         observed["turn2_history_answer_excerpt"] = answer2[:120]
         assert attachment_secret in answer2
 

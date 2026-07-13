@@ -44,6 +44,8 @@ class RLMTurnContext:
     attachments: tuple[Any, ...] = field(default_factory=tuple)
     artifacts: tuple[Any, ...] = field(default_factory=tuple)
     tools: tuple[Any, ...] = field(default_factory=tuple)
+    # Optional preflight resolver: authorized Skill Cards -> Turn capability blueprint.
+    capability_resolver: Any | None = None
     # Optional SkillToolHost for progressive load tools + skill.loaded events
     skill_tool_host: Any | None = None
     # Optional FileToolHost for read_attachment / create_artifact + public events

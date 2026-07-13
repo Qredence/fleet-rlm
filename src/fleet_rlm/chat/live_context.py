@@ -76,6 +76,7 @@ class LiveKernelResources:
         self.last_used_ephemeral = False
         # Optional capability hosts (wired by live proofs / app composition)
         self.skill_registry: Any | None = None
+        self.capability_registry: Any | None = None
         self.attachment_store: Any | None = None
         self.artifact_store: Any | None = None
 
@@ -174,6 +175,7 @@ class LiveKernelResources:
                     volume_fs=volume_fs,
                     volume_paths=volume_paths_from_settings(self.settings),
                     max_artifact_bytes=self.settings.max_artifact_bytes,
+                    capability_registry=self.capability_registry,
                 )
             return context
         except Exception:

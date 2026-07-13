@@ -133,6 +133,30 @@ _Avoid_: full Skill, prompt dump
 Host-held instruction and optional resources, loadable only after authorization.
 _Avoid_: Skill Card, Memory
 
+**Capability Package**:
+Host-registered, executable contribution referenced by a Skill: tools, bounded
+knowledge, typed task contract, serializable input adapters, validators, and
+Budget requirements. Skill content cannot define executable host capabilities.
+_Avoid_: arbitrary Skill code, plugin import, prompt body
+
+**Turn Capability Blueprint**:
+Immutable, host-validated composition for one Turn after optional Sub Model
+selection of zero to four authorized Skills. It fixes the fresh RLM Signature,
+tools, knowledge, adapters, validators, and primary task contract.
+_Avoid_: mutable global tool registry, client-selected execution mode
+
+**Task Contract**:
+Host-registered typed DSPy Signature plus input mapper, structured-result
+serializer, schema identity/version, and validator. At most one selected
+primary Skill owns the Task Contract for a Turn.
+_Avoid_: unvalidated model JSON, HTTP-provided Python type
+
+**Serializable Input**:
+Host-constructed `dspy.SandboxSerializable` value derived from an authorized
+Attachment or dataset and reconstructed in the Run interpreter. Public HTTP
+never accepts pickles or arbitrary Python objects.
+_Avoid_: uploaded pickle, unrestricted object deserialization
+
 **Host-Mediated Tool**:
 A Run capability invocable from interpreter code whose authorization and side
 effects are enforced on the host, not as unconstrained Sandbox-local code alone.
@@ -174,6 +198,18 @@ Transport-neutral record of Run progress with exactly one terminal outcome for
 observers. A successful terminal is only valid after Turn Commit; observers must
 not be told success for a non-Committed Turn.
 _Avoid_: SSE frame, WebSocket message, durability proof by itself
+
+**RLM Detail**:
+Sanitized model-authored reasoning, generated Python, interpreter output, or
+tool activity produced during an RLM iteration. It is public product progress,
+not provider-hidden chain-of-thought, a full prompt, or an unsanitized trace.
+_Avoid_: hidden reasoning, raw provider trace, prompt dump
+
+**UIMessage Stream**:
+AI SDK UI 7 v1 SSE projection of Runtime Events for `useChat`. Successful
+committed assistant Turns persist deterministic UIMessage parts; SSE bytes are
+not themselves durable records.
+_Avoid_: Runtime Event, raw event-log persistence
 
 ## Out of this context (for now)
 

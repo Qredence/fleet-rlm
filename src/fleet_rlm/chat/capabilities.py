@@ -20,6 +20,7 @@ from fleet_rlm.files.tools import FileToolHost
 from fleet_rlm.files.uploads import LocalAttachmentStore
 from fleet_rlm.rlm.context import RLMTurnContext
 from fleet_rlm.skills.authorize import SkillAuthorizer
+from fleet_rlm.skills.capabilities import CapabilityRegistry, CapabilityResolver
 from fleet_rlm.skills.registry import InMemorySkillRegistry
 from fleet_rlm.skills.tools import SkillToolHost
 
@@ -61,6 +62,7 @@ async def assemble_turn_capabilities(
     volume_fs: Any | None = None,
     volume_paths: VolumePaths | None = None,
     max_artifact_bytes: int = 10 * 1024 * 1024,
+    capability_registry: CapabilityRegistry | None = None,
 ) -> RLMTurnContext:
     """Return a new context with tools, hosts, cards, and attachment metadata bound.
 
@@ -73,6 +75,7 @@ async def assemble_turn_capabilities(
     skill_cards = tuple(context.skill_cards or ())
     attachments = tuple(context.attachments or ())
     staged_attachments: tuple[StagedAttachment, ...] = ()
+    capability_resolver = getattr(context, "capability_resolver", None)
 
     budget = context.budget
     max_skill_loads = int(getattr(budget, "max_skill_loads", 8) or 8)
@@ -90,6 +93,8 @@ async def assemble_turn_capabilities(
             max_skill_loads=max_skill_loads,
         )
         tools.extend(skill_host.as_tool_callables())
+        if capability_registry is not None:
+            capability_resolver = CapabilityResolver(capability_registry)
 
     if attachment_store is not None and command.attachment_ids:
         refs: list[AttachmentRef] = []
@@ -169,6 +174,7 @@ async def assemble_turn_capabilities(
         attachments=attachments,
         artifacts=context.artifacts,
         tools=tuple(tools),
+        capability_resolver=capability_resolver,
         skill_tool_host=skill_host,
         file_tool_host=file_host,
         volume_fs=volume_fs,
@@ -190,6 +196,7 @@ class CapabilityContextBuilder:
         volume_fs: Any | None = None,
         volume_paths: VolumePaths | None = None,
         max_artifact_bytes: int = 10 * 1024 * 1024,
+        capability_registry: CapabilityRegistry | None = None,
     ) -> None:
         self._inner = inner
         self._skill_registry = skill_registry
@@ -197,6 +204,7 @@ class CapabilityContextBuilder:
         self._volume_fs = volume_fs
         self._volume_paths = volume_paths
         self._max_artifact_bytes = max_artifact_bytes
+        self._capability_registry = capability_registry
 
     async def build(
         self,
@@ -224,4 +232,5 @@ class CapabilityContextBuilder:
             volume_fs=self._volume_fs,
             volume_paths=self._volume_paths,
             max_artifact_bytes=self._max_artifact_bytes,
+            capability_registry=self._capability_registry,
         )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 from fleet_rlm.sessions.errors import SessionRepositoryError
@@ -32,3 +33,7 @@ class TurnClaim:
     base_checkpoint_version: int
     replay: bool = False
     assistant_text: str | None = None
+    detail_parts: tuple[dict[str, Any], ...] = ()
+    structured_output: dict[str, Any] | None = None
+    result_schema_id: str | None = None
+    result_schema_version: str | None = None

@@ -88,15 +88,23 @@ def _host_roots(settings: Settings) -> tuple[str, str]:
     return upload_root, artifact_root
 
 
-def install_offline_composition(app: FastAPI, settings: Settings) -> OfflineCompositionHandles:
+def install_offline_composition(
+    app: FastAPI,
+    settings: Settings,
+    *,
+    session_factory: Any | None = None,
+) -> OfflineCompositionHandles:
     """Build hermetic adapters once during lifespan; routes never construct them."""
+    from fleet_rlm.artifacts.persistent import VolumeArtifactStore
     from fleet_rlm.artifacts.store import LocalArtifactStore
     from fleet_rlm.chat.capabilities import CapabilityContextBuilder
     from fleet_rlm.chat.context_builder import OfflineContextBuilder
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.daytona.paths import volume_paths_from_settings
     from fleet_rlm.daytona.volume_fs import HostVolumeMirror
+    from fleet_rlm.daytona.workspace_volume import OfflineHostVolumeGateway
     from fleet_rlm.files.uploads import LocalAttachmentStore
+    from fleet_rlm.persistence.repositories import SqlAlchemyArtifactRepository
 
     upload_root, artifact_root = _host_roots(settings)
     mirror = HostVolumeMirror(
@@ -109,12 +117,18 @@ def install_offline_composition(app: FastAPI, settings: Settings) -> OfflineComp
         volume_fs=mirror,
         volume_paths=mirror.volume_paths,
     )
-    artifact_store = LocalArtifactStore(
-        artifact_root,
-        max_bytes=settings.max_artifact_bytes,
-        volume_fs=mirror,
-        volume_paths=mirror.volume_paths,
-    )
+    if session_factory is None:
+        artifact_store: Any = LocalArtifactStore(
+            artifact_root,
+            max_bytes=settings.max_artifact_bytes,
+            volume_fs=mirror,
+            volume_paths=mirror.volume_paths,
+        )
+    else:
+        artifact_store = VolumeArtifactStore(
+            SqlAlchemyArtifactRepository(session_factory),
+            OfflineHostVolumeGateway(mirror),
+        )
     builder = CapabilityContextBuilder(
         OfflineContextBuilder(),
         skill_registry=getattr(app.state, "skill_registry", None),
@@ -122,6 +136,7 @@ def install_offline_composition(app: FastAPI, settings: Settings) -> OfflineComp
         volume_fs=mirror,
         volume_paths=mirror.volume_paths,
         max_artifact_bytes=settings.max_artifact_bytes,
+        capability_registry=getattr(app.state, "capability_registry", None),
     )
     coordinator = TurnCoordinator(
         context_builder=builder,
@@ -234,6 +249,7 @@ async def install_live_composition(app: FastAPI, settings: Settings) -> LiveComp
     try:
         skill_registry = getattr(app.state, "skill_registry", None)
         handles.resources.skill_registry = skill_registry
+        handles.resources.capability_registry = getattr(app.state, "capability_registry", None)
 
         app.state.live_mode = True
         app.state.live_composition_ready = True

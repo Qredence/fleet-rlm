@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -99,6 +100,8 @@ class TurnResponse(BaseModel):
     content: str
     status: str
     run_id: UUID | None = None
+    parts: list[dict[str, Any]]
+    metadata: dict[str, Any] | None = None
 
 
 class TurnListResponse(BaseModel):

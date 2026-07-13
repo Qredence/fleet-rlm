@@ -24,7 +24,7 @@ def test_rlm_events_module_does_not_import_fastapi() -> None:
     assert "starlette" not in imported
 
 
-def test_sse_projector_emits_data_lines_with_monotonic_sequences() -> None:
+def test_sse_projector_emits_ai_sdk_ui_message_chunks() -> None:
     from fleet_rlm.api.sse import SSEProjector
     from fleet_rlm.rlm.events import EventRecorder, RuntimeEventKind
 
@@ -47,8 +47,14 @@ def test_sse_projector_emits_data_lines_with_monotonic_sequences() -> None:
     lines = list(SSEProjector().project(events))
     assert all(line.startswith("data: ") and line.endswith("\n\n") for line in lines)
     payloads = [json.loads(line.removeprefix("data: ").rstrip("\n")) for line in lines]
-    assert [item["sequence"] for item in payloads] == [1, 2, 3]
-    assert payloads[-1]["kind"] == "run.completed"
+    assert [item["type"] for item in payloads] == [
+        "start",
+        "text-start",
+        "text-delta",
+        "text-end",
+        "finish",
+    ]
+    assert payloads[-1]["finishReason"] == "stop"
 
 
 def test_keepalive_does_not_consume_sequence() -> None:
@@ -73,11 +79,8 @@ def test_committed_fixture_is_valid_sse_transcript() -> None:
 
     data_lines = [line for line in text.splitlines() if line.startswith("data: ")]
     assert len(data_lines) >= 3
-    events = [json.loads(line.removeprefix("data: ")) for line in data_lines]
-    sequences = [event["sequence"] for event in events]
-    assert sequences == list(range(1, len(sequences) + 1))
-    assert events[0]["kind"] == "run.started"
-    assert events[-1]["kind"] in {"run.completed", "error"}
-    assert all(event["schema_version"] == 1 for event in events)
-    terminal_kinds = [event["kind"] for event in events if event["kind"] in {"error", "run.completed"}]
-    assert len(terminal_kinds) == 1
+    chunks = [json.loads(line.removeprefix("data: ")) for line in data_lines if line.removeprefix("data: ") != "[DONE]"]
+    assert chunks[0]["type"] == "start"
+    assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
+    assert data_lines[-1] == "data: [DONE]"
+    assert [chunk["type"] for chunk in chunks].count("finish") == 1

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 
@@ -28,6 +29,10 @@ class TurnRecord:
     content: str
     status: str
     run_id: UUID | None = None
+    detail_parts: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    structured_output: dict[str, Any] | None = None
+    result_schema_id: str | None = None
+    result_schema_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

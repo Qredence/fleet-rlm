@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
+from types import MappingProxyType
 from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -13,7 +15,10 @@ from fleet_rlm.rlm.budgets import RLMBudget
 from fleet_rlm.rlm.context import RLMTurnContext
 from fleet_rlm.rlm.events import RuntimeEventKind
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.observable import RLMDetail, RLMDetailKind
 from fleet_rlm.rlm.runner import RLMRunner
+from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
+from fleet_rlm.skills.models import SkillCard
 
 
 class _FakeLease:
@@ -35,17 +40,25 @@ class _FakeRLM:
         sub_lm: Any = None,
         fail: BaseException | None = None,
         capture: dict[str, Any] | None = None,
+        observer: Any = None,
     ) -> None:
         self.answer = answer
         self.sub_lm = sub_lm
         self.fail = fail
         self.capture = capture if capture is not None else {}
+        self.observer = observer
 
     async def aforward(self, **kwargs: Any) -> Any:
         import dspy
 
         self.capture["request"] = kwargs.get("request")
+        self.capture["kwargs"] = kwargs
         self.capture["settings_lm"] = getattr(dspy.settings, "lm", None)
+        if self.observer is not None:
+            self.observer(RLMDetail(RLMDetailKind.STEP_STARTED, {"step": 1}))
+            await asyncio.sleep(0)
+            self.observer(RLMDetail(RLMDetailKind.REASONING, {"step": 1, "text": "inspect"}))
+            self.observer(RLMDetail(RLMDetailKind.STEP_FINISHED, {"step": 1}))
         if self.fail is not None:
             raise self.fail
         prediction = dspy.Prediction(answer=self.answer)
@@ -65,6 +78,8 @@ class _FakeFactory:
             instance = self._maker(**kwargs)
         else:
             instance = self._rlm
+            if instance is not None:
+                instance.observer = kwargs.get("observer")
         self.created.append(instance)
         return instance
 
@@ -92,6 +107,14 @@ def _context(
     return ctx, lease
 
 
+class _Resolver:
+    def __init__(self, blueprint: TurnCapabilityBlueprint) -> None:
+        self.blueprint = blueprint
+
+    async def resolve(self, _context: RLMTurnContext) -> TurnCapabilityBlueprint:
+        return self.blueprint
+
+
 async def _collect(runner: RLMRunner, context: RLMTurnContext) -> tuple[list[Any], Any]:
     stream = runner.stream(context)
     events = [event async for event in stream]
@@ -110,14 +133,20 @@ async def test_runner_emits_start_text_usage_and_one_terminal() -> None:
 
     assert kinds[0] == RuntimeEventKind.RUN_STARTED
     assert RuntimeEventKind.STATUS in kinds
-    assert RuntimeEventKind.TEXT_DELTA in kinds
-    assert RuntimeEventKind.TEXT_COMPLETED in kinds
-    assert RuntimeEventKind.USAGE in kinds
+    assert RuntimeEventKind.TEXT_DELTA not in kinds
+    assert RuntimeEventKind.TEXT_COMPLETED not in kinds
+    assert RuntimeEventKind.USAGE not in kinds
     assert RuntimeEventKind.RUN_COMPLETED not in kinds
     assert RuntimeEventKind.ERROR not in kinds
     assert outcome is not None
     assert outcome.terminal_status == "completed"
     assert outcome.assistant_text == "world"
+    assert outcome.usage["iterations"] == 1
+    assert outcome.usage["tool_calls"] == 0
+    assert outcome.usage["sub_lm_calls"] == 0
+    assert outcome.usage["iteration_limit"] == 3
+    assert outcome.usage["sub_lm_call_limit"] == 5
+    assert outcome.usage["estimated_cost"] is None
     assert lease.released == 0
     assert factory.last_kwargs["models"].sub_lm is sub
     assert factory.last_kwargs["interpreter"] is lease.interpreter
@@ -148,6 +177,10 @@ async def test_runner_sanitizes_failures_without_releasing_coordinator_owned_lea
     assert RuntimeEventKind.ERROR not in kinds
     assert outcome is not None
     assert outcome.terminal_status == "failed"
+    assert outcome.usage["iterations"] == 1
+    assert outcome.usage["tool_call_limit"] == ctx.budget.max_tool_calls
+    assert outcome.usage["root_model_profile"]
+    assert outcome.usage["sub_model_profile"]
     message = outcome.public_error_message or ""
     assert "sk-super-secret-value" not in message
     assert "/Users/zoe" not in message
@@ -183,3 +216,84 @@ async def test_sequences_strictly_increase_for_one_run() -> None:
     events, _outcome = await _collect(RLMRunner(factory=_FakeFactory(_FakeRLM())), ctx)
     sequences = [e.sequence for e in events]
     assert sequences == list(range(1, len(sequences) + 1))
+
+
+@pytest.mark.asyncio
+async def test_runner_activates_selected_skills_and_streams_details_before_text() -> None:
+    card = SkillCard(
+        id=uuid4(),
+        name="long-context",
+        description="Analyze large inputs",
+        scope="system",
+        version="1.0.0",
+        trust="system",
+        affordances=("analyze",),
+        resources_available=True,
+    )
+    blueprint = TurnCapabilityBlueprint(activated_skills=(card,))
+    context, _ = _context()
+    context = replace(context, capability_resolver=_Resolver(blueprint))
+
+    events, outcome = await _collect(RLMRunner(factory=_FakeFactory(_FakeRLM())), context)
+    kinds = [event.kind for event in events]
+
+    assert kinds.index(RuntimeEventKind.SKILL_ACTIVATED) < kinds.index(RuntimeEventKind.RLM_REASONING)
+    assert RuntimeEventKind.RLM_REASONING in kinds
+    assert outcome is not None
+    assert any(part["kind"] == "rlm.reasoning" for part in outcome.detail_parts)
+
+
+@pytest.mark.asyncio
+async def test_runner_passes_registered_sandbox_serializable_to_typed_contract() -> None:
+    import dspy
+
+    from fleet_rlm.skills.capabilities import TaskContract
+
+    class Corpus(dspy.SandboxSerializable):
+        def sandbox_setup(self) -> str:
+            return ""
+
+        def to_sandbox(self) -> bytes:
+            return b"one\ntwo"
+
+        def sandbox_assignment(self, var_name: str, data_expr: str) -> str:
+            return f"{var_name} = {data_expr}.decode()"
+
+        def rlm_preview(self, max_chars: int = 500) -> str:
+            return "Corpus with 2 lines"
+
+    class CorpusSignature(dspy.Signature):
+        request: str = dspy.InputField()
+        corpus: Corpus = dspy.InputField()
+        answer: str = dspy.OutputField()
+
+    corpus = Corpus()
+    contract = TaskContract(
+        id="corpus-answer",
+        signature=CorpusSignature,
+        input_mapper=lambda context: {"request": context.request},
+        output_serializer=lambda prediction: {
+            "answer": prediction.answer,
+            "provider": "api_key=should-not-persist /home/daytona/private",
+        },
+    )
+    blueprint = TurnCapabilityBlueprint(
+        task_contract=contract,
+        input_values=MappingProxyType({"request": "hello", "corpus": corpus}),
+    )
+    capture: dict[str, Any] = {}
+    context, _ = _context()
+    context = replace(context, capability_resolver=_Resolver(blueprint))
+
+    _events, outcome = await _collect(
+        RLMRunner(factory=_FakeFactory(_FakeRLM(answer="typed", capture=capture))),
+        context,
+    )
+
+    assert capture["kwargs"]["corpus"] is corpus
+    assert outcome is not None
+    assert outcome.structured_output == {
+        "answer": "typed",
+        "provider": "[redacted] [path]",
+    }
+    assert outcome.result_schema_id == "corpus-answer"

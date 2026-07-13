@@ -77,13 +77,17 @@ The backend foundation is complete after Phase 4. Phases 5 and 6 expand a stable
 - The application class is `RLMRunner`; there is no `DirectRLMRunner` or `RLMAgent` wrapper.
 - A fresh `dspy.RLM` is created for every concurrent turn.
 - The root LM controls the recursive trajectory; `sub_lm` handles bounded semantic subqueries.
-- Generated Python and approved Skill scripts execute in Daytona, never in FastAPI.
+- RLM-generated Python executes in Daytona, never in FastAPI. Skill-supplied
+  executable code remains quarantined future work.
 - A Daytona Volume is mounted into the Sandbox for durable filesystem-native content.
 - Interpreter variables are an optimization, never the sole durable copy of session state.
-- FastAPI SSE is the only transcript transport in the clean backend.
+- AI SDK UI 7 v1 over FastAPI SSE is the only public transcript transport in
+  the clean backend; Runtime Events remain transport-neutral internally.
 - The client cannot select model providers, Sandbox IDs, Volume paths, or privileged Skills.
 - Deterministic Python owns identity, authorization, validation, budgets, persistence, path safety, and redaction.
-- Raw provider exceptions, credentials, private paths, and hidden reasoning never enter public SSE events.
+- Raw provider exceptions, credentials, private paths, full prompts, and
+  provider-hidden chain-of-thought never enter the public stream. Sanitized
+  RLM-authored reasoning, generated code, and bounded interpreter output do.
 - Memory consolidation, generated Skills, and GEPA stay outside normal chat turns.
 
 ## Status vocabulary
@@ -110,7 +114,8 @@ The clean backend is production-foundational only when a live end-to-end scenari
 8. The RLM loads one authorized Skill.
 9. The RLM reads one attachment by ID.
 10. The RLM creates one durable artifact on the mounted Volume.
-11. RuntimeEvents stream to the UI with exactly one terminal event.
+11. Runtime Events project to an AI SDK UIMessage stream with exactly one Fleet
+    terminal and a final `[DONE]` marker.
 12. The turn and checkpoint commit transactionally.
 13. The Sandbox is stopped, paused, archived, or replaced according to provider capability.
 14. A later turn reconstructs the session without relying on Python globals.

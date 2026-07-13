@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from fleet_rlm.chat.commands import ChatTurnCommand
@@ -16,6 +17,7 @@ from fleet_rlm.persistence.database import (
     create_session_factory,
     create_tables,
 )
+from fleet_rlm.persistence.models import RunRow
 from fleet_rlm.persistence.repositories import SqlAlchemySessionRepository
 from fleet_rlm.rlm.budgets import RLMBudget
 from fleet_rlm.rlm.context import RLMTurnContext
@@ -66,10 +68,20 @@ async def test_failed_run_does_not_advance_checkpoint_or_history() -> None:
         await repo.commit_completed_turn(session.id, user_text="u1", assistant_text="a1", run_id=run_ok)
         before = await repo.load(session.id)
         run_fail = await repo.begin_run(session.id)
-        after_fail = await repo.finish_failed_run(session.id, run_fail, message="boom")
+        after_fail = await repo.finish_failed_run(
+            session.id,
+            run_fail,
+            message="cancelled",
+            terminal_status="cancelled",
+            usage={"iterations": 1, "tool_calls": 0},
+        )
 
         assert len(after_fail.turns) == len(before.turns) == 2
         assert after_fail.session.checkpoint_version == before.session.checkpoint_version == 1
+        async with create_session_factory(engine)() as db:
+            run = (await db.execute(select(RunRow).where(RunRow.id == run_fail))).scalar_one()
+        assert run.status == "cancelled"
+        assert run.usage_json == {"iterations": 1, "tool_calls": 0}
     finally:
         await engine.dispose()
 
@@ -90,6 +102,40 @@ async def test_reload_after_new_repository_instance_preserves_history() -> None:
         history = turns_to_history(loaded.turns)
         assert history_message_count(history) == 2
         assert history.messages[0]["content"] == "persist"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_completed_assistant_turn_persists_details_and_typed_result() -> None:
+    repo, engine = await _open_repo()
+    try:
+        session = await repo.create(user_id=uuid4(), workspace_id=uuid4())
+        run_id = await repo.begin_run(session.id)
+        details = (
+            {"kind": "reasoning", "payload": {"step": 1, "text": "Inspect the corpus"}},
+            {"kind": "rlm.code", "payload": {"step": 1, "code": "print(total)"}},
+        )
+        structured = {"total": 42}
+
+        await repo.commit_completed_turn(
+            session.id,
+            user_text="calculate",
+            assistant_text="42",
+            run_id=run_id,
+            detail_parts=details,
+            structured_output=structured,
+            result_schema_id="analysis-result",
+            result_schema_version="1",
+        )
+
+        loaded = await repo.load(session.id)
+        assistant = loaded.turns[-1]
+        assert assistant.id == run_id
+        assert assistant.detail_parts == details
+        assert assistant.structured_output == structured
+        assert assistant.result_schema_id == "analysis-result"
+        assert assistant.result_schema_version == "1"
     finally:
         await engine.dispose()
 

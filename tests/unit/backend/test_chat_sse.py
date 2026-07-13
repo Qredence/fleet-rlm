@@ -44,7 +44,6 @@ class _FakeRunner:
                     return
                 recorder = EventRecorder(run_id=context.run_id, session_id=context.session_id)
                 yield recorder.emit(RuntimeEventKind.RUN_STARTED, {})
-                yield recorder.emit(RuntimeEventKind.TEXT_DELTA, {"text": "hi"})
             finally:
                 self.closed += 1
 
@@ -77,12 +76,12 @@ def _parse_sse_data_lines(body: str) -> list[dict[str, Any]]:
         for line in block.splitlines():
             if line.startswith("data:"):
                 raw = line[5:].lstrip()
-                if raw:
+                if raw and raw != "[DONE]":
                     payloads.append(json.loads(raw))
     return payloads
 
 
-def test_chat_route_returns_typed_sse_events() -> None:
+def test_chat_route_returns_ai_sdk_ui_message_stream() -> None:
     from fleet_rlm.app import create_app
 
     app = create_app()
@@ -97,10 +96,19 @@ def test_chat_route_returns_typed_sse_events() -> None:
 
     assert response.status_code == 200
     assert "text/event-stream" in response.headers.get("content-type", "")
+    assert response.headers["x-vercel-ai-ui-message-stream"] == "v1"
+    assert response.headers["x-accel-buffering"] == "no"
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["connection"] == "keep-alive"
     payloads = _parse_sse_data_lines(response.text)
-    assert payloads[0]["kind"] == "run.started"
-    assert payloads[-1]["kind"] == "run.completed"
-    assert [p["sequence"] for p in payloads] == list(range(1, len(payloads) + 1))
+    assert payloads[0]["type"] == "start"
+    assert [payload["type"] for payload in payloads[-4:]] == [
+        "text-start",
+        "text-delta",
+        "text-end",
+        "finish",
+    ]
+    assert response.text.rstrip().endswith("data: [DONE]")
     assert runner.closed == 1
 
 
@@ -109,8 +117,10 @@ def test_chat_route_uses_synthetic_identity_headers() -> None:
     from fleet_rlm.rlm.context import RLMTurnContext
 
     captured: list[RLMTurnContext] = []
+    commands: list[ChatTurnCommand] = []
 
     def builder(command: ChatTurnCommand) -> RLMTurnContext:
+        commands.append(command)
         ctx = _minimal_context(command)
         captured.append(ctx)
         return ctx
@@ -131,12 +141,14 @@ def test_chat_route_uses_synthetic_identity_headers() -> None:
         headers={
             "X-Fleet-User-Id": str(user_id),
             "X-Fleet-Workspace-Id": str(workspace_id),
+            "Idempotency-Key": " retry-key-1 ",
         },
     )
     assert response.status_code == 200
     assert captured[0].user_id == user_id
     assert captured[0].workspace_id == workspace_id
     assert captured[0].session_id == session_id
+    assert commands[0].idempotency_key == "retry-key-1"
 
 
 def test_chat_openapi_contains_request_contract() -> None:

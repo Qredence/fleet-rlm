@@ -50,8 +50,9 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
             from fleet_rlm.persistence.repositories import SqlAlchemySessionRepository
 
             engine = create_async_engine_from_url(settings_obj.database_url)
+            session_factory = create_session_factory(engine)
             app.state.db_engine = engine
-            app.state.session_repository = SqlAlchemySessionRepository(create_session_factory(engine))
+            app.state.session_repository = SqlAlchemySessionRepository(session_factory)
             owns_engine = True
         try:
             if engine is not None:
@@ -61,7 +62,11 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
             if owns_engine:
                 from fleet_rlm.composition import install_offline_composition
 
-                install_offline_composition(app, settings_obj)
+                install_offline_composition(
+                    app,
+                    settings_obj,
+                    session_factory=session_factory,
+                )
             yield
         finally:
             if owns_engine and engine is not None:
@@ -93,6 +98,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     app.include_router(runs_router)
 
     from fleet_rlm.skills.authorize import SkillAuthorizer
+    from fleet_rlm.skills.capabilities import CapabilityRegistry
     from fleet_rlm.skills.loader import seed_bundled_skills
     from fleet_rlm.skills.registry import InMemorySkillRegistry
 
@@ -100,6 +106,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     seed_bundled_skills(skill_registry)
     app.state.skill_registry = skill_registry
     app.state.skill_authorizer = SkillAuthorizer(skill_registry)
+    app.state.capability_registry = CapabilityRegistry()
     if not resolved.live_kernel:
         from fleet_rlm.composition import install_offline_composition
 

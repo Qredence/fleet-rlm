@@ -46,8 +46,21 @@ class SessionRepository(Protocol):
         run_id: Any | None = None,
         expected_checkpoint_version: int | None = None,
         artifact_candidates: tuple[ArtifactCandidate, ...] = (),
+        detail_parts: tuple[dict[str, Any], ...] = (),
+        usage: dict[str, Any] | None = None,
+        structured_output: dict[str, Any] | None = None,
+        result_schema_id: str | None = None,
+        result_schema_version: str | None = None,
     ) -> Any: ...
 
-    async def finish_failed_run(self, session_id: Any, run_id: Any, *, message: str | None = None) -> Any: ...
+    async def finish_failed_run(
+        self,
+        session_id: Any,
+        run_id: Any,
+        *,
+        message: str | None = None,
+        terminal_status: str = "failed",
+        usage: dict[str, Any] | None = None,
+    ) -> Any: ...
 
     async def is_cancel_requested(self, run_id: Any) -> bool: ...

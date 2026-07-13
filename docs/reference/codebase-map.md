@@ -8,13 +8,13 @@ compatibility runtime and parallel foundation package no longer exist.
 | Module | Ownership | May depend on |
 | --- | --- | --- |
 | `app.py`, `main.py` | FastAPI factory, lifespan, router registration, ASGI entrypoint | composition, API routers |
-| `api/` | HTTP translation, identity, dependency aliases, SSE projection | domain interfaces and lifespan-composed modules |
+| `api/` | HTTP translation, identity, dependency aliases, AI SDK UI SSE projection and UIMessage reload | domain interfaces and lifespan-composed modules |
 | `chat/` | Turn orchestration, context construction, commit and terminal ordering | RLM, sessions, Skills, files |
 | `rlm/` | DSPy signature, fresh-per-Turn RLM construction, budgets, events, runner | DSPy and domain values |
 | `daytona/` | Exclusive Daytona SDK boundary, Sandbox/lease/Volume adapters | Daytona SDK, domain values |
 | `sessions/` | Session, history, checkpoint, locking, and repository interfaces | domain values only |
 | `files/`, `artifacts/` | Attachment staging and Artifact Candidate promotion | storage interfaces, safe paths |
-| `skills/` | bundled Skill registry, authorization, cards, and host tools | domain values and package resources |
+| `skills/` | bundled Skills, authorization, host capability registry, selection, typed task contracts, and progressive tools | domain values and package resources |
 | `persistence/` | SQLAlchemy models and repository adapters | sessions/files/artifact interfaces |
 | `observability/` | sanitized Turn records and exporters | Runtime Events |
 | `cli/` | thin `fleet web` and `fleet-rlm serve-api` launchers | canonical ASGI entrypoint |
@@ -28,8 +28,9 @@ compatibility runtime and parallel foundation package no longer exist.
   `TurnCoordinator` owns commit, public terminal ordering, and final release.
 - Production schema evolution belongs to the root Alembic baseline. Explicit
   `create_tables` calls are limited to hermetic SQLite tests/offline helpers.
-- Public chat transport is FastAPI SSE. There is no `/api/v1` compatibility or
-  WebSocket execution surface.
+- Public chat transport is the AI SDK UI 7 v1 UIMessage protocol over FastAPI
+  SSE. Runtime Events remain the internal transport-neutral progress model.
+  There is no `/api/v1` compatibility or WebSocket execution surface.
 
 ## Public backend paths
 
@@ -40,5 +41,5 @@ compatibility runtime and parallel foundation package no longer exist.
 - `/api/skills`
 - `POST /api/runs/{id}/cancel`
 
-`src/frontend/` remains a separate, currently incompatible consumer until its
-own SSE adaptation effort.
+`src/frontend/` remains a separate consumer until its dedicated AI SDK UI 7
+adaptation effort.

@@ -48,6 +48,10 @@ def _to_turn_record(row: TurnRow) -> TurnRecord:
         content=row.content,
         status=row.status,
         run_id=row.run_id,
+        detail_parts=tuple(row.detail_parts_json or ()),
+        structured_output=row.structured_output_json,
+        result_schema_id=row.result_schema_id,
+        result_schema_version=row.result_schema_version,
     )
 
 
@@ -289,6 +293,10 @@ class SqlAlchemySessionRepository:
                             base_checkpoint_version=base_version,
                             replay=True,
                             assistant_text=existing.result_assistant_text,
+                            detail_parts=tuple(existing.result_detail_parts_json or ()),
+                            structured_output=existing.result_structured_output_json,
+                            result_schema_id=existing.result_schema_id,
+                            result_schema_version=existing.result_schema_version,
                         )
                     if existing.status == "running":
                         raise IdempotencyConflictError(
@@ -334,6 +342,10 @@ class SqlAlchemySessionRepository:
                         base_checkpoint_version=base_version,
                         replay=True,
                         assistant_text=winner.result_assistant_text,
+                        detail_parts=tuple(winner.result_detail_parts_json or ()),
+                        structured_output=winner.result_structured_output_json,
+                        result_schema_id=winner.result_schema_id,
+                        result_schema_version=winner.result_schema_version,
                     )
                 raise IdempotencyConflictError(
                     f"idempotency key {key!r} already in-flight for session {session_id}"
@@ -372,6 +384,11 @@ class SqlAlchemySessionRepository:
         run_id: UUID | None = None,
         expected_checkpoint_version: int | None = None,
         artifact_candidates: tuple[ArtifactCandidate, ...] = (),
+        detail_parts: tuple[dict[str, object], ...] = (),
+        usage: dict[str, object] | None = None,
+        structured_output: dict[str, object] | None = None,
+        result_schema_id: str | None = None,
+        result_schema_version: str | None = None,
     ) -> SessionSnapshot:
         """Atomically persist History, Run/checkpoint, and committed Artifact metadata."""
         async with self._session_factory() as db:
@@ -422,12 +439,17 @@ class SqlAlchemySessionRepository:
             )
             db.add(
                 TurnRow(
+                    id=run_id or uuid4(),
                     session_id=session_id,
                     run_id=run_id,
                     sequence=seq + 1,
                     role="assistant",
                     content=assistant_text,
                     status="completed",
+                    detail_parts_json=list(detail_parts) or None,
+                    structured_output_json=structured_output,
+                    result_schema_id=result_schema_id,
+                    result_schema_version=result_schema_version,
                 )
             )
             db.add(
@@ -447,6 +469,11 @@ class SqlAlchemySessionRepository:
                     run.status = "completed"
                     run.finished_at = datetime.now(UTC)
                     run.result_assistant_text = assistant_text
+                    run.usage_json = usage
+                    run.result_detail_parts_json = list(detail_parts) or None
+                    run.result_structured_output_json = structured_output
+                    run.result_schema_id = result_schema_id
+                    run.result_schema_version = result_schema_version
                     run.lease_owner = None
                     run.lease_heartbeat_at = None
             for candidate in artifact_candidates:
@@ -475,16 +502,20 @@ class SqlAlchemySessionRepository:
         run_id: UUID,
         *,
         message: str | None = None,
+        terminal_status: str = "failed",
+        usage: dict[str, object] | None = None,
     ) -> SessionSnapshot:
-        """Mark run failed without appending History or advancing checkpoint."""
+        """Finish an unsuccessful Run without advancing History or Checkpoint."""
         async with self._session_factory() as db:
             session = await db.get(SessionRow, session_id)
             if session is None:
                 raise SessionNotFoundError(f"session {session_id} not found")
             run = await db.get(RunRow, run_id)
             if run is not None and run.session_id == session_id:
-                run.status = "failed"
+                allowed = {"failed", "cancelled", "timeout", "budget_exhausted"}
+                run.status = terminal_status if terminal_status in allowed else "failed"
                 run.error_message = message
+                run.usage_json = usage if usage is not None else {"execution_started": False}
                 run.finished_at = datetime.now(UTC)
                 run.lease_owner = None
                 run.lease_heartbeat_at = None

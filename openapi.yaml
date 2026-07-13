@@ -8,10 +8,18 @@ paths:
       tags:
       - chat
       summary: Chat
-      description: Stream one chat turn as typed SSE. Route performs no DSPy/Daytona
-        SDK calls.
+      description: Stream one chat Turn as an AI SDK UI 7 message stream.
       operationId: chat_api_chat_post
       parameters:
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Idempotency-Key
       - name: Authorization
         in: header
         required: false
@@ -46,7 +54,7 @@ paths:
               $ref: '#/components/schemas/ChatRequest'
       responses:
         '200':
-          description: SSE stream of RuntimeEvent v1 envelopes
+          description: AI SDK UI 7 v1 UIMessage SSE stream
           content:
             text/event-stream:
               itemSchema:
@@ -61,6 +69,12 @@ paths:
                   retry:
                     type: integer
                     minimum: 0
+          headers:
+            x-vercel-ai-ui-message-stream:
+              description: AI SDK UI message stream protocol version
+              schema:
+                type: string
+                const: v1
         '400':
           description: Invalid attachment reference
         '404':
@@ -1118,6 +1132,18 @@ components:
             format: uuid
           - type: 'null'
           title: Run Id
+        parts:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Parts
+        metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Metadata
       type: object
       required:
       - id
@@ -1125,6 +1151,7 @@ components:
       - role
       - content
       - status
+      - parts
       title: TurnResponse
     ValidationError:
       properties:

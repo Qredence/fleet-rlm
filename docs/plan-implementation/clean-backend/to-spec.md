@@ -98,7 +98,7 @@ Uploads and artifacts are referenced by logical IDs. Public contracts never expo
 
 ## 5. SSE contract
 
-The server emits versioned RuntimeEvents with this envelope:
+Fleet records transport-neutral Runtime Events internally with this envelope:
 
 ```json
 {
@@ -113,7 +113,7 @@ The server emits versioned RuntimeEvents with this envelope:
 }
 ```
 
-Foundation event kinds:
+The event model includes:
 
 ```text
 run.started
@@ -122,14 +122,26 @@ text.delta
 text.completed
 tool.started
 tool.completed
+tool.failed
+skill.activated
 skill.loaded
+step.started
+step.finished
+rlm.reasoning
+rlm.code
+rlm.output
 attachment.read
 artifact.created
 usage
+structured.result
 warning
 error
 run.completed
 ```
+
+`POST /api/chat` projects those events as an AI SDK UI 7 v1 UIMessage SSE
+stream. The response carries `x-vercel-ai-ui-message-stream: v1`; native text,
+reasoning, and tool chunks plus Fleet `data-*` parts end with `data: [DONE]`.
 
 Requirements:
 
@@ -137,9 +149,15 @@ Requirements:
 - keepalive comments do not consume sequence numbers;
 - exactly one terminal `error` or `run.completed` event is emitted;
 - all upstream iterators and leases close on disconnect;
-- public events contain concise progress, not hidden chain-of-thought;
+- public detail may contain bounded, sanitized RLM-authored reasoning, generated
+  Python, interpreter output, and tool activity, but never provider-hidden
+  chain-of-thought;
 - raw provider exceptions, credentials, environment values, private paths, and internal prompts are prohibited;
-- terminal events include status, duration, usage, artifact IDs, checkpoint version, and degraded state.
+- successful public ordering after Turn Commit is committed Artifacts, usage,
+  optional typed result, final answer text, and `finish`;
+- failures after streaming emit `error` then `finish` with reason `error`;
+  cancellation emits `abort`;
+- successful assistant Turns persist canonical UIMessage parts, not SSE bytes.
 
 ## 6. Turn lifecycle
 
@@ -150,16 +168,20 @@ A normal turn follows this order:
 3. Claim the session execution lock and idempotency key.
 4. Create a run record.
 5. Load the latest successful session checkpoint.
-6. Reconstruct `dspy.History` and the rolling session summary.
+6. Reconstruct sandbox-safe `list[dict]` Session History and the rolling session summary.
 7. Resolve the server-owned model bundle.
 8. Resolve authorized SkillCards.
 9. Acquire an `InterpreterLease` from `DaytonaSessionManager`.
 10. Build `RLMTurnContext`.
-11. Create a fresh `dspy.RLM` through `RLMFactory`.
-12. Execute the turn off the FastAPI event loop.
-13. Normalize the trajectory into public RuntimeEvents and private trace records.
-14. Persist the completed assistant turn, usage, artifacts, and new checkpoint in one logical transaction.
-15. Release the interpreter lease and session lock.
+11. Use the Sub Model to select zero to four authorized Skills, validate the
+    result on the host, and build one immutable Turn Capability Blueprint.
+12. Create a fresh `dspy.RLM` through `RLMFactory` with the blueprint Signature,
+    tools, knowledge, and host-constructed inputs.
+13. Execute the turn while relaying sanitized detailed Runtime Events.
+14. Promote candidate bytes and atomically persist the assistant Turn, canonical
+    UIMessage parts, typed result, usage, Artifact metadata, and checkpoint.
+15. Publish committed Artifacts, usage, typed result, final text, and terminal.
+16. Release the interpreter lease and session lock.
 
 A failed or cancelled turn is recorded as a run but does not advance the successful conversation checkpoint.
 
@@ -174,7 +196,8 @@ The application-level class is `RLMRunner`. There is no `DirectRLMRunner`, `RLMA
 - every concurrent turn receives a fresh `dspy.RLM` instance;
 - an RLM instance is never shared across sessions or simultaneous runs;
 - the interpreter is supplied through an acquired lease;
-- the RLM signature is typed and stable;
+- the no-Skill Signature is stable; one selected primary Skill may supply a
+  registered typed task Signature for that Turn;
 - all RLM constructor parameters are passed explicitly and protected by framework contract tests.
 
 ### 7.3 Model roles
@@ -294,7 +317,7 @@ Recovery attempts, in order:
 
 ### 10.1 Foundation model
 
-The RLM initially receives compact authorized SkillCards containing:
+The Sub Model selector receives compact authorized Skill Cards containing:
 
 ```text
 id
@@ -305,9 +328,20 @@ version
 trust level
 affordances
 resource availability
+capability references
+optional task contract reference
 ```
 
-The full `SKILL.md` is not injected at run start.
+It selects zero to four Skills and at most one primary Skill. Host validation
+rejects foreign, hidden, untrusted, unknown, over-limit, or conflicting
+capabilities; invalid selection falls back to zero Skills. The RLM sees the
+activated Skill Cards and can progressively load their full bodies or resources.
+The full `SKILL.md` is not injected at Run start.
+
+Registered capability packages may contribute plain callables, explicit
+`dspy.Tool` objects, bounded knowledge, a primary typed task contract,
+`SandboxSerializable` input adapters, validators, and Budget requirements.
+Only host registrations execute in this version.
 
 Foundation host tools:
 
@@ -320,7 +354,8 @@ Authorization is deterministic and occurs on the host. The model cannot make an 
 
 ### 10.2 Deferred Skill features
 
-Trusted script execution, user-created Skills, session-generated Skills, patch proposals, and promotion are deferred until progressive read-only loading is proven.
+Skill-supplied executable code, user-created Skills, session-generated Skills,
+self-optimization, patch proposals, and promotion remain quarantined future work.
 
 ## 11. Attachments and artifacts
 
@@ -371,11 +406,17 @@ Every run records:
 - tokens, duration, estimated cost, and terminal status;
 - cancellation, timeout, budget exhaustion, degraded behavior, and fallback.
 
+The Run usage ledger is persisted for successful, failed, cancelled, timed-out,
+and budget-exhausted execution. It contains the resolved root/sub model profile
+labels, consumed iterations/tool/sub-LM calls, configured limits, available
+provider token usage, and nullable estimated cost. Optional trace exporters
+receive the same terminal ledger plus the immutable budget envelope.
+
 External exporters such as MLflow are optional adapters. Internal structured traces and run persistence are mandatory.
 
 ## 14. Foundation acceptance scenario
 
-One automated integration test and one opt-in live test must prove:
+One automated integration test and one opt-in live test jointly prove:
 
 1. A user starts a session from the Chat UI boundary.
 2. `POST /api/chat` returns SSE.
@@ -392,6 +433,12 @@ One automated integration test and one opt-in live test must prove:
 13. A second turn restores `dspy.History` and existing artifact references.
 14. The second answer demonstrably uses prior session context.
 15. No secret, private path, raw exception, or hidden reasoning appears in public events.
+
+The automated lane uses the real HTTP routes, capability resolver, fresh
+observable DSPy RLM, host-tool bridge, in-process interpreter adapter, commit,
+AI SDK projector, and reload path with deterministic model actions. The opt-in
+live lane supplies the provider proof for Daytona Volume mounting, Sandbox
+replacement, and live root/sub models.
 
 ## 15. Later capabilities
 

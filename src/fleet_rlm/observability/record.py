@@ -21,6 +21,8 @@ class TurnTrace:
     terminal_status: str | None = None
     duration_ms: int | None = None
     usage: dict[str, Any] = field(default_factory=dict)
+    model_profiles: dict[str, str] = field(default_factory=dict)
+    budget_limits: dict[str, int] = field(default_factory=dict)
     skill_ids: list[str] = field(default_factory=list)
     attachment_ids: list[str] = field(default_factory=list)
     artifact_ids: list[str] = field(default_factory=list)
@@ -40,6 +42,8 @@ class TurnTrace:
             "terminal_status": self.terminal_status,
             "duration_ms": self.duration_ms,
             "usage": dict(self.usage),
+            "model_profiles": dict(self.model_profiles),
+            "budget_limits": dict(self.budget_limits),
             "skill_ids": list(self.skill_ids),
             "attachment_ids": list(self.attachment_ids),
             "artifact_ids": list(self.artifact_ids),
@@ -52,7 +56,7 @@ class TurnTrace:
 
 def apply_event_to_trace(trace: TurnTrace, kind: str, payload: dict[str, Any]) -> None:
     """Mutate trace from a public RuntimeEvent kind + payload."""
-    if kind == "skill.loaded":
+    if kind in {"skill.activated", "skill.loaded"}:
         sid = str(payload.get("skill_id") or "")
         if sid and sid not in trace.skill_ids:
             trace.skill_ids.append(sid)

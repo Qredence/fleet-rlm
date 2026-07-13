@@ -99,7 +99,13 @@ def test_factory_passes_explicit_constructor_kwargs() -> None:
     root = MagicMock(name="root_lm")
     sub = MagicMock(name="sub_lm")
     interpreter = _FakeInterpreter()
-    budget = RLMBudget(max_iterations=7, max_llm_calls=11, max_output_chars=2048)
+    budget = RLMBudget(
+        max_iterations=7,
+        max_llm_calls=11,
+        max_output_chars=2048,
+        max_tool_calls=5,
+        max_sub_lm_concurrency=3,
+    )
     models = RLMModelBundle(root_lm=root, sub_lm=sub)
 
     rlm = RLMFactory().create(
@@ -113,6 +119,8 @@ def test_factory_passes_explicit_constructor_kwargs() -> None:
     assert rlm.max_iterations == 7
     assert rlm.max_llm_calls == 11
     assert rlm.max_output_chars == 2048
+    assert rlm._fleet_max_tool_calls == 5  # noqa: SLF001 - factory budget contract
+    assert rlm._fleet_max_sub_lm_concurrency == 3  # noqa: SLF001 - factory budget contract
     assert rlm.sub_lm is sub
     assert rlm._interpreter is interpreter
     assert "host_echo" in rlm.tools

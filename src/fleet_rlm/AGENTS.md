@@ -13,8 +13,14 @@ Root repository workflow and validation rules remain authoritative from
 - Keep Daytona SDK imports inside `daytona/`.
 - Create a fresh DSPy RLM and custom interpreter per Turn. Preserve
   `history: list[dict]` and call `await rlm.aforward(**named_inputs)`.
+- Compose zero to four authorized Skills through the host-owned capability
+  registry. Capability tools may be plain callables or explicit `dspy.Tool`
+  objects; HTTP never supplies executable Python or serialized objects.
+- Keep Runtime Events transport-neutral. `api/sse.py` alone projects the public
+  AI SDK UI 7 v1 stream; sanitized RLM-authored reasoning is public, while
+  provider-hidden chain-of-thought, full prompts, paths, and secrets are not.
 - `TurnCoordinator` owns candidate promotion, Turn Commit, terminal projection,
-  and Interpreter Lease release.
+  final UI part ordering, and Interpreter Lease release.
 - Alembic owns live schema evolution. `create_tables` is test/offline-only.
 - Do not add `/api/v1`, WebSocket, legacy-backend, or environment compatibility
   aliases.

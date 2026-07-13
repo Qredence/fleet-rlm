@@ -27,8 +27,11 @@ Documented behavior:
 - The root LM generates Python actions iteratively.
 - `llm_query(prompt)` and `llm_query_batched(prompts)` call `sub_lm`.
 - `sub_lm` can be a different, cheaper model from the root LM.
-- Additional tools can be exposed to generated interpreter code.
-- `max_iters`, `max_llm_calls`, and `max_output_chars` are built-in safety limits.
+- Plain callable functions and explicit `dspy.Tool` objects can be exposed to
+  generated interpreter code.
+- `SandboxSerializable` values can reconstruct host-approved data once inside
+  the interpreter.
+- `max_iterations`, `max_llm_calls`, and `max_output_chars` are built-in safety limits.
 - If the loop ends without explicit submission, an extractor pass can derive final outputs from the trajectory.
 - `aforward()` is the asynchronous counterpart to `forward()`.
 
@@ -37,10 +40,15 @@ Fleet implications:
 1. `RLMModelBundle` separates root and sub-model roles.
 2. `RLMFactory` always passes explicit finite budgets (`max_iterations`, not `max_iters`).
 3. Tool names are stable Python identifiers.
-4. Public SSE never exposes raw trajectory reasoning.
+4. Public SSE may expose bounded, sanitized model-authored RLM reasoning,
+   generated code, and interpreter output. It never exposes provider-hidden
+   chain-of-thought, full prompts, credentials, or raw provider traces.
 5. Dependency upgrades fail contract tests when constructor parameters or result behavior change.
 6. A fresh RLM instance is used for each concurrent turn; custom interpreter state is not shared between runs.
-7. `dspy.History` is application-managed durable conversation state reconstructed by Fleet.
+7. Fleet persists application-managed Session History and passes it to RLM as
+   sandbox-safe `list[dict]`; `dspy.History` is not required by RLM.
+8. Typed task contracts may replace the default Signature per Turn, and
+   `SandboxSerializable` values are constructed only by registered host adapters.
 
 Required contract tests:
 

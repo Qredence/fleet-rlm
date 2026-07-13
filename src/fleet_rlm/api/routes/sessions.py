@@ -19,6 +19,7 @@ from fleet_rlm.api.schemas import (
     TurnListResponse,
     TurnResponse,
 )
+from fleet_rlm.api.ui_message import detail_parts_to_ui_parts
 from fleet_rlm.sessions.errors import SessionNotFoundError
 from fleet_rlm.sessions.models import SessionRecord, TurnRecord
 
@@ -43,6 +44,15 @@ def _to_summary(record: SessionRecord) -> SessionSummaryResponse:
 
 
 def _to_turn(record: TurnRecord) -> TurnResponse:
+    metadata: dict[str, object] = {}
+    if record.run_id is not None:
+        metadata["runId"] = str(record.run_id)
+    if record.structured_output is not None:
+        metadata["structuredResult"] = {
+            "schemaId": record.result_schema_id,
+            "schemaVersion": record.result_schema_version,
+            "value": record.structured_output,
+        }
     return TurnResponse(
         id=record.id,
         sequence=record.sequence,
@@ -50,6 +60,20 @@ def _to_turn(record: TurnRecord) -> TurnResponse:
         content=record.content,
         status=record.status,
         run_id=record.run_id,
+        parts=detail_parts_to_ui_parts(
+            record.detail_parts,
+            answer_text=record.content,
+            structured_result=(
+                {
+                    "schemaId": record.result_schema_id,
+                    "schemaVersion": record.result_schema_version,
+                    "value": record.structured_output,
+                }
+                if record.structured_output is not None
+                else None
+            ),
+        ),
+        metadata=metadata or None,
     )
 
 

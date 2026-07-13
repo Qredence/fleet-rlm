@@ -178,4 +178,9 @@ async def test_runner_records_trace_via_exporter() -> None:
     assert stream.outcome is not None
     assert stream.outcome.terminal_status == "completed"
     assert len(store.traces) == 1
-    assert store.traces[0].terminal_status == "completed"
+    exported = store.traces[0]
+    assert exported.terminal_status == "completed"
+    assert exported.finished_at is not None
+    assert exported.model_profiles.keys() == {"root", "sub"}
+    assert exported.budget_limits["tool_calls"] == context.budget.max_tool_calls
+    assert exported.usage["estimated_cost"] is None

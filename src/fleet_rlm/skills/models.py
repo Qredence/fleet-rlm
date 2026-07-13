@@ -23,6 +23,8 @@ class SkillCard:
     trust: SkillTrust
     affordances: tuple[str, ...]
     resources_available: bool
+    capability_refs: tuple[str, ...] = field(default_factory=tuple)
+    task_contract_ref: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +42,8 @@ class SkillRecord:
     affordances: tuple[str, ...]
     resources_available: bool
     instructions: str
+    capability_refs: tuple[str, ...] = field(default_factory=tuple)
+    task_contract_ref: str | None = None
     resources: tuple[str, ...] = field(default_factory=tuple)
     # Relative path -> body (host only; never on SkillCard)
     resource_bodies: tuple[tuple[str, str], ...] = field(default_factory=tuple)

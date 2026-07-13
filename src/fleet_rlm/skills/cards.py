@@ -16,4 +16,6 @@ def to_card(record: SkillRecord) -> SkillCard:
         trust=record.trust,
         affordances=record.affordances,
         resources_available=record.resources_available,
+        capability_refs=record.capability_refs,
+        task_contract_ref=record.task_contract_ref,
     )

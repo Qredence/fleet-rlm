@@ -1,6 +1,14 @@
 """Host-owned SkillCards, authorization, and progressive load seams."""
 
 from fleet_rlm.skills.authorize import SkillAuthorizer
+from fleet_rlm.skills.capabilities import (
+    CapabilityBudgetRequirements,
+    CapabilityRegistry,
+    CapabilityResolver,
+    SkillSelection,
+    TaskContract,
+    TurnCapabilityBlueprint,
+)
 from fleet_rlm.skills.cards import to_card
 from fleet_rlm.skills.errors import (
     SkillBudgetError,
@@ -22,7 +30,11 @@ from fleet_rlm.skills.tools import SkillToolHost, skill_loaded_public_payload
 
 __all__ = [
     "InMemorySkillRegistry",
+    "CapabilityRegistry",
+    "CapabilityBudgetRequirements",
+    "CapabilityResolver",
     "SkillAuthorizer",
+    "SkillSelection",
     "SkillBudgetError",
     "SkillCard",
     "SkillError",
@@ -31,6 +43,8 @@ __all__ = [
     "SkillRecord",
     "SkillToolHost",
     "SkillValidationError",
+    "TaskContract",
+    "TurnCapabilityBlueprint",
     "bundled_skills_root",
     "normalize_skill_resource_path",
     "rank_authorized_cards",

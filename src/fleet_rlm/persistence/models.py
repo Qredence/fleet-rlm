@@ -80,6 +80,10 @@ class TurnRow(Base):
     role: Mapped[str] = mapped_column(String(32), nullable=False)  # user | assistant
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="completed")
+    detail_parts_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    structured_output_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    result_schema_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    result_schema_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -104,6 +108,10 @@ class RunRow(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     usage_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     result_assistant_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_detail_parts_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    result_structured_output_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    result_schema_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    result_schema_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     lease_owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
     lease_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

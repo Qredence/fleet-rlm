@@ -116,6 +116,7 @@ def rebind_turn_context(
         attachments=context.attachments,
         artifacts=context.artifacts,
         tools=context.tools,
+        capability_resolver=getattr(context, "capability_resolver", None),
         skill_tool_host=getattr(context, "skill_tool_host", None),
         file_tool_host=getattr(context, "file_tool_host", None),
         volume_fs=getattr(context, "volume_fs", None),

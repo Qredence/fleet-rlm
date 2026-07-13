@@ -168,6 +168,25 @@ class HostWorkspaceVolumeGateway:
         return self._mirror(workspace_id).read_bytes(logical_path)
 
 
+class OfflineHostVolumeGateway:
+    """Adapt the shared offline Turn mirror to the async durable-store port.
+
+    SQL metadata performs Workspace authorization before this adapter is called.
+    Production continues to use physically scoped Daytona Volume subpaths.
+    """
+
+    def __init__(self, mirror: HostVolumeMirror) -> None:
+        self._mirror = mirror
+
+    async def write_bytes(self, workspace_id: UUID, logical_path: str, data: bytes) -> None:
+        del workspace_id
+        self._mirror.write_bytes(logical_path, data)
+
+    async def read_bytes(self, workspace_id: UUID, logical_path: str) -> bytes:
+        del workspace_id
+        return self._mirror.read_bytes(logical_path)
+
+
 def create_daytona_workspace_volume_gateway(
     *,
     api_key: str,
@@ -186,6 +205,7 @@ def create_daytona_workspace_volume_gateway(
 
 __all__ = [
     "DaytonaWorkspaceVolumeGateway",
+    "OfflineHostVolumeGateway",
     "HostWorkspaceVolumeGateway",
     "WorkspaceVolumeGateway",
     "create_daytona_workspace_volume_gateway",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -23,7 +24,7 @@ from fleet_rlm.rlm.errors import TurnBudgetExhausted, TurnCancelled, TurnTimeout
 from fleet_rlm.rlm.events import RuntimeEventKind
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.runner import RLMRunner
-from fleet_rlm.rlm.sanitize import sanitize_public_error
+from fleet_rlm.rlm.sanitize import sanitize_public_error, sanitize_public_value
 
 
 @pytest.fixture(autouse=True)
@@ -42,6 +43,18 @@ def test_sanitize_redacts_secrets_dsns_paths_stacks() -> None:
     assert sanitize_public_error(TurnCancelled()) == "Turn cancelled"
     assert sanitize_public_error(TurnTimeout()) == "Turn timed out"
     assert sanitize_public_error(TurnBudgetExhausted()) == "Turn budget exhausted"
+    assert sanitize_public_value("sk-super-secret-value") == "[redacted]"
+    assert sanitize_public_value(
+        {
+            "api_key": "super-secret-value",
+            "authorization": "Bearer abc123",
+            "token": "abc123",
+        }
+    ) == {
+        "api_key": "[redacted]",
+        "authorization": "[redacted]",
+        "token": "[redacted]",
+    }
 
 
 def test_cancel_registry_idempotent() -> None:
@@ -117,6 +130,43 @@ async def test_runner_honors_cancel_before_execute() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_polls_cancellation_while_rlm_is_in_flight() -> None:
+    run_id = uuid4()
+
+    class SlowFactory:
+        def create(self, **_kwargs: Any) -> Any:
+            class SlowRLM:
+                async def aforward(self, **_inputs: Any) -> Any:
+                    await asyncio.sleep(10)
+                    return MagicMock(answer="late")
+
+            return SlowRLM()
+
+    context = RLMTurnContext(
+        run_id=run_id,
+        session_id=uuid4(),
+        user_id=uuid4(),
+        workspace_id=uuid4(),
+        request="x",
+        models=RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock()),
+        budget=RLMBudget(max_wall_seconds=30),
+        lease=ephemeral_lease(MagicMock()),
+    )
+    stream = RLMRunner(factory=SlowFactory()).stream(context)
+
+    async def _consume() -> list[Any]:
+        return [event async for event in stream]
+
+    task = asyncio.create_task(_consume())
+    await asyncio.sleep(0.1)
+    get_run_cancel_registry().request_cancel(run_id)
+    await asyncio.wait_for(task, timeout=2)
+
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "cancelled"
+
+
+@pytest.mark.asyncio
 async def test_runner_timeout_maps_to_stable_status() -> None:
     class SlowFactory:
         def create(self, **kwargs: Any) -> Any:
@@ -180,7 +230,7 @@ async def test_failed_turn_does_not_advance_checkpoint() -> None:
     from fleet_rlm.sessions.checkpoints import TurnClaim
     from fleet_rlm.sessions.models import SessionRecord, SessionSnapshot
 
-    calls: dict[str, int] = {"append": 0, "fail": 0}
+    calls: dict[str, Any] = {"append": 0, "fail": 0, "terminal_status": None, "usage": None}
     owner = uuid4()
     ws = uuid4()
     sid = uuid4()
@@ -212,6 +262,8 @@ async def test_failed_turn_does_not_advance_checkpoint() -> None:
 
         async def finish_failed_run(self, *a: Any, **k: Any) -> None:
             calls["fail"] += 1
+            calls["terminal_status"] = k.get("terminal_status")
+            calls["usage"] = k.get("usage")
 
     class FailRunner:
         def stream(self, context: Any) -> Any:
@@ -227,6 +279,7 @@ async def test_failed_turn_does_not_advance_checkpoint() -> None:
                 _agen(),
                 outcome=TurnExecutionOutcome(
                     terminal_status="cancelled",
+                    usage={"tool_call_limit": RLMBudget().max_tool_calls},
                     public_error_message="Turn cancelled",
                 ),
             )
@@ -254,3 +307,5 @@ async def test_failed_turn_does_not_advance_checkpoint() -> None:
     assert events[-1].kind == RuntimeEventKind.ERROR
     assert calls["append"] == 0
     assert calls["fail"] == 1
+    assert calls["terminal_status"] == "cancelled"
+    assert calls["usage"]["tool_call_limit"] == RLMBudget().max_tool_calls

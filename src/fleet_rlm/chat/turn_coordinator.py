@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
@@ -66,6 +67,11 @@ class SessionStore(Protocol):
         run_id: Any | None = None,
         expected_checkpoint_version: int | None = None,
         artifact_candidates: tuple[ArtifactCandidate, ...] = (),
+        detail_parts: tuple[dict[str, Any], ...] = (),
+        usage: dict[str, Any] | None = None,
+        structured_output: dict[str, Any] | None = None,
+        result_schema_id: str | None = None,
+        result_schema_version: str | None = None,
     ) -> Any: ...
 
     async def finish_failed_run(
@@ -74,6 +80,8 @@ class SessionStore(Protocol):
         run_id: Any,
         *,
         message: str | None = None,
+        terminal_status: str = "failed",
+        usage: dict[str, Any] | None = None,
     ) -> Any: ...
 
     async def is_cancel_requested(self, run_id: Any) -> bool: ...
@@ -107,6 +115,21 @@ def public_terminal_from_outcome(
     if outcome.duration_ms is not None:
         payload["duration_ms"] = outcome.duration_ms
     return recorder.emit(RuntimeEventKind.ERROR, payload)
+
+
+def _cancelled_usage(context: RLMTurnContext) -> dict[str, Any]:
+    return {
+        "root_model_profile": type(context.models.root_lm).__name__,
+        "sub_model_profile": type(context.models.sub_lm).__name__,
+        "iterations": 0,
+        "tool_calls": 0,
+        "sub_lm_calls": 0,
+        "iteration_limit": context.budget.max_iterations,
+        "tool_call_limit": context.budget.max_tool_calls,
+        "sub_lm_call_limit": context.budget.max_llm_calls,
+        "sub_lm_concurrency_limit": context.budget.max_sub_lm_concurrency,
+        "estimated_cost": None,
+    }
 
 
 class TurnCoordinator:
@@ -164,7 +187,7 @@ class TurnCoordinator:
         msg = "context_builder must be callable or provide build/build_context"
         raise TypeError(msg)
 
-    async def stream(self, command: ChatTurnCommand) -> AsyncIterator[RuntimeEvent]:
+    async def stream(self, command: ChatTurnCommand) -> AsyncGenerator[RuntimeEvent]:
         """Stream public RuntimeEvents for a single chat command."""
         if not command.message or not command.message.strip():
             msg = "message is required"
@@ -172,15 +195,17 @@ class TurnCoordinator:
 
         if self._sessions is None:
             context = await self._abuild_context(command)
-            async for event in self._stream_runner_then_terminal(context, persist=None):
-                yield event
+            async with aclosing(self._stream_runner_then_terminal(context, persist=None)) as events:
+                async for event in events:
+                    yield event
             return
 
         async with self._locks.hold(command.session_id):
-            async for event in self._stream_locked(command):
-                yield event
+            async with aclosing(self._stream_locked(command)) as events:
+                async for event in events:
+                    yield event
 
-    async def _stream_locked(self, command: ChatTurnCommand) -> AsyncIterator[RuntimeEvent]:
+    async def _stream_locked(self, command: ChatTurnCommand) -> AsyncGenerator[RuntimeEvent]:
         assert self._sessions is not None
         preferred_run_id = uuid4()
         try:
@@ -210,6 +235,10 @@ class TurnCoordinator:
                 session_id=command.session_id,
                 run_id=claim.run_id,
                 assistant_text=claim.assistant_text or "",
+                detail_parts=claim.detail_parts,
+                structured_output=claim.structured_output,
+                result_schema_id=claim.result_schema_id,
+                result_schema_version=claim.result_schema_version,
             ):
                 yield event
             return
@@ -244,23 +273,27 @@ class TurnCoordinator:
             cancel_probe=_cancel_probe,
         )
         base_version = claim.base_checkpoint_version
-        async for event in self._stream_runner_then_terminal(
+        terminal_stream = self._stream_runner_then_terminal(
             context,
             persist=_PersistArgs(
                 command=command,
                 context=context,
                 expected_checkpoint_version=base_version,
             ),
-        ):
-            yield event
+        )
+        async with aclosing(terminal_stream) as events:
+            async for event in events:
+                yield event
 
     async def _stream_runner_then_terminal(
         self,
         context: RLMTurnContext,
         *,
         persist: _PersistArgs | None,
-    ) -> AsyncIterator[RuntimeEvent]:
+    ) -> AsyncGenerator[RuntimeEvent]:
         last_sequence = 0
+        persistence_finalized = False
+        stream: TurnEventStream | None = None
         try:
             stream = self._runner.stream(context)
             async for event in stream:
@@ -287,7 +320,22 @@ class TurnCoordinator:
             if persist is not None:
                 try:
                     checkpoint_version = await self._persist_outcome(persist, outcome)
+                    persistence_finalized = True
                 except Exception:  # noqa: BLE001 - persistence details are never public
+                    try:
+                        sessions = self._sessions
+                        if sessions is None:
+                            raise RuntimeError("Session repository unavailable")
+                        await sessions.finish_failed_run(
+                            persist.command.session_id,
+                            context.run_id,
+                            message="Turn could not be committed",
+                            terminal_status="failed",
+                            usage=outcome.usage,
+                        )
+                        persistence_finalized = True
+                    except Exception:  # noqa: BLE001 - preserve exactly one public terminal
+                        pass
                     yield public_terminal_from_outcome(
                         recorder,
                         TurnExecutionOutcome(
@@ -312,11 +360,49 @@ class TurnCoordinator:
                         },
                     )
 
+            if outcome.succeeded:
+                yield recorder.emit(RuntimeEventKind.USAGE, {"usage": outcome.usage})
+                if outcome.structured_output is not None:
+                    yield recorder.emit(
+                        RuntimeEventKind.STRUCTURED_RESULT,
+                        {
+                            "schemaId": outcome.result_schema_id,
+                            "schemaVersion": outcome.result_schema_version,
+                            "value": outcome.structured_output,
+                        },
+                    )
+                if outcome.assistant_text:
+                    yield recorder.emit(RuntimeEventKind.TEXT_DELTA, {"text": outcome.assistant_text})
+                    yield recorder.emit(RuntimeEventKind.TEXT_COMPLETED, {"text": outcome.assistant_text})
+
             yield public_terminal_from_outcome(
                 recorder,
                 outcome,
                 checkpoint_version=checkpoint_version,
             )
+        except (GeneratorExit, asyncio.CancelledError):
+            if stream is not None:
+                try:
+                    await asyncio.shield(stream.aclose())
+                except BaseException:  # noqa: BLE001 - cleanup must preserve the outer close
+                    pass
+            if persist is not None and not persistence_finalized and self._sessions is not None:
+                measured = stream.outcome if stream is not None else None
+                try:
+                    await asyncio.shield(
+                        self._sessions.finish_failed_run(
+                            persist.command.session_id,
+                            context.run_id,
+                            message="Turn cancelled",
+                            terminal_status="cancelled",
+                            usage=(
+                                measured.usage if measured is not None and measured.usage else _cancelled_usage(context)
+                            ),
+                        )
+                    )
+                except Exception:  # noqa: BLE001 - disconnect cleanup is best-effort
+                    pass
+            raise
         finally:
             try:
                 context.lease.release()
@@ -350,10 +436,27 @@ class TurnCoordinator:
         session_id: UUID,
         run_id: UUID,
         assistant_text: str,
-    ) -> AsyncIterator[RuntimeEvent]:
+        detail_parts: tuple[dict[str, Any], ...] = (),
+        structured_output: dict[str, Any] | None = None,
+        result_schema_id: str | None = None,
+        result_schema_version: str | None = None,
+    ) -> AsyncGenerator[RuntimeEvent]:
         recorder = EventRecorder(run_id=run_id, session_id=session_id)
+        yield recorder.emit(RuntimeEventKind.RUN_STARTED, {"idempotent_replay": True})
         yield recorder.emit(RuntimeEventKind.STATUS, {"message": "idempotent_replay"})
-        if assistant_text:
+        replayed_text = False
+        for detail in detail_parts:
+            try:
+                kind = RuntimeEventKind(str(detail.get("kind") or ""))
+            except ValueError:
+                continue
+            if kind in {RuntimeEventKind.RUN_STARTED, RuntimeEventKind.RUN_COMPLETED, RuntimeEventKind.ERROR}:
+                continue
+            payload = detail.get("payload")
+            if kind is RuntimeEventKind.TEXT_DELTA:
+                replayed_text = True
+            yield recorder.emit(kind, payload if isinstance(payload, dict) else {})
+        if assistant_text and not replayed_text:
             yield recorder.emit(RuntimeEventKind.TEXT_DELTA, {"text": assistant_text})
             yield recorder.emit(RuntimeEventKind.TEXT_COMPLETED, {"text": assistant_text})
         yield public_terminal_from_outcome(
@@ -361,6 +464,10 @@ class TurnCoordinator:
             TurnExecutionOutcome(
                 terminal_status="completed",
                 assistant_text=assistant_text,
+                detail_parts=detail_parts,
+                structured_output=structured_output,
+                result_schema_id=result_schema_id,
+                result_schema_version=result_schema_version,
             ),
             idempotent_replay=True,
         )
@@ -375,6 +482,46 @@ class TurnCoordinator:
         context = args.context
         if outcome.succeeded:
             await self._promote_artifact_candidates(context, outcome.artifact_candidates)
+            committed_details = list(outcome.detail_parts)
+            committed_details.extend(
+                {
+                    "kind": RuntimeEventKind.ARTIFACT_CREATED.value,
+                    "payload": {
+                        "artifact_id": str(candidate.id),
+                        "kind": candidate.kind,
+                        "title": candidate.title,
+                        "media_type": candidate.media_type,
+                        "byte_size": candidate.byte_size,
+                        "checksum_sha256": candidate.checksum_sha256,
+                    },
+                }
+                for candidate in outcome.artifact_candidates
+            )
+            committed_details.append({"kind": RuntimeEventKind.USAGE.value, "payload": {"usage": outcome.usage}})
+            if outcome.structured_output is not None:
+                committed_details.append(
+                    {
+                        "kind": RuntimeEventKind.STRUCTURED_RESULT.value,
+                        "payload": {
+                            "schemaId": outcome.result_schema_id,
+                            "schemaVersion": outcome.result_schema_version,
+                            "value": outcome.structured_output,
+                        },
+                    }
+                )
+            if outcome.assistant_text:
+                committed_details.extend(
+                    (
+                        {
+                            "kind": RuntimeEventKind.TEXT_DELTA.value,
+                            "payload": {"text": outcome.assistant_text},
+                        },
+                        {
+                            "kind": RuntimeEventKind.TEXT_COMPLETED.value,
+                            "payload": {"text": outcome.assistant_text},
+                        },
+                    )
+                )
             snapshot = await self._sessions.commit_completed_turn(
                 command.session_id,
                 user_text=command.message,
@@ -382,6 +529,11 @@ class TurnCoordinator:
                 run_id=context.run_id,
                 expected_checkpoint_version=args.expected_checkpoint_version,
                 artifact_candidates=outcome.artifact_candidates,
+                detail_parts=tuple(committed_details),
+                usage=outcome.usage,
+                structured_output=outcome.structured_output,
+                result_schema_id=outcome.result_schema_id,
+                result_schema_version=outcome.result_schema_version,
             )
             session = getattr(snapshot, "session", None)
             if session is not None:
@@ -392,6 +544,8 @@ class TurnCoordinator:
             command.session_id,
             context.run_id,
             message=outcome.public_error_message or "turn failed",
+            terminal_status=outcome.terminal_status,
+            usage=outcome.usage,
         )
         return None
 

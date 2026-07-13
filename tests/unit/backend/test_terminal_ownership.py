@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections.abc import AsyncIterator
 from typing import Any
@@ -17,6 +18,7 @@ from fleet_rlm.rlm.budgets import RLMBudget
 from fleet_rlm.rlm.context import RLMTurnContext
 from fleet_rlm.rlm.events import RuntimeEvent, RuntimeEventKind
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.observable import RLMDetail, RLMDetailKind
 from fleet_rlm.rlm.outcome import TurnExecutionOutcome
 from fleet_rlm.rlm.runner import RLMRunner, TurnEventStream
 from fleet_rlm.sessions.checkpoints import TurnClaim
@@ -195,6 +197,10 @@ async def test_artifact_candidate_is_announced_only_after_turn_commit(tmp_path) 
                     terminal_status="completed",
                     assistant_text="done",
                     artifact_candidates=(candidate,),
+                    usage={"totalTokens": 7},
+                    structured_output={"artifact": str(candidate.id)},
+                    result_schema_id="artifact-result",
+                    result_schema_version="1",
                 ),
             )
 
@@ -265,6 +271,26 @@ async def test_artifact_candidate_is_announced_only_after_turn_commit(tmp_path) 
         if event.kind in {RuntimeEventKind.ARTIFACT_CREATED, RuntimeEventKind.RUN_COMPLETED, RuntimeEventKind.ERROR}
     ]
     assert terminal_kinds == [RuntimeEventKind.ARTIFACT_CREATED, RuntimeEventKind.RUN_COMPLETED]
+    assert [
+        event.kind
+        for event in events
+        if event.kind
+        in {
+            RuntimeEventKind.ARTIFACT_CREATED,
+            RuntimeEventKind.USAGE,
+            RuntimeEventKind.STRUCTURED_RESULT,
+            RuntimeEventKind.TEXT_DELTA,
+            RuntimeEventKind.TEXT_COMPLETED,
+            RuntimeEventKind.RUN_COMPLETED,
+        }
+    ] == [
+        RuntimeEventKind.ARTIFACT_CREATED,
+        RuntimeEventKind.USAGE,
+        RuntimeEventKind.STRUCTURED_RESULT,
+        RuntimeEventKind.TEXT_DELTA,
+        RuntimeEventKind.TEXT_COMPLETED,
+        RuntimeEventKind.RUN_COMPLETED,
+    ]
     assert order == ["commit"]
     assert lease.released == 1
 
@@ -349,6 +375,8 @@ async def test_coordinator_emits_error_and_releases_lease_when_turn_commit_fails
     assert terminals[0].kind == RuntimeEventKind.ERROR
     assert terminals[0].payload["message"] == "Turn could not be committed"
     assert "super-secret" not in str(terminals[0].payload)
+    assert RuntimeEventKind.TEXT_DELTA not in {event.kind for event in events}
+    assert RuntimeEventKind.STRUCTURED_RESULT not in {event.kind for event in events}
     assert lease.released == 1
 
 
@@ -446,7 +474,102 @@ async def test_coordinator_never_announces_candidate_without_turn_commit() -> No
         )
     ]
 
-    assert [event.kind for event in events] == [RuntimeEventKind.RUN_COMPLETED]
+    assert [event.kind for event in events] == [
+        RuntimeEventKind.USAGE,
+        RuntimeEventKind.TEXT_DELTA,
+        RuntimeEventKind.TEXT_COMPLETED,
+        RuntimeEventKind.RUN_COMPLETED,
+    ]
+    assert RuntimeEventKind.ARTIFACT_CREATED not in {event.kind for event in events}
+    assert lease.released == 1
+
+
+@pytest.mark.asyncio
+async def test_closing_stream_marks_claimed_run_cancelled_and_releases_lease() -> None:
+    lease = _FakeLease()
+    user, workspace, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
+    statuses: list[str] = []
+    usages: list[dict[str, Any]] = []
+    runner_closed = asyncio.Event()
+
+    class ActiveRLM:
+        tool_calls_used = 3
+        sub_lm_calls_used = 1
+        tool_budget_exhausted = False
+
+        def __init__(self, observer: Any) -> None:
+            self.observer = observer
+
+        async def aforward(self, **_kwargs: Any) -> Any:
+            try:
+                self.observer(RLMDetail(RLMDetailKind.STEP_STARTED, {"step": 1}))
+                await asyncio.Event().wait()
+            finally:
+                await asyncio.sleep(0.05)
+                runner_closed.set()
+
+    class Factory:
+        def create(self, **kwargs: Any) -> ActiveRLM:
+            return ActiveRLM(kwargs["observer"])
+
+    class Store:
+        async def load(self, _sid: Any) -> SessionSnapshot:
+            return SessionSnapshot(
+                session=SessionRecord(
+                    id=session_id,
+                    user_id=user,
+                    workspace_id=workspace,
+                    status="active",
+                    title="",
+                    checkpoint_version=0,
+                )
+            )
+
+        async def claim_turn(self, _sid: Any, **_kwargs: Any) -> TurnClaim:
+            return TurnClaim(run_id=run_id, base_checkpoint_version=0)
+
+        async def finish_failed_run(self, *_args: Any, **kwargs: Any) -> None:
+            statuses.append(str(kwargs.get("terminal_status")))
+            usages.append(dict(kwargs.get("usage") or {}))
+
+        async def is_cancel_requested(self, _run_id: Any) -> bool:
+            return False
+
+    def builder(command: ChatTurnCommand) -> RLMTurnContext:
+        return RLMTurnContext(
+            run_id=run_id,
+            session_id=command.session_id,
+            user_id=command.user_id,
+            workspace_id=command.workspace_id,
+            request=command.message,
+            models=RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock()),
+            budget=RLMBudget(),
+            lease=lease,
+        )
+
+    stream = TurnCoordinator(
+        runner=RLMRunner(factory=Factory()),
+        context_builder=builder,
+        session_repository=Store(),
+    ).stream(
+        ChatTurnCommand(
+            user_id=user,
+            workspace_id=workspace,
+            session_id=session_id,
+            message="disconnect",
+        )
+    )
+    while True:
+        event = await anext(stream)
+        if event.kind is RuntimeEventKind.STEP_STARTED:
+            break
+    await stream.aclose()
+
+    assert statuses == ["cancelled"]
+    assert usages[0]["iterations"] == 1
+    assert usages[0]["tool_calls"] == 3
+    assert usages[0]["sub_lm_calls"] == 1
+    assert runner_closed.is_set()
     assert lease.released == 1
 
 

@@ -94,6 +94,7 @@ async def test_duplicate_idempotency_key_does_not_execute_twice() -> None:
         events2 = [e async for e in coordinator.stream(cmd)]
         assert events1[-1].kind == RuntimeEventKind.RUN_COMPLETED
         assert events2[-1].kind == RuntimeEventKind.RUN_COMPLETED
+        assert events2[0].kind == RuntimeEventKind.RUN_STARTED
         assert events2[-1].payload.get("idempotent_replay") is True
         assert runner.calls == 1
         loaded = await repo.load(session.id)

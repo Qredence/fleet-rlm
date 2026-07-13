@@ -5,11 +5,10 @@ from __future__ import annotations
 import inspect
 import json
 from collections.abc import AsyncIterator
-from datetime import datetime
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from fleet_rlm.api.dependencies import (
@@ -19,10 +18,9 @@ from fleet_rlm.api.dependencies import (
 )
 from fleet_rlm.api.identity import RequestIdentity, get_request_identity
 from fleet_rlm.api.schemas import ChatRequest
-from fleet_rlm.api.sse import SSEProjector, _event_to_public_dict
+from fleet_rlm.api.sse import AI_SDK_UI_STREAM_HEADERS, AISDKUIProjector, SSEProjector, _json_default
 from fleet_rlm.chat.commands import ChatTurnCommand
 from fleet_rlm.files.errors import AttachmentNotFoundError
-from fleet_rlm.rlm.events import RuntimeEvent
 from fleet_rlm.sessions.errors import SessionNotFoundError
 
 router = APIRouter(tags=["chat"])
@@ -71,24 +69,12 @@ async def validate_chat_session(
         raise HTTPException(status_code=404, detail="session not found")
 
 
-def _json_default(value: Any) -> Any:
-    if isinstance(value, UUID):
-        return str(value)
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if hasattr(value, "value"):
-        return value.value
-    msg = f"Object of type {type(value).__name__} is not JSON serializable"
-    raise TypeError(msg)
-
-
-def runtime_event_to_sse(event: RuntimeEvent) -> ServerSentEvent:
-    """Project one RuntimeEvent into a FastAPI ServerSentEvent."""
-    payload = _event_to_public_dict(event)
-    return ServerSentEvent(
-        raw_data=json.dumps(payload, default=_json_default),
-        id=str(event.sequence),
-    )
+def set_ai_sdk_ui_stream_headers(response: Response) -> None:
+    """Set protocol headers before FastAPI constructs the SSE response."""
+    # FastAPI's native SSE response supplies Cache-Control and
+    # X-Accel-Buffering. Adding them here would duplicate the latter.
+    response.headers["connection"] = AI_SDK_UI_STREAM_HEADERS["connection"]
+    response.headers["x-vercel-ai-ui-message-stream"] = AI_SDK_UI_STREAM_HEADERS["x-vercel-ai-ui-message-stream"]
 
 
 @router.post(
@@ -96,8 +82,14 @@ def runtime_event_to_sse(event: RuntimeEvent) -> ServerSentEvent:
     response_class=EventSourceResponse,
     responses={
         200: {
-            "description": "SSE stream of RuntimeEvent v1 envelopes",
+            "description": "AI SDK UI 7 v1 UIMessage SSE stream",
             "content": {"text/event-stream": {}},
+            "headers": {
+                "x-vercel-ai-ui-message-stream": {
+                    "description": "AI SDK UI message stream protocol version",
+                    "schema": {"type": "string", "const": "v1"},
+                }
+            },
         },
         400: {"description": "Invalid attachment reference"},
         404: {"description": "Session not found"},
@@ -108,10 +100,12 @@ async def chat(
     request: Request,
     identity: Annotated[RequestIdentity, Depends(get_request_identity)],
     coordinator: TurnCoordinatorDep,
+    ___: Annotated[None, Depends(set_ai_sdk_ui_stream_headers)],
     __: Annotated[None, Depends(validate_chat_session)],
     _: Annotated[None, Depends(validate_chat_attachments)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key", max_length=128)] = None,
 ) -> AsyncIterator[ServerSentEvent]:
-    """Stream one chat turn as typed SSE. Route performs no DSPy/Daytona SDK calls."""
+    """Stream one chat Turn as an AI SDK UI 7 message stream."""
     from fleet_rlm.rlm.cancel import get_run_cancel_registry
 
     command = ChatTurnCommand(
@@ -120,9 +114,11 @@ async def chat(
         session_id=body.session_id or uuid4(),
         message=body.message,
         attachment_ids=tuple(body.attachment_ids),
+        idempotency_key=(idempotency_key or "").strip(),
     )
 
     stream: Any = coordinator.stream(command)
+    projector = AISDKUIProjector()
     run_id: UUID | None = None
     try:
         async for event in stream:
@@ -130,7 +126,10 @@ async def chat(
             if await request.is_disconnected():
                 get_run_cancel_registry().request_cancel(event.run_id)
                 break
-            yield runtime_event_to_sse(event)
+            for chunk in projector.project(event):
+                yield ServerSentEvent(raw_data=json.dumps(chunk, default=_json_default))
+        if not await request.is_disconnected():
+            yield ServerSentEvent(raw_data="[DONE]")
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
     finally:
@@ -140,4 +139,4 @@ async def chat(
 
 
 # Re-export projector for tests that assert route composition stays thin.
-__all__ = ["router", "runtime_event_to_sse", "SSEProjector"]
+__all__ = ["router", "SSEProjector"]
