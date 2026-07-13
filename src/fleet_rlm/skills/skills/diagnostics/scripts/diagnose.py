@@ -54,8 +54,8 @@ def check_env() -> bool:
     secret_presence("FLEET_LLM_API_KEY", llm_key)
     secret_presence("FLEET_DAYTONA_API_KEY", daytona_key)
 
-    live = (os.environ.get("FLEET_LIVE_KERNEL") or "false").strip().lower()
-    print_status("FLEET_LIVE_KERNEL", live or "false")
+    environment = (os.environ.get("FLEET_RUN_ENVIRONMENT") or "hermetic").strip().lower()
+    print_status("FLEET_RUN_ENVIRONMENT", environment)
 
     mount = os.environ.get("FLEET_VOLUME_MOUNT_PATH") or "/home/daytona/fleet"
     print_status("VOLUME_MOUNT_PATH", mount)
@@ -71,7 +71,7 @@ def check_settings_import() -> bool:
         settings = Settings()
         print_status("Settings()", "OK")
         print_status("auth_mode", settings.auth_mode)
-        print_status("live_kernel", str(settings.live_kernel))
+        print_status("run_environment", settings.run_environment)
         return True
     except Exception as exc:  # noqa: BLE001 - operator script
         print_status("Settings()", f"FAIL ({type(exc).__name__})")

@@ -9,14 +9,19 @@
   "scripts": {
     "start": "tsx src/cli.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "format": "biome format --write src",
+    "format:check": "biome ci --linter-enabled=false --assist-enabled=false src",
+    "lint": "biome lint src"
   },
   "dependencies": {
     "@ai-sdk/tui": "1.0.22",
     "ai": "7.0.22"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.2",
     "@types/node": "22.19.19",
+    "openapi-typescript": "7.10.1",
     "tsx": "4.22.0",
     "typescript": "5.8.3",
     "vitest": "4.0.18"

@@ -2,7 +2,7 @@ PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/contracts/backend tests/
 PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db
 PYTEST := uv run --no-sync pytest
 PYTEST_HERMETIC := env \
-	FLEET_LIVE_KERNEL=false \
+	FLEET_RUN_ENVIRONMENT=hermetic \
 	FLEET_DAYTONA_API_KEY= \
 	FLEET_LLM_API_KEY= \
 	FLEET_LLM_BASE_URL= \
@@ -10,8 +10,6 @@ PYTEST_HERMETIC := env \
 	FLEET_AUTH_MODE=dev \
 	FLEET_NEON_AUTH_URL= \
 	FLEET_NEON_TENANT_CLAIM= \
-	FLEET_UPLOAD_ROOT= \
-	FLEET_ARTIFACT_ROOT= \
 	$(PYTEST)
 PYTEST_XDIST_MAX_WORKERS ?= 2
 PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
@@ -21,7 +19,7 @@ PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
 	install install-dev install-all \
 	dev format format-check lint typecheck \
 	test test-fast test-unit test-contract \
-	check quality-gate check-release check-docs check-security check-deps check-codebase-tree api-check api-sync \
+	check quality-gate check-release check-docs check-security check-deps check-codebase-tree api-check api-sync tui-check \
 	build build-release release release-check \
 	clean cli precommit-install precommit-run precommit \
 	sync sync-dev sync-all metadata-check docs-check security-check dependency-check release-artifacts cli-help \
@@ -108,7 +106,14 @@ test-contract:
 test-db:
 	$(PYTEST) -q -m "db" -n 0
 
-check: lint format-check typecheck test api-check check-codebase-tree
+tui-check:
+	$(MAKE) api-check
+	pnpm --dir tools/fleet-tui run format:check
+	pnpm --dir tools/fleet-tui run lint
+	pnpm --dir tools/fleet-tui run typecheck
+	pnpm --dir tools/fleet-tui run test
+
+check: lint format-check typecheck test api-check tui-check check-codebase-tree check-docs
 
 quality-gate: check
 

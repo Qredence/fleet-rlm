@@ -9,7 +9,7 @@ description: "Diagnose fleet_rlm failures — Daytona leases, SSE chat, auth, bu
 
 1. **"Sandbox / interpreter won't start"**
    - `FLEET_DAYTONA_API_KEY` set for live paths
-   - `FLEET_LIVE_KERNEL` enabled when expecting live providers
+   - `FLEET_RUN_ENVIRONMENT=daytona` when expecting providers
    - Volume name/mount: `FLEET_VOLUME_NAME`, `FLEET_VOLUME_MOUNT_PATH`
    - Run `scripts/diagnose.py` (presence checks only; never print secrets)
 
@@ -30,7 +30,7 @@ description: "Diagnose fleet_rlm failures — Daytona leases, SSE chat, auth, bu
 5. **"Attachment / artifact tool fails"**
    - Invalid UUID ids → sanitized error
    - Ownership isolation (user/workspace) before read
-   - Host roots: `FLEET_UPLOAD_ROOT`, `FLEET_ARTIFACT_ROOT`
+   - Hermetic data root: `FLEET_DATA_ROOT`
 
 6. **"Client sees secrets or provider internals"**
    - Bug: public paths must use sanitize/redact — never raw `str(exc)` from Daytona/LLM

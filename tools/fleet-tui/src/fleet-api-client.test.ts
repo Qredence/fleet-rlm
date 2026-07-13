@@ -41,16 +41,21 @@ describe("FleetApiClient", () => {
       identity: { userId: "user-id", workspaceId: "workspace-id" },
     });
 
-    await client.streamChat({ message: "hello", sessionId: "session-id" });
+    await client.streamTurn({
+      message: "hello",
+      sessionId: "session-id",
+      idempotencyKey: "turn-key",
+    });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://fleet.test/api/chat",
+      "http://fleet.test/api/sessions/session-id/turns",
       expect.objectContaining({
-        body: JSON.stringify({ message: "hello", session_id: "session-id" }),
+        body: JSON.stringify({ text: "hello", attachment_ids: [] }),
         headers: expect.objectContaining({
           "x-fleet-user-id": "user-id",
           "x-fleet-workspace-id": "workspace-id",
           "content-type": "application/json",
+          "idempotency-key": "turn-key",
         }),
       }),
     );
@@ -60,7 +65,9 @@ describe("FleetApiClient", () => {
     globalThis.fetch = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
     const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
 
-    await expect(client.streamChat({ message: "hello", sessionId: "session-id" })).rejects.toBeInstanceOf(FleetApiError);
+    await expect(
+      client.streamTurn({ message: "hello", sessionId: "session-id", idempotencyKey: "turn-key" }),
+    ).rejects.toBeInstanceOf(FleetApiError);
   });
 
   it("explains how to start Fleet when the API cannot be reached", async () => {
@@ -76,22 +83,29 @@ describe("FleetApiClient", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ items: [{ id: "one", sequence: 1 }], has_more: true }), {
+        new Response(JSON.stringify({ items: [{ id: "one" }], next_after_sequence: 1 }), {
           headers: { "content-type": "application/json" },
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ items: [{ id: "two", sequence: 2 }], has_more: false }), {
+        new Response(JSON.stringify({ items: [{ id: "two" }], next_after_sequence: null }), {
           headers: { "content-type": "application/json" },
         }),
       );
     globalThis.fetch = fetchMock;
 
-    await expect(new FleetApiClient({ baseUrl: "http://fleet.test" }).listTurns("session-id")).resolves.toEqual([
-      { id: "one", sequence: 1 },
-      { id: "two", sequence: 2 },
-    ]);
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "http://fleet.test/api/sessions/session-id/turns?limit=200&offset=0", expect.any(Object));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "http://fleet.test/api/sessions/session-id/turns?limit=200&offset=1", expect.any(Object));
+    await expect(
+      new FleetApiClient({ baseUrl: "http://fleet.test" }).listTurns("session-id"),
+    ).resolves.toEqual([{ id: "one" }, { id: "two" }]);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://fleet.test/api/sessions/session-id/turns?limit=200",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://fleet.test/api/sessions/session-id/turns?limit=200&after_sequence=1",
+      expect.any(Object),
+    );
   });
 });

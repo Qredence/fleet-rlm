@@ -1,7 +1,7 @@
 # fleet_rlm — Bundled Agent Skills
 
 Bundled skills for the canonical backend: `dspy.RLM` + Daytona
-`code_interpreter` + SSE `POST /api/chat`.
+`code_interpreter` + session-scoped Turn SSE.
 
 ## Catalog
 

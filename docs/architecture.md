@@ -3,10 +3,10 @@
 ## Runtime flow
 
 ```text
-HTTP POST /api/chat
-  -> identity and Attachment validation
+HTTP POST /api/sessions/{session_id}/turns + Idempotency-Key
+  -> identity, Turn input, and Attachment validation
   -> TurnCoordinator
-  -> durable Session History + Checkpoint claim
+  -> durable Session History + atomic Run claim
   -> Daytona Sandbox with Workspace Volume Scope
   -> fresh DSPy RLM and CodeInterpreter
   -> host-mediated Skill, Attachment, and Artifact Candidate tools

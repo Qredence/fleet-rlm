@@ -187,9 +187,7 @@ class HarnessChecker:
         )
         if tracked_docs.returncode == 0:
             files.extend(
-                self.repo_root / rel_path
-                for rel_path in tracked_docs.stdout.splitlines()
-                if rel_path.endswith(".md")
+                self.repo_root / rel_path for rel_path in tracked_docs.stdout.splitlines() if rel_path.endswith(".md")
             )
         files.append(self.repo_root / "scripts" / "README.md")
         return [path for path in files if path.is_file()]

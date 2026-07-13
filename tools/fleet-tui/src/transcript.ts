@@ -1,6 +1,7 @@
 import type { FleetTurn, FleetTurnPart } from "./fleet-api-client.js";
 
-const sensitiveKey = /(?:api[-_]?key|authorization|credential|password|secret|private[-_]?key|env(?:ironment)?)/i;
+const sensitiveKey =
+  /(?:api[-_]?key|authorization|credential|password|secret|private[-_]?key|env(?:ironment)?)/i;
 const standaloneTokenKey = /(?:^|[-_])token(?:$|[-_])/i;
 
 /** Render the server's durable, already-public turn detail into a readable pre-TUI transcript. */
@@ -10,12 +11,10 @@ export function formatTranscript(turns: FleetTurn[]): string {
   }
 
   const lines = ["\n=== Restored Fleet transcript ==="];
-  for (const turn of turns) {
-    lines.push(`\n[${turn.sequence}] ${label(turn.role)}`);
-    const hasTextPart = turn.parts.some((part) => part.type === "text" && part.text);
-    if (turn.content && !hasTextPart) {
-      lines.push(turn.content);
-    }
+  for (const [index, turn] of turns.entries()) {
+    const sequence =
+      typeof turn.metadata?.sequence === "number" ? turn.metadata.sequence : index + 1;
+    lines.push(`\n[${sequence}] ${label(turn.role)}`);
     for (const part of turn.parts) {
       lines.push(...formatPart(part));
     }

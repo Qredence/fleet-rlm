@@ -46,7 +46,7 @@ Path ids for session/run segments must be UUID-shaped; host validates with `dayt
 | `FLEET_DAYTONA_API_KEY` | Daytona client (SecretStr) |
 | `FLEET_VOLUME_NAME` | Durable volume name |
 | `FLEET_VOLUME_MOUNT_PATH` | Absolute sandbox mount |
-| `FLEET_LIVE_KERNEL` | Allow live LM/Daytona wiring |
+| `FLEET_RUN_ENVIRONMENT=daytona` | Select Daytona LM/Sandbox wiring |
 
 ## Minimal host pattern
 

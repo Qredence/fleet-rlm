@@ -21,6 +21,7 @@ uv run fleet-rlm serve-api --port 8000
 
 - [Documentation home](index.md)
 - [Architecture](architecture.md)
+- [Architecture decisions](adr/README.md)
 - [HTTP API](reference/http-api.md)
 - [CLI](reference/cli.md)
 - [Database](reference/database.md)

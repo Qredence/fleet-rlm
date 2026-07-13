@@ -24,7 +24,7 @@ and its matching automated check in the same patch.
 - Construct a fresh `dspy.RLM`, custom `CodeInterpreter`, and host-tool list per
   Turn; custom interpreters are not shared concurrently.
 - Preserve sandbox-safe `history: list[dict]` and invoke
-  `await rlm.aforward(**named_signature_inputs)`.
+  the supported `await rlm.acall(**named_signature_inputs)` surface.
 - Attachment ownership validation finishes before SSE begins.
 - Artifact Candidates remain private until byte promotion and transactional Turn
   Commit succeed.

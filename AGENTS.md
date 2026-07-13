@@ -92,7 +92,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 
 ## Learned Workspace Facts
 
-- Local backend development runs on `:8000` through `fleet web` or `fleet-rlm serve-api`. `POST /api/chat` uses SSE `RuntimeEvent` projection; the legacy `/api/v1` and WebSocket surfaces are removed.
+- Local backend development runs on `:8000` through `fleet web` or `fleet-rlm serve-api`. `POST /api/sessions/{session_id}/turns` requires `Idempotency-Key` and projects typed `RuntimeEvent` values over SSE; the legacy top-level chat, `/api/v1`, and WebSocket surfaces are removed.
 - `src/fleet_rlm/` is the canonical RLM-native backend. The parallel foundation package was cut over after exit-bar evidence on `71e79271`; there is no compatibility runtime or dual-serve path.
 - Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments and Artifacts use Workspace Volume Scope; Artifact Candidates become public only through Turn Commit.
 - Settings use only `FLEET_*`. Neon auth requires explicit `FLEET_NEON_AUTH_URL`, exposes coarse public auth errors, and permits synthetic `X-Fleet-*` identity only in `auth_mode=dev`.

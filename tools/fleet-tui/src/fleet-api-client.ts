@@ -1,12 +1,12 @@
+import type { components } from "./generated/openapi.js";
+
 export type FleetIdentity = {
+  token?: string;
   userId?: string;
   workspaceId?: string;
 };
 
-export type FleetSession = {
-  id: string;
-  title: string;
-};
+export type FleetSession = components["schemas"]["SessionDetailResponse"];
 
 export type FleetTurnPart = {
   type: string;
@@ -20,23 +20,13 @@ export type FleetTurnPart = {
   data?: unknown;
 };
 
-export type FleetTurn = {
-  id: string;
-  sequence: number;
-  role: string;
-  content: string;
-  status: string;
-  run_id?: string | null;
+type GeneratedUIMessage = components["schemas"]["UIMessageResponse"];
+export type FleetTurn = Omit<GeneratedUIMessage, "parts"> & {
   parts: FleetTurnPart[];
-  metadata?: Record<string, unknown> | null;
 };
 
-type FleetTurnPage = {
+type FleetTurnPage = Omit<components["schemas"]["SessionTurnPageResponse"], "items"> & {
   items: FleetTurn[];
-  total: number;
-  offset: number;
-  limit: number;
-  has_more: boolean;
 };
 
 export class FleetApiError extends Error {
@@ -71,38 +61,45 @@ export class FleetApiClient {
 
   async listTurns(sessionId: string): Promise<FleetTurn[]> {
     const turns: FleetTurn[] = [];
-    let offset = 0;
-    do {
-      const page = await this.requestJson<FleetTurnPage>(
-        `/api/sessions/${encodeURIComponent(sessionId)}/turns?limit=200&offset=${offset}`,
+    let afterSequence: number | null = null;
+    for (let pageNumber = 0; pageNumber < Number.MAX_SAFE_INTEGER; pageNumber += 1) {
+      const cursor: string = afterSequence === null ? "" : `&after_sequence=${afterSequence}`;
+      const page: FleetTurnPage = await this.requestJson<FleetTurnPage>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/turns?limit=200${cursor}`,
       );
       turns.push(...page.items);
-      if (!page.has_more) {
+      if (page.next_after_sequence == null) {
         return turns;
       }
-      offset += page.items.length;
-    } while (true);
+      afterSequence = page.next_after_sequence ?? null;
+    }
+    throw new FleetApiError(502, "Fleet API returned too many Turn pages");
   }
 
-  async streamChat({
+  async streamTurn({
     message,
     sessionId,
+    idempotencyKey,
     signal,
   }: {
     message: string;
     sessionId: string;
+    idempotencyKey: string;
     signal?: AbortSignal;
   }): Promise<Response> {
-    const response = await this.fetch(`${this.baseUrl}/api/chat`, {
-      method: "POST",
-      headers: {
-        ...this.headers(),
-        "content-type": "application/json",
-        "idempotency-key": crypto.randomUUID(),
+    const response = await this.fetch(
+      `${this.baseUrl}/api/sessions/${encodeURIComponent(sessionId)}/turns`,
+      {
+        method: "POST",
+        headers: {
+          ...this.headers(),
+          "content-type": "application/json",
+          "idempotency-key": idempotencyKey,
+        },
+        body: JSON.stringify({ text: message, attachment_ids: [] }),
+        signal,
       },
-      body: JSON.stringify({ message, session_id: sessionId }),
-      signal,
-    });
+    );
 
     if (!response.ok) {
       throw await this.toApiError(response);
@@ -112,6 +109,23 @@ export class FleetApiClient {
     }
     if (!response.body) {
       throw new FleetApiError(502, "Fleet API returned an empty SSE response");
+    }
+    return response;
+  }
+
+  async requestCancellation(runId: string): Promise<components["schemas"]["CancellationResponse"]> {
+    return this.requestJson(`/api/runs/${encodeURIComponent(runId)}/cancellation`, {
+      method: "PUT",
+    });
+  }
+
+  async downloadArtifact(artifactId: string): Promise<Response> {
+    const response = await this.fetch(
+      `${this.baseUrl}/api/artifacts/${encodeURIComponent(artifactId)}/content`,
+      { method: "GET", headers: this.headers() },
+    );
+    if (!response.ok) {
+      throw await this.toApiError(response);
     }
     return response;
   }
@@ -132,11 +146,12 @@ export class FleetApiClient {
   }
 
   private headers(): HeadersInit {
+    if (this.identity.token) {
+      return { authorization: `Bearer ${this.identity.token}` };
+    }
     return {
       ...(this.identity.userId ? { "x-fleet-user-id": this.identity.userId } : {}),
-      ...(this.identity.workspaceId
-        ? { "x-fleet-workspace-id": this.identity.workspaceId }
-        : {}),
+      ...(this.identity.workspaceId ? { "x-fleet-workspace-id": this.identity.workspaceId } : {}),
     };
   }
 
@@ -156,7 +171,10 @@ export class FleetApiClient {
     const body = await response.text();
     let message = `Fleet API request failed (${response.status})`;
     try {
-      const parsed = JSON.parse(body) as { detail?: unknown };
+      const parsed = JSON.parse(body) as { message?: unknown; detail?: unknown };
+      if (typeof parsed.message === "string" && parsed.message.trim()) {
+        message = parsed.message;
+      }
       if (typeof parsed.detail === "string" && parsed.detail.trim()) {
         message = parsed.detail;
       }

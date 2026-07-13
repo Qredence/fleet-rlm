@@ -19,8 +19,19 @@ uv run fleet-rlm serve-api
 The default app is offline/hermetic. Live DSPy and Daytona composition is
 explicit:
 
+For local development, keep the hermetic runtime on SQLite:
+
 ```bash
-export FLEET_LIVE_KERNEL=true
+export FLEET_RUN_ENVIRONMENT=hermetic
+export FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3'
+export FLEET_AUTH_MODE=dev
+uv run fleet-rlm serve-api
+```
+
+Use PostgreSQL only for an explicitly authorized disposable/live lane:
+
+```bash
+export FLEET_RUN_ENVIRONMENT=daytona
 export FLEET_DATABASE_URL='postgresql+asyncpg://...'
 export FLEET_DAYTONA_API_KEY='...'
 export FLEET_LLM_API_KEY='...'
@@ -32,12 +43,12 @@ uv run fleet-rlm serve-api
 
 ## Backend API
 
-- `POST /api/chat` — authenticated SSE Turn execution.
+- `POST /api/sessions/{session_id}/turns` — authenticated, idempotent SSE Turn execution.
 - `/api/sessions` — Session CRUD and ordered Turn history.
-- `/api/files` — durable Attachment upload and metadata lookup.
+- `/api/attachments` — durable Attachment upload and metadata lookup.
 - `GET /api/artifacts/{artifact_id}` — committed Artifact retrieval.
 - `/api/skills` — authorized Skill Card discovery.
-- `POST /api/runs/{run_id}/cancel` — authorized Run cancellation.
+- `PUT /api/runs/{run_id}/cancellation` — durable, authorized Run cancellation.
 
 There is no `/api/v1`, WebSocket execution, optimization/evaluation API,
 runtime-admin API, Volume browser, BYOK profile API, or public Artifact creation.
@@ -57,7 +68,8 @@ and the [codebase map](docs/reference/codebase-map.md).
 ## Database
 
 Production schema evolution is owned by Alembic and starts from one fresh
-canonical baseline:
+canonical baseline. Local SQLite is initialized by the hermetic app; use the
+following only for a disposable PostgreSQL database:
 
 ```bash
 export FLEET_DATABASE_URL='postgresql+asyncpg://...'
@@ -71,8 +83,7 @@ Runtime live startup never calls SQLAlchemy `create_all`.
 
 ```bash
 make check
-FLEET_LIVE=1 uv run pytest tests/live/backend/test_exit_bar_l1_promotion.py -q
-FLEET_LIVE=1 uv run pytest tests/live/backend/test_exit_bar_l2_adversarial.py -q
+FLEET_LIVE=1 uv run pytest tests/live/backend/test_b5_attachment_artifact_durability.py -q
 ```
 
 `make api-sync` regenerates only root `openapi.yaml`; frontend generated

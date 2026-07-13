@@ -1,7 +1,7 @@
 # Backend Testing Strategy
 
-The cutover gate is backend-only. It does not run frontend tests or synchronize
-frontend-generated API contracts.
+The cutover gate covers the backend and the maintained `tools/fleet-tui/`
+client. Generated API types are synchronized only through `make api-sync`.
 
 ## Test Suites
 
@@ -9,8 +9,7 @@ frontend-generated API contracts.
 | --- | --- | --- |
 | Unit | `tests/unit/backend/` | domain, adapters, configuration, and route modules |
 | Contract | `tests/contracts/backend/` | API, persistence, packaging, and boundary contracts |
-| Live L1 | `tests/live/backend/test_exit_bar_l1_promotion.py` | one-workspace Daytona/DSPy lifecycle |
-| Live L2 | `tests/live/backend/test_exit_bar_l2_adversarial.py` | cross-workspace isolation and cancellation |
+| Live durability | `tests/live/backend/test_b5_attachment_artifact_durability.py` | Workspace Volume Attachment/Artifact persistence |
 
 ## Local Gate
 
@@ -24,7 +23,8 @@ so a developer's `.env` cannot silently switch unit, contract, or end-to-end
 tests into live composition. Database and live-provider lanes remain separate.
 
 This runs format, Ruff, type, unit/contract tests, backend OpenAPI drift, and
-the codebase boundary check. The focused commands are:
+the codebase boundary check, plus the pinned TUI Biome/TypeScript/Vitest lane.
+The focused commands are:
 
 ```bash
 uv run pytest tests/unit/backend tests/contracts/backend -q
@@ -33,6 +33,11 @@ uv run ty check src/fleet_rlm
 uv run python scripts/openapi_tools.py check
 uv run python scripts/check_harness_engineering.py
 git diff --check
+pnpm --dir tools/fleet-tui install --frozen-lockfile
+pnpm --dir tools/fleet-tui run format:check
+pnpm --dir tools/fleet-tui run lint
+pnpm --dir tools/fleet-tui run typecheck
+pnpm --dir tools/fleet-tui run test
 ```
 
 ## Database Gate
@@ -51,8 +56,7 @@ Tests may use explicit helpers to create ephemeral SQLite schemas.
 Live tests require canonical `FLEET_*` credentials and explicit opt-in:
 
 ```bash
-FLEET_LIVE=1 uv run pytest tests/live/backend/test_exit_bar_l1_promotion.py -q
-FLEET_LIVE=1 uv run pytest tests/live/backend/test_exit_bar_l2_adversarial.py -q
+FLEET_LIVE=1 uv run pytest tests/live/backend/test_b5_attachment_artifact_durability.py -q
 ```
 
 No pre-cutover or provider-specific environment aliases are supported.

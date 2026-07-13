@@ -20,7 +20,7 @@ sandbox lifecycle, persistence, or streaming themselves.
 ## Product surfaces
 
 - The FastAPI backend and generated `openapi.yaml` contract.
-- The AI SDK UI v1 stream exposed by `POST /api/chat`.
+- The AI SDK UI v1 stream exposed by `POST /api/sessions/{session_id}/turns`.
 - Session, Attachment, Artifact, Skill, and cancellation HTTP routes.
 - The standalone terminal client under `tools/fleet-tui/`.
 

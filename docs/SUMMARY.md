@@ -3,6 +3,8 @@
 * [Documentation Home](index.md)
 * [Documentation Overview](README.md)
 * [Architecture](architecture.md)
+* [Architecture Decisions](adr/README.md)
+  * [ADR 0001: Coordinated Session-first Turn contract](adr/0001-coordinated-turn-contract.md)
 * [Runtime Execution Flow](explanation/agent-runtime-execution-flow.md)
 * [Testing Strategy](how-to-guides/testing-strategy.md)
 * [Reference](reference/index.md)

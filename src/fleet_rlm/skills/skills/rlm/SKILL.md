@@ -9,11 +9,11 @@ Canonical DSPy module: https://dspy.ai/api/modules/RLM/
 
 ## Product surface (clean only)
 
-- **Transport:** `POST /api/chat` Server-Sent Events (`RuntimeEvent`). No WebSocket execution path.
+- **Transport:** `POST /api/sessions/{session_id}/turns` Server-Sent Events (`RuntimeEvent`). No WebSocket execution path.
 - **Engine:** host-owned `dspy.RLM` with signature `FleetRLMSignature` (`request -> answer`).
 - **Interpreter:** Daytona `code_interpreter` via a short-lived lease (never delete the sandbox on release).
 - **Auth:** `FLEET_AUTH_MODE=dev|neon` (fail-closed).
-- **Live providers:** opt-in via `FLEET_LIVE_KERNEL` / live settings; offline unit path is default.
+- **Run environment:** explicit `FLEET_RUN_ENVIRONMENT=hermetic|daytona`; hermetic is default.
 
 ## When to use RLM
 
@@ -28,7 +28,7 @@ Clean turns always run through the RLM runner (no EscalatingFleet / ReAct route 
 - Host tools (when bound): progressive `load_skill` / `read_skill_resource` (by **skill UUID**, not volume name); `read_attachment` / `create_artifact`.
 - Do **not** assume live helpers: `sub_rlm`, `remember`/`recall`, WebSocket batch concurrency, or `fleet_rlm.runtime.*`.
 
-## Budgets (`RLMBudget`)
+## Budgets (`RunBudget`)
 
 | Limit | Default | Maps to |
 |-------|---------|---------|

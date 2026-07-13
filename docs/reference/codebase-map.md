@@ -12,7 +12,7 @@ compatibility runtime and parallel foundation package no longer exist.
 | `chat/` | Turn orchestration, context construction, commit and terminal ordering | RLM, sessions, Skills, files |
 | `rlm/` | DSPy signature, fresh-per-Turn RLM construction, budgets, events, runner | DSPy and domain values |
 | `daytona/` | Exclusive Daytona SDK boundary, Sandbox/lease/Volume adapters | Daytona SDK, domain values |
-| `sessions/` | Session, history, checkpoint, locking, and repository interfaces | domain values only |
+| `sessions/` | Session Catalog, canonical Turn input/history, and versioned Committed Turn aggregate | domain values only |
 | `files/`, `artifacts/` | Attachment staging and Artifact Candidate promotion | storage interfaces, safe paths |
 | `skills/` | bundled Skills, authorization, host capability registry, selection, typed task contracts, and progressive tools | domain values and package resources |
 | `persistence/` | SQLAlchemy models and repository adapters | sessions/files/artifact interfaces |
@@ -34,12 +34,12 @@ compatibility runtime and parallel foundation package no longer exist.
 
 ## Public backend paths
 
-- `POST /api/chat`
+- `POST /api/sessions/{id}/turns`
 - `/api/sessions` and `/api/sessions/{id}/turns`
-- `/api/files`
+- `/api/attachments`
 - `GET /api/artifacts/{id}`
 - `/api/skills`
-- `POST /api/runs/{id}/cancel`
+- `PUT /api/runs/{id}/cancellation`
 
 There is currently no frontend source tree. A future client will consume the
 AI SDK UI 7 SSE contract as a separate implementation effort.

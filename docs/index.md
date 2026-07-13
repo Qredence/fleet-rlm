@@ -12,6 +12,7 @@ Daytona, and SQLAlchemy/Alembic.
 4. [Testing strategy](how-to-guides/testing-strategy.md)
 5. [Terminal UI](how-to-guides/terminal-tui.md)
 6. [Agent harness](agent-harness/README.md)
+7. [Architecture decisions](adr/README.md)
 
 ## Reference
 
@@ -23,6 +24,7 @@ Daytona, and SQLAlchemy/Alembic.
 - [Database](reference/database.md)
 - [Runtime execution flow](explanation/agent-runtime-execution-flow.md)
 - [Current implementation plans](plan-implementation/README.md)
+- [Accepted Session-first Turn cutover decision](adr/0001-coordinated-turn-contract.md)
 
 ## Source of Truth
 

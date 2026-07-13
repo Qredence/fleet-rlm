@@ -12,7 +12,7 @@ Root repository workflow and validation rules remain authoritative from
   composition.
 - Keep Daytona SDK imports inside `daytona/`.
 - Create a fresh DSPy RLM and custom interpreter per Turn. Preserve
-  `history: list[dict]` and call `await rlm.aforward(**named_inputs)`.
+  `history: list[dict]` and call the supported `await rlm.acall(**named_inputs)` surface.
 - Compose zero to four authorized Skills through the host-owned capability
   registry. Capability tools may be plain callables or explicit `dspy.Tool`
   objects; HTTP never supplies executable Python or serialized objects.

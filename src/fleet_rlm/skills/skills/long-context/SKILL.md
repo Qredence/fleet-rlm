@@ -23,7 +23,7 @@ When attachments are bound, use host `read_attachment(attachment_id)` for file b
 
 ## Clean turn context
 
-`RLMTurnContext` carries `request`, budgets, skill cards (metadata only), optional attachment/artifact refs, and tool hosts. There is **no** live auto-router (`large_context_rlm` / EscalatingFleet). Prefer this skill whenever the user paste or attachment is large.
+`RLMExecutionContext` carries validated request/history, a budget ledger, prepared Attachments, authorized capabilities, and one Interpreter. There is **no** live auto-router (`large_context_rlm` / EscalatingFleet). Prefer this skill whenever the user paste or attachment is large.
 
 ## Optional offline pre-chunking
 

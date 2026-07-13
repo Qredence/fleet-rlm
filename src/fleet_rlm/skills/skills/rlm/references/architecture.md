@@ -4,9 +4,9 @@ Paths relative to `src/fleet_rlm/`.
 
 | Path | Owns |
 |------|------|
-| `api/routes/chat.py` | `POST /api/chat` SSE entry |
+| `api/routes/turns.py` | Session-scoped Turn SSE entry |
 | `api/routes/skills.py` | SkillCards list/get (no bodies) |
-| `api/routes/files.py` | Attachment upload |
+| `api/routes/attachments.py` | Attachment upload and metadata |
 | `api/routes/artifacts.py` | Artifact CRUD |
 | `api/routes/runs.py` | Run cancel / status |
 | `chat/turn_coordinator.py` | Isolation, lease acquire, turn assembly |
@@ -14,7 +14,7 @@ Paths relative to `src/fleet_rlm/`.
 | `rlm/factory.py` | RLM construction (`max_iterations`, tools) |
 | `rlm/signature.py` | `FleetRLMSignature` |
 | `rlm/budgets.py` | Finite turn budgets |
-| `rlm/context.py` | `RLMTurnContext` |
+| `rlm/context.py` | immutable `RLMExecutionContext` |
 | `daytona/session_manager.py` | Sandbox acquire / volume mount |
 | `daytona/interpreter.py` | `code_interpreter` adapter |
 | `daytona/paths.py` | Volume path layout under mount root |

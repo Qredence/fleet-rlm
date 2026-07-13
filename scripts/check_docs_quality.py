@@ -23,6 +23,7 @@ EXTERNAL_PREFIXES = (
 )
 
 LEGACY_DOC_DIRS = ("artifacts", "plans", "references", "reviews")
+ARCHIVED_DOC_PREFIXES = (Path("internal/history"), Path("internal/legacy-backend"))
 LEGACY_EXPLANATION_MARKERS = (
     Path("explanation/README.md"),
     Path("explanation/architecture.md"),
@@ -124,6 +125,9 @@ def check_orphans(docs_root: Path, files: list[Path]) -> list[str]:
         return ["missing docs/index.md or unable to traverse docs graph"]
 
     for file_path in files:
+        relative = file_path.relative_to(docs_root)
+        if any(relative.is_relative_to(prefix) for prefix in ARCHIVED_DOC_PREFIXES):
+            continue
         if file_path.resolve() not in reachable:
             rel_file = file_path.relative_to(docs_root.parent).as_posix()
             errors.append(f"orphan active doc: {rel_file}")

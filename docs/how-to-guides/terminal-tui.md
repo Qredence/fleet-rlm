@@ -1,7 +1,7 @@
 # Use the Fleet terminal UI
 
 `tools/fleet-tui/` is a standalone Node 22+ development client for the
-canonical FastAPI `POST /api/chat` SSE endpoint. It adapts the backend's AI SDK
+canonical FastAPI `POST /api/sessions/{session_id}/turns` SSE endpoint. It adapts the backend's AI SDK
 UI v1 chunks into the `Agent.fullStream` consumed by `@ai-sdk/tui`.
 
 The client has no local model, provider key, Harness agent, or sandbox. Fleet
@@ -14,8 +14,8 @@ example for an OpenAI-compatible endpoint. Then from the repository root run:
 
 ```bash
 FLEET_AUTH_MODE=dev \
-FLEET_LIVE_KERNEL=true \
-FLEET_MAX_TURN_WALL_SECONDS=900 \
+FLEET_RUN_ENVIRONMENT=daytona \
+FLEET_BUDGET_MAX_WALL_SECONDS=900 \
 FLEET_ROOT_MODEL=openai/deepseek-v4-flash-free \
 FLEET_SUB_MODEL=openai/deepseek-v4-flash-free \
 uv run fleet-rlm serve-api --port 8000
@@ -43,7 +43,7 @@ FastAPI SSE stream; the live server performs every model call and Daytona
 interpreter operation. `FLEET_ROOT_MODEL` and `FLEET_SUB_MODEL` are the
 canonical model settings; for an OpenAI-compatible base URL, use
 `openai/<model-id>` rather than provider-specific environment aliases.
-`FLEET_MAX_TURN_WALL_SECONDS` defaults to 900 seconds and can be raised for
+`FLEET_BUDGET_MAX_WALL_SECONDS` defaults to 900 seconds and can be raised for
 long-running research turns.
 
 The stock TUI renders text, sanitized reasoning, and backend-executed tool

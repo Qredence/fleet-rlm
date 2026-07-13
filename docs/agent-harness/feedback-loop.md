@@ -28,8 +28,7 @@ in `docs/reference/http-api.md`.
 Run live checks only when runtime behavior changes or the exit bar requires it:
 
 ```bash
-FLEET_LIVE=1 uv run pytest tests/live/backend/test_exit_bar_l1_promotion.py -q
-FLEET_LIVE=1 uv run pytest tests/live/backend/test_exit_bar_l2_adversarial.py -q
+FLEET_LIVE=1 uv run pytest tests/live/backend/test_b5_attachment_artifact_durability.py -q
 ```
 
 Record the exact git tip, test result, and any provider-side cleanup needed.
