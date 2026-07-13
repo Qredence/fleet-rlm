@@ -42,5 +42,6 @@
   "claudeCode.disableLoginPrompt": true,
   "claudeCode.hideOnboarding": true,
   "claudeCode.respectGitIgnore": false,
-  "claudeCode.useTerminal": true
+  "claudeCode.useTerminal": true,
+  "python.terminal.useEnvFile": true
 }
