@@ -7,8 +7,8 @@ class RLMConfigError(ValueError):
     """Base class for Fleet RLM RLM configuration failures."""
 
 
-class RLMBudgetError(RLMConfigError):
-    """Raised when an RLMBudget is invalid before external execution."""
+class RunBudgetError(RLMConfigError):
+    """Raised when immutable Run budget limits are invalid."""
 
 
 class RLMModelBundleError(RLMConfigError):

@@ -1,18 +1,30 @@
-"""Application commands for chat turns."""
+"""Validated application commands for Session-first Turns."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from uuid import UUID, uuid4
+from dataclasses import dataclass
+from uuid import UUID
+
+from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
 
 @dataclass(frozen=True, slots=True)
-class ChatTurnCommand:
-    """Validated turn intent after auth/identity resolution."""
+class OpenTurnCommand:
+    """Canonical Turn intent after HTTP authentication and schema validation."""
 
-    user_id: UUID
-    workspace_id: UUID
-    message: str
-    session_id: UUID = field(default_factory=uuid4)
-    attachment_ids: tuple[UUID, ...] = ()
-    idempotency_key: str = ""
+    access: TurnAccess
+    session_id: UUID
+    input: TurnInput
+    idempotency_key: str
+    proposed_run_id: UUID
+
+    def __post_init__(self) -> None:
+        key = self.idempotency_key
+        if (
+            not isinstance(key, str)
+            or not 1 <= len(key) <= 128
+            or key != key.strip()
+            or not key.isprintable()
+            or any(char.isspace() for char in key)
+        ):
+            raise ValueError("idempotency_key must contain 1..128 printable non-whitespace characters")

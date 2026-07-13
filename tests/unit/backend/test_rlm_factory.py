@@ -58,40 +58,21 @@ def test_model_bundle_rejects_missing_roles() -> None:
 
 
 def test_invalid_budget_fails_before_construction() -> None:
-    from fleet_rlm.rlm.budgets import RLMBudget
-    from fleet_rlm.rlm.errors import RLMBudgetError
-    from fleet_rlm.rlm.factory import RLMFactory
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.rlm.budgets import RunBudget
+    from fleet_rlm.rlm.errors import RunBudgetError
 
-    factory = RLMFactory()
-    models = RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock())
-
-    with pytest.raises(RLMBudgetError):
-        RLMBudget(max_iterations=0)
-    with pytest.raises(RLMBudgetError):
-        RLMBudget(max_llm_calls=-1)
-    with pytest.raises(RLMBudgetError):
-        RLMBudget(max_output_chars=0)
-
-    # Construct-time validation also guards factory entry if a bad budget slips through.
-    bad = object.__new__(RLMBudget)
-    object.__setattr__(bad, "max_iterations", 0)
-    object.__setattr__(bad, "max_llm_calls", 50)
-    object.__setattr__(bad, "max_output_chars", 10_000)
-    object.__setattr__(bad, "max_wall_seconds", 300)
-    object.__setattr__(bad, "max_sub_lm_concurrency", 8)
-    object.__setattr__(bad, "max_tool_calls", 32)
-    object.__setattr__(bad, "max_skill_loads", 8)
-    object.__setattr__(bad, "max_artifact_bytes", 10 * 1024 * 1024)
-
-    with pytest.raises(RLMBudgetError):
-        factory.create(models=models, budget=bad, interpreter=_FakeInterpreter())  # type: ignore[arg-type]
+    with pytest.raises(RunBudgetError):
+        RunBudget(max_iterations=0)
+    with pytest.raises(RunBudgetError):
+        RunBudget(max_llm_calls=-1)
+    with pytest.raises(RunBudgetError):
+        RunBudget(max_output_chars=0)
 
 
 def test_factory_passes_explicit_constructor_kwargs() -> None:
     import dspy
 
-    from fleet_rlm.rlm.budgets import RLMBudget
+    from fleet_rlm.rlm.budgets import RunBudget
     from fleet_rlm.rlm.factory import RLMFactory
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
     from fleet_rlm.rlm.signature import FleetRLMSignature
@@ -99,7 +80,7 @@ def test_factory_passes_explicit_constructor_kwargs() -> None:
     root = MagicMock(name="root_lm")
     sub = MagicMock(name="sub_lm")
     interpreter = _FakeInterpreter()
-    budget = RLMBudget(
+    budget = RunBudget(
         max_iterations=7,
         max_llm_calls=11,
         max_output_chars=2048,
@@ -130,13 +111,13 @@ def test_factory_passes_explicit_constructor_kwargs() -> None:
 
 
 def test_each_factory_call_returns_new_rlm_instance() -> None:
-    from fleet_rlm.rlm.budgets import RLMBudget
+    from fleet_rlm.rlm.budgets import RunBudget
     from fleet_rlm.rlm.factory import RLMFactory
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
 
     factory = RLMFactory()
     models = RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock())
-    budget = RLMBudget()
+    budget = RunBudget()
     interpreter = _FakeInterpreter()
 
     first = factory.create(models=models, budget=budget, interpreter=interpreter)

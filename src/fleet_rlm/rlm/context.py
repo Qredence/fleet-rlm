@@ -3,54 +3,68 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
-from typing import Any, Protocol
+from dataclasses import dataclass
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
-from fleet_rlm.rlm.budgets import RLMBudget
+from fleet_rlm.artifacts.models import ArtifactCandidate
+from fleet_rlm.files.models import PreparedAttachment
+from fleet_rlm.rlm.budgets import RunBudgetLedger
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.sessions.models import TurnAccess
 
-
-class InterpreterLeaseLike(Protocol):
-    """Narrow lease surface used by RLMRunner (release never deletes Sandbox)."""
-
-    interpreter: Any
-
-    def release(self) -> None: ...
-
-
-CancelProbe = Callable[[UUID], Awaitable[bool]]
+AsyncCancellationProbe = Callable[[], Awaitable[bool]]
 
 
 @dataclass(frozen=True, slots=True)
-class RLMTurnContext:
-    """Everything required to execute one recursive turn.
+class RLMHistoryMessage:
+    """One validated conversational message adapted from committed Session state."""
 
-    ``skill_cards`` holds authorized SkillCard-like metadata (no instruction bodies).
-    Attachment/artifact refs remain opaque until wired into the runner tools.
-    """
+    role: Literal["user", "assistant"]
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
+class PreparationNotice:
+    """Safe, bounded preparation degradation visible after the stream starts."""
+
+    code: Literal["skills_unavailable"]
+    message: str
+
+
+class RLMInterpreter(Protocol):
+    """Narrow interpreter surface consumed by DSPy's RLM adapter."""
+
+    def execute(self, code: str) -> Any: ...
+
+
+class PreparedCapabilities(Protocol):
+    """Already authorized and composed host capabilities for one Run."""
+
+    @property
+    def blueprint(self) -> Any: ...
+
+    def drain_public_details(self) -> tuple[Any, ...]: ...
+
+    def drain_artifact_candidates(self) -> tuple[ArtifactCandidate, ...]: ...
+
+    async def aclose(self) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RLMExecutionContext:
+    """Complete immutable input accepted by `RLMRunner`."""
 
     run_id: UUID
     session_id: UUID
-    user_id: UUID
-    workspace_id: UUID
+    access: TurnAccess
     request: str
+    history: tuple[RLMHistoryMessage, ...]
     models: RLMModelBundle
-    budget: RLMBudget
-    lease: InterpreterLeaseLike
-    history: Any = None
-    session_summary: str = ""
-    skill_cards: tuple[Any, ...] = field(default_factory=tuple)
-    attachments: tuple[Any, ...] = field(default_factory=tuple)
-    artifacts: tuple[Any, ...] = field(default_factory=tuple)
-    tools: tuple[Any, ...] = field(default_factory=tuple)
-    # Optional preflight resolver: authorized Skill Cards -> Turn capability blueprint.
-    capability_resolver: Any | None = None
-    # Optional SkillToolHost for progressive load tools + skill.loaded events
-    skill_tool_host: Any | None = None
-    # Optional FileToolHost for read_attachment / create_artifact + public events
-    file_tool_host: Any | None = None
-    # Mounted Workspace Volume Scope filesystem for staging/promotion.
-    volume_fs: Any | None = None
-    # Optional durable cancel probe (DB cancel_requested_at); process-local is mirrored.
-    cancel_probe: CancelProbe | None = None
+    budget: RunBudgetLedger
+    deadline: float
+    interpreter: RLMInterpreter
+    attachments: tuple[PreparedAttachment, ...]
+    capabilities: PreparedCapabilities
+    cancellation_requested: AsyncCancellationProbe
+    preparation_notices: tuple[PreparationNotice, ...]

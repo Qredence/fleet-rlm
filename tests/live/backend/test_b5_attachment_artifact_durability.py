@@ -19,14 +19,54 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.artifacts.store import LocalArtifactStore
-from fleet_rlm.chat.live_context import LiveKernelResources
+from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
+from fleet_rlm.daytona.run_environment import LiveKernelResources
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.bindings import SandboxBinding
 from fleet_rlm.daytona.session_manager import LeaseRequest
 from fleet_rlm.daytona.volume_fs import DaytonaSandboxVolumeFs
-from fleet_rlm.files.staging import AttachmentStager
-from fleet_rlm.files.uploads import LocalAttachmentStore
+from fleet_rlm.files.lifecycle import AttachmentModule
+from fleet_rlm.files.local_catalog import LocalAttachmentCatalog
+from fleet_rlm.files.models import AttachmentAccess, AttachmentRun, AttachmentUpload
+from fleet_rlm.files.paths import DaytonaAttachmentPathPolicy
+
+
+class _LiveAttachmentBlob:
+    def __init__(self, volume_fs) -> None:
+        self.volume_fs = volume_fs
+
+    async def write(self, _workspace_id, logical_path: str, data: bytes) -> None:
+        self.volume_fs.write_bytes(logical_path, data)
+
+    async def read(self, _workspace_id, logical_path: str) -> bytes:
+        return self.volume_fs.read_bytes(logical_path)
+
+
+class _LiveSink:
+    def __init__(self, volume_fs) -> None:
+        self.volume_fs = volume_fs
+
+    async def read_private(self, logical_path: str) -> bytes:
+        return self.volume_fs.read_bytes(logical_path)
+
+    async def write_private(self, logical_path: str, data: bytes) -> None:
+        self.volume_fs.write_bytes(logical_path, data)
+
+    async def remove_private(self, logical_path: str) -> None:
+        self.volume_fs.remove(logical_path)
+
+
+class _Source:
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+        self.offset = 0
+
+    async def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            size = len(self.data)
+        chunk = self.data[self.offset : self.offset + size]
+        self.offset += len(chunk)
+        return chunk
 
 pytestmark = [pytest.mark.live_daytona]
 
@@ -78,7 +118,7 @@ async def test_live_b5_stage_readable_and_artifact_survives_replace(tmp_path: Pa
 
     user_id, workspace_id = uuid4(), uuid4()
     session_id, run_id = uuid4(), uuid4()
-    resources = LiveKernelResources(Settings(), allow_ephemeral_fallback=False)
+    resources = LiveKernelResources(Settings(run_environment="daytona"))
     sandbox_ids: list[str] = []
     volume_id: str | None = None
 
@@ -99,31 +139,29 @@ async def test_live_b5_stage_readable_and_artifact_survives_replace(tmp_path: Pa
         assert sandbox is not None
         volume_fs = DaytonaSandboxVolumeFs(sandbox)
 
-        attachment_store = LocalAttachmentStore(
-            tmp_path / "attachments",
+        attachment_module = AttachmentModule(
+            catalog=LocalAttachmentCatalog(tmp_path / "attachments"),
+            blobs=_LiveAttachmentBlob(volume_fs),
+            paths=DaytonaAttachmentPathPolicy(resources.volume_config.paths()),
             max_bytes=1024 * 1024,
-            volume_fs=volume_fs,
         )
-        artifact_store = LocalArtifactStore(
+        artifact_store = LocalArtifactCatalog(
             tmp_path / "artifacts",
             max_bytes=1024 * 1024,
             volume_fs=volume_fs,
         )
-        ref = attachment_store.upload(
-            user_id=user_id,
-            workspace_id=workspace_id,
-            filename="b5.txt",
-            content_type="text/plain",
-            data=ATTACHMENT_BYTES,
+        access = AttachmentAccess(user_id, workspace_id)
+        ref = await attachment_module.upload(
+            access,
+            AttachmentUpload("b5.txt", "text/plain", _Source(ATTACHMENT_BYTES)),
         )
-        stager = AttachmentStager(attachment_store, volume_fs=volume_fs)
-        staged = stager.stage(
-            ref.id,
-            user_id=user_id,
-            workspace_id=workspace_id,
-            session_id=session_id,
-            run_id=run_id,
+        prepared = await attachment_module.prepare_run(
+            access,
+            (ref.id,),
+            AttachmentRun(session_id, run_id),
+            _LiveSink(volume_fs),
         )
+        staged = prepared.staged[0]
 
         lease.interpreter.start()
         read_staged = lease.interpreter.execute(
@@ -185,7 +223,7 @@ async def test_live_b5_stage_readable_and_artifact_survives_replace(tmp_path: Pa
         assert hashlib.sha256(remounted).hexdigest() == art.checksum_sha256
 
         # Catalog re-read after replace still resolves via Volume Scope when rebound.
-        rebound_store = LocalArtifactStore(
+        rebound_store = LocalArtifactCatalog(
             tmp_path / "artifacts",
             max_bytes=1024 * 1024,
             volume_fs=volume_fs2,

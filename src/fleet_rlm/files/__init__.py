@@ -7,18 +7,17 @@ from fleet_rlm.files.errors import (
     AttachmentNotFoundError,
     AttachmentValidationError,
 )
+from fleet_rlm.files.lifecycle import AttachmentModule, StoredAttachment
 from fleet_rlm.files.models import AttachmentRef, StagedAttachment
-from fleet_rlm.files.staging import AttachmentStager
 from fleet_rlm.files.tools import FileToolHost
-from fleet_rlm.files.uploads import LocalAttachmentStore
 
 __all__ = [
     "AttachmentError",
     "AttachmentNotFoundError",
     "AttachmentRef",
-    "AttachmentStager",
+    "AttachmentModule",
     "AttachmentValidationError",
     "FileToolHost",
-    "LocalAttachmentStore",
+    "StoredAttachment",
     "StagedAttachment",
 ]

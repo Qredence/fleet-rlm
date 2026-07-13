@@ -26,6 +26,8 @@ class WorkspaceVolumeGateway(Protocol):
 
     async def read_bytes(self, workspace_id: UUID, logical_path: str) -> bytes: ...
 
+    async def remove_bytes(self, workspace_id: UUID, logical_path: str) -> None: ...
+
 
 class DaytonaWorkspaceVolumeGateway:
     """Use short-lived I/O Sandboxes because Daytona Volumes have no direct file API."""
@@ -64,6 +66,17 @@ class DaytonaWorkspaceVolumeGateway:
 
         try:
             return await self._with_io_sandbox(workspace_id, _read)
+        except Exception as exc:
+            raise map_provider_error(exc) from exc
+
+    async def remove_bytes(self, workspace_id: UUID, logical_path: str) -> None:
+        path = self._validate_logical_path(logical_path)
+
+        async def _remove(sandbox: Any) -> None:
+            await sandbox.fs.delete_file(path)
+
+        try:
+            await self._with_io_sandbox(workspace_id, _remove)
         except Exception as exc:
             raise map_provider_error(exc) from exc
 
@@ -167,6 +180,9 @@ class HostWorkspaceVolumeGateway:
     async def read_bytes(self, workspace_id: UUID, logical_path: str) -> bytes:
         return self._mirror(workspace_id).read_bytes(logical_path)
 
+    async def remove_bytes(self, workspace_id: UUID, logical_path: str) -> None:
+        self._mirror(workspace_id).remove(logical_path)
+
 
 class OfflineHostVolumeGateway:
     """Adapt the shared offline Turn mirror to the async durable-store port.
@@ -185,6 +201,10 @@ class OfflineHostVolumeGateway:
     async def read_bytes(self, workspace_id: UUID, logical_path: str) -> bytes:
         del workspace_id
         return self._mirror.read_bytes(logical_path)
+
+    async def remove_bytes(self, workspace_id: UUID, logical_path: str) -> None:
+        del workspace_id
+        self._mirror.remove(logical_path)
 
 
 def create_daytona_workspace_volume_gateway(

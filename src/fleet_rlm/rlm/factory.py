@@ -7,8 +7,7 @@ from typing import Any
 
 import dspy
 
-from fleet_rlm.rlm.budgets import RLMBudget
-from fleet_rlm.rlm.errors import RLMBudgetError
+from fleet_rlm.rlm.budgets import RunBudget
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.observable import DetailObserver, ObservableRLM
 from fleet_rlm.rlm.signature import FleetRLMSignature
@@ -27,7 +26,7 @@ class RLMFactory:
         self,
         *,
         models: RLMModelBundle,
-        budget: RLMBudget,
+        budget: RunBudget,
         interpreter: Any,
         tools: Sequence[RLMTool] | None = None,
         signature: type[dspy.Signature] | str | None = None,
@@ -35,13 +34,6 @@ class RLMFactory:
         observer: DetailObserver | None = None,
     ) -> Any:
         """Return a new ``dspy.RLM`` instance. Never reuses a previous module."""
-        try:
-            budget.validate()
-        except RLMBudgetError:
-            raise
-        except Exception as exc:  # noqa: BLE001 - normalize unexpected budget failures
-            raise RLMBudgetError(str(exc)) from exc
-
         resolved_signature: type[dspy.Signature] | str = signature if signature is not None else FleetRLMSignature
         tool_list = list(tools) if tools is not None else None
 

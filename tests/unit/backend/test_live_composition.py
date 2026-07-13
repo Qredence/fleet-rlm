@@ -11,8 +11,8 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from fleet_rlm.app import create_app, create_live_app
-from fleet_rlm.composition import LiveCompositionError, is_live_mode, require_live_settings
+from fleet_rlm.app import create_app
+from fleet_rlm.composition import LiveCompositionError, require_live_settings
 from fleet_rlm.config import Settings
 
 
@@ -24,12 +24,12 @@ def test_composition_module_imports_without_credentials() -> None:
 
 
 def test_require_live_settings_fails_closed_without_deps() -> None:
-    with pytest.raises(LiveCompositionError, match="live_kernel"):
-        require_live_settings(Settings(live_kernel=False))
+    with pytest.raises(LiveCompositionError, match="run_environment"):
+        require_live_settings(Settings(run_environment="hermetic"))
     with pytest.raises(LiveCompositionError, match="DAYTONA_API_KEY"):
         require_live_settings(
             Settings(
-                live_kernel=True,
+                run_environment="daytona",
                 database_url="sqlite+aiosqlite:///:memory:",
                 daytona_api_key=SecretStr(""),
                 llm_api_key=SecretStr("llm-key"),
@@ -38,7 +38,7 @@ def test_require_live_settings_fails_closed_without_deps() -> None:
     with pytest.raises(LiveCompositionError, match="LLM_API_KEY"):
         require_live_settings(
             Settings(
-                live_kernel=True,
+                run_environment="daytona",
                 database_url="sqlite+aiosqlite:///:memory:",
                 daytona_api_key=SecretStr("daytona-key"),
                 llm_api_key=SecretStr(""),
@@ -47,7 +47,7 @@ def test_require_live_settings_fails_closed_without_deps() -> None:
     with pytest.raises(LiveCompositionError, match="DATABASE_URL"):
         require_live_settings(
             Settings(
-                live_kernel=True,
+                run_environment="daytona",
                 database_url="",
                 daytona_api_key=SecretStr("daytona-key"),
                 llm_api_key=SecretStr("llm-key"),
@@ -56,7 +56,7 @@ def test_require_live_settings_fails_closed_without_deps() -> None:
     with pytest.raises(LiveCompositionError, match="NEON_AUTH_URL"):
         require_live_settings(
             Settings(
-                live_kernel=True,
+                run_environment="daytona",
                 auth_mode="neon",
                 neon_auth_url="",
                 database_url="sqlite+aiosqlite:///:memory:",
@@ -66,67 +66,64 @@ def test_require_live_settings_fails_closed_without_deps() -> None:
         )
 
 
-def test_create_live_app_fails_closed_without_secrets() -> None:
-    with pytest.raises(LiveCompositionError):
-        create_live_app(settings=Settings(live_kernel=False, database_url=None))
+def test_daytona_environment_fails_closed_without_secrets() -> None:
     with pytest.raises(LiveCompositionError, match="required settings"):
-        create_app(settings=Settings(live_kernel=True))
+        create_app(settings=Settings(run_environment="daytona"))
 
 
 def test_create_app_offline_still_hermetic() -> None:
-    app = create_app(settings=Settings(live_kernel=False))
-    assert app.state.live_mode is False
-    assert app.state.live_composition_ready is False
+    app = create_app(settings=Settings(run_environment="hermetic"))
+    assert app.state.composition_ready is True
     assert app.state.turn_coordinator is not None
-    assert app.state.attachment_store is not None
-    assert app.state.artifact_store is not None
-    assert is_live_mode(app) is False
+    assert app.state.attachment_lifecycle is not None
+    assert app.state.artifact_reader is not None
     with TestClient(app) as client:
-        # Offline chat works through the eagerly composed hermetic modules.
+        # The clean-break API never creates an implicit Session.
         response = client.post(
-            "/api/chat",
-            json={"message": "ping", "session_id": str(uuid4())},
+            f"/api/sessions/{uuid4()}/turns",
+            json={"text": "ping"},
             headers={
                 "X-Fleet-User-Id": str(uuid4()),
                 "X-Fleet-Workspace-Id": str(uuid4()),
+                "Idempotency-Key": "offline-test",
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 404
 
 
 def test_offline_database_is_created_and_closed_by_lifespan() -> None:
     app = create_app(
         settings=Settings(
-            live_kernel=False,
+            run_environment="hermetic",
             database_url="sqlite+aiosqlite:///:memory:",
         )
     )
     assert app.state.db_engine is None
-    assert not hasattr(app.state, "session_repository")
+    assert app.state.session_catalog is not None
 
     with TestClient(app):
         assert app.state.db_engine is not None
-        assert app.state.session_repository is not None
+        assert app.state.session_catalog is not None
 
     assert app.state.db_engine is None
-    assert app.state.session_repository is None
+    assert app.state.session_catalog is None
 
 
-def test_live_mode_coordinator_never_falls_back_to_offline() -> None:
-    """If live_mode is set without lifespan inventory, chat must not build OfflineCoordinator."""
+def test_unready_composition_never_builds_route_dependencies() -> None:
     app = create_app(settings=Settings(auth_mode="dev"))
-    app.state.live_mode = True
+    app.state.composition_ready = False
     with TestClient(app) as client:
         response = client.post(
-            "/api/chat",
-            json={"message": "ping", "session_id": str(uuid4())},
+            f"/api/sessions/{uuid4()}/turns",
+            json={"text": "ping"},
             headers={
                 "X-Fleet-User-Id": str(uuid4()),
                 "X-Fleet-Workspace-Id": str(uuid4()),
+                "Idempotency-Key": "live-readiness-test",
             },
         )
         assert response.status_code == 503
-        assert "live composition" in response.json()["detail"]
+        assert response.json()["code"] == "turn_unavailable"
 
 
 def test_app_py_top_level_avoids_dspy_daytona() -> None:
@@ -142,89 +139,12 @@ def test_app_py_top_level_avoids_dspy_daytona() -> None:
     assert "daytona" not in imported
 
 
-def test_main_exports_create_live_app() -> None:
+def test_main_exports_single_app_factory() -> None:
     from fleet_rlm import main as main_mod
 
-    assert callable(main_mod.create_live_app)
+    assert callable(main_mod.create_app)
+    assert not hasattr(main_mod, "create_live_app")
     assert main_mod.app is not None
-
-
-@pytest.mark.asyncio
-async def test_live_context_releases_claimed_lease_when_post_acquire_preparation_fails() -> None:
-    from fleet_rlm.chat.commands import ChatTurnCommand
-    from fleet_rlm.chat.live_context import LiveKernelResources
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
-
-    run_id = uuid4()
-    lease = SimpleNamespace(sandbox_id="sb-1", release=lambda: None)
-
-    class Manager:
-        def __init__(self) -> None:
-            self.request = None
-            self.released = 0
-
-        async def acquire(self, request):
-            self.request = request
-            return lease
-
-        async def release(self, value) -> None:
-            assert value is lease
-            self.released += 1
-
-    manager = Manager()
-    resources = object.__new__(LiveKernelResources)
-    resources.settings = Settings()
-    resources.session_manager = manager
-    resources.allow_ephemeral_fallback = False
-    resources.last_used_ephemeral = False
-    resources._sandbox_ids = []
-    resources.models = RLMModelBundle(root_lm=object(), sub_lm=object())
-    resources.skill_registry = object()
-    resources.attachment_store = None
-    resources.artifact_store = None
-    resources.platform = SimpleNamespace(get=lambda _sandbox_id: None)
-
-    command = ChatTurnCommand(
-        user_id=uuid4(),
-        workspace_id=uuid4(),
-        session_id=uuid4(),
-        message="prepare",
-    )
-    with pytest.raises(RuntimeError, match="unavailable"):
-        await resources.build_context(command, run_id=run_id)
-
-    assert manager.request.run_id == run_id
-    assert manager.released == 1
-
-
-@pytest.mark.asyncio
-async def test_live_context_propagates_configured_turn_wall_budget() -> None:
-    from fleet_rlm.chat.commands import ChatTurnCommand
-    from fleet_rlm.chat.live_context import LiveKernelResources
-    from fleet_rlm.rlm.model_bundle import RLMModelBundle
-
-    lease = SimpleNamespace(sandbox_id="sb-1", interpreter=object())
-
-    class Manager:
-        async def acquire(self, _request):
-            return lease
-
-    resources = object.__new__(LiveKernelResources)
-    resources.settings = Settings(max_turn_wall_seconds=123)
-    resources.session_manager = Manager()
-    resources.allow_ephemeral_fallback = False
-    resources.last_used_ephemeral = False
-    resources._sandbox_ids = []
-    resources.models = RLMModelBundle(root_lm=object(), sub_lm=object())
-    resources.skill_registry = None
-    resources.attachment_store = None
-    resources.artifact_store = None
-
-    context = await resources.build_context(
-        ChatTurnCommand(user_id=uuid4(), workspace_id=uuid4(), session_id=uuid4(), message="long task"),
-    )
-
-    assert context.budget.max_wall_seconds == 123
 
 
 @pytest.mark.asyncio
@@ -243,9 +163,10 @@ async def test_install_live_composition_does_not_create_schema(monkeypatch) -> N
     handles = composition.LiveCompositionHandles(
         resources=Resources(),
         turn_coordinator=object(),
-        session_repository=object(),
-        attachment_store=object(),
-        artifact_store=object(),
+        session_catalog=object(),
+        turn_lifecycle=object(),
+        attachment_lifecycle=object(),
+        artifact_reader=object(),
         workspace_volume_gateway=Gateway(),
     )
 
@@ -262,7 +183,7 @@ async def test_install_live_composition_does_not_create_schema(monkeypatch) -> N
     installed = await composition.install_live_composition(app, Settings())
 
     assert installed is handles
-    assert app.state.live_composition_ready is True
+    assert app.state.composition_ready is True
 
 
 def test_offline_lifespan_disposes_engine_when_table_creation_fails(monkeypatch) -> None:
@@ -318,9 +239,10 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
     handles = composition.LiveCompositionHandles(
         resources=Resources(),
         turn_coordinator=object(),
-        session_repository=object(),
-        attachment_store=object(),
-        artifact_store=object(),
+        session_catalog=object(),
+        turn_lifecycle=object(),
+        attachment_lifecycle=object(),
+        artifact_reader=object(),
         workspace_volume_gateway=Gateway(),
     )
 

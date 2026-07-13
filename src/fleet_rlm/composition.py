@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from fleet_rlm.config import Settings
+from fleet_rlm.rlm.budgets import RunBudget
 
 
 class LiveCompositionError(RuntimeError):
@@ -21,8 +22,8 @@ class LiveCompositionError(RuntimeError):
 
 def require_live_settings(settings: Settings) -> None:
     """Fail closed when required live deps are missing. Credentials alone are not enough."""
-    if not settings.live_kernel:
-        raise LiveCompositionError("live composition requires live_kernel=True")
+    if settings.run_environment != "daytona":
+        raise LiveCompositionError("Daytona composition requires run_environment='daytona'")
     missing: list[str] = []
     if settings.daytona_api_key is None or not settings.daytona_api_key.get_secret_value().strip():
         missing.append("FLEET_DAYTONA_API_KEY")
@@ -42,9 +43,10 @@ class LiveCompositionHandles:
 
     resources: Any
     turn_coordinator: Any
-    session_repository: Any
-    attachment_store: Any
-    artifact_store: Any
+    session_catalog: Any
+    turn_lifecycle: Any
+    attachment_lifecycle: Any
+    artifact_reader: Any
     workspace_volume_gateway: Any
 
 
@@ -53,9 +55,11 @@ class OfflineCompositionHandles:
     """Hermetic process-owned adapters for local development and tests."""
 
     turn_coordinator: Any
-    attachment_store: Any
-    artifact_store: Any
+    attachment_lifecycle: Any
+    artifact_reader: Any
     workspace_volume_mirror: Any
+    session_catalog: Any
+    turn_lifecycle: Any
 
 
 async def _dispose_live_components(
@@ -80,11 +84,9 @@ async def _dispose_live_components(
 
 
 def _host_roots(settings: Settings) -> tuple[str, str]:
-    upload_root = settings.upload_root or str(Path.cwd() / ".fleet_rlm_uploads")
-    if settings.artifact_root:
-        artifact_root = settings.artifact_root
-    else:
-        artifact_root = str(Path(upload_root).parent / "artifacts")
+    data_root = Path(settings.data_root)
+    upload_root = str(data_root / "attachments")
+    artifact_root = str(data_root / "artifacts")
     return upload_root, artifact_root
 
 
@@ -95,64 +97,115 @@ def install_offline_composition(
     session_factory: Any | None = None,
 ) -> OfflineCompositionHandles:
     """Build hermetic adapters once during lifespan; routes never construct them."""
-    from fleet_rlm.artifacts.persistent import VolumeArtifactStore
-    from fleet_rlm.artifacts.store import LocalArtifactStore
-    from fleet_rlm.chat.capabilities import CapabilityContextBuilder
-    from fleet_rlm.chat.context_builder import OfflineContextBuilder
+    from fleet_rlm.artifacts.daytona_catalog import DaytonaArtifactBlobGateway
+    from fleet_rlm.artifacts.local_catalog import (
+        LocalArtifactBlobGateway,
+        LocalArtifactCatalog,
+        LocalArtifactReaderCatalog,
+    )
+    from fleet_rlm.artifacts.reader import ArtifactReader
+    from fleet_rlm.chat.hermetic_run_environment import HermeticRLMFactory, HermeticTurnPreparation
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
     from fleet_rlm.daytona.paths import volume_paths_from_settings
     from fleet_rlm.daytona.volume_fs import HostVolumeMirror
     from fleet_rlm.daytona.workspace_volume import OfflineHostVolumeGateway
-    from fleet_rlm.files.uploads import LocalAttachmentStore
-    from fleet_rlm.persistence.repositories import SqlAlchemyArtifactRepository
+    from fleet_rlm.files.lifecycle import AttachmentModule
+    from fleet_rlm.files.local_catalog import (
+        LocalAttachmentBlobGateway,
+        LocalAttachmentCatalog,
+        WorkspaceAttachmentBlobGateway,
+    )
+    from fleet_rlm.files.paths import DaytonaAttachmentPathPolicy, LocalAttachmentPathPolicy
+    from fleet_rlm.persistence.repositories import (
+        InMemorySessionCatalog,
+        InMemoryTurnStateStore,
+        SqlAlchemyArtifactCatalog,
+        SqlAlchemyAttachmentCatalog,
+        SqlAlchemySessionCatalog,
+        SqlAlchemyTurnStateStore,
+    )
+    from fleet_rlm.rlm.runner import RLMRunner
 
     upload_root, artifact_root = _host_roots(settings)
     mirror = HostVolumeMirror(
         Path(upload_root) / "_workspace_volume",
         volume_paths=volume_paths_from_settings(settings),
     )
-    attachment_store = LocalAttachmentStore(
-        upload_root,
-        max_bytes=settings.max_upload_bytes,
-        volume_fs=mirror,
-        volume_paths=mirror.volume_paths,
-    )
+    volume_gateway = OfflineHostVolumeGateway(mirror)
     if session_factory is None:
-        artifact_store: Any = LocalArtifactStore(
+        attachment_lifecycle: Any = AttachmentModule(
+            catalog=LocalAttachmentCatalog(upload_root),
+            blobs=LocalAttachmentBlobGateway(Path(upload_root)),
+            paths=LocalAttachmentPathPolicy(Path(upload_root)),
+            max_bytes=settings.max_upload_bytes,
+        )
+        artifact_catalog = LocalArtifactCatalog(
             artifact_root,
             max_bytes=settings.max_artifact_bytes,
-            volume_fs=mirror,
             volume_paths=mirror.volume_paths,
         )
-    else:
-        artifact_store = VolumeArtifactStore(
-            SqlAlchemyArtifactRepository(session_factory),
-            OfflineHostVolumeGateway(mirror),
+        artifact_reader: Any = ArtifactReader(
+            catalog=LocalArtifactReaderCatalog(artifact_catalog),
+            blobs=LocalArtifactBlobGateway(artifact_catalog),
         )
-    builder = CapabilityContextBuilder(
-        OfflineContextBuilder(),
-        skill_registry=getattr(app.state, "skill_registry", None),
-        attachment_store=attachment_store,
-        volume_fs=mirror,
-        volume_paths=mirror.volume_paths,
+    else:
+        attachment_lifecycle = AttachmentModule(
+            catalog=SqlAlchemyAttachmentCatalog(session_factory),
+            blobs=WorkspaceAttachmentBlobGateway(volume_gateway),
+            paths=DaytonaAttachmentPathPolicy(mirror.volume_paths),
+            max_bytes=settings.max_upload_bytes,
+        )
+        artifact_reader = ArtifactReader(
+            catalog=SqlAlchemyArtifactCatalog(session_factory),
+            blobs=DaytonaArtifactBlobGateway(volume_gateway),
+        )
+    if session_factory is None:
+        turn_state = InMemoryTurnStateStore()
+        session_catalog = InMemorySessionCatalog(turn_state)
+    else:
+        turn_state = SqlAlchemyTurnStateStore(
+            session_factory,
+            stale_after_seconds=settings.run_stale_after_seconds,
+        )
+        session_catalog = SqlAlchemySessionCatalog(session_factory)
+    lifecycle = TurnLifecycleModule(
+        turn_state,
         max_artifact_bytes=settings.max_artifact_bytes,
-        capability_registry=getattr(app.state, "capability_registry", None),
+        heartbeat_seconds=settings.run_heartbeat_seconds,
     )
     coordinator = TurnCoordinator(
-        context_builder=builder,
-        session_repository=getattr(app.state, "session_repository", None),
+        lifecycle=lifecycle,
+        preparation=HermeticTurnPreparation(
+            attachments=attachment_lifecycle,
+            budget=RunBudget(
+                max_iterations=settings.budget_max_iterations,
+                max_llm_calls=settings.budget_max_llm_calls,
+                max_output_chars=settings.budget_max_output_chars,
+                max_wall_seconds=settings.budget_max_wall_seconds,
+                max_sub_lm_concurrency=settings.budget_max_sub_lm_concurrency,
+                max_tool_calls=settings.budget_max_tool_calls,
+                max_skill_loads=settings.budget_max_skill_loads,
+            ),
+        ),
+        runner=RLMRunner(factory=HermeticRLMFactory()),
     )
     handles = OfflineCompositionHandles(
         turn_coordinator=coordinator,
-        attachment_store=attachment_store,
-        artifact_store=artifact_store,
+        attachment_lifecycle=attachment_lifecycle,
+        artifact_reader=artifact_reader,
         workspace_volume_mirror=mirror,
+        session_catalog=session_catalog,
+        turn_lifecycle=lifecycle,
     )
     app.state.turn_coordinator = coordinator
-    app.state.attachment_store = attachment_store
-    app.state.artifact_store = artifact_store
+    app.state.turn_lifecycle = lifecycle
+    app.state.turn_state_store = turn_state
+    app.state.session_catalog = session_catalog
+    app.state.attachment_lifecycle = attachment_lifecycle
+    app.state.artifact_reader = artifact_reader
     app.state.workspace_volume_mirror = mirror
-    app.state.live_composition_ready = False
+    app.state.composition_ready = True
     return handles
 
 
@@ -160,26 +213,29 @@ async def build_live_composition(settings: Settings) -> LiveCompositionHandles:
     """Construct the live lifespan inventory and clean partial failures."""
     require_live_settings(settings)
 
-    from fleet_rlm.artifacts.persistent import VolumeArtifactStore
-    from fleet_rlm.chat.live_context import LiveKernelResources, resolve_settings
+    from fleet_rlm.artifacts.daytona_catalog import DaytonaArtifactBlobGateway
+    from fleet_rlm.artifacts.reader import ArtifactReader
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.daytona.paths import volume_paths_from_settings
+    from fleet_rlm.daytona.run_environment import LiveKernelResources, resolve_settings
     from fleet_rlm.daytona.workspace_volume import create_daytona_workspace_volume_gateway
-    from fleet_rlm.files.store import VolumeAttachmentStore
+    from fleet_rlm.files.lifecycle import AttachmentModule
+    from fleet_rlm.files.local_catalog import WorkspaceAttachmentBlobGateway
+    from fleet_rlm.files.paths import DaytonaAttachmentPathPolicy
     from fleet_rlm.observability.exporters import LoggingTurnExporter
     from fleet_rlm.persistence.database import (
         create_async_engine_from_url,
         create_session_factory,
     )
     from fleet_rlm.persistence.repositories import (
-        SqlAlchemyArtifactRepository,
-        SqlAlchemyAttachmentRepository,
+        SqlAlchemyArtifactCatalog,
+        SqlAlchemyAttachmentCatalog,
     )
     from fleet_rlm.rlm.factory import RLMFactory
     from fleet_rlm.rlm.runner import RLMRunner
 
     resolved = resolve_settings(settings)
-    require_live_settings(resolved.model_copy(update={"live_kernel": True}))
+    require_live_settings(resolved)
 
     engine = create_async_engine_from_url(resolved.database_url or "")
     resources: Any | None = None
@@ -190,10 +246,7 @@ async def build_live_composition(settings: Settings) -> LiveCompositionHandles:
             resolved,
             session_factory=session_factory,
             engine=engine,
-            allow_ephemeral_fallback=False,
         )
-        assert resources.sessions is not None
-
         volume_paths = volume_paths_from_settings(resolved)
         if resolved.daytona_api_key is None:
             raise LiveCompositionError("live composition missing required settings: FLEET_DAYTONA_API_KEY")
@@ -202,33 +255,49 @@ async def build_live_composition(settings: Settings) -> LiveCompositionHandles:
             volume_name=resolved.volume_name,
             mount_path=resolved.volume_mount_path,
         )
-        attachment_store = VolumeAttachmentStore(
-            SqlAlchemyAttachmentRepository(session_factory),
-            gateway,
+        attachment_lifecycle = AttachmentModule(
+            catalog=SqlAlchemyAttachmentCatalog(session_factory),
+            blobs=WorkspaceAttachmentBlobGateway(gateway),
+            paths=DaytonaAttachmentPathPolicy(volume_paths),
             max_bytes=resolved.max_upload_bytes,
-            volume_paths=volume_paths,
         )
-        artifact_store = VolumeArtifactStore(
-            SqlAlchemyArtifactRepository(session_factory),
-            gateway,
+        artifact_reader = ArtifactReader(
+            catalog=SqlAlchemyArtifactCatalog(session_factory),
+            blobs=DaytonaArtifactBlobGateway(gateway),
         )
-        resources.attachment_store = attachment_store
-        resources.artifact_store = artifact_store
+        resources.configure_preparation(attachment_lifecycle)
 
         runner = RLMRunner(factory=RLMFactory())
+        from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+        from fleet_rlm.persistence.repositories import (
+            SqlAlchemySessionCatalog,
+            SqlAlchemyTurnStateStore,
+        )
+
+        turn_state = SqlAlchemyTurnStateStore(
+            session_factory,
+            stale_after_seconds=resolved.run_stale_after_seconds,
+        )
+        session_catalog = SqlAlchemySessionCatalog(session_factory)
+        lifecycle = TurnLifecycleModule(
+            turn_state,
+            max_artifact_bytes=resolved.max_artifact_bytes,
+            heartbeat_seconds=resolved.run_heartbeat_seconds,
+        )
         coordinator = TurnCoordinator(
+            lifecycle=lifecycle,
+            preparation=resources,
             runner=runner,
-            context_builder=resources,
-            session_repository=resources.sessions,
         )
         _ = LoggingTurnExporter()
 
         return LiveCompositionHandles(
             resources=resources,
             turn_coordinator=coordinator,
-            session_repository=resources.sessions,
-            attachment_store=attachment_store,
-            artifact_store=artifact_store,
+            session_catalog=session_catalog,
+            turn_lifecycle=lifecycle,
+            attachment_lifecycle=attachment_lifecycle,
+            artifact_reader=artifact_reader,
             workspace_volume_gateway=gateway,
         )
     except Exception:
@@ -251,14 +320,14 @@ async def install_live_composition(app: FastAPI, settings: Settings) -> LiveComp
         handles.resources.skill_registry = skill_registry
         handles.resources.capability_registry = getattr(app.state, "capability_registry", None)
 
-        app.state.live_mode = True
-        app.state.live_composition_ready = True
-        app.state.live_kernel_resources = handles.resources
+        app.state.composition_ready = True
+        app.state.run_environment_resources = handles.resources
         app.state.db_engine = handles.resources._engine  # noqa: SLF001
-        app.state.session_repository = handles.session_repository
+        app.state.session_catalog = handles.session_catalog
+        app.state.turn_lifecycle = handles.turn_lifecycle
         app.state.turn_coordinator = handles.turn_coordinator
-        app.state.attachment_store = handles.attachment_store
-        app.state.artifact_store = handles.artifact_store
+        app.state.attachment_lifecycle = handles.attachment_lifecycle
+        app.state.artifact_reader = handles.artifact_reader
         app.state.workspace_volume_gateway = handles.workspace_volume_gateway
         app.state.session_manager = handles.resources.session_manager
         app.state.rlm_model_bundle = handles.resources.models
@@ -270,8 +339,7 @@ async def install_live_composition(app: FastAPI, settings: Settings) -> LiveComp
 
         return handles
     except Exception:
-        app.state.live_mode = False
-        app.state.live_composition_ready = False
+        app.state.composition_ready = False
         await _dispose_live_components(
             resources=handles.resources,
             gateway=handles.workspace_volume_gateway,
@@ -282,7 +350,7 @@ async def install_live_composition(app: FastAPI, settings: Settings) -> LiveComp
 
 async def dispose_live_composition(app: FastAPI) -> None:
     """Best-effort shutdown of live resources."""
-    resources = getattr(app.state, "live_kernel_resources", None)
+    resources = getattr(app.state, "run_environment_resources", None)
     gateway = getattr(app.state, "workspace_volume_gateway", None)
     try:
         await _dispose_live_components(
@@ -291,16 +359,7 @@ async def dispose_live_composition(app: FastAPI) -> None:
             suppress_errors=False,
         )
     finally:
-        app.state.live_mode = False
-        app.state.live_composition_ready = False
-
-
-def is_live_mode(app: FastAPI | Any) -> bool:
-    state = getattr(app, "state", app)
-    if getattr(state, "live_mode", False):
-        return True
-    settings = getattr(state, "settings", None)
-    return bool(getattr(settings, "live_kernel", False))
+        app.state.composition_ready = False
 
 
 __all__ = [
@@ -311,6 +370,5 @@ __all__ = [
     "dispose_live_composition",
     "install_live_composition",
     "install_offline_composition",
-    "is_live_mode",
     "require_live_settings",
 ]

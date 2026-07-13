@@ -8,24 +8,17 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.rlm.budgets import RLMBudget
-from fleet_rlm.rlm.context import RLMTurnContext
+from fleet_rlm.rlm.budgets import RunBudget
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.skills.capabilities import (
     CapabilityBudgetRequirements,
     CapabilityRegistry,
+    CapabilityResolutionContext,
     CapabilityResolver,
     SkillSelection,
     TaskContract,
 )
 from fleet_rlm.skills.models import SkillCard
-
-
-class _Lease:
-    interpreter: Any = object()
-
-    def release(self) -> None:
-        pass
 
 
 class _Selector:
@@ -53,16 +46,11 @@ def _card(name: str, *, refs: tuple[str, ...] = (), contract: str | None = None)
     )
 
 
-def _context(cards: tuple[SkillCard, ...], tools: tuple[Any, ...] = ()) -> RLMTurnContext:
-    return RLMTurnContext(
-        run_id=uuid4(),
-        session_id=uuid4(),
-        user_id=uuid4(),
-        workspace_id=uuid4(),
+def _context(cards: tuple[SkillCard, ...], tools: tuple[Any, ...] = ()) -> CapabilityResolutionContext:
+    return CapabilityResolutionContext(
         request="analyze the long document",
         models=RLMModelBundle(root_lm=object(), sub_lm=object()),
-        budget=RLMBudget(max_iterations=3, max_llm_calls=5, max_output_chars=1000),
-        lease=_Lease(),
+        budget=RunBudget(max_iterations=3, max_llm_calls=5, max_output_chars=1000),
         history=[],
         skill_cards=cards,
         tools=tools,

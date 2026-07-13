@@ -12,8 +12,8 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.app import create_app
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError, ArtifactValidationError
+from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
 from fleet_rlm.artifacts.safety import parse_kind, sanitize_title, validate_content_size
-from fleet_rlm.artifacts.store import LocalArtifactStore
 from fleet_rlm.config import Settings
 
 
@@ -37,7 +37,7 @@ def test_validate_content_size() -> None:
 
 
 def test_store_create_kinds_checksum_and_reauth(tmp_path: Path) -> None:
-    store = LocalArtifactStore(tmp_path, max_bytes=1024)
+    store = LocalArtifactCatalog(tmp_path, max_bytes=1024)
     user, ws = uuid4(), uuid4()
     session_id, run_id = uuid4(), uuid4()
 
@@ -94,7 +94,7 @@ def test_store_create_kinds_checksum_and_reauth(tmp_path: Path) -> None:
 
 
 def test_logical_sandbox_path_run_scoped(tmp_path: Path) -> None:
-    store = LocalArtifactStore(tmp_path, max_bytes=1024)
+    store = LocalArtifactCatalog(tmp_path, max_bytes=1024)
     user, ws = uuid4(), uuid4()
     session_id, run_id = uuid4(), uuid4()
     ref = store.create(
@@ -120,7 +120,7 @@ def test_content_survives_store_reload(tmp_path: Path) -> None:
     root = tmp_path / "artifacts"
     user, ws = uuid4(), uuid4()
     session_id, run_id = uuid4(), uuid4()
-    first = LocalArtifactStore(root, max_bytes=1024)
+    first = LocalArtifactCatalog(root, max_bytes=1024)
     ref = first.create(
         user_id=user,
         workspace_id=ws,
@@ -132,7 +132,7 @@ def test_content_survives_store_reload(tmp_path: Path) -> None:
     path_before = first.sandbox_path_for(ref.id, user_id=user, workspace_id=ws)
 
     # New store instance (API restart); same Volume-backed host root
-    second = LocalArtifactStore(root, max_bytes=1024)
+    second = LocalArtifactCatalog(root, max_bytes=1024)
     body = second.read_bytes(ref.id, user_id=user, workspace_id=ws)
     assert body == b"durable payload"
     path_after = second.sandbox_path_for(ref.id, user_id=user, workspace_id=ws)
@@ -141,7 +141,7 @@ def test_content_survives_store_reload(tmp_path: Path) -> None:
 
 
 def test_api_get_committed_artifact_has_no_path_leak(tmp_path: Path) -> None:
-    settings = Settings(artifact_root=str(tmp_path / "arts"), max_artifact_bytes=2048)
+    settings = Settings(data_root=str(tmp_path), max_artifact_bytes=2048)
     app = create_app(settings=settings)
     user, ws = uuid4(), uuid4()
     headers = {
@@ -149,7 +149,7 @@ def test_api_get_committed_artifact_has_no_path_leak(tmp_path: Path) -> None:
         "X-Fleet-Workspace-Id": str(ws),
     }
     client = TestClient(app)
-    ref = app.state.artifact_store.create(
+    ref = app.state.artifact_reader._catalog._store.create(  # noqa: SLF001
         user_id=user,
         workspace_id=ws,
         session_id=uuid4(),
@@ -188,9 +188,31 @@ def test_api_get_committed_artifact_has_no_path_leak(tmp_path: Path) -> None:
     )
     assert other.status_code == 404
 
+    content = client.get(f"/api/artifacts/{ref.id}/content", headers=headers)
+    assert content.status_code == 200
+    assert content.content == b"## Result\n\nok"
+    assert content.headers["content-type"].startswith("text/markdown")
+    assert content.headers["content-length"] == str(ref.byte_size)
+    assert content.headers["etag"] == f'"{ref.checksum_sha256}"'
+    assert content.headers["x-content-type-options"] == "nosniff"
+    assert content.headers["content-disposition"] == 'attachment; filename="summary.md"'
+
+    foreign_content = client.get(
+        f"/api/artifacts/{ref.id}/content",
+        headers={
+            "X-Fleet-User-Id": str(user),
+            "X-Fleet-Workspace-Id": str(uuid4()),
+        },
+    )
+    assert foreign_content.status_code == 404
+    assert foreign_content.json() == {
+        "code": "artifact_not_found",
+        "message": "Artifact not found",
+    }
+
 
 def test_public_artifact_create_is_removed(tmp_path: Path) -> None:
-    app = create_app(settings=Settings(artifact_root=str(tmp_path), max_artifact_bytes=8))
+    app = create_app(settings=Settings(data_root=str(tmp_path), max_artifact_bytes=8))
     client = TestClient(app)
     headers = {
         "X-Fleet-User-Id": str(uuid4()),

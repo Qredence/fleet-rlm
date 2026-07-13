@@ -1,590 +1,237 @@
-"""Thin use-case: assemble turn context and stream RuntimeEvents from RLMRunner."""
+"""Turn use case: begin, prepare, execute, settle, project, and close."""
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import inspect
-from collections.abc import AsyncGenerator
-from contextlib import aclosing
-from typing import Any, Protocol
-from uuid import UUID, uuid4
+from collections.abc import AsyncGenerator, AsyncIterator
+from typing import Protocol, Self
+from uuid import UUID
 
-from fleet_rlm.artifacts.models import ArtifactCandidate
-from fleet_rlm.chat.commands import ChatTurnCommand
-from fleet_rlm.chat.context_builder import (
-    OfflineContextBuilder,
-    ephemeral_lease,
-    rebind_turn_context,
+from fleet_rlm.chat.commands import OpenTurnCommand
+from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
+from fleet_rlm.chat.turn_lifecycle import (
+    BeginTurn,
+    CommittedTurnReceipt,
+    ExecuteTurn,
+    FailedRunReceipt,
+    ReplayTurn,
+    TurnFailure,
+    TurnLifecycle,
 )
-from fleet_rlm.rlm.context import RLMTurnContext
-from fleet_rlm.rlm.events import EventRecorder, RuntimeEvent, RuntimeEventKind
-from fleet_rlm.rlm.outcome import TurnExecutionOutcome
-from fleet_rlm.rlm.runner import RLMRunner, TurnEventStream
-from fleet_rlm.sessions.checkpoints import TurnClaim
-from fleet_rlm.sessions.errors import SessionAccessDenied, SessionNotFoundError
-from fleet_rlm.sessions.history import turns_to_history
-from fleet_rlm.sessions.locks import SessionLockRegistry
+from fleet_rlm.chat.turn_preparation import (
+    PreparedTurn,
+    TurnPreparation,
+    TurnPreparationCancelled,
+)
+from fleet_rlm.rlm.context import RLMExecutionContext
+from fleet_rlm.rlm.events import (
+    TERMINAL_DETAIL_TYPES,
+    EventRecorder,
+    RunBudgetExhausted,
+    RunCancelled,
+    RunCompleted,
+    RunFailed,
+    RunStarted,
+    RunTimedOut,
+    RuntimeEvent,
+    Status,
+)
+from fleet_rlm.rlm.outcome import RLMOutcome
 
-__all__ = [
-    "SessionStore",
-    "TurnCoordinator",
-    "TurnRunner",
-    "ephemeral_lease",
-    "rebind_turn_context",
-]
+
+class TurnEventStream(AsyncIterator[RuntimeEvent], Protocol):
+    @property
+    def outcome(self) -> RLMOutcome | None: ...
+
+    async def aclose(self) -> None: ...
 
 
 class TurnRunner(Protocol):
-    def stream(self, context: RLMTurnContext) -> TurnEventStream: ...
+    def stream(self, context: RLMExecutionContext) -> TurnEventStream: ...
 
 
-class SessionStore(Protocol):
-    async def load(self, session_id: Any) -> Any: ...
-
-    async def claim_turn(
-        self,
-        session_id: Any,
-        *,
-        idempotency_key: str | None = None,
-        run_id: Any | None = None,
-    ) -> TurnClaim: ...
-
-    async def begin_run(
-        self,
-        session_id: Any,
-        *,
-        idempotency_key: str | None = None,
-        run_id: Any | None = None,
-    ) -> Any: ...
-
-    async def commit_completed_turn(
-        self,
-        session_id: Any,
-        *,
-        user_text: str,
-        assistant_text: str,
-        run_id: Any | None = None,
-        expected_checkpoint_version: int | None = None,
-        artifact_candidates: tuple[ArtifactCandidate, ...] = (),
-        detail_parts: tuple[dict[str, Any], ...] = (),
-        usage: dict[str, Any] | None = None,
-        structured_output: dict[str, Any] | None = None,
-        result_schema_id: str | None = None,
-        result_schema_version: str | None = None,
-    ) -> Any: ...
-
-    async def finish_failed_run(
-        self,
-        session_id: Any,
-        run_id: Any,
-        *,
-        message: str | None = None,
-        terminal_status: str = "failed",
-        usage: dict[str, Any] | None = None,
-    ) -> Any: ...
-
-    async def is_cancel_requested(self, run_id: Any) -> bool: ...
+async def _shield_cleanup(awaitable) -> None:
+    """Complete owned settlement/cleanup even if the caller is cancelled."""
+    task = asyncio.ensure_future(awaitable)
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await asyncio.shield(task)
+        raise
 
 
-def public_terminal_from_outcome(
-    recorder: EventRecorder,
-    outcome: TurnExecutionOutcome,
-    *,
-    checkpoint_version: int | None = None,
-    idempotent_replay: bool = False,
-) -> RuntimeEvent:
-    """Map an internal outcome to exactly one public terminal RuntimeEvent."""
-    if outcome.succeeded:
-        payload: dict[str, Any] = {
-            "status": "completed",
-            "assistant_text": outcome.assistant_text,
-        }
-        if outcome.duration_ms is not None:
-            payload["duration_ms"] = outcome.duration_ms
-        if checkpoint_version is not None:
-            payload["checkpoint_version"] = checkpoint_version
-        if idempotent_replay:
-            payload["idempotent_replay"] = True
-        return recorder.emit(RuntimeEventKind.RUN_COMPLETED, payload)
+class OpenedTurnStream:
+    """Prepared stream handle whose close shields settlement and cleanup."""
 
-    payload = {
-        "status": outcome.terminal_status,
-        "message": outcome.public_error_message or "turn failed",
-    }
-    if outcome.duration_ms is not None:
-        payload["duration_ms"] = outcome.duration_ms
-    return recorder.emit(RuntimeEventKind.ERROR, payload)
+    def __init__(self, run_id: UUID, events: AsyncIterator[RuntimeEvent]) -> None:
+        self.run_id = run_id
+        self._events = events
+
+    def __aiter__(self) -> Self:
+        return self
+
+    async def __anext__(self) -> RuntimeEvent:
+        return await self._events.__anext__()
+
+    async def aclose(self) -> None:
+        close = getattr(self._events, "aclose", None)
+        if close is not None:
+            await _shield_cleanup(close())
 
 
-def _cancelled_usage(context: RLMTurnContext) -> dict[str, Any]:
-    return {
-        "root_model_profile": type(context.models.root_lm).__name__,
-        "sub_model_profile": type(context.models.sub_lm).__name__,
-        "iterations": 0,
-        "tool_calls": 0,
-        "sub_lm_calls": 0,
-        "iteration_limit": context.budget.max_iterations,
-        "tool_call_limit": context.budget.max_tool_calls,
-        "sub_lm_call_limit": context.budget.max_llm_calls,
-        "sub_lm_concurrency_limit": context.budget.max_sub_lm_concurrency,
-        "estimated_cost": None,
-    }
+def _terminal(recorder: EventRecorder, receipt: CommittedTurnReceipt | FailedRunReceipt) -> RuntimeEvent:
+    if isinstance(receipt, CommittedTurnReceipt):
+        return recorder.record(RunCompleted(checkpoint_version=receipt.checkpoint_version, delivery="live"))
+    if receipt.terminal_status == "cancelled":
+        return recorder.record(RunCancelled())
+    if receipt.terminal_status == "timeout":
+        return recorder.record(RunTimedOut())
+    if receipt.terminal_status == "budget_exhausted":
+        return recorder.record(RunBudgetExhausted())
+    message = (
+        "Turn could not be committed" if receipt.public_message == "Turn could not be committed" else "Turn failed"
+    )
+    return recorder.record(RunFailed(code="execution_failed", message=message))
 
 
 class TurnCoordinator:
-    """Application service for one chat turn. No DSPy or Daytona SDK calls here."""
+    """Own public delivery ordering while domain modules own state and resources."""
 
     def __init__(
         self,
         *,
-        runner: TurnRunner | None = None,
-        context_builder: Any | None = None,
-        session_repository: SessionStore | None = None,
-        locks: SessionLockRegistry | None = None,
+        lifecycle: TurnLifecycle,
+        preparation: TurnPreparation,
+        runner: TurnRunner,
+        projector: CommittedTurnEventProjector | None = None,
     ) -> None:
-        self._runner: TurnRunner = runner if runner is not None else RLMRunner()
-        self._context_builder: Any = OfflineContextBuilder() if context_builder is None else context_builder
-        self._sessions = session_repository
-        self._locks = locks if locks is not None else SessionLockRegistry()
+        self._lifecycle = lifecycle
+        self._preparation = preparation
+        self._runner = runner
+        self._projector = projector or CommittedTurnEventProjector()
 
-    def _build_context(self, command: ChatTurnCommand) -> RLMTurnContext:
-        builder = self._context_builder
-        build = getattr(builder, "build", None)
-        if callable(build):
-            return build(command)
-        if callable(builder):
-            return builder(command)
-        msg = "context_builder must be callable or provide build(command)"
-        raise TypeError(msg)
+    async def open(self, command: OpenTurnCommand) -> OpenedTurnStream:
+        """Complete claim and preparation before a transport sends headers."""
+        request = BeginTurn(
+            command.access,
+            command.session_id,
+            command.input,
+            command.idempotency_key,
+            command.proposed_run_id,
+        )
+        start = await self._lifecycle.begin(request)
 
-    async def _abuild_context(
-        self,
-        command: ChatTurnCommand,
-        *,
-        run_id: UUID | None = None,
-    ) -> RLMTurnContext:
-        """Build context; await async builders (e.g. LiveKernelResources.build_context)."""
-
-        builder = self._context_builder
-        for name in ("build_context", "abuild", "build"):
-            method = getattr(builder, name, None)
-            if not callable(method):
-                continue
-            try:
-                accepts_run_id = "run_id" in inspect.signature(method).parameters
-            except (TypeError, ValueError):
-                accepts_run_id = False
-            result = method(command, run_id=run_id) if run_id is not None and accepts_run_id else method(command)
-            if inspect.isawaitable(result):
-                return await result
-            return result
-        if callable(builder):
-            result = builder(command)
-            if inspect.isawaitable(result):
-                return await result
-            return result
-        msg = "context_builder must be callable or provide build/build_context"
-        raise TypeError(msg)
-
-    async def stream(self, command: ChatTurnCommand) -> AsyncGenerator[RuntimeEvent]:
-        """Stream public RuntimeEvents for a single chat command."""
-        if not command.message or not command.message.strip():
-            msg = "message is required"
-            raise ValueError(msg)
-
-        if self._sessions is None:
-            context = await self._abuild_context(command)
-            async with aclosing(self._stream_runner_then_terminal(context, persist=None)) as events:
-                async for event in events:
-                    yield event
-            return
-
-        async with self._locks.hold(command.session_id):
-            async with aclosing(self._stream_locked(command)) as events:
-                async for event in events:
-                    yield event
-
-    async def _stream_locked(self, command: ChatTurnCommand) -> AsyncGenerator[RuntimeEvent]:
-        assert self._sessions is not None
-        preferred_run_id = uuid4()
-        try:
-            snapshot = await self._sessions.load(command.session_id)
-            sess = snapshot.session
-            if sess.user_id != command.user_id or sess.workspace_id != command.workspace_id:
-                raise SessionNotFoundError(f"session {command.session_id} not found") from SessionAccessDenied()
-            history = turns_to_history(snapshot.turns)
-            claim = await self._claim(command, preferred_run_id)
-        except Exception:  # noqa: BLE001 - preparation details are never public
-            try:
-                await self._sessions.finish_failed_run(
-                    command.session_id,
-                    preferred_run_id,
-                    message="Turn could not be prepared",
-                )
-            except Exception:  # noqa: BLE001 - preserve exactly one public terminal
-                pass
-            recorder = EventRecorder(run_id=preferred_run_id, session_id=command.session_id)
-            yield recorder.emit(
-                RuntimeEventKind.ERROR,
-                {"status": "failed", "message": "Turn could not be prepared"},
-            )
-            return
-        if claim.replay:
-            async for event in self._replay_events(
-                session_id=command.session_id,
-                run_id=claim.run_id,
-                assistant_text=claim.assistant_text or "",
-                detail_parts=claim.detail_parts,
-                structured_output=claim.structured_output,
-                result_schema_id=claim.result_schema_id,
-                result_schema_version=claim.result_schema_version,
-            ):
-                yield event
-            return
-
-        sessions = self._sessions
+        if isinstance(start, ReplayTurn):
+            return OpenedTurnStream(start.run_id, self._replay(start))
 
         try:
-            built = await self._abuild_context(command, run_id=claim.run_id)
-        except Exception:  # noqa: BLE001 - preparation details are never public
-            try:
-                await sessions.finish_failed_run(
-                    command.session_id,
-                    claim.run_id,
-                    message="Turn could not be prepared",
+            prepared = await self._preparation.prepare(start)
+        except TurnPreparationCancelled:
+            await _shield_cleanup(
+                self._lifecycle.finish(
+                    start,
+                    TurnFailure("cancelled", "Turn cancelled", {}),
                 )
-            except Exception:  # noqa: BLE001 - preserve exactly one public terminal
-                pass
-            recorder = EventRecorder(run_id=claim.run_id, session_id=command.session_id)
-            yield recorder.emit(
-                RuntimeEventKind.ERROR,
-                {"status": "failed", "message": "Turn could not be prepared"},
             )
-            return
+            raise
+        except Exception:
+            await _shield_cleanup(
+                self._lifecycle.finish(
+                    start,
+                    TurnFailure("failed", "Turn could not be prepared", {}),
+                )
+            )
+            raise
+        return OpenedTurnStream(start.run_id, self._execute(start, prepared))
 
-        async def _cancel_probe(run_id: UUID) -> bool:
-            return await sessions.is_cancel_requested(run_id)
+    async def _replay(self, start: ReplayTurn) -> AsyncGenerator[RuntimeEvent]:
+        recorder = EventRecorder(start.run_id, start.session_id)
+        yield recorder.record(RunStarted(delivery="replay"))
+        yield recorder.record(Status("replay", "running", "idempotent replay"))
+        for event in self._projector.project(start.committed_turn, recorder, mode="replay"):
+            yield event
+        yield recorder.record(RunCompleted(checkpoint_version=start.checkpoint_version, delivery="replay"))
 
-        context = rebind_turn_context(
-            built,
-            run_id=claim.run_id,
-            history=history,
-            cancel_probe=_cancel_probe,
-        )
-        base_version = claim.base_checkpoint_version
-        terminal_stream = self._stream_runner_then_terminal(
-            context,
-            persist=_PersistArgs(
-                command=command,
-                context=context,
-                expected_checkpoint_version=base_version,
-            ),
-        )
-        async with aclosing(terminal_stream) as events:
-            async for event in events:
-                yield event
-
-    async def _stream_runner_then_terminal(
+    async def _execute(
         self,
-        context: RLMTurnContext,
-        *,
-        persist: _PersistArgs | None,
+        turn: ExecuteTurn,
+        prepared: PreparedTurn,
     ) -> AsyncGenerator[RuntimeEvent]:
-        last_sequence = 0
-        persistence_finalized = False
         stream: TurnEventStream | None = None
+        settled = False
+        recorder = EventRecorder(turn.run_id, turn.session_id)
+        heartbeat_task: asyncio.Task[None] | None = None
+        heartbeat = getattr(self._lifecycle, "heartbeat", None)
+        if callable(heartbeat):
+            interval = max(1, int(getattr(self._lifecycle, "heartbeat_seconds", 10)))
+
+            async def maintain_claim() -> None:
+                while True:
+                    await asyncio.sleep(interval)
+                    await heartbeat(turn)
+
+            heartbeat_task = asyncio.create_task(maintain_claim())
         try:
-            stream = self._runner.stream(context)
+            stream = self._runner.stream(prepared.execution)
+            last_sequence = 0
             async for event in stream:
-                if event.kind in {RuntimeEventKind.RUN_COMPLETED, RuntimeEventKind.ERROR}:
-                    # Protocol violation if a runner yields public terminals.
-                    msg = "runner emitted a public terminal event"
-                    raise RuntimeError(msg)
+                if isinstance(event.detail, TERMINAL_DETAIL_TYPES):
+                    raise RuntimeError("runner emitted a terminal Runtime Event")
                 last_sequence = event.sequence
                 yield event
-
-            outcome = stream.outcome
-            if outcome is None:
-                outcome = TurnExecutionOutcome(
-                    terminal_status="failed",
-                    public_error_message="stream ended without outcome",
-                )
-
-            recorder = EventRecorder(
-                run_id=context.run_id,
-                session_id=context.session_id,
-                start_sequence=last_sequence,
+            recorder = EventRecorder(turn.run_id, turn.session_id, start_sequence=last_sequence)
+            outcome = stream.outcome or RLMOutcome(
+                terminal_status="failed",
+                public_error_message="Turn failed",
             )
-            checkpoint_version: int | None = None
-            if persist is not None:
-                try:
-                    checkpoint_version = await self._persist_outcome(persist, outcome)
-                    persistence_finalized = True
-                except Exception:  # noqa: BLE001 - persistence details are never public
-                    try:
-                        sessions = self._sessions
-                        if sessions is None:
-                            raise RuntimeError("Session repository unavailable")
-                        await sessions.finish_failed_run(
-                            persist.command.session_id,
-                            context.run_id,
-                            message="Turn could not be committed",
-                            terminal_status="failed",
-                            usage=outcome.usage,
-                        )
-                        persistence_finalized = True
-                    except Exception:  # noqa: BLE001 - preserve exactly one public terminal
-                        pass
-                    yield public_terminal_from_outcome(
-                        recorder,
-                        TurnExecutionOutcome(
-                            terminal_status="failed",
-                            public_error_message="Turn could not be committed",
-                            duration_ms=outcome.duration_ms,
-                        ),
-                    )
-                    return
-
-            if outcome.succeeded and persist is not None:
-                for candidate in outcome.artifact_candidates:
-                    yield recorder.emit(
-                        RuntimeEventKind.ARTIFACT_CREATED,
-                        {
-                            "artifact_id": str(candidate.id),
-                            "kind": candidate.kind,
-                            "title": candidate.title,
-                            "media_type": candidate.media_type,
-                            "byte_size": candidate.byte_size,
-                            "checksum_sha256": candidate.checksum_sha256,
-                        },
-                    )
-
-            if outcome.succeeded:
-                yield recorder.emit(RuntimeEventKind.USAGE, {"usage": outcome.usage})
-                if outcome.structured_output is not None:
-                    yield recorder.emit(
-                        RuntimeEventKind.STRUCTURED_RESULT,
-                        {
-                            "schemaId": outcome.result_schema_id,
-                            "schemaVersion": outcome.result_schema_version,
-                            "value": outcome.structured_output,
-                        },
-                    )
-                if outcome.assistant_text:
-                    yield recorder.emit(RuntimeEventKind.TEXT_DELTA, {"text": outcome.assistant_text})
-                    yield recorder.emit(RuntimeEventKind.TEXT_COMPLETED, {"text": outcome.assistant_text})
-
-            yield public_terminal_from_outcome(
-                recorder,
+            receipt = await self._lifecycle.finish(
+                turn,
                 outcome,
-                checkpoint_version=checkpoint_version,
+                artifact_sink=prepared.artifact_sink,
             )
+            settled = True
+            if isinstance(receipt, CommittedTurnReceipt):
+                for event in self._projector.project(
+                    receipt.committed_turn,
+                    recorder,
+                    mode="live_suffix",
+                ):
+                    yield event
+            yield _terminal(recorder, receipt)
         except (GeneratorExit, asyncio.CancelledError):
             if stream is not None:
                 try:
                     await asyncio.shield(stream.aclose())
-                except BaseException:  # noqa: BLE001 - cleanup must preserve the outer close
+                except BaseException:
                     pass
-            if persist is not None and not persistence_finalized and self._sessions is not None:
-                measured = stream.outcome if stream is not None else None
+            if not settled:
                 try:
                     await asyncio.shield(
-                        self._sessions.finish_failed_run(
-                            persist.command.session_id,
-                            context.run_id,
-                            message="Turn cancelled",
-                            terminal_status="cancelled",
-                            usage=(
-                                measured.usage if measured is not None and measured.usage else _cancelled_usage(context)
-                            ),
+                        self._lifecycle.finish(
+                            turn,
+                            TurnFailure("cancelled", "Turn cancelled", {}),
+                            artifact_sink=prepared.artifact_sink,
                         )
                     )
-                except Exception:  # noqa: BLE001 - disconnect cleanup is best-effort
+                except Exception:
                     pass
             raise
-        finally:
-            try:
-                context.lease.release()
-            except Exception:  # noqa: BLE001 - committed outcome cannot be retracted by cleanup
-                pass
-
-    async def _claim(self, command: ChatTurnCommand, preferred_run_id: UUID) -> TurnClaim:
-        assert self._sessions is not None
-        claim_turn = getattr(self._sessions, "claim_turn", None)
-        if callable(claim_turn):
-            return await claim_turn(
-                command.session_id,
-                idempotency_key=command.idempotency_key or None,
-                run_id=preferred_run_id,
-            )
-        run_id = await self._sessions.begin_run(
-            command.session_id,
-            idempotency_key=command.idempotency_key or None,
-            run_id=preferred_run_id,
-        )
-        snap = await self._sessions.load(command.session_id)
-        return TurnClaim(
-            run_id=run_id,
-            base_checkpoint_version=int(snap.session.checkpoint_version),
-            replay=False,
-        )
-
-    async def _replay_events(
-        self,
-        *,
-        session_id: UUID,
-        run_id: UUID,
-        assistant_text: str,
-        detail_parts: tuple[dict[str, Any], ...] = (),
-        structured_output: dict[str, Any] | None = None,
-        result_schema_id: str | None = None,
-        result_schema_version: str | None = None,
-    ) -> AsyncGenerator[RuntimeEvent]:
-        recorder = EventRecorder(run_id=run_id, session_id=session_id)
-        yield recorder.emit(RuntimeEventKind.RUN_STARTED, {"idempotent_replay": True})
-        yield recorder.emit(RuntimeEventKind.STATUS, {"message": "idempotent_replay"})
-        replayed_text = False
-        for detail in detail_parts:
-            try:
-                kind = RuntimeEventKind(str(detail.get("kind") or ""))
-            except ValueError:
-                continue
-            if kind in {RuntimeEventKind.RUN_STARTED, RuntimeEventKind.RUN_COMPLETED, RuntimeEventKind.ERROR}:
-                continue
-            payload = detail.get("payload")
-            if kind is RuntimeEventKind.TEXT_DELTA:
-                replayed_text = True
-            yield recorder.emit(kind, payload if isinstance(payload, dict) else {})
-        if assistant_text and not replayed_text:
-            yield recorder.emit(RuntimeEventKind.TEXT_DELTA, {"text": assistant_text})
-            yield recorder.emit(RuntimeEventKind.TEXT_COMPLETED, {"text": assistant_text})
-        yield public_terminal_from_outcome(
-            recorder,
-            TurnExecutionOutcome(
-                terminal_status="completed",
-                assistant_text=assistant_text,
-                detail_parts=detail_parts,
-                structured_output=structured_output,
-                result_schema_id=result_schema_id,
-                result_schema_version=result_schema_version,
-            ),
-            idempotent_replay=True,
-        )
-
-    async def _persist_outcome(
-        self,
-        args: _PersistArgs,
-        outcome: TurnExecutionOutcome,
-    ) -> int | None:
-        assert self._sessions is not None
-        command = args.command
-        context = args.context
-        if outcome.succeeded:
-            await self._promote_artifact_candidates(context, outcome.artifact_candidates)
-            committed_details = list(outcome.detail_parts)
-            committed_details.extend(
-                {
-                    "kind": RuntimeEventKind.ARTIFACT_CREATED.value,
-                    "payload": {
-                        "artifact_id": str(candidate.id),
-                        "kind": candidate.kind,
-                        "title": candidate.title,
-                        "media_type": candidate.media_type,
-                        "byte_size": candidate.byte_size,
-                        "checksum_sha256": candidate.checksum_sha256,
-                    },
-                }
-                for candidate in outcome.artifact_candidates
-            )
-            committed_details.append({"kind": RuntimeEventKind.USAGE.value, "payload": {"usage": outcome.usage}})
-            if outcome.structured_output is not None:
-                committed_details.append(
-                    {
-                        "kind": RuntimeEventKind.STRUCTURED_RESULT.value,
-                        "payload": {
-                            "schemaId": outcome.result_schema_id,
-                            "schemaVersion": outcome.result_schema_version,
-                            "value": outcome.structured_output,
-                        },
-                    }
-                )
-            if outcome.assistant_text:
-                committed_details.extend(
-                    (
-                        {
-                            "kind": RuntimeEventKind.TEXT_DELTA.value,
-                            "payload": {"text": outcome.assistant_text},
-                        },
-                        {
-                            "kind": RuntimeEventKind.TEXT_COMPLETED.value,
-                            "payload": {"text": outcome.assistant_text},
-                        },
+        except Exception:
+            if not settled:
+                try:
+                    receipt = await asyncio.shield(
+                        self._lifecycle.finish(
+                            turn,
+                            TurnFailure("failed", "Turn failed", {}),
+                            artifact_sink=prepared.artifact_sink,
+                        )
                     )
-                )
-            snapshot = await self._sessions.commit_completed_turn(
-                command.session_id,
-                user_text=command.message,
-                assistant_text=outcome.assistant_text,
-                run_id=context.run_id,
-                expected_checkpoint_version=args.expected_checkpoint_version,
-                artifact_candidates=outcome.artifact_candidates,
-                detail_parts=tuple(committed_details),
-                usage=outcome.usage,
-                structured_output=outcome.structured_output,
-                result_schema_id=outcome.result_schema_id,
-                result_schema_version=outcome.result_schema_version,
-            )
-            session = getattr(snapshot, "session", None)
-            if session is not None:
-                return int(getattr(session, "checkpoint_version", 0) or 0)
-            return None
-
-        await self._sessions.finish_failed_run(
-            command.session_id,
-            context.run_id,
-            message=outcome.public_error_message or "turn failed",
-            terminal_status=outcome.terminal_status,
-            usage=outcome.usage,
-        )
-        return None
-
-    @staticmethod
-    async def _promote_artifact_candidates(
-        context: RLMTurnContext,
-        candidates: tuple[ArtifactCandidate, ...],
-    ) -> None:
-        if not candidates:
-            return
-        if context.volume_fs is None:
-            raise RuntimeError("artifact promotion requires a Workspace Volume Scope")
-
-        for candidate in candidates:
-            if (
-                candidate.user_id != context.user_id
-                or candidate.workspace_id != context.workspace_id
-                or candidate.session_id != context.session_id
-                or candidate.run_id != context.run_id
-            ):
-                raise RuntimeError("artifact candidate does not belong to this Turn")
-            data = await asyncio.to_thread(context.volume_fs.read_bytes, candidate.staging_path)
-            if len(data) != candidate.byte_size:
-                raise RuntimeError("artifact candidate size mismatch")
-            if hashlib.sha256(data).hexdigest() != candidate.checksum_sha256:
-                raise RuntimeError("artifact candidate checksum mismatch")
-            await asyncio.to_thread(context.volume_fs.write_bytes, candidate.durable_path, data)
-
-
-class _PersistArgs:
-    __slots__ = ("command", "context", "expected_checkpoint_version")
-
-    def __init__(
-        self,
-        *,
-        command: ChatTurnCommand,
-        context: RLMTurnContext,
-        expected_checkpoint_version: int | None,
-    ) -> None:
-        self.command = command
-        self.context = context
-        self.expected_checkpoint_version = expected_checkpoint_version
+                    settled = True
+                    yield _terminal(recorder, receipt)
+                except Exception:
+                    yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
+        finally:
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
+            await _shield_cleanup(prepared.aclose())

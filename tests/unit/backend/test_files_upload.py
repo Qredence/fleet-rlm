@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -11,11 +12,52 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.app import create_app
 from fleet_rlm.config import Settings
+from fleet_rlm.daytona.paths import VolumePaths
 from fleet_rlm.daytona.volume_fs import HostVolumeMirror
 from fleet_rlm.files.errors import AttachmentNotFoundError, AttachmentValidationError
+from fleet_rlm.files.lifecycle import AttachmentModule
+from fleet_rlm.files.local_catalog import LocalAttachmentBlobGateway, LocalAttachmentCatalog
+from fleet_rlm.files.models import AttachmentAccess, AttachmentRun, AttachmentUpload
+from fleet_rlm.files.paths import LocalAttachmentPathPolicy
 from fleet_rlm.files.safety import sanitize_filename, validate_upload_size
-from fleet_rlm.files.staging import AttachmentStager
-from fleet_rlm.files.uploads import LocalAttachmentStore
+
+
+class _Source:
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+        self.offset = 0
+
+    async def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            size = len(self.data)
+        chunk = self.data[self.offset : self.offset + size]
+        self.offset += len(chunk)
+        return chunk
+
+
+class _Sink:
+    def __init__(self, mirror: HostVolumeMirror) -> None:
+        self.mirror = mirror
+
+    async def read_private(self, logical_path: str) -> bytes:
+        return self.mirror.read_bytes(logical_path)
+
+    async def write_private(self, logical_path: str, data: bytes) -> None:
+        self.mirror.write_bytes(logical_path, data)
+
+    async def remove_private(self, logical_path: str) -> None:
+        self.mirror.remove(logical_path)
+
+
+class _HybridPaths:
+    def __init__(self, volume_paths: VolumePaths) -> None:
+        self.volume_paths = volume_paths
+
+    def attachment_blob(self, attachment_id):
+        return f"{attachment_id}.bin"
+
+    def run_attachment(self, run, attachment_id, filename):
+        return str(self.volume_paths.run_attachment_file(run.session_id, run.run_id, attachment_id, filename))
 
 
 def test_sanitize_filename_rejects_paths() -> None:
@@ -37,51 +79,57 @@ def test_validate_upload_size() -> None:
 
 
 def test_local_store_upload_and_reauth(tmp_path: Path) -> None:
-    store = LocalAttachmentStore(tmp_path, max_bytes=1024)
+    module = AttachmentModule(
+        catalog=LocalAttachmentCatalog(tmp_path),
+        blobs=LocalAttachmentBlobGateway(tmp_path),
+        paths=LocalAttachmentPathPolicy(tmp_path),
+        max_bytes=1024,
+    )
     user, ws = uuid4(), uuid4()
-    ref = store.upload(
-        user_id=user,
-        workspace_id=ws,
-        filename="hello.txt",
-        content_type="text/plain",
-        data=b"hello world",
+    access = AttachmentAccess(user, ws)
+    ref = asyncio.run(
+        module.upload(
+            access,
+            AttachmentUpload("hello.txt", "text/plain", _Source(b"hello world")),
+        )
     )
     assert ref.filename == "hello.txt"
     assert ref.byte_size == 11
     assert len(ref.checksum_sha256) == 64
-    got = store.get(ref.id, user_id=user, workspace_id=ws)
+    got = asyncio.run(module.metadata(access, (ref.id,)))[0]
     assert got.id == ref.id
     with pytest.raises(AttachmentNotFoundError):
-        store.get(ref.id, user_id=uuid4(), workspace_id=ws)
+        asyncio.run(module.metadata(AttachmentAccess(uuid4(), ws), (ref.id,)))
     with pytest.raises(AttachmentNotFoundError):
-        store.get(uuid4(), user_id=user, workspace_id=ws)
+        asyncio.run(module.metadata(access, (uuid4(),)))
 
 
 def test_stage_returns_fleet_sandbox_path_only(tmp_path: Path) -> None:
     mirror = HostVolumeMirror(tmp_path / "volume")
-    store = LocalAttachmentStore(
-        tmp_path / "blobs",
+    module = AttachmentModule(
+        catalog=LocalAttachmentCatalog(tmp_path / "blobs"),
+        blobs=LocalAttachmentBlobGateway(tmp_path / "blobs"),
+        paths=_HybridPaths(VolumePaths.from_mount()),
         max_bytes=1024,
-        volume_fs=mirror,
-        volume_paths=mirror.volume_paths,
     )
-    stager = AttachmentStager(store, volume_fs=mirror, volume_paths=mirror.volume_paths)
     user, ws = uuid4(), uuid4()
-    ref = store.upload(
-        user_id=user,
-        workspace_id=ws,
-        filename="doc.txt",
-        content_type="text/plain",
-        data=b"payload",
+    access = AttachmentAccess(user, ws)
+    ref = asyncio.run(
+        module.upload(
+            access,
+            AttachmentUpload("doc.txt", "text/plain", _Source(b"payload")),
+        )
     )
     session_id, run_id = uuid4(), uuid4()
-    staged = stager.stage(
-        ref.id,
-        user_id=user,
-        workspace_id=ws,
-        session_id=session_id,
-        run_id=run_id,
+    prepared = asyncio.run(
+        module.prepare_run(
+            access,
+            (ref.id,),
+            AttachmentRun(session_id, run_id),
+            _Sink(mirror),
+        )
     )
+    staged = prepared.staged[0]
     assert staged.sandbox_path.startswith("/home/daytona/fleet/sessions/")
     assert str(ref.id) in staged.sandbox_path
     assert "doc.txt" in staged.sandbox_path
@@ -92,7 +140,7 @@ def test_stage_returns_fleet_sandbox_path_only(tmp_path: Path) -> None:
 
 
 def test_api_upload_get_no_path_leak_and_no_public_stage(tmp_path: Path) -> None:
-    settings = Settings(upload_root=str(tmp_path / "uploads"), max_upload_bytes=1024)
+    settings = Settings(data_root=str(tmp_path), max_upload_bytes=1024)
     app = create_app(settings=settings)
     user, ws = uuid4(), uuid4()
     headers = {
@@ -101,11 +149,11 @@ def test_api_upload_get_no_path_leak_and_no_public_stage(tmp_path: Path) -> None
     }
     client = TestClient(app)
     response = client.post(
-        "/api/files",
+        "/api/attachments",
         headers=headers,
-        files={"file": ("readme.md", b"# hi", "text/markdown")},
+        files={"attachment": ("readme.md", b"# hi", "text/markdown")},
     )
-    assert response.status_code == 200
+    assert response.status_code == 201
     body = response.json()
     assert set(body.keys()) == {
         "id",
@@ -119,13 +167,13 @@ def test_api_upload_get_no_path_leak_and_no_public_stage(tmp_path: Path) -> None
     assert tmp_path.as_posix() not in json.dumps(body)
 
     file_id = body["id"]
-    got = client.get(f"/api/files/{file_id}", headers=headers)
+    got = client.get(f"/api/attachments/{file_id}", headers=headers)
     assert got.status_code == 200
     assert got.json()["filename"] == "readme.md"
 
     # wrong workspace
     other = client.get(
-        f"/api/files/{file_id}",
+        f"/api/attachments/{file_id}",
         headers={
             "X-Fleet-User-Id": str(user),
             "X-Fleet-Workspace-Id": str(uuid4()),
@@ -135,7 +183,7 @@ def test_api_upload_get_no_path_leak_and_no_public_stage(tmp_path: Path) -> None
 
     # Public stage removed (B6)
     staged = client.post(
-        f"/api/files/{file_id}/stage",
+        f"/api/attachments/{file_id}/stage",
         headers=headers,
         json={"session_id": str(uuid4()), "run_id": str(uuid4())},
     )
@@ -143,15 +191,15 @@ def test_api_upload_get_no_path_leak_and_no_public_stage(tmp_path: Path) -> None
 
 
 def test_api_rejects_oversize(tmp_path: Path) -> None:
-    settings = Settings(upload_root=str(tmp_path), max_upload_bytes=4)
+    settings = Settings(data_root=str(tmp_path), max_upload_bytes=4)
     app = create_app(settings=settings)
     client = TestClient(app)
     response = client.post(
-        "/api/files",
+        "/api/attachments",
         headers={
             "X-Fleet-User-Id": str(uuid4()),
             "X-Fleet-Workspace-Id": str(uuid4()),
         },
-        files={"file": ("big.bin", b"12345", "application/octet-stream")},
+        files={"attachment": ("big.bin", b"12345", "application/octet-stream")},
     )
     assert response.status_code == 400

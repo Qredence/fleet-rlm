@@ -6,7 +6,9 @@ Secrets use ``SecretStr`` so public dumps never expose plaintext values.
 
 from __future__ import annotations
 
-from pydantic import Field, SecretStr, field_validator
+from typing import Literal
+
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -52,31 +54,29 @@ class Settings(BaseSettings):
         default="/home/daytona/fleet",
         description="Absolute Sandbox mount path for the workspace Volume",
     )
-    live_kernel: bool = Field(
-        default=False,
-        description="When true, app wiring may construct live LM/Daytona clients",
-    )
-    upload_root: str | None = Field(
-        default=None,
-        description="Host directory for attachment blobs (never exposed in API)",
-    )
+    run_environment: Literal["hermetic", "daytona"] = Field(default="hermetic")
+    data_root: str = Field(default=".fleet_rlm")
     max_upload_bytes: int = Field(
         default=10 * 1024 * 1024,
         description="Maximum upload size in bytes",
-    )
-    artifact_root: str | None = Field(
-        default=None,
-        description="Host directory for artifact blobs (never exposed in API)",
     )
     max_artifact_bytes: int = Field(
         default=10 * 1024 * 1024,
         description="Maximum artifact body size in bytes",
     )
-    max_turn_wall_seconds: int = Field(
+    budget_max_wall_seconds: int = Field(
         default=900,
         gt=0,
-        description="Maximum wall-clock seconds allowed for one live RLM turn",
+        description="Maximum wall-clock seconds allowed for one RLM Turn",
     )
+    budget_max_iterations: int = Field(default=6, gt=0)
+    budget_max_llm_calls: int = Field(default=16, gt=0)
+    budget_max_output_chars: int = Field(default=3_000, gt=0)
+    budget_max_sub_lm_concurrency: int = Field(default=8, gt=0)
+    budget_max_tool_calls: int = Field(default=32, gt=0)
+    budget_max_skill_loads: int = Field(default=8, gt=0)
+    run_heartbeat_seconds: int = Field(default=10, gt=0)
+    run_stale_after_seconds: int = Field(default=60, gt=0)
     auth_mode: str = Field(
         default="dev",
         description="dev = synthetic headers; neon = require Neon Auth Bearer JWT",
@@ -89,6 +89,12 @@ class Settings(BaseSettings):
         default=None,
         description="Default tenant/workspace key when JWT has no workspace claim",
     )
+
+    @model_validator(mode="after")
+    def _validate_run_liveness(self) -> Settings:
+        if self.run_stale_after_seconds < self.run_heartbeat_seconds * 3:
+            raise ValueError("FLEET_RUN_STALE_AFTER_SECONDS must be at least three times FLEET_RUN_HEARTBEAT_SECONDS")
+        return self
 
     @field_validator("auth_mode", mode="before")
     @classmethod

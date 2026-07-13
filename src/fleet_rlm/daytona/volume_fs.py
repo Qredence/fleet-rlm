@@ -21,6 +21,8 @@ class VolumeBlobFs(Protocol):
 
     def exists(self, logical_path: str) -> bool: ...
 
+    def remove(self, logical_path: str) -> None: ...
+
 
 class HostVolumeMirror:
     """Hermetic Workspace Volume Scope double: host directory mirrors the mount root.
@@ -74,6 +76,9 @@ class HostVolumeMirror:
 
     def exists(self, logical_path: str) -> bool:
         return self.host_path_for(logical_path).is_file()
+
+    def remove(self, logical_path: str) -> None:
+        self.host_path_for(logical_path).unlink(missing_ok=True)
 
 
 class DaytonaSandboxVolumeFs:

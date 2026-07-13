@@ -10,14 +10,28 @@ from uuid import UUID
 
 import dspy
 
-from fleet_rlm.rlm.context import RLMTurnContext
+from fleet_rlm.rlm.budgets import RunBudget
+from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.signature import FleetRLMSignature
 from fleet_rlm.skills.models import SkillCard
 
 RLMTool = Callable[..., Any] | dspy.Tool
-InputAdapter = Callable[[RLMTurnContext], Mapping[str, Any]]
+InputAdapter = Callable[["CapabilityResolutionContext"], Mapping[str, Any]]
 OutputValidator = Callable[[Mapping[str, Any]], None]
 _RESERVED_TOOL_NAMES = frozenset({"llm_query", "llm_query_batched", "SUBMIT", "print"})
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilityResolutionContext:
+    """Bounded immutable input for optional Skill capability composition."""
+
+    request: str
+    history: Any
+    models: RLMModelBundle
+    budget: RunBudget
+    skill_cards: tuple[SkillCard, ...] = ()
+    attachments: tuple[Any, ...] = ()
+    tools: tuple[RLMTool, ...] = ()
 
 
 class SkillComposedFleetRLMSignature(FleetRLMSignature):
@@ -36,7 +50,7 @@ class CapabilityBudgetRequirements:
     min_llm_calls: int = 0
     min_output_chars: int = 0
 
-    def validate(self, context: RLMTurnContext) -> None:
+    def validate(self, context: CapabilityResolutionContext) -> None:
         budget = context.budget
         if (
             budget.max_iterations < self.min_iterations
@@ -219,7 +233,7 @@ class CapabilityResolver:
         self._selector = selector if selector is not None else DSPySkillSelector()
         self._max_selected = max(0, int(max_selected_skills))
 
-    async def resolve(self, context: RLMTurnContext) -> TurnCapabilityBlueprint:
+    async def resolve(self, context: CapabilityResolutionContext) -> TurnCapabilityBlueprint:
         cards = tuple(context.skill_cards or ())
         try:
             selection = await self._selector.select(
@@ -235,7 +249,7 @@ class CapabilityResolver:
 
     def _compose(
         self,
-        context: RLMTurnContext,
+        context: CapabilityResolutionContext,
         cards: tuple[SkillCard, ...],
         selection: SkillSelection,
     ) -> TurnCapabilityBlueprint:

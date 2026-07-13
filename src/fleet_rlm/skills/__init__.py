@@ -4,6 +4,7 @@ from fleet_rlm.skills.authorize import SkillAuthorizer
 from fleet_rlm.skills.capabilities import (
     CapabilityBudgetRequirements,
     CapabilityRegistry,
+    CapabilityResolutionContext,
     CapabilityResolver,
     SkillSelection,
     TaskContract,
@@ -32,6 +33,7 @@ __all__ = [
     "InMemorySkillRegistry",
     "CapabilityRegistry",
     "CapabilityBudgetRequirements",
+    "CapabilityResolutionContext",
     "CapabilityResolver",
     "SkillAuthorizer",
     "SkillSelection",

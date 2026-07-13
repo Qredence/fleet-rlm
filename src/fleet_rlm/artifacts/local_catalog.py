@@ -12,7 +12,8 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError, ArtifactValidationError
-from fleet_rlm.artifacts.models import KIND_EXTENSIONS, ArtifactKind, ArtifactRef
+from fleet_rlm.artifacts.models import KIND_EXTENSIONS, ArtifactAccess, ArtifactKind, ArtifactRef
+from fleet_rlm.artifacts.reader import StoredArtifact
 from fleet_rlm.artifacts.safety import (
     encode_content,
     media_type_for,
@@ -24,7 +25,7 @@ from fleet_rlm.daytona.paths import VolumePaths, as_posix
 from fleet_rlm.daytona.volume_fs import VolumeBlobFs
 
 
-class LocalArtifactStore:
+class LocalArtifactCatalog:
     """Store artifact catalog under a host root; promote bytes into Volume scope.
 
     Host ``root`` is a hermetic offline catalog. When ``volume_fs`` is set, durable
@@ -258,3 +259,36 @@ class LocalArtifactStore:
         if isinstance(path, str) and path:
             return path
         return as_posix(self._paths.artifact_blob_path(artifact_id))
+
+
+class LocalArtifactReaderCatalog:
+    """Async ArtifactReader catalog adapter over the hermetic local catalog."""
+
+    def __init__(self, store: LocalArtifactCatalog) -> None:
+        self._store = store
+
+    async def get(self, *, access: ArtifactAccess, artifact_id: UUID) -> StoredArtifact:
+        ref = self._store.get(
+            artifact_id,
+            user_id=access.user_id,
+            workspace_id=access.workspace_id,
+        )
+        storage_ref = f"{access.user_id}:{access.workspace_id}:{artifact_id}"
+        return StoredArtifact(ref=ref, storage_ref=storage_ref)
+
+
+class LocalArtifactBlobGateway:
+    """Resolve opaque local Artifact references without exposing host paths."""
+
+    def __init__(self, store: LocalArtifactCatalog) -> None:
+        self._store = store
+
+    async def read(self, workspace_id: UUID, logical_path: str) -> bytes:
+        _user, encoded_workspace, encoded_id = logical_path.split(":", 2)
+        if UUID(encoded_workspace) != workspace_id:
+            raise ArtifactNotFoundError("artifact not found")
+        return self._store.read_bytes(
+            UUID(encoded_id),
+            user_id=UUID(_user),
+            workspace_id=workspace_id,
+        )

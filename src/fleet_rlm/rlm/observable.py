@@ -16,7 +16,7 @@ from uuid import uuid4
 from dspy.predict.rlm import RLM, _strip_code_fences
 from dspy.primitives.code_interpreter import FinalOutput
 
-from fleet_rlm.rlm.errors import RLMBudgetError
+from fleet_rlm.rlm.errors import RunBudgetError
 from fleet_rlm.rlm.sanitize import sanitize_public_text, sanitize_public_value
 
 
@@ -116,6 +116,16 @@ class ObservableRLM(RLM):  # ty: ignore[invalid-base] - DSPy @experimental obscu
         self._fleet_sub_lm_calls = 0
         self._fleet_tool_budget_exhausted = False
         self._fleet_tool_lock = threading.Lock()
+        self._user_tools = {
+            name: type(tool)(
+                self.instrument_tool(name, tool.func),
+                name=tool.name,
+                desc=tool.desc,
+                args=tool.args,
+                arg_types=tool.arg_types,
+            )
+            for name, tool in self._user_tools.items()
+        }
 
     @property
     def tool_budget_exhausted(self) -> bool:
@@ -133,7 +143,7 @@ class ObservableRLM(RLM):  # ty: ignore[invalid-base] - DSPy @experimental obscu
         with self._fleet_tool_lock:
             if self._fleet_tool_calls >= self._fleet_max_tool_calls:
                 self._fleet_tool_budget_exhausted = True
-                raise RLMBudgetError("Turn tool-call budget exhausted")
+                raise RunBudgetError("Turn tool-call budget exhausted")
             self._fleet_tool_calls += 1
             if name == "llm_query":
                 self._fleet_sub_lm_calls += 1
@@ -142,7 +152,8 @@ class ObservableRLM(RLM):  # ty: ignore[invalid-base] - DSPy @experimental obscu
                 self._fleet_sub_lm_calls += len(prompts) if isinstance(prompts, (list, tuple)) else 0
 
     def _make_llm_tools(self, max_workers: int = 8) -> dict[str, Callable[..., Any]]:
-        return super()._make_llm_tools(max_workers=min(max_workers, self._fleet_max_sub_lm_concurrency))
+        tools = super()._make_llm_tools(max_workers=min(max_workers, self._fleet_max_sub_lm_concurrency))
+        return {name: self.instrument_tool(name, function) for name, function in tools.items()}
 
     def _remember_private_values(
         self,
@@ -248,11 +259,9 @@ class ObservableRLM(RLM):  # ty: ignore[invalid-base] - DSPy @experimental obscu
             return
         self._fleet_observer(RLMDetail(kind=kind, payload=payload))
 
-    def _prepare_execution_tools(self) -> dict[str, Callable[..., Any]]:
-        tools = super()._prepare_execution_tools()
-        return {name: self._instrument_tool(name, function) for name, function in tools.items()}
+    def instrument_tool(self, name: str, function: Callable[..., Any]) -> Callable[..., Any]:
+        """Apply Fleet observation and Budget policy while preserving Tool metadata."""
 
-    def _instrument_tool(self, name: str, function: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(function)
         def wrapped(*args: Any, **kwargs: Any) -> Any:
             call_id = str(uuid4())

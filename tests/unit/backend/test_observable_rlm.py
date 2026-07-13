@@ -9,7 +9,7 @@ import pytest
 
 from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
-from fleet_rlm.rlm.errors import RLMBudgetError
+from fleet_rlm.rlm.errors import RunBudgetError
 from fleet_rlm.rlm.observable import ObservableRLM, RLMDetail, RLMDetailKind
 
 
@@ -102,7 +102,7 @@ def test_observable_rlm_remains_a_dspy_rlm() -> None:
 def test_observable_rlm_never_publishes_attachment_skill_or_candidate_bodies() -> None:
     observed: list[RLMDetail] = []
     rlm = ObservableRLM("request -> answer", observer=observed.append)
-    read = rlm._instrument_tool(  # noqa: SLF001 - focused public-projection contract
+    read = rlm.instrument_tool(
         "read_attachment",
         lambda attachment_id: {
             "ok": True,
@@ -111,7 +111,7 @@ def test_observable_rlm_never_publishes_attachment_skill_or_candidate_bodies() -
             "content": "attachment-secret-body",
         },
     )
-    create = rlm._instrument_tool(  # noqa: SLF001 - focused public-projection contract
+    create = rlm.instrument_tool(
         "create_artifact",
         lambda kind, content, title=None: {
             "ok": True,
@@ -122,7 +122,7 @@ def test_observable_rlm_never_publishes_attachment_skill_or_candidate_bodies() -
             "byte_size": len(content),
         },
     )
-    load = rlm._instrument_tool(  # noqa: SLF001 - focused public-projection contract
+    load = rlm.instrument_tool(
         "load_skill",
         lambda skill_id: {"ok": True, "skill_id": skill_id, "instructions": "private-skill-body"},
     )
@@ -134,7 +134,7 @@ def test_observable_rlm_never_publishes_attachment_skill_or_candidate_bodies() -
     def _fail_artifact(_kind: str, content: str) -> None:
         raise ValueError(f"could not store {content}")
 
-    failing_create = rlm._instrument_tool(  # noqa: SLF001 - focused public-projection contract
+    failing_create = rlm.instrument_tool(
         "create_artifact",
         _fail_artifact,
     )
@@ -175,7 +175,7 @@ def test_observable_rlm_never_publishes_attachment_skill_or_candidate_bodies() -
 
     short_observed: list[RLMDetail] = []
     short = ObservableRLM("request -> answer", observer=short_observed.append)
-    short_create = short._instrument_tool(  # noqa: SLF001 - short protected-value regression
+    short_create = short.instrument_tool(
         "create_artifact",
         lambda _kind, content: (_ for _ in ()).throw(ValueError(f"failed {content}")),
     )
@@ -200,10 +200,10 @@ def test_observable_rlm_enforces_tool_and_sub_lm_concurrency_budgets(monkeypatch
         max_tool_calls=1,
         max_sub_lm_concurrency=2,
     )
-    wrapped = rlm._instrument_tool("helper", lambda: "ok")  # noqa: SLF001
+    wrapped = rlm.instrument_tool("helper", lambda: "ok")
 
     assert wrapped() == "ok"
-    with pytest.raises(RLMBudgetError, match="budget"):
+    with pytest.raises(RunBudgetError, match="budget"):
         wrapped()
     assert rlm.tool_budget_exhausted is True
     assert rlm.tool_calls_used == 1

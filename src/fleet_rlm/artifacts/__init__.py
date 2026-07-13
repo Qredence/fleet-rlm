@@ -5,8 +5,8 @@ from fleet_rlm.artifacts.errors import (
     ArtifactNotFoundError,
     ArtifactValidationError,
 )
+from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
 from fleet_rlm.artifacts.models import ArtifactKind, ArtifactRef
-from fleet_rlm.artifacts.store import LocalArtifactStore
 
 __all__ = [
     "ArtifactError",
@@ -14,5 +14,5 @@ __all__ = [
     "ArtifactNotFoundError",
     "ArtifactRef",
     "ArtifactValidationError",
-    "LocalArtifactStore",
+    "LocalArtifactCatalog",
 ]
