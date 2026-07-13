@@ -92,45 +92,6 @@ jobs:
           --timeout=120
           --timeout-method=thread
 
-      - name: Install pnpm
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: pnpm/action-setup@8912a9102ac27614460f54aedde9e1e7f9aec20d # v6.0.5
-        with:
-          version: 10.33.0
-
-      - name: Set up Node.js
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: "24"
-          cache: "pnpm"
-          cache-dependency-path: "src/frontend/pnpm-lock.yaml"
-
-      - name: Frontend install
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        run: |
-          cd src/frontend
-          pnpm install --frozen-lockfile
-
-      - name: Duplicate code detection
-        # This script scans backend and frontend sources, so keep it repo-wide.
-        run: ./scripts/run_duplicate_check.zsh
-
-      - name: Install Playwright browser
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        run: |
-          cd src/frontend
-          pnpm exec playwright install chromium
-
-      - name: Frontend quality gate
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        run: |
-          cd src/frontend
-          pnpm dlx knip --no-progress || echo "⚠️ Unused dependencies detected - see report above"
-          ./node_modules/.bin/vp check
-          ./node_modules/.bin/vp test
-          ./node_modules/.bin/vp build
-
   build:
     name: Build Distribution
     runs-on: ubuntu-latest
@@ -146,44 +107,6 @@ jobs:
         with:
           version: "latest"
 
-      - name: Install pnpm
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: pnpm/action-setup@8912a9102ac27614460f54aedde9e1e7f9aec20d # v6.0.5
-        with:
-          version: 10.33.0
-
-      - name: Set up Node.js
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: "24"
-          cache: "pnpm"
-          cache-dependency-path: "src/frontend/pnpm-lock.yaml"
-
-      - name: Install packaged frontend dependencies
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        run: |
-          cd src/frontend
-          pnpm install --frozen-lockfile
-
-      - name: Build packaged frontend assets
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        run: |
-          cd src/frontend
-          timeout 10m ./node_modules/.bin/vp build > /tmp/fleet-rlm-frontend-build.log 2>&1 || {
-            tail -n 200 /tmp/fleet-rlm-frontend-build.log
-            exit 1
-          }
-          tail -n 40 /tmp/fleet-rlm-frontend-build.log
-
-      - name: Stage packaged frontend assets
-        if: ${{ hashFiles('src/frontend/package.json') != '' }}
-        run: |
-          node src/frontend/scripts/ensure-entrypoint.mjs --dist-dir src/frontend/dist
-          rm -rf src/fleet_rlm/ui/dist
-          mkdir -p src/fleet_rlm/ui
-          cp -R src/frontend/dist src/fleet_rlm/ui/dist
-
       - name: Clean previous builds
         run: rm -rf dist build
 
@@ -192,7 +115,7 @@ jobs:
           FLEET_RLM_UI_BUILD_DONE: "1"
         run: uv build
 
-      - name: Verify packaged frontend assets
+      - name: Verify packaged backend assets
         env:
           FLEET_RLM_UI_BUILD_DONE: "1"
         run: uv run python scripts/validate_release.py wheel

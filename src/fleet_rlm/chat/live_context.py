@@ -152,7 +152,12 @@ class LiveKernelResources:
                 workspace_id=command.workspace_id,
                 request=command.message,
                 models=self.models,
-                budget=RLMBudget(max_iterations=6, max_llm_calls=16, max_output_chars=3000),
+                budget=RLMBudget(
+                    max_iterations=6,
+                    max_llm_calls=16,
+                    max_output_chars=3000,
+                    max_wall_seconds=self.settings.max_turn_wall_seconds,
+                ),
                 lease=lease,
             )
             if self.skill_registry is not None or (

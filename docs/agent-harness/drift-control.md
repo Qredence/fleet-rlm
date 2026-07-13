@@ -14,8 +14,7 @@ make api-check
   gate.
 - `make check-docs` validates active documentation and harness structure.
 - `make check-release` validates backend metadata, packaging, and agent guides.
-- `make api-check` checks root `openapi.yaml` without synchronizing frontend
-  contracts.
+- `make api-check` checks the root backend contract.
 
 ## Active Documentation
 
@@ -33,4 +32,4 @@ make api-sync
 make api-check
 ```
 
-Neither command modifies `src/frontend/`.
+Neither command modifies client source.

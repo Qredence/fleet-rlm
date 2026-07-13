@@ -13,7 +13,6 @@ Fleet RLM uses a multi-context glossary layout.
 - `CONTEXT.md` contains concepts shared across the whole product.
 - `src/fleet_rlm/CONTEXT.md` contains the canonical RLM-native backend language
   (Turns, Runs, leases, Skill Cards, staged Attachments, and Artifact Candidates).
-- `src/frontend/CONTEXT.md` contains frontend interaction language.
 
 ADRs for the deleted backend are preserved under
 `docs/internal/legacy-backend/adr/` as history and are not current authority.

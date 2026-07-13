@@ -21,6 +21,23 @@ class _ActionPredictor:
         )
 
 
+class _RepairAfterExecutionErrorPredictor:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+        self.calls += 1
+        if self.calls == 1:
+            return dspy.Prediction(
+                reasoning="Read the metric.",
+                code="metrics = {'precision': 0.9}\nprint(metrics['prec'])",
+            )
+        return dspy.Prediction(
+            reasoning="The previous key was incorrect; use the available precision key.",
+            code="SUBMIT(answer='precision=0.9')",
+        )
+
+
 @pytest.mark.asyncio
 async def test_observable_rlm_streams_sanitized_iteration_and_tool_details() -> None:
     observed: list[RLMDetail] = []
@@ -56,6 +73,25 @@ async def test_observable_rlm_streams_sanitized_iteration_and_tool_details() -> 
     assert tool_start.payload["tool_call_id"] == tool_end.payload["tool_call_id"]
     assert tool_start.payload["tool_name"] == "helper"
     assert "/home/" not in str(observed)
+
+
+@pytest.mark.asyncio
+async def test_observable_rlm_recovers_from_user_code_error_on_the_next_iteration() -> None:
+    observed: list[RLMDetail] = []
+    rlm = ObservableRLM(
+        "request -> answer",
+        max_iterations=2,
+        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        observer=observed.append,
+    )
+    rlm.generate_action = _RepairAfterExecutionErrorPredictor()
+
+    prediction = await rlm.aforward(request="summarize metrics")
+
+    assert prediction.answer == "precision=0.9"
+    outputs = [item.payload["output"] for item in observed if item.kind is RLMDetailKind.OUTPUT]
+    assert any("'prec'" in output for output in outputs)
+    assert sum(item.kind is RLMDetailKind.STEP_STARTED for item in observed) == 2
 
 
 def test_observable_rlm_remains_a_dspy_rlm() -> None:

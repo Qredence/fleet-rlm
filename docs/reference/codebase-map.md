@@ -41,5 +41,5 @@ compatibility runtime and parallel foundation package no longer exist.
 - `/api/skills`
 - `POST /api/runs/{id}/cancel`
 
-`src/frontend/` remains a separate consumer until its dedicated AI SDK UI 7
-adaptation effort.
+There is currently no frontend source tree. A future client will consume the
+AI SDK UI 7 SSE contract as a separate implementation effort.

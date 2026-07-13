@@ -34,7 +34,6 @@ This project adheres to a code of conduct that all contributors are expected to 
 
 - Python >= 3.10
 - `uv` package manager (see [UV Docs](https://docs.astral.sh/uv/))
-- `pnpm` (for frontend development, see [pnpm Docs](https://pnpm.io/))
 - Git
 - A Daytona account (for sandbox execution)
 
@@ -318,16 +317,6 @@ uv run pytest -q
 uv run python scripts/validate_release.py hygiene
 uv run python scripts/validate_release.py metadata
 uv run python scripts/check_docs_quality.py
-```
-
-### Frontend Check (if frontend workspace is in scope)
-
-```bash
-# from repo root
-cd src/frontend
-pnpm install --frozen-lockfile
-pnpm run check
-cd ../..
 ```
 
 ### Validation Before Merge

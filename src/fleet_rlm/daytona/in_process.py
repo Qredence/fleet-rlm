@@ -60,15 +60,21 @@ class InProcessInterpreterBackend:
             exec(code, self.namespace, self.namespace)  # noqa: S102
         except FleetFinalOutput as final:
             return BackendExecutionResult(stdout=str(self.namespace.get("_out", "")), final=dict(final.value))
+        except DaytonaAdapterError:
+            # Host-tool and interpreter lifecycle failures are not repairable
+            # user-code errors. Preserve their existing terminal semantics.
+            raise
         except Exception as exc:  # noqa: BLE001 - sanitize at the mediation boundary
             # Remote-style SUBMIT may raise a namespace-local FleetFinalOutput twin.
             value = getattr(exc, "value", None)
             if type(exc).__name__ == "FleetFinalOutput" and isinstance(value, dict):
                 return BackendExecutionResult(stdout=str(self.namespace.get("_out", "")), final=dict(value))
-            raise DaytonaAdapterError(
-                message=sanitize_provider_message(str(exc)),
-                cause_type=type(exc).__name__,
-            ) from exc
+            # Match Daytona's code-interpreter behavior: an exception in
+            # generated code is feedback for the RLM, not a platform failure.
+            return BackendExecutionResult(
+                stdout=str(self.namespace.get("_out", "")),
+                error=sanitize_provider_message(str(exc)),
+            )
         return BackendExecutionResult(stdout=str(self.namespace.get("_out", "")))
 
     def close(self) -> None:

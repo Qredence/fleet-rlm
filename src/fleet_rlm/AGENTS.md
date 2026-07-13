@@ -41,5 +41,4 @@ Daytona credentials as Fleet API bearer tokens.
 
 ## Generated contract
 
-`openapi.yaml` is the backend-only generated contract. Run `make api-sync` and
-do not update `src/frontend/` generated files during backend-only work.
+`openapi.yaml` is the backend-only generated contract. Run `make api-sync`.

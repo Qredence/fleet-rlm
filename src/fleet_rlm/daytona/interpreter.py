@@ -74,10 +74,10 @@ class _SandboxCodeInterpreterBackend:
             if error_name in {"FleetFinalOutput", "_FleetFinalOutput"} and final is not None:
                 return BackendExecutionResult(stdout=stdout, final=final)
             raw = f"{getattr(error, 'name', 'Error')}: {getattr(error, 'value', error)}"
-            raise DaytonaAdapterError(
-                message=sanitize_provider_message(raw),
-                cause_type="SandboxCodeInterpreterError",
-            )
+            # User-generated Python errors are part of the RLM feedback loop:
+            # return them to DSPy so the next iteration can repair the code.
+            # Provider/transport failures still raise above from run_code().
+            return BackendExecutionResult(stdout=stdout, error=sanitize_provider_message(raw))
         if final is not None:
             return BackendExecutionResult(stdout=stdout, final=final)
         return BackendExecutionResult(stdout=stdout)
@@ -211,10 +211,7 @@ class DaytonaCodeInterpreter:
     def _finalize(self, raw: str | BackendExecutionResult) -> Any:
         if isinstance(raw, BackendExecutionResult):
             if raw.error:
-                raise DaytonaAdapterError(
-                    message=sanitize_provider_message(raw.error),
-                    cause_type="SandboxCodeInterpreterError",
-                )
+                return f"[Error] {sanitize_provider_message(raw.error)}"
             if raw.final is not None:
                 return FinalOutput(raw.final)
             return raw.stdout

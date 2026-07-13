@@ -198,6 +198,36 @@ async def test_live_context_releases_claimed_lease_when_post_acquire_preparation
 
 
 @pytest.mark.asyncio
+async def test_live_context_propagates_configured_turn_wall_budget() -> None:
+    from fleet_rlm.chat.commands import ChatTurnCommand
+    from fleet_rlm.chat.live_context import LiveKernelResources
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+
+    lease = SimpleNamespace(sandbox_id="sb-1", interpreter=object())
+
+    class Manager:
+        async def acquire(self, _request):
+            return lease
+
+    resources = object.__new__(LiveKernelResources)
+    resources.settings = Settings(max_turn_wall_seconds=123)
+    resources.session_manager = Manager()
+    resources.allow_ephemeral_fallback = False
+    resources.last_used_ephemeral = False
+    resources._sandbox_ids = []
+    resources.models = RLMModelBundle(root_lm=object(), sub_lm=object())
+    resources.skill_registry = None
+    resources.attachment_store = None
+    resources.artifact_store = None
+
+    context = await resources.build_context(
+        ChatTurnCommand(user_id=uuid4(), workspace_id=uuid4(), session_id=uuid4(), message="long task"),
+    )
+
+    assert context.budget.max_wall_seconds == 123
+
+
+@pytest.mark.asyncio
 async def test_install_live_composition_does_not_create_schema(monkeypatch) -> None:
     import fleet_rlm.composition as composition
     import fleet_rlm.persistence.database as database

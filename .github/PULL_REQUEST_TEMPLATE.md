@@ -16,7 +16,6 @@ Please delete options that are not relevant.
 ## Checklist
 
 - [ ] Relevant local validation passed (`make test-fast` for backend-only work, `make quality-gate` for shared-contract work)
-- [ ] Frontend changes passed repo checks (`cd src/frontend && pnpm run api:check && pnpm run type-check && pnpm run lint:robustness && pnpm run test:unit && pnpm run build`)
 - [ ] Pre-commit and pre-push hooks are installed locally (`uv run pre-commit install` and `uv run pre-commit install --hook-type pre-push`)
 - [ ] Documentation updated (README, AGENTS.md, docstrings)
 - [ ] Commit messages follow conventions

@@ -72,6 +72,11 @@ class Settings(BaseSettings):
         default=10 * 1024 * 1024,
         description="Maximum artifact body size in bytes",
     )
+    max_turn_wall_seconds: int = Field(
+        default=900,
+        gt=0,
+        description="Maximum wall-clock seconds allowed for one live RLM turn",
+    )
     auth_mode: str = Field(
         default="dev",
         description="dev = synthetic headers; neon = require Neon Auth Bearer JWT",

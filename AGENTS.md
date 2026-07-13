@@ -1,6 +1,6 @@
 # Repository Agent Map
 
-`fleet-rlm` is a Web UI-first adaptive recursive language model workspace built around a Daytona-backed DSPy ReAct agent runtime.
+`fleet-rlm` is a backend-first adaptive recursive language model workspace built around a Daytona-backed DSPy RLM runtime. The prior frontend has been removed; a new client will be introduced separately.
 
 ## Operating Model
 
@@ -14,19 +14,17 @@
 
 1. `docs/agent-harness/README.md` - harness model, reading order, and quality bar.
 2. `docs/agent-harness/feedback-loop.md` - local Codex loop and report expectations.
-3. `docs/agent-harness/architecture-invariants.md` - backend, frontend, generated-file rules.
+3. `docs/agent-harness/architecture-invariants.md` - backend and generated-file rules.
 4. `docs/reference/codebase-map.md` - source layout and ownership map.
 5. `docs/how-to-guides/testing-strategy.md` - validation lanes by change type.
 
 ## Deeper Agent Guides
 
 - `src/fleet_rlm/AGENTS.md` - backend, runtime, API, persistence, Daytona, and package rules.
-- `src/frontend/AGENTS.md` - React, TanStack Router, Vite+, styling, and frontend checks.
 
 ## Durable Detail Locations
 
 - Auth, DB, websocket, runtime, and deploy details live in `src/fleet_rlm/AGENTS.md` or matching docs.
-- Frontend routing, Agent Elements, styling, session restore, and package rules live in `src/frontend/AGENTS.md`.
 - Local Codex actions, ports, browser smoke expectations, and tool preferences live in `.codex/` and loop docs.
 
 ## Agent skills
@@ -41,13 +39,12 @@ Use the default `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-huma
 
 ### Domain docs
 
-Use the root, backend, and frontend contexts listed in `CONTEXT-MAP.md`, plus relevant ADRs. See `docs/agents/domain.md`.
+Use the root and backend contexts listed in `CONTEXT-MAP.md`, plus relevant ADRs. See `docs/agents/domain.md`.
 
 ## Setup
 
 ```bash
 uv sync --all-extras --dev
-cd src/frontend && pnpm install --frozen-lockfile
 zsh .codex/workspace-bootstrap.zsh
 ```
 
@@ -56,7 +53,6 @@ zsh .codex/workspace-bootstrap.zsh
 ```bash
 uv run fleet web
 uv run fleet-rlm serve-api --port 8000
-pnpm --filter frontend dev
 ```
 
 ## Validation
@@ -71,7 +67,7 @@ Override it only on a runner with verified capacity using
 
 ## Generated Artifacts
 
-Do not hand-edit: `openapi.yaml`, `src/frontend/src/lib/rlm-api/generated/openapi.ts`, `src/frontend/openapi/fleet-rlm.openapi.yaml`, `src/frontend/src/routeTree.gen.ts`, `src/frontend/dist`, `src/fleet_rlm/ui/dist`.
+Do not hand-edit: `openapi.yaml`, `src/fleet_rlm/ui/dist`.
 
 Use: `make api-sync`, `make api-check`, `make build-ui`.
 

@@ -19,7 +19,9 @@ Chat UI
   -> later session continuation
 ```
 
-The frontend understands sessions, messages, attachments, artifacts, and public RuntimeEvents. It does not understand DSPy internals, model-provider names, Sandbox IDs, Volume paths, interpreter contexts, or Skill trust internals.
+A future frontend will understand sessions, messages, attachments, Artifacts,
+and public Runtime Events. It will not understand DSPy internals, model-provider
+names, Sandbox IDs, Volume paths, interpreter contexts, or Skill trust internals.
 
 ## 3. Foundation scope
 

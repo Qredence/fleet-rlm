@@ -182,7 +182,7 @@ class AgentsMdValidator:
                 # Python src layout case (e.g., src/fleet_rlm/)
                 package_root = candidate
             elif (candidate / "package.json").exists():
-                # Node.js frontend case (e.g., src/frontend/)
+                # Node.js package case
                 package_root = candidate
 
         # Pattern for backtick-enclosed paths like `src/fleet_rlm/` or `core/agent/`
@@ -342,7 +342,7 @@ class AgentsMdValidator:
         content = root_agents.read_text(encoding="utf-8", errors="ignore")
 
         # Expected cross-references from root to sub AGENTS.md files
-        expected_refs = ["src/fleet_rlm/AGENTS.md", "src/frontend/AGENTS.md"]
+        expected_refs = ["src/fleet_rlm/AGENTS.md"]
 
         for ref in expected_refs:
             if ref not in content:

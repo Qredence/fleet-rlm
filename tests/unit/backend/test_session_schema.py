@@ -26,6 +26,14 @@ def test_normalize_database_url_upgrades_drivers() -> None:
         normalize_database_url("   ")
 
 
+def test_normalize_database_url_drops_libpq_channel_binding_for_asyncpg() -> None:
+    normalized = normalize_database_url(
+        "postgresql+asyncpg://user:password@example.test/fleet?sslmode=require&channel_binding=require",
+    )
+
+    assert normalized == "postgresql+asyncpg://user:password@example.test/fleet?ssl=require"
+
+
 def test_foundation_tables_are_registered() -> None:
     names = set(Base.metadata.tables)
     expected = {

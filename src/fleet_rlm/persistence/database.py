@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -29,11 +30,30 @@ def normalize_database_url(url: str) -> str:
     if not cleaned:
         raise DatabaseNotConfiguredError("database URL is empty")
     if cleaned.startswith("postgres://"):
-        return "postgresql+asyncpg://" + cleaned.removeprefix("postgres://")
-    if cleaned.startswith("postgresql://") and "+asyncpg" not in cleaned:
-        return "postgresql+asyncpg://" + cleaned.removeprefix("postgresql://")
-    if cleaned.startswith("sqlite://") and "+aiosqlite" not in cleaned:
-        return cleaned.replace("sqlite://", "sqlite+aiosqlite://", 1)
+        cleaned = "postgresql+asyncpg://" + cleaned.removeprefix("postgres://")
+    elif cleaned.startswith("postgresql://") and "+asyncpg" not in cleaned:
+        cleaned = "postgresql+asyncpg://" + cleaned.removeprefix("postgresql://")
+    elif cleaned.startswith("sqlite://") and "+aiosqlite" not in cleaned:
+        cleaned = cleaned.replace("sqlite://", "sqlite+aiosqlite://", 1)
+    if cleaned.startswith("postgresql+asyncpg://"):
+        # ``channel_binding`` is a libpq/psycopg option. SQLAlchemy forwards URL
+        # query parameters to asyncpg.connect(), which does not accept it.
+        # asyncpg accepts the equivalent SSL mode through its ``ssl`` option.
+        parsed = make_url(cleaned)
+        query = dict(parsed.query)
+        changed = query.pop("channel_binding", None) is not None
+        sslmode = query.pop("sslmode", None)
+        if sslmode is not None:
+            changed = True
+            query.setdefault("ssl", sslmode)
+        if changed:
+            return (
+                parsed.difference_update_query(list(parsed.query))
+                .update_query_dict(query)
+                .render_as_string(
+                    hide_password=False,
+                )
+            )
     return cleaned
 
 

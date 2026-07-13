@@ -39,6 +39,15 @@ def test_execute_returns_string_and_preserves_state() -> None:
     assert result == "41"
 
 
+def test_execute_returns_user_code_errors_for_rlm_repair() -> None:
+    from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+
+    interp = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+
+    assert interp.execute("metrics = {'precision': 0.9}\nprint(metrics['prec'])") == "[Error] 'prec'"
+
+
 def test_shutdown_is_idempotent() -> None:
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 

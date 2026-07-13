@@ -17,7 +17,8 @@ storage policy, and redaction. RLM-native does not mean RLM-only.
 
 The legacy runtime has been removed. `src/fleet_rlm/` is the RLM-native backend;
 there is no compatibility runtime, dual-serve path, or backend-selection surface.
-Phase 10 owns the separate frontend contract adaptation.
+The former frontend has been removed. A new client and its contract adaptation
+are a separately authorized follow-up.
 
 ## Canonical architecture
 

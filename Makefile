@@ -8,11 +8,11 @@ PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
 	help \
 	install install-dev install-all \
 	dev format format-check lint typecheck \
-	test test-fast test-unit test-contract test-e2e \
-	check quality-gate check-release check-docs check-duplicates check-security check-deps check-frontend check-codebase-tree api-check api-sync \
+	test test-fast test-unit test-contract \
+	check quality-gate check-release check-docs check-security check-deps check-codebase-tree api-check api-sync \
 	build build-release release release-check \
 	clean cli mlflow precommit-install precommit-run precommit \
-	sync sync-dev sync-all metadata-check docs-check security-check dependency-check frontend-check release-artifacts cli-help mlflow-server mlflow-upgrade \
+	sync sync-dev sync-all metadata-check docs-check security-check dependency-check release-artifacts cli-help mlflow-server mlflow-upgrade \
 	cloud-preflight
 
 help:
@@ -32,16 +32,13 @@ help:
 	@echo "  make test             - Run default non-live/non-benchmark tests"
 	@echo "  make test-unit        - Run unit tests (non-live/non-benchmark)"
 	@echo "  make test-contract    - Run backend contracts and CLI smoke tests"
-	@echo "  make test-e2e         - Run frontend Playwright tests when frontend exists"
 	@echo ""
 	@echo "Quality:"
 	@echo "  make check            - Run the primary repo quality gate"
 	@echo "  make check-release    - Run release metadata/hygiene and AGENTS.md validation"
 	@echo "  make check-docs       - Run docs quality and harness engineering checks"
-	@echo "  make check-duplicates - Detect duplicate handwritten source blocks with jscpd (requires frontend pnpm install)"
 	@echo "  make check-security   - Run pip-audit + bandit"
 	@echo "  make check-deps       - Check for unused dependencies (deptry, knip)"
-	@echo "  make check-frontend   - Run frontend checks when src/frontend exists"
 	@echo "  make check-codebase-tree - Enforce import boundaries defined in codebase map"
 	@echo "  make api-check        - Verify the backend-only OpenAPI artifact"
 	@echo "  make api-sync         - Regenerate the backend-only OpenAPI artifact"
@@ -100,13 +97,6 @@ test-contract:
 test-db:
 	$(PYTEST) -q -m "db" -n 0
 
-test-e2e:
-	@if [ -f src/frontend/package.json ]; then \
-		cd src/frontend && pnpm run test:e2e; \
-	else \
-		echo "No src/frontend/package.json found, skipping frontend e2e tests."; \
-	fi
-
 check: lint format-check typecheck test api-check check-codebase-tree
 
 quality-gate: check
@@ -120,9 +110,6 @@ check-docs:
 	uv run python scripts/check_docs_quality.py
 	uv run python scripts/check_harness_engineering.py
 
-check-duplicates:
-	./scripts/run_duplicate_check.zsh
-
 check-security:
 	# TODO: Remove this ignore once Pygments ships a patched release for
 	# GHSA-5239-wwwm-4pmq / CVE-2026-4539.
@@ -135,16 +122,6 @@ check-security:
 
 check-deps:
 	uvx deptry .
-	@if [ -f src/frontend/package.json ]; then \
-		cd src/frontend && pnpm dlx knip --no-progress || echo "Unused dependencies detected - see report above"; \
-	fi
-
-check-frontend:
-	@if [ -f src/frontend/package.json ]; then \
-		cd src/frontend && pnpm install --frozen-lockfile && pnpm run api:check && pnpm run type-check && pnpm run lint:robustness && pnpm run test:unit && CI=true pnpm run build; \
-	else \
-		echo "No src/frontend/package.json found, skipping frontend checks."; \
-	fi
 
 check-codebase-tree:
 	uv run python scripts/check_codebase_tree.py
@@ -218,9 +195,6 @@ security-check:
 
 dependency-check:
 	$(MAKE) check-deps
-
-frontend-check:
-	$(MAKE) check-frontend
 
 release-artifacts:
 	$(MAKE) build-release

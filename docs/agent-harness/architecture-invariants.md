@@ -53,14 +53,8 @@ them to FastAPI routes. Do not move provider calls or raw exceptions across the
   import, schema, route, or command aliases for the deleted backend.
 - There is no `/api/v1`, WebSocket execution, dual-serve, legacy data migration,
   runtime-admin, optimization/evaluation API, or public Artifact creation.
-- `src/frontend/` is a separate consumer until its SSE adaptation; backend work
-  does not synchronize or package frontend artifacts.
-
-## Frontend boundaries
-
-Existing frontend source remains governed by its own `AGENTS.md`. Backend-only
-work must not edit frontend source, generated OpenAPI copies, route trees, or
-build artifacts.
+- No frontend source tree or generated frontend contract is currently retained.
+  A future client must integrate through the public AI SDK UI 7 SSE contract.
 
 ## Generated artifacts
 
@@ -71,8 +65,7 @@ make api-sync
 make api-check
 ```
 
-These commands are backend-only. Frontend generated contracts are intentionally
-not synchronized by the backend gate.
+These commands own the backend contract.
 
 ## Script boundary
 
