@@ -1,8 +1,7 @@
 # fleet_rlm — Bundled Agent Skills
 
-Reference skills for the **clean** parallel backend: `dspy.RLM` + Daytona
-`code_interpreter` + SSE `POST /api/chat`. They are not the live
-`fleet_rlm.scaffold` skill set (WebSocket, EscalatingFleet, GEPA).
+Bundled skills for the canonical backend: `dspy.RLM` + Daytona
+`code_interpreter` + SSE `POST /api/chat`.
 
 ## Catalog
 
@@ -16,8 +15,8 @@ Reference skills for the **clean** parallel backend: `dspy.RLM` + Daytona
 | `browser-interaction` | Optional Playwright / SPA pages | yes |
 | `writing-great-skills` | Authoring principles | **no** (`disable-model-invocation`) |
 
-Removed from clean seed (live-only sediment): `delegation`, `dspy-programs`,
-`optimization`.
+Delegation, DSPy-program generation, and optimization are not bundled
+capabilities.
 
 ## Shipping
 
@@ -42,5 +41,5 @@ Do not hardcode install paths. Prefer `importlib.resources` via the loader.
 
 ## Stability
 
-Skills must describe `fleet_rlm` only. If a skill references
-`fleet_rlm.runtime`, WebSocket `/api/v1/ws/execution`, or GEPA CLI, it is stale.
+Skills must describe the canonical `fleet_rlm` modules and public HTTP/SSE
+contract only.

@@ -19,8 +19,8 @@ make api-check
 ## Active Documentation
 
 Current docs must be reachable from `docs/index.md` or `docs/SUMMARY.md`.
-Documents under `docs/internal/legacy-backend/` are excluded because they
-describe the deleted backend and exist only as historical evidence.
+Superseded plans and removed-backend documentation remain available through Git
+history rather than an excluded in-tree archive.
 
 ## Script and Contract Drift
 

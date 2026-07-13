@@ -47,26 +47,11 @@ tmp/
 .scratch/
 TASKS.md
 docs/notes/
-docs/internal/
-docs/reference/adr/
 docs/superpowers/
-docs/plans/
-docs/archive/
 
 qa-results/
 
 plan/
-
-# Frontend
-src/frontend/node_modules/
-src/frontend/dist/
-src/frontend/test-results/
-src/frontend/playwright-report/
-src/frontend/.vite/
-src/frontend/.tanstack/
-src/frontend/smoke-*.mjs
-src/frontend/.tmp-*.mjs
-.vite/
 
 # Agent/tooling state
 .claude/
@@ -77,7 +62,6 @@ src/frontend/.tmp-*.mjs
 !.codex/environments/environment.toml
 !.codex/workspace-bootstrap.zsh
 !.codex/config.toml
-!.codex/hooks.json
 !.codex/hooks/
 !.codex/hooks/*.zsh
 !.codex/agents/
@@ -87,7 +71,6 @@ src/frontend/.tmp-*.mjs
 .junie/
 .pi/
 .hermes/
-.factory/
 blogs/
 .cursor/
 
@@ -103,10 +86,6 @@ artifacts/
 artifacts/eval/
 !src/fleet_rlm/artifacts/
 !src/fleet_rlm/artifacts/*.py
-!tests/unit/artifacts/
-!tests/unit/artifacts/*.py
-!src/frontend/src/features/artifacts/
-!src/frontend/src/features/artifacts/*.tsx
 
 # Local runtime artifacts
 .data/
@@ -160,7 +139,6 @@ files/ai_index_report_2026.pdf
 blogs/
 logs/
 mlflow_verification_report.md
-src/frontend/test_output.txt
 
 
 .understand-anything/
@@ -176,5 +154,3 @@ transcript-vvqo_92l.jsonl
 .cursor/settings.json
 .cursor/hooks/state/continual-learning-index.json
 .cursor/hooks/state/continual-learning.json
-PLAN.md
-PLANS_REORGANIZED.md

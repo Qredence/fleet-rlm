@@ -26,7 +26,6 @@ uv run fleet-rlm serve-api --port 8000
 - [Database](reference/database.md)
 - [Testing strategy](how-to-guides/testing-strategy.md)
 - [Agent harness](agent-harness/README.md)
-- [Implementation history](plan-implementation/README.md)
 
-The authoritative backend contract is `openapi.yaml`. Legacy backend material
-is preserved only under `docs/internal/legacy-backend/`.
+The authoritative backend contract is `openapi.yaml`. Superseded implementation
+plans and removed-backend documentation remain available through Git history.

@@ -6,5 +6,4 @@
 - [Source layout](source-layout.md) — package and test ownership.
 - [Codebase map](codebase-map.md) — module boundaries and dependency direction.
 
-The generated `openapi.yaml` file is authoritative for HTTP shapes. Historical
-references for the removed backend live under `docs/internal/legacy-backend/`.
+The generated `openapi.yaml` file is authoritative for HTTP shapes.

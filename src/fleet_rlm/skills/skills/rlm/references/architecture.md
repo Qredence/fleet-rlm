@@ -24,4 +24,5 @@ Paths relative to `src/fleet_rlm/`.
 | `files/tools.py` | Attachment / artifact host tools |
 | `observability/` | TurnTrace + exporters |
 
-Live package `src/fleet_rlm/` (WebSocket, EscalatingFleetModule, GEPA CLI) is **out of scope** for these skills.
+This map describes the live `src/fleet_rlm/` package. New capability guidance
+must remain aligned with these owning modules.

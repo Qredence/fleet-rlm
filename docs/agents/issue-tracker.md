@@ -10,7 +10,9 @@ The directory is intentionally gitignored: it is a coordination surface for agen
 - Ordinary implementation issues are `.scratch/<effort>/issues/<NN>-<slug>.md`, numbered from `01`.
 - Triage state is a `Status:` line near the top of each issue.
 - Comments append under `## Comments`.
-- Settled implementation plans are published into the owning tracked documentation module; for the backend refactor that module is `docs/plan-implementation/`.
+- Settled architecture and workflow decisions are published into the owning
+  current documentation page linked from `docs/index.md`; superseded plans
+  remain available through Git history.
 
 ## Wayfinding operations
 

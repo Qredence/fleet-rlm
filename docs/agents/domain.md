@@ -14,6 +14,5 @@ Fleet RLM uses a multi-context glossary layout.
 - `src/fleet_rlm/CONTEXT.md` contains the canonical RLM-native backend language
   (Turns, Runs, leases, Skill Cards, staged Attachments, and Artifact Candidates).
 
-ADRs for the deleted backend are preserved under
-`docs/internal/legacy-backend/adr/` as history and are not current authority.
-Record new hard-to-reverse decisions alongside the active planning artifact.
+Record new hard-to-reverse decisions in a current ADR linked from the docs
+index. Removed-backend decisions remain available through Git history.

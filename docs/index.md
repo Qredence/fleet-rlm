@@ -22,7 +22,7 @@ Daytona, and SQLAlchemy/Alembic.
 - [Source layout](reference/source-layout.md)
 - [Database](reference/database.md)
 - [Runtime execution flow](explanation/agent-runtime-execution-flow.md)
-- [Backend foundation and cutover history](plan-implementation/README.md)
+- [Current implementation plans](plan-implementation/README.md)
 
 ## Source of Truth
 
@@ -31,6 +31,3 @@ Daytona, and SQLAlchemy/Alembic.
 - schema: `migrations/`
 - backend validation: `Makefile`, `tests/unit/backend/`,
   `tests/contracts/backend/`, and `tests/live/backend/`
-
-Documents under `docs/internal/legacy-backend/` are historical records for the
-removed backend. They are not current product or compatibility documentation.

@@ -43,3 +43,11 @@ never public Artifact rows.
 
 There is no legacy backend, `/api/v1`, WebSocket execution, dual-serve, or data
 migration layer. Frontend adaptation is a separate effort.
+
+## Cutover status
+
+The RLM-native package replaced the former Python backend after its attachment,
+Artifact, persistence, and Workspace-isolation exit bar passed. The maintained
+architecture is the module ownership described above and in
+[`reference/codebase-map.md`](reference/codebase-map.md); superseded migration
+plans remain available through Git history rather than a parallel docs tree.
