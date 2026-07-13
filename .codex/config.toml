@@ -54,22 +54,17 @@ max_depth = 1
 job_max_runtime_seconds = 3600
 
 [agents.backend-runtime]
-description = "FastAPI, websocket, Daytona-backed runtime, DSPy ReAct, and recursive RLM implementation work."
+description = "FastAPI, Turn orchestration, DSPy RLM, persistence, and Runtime Event implementation work."
 config_file = "agents/backend-runtime.toml"
 nickname_candidates = ["Runtime", "Backend"]
 
-[agents.frontend-ui]
-description = "React 19, TanStack Router/Start, Vite+, Tailwind, shadcn/Base UI, and Agent Elements frontend work."
-config_file = "agents/frontend-ui.toml"
-nickname_candidates = ["Frontend", "UI"]
-
 [agents.api-contract]
-description = "OpenAPI schema, backend/frontend contract, generated API artifacts, and websocket payload review."
+description = "OpenAPI schema, HTTP routes, AI SDK UI v1 SSE, and generated backend contract review."
 config_file = "agents/api-contract.toml"
 nickname_candidates = ["Contract", "OpenAPI"]
 
 [agents.testing-strategist]
-description = "Chooses and audits the smallest meaningful validation lane for backend, frontend, integration, and release work."
+description = "Chooses and audits backend, terminal-client, contract, live, and release validation lanes."
 config_file = "agents/testing-strategist.toml"
 nickname_candidates = ["Tests", "Validation"]
 
@@ -79,17 +74,17 @@ config_file = "agents/security-reviewer.toml"
 nickname_candidates = ["Security", "Reviewer"]
 
 [agents.release-manager]
-description = "Release hygiene, packaging, bundled UI assets, metadata, docs, and publish readiness."
+description = "Backend release hygiene, packaging, metadata, docs, contracts, and publish readiness."
 config_file = "agents/release-manager.toml"
 nickname_candidates = ["Release", "Packager"]
 
 [agents.sandbox-runtime]
-description = "Daytona SDK integration, sandbox lifecycle, volumes, child isolation, context staging, and runtime diagnostics."
+description = "Daytona SDK integration, Sandbox lifecycle, Interpreter Leases, Volumes, and safe provider seams."
 config_file = "agents/sandbox-runtime.toml"
 nickname_candidates = ["Daytona", "Sandbox"]
 
 [agents.docs-maintainer]
-description = "AGENTS.md, implementation-phase dossiers, docs, README, and durable workflow documentation consistency."
+description = "AGENTS.md, current architecture/reference docs, README, and workflow documentation consistency."
 config_file = "agents/docs-maintainer.toml"
 nickname_candidates = ["Docs", "Maintainer"]
 

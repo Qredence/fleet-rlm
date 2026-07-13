@@ -31,28 +31,14 @@ repos:
     hooks:
       - id: ty-check
         name: Type-check backend sources with ty
-        entry: ./scripts/run_ty_check.zsh
+        entry: make typecheck
         language: system
         pass_filenames: false
         stages: [pre-commit]
 
       - id: backend-fast-tests
         name: Run backend fast test lane
-        entry: ./scripts/run_backend_fast_tests.zsh
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-
-      - id: frontend-quality-lane
-        name: Run frontend contract/type/build lane
-        entry: zsh -lc 'cd src/frontend && pnpm install --frozen-lockfile && pnpm run api:check && pnpm run type-check && pnpm run lint:robustness && pnpm run test:unit && pnpm run build'
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-
-      - id: duplicate-code-check
-        name: Detect duplicate handwritten source blocks
-        entry: bash -lc 'cd src/frontend && pnpm install --frozen-lockfile && cd ../.. && ./scripts/run_duplicate_check.zsh'
+        entry: make test-fast
         language: system
         pass_filenames: false
         stages: [pre-push]

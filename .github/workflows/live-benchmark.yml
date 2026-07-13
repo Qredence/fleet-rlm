@@ -1,4 +1,4 @@
-name: Live + Benchmark Tests
+name: Live Backend Tests
 permissions:
   contents: read
 
@@ -6,10 +6,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  live-and-benchmark:
-    name: Live + Benchmark
+  live-backend:
+    name: Live Backend
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -23,7 +22,12 @@ jobs:
         run: uv python install 3.12
       - name: Install dependencies
         run: uv sync --all-extras --dev
-      - name: Run live_llm and benchmark tests (opt-in)
+      - name: Run canonical live backend tests
         env:
-          RLM_LIVE_TESTS: "1"
-        run: uv run pytest -q -m "live_llm or benchmark"
+          FLEET_LIVE: "1"
+          FLEET_DAYTONA_API_KEY: ${{ secrets.FLEET_DAYTONA_API_KEY }}
+          FLEET_LLM_API_KEY: ${{ secrets.FLEET_LLM_API_KEY }}
+          FLEET_LLM_BASE_URL: ${{ vars.FLEET_LLM_BASE_URL }}
+          FLEET_ROOT_MODEL: ${{ vars.FLEET_ROOT_MODEL }}
+          FLEET_SUB_MODEL: ${{ vars.FLEET_SUB_MODEL }}
+        run: uv run pytest tests/live/backend -q

@@ -19,14 +19,5 @@ else
   uv sync --all-extras --dev
 fi
 
-if [[ -f src/frontend/package.json ]]; then
-  if ! command -v pnpm >/dev/null 2>&1; then
-    echo "ERROR: pnpm is required for src/frontend bootstrap." >&2
-    exit 1
-  fi
-  echo "==> Installing frontend dependencies"
-  (cd src/frontend && pnpm install --frozen-lockfile)
-fi
-
 echo "==> Bootstrap complete"
-echo "Use Codex actions for run, validation, OpenAPI sync, release, and diagnostics lanes."
+echo "Use Codex actions for backend, terminal-client, OpenAPI, release, and validation lanes."

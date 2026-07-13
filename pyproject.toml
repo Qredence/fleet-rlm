@@ -252,7 +252,6 @@ ignore = [
 "__init__.py" = ["F401", "F403"]  # Allow star imports and unused imports in __init__
 "tests/**" = ["ARG001", "ARG002", "D100", "D101", "D102", "D103"]  # Less strict for tests
 "scripts/**" = ["D100", "D101", "D102", "D103"]  # Less strict for scripts
-"setup.py" = ["D100"]  # Less strict for setup file
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"
@@ -279,7 +278,6 @@ exclude = [
     "tests/",
     "scripts/",
     "notebooks/",
-    "setup.py",
 ]
 
 [tool.deptry]

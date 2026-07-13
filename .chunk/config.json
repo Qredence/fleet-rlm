@@ -30,16 +30,16 @@
       "remote": true
     },
     {
-      "name": "check-security",
-      "run": "make check-security",
-      "timeout": 600,
+      "name": "check-docs",
+      "run": "make check-docs",
+      "timeout": 300,
       "limit": 3,
       "remote": true
     },
     {
-      "name": "frontend-check",
-      "run": "make check-frontend",
-      "timeout": 900,
+      "name": "check-security",
+      "run": "make check-security",
+      "timeout": 600,
       "limit": 3,
       "remote": true
     }
@@ -56,24 +56,12 @@
     "stack": "python",
     "setup": [
       {
-        "name": "system",
-        "command": "curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs --no-install-recommends && sudo rm -rf /var/lib/apt/lists/*"
-      },
-      {
         "name": "uv",
         "command": "curl -LsSf https://astral.sh/uv/install.sh | sh && sudo ln -sf $HOME/.local/bin/uv /usr/local/bin/uv && sudo ln -sf $HOME/.local/bin/uvx /usr/local/bin/uvx"
       },
       {
-        "name": "pnpm",
-        "command": "(command -v corepack >/dev/null 2>&1 || sudo npm install -g corepack) && sudo corepack enable && sudo corepack prepare pnpm@11.8.0 --activate"
-      },
-      {
         "name": "python-deps",
         "command": "uv sync --all-extras --dev --python 3.13"
-      },
-      {
-        "name": "frontend-deps",
-        "command": "cd src/frontend && pnpm install --frozen-lockfile"
       },
       {
         "name": "chunk-testsuite",
@@ -81,6 +69,6 @@
       }
     ],
     "image": "cimg/python",
-    "image_version": "3.13.11-node"
+    "image_version": "3.13.11"
   }
 }

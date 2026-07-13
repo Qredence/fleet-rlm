@@ -42,9 +42,7 @@ ATTACHMENT_BODY = b"attachment-payload-for-capability"
 
 
 def _live_enabled() -> bool:
-    return os.environ.get("FLEET_LIVE", "").strip() in {"1", "true", "yes"} or os.environ.get(
-        "FLEET_RLM_RUN_LIVE_LLM_TESTS", ""
-    ).strip() in {"1", "true", "yes"}
+    return os.environ.get("FLEET_LIVE", "").strip() in {"1", "true", "yes"}
 
 
 def _have_daytona() -> bool:

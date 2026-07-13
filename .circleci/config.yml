@@ -3,19 +3,10 @@ version: 2.1
 executors:
   python:
     docker:
-      - image: cimg/python:3.13.11-node
+      - image: cimg/python:3.13.11
     working_directory: ~/project
     environment:
       UV_CACHE_DIR: ~/.cache/uv
-      MLFLOW_TRACKING_URI: "file:///tmp/mlruns"
-  node:
-    docker:
-      - image: cimg/node:24.16.0
-    working_directory: ~/project
-    environment:
-      PNPM_HOME: /home/circleci/.local/share/pnpm
-      PNPM_STORE_PATH: /home/circleci/.pnpm-store
-      CI: "true"
 
 commands:
   install_uv:
@@ -58,29 +49,6 @@ commands:
           name: Install Python dependencies
           no_output_timeout: 15m
           command: uv sync --all-extras --dev --python 3.13 --verbose
-
-  setup_pnpm:
-    steps:
-      - run:
-          name: Enable pnpm
-          command: |
-            corepack enable
-            corepack prepare pnpm@11.8.0 --activate
-            pnpm config set store-dir "$PNPM_STORE_PATH"
-
-  restore_pnpm_cache:
-    steps:
-      - restore_cache:
-          keys:
-            - v1-pnpm-node24-{{ arch }}-{{ checksum "src/frontend/pnpm-lock.yaml" }}
-            - v1-pnpm-node24-{{ arch }}-
-
-  save_pnpm_cache:
-    steps:
-      - save_cache:
-          key: v1-pnpm-node24-{{ arch }}-{{ checksum "src/frontend/pnpm-lock.yaml" }}
-          paths:
-            - ~/.pnpm-store
 
 jobs:
   quality:
@@ -156,43 +124,6 @@ jobs:
           path: test-results
           destination: test-results/integration
 
-  frontend-check:
-    executor: node
-    resource_class: medium
-    steps:
-      - checkout
-      - setup_pnpm
-      - restore_pnpm_cache
-      - run:
-          name: Install frontend dependencies
-          no_output_timeout: 10m
-          command: cd src/frontend && pnpm install --frozen-lockfile
-      - save_pnpm_cache
-      - run:
-          name: Frontend API check
-          no_output_timeout: 5m
-          command: cd src/frontend && pnpm run api:check
-      - run:
-          name: Frontend type check
-          no_output_timeout: 10m
-          command: cd src/frontend && pnpm run type-check
-      - run:
-          name: Frontend lint
-          no_output_timeout: 10m
-          command: cd src/frontend && pnpm run lint:robustness
-      - run:
-          name: Frontend unit tests
-          no_output_timeout: 10m
-          command: cd src/frontend && pnpm run test:unit
-      - run:
-          name: Duplicate code detection
-          no_output_timeout: 10m
-          command: ./scripts/run_duplicate_check.zsh
-      - run:
-          name: Frontend build
-          no_output_timeout: 15m
-          command: cd src/frontend && pnpm run build
-
 workflows:
   ci:
     jobs:
@@ -200,4 +131,3 @@ workflows:
       - lint-typecheck
       - test-unit
       - test-integration
-      - frontend-check

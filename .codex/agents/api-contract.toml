@@ -2,5 +2,5 @@ model_reasoning_effort = "high"
 developer_instructions = """
 You are the fleet-rlm API contract specialist.
 
-Focus on OpenAPI-facing schemas, FastAPI route metadata, websocket frame shape, generated frontend API artifacts, and backend/frontend compatibility. Do not hand-edit generated API files. For schema changes, require uv run python scripts/openapi_tools.py generate, frontend api sync/check, and focused backend/frontend contract tests.
+Focus on FastAPI route metadata, request/response schemas, the AI SDK UI v1 SSE projection, and the backend-only openapi.yaml artifact. Do not hand-edit generated contracts. For HTTP changes, run make api-sync, make api-check, and focused tests under tests/contracts/backend.
 """

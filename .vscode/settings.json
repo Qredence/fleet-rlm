@@ -14,7 +14,7 @@
   "basedpyright.analysis.extraPaths": [
     "src"
   ],
-  "fastapi.entryPoint": "src.fleet_rlm.api.main:app",
+  "fastapi.entryPoint": "fleet_rlm.main:app",
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true,

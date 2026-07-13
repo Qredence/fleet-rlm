@@ -1,6 +1,6 @@
 """Opt-in live proofs for stateful recovery (impl-10).
 
-Gate: FLEET_LIVE=1 (or FLEET_RLM_RUN_LIVE_LLM_TESTS=1)
+Gate: FLEET_LIVE=1
 
 Requires Daytona credentials. History/restart use durable sqlite;
 sandbox lifecycle + Volume replace use live Daytona.
@@ -41,9 +41,7 @@ MARKER_CONTENT = "fleet-rlm-recovery-ok"
 
 
 def _live_enabled() -> bool:
-    return os.environ.get("FLEET_LIVE", "").strip() in {"1", "true", "yes"} or os.environ.get(
-        "FLEET_RLM_RUN_LIVE_LLM_TESTS", ""
-    ).strip() in {"1", "true", "yes"}
+    return os.environ.get("FLEET_LIVE", "").strip() in {"1", "true", "yes"}
 
 
 def _have_daytona() -> bool:

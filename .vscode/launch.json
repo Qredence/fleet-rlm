@@ -10,13 +10,6 @@
             "justMyCode": true
         },
         {
-            "name": "Python: Module",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "enter-your-module-name-here",
-            "console": "integratedTerminal"
-        },
-        {
             "name": "Python: FastAPI",
             "type": "debugpy",
             "request": "launch",

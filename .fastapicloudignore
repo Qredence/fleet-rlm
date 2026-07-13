@@ -14,23 +14,13 @@ __pycache__/
 .env
 .env.*
 node_modules/
-src/frontend/node_modules/
 
 # Exclude repository workflow/development content that is not needed at runtime.
 output/
 tests/
-oolong_rlm/
 docs/
 scripts/
-blogs/
 .codex/
 .vscode/
 .github/
-.azure/
-.matter/
 migrations/
-
-# Exclude frontend source while keeping the compiled SPA for source-checkout deploys.
-src/frontend/*
-!src/frontend/dist/
-!src/frontend/dist/**
