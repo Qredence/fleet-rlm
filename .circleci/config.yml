@@ -104,7 +104,7 @@ jobs:
           path: test-results
           destination: test-results/unit
 
-  test-integration:
+  test-e2e:
     executor: python
     resource_class: medium+
     parallelism: 2
@@ -113,16 +113,16 @@ jobs:
       - install_python_dependencies
       - save_uv_cache
       - run:
-          name: Run integration/e2e atom subset (Smarter Testing)
+          name: Run E2E atom subset (Smarter Testing)
           no_output_timeout: 10m
           command: |
             mkdir -p test-results
-            circleci run testsuite "pytest-integration"
+            circleci run testsuite "pytest-e2e"
       - store_test_results:
           path: test-results
       - store_artifacts:
           path: test-results
-          destination: test-results/integration
+          destination: test-results/e2e
 
 workflows:
   ci:
@@ -130,4 +130,4 @@ workflows:
       - quality
       - lint-typecheck
       - test-unit
-      - test-integration
+      - test-e2e
