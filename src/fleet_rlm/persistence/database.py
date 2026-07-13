@@ -6,9 +6,6 @@ explicit helper for hermetic SQLite tests and offline development only.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -49,7 +46,7 @@ def normalize_database_url(url: str) -> str:
         if changed:
             return (
                 parsed.difference_update_query(list(parsed.query))
-                .update_query_dict(query)
+                .update_query_dict(query)  # ty: ignore[invalid-argument-type] - SQLAlchemy accepts tuple values
                 .render_as_string(
                     hide_password=False,
                 )
@@ -73,18 +70,3 @@ async def create_tables(engine: AsyncEngine) -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
-
-@asynccontextmanager
-async def session_scope(
-    factory: async_sessionmaker[AsyncSession],
-) -> AsyncIterator[AsyncSession]:
-    session = factory()
-    try:
-        yield session
-        await session.commit()
-    except Exception:
-        await session.rollback()
-        raise
-    finally:
-        await session.close()

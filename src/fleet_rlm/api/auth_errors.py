@@ -33,9 +33,3 @@ class AuthError(Exception):
     @property
     def public_detail(self) -> str:
         return PUBLIC_AUTH_DETAIL[self.kind]
-
-
-def public_http_status(kind: AuthFailureKind) -> int:
-    if kind == "unavailable":
-        return 503
-    return 401

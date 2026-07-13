@@ -9,9 +9,7 @@
 | `check_docs_quality.py` | Validate documentation structure and links |
 | `check_agents_md_freshness.py` | Validate agent-guide reachability |
 | `validate_release.py` | Validate package metadata and wheel contents |
-| `sync_plans_canvas.py` | Maintain historical implementation-plan canvas |
 | `codex_feedback_loop.py` | Run the local Codex feedback-loop probes |
-| `consolidate_rlm_results.py` | Consolidate local RLM result artifacts |
 | `deployment_observability.py` | Inspect deployment observability inputs |
 | `dev_issue_token.py` | Generate a local development issue token |
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import re
 import subprocess
 import sys
 import tomllib
@@ -26,6 +27,30 @@ HEAVY_IMPORTS = ("dspy", "mlflow", "posthog", "daytona")
 CONFIG_MODULES = (
     "src/fleet_rlm/__init__.py",
     "src/fleet_rlm/config.py",
+)
+REMOVED_PATHS = (
+    ".factory",
+    "oolong_rlm",
+    "docs/internal/legacy-backend",
+    "src/frontend",
+    "src/fleet_rlm/ui",
+)
+STALE_CONTROL_MARKERS = (
+    "src/frontend",
+    "docs/internal/legacy-backend",
+    "scripts/sync_plans_canvas.py",
+    "scripts/consolidate_rlm_results.py",
+    "scripts/run_ty_check.zsh",
+    "scripts/run_backend_fast_tests.zsh",
+    "scripts/run_duplicate_check.zsh",
+    "make build-ui",
+    "make check-frontend",
+    "fleet-rlm chat",
+    "fleet-rlm daytona-smoke",
+    "src/fleet_rlm/integrations/daytona",
+)
+LOCAL_COMMAND_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_.-])((?:scripts|\.codex)/[A-Za-z0-9_./-]+\.(?:py|sh|zsh))(?![A-Za-z0-9_.-])"
 )
 
 
@@ -53,6 +78,8 @@ class HarnessChecker:
         self._check_codex_config()
         self._check_generated_artifact_controls()
         self._check_script_inventory()
+        self._check_removed_paths()
+        self._check_control_surface_drift()
         self._check_backend_import_boundaries()
         return self.errors
 
@@ -132,6 +159,64 @@ class HarnessChecker:
                 self._error(rel_path, "top-level Python helper is missing from scripts/README.md")
             if self.check_script_help:
                 self._check_script_help(script)
+
+    def _control_surface_files(self) -> list[Path]:
+        relative_files = (
+            "AGENTS.md",
+            "CONTRIBUTING.md",
+            "Makefile",
+            "PRODUCT.md",
+            "pyproject.toml",
+            ".pre-commit-config.yaml",
+            ".circleci/config.yml",
+            ".chunk/config.json",
+            ".fastapicloudignore",
+            ".codex/config.toml",
+            ".codex/environments/environment.toml",
+        )
+        files = [self.repo_root / rel_path for rel_path in relative_files]
+        files.extend(sorted((self.repo_root / ".github" / "workflows").glob("*.yml")))
+        files.extend(sorted((self.repo_root / ".codex" / "agents").glob("*.toml")))
+        files.extend(sorted((self.repo_root / ".codex" / "hooks").glob("*.zsh")))
+        tracked_docs = subprocess.run(
+            ("git", "ls-files", "docs"),
+            cwd=self.repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if tracked_docs.returncode == 0:
+            files.extend(
+                self.repo_root / rel_path
+                for rel_path in tracked_docs.stdout.splitlines()
+                if rel_path.endswith(".md")
+            )
+        files.append(self.repo_root / "scripts" / "README.md")
+        return [path for path in files if path.is_file()]
+
+    def _check_removed_paths(self) -> None:
+        for rel_path in REMOVED_PATHS:
+            tracked = subprocess.run(
+                ("git", "ls-files", rel_path),
+                cwd=self.repo_root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            for tracked_path in tracked.stdout.splitlines():
+                if (self.repo_root / tracked_path).is_file():
+                    self._error(tracked_path, "removed backend/frontend artifact reintroduced")
+
+    def _check_control_surface_drift(self) -> None:
+        for path in self._control_surface_files():
+            content = path.read_text(encoding="utf-8", errors="ignore")
+            rel_path = path.relative_to(self.repo_root).as_posix()
+            for marker in STALE_CONTROL_MARKERS:
+                if marker in content:
+                    self._error(rel_path, f"stale removed-surface reference: {marker}")
+            for command_path in LOCAL_COMMAND_PATTERN.findall(content):
+                if not (self.repo_root / command_path).is_file():
+                    self._error(rel_path, f"references missing local command: {command_path}")
 
     def _check_script_help(self, script: Path) -> None:
         rel_path = script.relative_to(self.repo_root).as_posix()

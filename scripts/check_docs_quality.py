@@ -23,7 +23,6 @@ EXTERNAL_PREFIXES = (
 )
 
 LEGACY_DOC_DIRS = ("artifacts", "plans", "references", "reviews")
-INACTIVE_DOC_DIRS = ("internal",)
 LEGACY_EXPLANATION_MARKERS = (
     Path("explanation/README.md"),
     Path("explanation/architecture.md"),
@@ -37,11 +36,22 @@ CLI_CONTRACT_COMMANDS = (("uv", "run", "fleet-rlm", "--help"),)
 
 
 def iter_docs_files(docs_root: Path) -> list[Path]:
-    return sorted(
-        p
-        for p in docs_root.rglob("*.md")
-        if p.is_file() and not any(part in INACTIVE_DOC_DIRS for part in p.relative_to(docs_root).parts)
+    """Return every tracked Markdown document, including any future internal docs."""
+    repo_root = docs_root.parent
+    result = subprocess.run(
+        ("git", "ls-files", "docs"),
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
     )
+    if result.returncode == 0:
+        return sorted(
+            repo_root / rel_path
+            for rel_path in result.stdout.splitlines()
+            if rel_path.endswith(".md") and (repo_root / rel_path).is_file()
+        )
+    return sorted(path for path in docs_root.rglob("*.md") if path.is_file())
 
 
 @functools.lru_cache(maxsize=None)

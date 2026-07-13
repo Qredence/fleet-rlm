@@ -1,6 +1,18 @@
 PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/contracts/backend tests/e2e scripts/openapi_tools.py scripts/db_init.py migrations
 PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db
 PYTEST := uv run --no-sync pytest
+PYTEST_HERMETIC := env \
+	FLEET_LIVE_KERNEL=false \
+	FLEET_DAYTONA_API_KEY= \
+	FLEET_LLM_API_KEY= \
+	FLEET_LLM_BASE_URL= \
+	FLEET_DATABASE_URL= \
+	FLEET_AUTH_MODE=dev \
+	FLEET_NEON_AUTH_URL= \
+	FLEET_NEON_TENANT_CLAIM= \
+	FLEET_UPLOAD_ROOT= \
+	FLEET_ARTIFACT_ROOT= \
+	$(PYTEST)
 PYTEST_XDIST_MAX_WORKERS ?= 2
 PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
 
@@ -11,8 +23,8 @@ PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
 	test test-fast test-unit test-contract \
 	check quality-gate check-release check-docs check-security check-deps check-codebase-tree api-check api-sync \
 	build build-release release release-check \
-	clean cli mlflow precommit-install precommit-run precommit \
-	sync sync-dev sync-all metadata-check docs-check security-check dependency-check release-artifacts cli-help mlflow-server mlflow-upgrade \
+	clean cli precommit-install precommit-run precommit \
+	sync sync-dev sync-all metadata-check docs-check security-check dependency-check release-artifacts cli-help \
 	cloud-preflight
 
 help:
@@ -38,7 +50,7 @@ help:
 	@echo "  make check-release    - Run release metadata/hygiene and AGENTS.md validation"
 	@echo "  make check-docs       - Run docs quality and harness engineering checks"
 	@echo "  make check-security   - Run pip-audit + bandit"
-	@echo "  make check-deps       - Check for unused dependencies (deptry, knip)"
+	@echo "  make check-deps       - Check Python dependencies with deptry"
 	@echo "  make check-codebase-tree - Enforce import boundaries defined in codebase map"
 	@echo "  make api-check        - Verify the backend-only OpenAPI artifact"
 	@echo "  make api-sync         - Regenerate the backend-only OpenAPI artifact"
@@ -57,7 +69,6 @@ help:
 	@echo "  make precommit-install - Install pre-commit and pre-push git hooks"
 	@echo "  make precommit-run    - Run pre-commit on all files"
 	@echo "  make cli              - Show fleet-rlm CLI help"
-	@echo "  make mlflow           - Start a local MLflow OSS tracking server on port 5001"
 
 install:
 	uv sync
@@ -84,15 +95,15 @@ typecheck:
 	uv run ty check src/fleet_rlm
 
 test:
-	$(PYTEST) -q $(PYTEST_PARALLEL) tests/unit/backend tests/contracts/backend tests/unit/test_litellm_invariant.py tests/e2e -m "$(PYTEST_FAST_MARKERS)"
+	$(PYTEST_HERMETIC) -q $(PYTEST_PARALLEL) tests/unit/backend tests/contracts/backend tests/unit/test_litellm_invariant.py tests/e2e -m "$(PYTEST_FAST_MARKERS)"
 
 test-fast: test
 
 test-unit:
-	$(PYTEST) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/test_litellm_invariant.py -m "$(PYTEST_FAST_MARKERS)"
+	$(PYTEST_HERMETIC) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/test_litellm_invariant.py -m "$(PYTEST_FAST_MARKERS)"
 
 test-contract:
-	$(PYTEST) -q tests/contracts/backend tests/e2e -m "$(PYTEST_FAST_MARKERS)" -n 0
+	$(PYTEST_HERMETIC) -q tests/contracts/backend tests/e2e -m "$(PYTEST_FAST_MARKERS)" -n 0
 
 test-db:
 	$(PYTEST) -q -m "db" -n 0
@@ -164,16 +175,6 @@ cli:
 	uv run fleet-rlm --help
 
 cli-help: cli
-
-MLFLOW_LOCAL_BACKEND_STORE_URI ?= sqlite:///.data/mlruns.db
-
-mlflow:
-	uv run mlflow server --backend-store-uri $(MLFLOW_LOCAL_BACKEND_STORE_URI) --port 5001
-
-mlflow-upgrade:
-	uv run mlflow db upgrade $(MLFLOW_LOCAL_BACKEND_STORE_URI)
-
-mlflow-server: mlflow
 
 sync:
 	$(MAKE) install

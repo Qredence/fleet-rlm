@@ -19,6 +19,10 @@ frontend-generated API contracts.
 make check
 ```
 
+The default Make test targets explicitly mask local live `FLEET_*` credentials
+so a developer's `.env` cannot silently switch unit, contract, or end-to-end
+tests into live composition. Database and live-provider lanes remain separate.
+
 This runs format, Ruff, type, unit/contract tests, backend OpenAPI drift, and
 the codebase boundary check. The focused commands are:
 

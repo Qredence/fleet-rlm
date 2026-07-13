@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Annotated, Literal, NoReturn
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import Header, HTTPException, Request
 
 from fleet_rlm.api.auth_errors import (
     PUBLIC_WORKSPACE_MISMATCH_DETAIL,
@@ -145,7 +145,3 @@ def require_session_access(
         from fleet_rlm.sessions.errors import SessionAccessDenied
 
         raise SessionAccessDenied()
-
-
-# FastAPI dependency alias
-RequestIdentityDep = Annotated[RequestIdentity, Depends(get_request_identity)]

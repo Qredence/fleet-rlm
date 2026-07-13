@@ -1,6 +1,6 @@
 # Repository Agent Map
 
-`fleet-rlm` is a backend-first adaptive recursive language model workspace built around a Daytona-backed DSPy RLM runtime. The prior frontend has been removed; a new client will be introduced separately.
+`fleet-rlm` is a backend-first adaptive recursive language model workspace built around a Daytona-backed DSPy RLM runtime. The prior Web frontend has been removed; the maintained development client is `tools/fleet-tui/`.
 
 ## Operating Model
 
@@ -24,8 +24,8 @@
 
 ## Durable Detail Locations
 
-- Auth, DB, websocket, runtime, and deploy details live in `src/fleet_rlm/AGENTS.md` or matching docs.
-- Local Codex actions, ports, browser smoke expectations, and tool preferences live in `.codex/` and loop docs.
+- Auth, DB, SSE, runtime, and deploy details live in `src/fleet_rlm/AGENTS.md` or matching docs.
+- Local Codex actions, ports, terminal-client checks, and tool preferences live in `.codex/` and loop docs.
 
 ## Agent skills
 
@@ -67,9 +67,9 @@ Override it only on a runner with verified capacity using
 
 ## Generated Artifacts
 
-Do not hand-edit: `openapi.yaml`, `src/fleet_rlm/ui/dist`.
+Do not hand-edit: `openapi.yaml`.
 
-Use: `make api-sync`, `make api-check`, `make build-ui`.
+Use: `make api-sync`, `make api-check`.
 
 ## Drift Checks
 
@@ -81,7 +81,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Secure production deployments strictly on Bring-Your-Own-Key (BYOK) model; never leak server-level secrets (like Gemini API keys or Daytona keys) to authenticated users.
 - Do not edit `.plan.md` or any attached implementation plans while executing a task, prioritizing marked-in-progress to-dos sequentially.
 - Prefer preserving Agent Elements design tokens (`--an-max-width`) rather than introducing arbitrary Tailwind classes for chat width adjustments.
-- Run the full validation gate (`make format-check`, `make lint`, `make typecheck`, `make test`, `make api-check`, `make check-docs`, `uv run python scripts/sync_plans_canvas.py --check`, `git diff --check`) before commits when the user or phase completion requires it.
+- Run the full validation gate (`make format-check`, `make lint`, `make typecheck`, `make test`, `make api-check`, `make check-docs`, `git diff --check`) before commits when the user or phase completion requires it.
 - Do not amend commits already pushed to remote; use narrow follow-up commits for fixes discovered after push.
 - Never use `FLEET_DAYTONA_API_KEY` as the `Authorization: Bearer` token for Fleet-RLM API requests (authenticated clients must use Neon JWT); sanitize client-facing prepare/startup errors—never expose raw `str(exc)`, stack traces, credentials, or Daytona/provider internals to API clients.
 - Do not commit `AGENTS.md` unless changes are intentional team workflow guidance; continual-learning workspace-fact deltas may stay uncommitted.
@@ -97,5 +97,5 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments and Artifacts use Workspace Volume Scope; Artifact Candidates become public only through Turn Commit.
 - Settings use only `FLEET_*`. Neon auth requires explicit `FLEET_NEON_AUTH_URL`, exposes coarse public auth errors, and permits synthetic `X-Fleet-*` identity only in `auth_mode=dev`.
 - Alembic owns the live schema through one fresh canonical baseline. `create_tables` is restricted to explicit SQLite test/offline helpers; run `alembic check` against an upgraded empty database for drift.
-- Backend validation is `make check`; live promotion uses the canonical tests under `tests/live/backend/` with explicit `FLEET_LIVE=1`. Frontend adaptation and generated frontend contracts are separate work.
+- Backend validation is `make check`; its default test targets mask local live credentials so they remain hermetic. Live promotion uses `tests/live/backend/` with explicit `FLEET_LIVE=1`. Frontend adaptation and generated frontend contracts are separate work.
 - Under DSPy 3.3.Xb (normalized LM API), any `BaseLM` or bounded LM must have its provider explicitly resolved (via prefix or `provider` kwargs). Prefer stock `dspy.LM` with stateless config overrides passed directly to predictors/LM calls (using `dspy.settings.context` if needed) over stateful `copy()` or custom wrappers to ensure thread/session safety.

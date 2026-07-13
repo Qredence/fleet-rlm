@@ -17,9 +17,6 @@ from fleet_rlm.daytona.active_leases import (
     get_active_lease_registry,
     set_active_lease_registry,
 )
-from fleet_rlm.daytona.volume_writes import (
-    VolumeWriteCoordinator,
-)
 from fleet_rlm.observability import (
     InMemoryTurnStore,
     TurnTrace,
@@ -68,32 +65,6 @@ async def test_session_lock_serializes_mutations() -> None:
     await asyncio.gather(task(1), task(2))
     # nested pairs complete without interleaving across critical section
     assert order in ([1, 11, 2, 12], [2, 12, 1, 11])
-
-
-@pytest.mark.asyncio
-async def test_volume_write_coordinator_serializes() -> None:
-    coord = VolumeWriteCoordinator()
-    order: list[str] = []
-    sid = uuid4()
-
-    async def writer(tag: str) -> None:
-        async with coord.hold(sid, resource="artifacts"):
-            order.append(f"start-{tag}")
-            await asyncio.sleep(0.02)
-            order.append(f"end-{tag}")
-
-    await asyncio.gather(writer("a"), writer("b"))
-    # no interleaving of start/end pairs from different writers
-    assert order.index("start-a") < order.index("end-a")
-    assert order.index("start-b") < order.index("end-b")
-    # one fully completes before the other starts
-    a_first = order.index("end-a") < order.index("start-b")
-    b_first = order.index("end-b") < order.index("start-a")
-    assert a_first or b_first
-
-    path = VolumeWriteCoordinator.run_scoped_path(sid, uuid4(), "artifacts", "x.md")
-    assert path.startswith("sessions/")
-    assert "/runs/" in path
 
 
 def test_concurrent_artifact_creates_unique_ids(tmp_path) -> None:

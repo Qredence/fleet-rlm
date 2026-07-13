@@ -55,10 +55,6 @@ class RunCancelRegistry:
                 terminal=True,
             )
 
-    def ownership_of(self, run_id: UUID) -> RunOwnership | None:
-        with self._lock:
-            return self._ownership.get(run_id)
-
     def authorize(
         self,
         run_id: UUID,

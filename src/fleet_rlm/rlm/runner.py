@@ -190,12 +190,6 @@ class _DetailRelay:
                 return values
 
 
-class HostEventSource(Protocol):
-    """Internal seam: host tool ledgers that emit safe public event dicts."""
-
-    def drain_public_events(self) -> list[dict[str, Any]]: ...
-
-
 def _map_host_ledger_item(
     item: dict[str, Any],
 ) -> tuple[RuntimeEventKind, dict[str, Any]] | None:
