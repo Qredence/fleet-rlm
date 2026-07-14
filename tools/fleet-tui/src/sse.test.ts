@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseSSE, parseUIChunk, toTextStreamParts } from "./sse.js";
+import { parseSSE, parseUIChunk } from "./sse.js";
 
 function streamFrom(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
@@ -33,44 +33,6 @@ describe("Fleet SSE parser", () => {
     await expect(collect(parseSSE(body))).resolves.toEqual([
       '{"type":"finish","finishReason":"stop"}',
     ]);
-  });
-
-  it("maps RLM code and output into one visible tool trajectory", () => {
-    const textChunk = parseUIChunk('{"type":"text-delta","id":"t","delta":"hi"}');
-    const codeChunk = parseUIChunk(
-      '{"type":"data-rlm-code","id":"code-1","data":{"step":3,"code":"print(1)"}}',
-    );
-    const outputChunk = parseUIChunk(
-      '{"type":"data-rlm-output","id":"output-1","data":{"step":3,"output":"1"}}',
-    );
-    const statusChunk = parseUIChunk('{"type":"data-status","data":{"phase":"running"}}');
-    expect(textChunk).not.toBe("[DONE]");
-    expect(codeChunk).not.toBe("[DONE]");
-    expect(outputChunk).not.toBe("[DONE]");
-    expect(statusChunk).not.toBe("[DONE]");
-    expect(toTextStreamParts(textChunk as Exclude<typeof textChunk, "[DONE]">)).toEqual([
-      {
-        type: "text-delta",
-        id: "t",
-        text: "hi",
-      },
-    ]);
-    expect(toTextStreamParts(codeChunk as Exclude<typeof codeChunk, "[DONE]">)).toEqual([
-      expect.objectContaining({
-        type: "tool-call",
-        toolCallId: "rlm-step-3",
-        toolName: "RLM step 3",
-        input: "print(1)",
-      }),
-    ]);
-    expect(toTextStreamParts(outputChunk as Exclude<typeof outputChunk, "[DONE]">)).toEqual([
-      expect.objectContaining({
-        type: "tool-result",
-        toolCallId: "rlm-step-3",
-        output: "1",
-      }),
-    ]);
-    expect(toTextStreamParts(statusChunk as Exclude<typeof statusChunk, "[DONE]">)).toEqual([]);
   });
 
   it("rejects malformed UI chunks", () => {

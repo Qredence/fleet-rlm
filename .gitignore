@@ -48,10 +48,20 @@ tmp/
 TASKS.md
 docs/notes/
 docs/superpowers/
+.superpowers/
 
 qa-results/
 
 plan/
+
+# Generated wiki (Factory artifact)
+droid-wiki/
+
+# Generated video (Factory artifact)
+.factory/video/
+
+# Local runtime state
+.fleet_rlm/
 
 # Agent/tooling state
 .claude/
@@ -122,7 +132,6 @@ plugins/
 notebooks/dspy-rlm-end-to-end-use-case.ipynb
 src/fleet_rlm/_scaffold/
 src/.tmp/
-tui/
 tui-cli/tui-ink/node_modules/
 tui-cli/opentui-rlm/node_modules/
 tui-ink/package-lock.json

@@ -14,7 +14,7 @@ BIN_DIR = REPO_ROOT / ".venv" / "bin"
 @pytest.mark.parametrize(
     ("command", "expected_terms"),
     [
-        ("fleet", ("web",)),
+        ("fleet", ("web", "cli", "deno", "doctor")),
         ("fleet-rlm", ("serve-api",)),
     ],
 )

@@ -148,67 +148,67 @@ def test_api_get_committed_artifact_has_no_path_leak(tmp_path: Path) -> None:
         "X-Fleet-User-Id": str(user),
         "X-Fleet-Workspace-Id": str(ws),
     }
-    client = TestClient(app)
-    ref = app.state.artifact_reader._catalog._store.create(  # noqa: SLF001
-        user_id=user,
-        workspace_id=ws,
-        session_id=uuid4(),
-        run_id=uuid4(),
-        kind="markdown",
-        title="summary",
-        content="## Result\n\nok",
-    )
-    response = client.get(f"/api/artifacts/{ref.id}", headers=headers)
-    assert response.status_code == 200
-    body = response.json()
-    assert set(body.keys()) == {
-        "id",
-        "session_id",
-        "run_id",
-        "kind",
-        "title",
-        "media_type",
-        "byte_size",
-        "checksum_sha256",
-    }
-    dumped = json.dumps(body)
-    assert "path" not in body
-    assert "storage_key" not in dumped
-    assert "/home/" not in dumped
-    assert tmp_path.as_posix() not in dumped
-    assert body["kind"] == "markdown"
-    assert body["title"] == "summary"
+    with TestClient(app) as client:
+        ref = app.state.artifact_reader._catalog._store.create(  # noqa: SLF001
+            user_id=user,
+            workspace_id=ws,
+            session_id=uuid4(),
+            run_id=uuid4(),
+            kind="markdown",
+            title="summary",
+            content="## Result\n\nok",
+        )
+        response = client.get(f"/api/artifacts/{ref.id}", headers=headers)
+        assert response.status_code == 200
+        body = response.json()
+        assert set(body.keys()) == {
+            "id",
+            "session_id",
+            "run_id",
+            "kind",
+            "title",
+            "media_type",
+            "byte_size",
+            "checksum_sha256",
+        }
+        dumped = json.dumps(body)
+        assert "path" not in body
+        assert "storage_key" not in dumped
+        assert "/home/" not in dumped
+        assert tmp_path.as_posix() not in dumped
+        assert body["kind"] == "markdown"
+        assert body["title"] == "summary"
 
-    other = client.get(
-        f"/api/artifacts/{ref.id}",
-        headers={
-            "X-Fleet-User-Id": str(user),
-            "X-Fleet-Workspace-Id": str(uuid4()),
-        },
-    )
-    assert other.status_code == 404
+        other = client.get(
+            f"/api/artifacts/{ref.id}",
+            headers={
+                "X-Fleet-User-Id": str(user),
+                "X-Fleet-Workspace-Id": str(uuid4()),
+            },
+        )
+        assert other.status_code == 404
 
-    content = client.get(f"/api/artifacts/{ref.id}/content", headers=headers)
-    assert content.status_code == 200
-    assert content.content == b"## Result\n\nok"
-    assert content.headers["content-type"].startswith("text/markdown")
-    assert content.headers["content-length"] == str(ref.byte_size)
-    assert content.headers["etag"] == f'"{ref.checksum_sha256}"'
-    assert content.headers["x-content-type-options"] == "nosniff"
-    assert content.headers["content-disposition"] == 'attachment; filename="summary.md"'
+        content = client.get(f"/api/artifacts/{ref.id}/content", headers=headers)
+        assert content.status_code == 200
+        assert content.content == b"## Result\n\nok"
+        assert content.headers["content-type"].startswith("text/markdown")
+        assert content.headers["content-length"] == str(ref.byte_size)
+        assert content.headers["etag"] == f'"{ref.checksum_sha256}"'
+        assert content.headers["x-content-type-options"] == "nosniff"
+        assert content.headers["content-disposition"] == 'attachment; filename="summary.md"'
 
-    foreign_content = client.get(
-        f"/api/artifacts/{ref.id}/content",
-        headers={
-            "X-Fleet-User-Id": str(user),
-            "X-Fleet-Workspace-Id": str(uuid4()),
-        },
-    )
-    assert foreign_content.status_code == 404
-    assert foreign_content.json() == {
-        "code": "artifact_not_found",
-        "message": "Artifact not found",
-    }
+        foreign_content = client.get(
+            f"/api/artifacts/{ref.id}/content",
+            headers={
+                "X-Fleet-User-Id": str(user),
+                "X-Fleet-Workspace-Id": str(uuid4()),
+            },
+        )
+        assert foreign_content.status_code == 404
+        assert foreign_content.json() == {
+            "code": "artifact_not_found",
+            "message": "Artifact not found",
+        }
 
 
 def test_public_artifact_create_is_removed(tmp_path: Path) -> None:

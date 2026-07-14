@@ -21,6 +21,15 @@ class DatabaseNotConfiguredError(RuntimeError):
     """Raised when a database URL is required but missing."""
 
 
+def is_sqlite_url(url: str) -> bool:
+    """Return True when the URL targets SQLite (offline/test helper path)."""
+    cleaned = url.strip()
+    if not cleaned:
+        return False
+    normalized = normalize_database_url(cleaned)
+    return normalized.startswith("sqlite")
+
+
 def normalize_database_url(url: str) -> str:
     """Accept postgres:// and sqlite paths; ensure async drivers when needed."""
     cleaned = url.strip()

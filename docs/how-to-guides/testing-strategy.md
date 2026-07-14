@@ -20,7 +20,9 @@ make check
 
 The default Make test targets explicitly mask local live `FLEET_*` credentials
 so a developer's `.env` cannot silently switch unit, contract, or end-to-end
-tests into live composition. Database and live-provider lanes remain separate.
+tests into live composition. Database, Deno-runtime, and live-provider lanes
+remain separate. Tests marked `deno` are excluded from the normal fast and
+CircleCI split lanes.
 
 This runs format, Ruff, type, unit/contract tests, backend OpenAPI drift, and
 the codebase boundary check, plus the pinned TUI Biome/TypeScript/Vitest lane.
@@ -39,6 +41,22 @@ pnpm --dir tools/fleet-tui run lint
 pnpm --dir tools/fleet-tui run typecheck
 pnpm --dir tools/fleet-tui run test
 ```
+
+## Deno Gate
+
+Deno-runtime contracts use the `deno` pytest marker and run only in the
+dedicated lane:
+
+```bash
+# from repo root; requires Deno on PATH
+make test-deno
+```
+
+CircleCI installs exactly Deno 2.9.2 under `$HOME/.deno`, exports
+`$HOME/.deno/bin` on `PATH`, records `deno --version`, and runs
+`make test-deno` as a required workflow job. The contract is deterministic and
+forbids provider network calls; it validates DSPy's real default
+Deno/Pyodide interpreter rather than live model quality.
 
 ## Database Gate
 

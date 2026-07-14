@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from fleet_rlm.app import create_app
-from fleet_rlm.composition import LiveCompositionError, require_live_settings
+from fleet_rlm.composition import LiveCompositionError, require_deno_settings, require_live_settings
 from fleet_rlm.config import Settings
 
 
@@ -66,18 +66,88 @@ def test_require_live_settings_fails_closed_without_deps() -> None:
         )
 
 
+def test_require_deno_settings_fails_closed_without_deps(monkeypatch) -> None:
+    monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/deno")
+    with pytest.raises(LiveCompositionError, match="run_environment"):
+        require_deno_settings(Settings(run_environment="hermetic"))
+    with pytest.raises(LiveCompositionError, match="LLM_API_KEY"):
+        require_deno_settings(
+            Settings(
+                run_environment="deno",
+                llm_api_key=SecretStr(""),
+            )
+        )
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    with pytest.raises(LiveCompositionError, match="deno executable"):
+        require_deno_settings(
+            Settings(
+                run_environment="deno",
+                llm_api_key=SecretStr("llm-key"),
+            )
+        )
+    monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/deno")
+    with pytest.raises(LiveCompositionError, match="NEON_AUTH_URL"):
+        require_deno_settings(
+            Settings(
+                run_environment="deno",
+                auth_mode="neon",
+                neon_auth_url="",
+                llm_api_key=SecretStr("llm-key"),
+            )
+        )
+
+
+def test_deno_environment_fails_closed_without_secrets(monkeypatch) -> None:
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    with pytest.raises(LiveCompositionError, match="deno executable"):
+        create_app(
+            settings=Settings(
+                run_environment="deno",
+                llm_api_key=SecretStr("llm-key"),
+            )
+        )
+
+
+def test_deno_lifespan_skips_create_tables_for_postgres(monkeypatch) -> None:
+    import fleet_rlm.persistence.database as database
+
+    called: list[str] = []
+
+    async def track_tables(_engine):
+        called.append("create_tables")
+
+    monkeypatch.setattr(database, "create_tables", track_tables)
+    monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/deno")
+    app = create_app(
+        settings=Settings(
+            run_environment="deno",
+            llm_api_key=SecretStr("llm-key"),
+            database_url="postgresql+asyncpg://user:pass@localhost/fleet",
+        )
+    )
+
+    with TestClient(app):
+        pass
+
+    assert called == []
+
+
 def test_daytona_environment_fails_closed_without_secrets() -> None:
     with pytest.raises(LiveCompositionError, match="required settings"):
         create_app(settings=Settings(run_environment="daytona"))
 
 
-def test_create_app_offline_still_hermetic() -> None:
+def test_create_app_offline_composes_only_inside_lifespan() -> None:
     app = create_app(settings=Settings(run_environment="hermetic"))
-    assert app.state.composition_ready is True
-    assert app.state.turn_coordinator is not None
-    assert app.state.attachment_lifecycle is not None
-    assert app.state.artifact_reader is not None
+    assert app.state.composition_ready is False
+    assert app.state.turn_coordinator is None
+    assert app.state.attachment_lifecycle is None
+    assert app.state.artifact_reader is None
     with TestClient(app) as client:
+        assert app.state.composition_ready is True
+        assert app.state.turn_coordinator is not None
+        assert app.state.attachment_lifecycle is not None
+        assert app.state.artifact_reader is not None
         # The clean-break API never creates an implicit Session.
         response = client.post(
             f"/api/sessions/{uuid4()}/turns",
@@ -90,6 +160,11 @@ def test_create_app_offline_still_hermetic() -> None:
         )
         assert response.status_code == 404
 
+    assert app.state.composition_ready is False
+    assert app.state.turn_coordinator is None
+    assert app.state.attachment_lifecycle is None
+    assert app.state.artifact_reader is None
+
 
 def test_offline_database_is_created_and_closed_by_lifespan() -> None:
     app = create_app(
@@ -99,7 +174,7 @@ def test_offline_database_is_created_and_closed_by_lifespan() -> None:
         )
     )
     assert app.state.db_engine is None
-    assert app.state.session_catalog is not None
+    assert app.state.session_catalog is None
 
     with TestClient(app):
         assert app.state.db_engine is not None
@@ -109,10 +184,64 @@ def test_offline_database_is_created_and_closed_by_lifespan() -> None:
     assert app.state.session_catalog is None
 
 
+@pytest.mark.parametrize("database_url", [None, "sqlite+aiosqlite:///:memory:"])
+def test_local_composition_installs_once_for_in_memory_and_sql(monkeypatch, database_url) -> None:
+    import fleet_rlm.composition as composition
+
+    calls: list[object | None] = []
+    original = composition.install_offline_composition
+
+    def track_install(app, settings, *, session_factory=None):
+        calls.append(session_factory)
+        return original(app, settings, session_factory=session_factory)
+
+    monkeypatch.setattr(composition, "install_offline_composition", track_install)
+    app = create_app(
+        settings=Settings(
+            run_environment="hermetic",
+            database_url=database_url,
+        )
+    )
+
+    assert calls == []
+    with TestClient(app):
+        assert len(calls) == 1
+        assert (calls[0] is None) is (database_url is None)
+    assert len(calls) == 1
+
+
+def test_local_startup_failure_rolls_back_partial_inventory(monkeypatch) -> None:
+    import fleet_rlm.composition as composition
+
+    marker = object()
+
+    def fail_install(app, _settings, *, session_factory=None):
+        del session_factory
+        app.state.turn_coordinator = marker
+        app.state.composition_ready = True
+        raise RuntimeError("local wiring unavailable")
+
+    monkeypatch.setattr(composition, "install_offline_composition", fail_install)
+    app = create_app(
+        settings=Settings(
+            run_environment="hermetic",
+            database_url="sqlite+aiosqlite:///:memory:",
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="local wiring unavailable"), TestClient(app):
+        pass
+
+    assert app.state.composition_ready is False
+    assert app.state.turn_coordinator is None
+    assert app.state.db_engine is None
+    assert app.state.session_catalog is None
+
+
 def test_unready_composition_never_builds_route_dependencies() -> None:
     app = create_app(settings=Settings(auth_mode="dev"))
-    app.state.composition_ready = False
     with TestClient(app) as client:
+        app.state.composition_ready = False
         response = client.post(
             f"/api/sessions/{uuid4()}/turns",
             json={"text": "ping"},

@@ -70,6 +70,27 @@ describe("FleetApiClient", () => {
     ).rejects.toBeInstanceOf(FleetApiError);
   });
 
+  it("retains the request correlation id on public API failures", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: "turn_unavailable", message: "Turn is unavailable" }), {
+        status: 503,
+        headers: { "content-type": "application/json", "x-request-id": "request-123" },
+      }),
+    );
+    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
+
+    const failure = await client
+      .streamTurn({ message: "hello", sessionId: "session-id", idempotencyKey: "turn-key" })
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(FleetApiError);
+    expect(failure).toMatchObject({
+      status: 503,
+      message: "Turn is unavailable",
+      correlationId: "request-123",
+    });
+  });
+
   it("explains how to start Fleet when the API cannot be reached", async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
     const client = new FleetApiClient({ baseUrl: "http://127.0.0.1:8000" });

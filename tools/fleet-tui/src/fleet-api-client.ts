@@ -7,35 +7,21 @@ export type FleetIdentity = {
 };
 
 export type FleetSession = components["schemas"]["SessionDetailResponse"];
+export type FleetTurnPart = components["schemas"]["UIMessagePart"];
+export type FleetTurn = components["schemas"]["UIMessageResponse"];
+type FleetTurnPage = components["schemas"]["SessionTurnPageResponse"];
 
-export type FleetTurnPart = {
-  type: string;
-  text?: string;
-  state?: string;
-  toolName?: string;
-  toolCallId?: string;
-  input?: unknown;
-  output?: unknown;
-  errorText?: string;
-  data?: unknown;
-};
-
-type GeneratedUIMessage = components["schemas"]["UIMessageResponse"];
-export type FleetTurn = Omit<GeneratedUIMessage, "parts"> & {
-  parts: FleetTurnPart[];
-};
-
-type FleetTurnPage = Omit<components["schemas"]["SessionTurnPageResponse"], "items"> & {
-  items: FleetTurn[];
-};
+export type SessionListPage = components["schemas"]["SessionListResponse"];
 
 export class FleetApiError extends Error {
   readonly status: number;
+  readonly correlationId?: string;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, correlationId?: string) {
     super(message);
     this.name = "FleetApiError";
     this.status = status;
+    this.correlationId = correlationId;
   }
 }
 
@@ -57,6 +43,17 @@ export class FleetApiClient {
 
   async getSession(sessionId: string): Promise<FleetSession> {
     return this.requestJson<FleetSession>(`/api/sessions/${encodeURIComponent(sessionId)}`);
+  }
+
+  async listSessions(
+    params: { limit?: number; offset?: number; search?: string } = {},
+  ): Promise<SessionListPage> {
+    const search = new URLSearchParams();
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    if (params.offset !== undefined) search.set("offset", String(params.offset));
+    if (params.search) search.set("search", params.search);
+    const suffix = search.toString();
+    return this.requestJson<SessionListPage>(`/api/sessions${suffix ? `?${suffix}` : ""}`);
   }
 
   async listTurns(sessionId: string): Promise<FleetTurn[]> {
@@ -181,6 +178,10 @@ export class FleetApiClient {
     } catch {
       // The public API may return an empty or non-JSON error body.
     }
-    return new FleetApiError(response.status, message);
+    return new FleetApiError(
+      response.status,
+      message,
+      response.headers.get("x-request-id") ?? undefined,
+    );
   }
 }

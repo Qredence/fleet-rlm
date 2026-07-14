@@ -51,6 +51,9 @@ zsh .codex/workspace-bootstrap.zsh
 ## Run
 
 ```bash
+uv run fleet cli
+uv run fleet deno
+uv run fleet doctor daytona
 uv run fleet web
 uv run fleet-rlm serve-api --port 8000
 ```
@@ -92,8 +95,17 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 
 ## Learned Workspace Facts
 
-- Local backend development runs on `:8000` through `fleet web` or `fleet-rlm serve-api`. `POST /api/sessions/{session_id}/turns` requires `Idempotency-Key` and projects typed `RuntimeEvent` values over SSE; the legacy top-level chat, `/api/v1`, and WebSocket surfaces are removed.
+- Local development runs on `:8000`. `fleet cli` supervises Daytona plus Ink,
+  `fleet deno` supervises Deno plus Ink, and `fleet web` or `fleet-rlm serve-api`
+  remains backend-only. Supervised backend logs live under `.fleet_rlm/logs/`;
+  `fleet doctor daytona` is the opt-in disposable provider/mount probe.
+  `POST /api/sessions/{session_id}/turns`
+  requires `Idempotency-Key` and projects typed `RuntimeEvent` values over SSE;
+  the legacy top-level chat, `/api/v1`, and WebSocket surfaces are removed.
 - `src/fleet_rlm/` is the canonical RLM-native backend. The parallel foundation package was cut over after exit-bar evidence on `71e79271`; there is no compatibility runtime or dual-serve path.
+- The canonical Run Environment set is `hermetic`, `deno`, and `daytona`. Deno is intentional local vanilla `dspy.RLM` (real LM + DSPy default Deno/Pyodide) with Attachment reads and Skills but no durable Artifact promotion; Daytona is the full Fleet path (Sandbox, Workspace Volume Scope, Artifact promotion).
+- Application composition is lifespan-only: `create_app()` builds the shell, `composition.py` installs one complete inventory, and routes only retrieve composed modules.
+- The maintained terminal uses Ink only. `fleet-turn-stream.ts` owns strict stream lifecycle, `sse.ts` owns frame/chunk validation, `tui/projection.ts` owns live/reload projection, and `tui/store.ts` owns atomic hydration. The white-and-gray operator timeline shows typed structured Result cards and expanded, individually collapsible execution events.
 - Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments and Artifacts use Workspace Volume Scope; Artifact Candidates become public only through Turn Commit.
 - Settings use only `FLEET_*`. Neon auth requires explicit `FLEET_NEON_AUTH_URL`, exposes coarse public auth errors, and permits synthetic `X-Fleet-*` identity only in `auth_mode=dev`.
 - Alembic owns the live schema through one fresh canonical baseline. `create_tables` is restricted to explicit SQLite test/offline helpers; run `alembic check` against an upgraded empty database for drift.

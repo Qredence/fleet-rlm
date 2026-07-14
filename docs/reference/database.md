@@ -1,11 +1,31 @@
 # Database
 
+Canonical Run Environment set: `hermetic`, `deno`, `daytona`.
+
 Local development uses a hermetic SQLite database:
 
 ```bash
 export FLEET_RUN_ENVIRONMENT=hermetic
 export FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3'
 ```
+
+`FLEET_RUN_ENVIRONMENT` selects the Run environment at startup:
+
+| Value | Code execution | LLM calls | Durable volume | Auth/scope |
+| --- | --- | --- | --- | --- |
+| `hermetic` (default) | stub interpreter | none | n/a | off |
+| `deno` | DSPy default `PythonInterpreter` (Deno + Pyodide WASM) | real `dspy.LM` | none | on |
+| `daytona` | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | on |
+
+`deno` is intentional vanilla local `dspy.RLM`: real LLM calls and in-process
+attachment/skill tools, but no `create_artifact`, no Artifact Candidate
+promotion, and no Daytona broker. `daytona` is the full Fleet solution with
+Workspace Volume Scope and Turn Commit promotion.
+
+The Deno mode is additive: it issues real LLM requests and runs real Python
+inside the local Deno/Pyodide WASM interpreter, but never touches the Daytona
+broker or Workspace Volume. Its in-process sinks are Run-scoped working state,
+not a durable volume or an Artifact publication path.
 
 For disposable PostgreSQL or production, Fleet RLM starts from an empty
 database and one Alembic baseline under `migrations/versions/`.

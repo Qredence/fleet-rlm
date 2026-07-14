@@ -35,6 +35,19 @@ LEGACY_EXPLANATION_MARKERS = (
 
 CLI_CONTRACT_COMMANDS = (("uv", "run", "fleet-rlm", "--help"),)
 
+CANONICAL_RUN_ENVIRONMENTS = frozenset({"hermetic", "deno", "daytona"})
+CANONICAL_ENVIRONMENT_DOCS = (
+    Path("docs/adr/0002-canonical-deno-and-ink-terminal.md"),
+    Path("PRODUCT.md"),
+    Path("docs/architecture.md"),
+    Path("docs/reference/database.md"),
+)
+CANONICAL_ENVIRONMENT_DECLARATION = re.compile(
+    r"^Canonical Run Environment set:\s*(?P<values>[^\n]+)$",
+    re.MULTILINE,
+)
+INLINE_CODE_VALUE = re.compile(r"`([a-z][a-z0-9_-]*)`")
+
 
 def iter_docs_files(docs_root: Path) -> list[Path]:
     """Return every tracked Markdown document, including any future internal docs."""
@@ -150,6 +163,35 @@ def check_archived_paths(docs_root: Path) -> list[str]:
     return errors
 
 
+def check_canonical_environment_sets(repo_root: Path) -> list[str]:
+    """Keep the canonical Run Environment declaration aligned across durable docs."""
+    errors: list[str] = []
+    expected = sorted(CANONICAL_RUN_ENVIRONMENTS)
+
+    for relative_path in CANONICAL_ENVIRONMENT_DOCS:
+        file_path = repo_root / relative_path
+        if not file_path.is_file():
+            errors.append(f"missing canonical environment document: {relative_path.as_posix()}")
+            continue
+
+        text = file_path.read_text(encoding="utf-8", errors="ignore")
+        match = CANONICAL_ENVIRONMENT_DECLARATION.search(text)
+        if match is None:
+            errors.append(
+                f"missing canonical Run Environment declaration in {relative_path.as_posix()}; expected {expected}"
+            )
+            continue
+
+        actual = frozenset(INLINE_CODE_VALUE.findall(match.group("values")))
+        if actual != CANONICAL_RUN_ENVIRONMENTS:
+            errors.append(
+                f"canonical Run Environment drift in {relative_path.as_posix()}: "
+                f"expected {expected}, found {sorted(actual)}"
+            )
+
+    return errors
+
+
 def check_contract_sanity(repo_root: Path) -> list[str]:
     errors: list[str] = []
 
@@ -197,6 +239,7 @@ def run_checks(repo_root: Path, *, include_contract_checks: bool = True) -> list
     errors.extend(check_banned_link_schemes(docs_root, files))
     errors.extend(check_orphans(docs_root, files))
     errors.extend(check_archived_paths(docs_root))
+    errors.extend(check_canonical_environment_sets(repo_root))
 
     if include_contract_checks:
         errors.extend(check_contract_sanity(repo_root))

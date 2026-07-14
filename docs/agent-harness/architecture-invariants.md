@@ -21,8 +21,10 @@ and its matching automated check in the same patch.
 
 ## Turn and async boundary
 
-- Construct a fresh `dspy.RLM`, custom `CodeInterpreter`, and host-tool list per
-  Turn; custom interpreters are not shared concurrently.
+- Construct a fresh `dspy.RLM` and host-tool list per Turn. Daytona constructs
+  a fresh custom `CodeInterpreter`; Deno passes `interpreter=None` so DSPy owns
+  a fresh default Deno/Pyodide interpreter. Interpreters are never shared
+  concurrently.
 - Preserve sandbox-safe `history: list[dict]` and invoke
   the supported `await rlm.acall(**named_signature_inputs)` surface.
 - Attachment ownership validation finishes before SSE begins.

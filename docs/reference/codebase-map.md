@@ -7,9 +7,9 @@ compatibility runtime and parallel foundation package no longer exist.
 
 | Module | Ownership | May depend on |
 | --- | --- | --- |
-| `app.py`, `main.py` | FastAPI factory, lifespan, router registration, ASGI entrypoint | composition, API routers |
+| `app.py`, `main.py` | FastAPI/router shell, lifespan selection and cleanup, ASGI entrypoint | composition, API routers |
 | `api/` | HTTP translation, identity, dependency aliases, AI SDK UI SSE projection and UIMessage reload | domain interfaces and lifespan-composed modules |
-| `chat/` | Turn orchestration, context construction, commit and terminal ordering | RLM, sessions, Skills, files |
+| `chat/` | Turn orchestration, context construction, commit and terminal ordering; Deno Run Environment, sinks, reduced capabilities, and RLM factory | RLM, sessions, Skills, files |
 | `rlm/` | DSPy signature, fresh-per-Turn RLM construction, budgets, events, runner | DSPy and domain values |
 | `daytona/` | Exclusive Daytona SDK boundary, Sandbox/lease/Volume adapters | Daytona SDK, domain values |
 | `sessions/` | Session Catalog, canonical Turn input/history, and versioned Committed Turn aggregate | domain values only |
@@ -17,13 +17,15 @@ compatibility runtime and parallel foundation package no longer exist.
 | `skills/` | bundled Skills, authorization, host capability registry, selection, typed task contracts, and progressive tools | domain values and package resources |
 | `persistence/` | SQLAlchemy models and repository adapters | sessions/files/artifact interfaces |
 | `observability/` | sanitized Turn records and exporters | Runtime Events |
-| `cli/` | thin `fleet web` and `fleet-rlm serve-api` launchers | canonical ASGI entrypoint |
+| `cli/` | Daytona/Deno backend-plus-Ink supervision, backend-only launchers, and doctor dispatch | canonical ASGI entrypoint, Daytona diagnostics |
 
 ## Hard boundaries
 
 - Daytona SDK imports are confined to `fleet_rlm.daytona`.
-- FastAPI routes retrieve lifespan-composed modules through dependency aliases;
-  routes do not construct repositories, engines, clients, or stores.
+- `create_app()` constructs no runtime inventory. FastAPI lifespan installs one
+  complete hermetic, Deno, or Daytona composition and owns rollback and
+  cleanup; routes retrieve it through dependency aliases and do not construct
+  repositories, engines, clients, or stores.
 - `RLMRunner` owns execution but not Turn Commit or Interpreter Lease release;
   `TurnCoordinator` owns commit, public terminal ordering, and final release.
 - Production schema evolution belongs to the root Alembic baseline. Explicit
@@ -41,5 +43,22 @@ compatibility runtime and parallel foundation package no longer exist.
 - `/api/skills`
 - `PUT /api/runs/{id}/cancellation`
 
-There is currently no frontend source tree. A future client will consume the
-AI SDK UI 7 SSE contract as a separate implementation effort.
+## Maintained terminal client
+
+| Module | Ownership |
+| --- | --- |
+| `tools/fleet-tui/src/fleet-turn-stream.ts` | request opening, bounded same-key retry, strict UI SSE lifecycle |
+| `tools/fleet-tui/src/sse.ts` | SSE framing and closed generated `FleetUIMessageChunk` validation |
+| `tools/fleet-tui/src/tui/projection.ts` | shared live-chunk and durable-Turn display projection |
+| `tools/fleet-tui/src/tui/store.ts` | conversation state and atomic Session hydration |
+| `tools/fleet-tui/src/tui/theme.ts` | white-and-gray palette and shared visual hierarchy |
+| `tools/fleet-tui/src/tui/views/` | Ink-only execution cards, structured Result formatting, Markdown, and code presentation |
+
+The client has no classic renderer. Live and reload use the same display
+semantics, including visible typed structured Result cards. Execution cards
+start expanded and are individually collapsible. A future graphical client is
+a separate implementation effort.
+
+`fleet cli` and `fleet deno` supervise this client against a selected local
+backend while keeping backend output out of Ink. `daytona/diagnostics.py` owns
+the opt-in disposable Sandbox doctor and never composes Fleet domain stores.

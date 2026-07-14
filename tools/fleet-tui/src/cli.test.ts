@@ -14,4 +14,7 @@ describe("CLI options", () => {
   it("rejects an option without a value", () => {
     expect(() => parseArgs(["--api-url"])).toThrow("Missing value");
   });
+  it("rejects the removed classic renderer flag", () => {
+    expect(() => parseArgs(["--classic"])).toThrow("Missing value for --classic");
+  });
 });

@@ -147,59 +147,59 @@ def test_api_upload_get_no_path_leak_and_no_public_stage(tmp_path: Path) -> None
         "X-Fleet-User-Id": str(user),
         "X-Fleet-Workspace-Id": str(ws),
     }
-    client = TestClient(app)
-    response = client.post(
-        "/api/attachments",
-        headers=headers,
-        files={"attachment": ("readme.md", b"# hi", "text/markdown")},
-    )
-    assert response.status_code == 201
-    body = response.json()
-    assert set(body.keys()) == {
-        "id",
-        "filename",
-        "content_type",
-        "byte_size",
-        "checksum_sha256",
-    }
-    assert "path" not in body
-    assert "/home/" not in json.dumps(body)
-    assert tmp_path.as_posix() not in json.dumps(body)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/attachments",
+            headers=headers,
+            files={"attachment": ("readme.md", b"# hi", "text/markdown")},
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert set(body.keys()) == {
+            "id",
+            "filename",
+            "content_type",
+            "byte_size",
+            "checksum_sha256",
+        }
+        assert "path" not in body
+        assert "/home/" not in json.dumps(body)
+        assert tmp_path.as_posix() not in json.dumps(body)
 
-    file_id = body["id"]
-    got = client.get(f"/api/attachments/{file_id}", headers=headers)
-    assert got.status_code == 200
-    assert got.json()["filename"] == "readme.md"
+        file_id = body["id"]
+        got = client.get(f"/api/attachments/{file_id}", headers=headers)
+        assert got.status_code == 200
+        assert got.json()["filename"] == "readme.md"
 
-    # wrong workspace
-    other = client.get(
-        f"/api/attachments/{file_id}",
-        headers={
-            "X-Fleet-User-Id": str(user),
-            "X-Fleet-Workspace-Id": str(uuid4()),
-        },
-    )
-    assert other.status_code == 404
+        # wrong workspace
+        other = client.get(
+            f"/api/attachments/{file_id}",
+            headers={
+                "X-Fleet-User-Id": str(user),
+                "X-Fleet-Workspace-Id": str(uuid4()),
+            },
+        )
+        assert other.status_code == 404
 
-    # Public stage removed (B6)
-    staged = client.post(
-        f"/api/attachments/{file_id}/stage",
-        headers=headers,
-        json={"session_id": str(uuid4()), "run_id": str(uuid4())},
-    )
-    assert staged.status_code == 404
+        # Public stage removed (B6)
+        staged = client.post(
+            f"/api/attachments/{file_id}/stage",
+            headers=headers,
+            json={"session_id": str(uuid4()), "run_id": str(uuid4())},
+        )
+        assert staged.status_code == 404
 
 
 def test_api_rejects_oversize(tmp_path: Path) -> None:
     settings = Settings(data_root=str(tmp_path), max_upload_bytes=4)
     app = create_app(settings=settings)
-    client = TestClient(app)
-    response = client.post(
-        "/api/attachments",
-        headers={
-            "X-Fleet-User-Id": str(uuid4()),
-            "X-Fleet-Workspace-Id": str(uuid4()),
-        },
-        files={"attachment": ("big.bin", b"12345", "application/octet-stream")},
-    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/attachments",
+            headers={
+                "X-Fleet-User-Id": str(uuid4()),
+                "X-Fleet-Workspace-Id": str(uuid4()),
+            },
+            files={"attachment": ("big.bin", b"12345", "application/octet-stream")},
+        )
     assert response.status_code == 400

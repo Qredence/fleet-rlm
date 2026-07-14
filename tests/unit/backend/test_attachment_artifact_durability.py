@@ -185,31 +185,31 @@ def test_public_attachment_and_artifact_responses_omit_paths(tmp_path: Path) -> 
         "X-Fleet-User-Id": str(user),
         "X-Fleet-Workspace-Id": str(ws),
     }
-    client = TestClient(app)
-    up = client.post(
-        "/api/attachments",
-        headers=headers,
-        files={"attachment": ("x.txt", b"abc", "text/plain")},
-    )
-    assert up.status_code == 201
-    up_body = up.json()
-    assert "path" not in up_body
-    assert "/home/" not in json.dumps(up_body)
-    assert str(tmp_path) not in json.dumps(up_body)
+    with TestClient(app) as client:
+        up = client.post(
+            "/api/attachments",
+            headers=headers,
+            files={"attachment": ("x.txt", b"abc", "text/plain")},
+        )
+        assert up.status_code == 201
+        up_body = up.json()
+        assert "path" not in up_body
+        assert "/home/" not in json.dumps(up_body)
+        assert str(tmp_path) not in json.dumps(up_body)
 
-    # Host-Mediated creation is the only foundation path; public create is absent.
-    art = client.post(
-        "/api/artifacts",
-        headers=headers,
-        json={
-            "session_id": str(uuid4()),
-            "run_id": str(uuid4()),
-            "kind": "text",
-            "content": "artifact body",
-            "title": "n",
-        },
-    )
-    assert art.status_code == 404
+        # Host-Mediated creation is the only foundation path; public create is absent.
+        art = client.post(
+            "/api/artifacts",
+            headers=headers,
+            json={
+                "session_id": str(uuid4()),
+                "run_id": str(uuid4()),
+                "kind": "text",
+                "content": "artifact body",
+                "title": "n",
+            },
+        )
+        assert art.status_code == 404
 
 
 def test_host_volume_mirror_rejects_escape(tmp_path: Path) -> None:

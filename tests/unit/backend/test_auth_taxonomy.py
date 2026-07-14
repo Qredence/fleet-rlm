@@ -97,9 +97,10 @@ def test_http_surface_logs_correlation_and_hides_cause(caplog: pytest.LogCapture
 
 def test_dev_mode_requires_an_existing_session() -> None:
     app = create_app(settings=Settings(auth_mode="dev"))
-    r = TestClient(app).post(
-        f"/api/sessions/{uuid4()}/turns",
-        headers={"Idempotency-Key": "dev-test"},
-        json={"text": "hi"},
-    )
+    with TestClient(app) as client:
+        r = client.post(
+            f"/api/sessions/{uuid4()}/turns",
+            headers={"Idempotency-Key": "dev-test"},
+            json={"text": "hi"},
+        )
     assert r.status_code == 404

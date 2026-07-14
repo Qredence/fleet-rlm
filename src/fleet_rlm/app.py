@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 
@@ -37,6 +39,41 @@ def _reject_retired_environment_variables() -> None:
         raise ValueError(f"retired Fleet environment variable(s): {names}")
 
 
+@asynccontextmanager
+async def _local_db_lifespan(
+    app: FastAPI,
+    settings_obj: Settings,
+    install_fn: Callable[..., Any],
+) -> AsyncIterator[None]:
+    from fleet_rlm.composition import _clear_composition_state
+
+    engine = None
+    session_factory = None
+    try:
+        if settings_obj.database_url:
+            from fleet_rlm.persistence.database import (
+                create_async_engine_from_url,
+                create_session_factory,
+                create_tables,
+                is_sqlite_url,
+            )
+
+            engine = create_async_engine_from_url(settings_obj.database_url)
+            app.state.db_engine = engine
+            session_factory = create_session_factory(engine)
+            if is_sqlite_url(settings_obj.database_url):
+                await create_tables(engine)
+        install_fn(app, settings_obj, session_factory=session_factory)
+        yield
+    finally:
+        _clear_composition_state(app)
+        try:
+            if engine is not None:
+                await engine.dispose()
+        finally:
+            app.state.db_engine = None
+
+
 def create_app(*, settings: Settings | None = None) -> FastAPI:
     """Create a FastAPI app.
 
@@ -49,6 +86,10 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
         from fleet_rlm.composition import require_live_settings
 
         require_live_settings(resolved)
+    elif resolved.run_environment == "deno":
+        from fleet_rlm.composition import require_deno_settings
+
+        require_deno_settings(resolved)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -66,37 +107,21 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
                     await dispose_live_composition(app)
             return
 
-        owns_engine = False
-        engine = getattr(app.state, "db_engine", None)
-        if engine is None and settings_obj.database_url:
-            from fleet_rlm.persistence.database import (
-                create_async_engine_from_url,
-                create_session_factory,
-            )
+        if settings_obj.run_environment == "deno":
+            from fleet_rlm.composition import install_deno_composition
 
-            engine = create_async_engine_from_url(settings_obj.database_url)
-            session_factory = create_session_factory(engine)
-            app.state.db_engine = engine
-            owns_engine = True
-        try:
-            if engine is not None:
-                from fleet_rlm.persistence.database import create_tables
+            async with _local_db_lifespan(app, settings_obj, install_deno_composition):
+                yield
+            return
 
-                await create_tables(engine)
-            if owns_engine:
-                from fleet_rlm.composition import install_offline_composition
+        if settings_obj.run_environment == "hermetic":
+            from fleet_rlm.composition import install_offline_composition
 
-                install_offline_composition(
-                    app,
-                    settings_obj,
-                    session_factory=session_factory,
-                )
-            yield
-        finally:
-            if owns_engine and engine is not None:
-                await engine.dispose()
-                app.state.db_engine = None
-                app.state.session_catalog = None
+            async with _local_db_lifespan(app, settings_obj, install_offline_composition):
+                yield
+            return
+
+        yield
 
     app = FastAPI(
         title=resolved.app_name,
@@ -106,7 +131,21 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     app.state.settings = resolved
     app.state.composition_ready = False
     app.state.db_engine = None
-    app.state.session_catalog = None
+    for name in (
+        "artifact_reader",
+        "attachment_lifecycle",
+        "auth_verifier",
+        "rlm_model_bundle",
+        "run_environment_resources",
+        "session_catalog",
+        "session_manager",
+        "turn_coordinator",
+        "turn_lifecycle",
+        "turn_state_store",
+        "workspace_volume_gateway",
+        "workspace_volume_mirror",
+    ):
+        setattr(app.state, name, None)
 
     from fleet_rlm.api.errors import install_error_handlers
     from fleet_rlm.api.openapi import install_openapi_contract
@@ -138,9 +177,4 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     app.state.skill_registry = skill_registry
     app.state.skill_authorizer = SkillAuthorizer(skill_registry)
     app.state.capability_registry = CapabilityRegistry()
-    if resolved.run_environment == "hermetic":
-        from fleet_rlm.composition import install_offline_composition
-
-        install_offline_composition(app, resolved)
-        app.state.composition_ready = True
     return app

@@ -1,5 +1,7 @@
 # Fleet RLM backend architecture
 
+Canonical Run Environment set: `hermetic`, `deno`, `daytona`.
+
 ## Runtime flow
 
 ```text
@@ -7,10 +9,14 @@ HTTP POST /api/sessions/{session_id}/turns + Idempotency-Key
   -> identity, Turn input, and Attachment validation
   -> TurnCoordinator
   -> durable Session History + atomic Run claim
-  -> Daytona Sandbox with Workspace Volume Scope
+  -> Run environment selected by FLEET_RUN_ENVIRONMENT
+     - hermetic: stub interpreter, no live LLM
+     - deno:     real dspy.LM, DSPy default PythonInterpreter (Deno/Pyodide WASM), in-process sinks
+     - daytona:  Daytona Sandbox with Workspace Volume Scope
   -> fresh DSPy RLM and CodeInterpreter
   -> host-mediated Skill, Attachment, and Artifact Candidate tools
-  -> candidate byte promotion
+     (deno: read_attachment + skills only; no create_artifact or promotion)
+  -> candidate byte promotion (daytona only; deno/hermetic skip durable volume write)
   -> atomic Turn/Run/Checkpoint/Artifact metadata commit
   -> artifact.created* then one run.completed terminal
   -> Interpreter Lease release
@@ -22,14 +28,33 @@ Artifact identity, and still releases the Interpreter Lease.
 
 ## Ownership
 
-- FastAPI lifespan owns database engines, Daytona clients, gateways,
-  repositories, and shutdown.
+- `app.create_app()` constructs only the FastAPI/router shell and empty state.
+- FastAPI lifespan installs exactly one complete Run Environment inventory,
+  marks it ready after successful wiring, and owns shutdown or startup rollback.
+- `composition.py` owns profile wiring. Its local installers share one inventory
+  builder; its live installer/disposer own Daytona resources. A locally owned
+  database engine creates tables only for SQLite and is disposed by lifespan.
 - Routes retrieve already-composed modules from `api/dependencies.py`.
 - `RLMRunner` executes one fresh DSPy RLM per Turn.
 - `TurnCoordinator` owns commit, public terminal ordering, and lease release.
+- `chat/deno_run_environment.py` owns Deno's in-process sinks, reduced
+  capabilities, and RLM factory. Passing no interpreter delegates to DSPy's
+  default Deno/Pyodide interpreter.
 - `daytona/` is the only Daytona SDK import boundary.
 - `persistence/` implements domain repository interfaces; Alembic owns the live
   schema.
+
+## Terminal client
+
+Ink is the sole renderer; there is no classic compatibility path.
+`fleet-turn-stream.ts` owns request/retry and the strict UI SSE lifecycle,
+`sse.ts` owns frame parsing and closed generated-chunk validation,
+`tui/projection.ts` owns both live and durable projection, and `tui/store.ts`
+owns atomic Session hydration. Live and reload therefore share display
+semantics. Structured results project into the same typed Result card in both
+paths; assistant narrative may merge into that card without changing the SSE
+or durable UI-message contracts. Ink renders the execution timeline with one
+achromatic white-and-gray theme.
 
 ## Durable files
 
@@ -41,8 +66,9 @@ never public Artifact rows.
 
 ## Compatibility
 
-There is no legacy backend, `/api/v1`, WebSocket execution, dual-serve, or data
-migration layer. Frontend adaptation is a separate effort.
+There is no legacy backend, `/api/v1`, WebSocket execution, dual-serve, data
+migration layer, or classic terminal renderer. A graphical frontend is a
+separate effort.
 
 ## Cutover status
 

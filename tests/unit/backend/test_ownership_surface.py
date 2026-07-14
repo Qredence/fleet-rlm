@@ -23,80 +23,78 @@ def _headers(user_id=None, workspace_id=None):
 @pytest.mark.asyncio
 async def test_cancel_foreign_or_missing_run_returns_404() -> None:
     app = create_app(settings=Settings(auth_mode="dev"))
-    client = TestClient(app)
     user, ws = uuid4(), uuid4()
     headers = _headers(user, ws)
+    with TestClient(app) as client:
+        missing = client.put(f"/api/runs/{uuid4()}/cancellation", headers=headers)
+        assert missing.status_code == 404
+        assert missing.json()["code"] == "run_not_found"
 
-    missing = client.put(f"/api/runs/{uuid4()}/cancellation", headers=headers)
-    assert missing.status_code == 404
-    assert missing.json()["code"] == "run_not_found"
-
-    # Create owned session+run, then cancel as a different workspace → 404
-    created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
-    assert created.status_code == 201
-    session_id = UUID(created.json()["id"])
-    started = await app.state.turn_lifecycle.begin(
-        BeginTurn(TurnAccess(user, ws), session_id, TurnInput("question"), "key-1", uuid4())
-    )
-    assert isinstance(started, ExecuteTurn)
-    foreign = client.put(
-        f"/api/runs/{started.run_id}/cancellation",
-        headers=_headers(user, uuid4()),
-    )
-    assert foreign.status_code == 404
+        # Create owned session+run, then cancel as a different workspace → 404
+        created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
+        assert created.status_code == 201
+        session_id = UUID(created.json()["id"])
+        started = await app.state.turn_lifecycle.begin(
+            BeginTurn(TurnAccess(user, ws), session_id, TurnInput("question"), "key-1", uuid4())
+        )
+        assert isinstance(started, ExecuteTurn)
+        foreign = client.put(
+            f"/api/runs/{started.run_id}/cancellation",
+            headers=_headers(user, uuid4()),
+        )
+        assert foreign.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_cancel_owned_run_records_intent_and_is_idempotent() -> None:
     app = create_app(settings=Settings(auth_mode="dev"))
-    client = TestClient(app)
     user, ws = uuid4(), uuid4()
     headers = _headers(user, ws)
-    created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
-    session_id = UUID(created.json()["id"])
-    started = await app.state.turn_lifecycle.begin(
-        BeginTurn(TurnAccess(user, ws), session_id, TurnInput("question"), "key-2", uuid4())
-    )
-    assert isinstance(started, ExecuteTurn)
+    with TestClient(app) as client:
+        created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
+        session_id = UUID(created.json()["id"])
+        started = await app.state.turn_lifecycle.begin(
+            BeginTurn(TurnAccess(user, ws), session_id, TurnInput("question"), "key-2", uuid4())
+        )
+        assert isinstance(started, ExecuteTurn)
 
-    r1 = client.put(f"/api/runs/{started.run_id}/cancellation", headers=headers)
-    assert r1.status_code == 200
-    assert r1.json()["state"] == "requested"
+        r1 = client.put(f"/api/runs/{started.run_id}/cancellation", headers=headers)
+        assert r1.status_code == 200
+        assert r1.json()["state"] == "requested"
 
-    r2 = client.put(f"/api/runs/{started.run_id}/cancellation", headers=headers)
-    assert r2.status_code == 200
-    assert r2.json()["state"] == "already_requested"
+        r2 = client.put(f"/api/runs/{started.run_id}/cancellation", headers=headers)
+        assert r2.status_code == 200
+        assert r2.json()["state"] == "already_requested"
 
 
 def test_missing_run_cannot_be_cancelled() -> None:
     app = create_app(settings=Settings(auth_mode="dev"))
-    client = TestClient(app)
     user, ws = uuid4(), uuid4()
     headers = _headers(user, ws)
     run_id = uuid4()
-
-    response = client.put(f"/api/runs/{run_id}/cancellation", headers=headers)
+    with TestClient(app) as client:
+        response = client.put(f"/api/runs/{run_id}/cancellation", headers=headers)
     assert response.status_code == 404
 
 
 def test_public_stage_route_removed(tmp_path) -> None:
     settings = Settings(data_root=str(tmp_path), max_upload_bytes=1024)
     app = create_app(settings=settings)
-    client = TestClient(app)
     headers = _headers()
-    up = client.post(
-        "/api/attachments",
-        headers=headers,
-        files={"attachment": ("a.txt", b"hi", "text/plain")},
-    )
-    assert up.status_code == 201
-    file_id = up.json()["id"]
-    staged = client.post(
-        f"/api/attachments/{file_id}/stage",
-        headers=headers,
-        json={"session_id": str(uuid4()), "run_id": str(uuid4())},
-    )
-    assert staged.status_code == 404
+    with TestClient(app) as client:
+        up = client.post(
+            "/api/attachments",
+            headers=headers,
+            files={"attachment": ("a.txt", b"hi", "text/plain")},
+        )
+        assert up.status_code == 201
+        file_id = up.json()["id"]
+        staged = client.post(
+            f"/api/attachments/{file_id}/stage",
+            headers=headers,
+            json={"session_id": str(uuid4()), "run_id": str(uuid4())},
+        )
+        assert staged.status_code == 404
 
 
 def test_public_artifact_create_is_not_an_ownership_surface(tmp_path) -> None:

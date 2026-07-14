@@ -11,10 +11,20 @@ SSE contract and is intentionally outside the backend cutover.
 
 ```bash
 uv sync --all-extras --dev
+# combined backend + Ink terminal
+uv run fleet cli   # Daytona
+uv run fleet deno  # Deno/Pyodide
+# backend-only launchers
 uv run fleet web
-# equivalent backend launcher
 uv run fleet-rlm serve-api
 ```
+
+`fleet cli` and `fleet deno` require Node 22+ and pnpm. They wait for backend
+readiness, keep backend output in `.fleet_rlm/logs/latest.log`, and stop the
+backend when Ink exits. Forward Ink arguments after `--`, for example
+`uv run fleet deno -- --session <uuid>`. Before a Daytona run, the explicit
+`uv run fleet doctor daytona` check validates database/provider access and a
+disposable scoped Sandbox without creating Fleet rows.
 
 The default app is offline/hermetic. Live DSPy and Daytona composition is
 explicit:
@@ -57,10 +67,11 @@ See [HTTP API](docs/reference/http-api.md) and generated [OpenAPI](openapi.yaml)
 ## Architecture
 
 One Turn validates identity and Attachment references before opening SSE,
-restores durable Session History, acquires a Daytona Interpreter Lease, creates
-a fresh `dspy.RLM`, executes host-mediated tools, promotes private Artifact
-Candidates, commits the Turn transactionally, emits committed Artifact events,
-then emits exactly one terminal Runtime Event and releases the lease.
+restores durable Session History, creates a fresh `dspy.RLM`, executes
+host-mediated tools, commits the Turn transactionally, and emits exactly one
+terminal Runtime Event. Daytona Turns additionally acquire a Sandbox
+Interpreter Lease and promote private Artifact Candidates before commit; Deno
+Turns use DSPy's local Deno/Pyodide interpreter and do not promote Artifacts.
 
 Read [architecture](docs/architecture.md), the [backend context](src/fleet_rlm/CONTEXT.md),
 and the [codebase map](docs/reference/codebase-map.md).

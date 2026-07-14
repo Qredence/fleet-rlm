@@ -1,0 +1,233 @@
+"""Process supervision for the backend-backed Ink development client."""
+
+from __future__ import annotations
+
+import os
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
+from pathlib import Path
+from types import FrameType
+
+SignalHandler = int | Callable[[int, FrameType | None], object] | None
+
+
+class SupervisorError(RuntimeError):
+    """A user-actionable local process supervision failure."""
+
+
+def _validate_prerequisites(repo_root: Path) -> tuple[Path, str]:
+    workspace = repo_root / "tools" / "fleet-tui"
+    if (
+        not workspace.is_dir()
+        or not (workspace / "package.json").is_file()
+        or not (workspace / "src" / "cli.tsx").is_file()
+    ):
+        raise SupervisorError(f"Fleet TUI workspace is missing: {workspace}")
+
+    pnpm = shutil.which("pnpm")
+    if pnpm is None:
+        raise SupervisorError("pnpm is required to launch the Fleet TUI")
+    node = shutil.which("node")
+    if node is None:
+        raise SupervisorError("Node.js 22 or newer is required to launch the Fleet TUI")
+    try:
+        result = subprocess.run(
+            [node, "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SupervisorError("Could not execute Node.js to validate version 22 or newer") from exc
+    version = result.stdout.strip().removeprefix("v")
+    try:
+        major = int(version.split(".", maxsplit=1)[0])
+    except ValueError as exc:
+        raise SupervisorError(f"Could not determine the installed Node.js version: {version or 'unknown'}") from exc
+    if result.returncode != 0 or major < 22:
+        raise SupervisorError(f"Node.js 22 or newer is required; found {version or 'unknown'}")
+    return workspace, pnpm
+
+
+def _require_available_port(host: str, port: int) -> None:
+    if not 1 <= port <= 65_535:
+        raise SupervisorError("port must be between 1 and 65535")
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    try:
+        with socket.socket(family, socket.SOCK_STREAM) as probe:
+            probe.bind((host, port))
+    except OSError as exc:
+        raise SupervisorError(f"port {port} is already in use on {host}") from exc
+
+
+def _api_url(host: str, port: int) -> str:
+    client_host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(host, host)
+    if ":" in client_host and not client_host.startswith("["):
+        client_host = f"[{client_host}]"
+    return f"http://{client_host}:{port}"
+
+
+def _wait_until_ready(
+    backend: subprocess.Popen[bytes],
+    *,
+    api_url: str,
+    log_path: Path,
+    timeout: float,
+    shutdown_requested: Callable[[], bool],
+) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if shutdown_requested():
+            return
+        returncode = backend.poll()
+        if returncode is not None:
+            raise SupervisorError(f"Fleet backend exited with status {returncode}; see {log_path}")
+        try:
+            with urllib.request.urlopen(f"{api_url}/openapi.json", timeout=0.5) as response:
+                if 200 <= response.status < 300:
+                    return
+        except (OSError, TimeoutError, urllib.error.URLError):
+            pass
+        time.sleep(0.1)
+    if shutdown_requested():
+        return
+    raise SupervisorError(f"Fleet backend was not ready within {timeout:g}s; see {log_path}")
+
+
+def _stop_process_group(process: subprocess.Popen[bytes]) -> None:
+    """Stop one owned child process group, escalating after a bounded wait."""
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            return
+        process.wait()
+
+
+def supervise(
+    *,
+    host: str,
+    port: int,
+    reload: bool,
+    run_environment: str,
+    tui_args: Sequence[str] = (),
+    repo_root: Path | None = None,
+) -> None:
+    """Run the selected backend and repository Ink client together."""
+    root = repo_root or Path(__file__).resolve().parents[3]
+    workspace, pnpm = _validate_prerequisites(root)
+    _require_available_port(host, port)
+    logs = root / ".fleet_rlm" / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
+    log_path = logs / f"backend-{timestamp}.log"
+    latest_log_path = logs / "latest.log"
+    api_url = _api_url(host, port)
+    backend_command = [
+        sys.executable,
+        "-m",
+        "uvicorn",
+        "fleet_rlm.main:app",
+        "--host",
+        host,
+        "--port",
+        str(port),
+    ]
+    if reload:
+        backend_command.append("--reload")
+    backend_env = {**os.environ, "FLEET_RUN_ENVIRONMENT": run_environment}
+    previous_handlers: dict[int, SignalHandler] = {}
+    received_signal: int | None = None
+
+    def request_shutdown(signum: int, _frame: FrameType | None) -> None:
+        nonlocal received_signal
+        if received_signal is None:
+            received_signal = signum
+
+    for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        try:
+            previous_handlers[signum] = signal.signal(signum, request_shutdown)
+        except ValueError:
+            continue
+    try:
+        with log_path.open("wb") as backend_log:
+            latest_log_path.unlink(missing_ok=True)
+            latest_log_path.symlink_to(log_path.name)
+            backend: subprocess.Popen[bytes] | None = None
+            tui: subprocess.Popen[bytes] | None = None
+            try:
+                backend = subprocess.Popen(
+                    backend_command,
+                    cwd=root,
+                    env=backend_env,
+                    stdout=backend_log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+            except OSError as exc:
+                raise SupervisorError(f"Could not start the Fleet backend; see {log_path}") from exc
+            try:
+                _wait_until_ready(
+                    backend,
+                    api_url=api_url,
+                    log_path=log_path,
+                    timeout=30.0,
+                    shutdown_requested=lambda: received_signal is not None,
+                )
+                if received_signal is None:
+                    try:
+                        tui = subprocess.Popen(
+                            [pnpm, "start", "--", "--api-url", api_url, *tui_args],
+                            cwd=workspace,
+                            start_new_session=True,
+                        )
+                    except OSError as exc:
+                        raise SupervisorError("Could not start the Fleet Ink TUI") from exc
+
+                tui_returncode: int | None = None
+                while received_signal is None and tui is not None:
+                    backend_returncode = backend.poll()
+                    if backend_returncode is not None:
+                        raise SupervisorError(f"Fleet backend exited with status {backend_returncode}; see {log_path}")
+                    tui_returncode = tui.poll()
+                    if tui_returncode is not None:
+                        break
+                    time.sleep(0.1)
+                if received_signal is None and tui_returncode not in {
+                    0,
+                    128 + signal.SIGINT,
+                    -signal.SIGINT,
+                }:
+                    raise SupervisorError(f"Fleet Ink TUI exited with status {tui_returncode}")
+            finally:
+                if tui is not None:
+                    _stop_process_group(tui)
+                _stop_process_group(backend)
+    finally:
+        for signum, handler in previous_handlers.items():
+            try:
+                signal.signal(signum, handler)
+            except ValueError:
+                continue
+
+    if received_signal is not None:
+        if received_signal != signal.SIGINT:
+            raise SystemExit(128 + received_signal)
+        return

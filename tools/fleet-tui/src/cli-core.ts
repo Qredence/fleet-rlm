@@ -1,13 +1,8 @@
-#!/usr/bin/env node
-
-import { runAgentTUI } from "@ai-sdk/tui";
 import { createHash, randomUUID } from "node:crypto";
 import { open, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 import { FleetApiClient } from "./fleet-api-client.js";
-import { FleetSseAgent } from "./fleet-sse-agent.js";
-import { formatTranscript } from "./transcript.js";
 
 export type CliOptions = {
   apiUrl: string;
@@ -19,7 +14,9 @@ export type CliOptions = {
 };
 
 export function parseArgs(args: string[]): CliOptions | "help" {
-  const options: CliOptions = { apiUrl: process.env.FLEET_API_URL ?? "http://127.0.0.1:8000" };
+  const options: CliOptions = {
+    apiUrl: process.env.FLEET_API_URL ?? "http://127.0.0.1:8000",
+  };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--") {
@@ -68,8 +65,9 @@ export function parseArgs(args: string[]): CliOptions | "help" {
   return options;
 }
 
-export async function run(options: CliOptions): Promise<void> {
-  const client = new FleetApiClient({
+export function createFleetClient(options: CliOptions): FleetApiClient {
+  validateIdentity(options);
+  return new FleetApiClient({
     baseUrl: options.apiUrl,
     identity: {
       token: process.env.FLEET_API_TOKEN,
@@ -77,38 +75,18 @@ export async function run(options: CliOptions): Promise<void> {
       workspaceId: options.workspaceId,
     },
   });
+}
+
+export function validateIdentity(options: CliOptions): void {
   if (Boolean(options.userId) !== Boolean(options.workspaceId)) {
     throw new Error("--user-id and --workspace-id must be provided together");
   }
   if (process.env.FLEET_API_TOKEN && options.userId) {
     throw new Error("FLEET_API_TOKEN cannot be combined with synthetic dev identity");
   }
-  if (options.artifactId && options.outputPath) {
-    await saveArtifact(client, options.artifactId, options.outputPath);
-    process.stdout.write(`Saved verified artifact to ${options.outputPath}\n`);
-    return;
-  }
-  const resumed = Boolean(options.sessionId);
-  const session = resumed
-    ? await client.getSession(options.sessionId!)
-    : await client.createSession();
-
-  process.stdout.write(`Fleet session: ${session.id}\n`);
-  if (resumed) {
-    process.stdout.write(formatTranscript(await client.listTurns(session.id)));
-  }
-  await runAgentTUI({
-    title: "Fleet RLM",
-    agent: new FleetSseAgent(client, session.id),
-    // A Fleet RLM run is an execution trace.  Keep earlier RLM steps and
-    // reasoning expanded when later events arrive instead of collapsing them
-    // into invisible history.
-    tools: "full",
-    reasoning: "full",
-  });
 }
 
-async function saveArtifact(
+export async function saveArtifact(
   client: FleetApiClient,
   artifactId: string,
   outputPath: string,
@@ -146,7 +124,17 @@ async function saveArtifact(
   }
 }
 
-function usage(): string {
+export async function runArtifactDownload(options: CliOptions): Promise<boolean> {
+  if (!options.artifactId || !options.outputPath) {
+    return false;
+  }
+  const client = createFleetClient(options);
+  await saveArtifact(client, options.artifactId, options.outputPath);
+  process.stdout.write(`Saved verified artifact to ${options.outputPath}\n`);
+  return true;
+}
+
+export function inkUsage(): string {
   return `Usage: pnpm start -- [options]
 
 Options:
@@ -157,19 +145,14 @@ Options:
   artifact <uuid> --output <path>
                             Download, verify, and atomically save an Artifact
   --help, -h               Show this help
-`;
-}
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  try {
-    const options = parseArgs(process.argv.slice(2));
-    if (options === "help") {
-      process.stdout.write(usage());
-    } else {
-      await run(options);
-    }
-  } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : "Fleet TUI failed"}\n`);
-    process.exitCode = 1;
-  }
+Slash commands:
+  /help      list commands
+  /clear     clear the visible conversation
+  /sessions  list recent sessions
+  /resume    resume a session by id
+  /cancel    cancel the current run
+  /status    show session, run, and usage
+  /exit      exit
+`;
 }

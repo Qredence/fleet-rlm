@@ -54,7 +54,7 @@ class Settings(BaseSettings):
         default="/home/daytona/fleet",
         description="Absolute Sandbox mount path for the workspace Volume",
     )
-    run_environment: Literal["hermetic", "daytona"] = Field(default="hermetic")
+    run_environment: Literal["hermetic", "daytona", "deno"] = Field(default="hermetic")
     data_root: str = Field(default=".fleet_rlm")
     max_upload_bytes: int = Field(
         default=10 * 1024 * 1024,

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from fleet_rlm.api.dependencies import TurnCoordinatorDep
 from fleet_rlm.api.identity import RequestIdentity, get_request_identity
@@ -22,13 +23,43 @@ from fleet_rlm.chat.turn_lifecycle import (
     TurnNotFoundError,
 )
 from fleet_rlm.chat.turn_preparation import TurnPreparationTimeout, TurnPreparationUnavailable
+from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
 router = APIRouter(tags=["turns"])
+logger = logging.getLogger(__name__)
 
 
 def _http_error(status: int, code: str, message: str) -> HTTPException:
     return HTTPException(status_code=status, detail={"code": code, "message": message})
+
+
+def _correlation_id(request: Request) -> str:
+    for header in ("x-request-id", "x-correlation-id"):
+        value = request.headers.get(header)
+        if value and value.strip():
+            return value.strip()
+    return str(uuid4())
+
+
+def _preparation_unavailable(request: Request, exc: BaseException) -> JSONResponse:
+    correlation_id = _correlation_id(request)
+    diagnostic = normalize_turn_failure(exc)
+    logger.warning(
+        "turn_preparation_failure correlation_id=%s cause_type=%s provider_status_category=%s message=%s",
+        correlation_id,
+        diagnostic.cause_type,
+        diagnostic.provider_status_category,
+        diagnostic.message,
+    )
+    return JSONResponse(
+        status_code=503,
+        content={"code": "turn_unavailable", "message": "Turn is unavailable"},
+        headers={
+            "X-Request-ID": correlation_id,
+            "X-Correlation-ID": correlation_id,
+        },
+    )
 
 
 @router.post(
@@ -56,7 +87,7 @@ async def create_turn(
         str,
         Header(alias="Idempotency-Key", min_length=1, max_length=128),
     ],
-) -> StreamingResponse:
+) -> Response:
     """Open the Turn fully, then construct its public SSE response."""
     try:
         command = OpenTurnCommand(
@@ -76,7 +107,7 @@ async def create_turn(
     except TurnPreparationTimeout as exc:
         raise _http_error(504, "turn_preparation_timeout", "Turn preparation timed out") from exc
     except (TurnLifecycleUnavailable, TurnPreparationUnavailable) as exc:
-        raise _http_error(503, "turn_unavailable", "Turn is unavailable") from exc
+        return _preparation_unavailable(request, exc)
     except ValueError as exc:
         raise _http_error(422, "invalid_request", "Invalid request") from exc
 

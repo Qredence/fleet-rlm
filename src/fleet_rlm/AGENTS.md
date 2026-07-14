@@ -11,14 +11,19 @@ Root repository workflow and validation rules remain authoritative from
   aliases in `api/dependencies.py`; construct process resources only in lifespan
   composition.
 - Keep Daytona SDK imports inside `daytona/`.
-- Create a fresh DSPy RLM and custom interpreter per Turn. Preserve
-  `history: list[dict]` and call the supported `await rlm.acall(**named_inputs)` surface.
+- Create a fresh DSPy RLM per Turn. Daytona supplies a fresh custom interpreter;
+  Deno passes `interpreter=None` so DSPy constructs its default Deno/Pyodide
+  interpreter. Preserve `history: list[dict]` and call the supported
+  `await rlm.acall(**named_inputs)` surface.
 - Compose zero to four authorized Skills through the host-owned capability
   registry. Capability tools may be plain callables or explicit `dspy.Tool`
   objects; HTTP never supplies executable Python or serialized objects.
 - Keep Runtime Events transport-neutral. `api/sse.py` alone projects the public
   AI SDK UI 7 v1 stream; sanitized RLM-authored reasoning is public, while
   provider-hidden chain-of-thought, full prompts, paths, and secrets are not.
+- Sanitize observable code semantically: preserve harmless literals and
+  f-string structure, but redact protected query/artifact arguments, remembered
+  private values, credentials, and private paths before public projection.
 - `TurnCoordinator` owns candidate promotion, Turn Commit, terminal projection,
   final UI part ordering, and Interpreter Lease release.
 - Alembic owns live schema evolution. `create_tables` is test/offline-only.
@@ -28,6 +33,9 @@ Root repository workflow and validation rules remain authoritative from
 ## Commands
 
 ```bash
+uv run fleet cli
+uv run fleet deno
+uv run fleet doctor daytona
 uv run fleet web
 uv run fleet-rlm serve-api
 uv run pytest tests/unit/backend tests/contracts/backend -q

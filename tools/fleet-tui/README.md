@@ -1,7 +1,7 @@
 # Fleet RLM Terminal UI
 
 This is a local Node 22+ terminal client for Fleet RLM's existing FastAPI SSE
-API. It uses `ai` and `@ai-sdk/tui` to render the backend's AI SDK UI v1
+API. It uses Ink to render the backend's AI SDK UI v1
 stream; it does not run a local model, a Harness agent, or any Vercel Sandbox.
 
 ## Run
@@ -20,13 +20,11 @@ uv run fleet-rlm serve-api --port 8000
 pnpm --dir tools/fleet-tui start
 ```
 
-For real Fleet RLM execution through Daytona and `dspy.RLM`, start the API
-against a freshly migrated disposable PostgreSQL database with provider
-credentials:
+For real Fleet RLM execution through Daytona and `dspy.RLM`, migrate the
+database, then use the combined backend-and-Ink command:
 
 ```bash
 FLEET_AUTH_MODE=dev \
-FLEET_RUN_ENVIRONMENT=daytona \
 FLEET_DATABASE_URL='postgresql+asyncpg://...' \
 FLEET_DAYTONA_API_KEY='...' \
 FLEET_LLM_API_KEY='...' \
@@ -35,29 +33,34 @@ FLEET_SUB_MODEL='openai/<model>' \
 uv run alembic upgrade head
 
 FLEET_AUTH_MODE=dev \
-FLEET_RUN_ENVIRONMENT=daytona \
 FLEET_DATABASE_URL='postgresql+asyncpg://...' \
 FLEET_DAYTONA_API_KEY='...' \
 FLEET_LLM_API_KEY='...' \
 FLEET_ROOT_MODEL='openai/<model>' \
 FLEET_SUB_MODEL='openai/<model>' \
-uv run fleet-rlm serve-api --port 8000
+uv run fleet cli --port 8000
 ```
 
-Run the TUI in another terminal with `pnpm --dir tools/fleet-tui start`. The
-SQLite/hermetic command above is only for local transport/UI smoke testing.
+The supervised backend logs to `.fleet_rlm/logs/latest.log` and stops when Ink
+exits. Run `uv run fleet doctor daytona` first when validating provider access
+or diagnosing Sandbox creation. The SQLite/hermetic two-terminal command above
+is only for local transport/UI smoke testing.
+
+For local Deno/Pyodide execution, configure the LLM settings and run
+`uv run fleet deno --port 8000`; this mode intentionally has no durable
+Artifact promotion.
 
 The command creates a Fleet session and prints its UUID. Resume server-side
 conversation context later with:
 
 ```bash
-pnpm --dir tools/fleet-tui start -- --session <session-uuid>
+uv run fleet cli -- --session <session-uuid>
 ```
 
 For non-default synthetic development identities, supply both headers:
 
 ```bash
-pnpm --dir tools/fleet-tui start -- \
+uv run fleet deno -- \
   --user-id <user-uuid> \
   --workspace-id <workspace-uuid>
 ```
@@ -69,11 +72,22 @@ authentication is intentionally out of scope for this first version.
 `FLEET_BUDGET_MAX_WALL_SECONDS` controls the maximum wall-clock duration of one
 live RLM turn and defaults to 900 seconds.
 
-When resuming, the client first restores the durable server-side transcript:
-user and assistant text, sanitized RLM reasoning, tool calls/results, and
-Fleet trajectory data such as RLM code/output, artifacts, skills, and usage.
-The stock TUI then starts a new interactive display for subsequent turns.
-Sensitive fields in restored structured data are redacted defensively.
+When resuming, the client atomically hydrates the Ink store with durable user
+and assistant text, sanitized RLM reasoning, tool calls/results, and Fleet
+trajectory data such as RLM code/output, structured results, artifacts, skills,
+and usage.
+
+## Operator timeline
+
+Ink renders one white-and-gray execution timeline with no semantic color
+dependency. Reasoning, code, interpreter output, tools, errors, Result, and
+usage remain chronological. The timeline grows upward from the prompt and
+follows new output at the bottom. Execution cards start expanded; focus a card
+and press `Enter` or `Space` to collapse it. Code is shown without a line-number
+gutter. Use `PageUp` and `PageDown` to scroll, and `End` to jump to the bottom
+and resume live-follow. Keyboard help sits below the input border. HTML
+character references are decoded for readability while HTML tags remain inert
+text.
 
 ## Validate
 

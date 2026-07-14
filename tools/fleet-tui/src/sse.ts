@@ -1,22 +1,8 @@
-import type { TextStreamPart } from "ai";
+import type { components } from "./generated/openapi.js";
 
-type UIChunk = {
-  type: string;
-  messageId?: string;
-  data?: unknown;
-  id?: string;
-  delta?: string;
-  text?: string;
-  toolCallId?: string;
-  toolName?: string;
-  input?: unknown;
-  output?: unknown;
-  errorText?: string;
-  reason?: string;
-  finishReason?: string;
-};
+export type FleetUIMessageChunk = components["schemas"]["FleetUIMessageChunk"];
 
-const chunkTypes = new Set([
+const chunkTypes = new Set<FleetUIMessageChunk["type"]>([
   "start",
   "start-step",
   "finish-step",
@@ -43,8 +29,6 @@ const chunkTypes = new Set([
   "error",
 ]);
 
-const finishReasons = new Set(["stop", "length", "content-filter", "tool-calls", "error", "other"]);
-
 export async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -58,28 +42,13 @@ export async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerato
       while (separator >= 0) {
         const frame = buffer.slice(0, separator);
         buffer = buffer.slice(separator).replace(/^\r?\n\r?\n/, "");
-        const data = frame
-          .split(/\r?\n/)
-          .filter((line) => line.startsWith("data:"))
-          .map((line) => line.slice(5).trimStart())
-          .join("\n");
-        if (data) {
-          yield data;
-        }
+        const data = frameData(frame);
+        if (data) yield data;
         separator = buffer.search(/\r?\n\r?\n/);
       }
       if (done) {
-        const frame = buffer.trim();
-        if (frame) {
-          const data = frame
-            .split(/\r?\n/)
-            .filter((line) => line.startsWith("data:"))
-            .map((line) => line.slice(5).trimStart())
-            .join("\n");
-          if (data) {
-            yield data;
-          }
-        }
+        const data = frameData(buffer.trim());
+        if (data) yield data;
         break;
       }
     }
@@ -88,170 +57,72 @@ export async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerato
   }
 }
 
-export function parseUIChunk(data: string): UIChunk | "[DONE]" {
-  if (data === "[DONE]") {
-    return data;
-  }
+export function parseUIChunk(data: string): FleetUIMessageChunk | "[DONE]" {
+  if (data === "[DONE]") return data;
   const parsed: unknown = JSON.parse(data);
-  if (!isUIChunk(parsed)) {
+  if (!isFleetUIMessageChunk(parsed)) {
     throw new Error("Fleet API returned an invalid AI SDK UI stream chunk");
   }
   return parsed;
 }
 
-export function toTextStreamParts(chunk: UIChunk): TextStreamPart<{}>[] {
-  if (chunk.type === "data-rlm-code") {
-    const data = requireRecord(chunk.data, "RLM code data");
-    const step = requiredStep(data, chunk.id);
-    return [
-      {
-        type: "tool-call",
-        toolCallId: `rlm-step-${step}`,
-        toolName: `RLM step ${step}`,
-        input: requireString(data.code, "RLM code"),
-        dynamic: true,
-        providerExecuted: true,
-      } as TextStreamPart<{}>,
-    ];
-  }
-  if (chunk.type === "data-rlm-output") {
-    const data = requireRecord(chunk.data, "RLM output data");
-    const step = requiredStep(data, chunk.id);
-    return [
-      {
-        type: "tool-result",
-        toolCallId: `rlm-step-${step}`,
-        output: requireString(data.output, "RLM output"),
-        dynamic: true,
-        providerExecuted: true,
-      } as TextStreamPart<{}>,
-    ];
-  }
-  if (chunk.type.startsWith("data-")) {
-    // The terminal renderer has no custom-data panel.  Do not pretend status,
-    // usage, or artifacts are model reasoning: real reasoning and tool events
-    // below retain their native UI treatment.
-    return [];
-  }
-  switch (chunk.type) {
+function frameData(frame: string): string {
+  return frame
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n");
+}
+
+function isFleetUIMessageChunk(value: unknown): value is FleetUIMessageChunk {
+  if (!isRecord(value) || typeof value.type !== "string") return false;
+  if (!chunkTypes.has(value.type as FleetUIMessageChunk["type"])) return false;
+
+  switch (value.type) {
     case "start":
-      return [{ type: "start" }];
+      return nonEmptyString(value.messageId) && isRecord(value.messageMetadata);
     case "start-step":
-      return [{ type: "start-step", request: {}, warnings: [] } as TextStreamPart<{}>];
     case "finish-step":
-      return [
-        {
-          type: "finish-step",
-          response: {},
-          usage: {},
-          performance: {},
-          finishReason: "stop",
-          rawFinishReason: undefined,
-          providerMetadata: undefined,
-        } as TextStreamPart<{}>,
-      ];
-    case "text-start":
-      return [{ type: "text-start", id: requireString(chunk.id, "text id") }];
-    case "text-delta":
-      return [
-        {
-          type: "text-delta",
-          id: requireString(chunk.id, "text id"),
-          text: requireString(chunk.delta, "text delta"),
-        },
-      ];
-    case "text-end":
-      return [{ type: "text-end", id: requireString(chunk.id, "text id") }];
+      return true;
     case "reasoning-start":
-      return [{ type: "reasoning-start", id: requireString(chunk.id, "reasoning id") }];
-    case "reasoning-delta":
-      return [
-        {
-          type: "reasoning-delta",
-          id: requireString(chunk.id, "reasoning id"),
-          text: requireString(chunk.delta, "reasoning delta"),
-        },
-      ];
     case "reasoning-end":
-      return [{ type: "reasoning-end", id: requireString(chunk.id, "reasoning id") }];
+    case "text-start":
+    case "text-end":
+      return nonEmptyString(value.id);
+    case "reasoning-delta":
+    case "text-delta":
+      return nonEmptyString(value.id) && typeof value.delta === "string";
     case "tool-input-available":
-      return [
-        {
-          type: "tool-call",
-          toolCallId: requireString(chunk.toolCallId, "tool call id"),
-          toolName: requireString(chunk.toolName, "tool name"),
-          input: chunk.input,
-          dynamic: true,
-          providerExecuted: true,
-        } as TextStreamPart<{}>,
-      ];
+      return nonEmptyString(value.toolCallId) && nonEmptyString(value.toolName) && "input" in value;
     case "tool-output-available":
-      return [
-        {
-          type: "tool-result",
-          toolCallId: requireString(chunk.toolCallId, "tool call id"),
-          output: chunk.output,
-          dynamic: true,
-          providerExecuted: true,
-        } as TextStreamPart<{}>,
-      ];
+      return nonEmptyString(value.toolCallId) && "output" in value;
     case "tool-output-error":
-      return [
-        {
-          type: "tool-error",
-          toolCallId: requireString(chunk.toolCallId, "tool call id"),
-          error: chunk.errorText ?? "Tool failed",
-          dynamic: true,
-          providerExecuted: true,
-        } as TextStreamPart<{}>,
-      ];
+      return nonEmptyString(value.toolCallId) && nonEmptyString(value.errorText);
     case "finish":
-      return [
-        {
-          type: "finish",
-          finishReason: finishReasons.has(chunk.finishReason ?? "")
-            ? (chunk.finishReason as "stop")
-            : "other",
-          rawFinishReason: chunk.finishReason,
-          totalUsage: {},
-        } as TextStreamPart<{}>,
-      ];
+      return value.finishReason === "stop" || value.finishReason === "error";
     case "abort":
-      return [{ type: "abort", reason: chunk.reason }];
+      return typeof value.reason === "string";
     case "error":
-      return [{ type: "error", error: chunk.errorText ?? "Fleet turn failed" }];
+      return nonEmptyString(value.errorText);
+    case "data-status":
+    case "data-skill":
+    case "data-rlm-code":
+    case "data-rlm-output":
+    case "data-attachment":
+    case "data-warning":
+    case "data-artifact":
+    case "data-usage":
+    case "data-structured-result":
+      return "data" in value;
     default:
-      throw new Error(`Fleet API returned unsupported chunk type: ${chunk.type}`);
+      return false;
   }
 }
 
-function isUIChunk(value: unknown): value is UIChunk {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { type?: unknown }).type === "string" &&
-    chunkTypes.has((value as { type: string }).type)
-  );
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function requireString(value: unknown, label: string): string {
-  if (typeof value !== "string" || !value) {
-    throw new Error(`Fleet API stream is missing ${label}`);
-  }
-  return value;
-}
-
-function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`Fleet API stream is missing ${label}`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function requiredStep(data: Record<string, unknown>, fallback: string | undefined): string {
-  const step = data.step;
-  if (typeof step === "number" || typeof step === "string") {
-    return String(step);
-  }
-  return requireString(fallback, "RLM step id");
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
 }

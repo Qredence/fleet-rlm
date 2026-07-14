@@ -1,6 +1,6 @@
 [project]
 name = "fleet-rlm"
-version = "0.6.2"
+version = "0.7.0"
 description = "RLM-native FastAPI backend with DSPy and Daytona"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -153,6 +153,7 @@ markers = [
     "db: requires live database",
     "e2e: full stack smoke tests",
     "benchmark: performance/throughput benchmark tests",
+    "deno: requires the pinned Deno runtime but no provider network access",
     "live_llm: tests that require a live configured LM / LiteLLM backend",
     "live_daytona: tests that require a live Daytona backend and explicit opt-in",
 ]

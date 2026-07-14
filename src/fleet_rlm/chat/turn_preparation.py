@@ -87,7 +87,7 @@ class TurnPreparation(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class RunEnvironment:
-    interpreter: RLMInterpreter
+    interpreter: RLMInterpreter | None
     attachment_sink: RunAttachmentSink
     artifact_sink: RunArtifactSink
     release: AsyncCleanup

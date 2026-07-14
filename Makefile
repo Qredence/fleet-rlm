@@ -1,5 +1,5 @@
 PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/contracts/backend tests/e2e scripts/openapi_tools.py scripts/db_init.py migrations
-PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db
+PYTEST_FAST_MARKERS = not deno and not live_llm and not live_daytona and not benchmark and not db
 PYTEST := uv run --no-sync pytest
 PYTEST_HERMETIC := env \
 	FLEET_RUN_ENVIRONMENT=hermetic \
@@ -18,7 +18,7 @@ PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
 	help \
 	install install-dev install-all \
 	dev format format-check lint typecheck \
-	test test-fast test-unit test-contract \
+	test test-fast test-unit test-contract test-deno \
 	check quality-gate check-release check-docs check-security check-deps check-codebase-tree api-check api-sync tui-check \
 	build build-release release release-check \
 	clean cli precommit-install precommit-run precommit \
@@ -42,6 +42,7 @@ help:
 	@echo "  make test             - Run default non-live/non-benchmark tests"
 	@echo "  make test-unit        - Run unit tests (non-live/non-benchmark)"
 	@echo "  make test-contract    - Run backend contracts and CLI smoke tests"
+	@echo "  make test-deno        - Run deterministic contracts against the Deno runtime"
 	@echo ""
 	@echo "Quality:"
 	@echo "  make check            - Run the primary repo quality gate"
@@ -102,6 +103,9 @@ test-unit:
 
 test-contract:
 	$(PYTEST_HERMETIC) -q tests/contracts/backend tests/e2e -m "$(PYTEST_FAST_MARKERS)" -n 0
+
+test-deno:
+	$(PYTEST) -q tests/unit/backend/test_deno_run_environment.py tests/contracts/backend/test_deno_turn_flow.py -m "deno" -n 0 --timeout=120
 
 test-db:
 	$(PYTEST) -q -m "db" -n 0

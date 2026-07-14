@@ -157,7 +157,71 @@ def test_observable_rlm_never_publishes_attachment_skill_or_candidate_bodies() -
     ):
         assert forbidden not in public
         assert forbidden not in public_code
-    assert "body = '[string:" in public_code
+    assert "body = '[private]'" in public_code
+    assert "emit('text', body)" in public_code
+
+
+def test_observable_rlm_code_projection_preserves_harmless_literals_and_f_strings() -> None:
+    rlm = ObservableRLM("request -> answer", observer=lambda _item: None)
+
+    public_code = rlm._sanitize_code(  # noqa: SLF001 - focused public-projection contract
+        "digit = '7'\nlabel = f'digit={digit}'\nprint(label)\nSUBMIT(answer=digit)"
+    )
+
+    assert "digit = '7'" in public_code
+    assert "label = f'digit={digit}'" in public_code
+    assert "print(label)" in public_code
+    assert "[string:" not in public_code
+
+
+def test_observable_rlm_code_projection_redacts_only_protected_call_arguments() -> None:
+    rlm = ObservableRLM("request -> answer", observer=lambda _item: None)
+
+    public_code = rlm._sanitize_code(  # noqa: SLF001 - focused public-projection contract
+        "\n".join(
+            (
+                "question = '955th digit'",
+                "answer = llm_query(f'private prompt: {question}')",
+                "answers = llm_query_batched(['private one', f'private {question}'])",
+                "create_artifact('text', f'private artifact: {answer}', title='Pi report')",
+                "print('7')",
+            )
+        )
+    )
+
+    assert "question = '955th digit'" in public_code
+    assert "llm_query('[redacted-subquery-prompt]')" in public_code
+    assert "llm_query_batched(['[redacted-subquery-prompts]'])" in public_code
+    assert "'[redacted-artifact-content]'" in public_code
+    assert "title='Pi report'" in public_code
+    assert "print('7')" in public_code
+    assert "private prompt" not in public_code
+    assert "private one" not in public_code
+    assert "private artifact" not in public_code
+
+
+def test_observable_rlm_code_projection_redacts_private_values_secrets_and_paths_safely() -> None:
+    rlm = ObservableRLM("request -> answer", observer=lambda _item: None)
+    rlm._fleet_private_tokens.add("previously private value")  # noqa: SLF001
+
+    public_code = rlm._sanitize_code(  # noqa: SLF001 - focused public-projection contract
+        "\n".join(
+            (
+                "private = 'previously private value'",
+                "credential = 'api_key=super-secret-value'",
+                "location = '/home/daytona/private/file.txt'",
+                "message = f'safe prefix {private}'",
+            )
+        )
+    )
+
+    assert "previously private value" not in public_code
+    assert "super-secret-value" not in public_code
+    assert "/home/daytona" not in public_code
+    assert "private = '[private]'" in public_code
+    assert "credential = '[redacted]'" in public_code
+    assert "location = '[path]'" in public_code
+    assert "message = f'safe prefix {private}'" in public_code
 
     rlm._remember_private_values(  # noqa: SLF001 - focused escaped-output regression
         "load_skill",
@@ -172,6 +236,27 @@ def test_observable_rlm_never_publishes_attachment_skill_or_candidate_bodies() -
     assert "line one" not in rlm._public_interpreter_output(  # noqa: SLF001
         {"instructions": "line one\nline two secret"}
     )
+
+
+def test_observable_rlm_code_projection_redacts_turn_inputs_and_protected_results() -> None:
+    rlm = ObservableRLM("request -> answer", observer=lambda _item: None)
+
+    rlm._remember_input_values({"request": "private user-provided phrase"})  # noqa: SLF001
+    rlm._remember_private_values(  # noqa: SLF001
+        "llm_query",
+        ("safe prompt",),
+        {},
+        "private sub-lm result",
+    )
+
+    public_code = rlm._sanitize_code(  # noqa: SLF001 - focused public-projection contract
+        "user = 'private user-provided phrase'\nresult = 'private sub-lm result'"
+    )
+
+    assert "private user-provided phrase" not in public_code
+    assert "private sub-lm result" not in public_code
+    assert "user = '[private]'" in public_code
+    assert "result = '[private]'" in public_code
 
     short_observed: list[RLMDetail] = []
     short = ObservableRLM("request -> answer", observer=short_observed.append)

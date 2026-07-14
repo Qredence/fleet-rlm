@@ -14,7 +14,6 @@ from fleet_rlm.daytona.session_manager import (
     DaytonaSessionManager,
     ExpectedWorkspaceMount,
     LeaseRequest,
-    binding_matches_expected,
     verify_sandbox_workspace_mount,
 )
 from fleet_rlm.daytona.volumes import (
@@ -183,7 +182,7 @@ async def test_sibling_workspaces_get_distinct_subpaths() -> None:
 
 
 @pytest.mark.asyncio
-async def test_acquire_replaces_binding_with_wrong_workspace_scope() -> None:
+async def test_acquire_rejects_binding_with_wrong_workspace_scope_without_replacement() -> None:
     mgr, plat, store = _manager()
     req = LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=uuid4())
     lease = await mgr.acquire(req)
@@ -201,18 +200,13 @@ async def test_acquire_replaces_binding_with_wrong_workspace_scope() -> None:
             provider_state="running",
         )
     )
-    again = await mgr.acquire(req)
-    assert again.sandbox_id != lease.sandbox_id
-    assert again.volume_subpath == f"workspaces/{req.workspace_id}"
-    assert lease.sandbox_id in plat.deleted
-    binding = await store.get(req.session_id)
-    assert binding is not None
-    assert binding.workspace_id == req.workspace_id
-    assert binding.volume_subpath == again.volume_subpath
+    with pytest.raises(DaytonaAdapterError, match="binding does not match"):
+        await mgr.acquire(req)
+    assert plat.deleted == []
 
 
 @pytest.mark.asyncio
-async def test_acquire_replaces_when_live_mount_mismatches() -> None:
+async def test_acquire_rejects_live_mount_mismatch_without_replacement() -> None:
     mgr, plat, store = _manager()
     req = LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=uuid4())
     lease = await mgr.acquire(req)
@@ -227,20 +221,9 @@ async def test_acquire_replaces_when_live_mount_mismatches() -> None:
             "subpath": f"workspaces/{other}",
         }
     ]
-    again = await mgr.acquire(req)
-    assert again.sandbox_id != lease.sandbox_id
-    assert again.volume_subpath == f"workspaces/{req.workspace_id}"
-    binding = await store.get(req.session_id)
-    assert binding is not None
-    assert binding_matches_expected(
-        binding,
-        ExpectedWorkspaceMount(
-            volume_id=again.volume_id,
-            volume_subpath=again.volume_subpath or "",
-            mount_path=again.mount_path,
-            workspace_id=req.workspace_id,
-        ),
-    )
+    with pytest.raises(DaytonaAdapterError, match="volume mount does not match"):
+        await mgr.acquire(req)
+    assert plat.deleted == []
 
 
 def test_verify_sandbox_workspace_mount_fail_closed() -> None:

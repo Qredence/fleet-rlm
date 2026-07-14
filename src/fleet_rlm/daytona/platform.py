@@ -69,8 +69,10 @@ class LiveDaytonaPlatform:
         )
         return self._client.create(params)
 
-    def delete(self, sandbox_id: str) -> None:
-        self._client.delete(sandbox_id)
+    def delete(self, sandbox_id: Any) -> None:
+        """Delete through Daytona 0.192, which requires a Sandbox object."""
+        target = self._client.get(sandbox_id) if isinstance(sandbox_id, str) else sandbox_id
+        self._client.delete(target)
 
     def start(self, sandbox_id: str) -> None:
         self._client.start(sandbox_id)

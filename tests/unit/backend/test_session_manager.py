@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from fleet_rlm.daytona.bindings import InMemoryBindingStore, SandboxBinding
-from fleet_rlm.daytona.errors import DaytonaAdapterError
+from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
 from fleet_rlm.daytona.lifecycle import LifecycleCapabilityError
 from fleet_rlm.daytona.session_manager import DaytonaSessionManager, LeaseRequest
 from fleet_rlm.daytona.volumes import VolumeConfig
@@ -22,9 +22,12 @@ class _FakeVolume:
 class _FakeVolumeClient:
     def __init__(self) -> None:
         self.gets: list[tuple[str, bool]] = []
+        self.failures: list[BaseException] = []
 
     def get(self, name: str, *, create: bool = False) -> _FakeVolume:
         self.gets.append((name, create))
+        if self.failures:
+            raise self.failures.pop(0)
         return _FakeVolume(f"vol-{name}")
 
 
@@ -190,6 +193,64 @@ async def test_acquire_creates_running_sandbox_and_lease() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "expected_calls"),
+    [
+        (ProviderRequestError("timeout", cause_type="TimeoutError"), 2),
+        (ProviderRequestError("network", cause_type="ConnectionError"), 2),
+        (ProviderRequestError("server", cause_type="ProviderError", status_code=503), 2),
+        (ProviderRequestError("auth", cause_type="AuthError", status_code=401), 1),
+        (ProviderRequestError("quota", cause_type="QuotaError", status_code=429), 1),
+        (ProviderRequestError("validation", cause_type="ValidationError", status_code=422), 1),
+        (ProviderRequestError("mount", cause_type="WorkspaceMountMismatch"), 1),
+    ],
+)
+async def test_acquire_retries_only_safe_pre_creation_failures(
+    failure: ProviderRequestError,
+    expected_calls: int,
+) -> None:
+    mgr, plat, _store, volumes = _manager()
+    volumes.failures = [failure]
+
+    if expected_calls == 2:
+        lease = await mgr.acquire(_request())
+        assert lease.sandbox_id in plat.sandboxes
+    else:
+        with pytest.raises(ProviderRequestError):
+            await mgr.acquire(_request())
+
+    assert len(volumes.gets) == expected_calls
+
+
+@pytest.mark.asyncio
+async def test_acquire_never_retries_ambiguous_sandbox_creation_failure() -> None:
+    class _FailingCreatePlatform(_FakePlatform):
+        def create(self, **kwargs: Any) -> _FakeSandbox:
+            self._n += 1
+            raise ProviderRequestError("provider unavailable", cause_type="ProviderError", status_code=503)
+
+    platform = _FailingCreatePlatform()
+    mgr, _plat, _store, _volumes = _manager(platform=platform)
+
+    with pytest.raises(ProviderRequestError):
+        await mgr.acquire(_request())
+
+    assert platform._n == 1
+
+
+@pytest.mark.asyncio
+async def test_acquire_retries_a_transient_pre_creation_failure_at_most_once() -> None:
+    mgr, _plat, _store, volumes = _manager()
+    volumes.failures = [TimeoutError("one"), TimeoutError("two"), TimeoutError("three")]
+
+    with pytest.raises(ProviderRequestError):
+        await mgr.acquire(_request())
+
+    assert len(volumes.gets) == 2
+    assert len(volumes.failures) == 1
+
+
+@pytest.mark.asyncio
 async def test_acquire_rejects_zero_workspace_id() -> None:
     mgr, _plat, _store, _volumes = _manager()
     with pytest.raises(ValueError, match="zero UUID"):
@@ -286,6 +347,32 @@ async def test_acquire_starts_stopped_sandbox() -> None:
     again = await mgr.acquire(req)
     assert again.sandbox_id == lease.sandbox_id
     assert "start" in plat.sandboxes[lease.sandbox_id].ops
+
+
+@pytest.mark.asyncio
+async def test_acquire_maps_lifecycle_provider_failure_without_replacement() -> None:
+    mgr, plat, _store, _volumes = _manager()
+    req = _request()
+    lease = await mgr.acquire(req)
+    await mgr.release(lease)
+    sandbox = plat.sandboxes[lease.sandbox_id]
+    sandbox.state = "stopped"
+
+    class _ProviderFailure(Exception):
+        status_code = 503
+
+    def fail_start() -> None:
+        raise _ProviderFailure("provider failed api_key=private")
+
+    sandbox.start = fail_start  # type: ignore[method-assign]
+
+    with pytest.raises(ProviderRequestError) as caught:
+        await mgr.acquire(req)
+
+    assert caught.value.status_code == 503
+    assert "private" not in str(caught.value)
+    assert len(plat.created) == 1
+    assert plat.deleted == []
 
 
 @pytest.mark.asyncio

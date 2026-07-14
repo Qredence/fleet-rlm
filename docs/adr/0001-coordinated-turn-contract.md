@@ -104,6 +104,10 @@ Composition selects exactly one explicit
 environment, never a provider fallback. Daytona SDK imports remain confined to
 `fleet_rlm.daytona`.
 
+> **Superseded only for the environment set by ADR 0002:** the canonical set is
+> now `hermetic`, `deno`, and `daytona`. The explicit-selection, no-fallback,
+> and Daytona import-boundary clauses above remain in force.
+
 Alembic owns one fresh baseline with `down_revision=None`. It stores canonical
 Turn input, one committed aggregate, claim/heartbeat/cancellation state, and
 committed Artifact truth. The prior revisions and result mirrors are removed.
@@ -166,3 +170,6 @@ Daytona/DSPy lane tied to the exact candidate fingerprint.
 - Metadata-only Artifacts: leaves committed outputs uninspectable.
 - A custom TUI fork: creates a UI subsystem when stable display-only detail
   panels preserve semantics through the maintained renderer.
+  **Superseded only for renderer choice by ADR 0002:** Ink is now the sole
+  maintained terminal renderer; the coordinated Turn and display-only detail
+  semantics remain in force.

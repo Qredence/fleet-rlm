@@ -39,6 +39,17 @@ class RLMDetail:
 
 DetailObserver = Callable[[RLMDetail], None]
 
+_PROTECTED_TOOL_NAMES = frozenset(
+    {
+        "read_attachment",
+        "create_artifact",
+        "load_skill",
+        "read_skill_resource",
+        "llm_query",
+        "llm_query_batched",
+    }
+)
+
 
 def _safe_value(value: Any, *, max_len: int = 2_000) -> Any:
     return sanitize_public_value(value, max_len=max_len)
@@ -46,6 +57,24 @@ def _safe_value(value: Any, *, max_len: int = 2_000) -> Any:
 
 def _argument(args: tuple[Any, ...], kwargs: dict[str, Any], name: str, index: int) -> Any:
     return kwargs.get(name, args[index] if len(args) > index else None)
+
+
+def _text_values(value: Any, *, depth: int = 0) -> list[str]:
+    if depth >= 8:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        values: list[str] = []
+        for item in value.values():
+            values.extend(_text_values(item, depth=depth + 1))
+        return values
+    if isinstance(value, (list, tuple, set, frozenset)):
+        values = []
+        for item in value:
+            values.extend(_text_values(item, depth=depth + 1))
+        return values
+    return []
 
 
 def _public_tool_input(name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
@@ -172,6 +201,9 @@ class ObservableRLM(RLM):  # ty: ignore[invalid-base] - DSPy @experimental obscu
         elif name == "llm_query_batched":
             self._fleet_protected_data_accessed = True
             values.extend(list(_argument(args, kwargs, "prompts", 0) or ()))
+        if name in _PROTECTED_TOOL_NAMES and result is not None:
+            self._fleet_protected_data_accessed = True
+            values.append(result)
         if isinstance(result, dict):
             protected = {
                 "artifact_candidate_id",
@@ -186,9 +218,16 @@ class ObservableRLM(RLM):  # ty: ignore[invalid-base] - DSPy @experimental obscu
                 self._fleet_protected_data_accessed = True
             values.extend(protected_values)
         for value in values:
-            text = str(value or "")
-            if len(text) >= 6:
-                self._fleet_private_tokens.add(text)
+            for text in _text_values(value):
+                if len(text) >= 6:
+                    self._fleet_private_tokens.add(text)
+
+    def _remember_input_values(self, input_args: dict[str, Any]) -> None:
+        """Remember turn inputs so generated code cannot echo them publicly."""
+        for value in input_args.values():
+            for text in _text_values(value):
+                if len(text) >= 6:
+                    self._fleet_private_tokens.add(text)
 
     def _sanitize_detail_text(self, value: Any) -> str:
         text: str = sanitize_public_text(str(value), max_len=self._fleet_detail_max_chars)
@@ -202,12 +241,21 @@ class ObservableRLM(RLM):  # ty: ignore[invalid-base] - DSPy @experimental obscu
         return text
 
     def _sanitize_code(self, code: str) -> str:
-        """Keep generated Python visible while replacing protected call bodies."""
+        """Keep generated Python readable while replacing only protected values."""
+
+        private_values = tuple(sorted(self._fleet_private_tokens, key=lambda item: len(item), reverse=True))
+        detail_max_chars = self._fleet_detail_max_chars
 
         class _ProtectedCallRedactor(ast.NodeTransformer):
             def visit_Constant(self, node: ast.Constant) -> ast.AST:  # noqa: N802 - ast API
-                if isinstance(node.value, str):
-                    return ast.copy_location(ast.Constant(f"[string:{len(node.value)}]"), node)
+                if not isinstance(node.value, str):
+                    return node
+                projected = node.value
+                for private in private_values:
+                    projected = projected.replace(private, "[private]")
+                projected = sanitize_public_text(projected, max_len=detail_max_chars)
+                if projected != node.value:
+                    return ast.copy_location(ast.Constant(projected), node)
                 return node
 
             def visit_Call(self, node: ast.Call) -> ast.AST:  # noqa: N802 - ast API
@@ -240,7 +288,9 @@ class ObservableRLM(RLM):  # ty: ignore[invalid-base] - DSPy @experimental obscu
             projected = ast.unparse(tree)
         except (SyntaxError, ValueError):
             return "Generated code omitted because it could not be safely projected"
-        return self._sanitize_detail_text(projected)
+        if len(projected) > self._fleet_detail_max_chars:
+            return projected[: self._fleet_detail_max_chars - 3] + "..."
+        return projected
 
     def _public_reasoning(self, reasoning: Any) -> str:
         if self._fleet_protected_data_accessed:
@@ -317,6 +367,7 @@ class ObservableRLM(RLM):  # ty: ignore[invalid-base] - DSPy @experimental obscu
     ) -> Any:
         """Mirror installed DSPy iteration behavior while publishing safe details."""
         step = iteration + 1
+        self._remember_input_values(input_args)
         self._observe(RLMDetailKind.STEP_STARTED, {"step": step, "max_steps": self.max_iterations})
         variables_info = [variable.format() for variable in variables]
         prediction = await self.generate_action.acall(

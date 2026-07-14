@@ -3,21 +3,88 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import os
 from collections.abc import Sequence
+from typing import Any
 
 
-def _serve_parser(*, program: str, command: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=program, description="Serve the Fleet RLM backend")
-    subcommands = parser.add_subparsers(dest="command", required=True)
-    serve = subcommands.add_parser(command, help="start the FastAPI backend")
+def _add_serve_command(
+    subcommands: Any,
+    command: str,
+    *,
+    help_text: str,
+    run_environment: str | None = None,
+    supervise_tui: bool = False,
+) -> None:
+    serve = subcommands.add_parser(command, help=help_text)
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--reload", action="store_true")
+    if supervise_tui:
+        serve.add_argument("tui_args", nargs=argparse.REMAINDER)
+    serve.set_defaults(run_environment=run_environment, supervise_tui=supervise_tui)
+
+
+def _fleet_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="fleet", description="Run and diagnose Fleet RLM")
+    subcommands = parser.add_subparsers(dest="command", required=True)
+    _add_serve_command(subcommands, "web", help_text="start the configured FastAPI backend")
+    _add_serve_command(
+        subcommands,
+        "cli",
+        help_text="start the Daytona backend and Ink terminal",
+        run_environment="daytona",
+        supervise_tui=True,
+    )
+    _add_serve_command(
+        subcommands,
+        "deno",
+        help_text="start the Deno backend and Ink terminal",
+        run_environment="deno",
+        supervise_tui=True,
+    )
+    doctor = subcommands.add_parser("doctor", help="run opt-in provider diagnostics")
+    doctor_providers = doctor.add_subparsers(dest="doctor_provider", required=True)
+    daytona = doctor_providers.add_parser(
+        "daytona",
+        help="verify Daytona, database, scoped mount, and interpreter access",
+    )
+    daytona.set_defaults(command="doctor", doctor_provider="daytona")
     return parser
 
 
-def _run(*, program: str, command: str, argv: Sequence[str] | None = None) -> None:
-    args = _serve_parser(program=program, command=command).parse_args(argv)
+def _single_command_parser(*, program: str, command: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=program, description="Serve the Fleet RLM backend")
+    subcommands = parser.add_subparsers(dest="command", required=True)
+    _add_serve_command(subcommands, command, help_text="start the FastAPI backend")
+    return parser
+
+
+def _run(parser: argparse.ArgumentParser, argv: Sequence[str] | None = None) -> None:
+    args = parser.parse_args(argv)
+    if args.command == "doctor":
+        _run_doctor(parser, args.doctor_provider)
+        return
+    if args.supervise_tui:
+        from fleet_rlm.cli.supervisor import SupervisorError, supervise
+
+        tui_args = tuple(args.tui_args)
+        if tui_args[:1] == ("--",):
+            tui_args = tui_args[1:]
+        try:
+            supervise(
+                host=args.host,
+                port=args.port,
+                reload=args.reload,
+                run_environment=args.run_environment,
+                tui_args=tui_args,
+            )
+        except SupervisorError as exc:
+            parser.exit(1, f"fleet: error: {exc}\n")
+        return
+    if args.run_environment is not None:
+        os.environ["FLEET_RUN_ENVIRONMENT"] = args.run_environment
     import uvicorn
 
     uvicorn.run(
@@ -28,11 +95,52 @@ def _run(*, program: str, command: str, argv: Sequence[str] | None = None) -> No
     )
 
 
+_DOCTOR_ACTIONS = {
+    "auth": "verify FLEET_DAYTONA_API_KEY and Daytona account access.",
+    "quota": "verify Daytona account capacity and quota.",
+    "network_timeout": "verify network access to Daytona and retry.",
+    "provider_5xx": "retry after the Daytona service recovers.",
+    "request_validation": "update the Fleet Daytona adapter to the pinned SDK contract.",
+    "mount_mismatch": "correct the Fleet scoped Volume mount contract.",
+    "database": "verify FLEET_DATABASE_URL and upgrade the database to Alembic head.",
+    "settings": "configure the required FLEET_DAYTONA_API_KEY and FLEET_DATABASE_URL settings.",
+    "interpreter": "inspect the disposable Sandbox interpreter capability.",
+    "cleanup": "check Daytona for a labelled fleet-daytona-doctor Sandbox and delete it if present.",
+    "unknown": "inspect sanitized server diagnostics and retry.",
+}
+
+
+def _run_doctor(parser: argparse.ArgumentParser, provider: str) -> None:
+    if provider != "daytona":
+        parser.error(f"unsupported doctor provider: {provider}")
+    from fleet_rlm.config import Settings
+    from fleet_rlm.daytona.diagnostics import run_daytona_doctor
+
+    try:
+        settings = Settings()
+    except Exception:  # noqa: BLE001 - settings errors must remain bounded and secret-free
+        print("[failed] settings: Required Fleet Daytona settings are missing or invalid.")
+        print(f"action: {_DOCTOR_ACTIONS['settings']}")
+        raise SystemExit(1) from None
+    result = asyncio.run(run_daytona_doctor(settings))
+    for step in result.steps:
+        state = "ok" if step.ok else "failed"
+        print(f"[{state}] {step.name}: {step.message}")
+    if not result.ok:
+        categories = [step.category for step in result.steps if not step.ok and step.category]
+        if not categories:
+            categories = [result.failure_category or "unknown"]
+        for category in dict.fromkeys(categories):
+            action = _DOCTOR_ACTIONS.get(category, _DOCTOR_ACTIONS["unknown"])
+            print(f"action: {action}")
+        raise SystemExit(1)
+
+
 def fleet_main(argv: Sequence[str] | None = None) -> None:
-    """Run ``fleet web``."""
-    _run(program="fleet", command="web", argv=argv)
+    """Run the configured, Daytona, or Deno Fleet backend."""
+    _run(_fleet_parser(), argv)
 
 
 def fleet_rlm_main(argv: Sequence[str] | None = None) -> None:
     """Run ``fleet-rlm serve-api``."""
-    _run(program="fleet-rlm", command="serve-api", argv=argv)
+    _run(_single_command_parser(program="fleet-rlm", command="serve-api"), argv)

@@ -6,6 +6,7 @@ Construction happens only via ``install_live_composition`` when live mode is on.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from fastapi import FastAPI
 
 from fleet_rlm.config import Settings
 from fleet_rlm.rlm.budgets import RunBudget
+from fleet_rlm.skills.registry import InMemorySkillRegistry
 
 
 class LiveCompositionError(RuntimeError):
@@ -90,6 +92,99 @@ def _host_roots(settings: Settings) -> tuple[str, str]:
     return upload_root, artifact_root
 
 
+def _run_budget(settings: Settings) -> RunBudget:
+    """Project Settings onto the one canonical per-Run Budget."""
+    return RunBudget(
+        max_iterations=settings.budget_max_iterations,
+        max_llm_calls=settings.budget_max_llm_calls,
+        max_output_chars=settings.budget_max_output_chars,
+        max_wall_seconds=settings.budget_max_wall_seconds,
+        max_sub_lm_concurrency=settings.budget_max_sub_lm_concurrency,
+        max_tool_calls=settings.budget_max_tool_calls,
+        max_skill_loads=settings.budget_max_skill_loads,
+    )
+
+
+def _clear_composition_state(app: FastAPI) -> None:
+    """Make every process-owned adapter unavailable after shutdown or rollback."""
+    app.state.composition_ready = False
+    for name in (
+        "artifact_reader",
+        "attachment_lifecycle",
+        "auth_verifier",
+        "rlm_model_bundle",
+        "run_environment_resources",
+        "session_catalog",
+        "session_manager",
+        "turn_coordinator",
+        "turn_lifecycle",
+        "turn_state_store",
+        "workspace_volume_gateway",
+        "workspace_volume_mirror",
+    ):
+        setattr(app.state, name, None)
+
+
+def _install_local_inventory(
+    app: FastAPI,
+    settings: Settings,
+    *,
+    session_factory: Any | None,
+    attachment_lifecycle: Any,
+    artifact_reader: Any,
+    preparation: Any,
+    rlm_factory: Any,
+    workspace_volume_mirror: Any | None,
+) -> OfflineCompositionHandles:
+    """Attach the shared in-memory/SQL inventory for one local Run Environment."""
+    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.persistence.repositories import (
+        InMemorySessionCatalog,
+        InMemoryTurnStateStore,
+        SqlAlchemySessionCatalog,
+        SqlAlchemyTurnStateStore,
+    )
+    from fleet_rlm.rlm.runner import RLMRunner
+
+    if session_factory is None:
+        turn_state = InMemoryTurnStateStore()
+        session_catalog = InMemorySessionCatalog(turn_state)
+    else:
+        turn_state = SqlAlchemyTurnStateStore(
+            session_factory,
+            stale_after_seconds=settings.run_stale_after_seconds,
+        )
+        session_catalog = SqlAlchemySessionCatalog(session_factory)
+    lifecycle = TurnLifecycleModule(
+        turn_state,
+        max_artifact_bytes=settings.max_artifact_bytes,
+        heartbeat_seconds=settings.run_heartbeat_seconds,
+    )
+    coordinator = TurnCoordinator(
+        lifecycle=lifecycle,
+        preparation=preparation,
+        runner=RLMRunner(factory=rlm_factory),
+    )
+    handles = OfflineCompositionHandles(
+        turn_coordinator=coordinator,
+        attachment_lifecycle=attachment_lifecycle,
+        artifact_reader=artifact_reader,
+        workspace_volume_mirror=workspace_volume_mirror,
+        session_catalog=session_catalog,
+        turn_lifecycle=lifecycle,
+    )
+    app.state.turn_coordinator = coordinator
+    app.state.turn_lifecycle = lifecycle
+    app.state.turn_state_store = turn_state
+    app.state.session_catalog = session_catalog
+    app.state.attachment_lifecycle = attachment_lifecycle
+    app.state.artifact_reader = artifact_reader
+    app.state.workspace_volume_mirror = workspace_volume_mirror
+    app.state.composition_ready = True
+    return handles
+
+
 def install_offline_composition(
     app: FastAPI,
     settings: Settings,
@@ -105,8 +200,6 @@ def install_offline_composition(
     )
     from fleet_rlm.artifacts.reader import ArtifactReader
     from fleet_rlm.chat.hermetic_run_environment import HermeticRLMFactory, HermeticTurnPreparation
-    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
     from fleet_rlm.daytona.paths import volume_paths_from_settings
     from fleet_rlm.daytona.volume_fs import HostVolumeMirror
     from fleet_rlm.daytona.workspace_volume import OfflineHostVolumeGateway
@@ -117,15 +210,7 @@ def install_offline_composition(
         WorkspaceAttachmentBlobGateway,
     )
     from fleet_rlm.files.paths import DaytonaAttachmentPathPolicy, LocalAttachmentPathPolicy
-    from fleet_rlm.persistence.repositories import (
-        InMemorySessionCatalog,
-        InMemoryTurnStateStore,
-        SqlAlchemyArtifactCatalog,
-        SqlAlchemyAttachmentCatalog,
-        SqlAlchemySessionCatalog,
-        SqlAlchemyTurnStateStore,
-    )
-    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
 
     upload_root, artifact_root = _host_roots(settings)
     mirror = HostVolumeMirror(
@@ -160,53 +245,19 @@ def install_offline_composition(
             catalog=SqlAlchemyArtifactCatalog(session_factory),
             blobs=DaytonaArtifactBlobGateway(volume_gateway),
         )
-    if session_factory is None:
-        turn_state = InMemoryTurnStateStore()
-        session_catalog = InMemorySessionCatalog(turn_state)
-    else:
-        turn_state = SqlAlchemyTurnStateStore(
-            session_factory,
-            stale_after_seconds=settings.run_stale_after_seconds,
-        )
-        session_catalog = SqlAlchemySessionCatalog(session_factory)
-    lifecycle = TurnLifecycleModule(
-        turn_state,
-        max_artifact_bytes=settings.max_artifact_bytes,
-        heartbeat_seconds=settings.run_heartbeat_seconds,
-    )
-    coordinator = TurnCoordinator(
-        lifecycle=lifecycle,
-        preparation=HermeticTurnPreparation(
-            attachments=attachment_lifecycle,
-            budget=RunBudget(
-                max_iterations=settings.budget_max_iterations,
-                max_llm_calls=settings.budget_max_llm_calls,
-                max_output_chars=settings.budget_max_output_chars,
-                max_wall_seconds=settings.budget_max_wall_seconds,
-                max_sub_lm_concurrency=settings.budget_max_sub_lm_concurrency,
-                max_tool_calls=settings.budget_max_tool_calls,
-                max_skill_loads=settings.budget_max_skill_loads,
-            ),
-        ),
-        runner=RLMRunner(factory=HermeticRLMFactory()),
-    )
-    handles = OfflineCompositionHandles(
-        turn_coordinator=coordinator,
+    return _install_local_inventory(
+        app,
+        settings,
+        session_factory=session_factory,
         attachment_lifecycle=attachment_lifecycle,
         artifact_reader=artifact_reader,
+        preparation=HermeticTurnPreparation(
+            attachments=attachment_lifecycle,
+            budget=_run_budget(settings),
+        ),
+        rlm_factory=HermeticRLMFactory(),
         workspace_volume_mirror=mirror,
-        session_catalog=session_catalog,
-        turn_lifecycle=lifecycle,
     )
-    app.state.turn_coordinator = coordinator
-    app.state.turn_lifecycle = lifecycle
-    app.state.turn_state_store = turn_state
-    app.state.session_catalog = session_catalog
-    app.state.attachment_lifecycle = attachment_lifecycle
-    app.state.artifact_reader = artifact_reader
-    app.state.workspace_volume_mirror = mirror
-    app.state.composition_ready = True
-    return handles
 
 
 async def build_live_composition(settings: Settings) -> LiveCompositionHandles:
@@ -339,7 +390,7 @@ async def install_live_composition(app: FastAPI, settings: Settings) -> LiveComp
 
         return handles
     except Exception:
-        app.state.composition_ready = False
+        _clear_composition_state(app)
         await _dispose_live_components(
             resources=handles.resources,
             gateway=handles.workspace_volume_gateway,
@@ -359,7 +410,128 @@ async def dispose_live_composition(app: FastAPI) -> None:
             suppress_errors=False,
         )
     finally:
-        app.state.composition_ready = False
+        _clear_composition_state(app)
+
+
+def require_deno_settings(settings: Settings) -> None:
+    """Fail closed when Deno deps are missing. Does not require Daytona."""
+
+    if settings.run_environment != "deno":
+        raise LiveCompositionError("Deno composition requires run_environment='deno'")
+    if settings.llm_api_key is None or not settings.llm_api_key.get_secret_value().strip():
+        msg = "FLEET_LLM_API_KEY is required in deno mode"
+        raise LiveCompositionError(msg)
+    if shutil.which("deno") is None:
+        raise LiveCompositionError("deno executable is required in deno mode")
+    if settings.auth_mode == "neon" and not (settings.neon_auth_url or "").strip():
+        raise LiveCompositionError("FLEET_NEON_AUTH_URL is required in deno mode with auth_mode=neon")
+
+
+def install_deno_composition(
+    app: FastAPI,
+    settings: Settings,
+    *,
+    session_factory: Any | None = None,
+) -> OfflineCompositionHandles:
+    """Build Deno adapters once during lifespan; routes never construct them.
+
+    Uses real ``dspy.LM`` models (Root + Sub) and DSPy's default
+    ``PythonInterpreter`` (Deno/Pyodide WASM) for local code execution.
+    Attachments and artifacts stay in-process (no durable volume mount).
+    """
+    from fleet_rlm.artifacts.local_catalog import (
+        LocalArtifactBlobGateway,
+        LocalArtifactCatalog,
+        LocalArtifactReaderCatalog,
+    )
+    from fleet_rlm.artifacts.reader import ArtifactReader
+    from fleet_rlm.chat.deno_run_environment import DenoRLMFactory, DenoTurnPreparation
+    from fleet_rlm.files.lifecycle import AttachmentModule
+    from fleet_rlm.files.local_catalog import (
+        LocalAttachmentBlobGateway,
+        LocalAttachmentCatalog,
+    )
+    from fleet_rlm.files.paths import LocalAttachmentPathPolicy
+    from fleet_rlm.persistence.repositories import (
+        SqlAlchemyArtifactCatalog,
+        SqlAlchemyAttachmentCatalog,
+    )
+    from fleet_rlm.rlm.lm_factory import build_lm
+
+    # Build real dspy.LM models (Root + Sub) per user preference:
+    # FLEET_LLM_BASE_URL is always forwarded when set.
+    api_key = settings.llm_api_key.get_secret_value() if settings.llm_api_key else ""
+    base_url = settings.llm_base_url
+    max_tokens = settings.llm_max_tokens
+
+    root_lm = build_lm(
+        settings.root_model,
+        api_key=api_key,
+        base_url=base_url,
+        max_tokens=max_tokens,
+    )
+    sub_lm = build_lm(
+        settings.sub_model,
+        api_key=api_key,
+        base_url=base_url,
+        max_tokens=max_tokens,
+    )
+
+    upload_root, artifact_root = _host_roots(settings)
+
+    if session_factory is None:
+        attachment_lifecycle: Any = AttachmentModule(
+            catalog=LocalAttachmentCatalog(upload_root),
+            blobs=LocalAttachmentBlobGateway(Path(upload_root)),
+            paths=LocalAttachmentPathPolicy(Path(upload_root)),
+            max_bytes=settings.max_upload_bytes,
+        )
+        artifact_catalog = LocalArtifactCatalog(
+            artifact_root,
+            max_bytes=settings.max_artifact_bytes,
+            volume_paths=None,
+        )
+        artifact_reader: Any = ArtifactReader(
+            catalog=LocalArtifactReaderCatalog(artifact_catalog),
+            blobs=LocalArtifactBlobGateway(artifact_catalog),
+        )
+    else:
+        attachment_lifecycle = AttachmentModule(
+            catalog=SqlAlchemyAttachmentCatalog(session_factory),
+            blobs=LocalAttachmentBlobGateway(Path(upload_root)),
+            paths=LocalAttachmentPathPolicy(Path(upload_root)),
+            max_bytes=settings.max_upload_bytes,
+        )
+        artifact_catalog = LocalArtifactCatalog(
+            artifact_root,
+            max_bytes=settings.max_artifact_bytes,
+            volume_paths=None,
+        )
+        artifact_reader = ArtifactReader(
+            catalog=SqlAlchemyArtifactCatalog(session_factory),
+            blobs=LocalArtifactBlobGateway(artifact_catalog),
+        )
+
+    skill_registry = getattr(app.state, "skill_registry", None) or InMemorySkillRegistry()
+    capability_registry = getattr(app.state, "capability_registry", None)
+
+    return _install_local_inventory(
+        app,
+        settings,
+        session_factory=session_factory,
+        attachment_lifecycle=attachment_lifecycle,
+        artifact_reader=artifact_reader,
+        preparation=DenoTurnPreparation(
+            attachments=attachment_lifecycle,
+            budget=_run_budget(settings),
+            root_lm=root_lm,
+            sub_lm=sub_lm,
+            skill_registry=skill_registry,
+            capability_registry=capability_registry,
+        ),
+        rlm_factory=DenoRLMFactory(),
+        workspace_volume_mirror=None,
+    )
 
 
 __all__ = [
@@ -368,7 +540,9 @@ __all__ = [
     "OfflineCompositionHandles",
     "build_live_composition",
     "dispose_live_composition",
+    "install_deno_composition",
     "install_live_composition",
     "install_offline_composition",
+    "require_deno_settings",
     "require_live_settings",
 ]

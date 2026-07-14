@@ -63,7 +63,7 @@ class RLMExecutionContext:
     models: RLMModelBundle
     budget: RunBudgetLedger
     deadline: float
-    interpreter: RLMInterpreter
+    interpreter: RLMInterpreter | None
     attachments: tuple[PreparedAttachment, ...]
     capabilities: PreparedCapabilities
     cancellation_requested: AsyncCancellationProbe

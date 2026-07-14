@@ -13,7 +13,12 @@ from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from fleet_rlm.daytona.bindings import SandboxBinding
-from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError, map_provider_error
+from fleet_rlm.daytona.errors import (
+    DaytonaAdapterError,
+    ProviderRequestError,
+    is_safe_pre_creation_retry,
+    map_provider_error,
+)
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 from fleet_rlm.daytona.leases import InterpreterLease
 from fleet_rlm.daytona.lifecycle import (
@@ -193,19 +198,17 @@ class DaytonaSessionManager:
         session_id = request.session_id
         get_active_lease_registry().acquire(session_id, run_id)
         try:
-            volume_id = await asyncio.to_thread(get_or_create_volume_id, self._volume_client, self._volume_config)
+            volume_id = await self._resolve_volume_id()
             expected = self._expected_mount(volume_id=volume_id, workspace_id=request.workspace_id)
             binding = await self._bindings.get(session_id)
 
             sandbox: Any | None = None
             if binding is not None and binding.sandbox_id:
                 if not binding_matches_expected(binding, expected):
-                    binding = await self.replace(
-                        binding,
-                        workspace_id=request.workspace_id,
-                        user_id=request.user_id,
+                    raise DaytonaAdapterError(
+                        message="sandbox binding does not match workspace scope",
+                        cause_type="WorkspaceMountMismatch",
                     )
-                    sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id or "")
                 else:
                     try:
                         sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id)
@@ -227,7 +230,29 @@ class DaytonaSessionManager:
                         mount_path=expected.mount_path,
                     )
                     verify_sandbox_workspace_mount(sandbox, expected)
-                except (DaytonaAdapterError, LifecycleCapabilityError):
+                except ProviderRequestError:
+                    raise
+                except DaytonaAdapterError as exc:
+                    if exc.cause_type != "SandboxUnrecoverable":
+                        raise
+                    if binding is not None:
+                        binding = await self.replace(
+                            SandboxBinding(
+                                session_id=session_id,
+                                sandbox_id=binding.sandbox_id,
+                                workspace_id=request.workspace_id,
+                                volume_id=expected.volume_id,
+                                volume_subpath=expected.volume_subpath,
+                                mount_path=expected.mount_path,
+                                provider_state="unrecoverable",
+                            ),
+                            workspace_id=request.workspace_id,
+                            user_id=request.user_id,
+                        )
+                        sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id or "")
+                    else:
+                        sandbox = None
+                except LifecycleCapabilityError:
                     if binding is not None:
                         binding = await self.replace(
                             SandboxBinding(
@@ -296,6 +321,24 @@ class DaytonaSessionManager:
     async def release(self, lease: InterpreterLease) -> None:
         """Release interpreter resources only — never deletes the Sandbox."""
         lease.release()
+
+    async def _resolve_volume_id(self) -> str:
+        """Retry one safe transient failure before sandbox creation can begin."""
+        for attempt in range(2):
+            try:
+                return await asyncio.to_thread(
+                    get_or_create_volume_id,
+                    self._volume_client,
+                    self._volume_config,
+                )
+            except Exception as exc:  # noqa: BLE001
+                mapped = map_provider_error(exc)
+                if attempt == 0 and is_safe_pre_creation_retry(mapped):
+                    continue
+                if mapped is exc:
+                    raise
+                raise mapped from exc
+        raise AssertionError("unreachable")
 
     async def stop(self, sandbox_id: str) -> None:
         sandbox = self._require(sandbox_id)
@@ -416,23 +459,23 @@ class DaytonaSessionManager:
         if state == "running":
             return sandbox
         if state == "stopped":
-            await asyncio.to_thread(call_if_supported, sandbox, "start")
+            await self._call_lifecycle(sandbox, "start")
             return sandbox
         if state == "paused":
             try:
-                await asyncio.to_thread(call_if_supported, sandbox, "resume")
+                await self._call_lifecycle(sandbox, "resume")
             except LifecycleCapabilityError:
-                await asyncio.to_thread(call_if_supported, sandbox, "start")
+                await self._call_lifecycle(sandbox, "start")
             return sandbox
         if state == "archived":
             try:
-                await asyncio.to_thread(call_if_supported, sandbox, "restore")
+                await self._call_lifecycle(sandbox, "restore")
             except LifecycleCapabilityError as exc:
                 raise LifecycleCapabilityError("restore") from exc
             # After restore, may still need start
             if sandbox_state(sandbox) != "running":
                 try:
-                    await asyncio.to_thread(call_if_supported, sandbox, "start")
+                    await self._call_lifecycle(sandbox, "start")
                 except LifecycleCapabilityError:
                     pass
             return sandbox
@@ -441,6 +484,14 @@ class DaytonaSessionManager:
             message=f"sandbox unusable in state {state}",
             cause_type="SandboxUnrecoverable",
         )
+
+    async def _call_lifecycle(self, sandbox: Any, operation: str) -> None:
+        try:
+            await asyncio.to_thread(call_if_supported, sandbox, operation)
+        except (DaytonaAdapterError, LifecycleCapabilityError):
+            raise
+        except Exception as exc:  # noqa: BLE001 - normalize provider SDK failures
+            raise map_provider_error(exc) from exc
 
     def _create_sandbox(
         self,

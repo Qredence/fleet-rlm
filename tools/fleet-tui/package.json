@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "tsx src/cli.ts",
+    "start": "tsx src/cli.tsx",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "format": "biome format --write src",
@@ -15,12 +15,15 @@
     "lint": "biome lint src"
   },
   "dependencies": {
-    "@ai-sdk/tui": "1.0.22",
-    "ai": "7.0.22"
+    "ai": "7.0.22",
+    "ink": "7.1.0",
+    "marked": "14.1.3",
+    "react": "19.2.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.2",
     "@types/node": "22.19.19",
+    "@types/react": "19.2.2",
     "openapi-typescript": "7.10.1",
     "tsx": "4.22.0",
     "typescript": "5.8.3",
