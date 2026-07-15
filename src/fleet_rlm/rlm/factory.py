@@ -1,4 +1,4 @@
-"""Only construction site for dspy.RLM in the Fleet RLM package."""
+"""Runtime RLM factory and public access to the native constructor seam."""
 
 from __future__ import annotations
 
@@ -8,17 +8,19 @@ from typing import Any
 import dspy
 
 from fleet_rlm.rlm.budgets import RunBudget
+from fleet_rlm.rlm.compat import build_native_rlm
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.observable import DetailObserver, ObservableRLM
 from fleet_rlm.rlm.signature import FleetRLMSignature
 from fleet_rlm.skills.capabilities import RLMTool
 
+__all__ = ["RLMFactory", "build_native_rlm"]
+
 
 class RLMFactory:
-    """Deep module: one entry point that builds a fresh budgeted ``dspy.RLM``.
+    """Build the current observable RLM until observation moves to stable boundaries.
 
-    Callers supply roles, budgets, interpreter, and tools. Construction details
-    (installed constructor kwargs, signature default) stay behind this seam.
+    ``build_native_rlm`` owns pinned native construction for the P2 cutover.
     Root LM application during execution belongs to RLMRunner, not this factory.
     """
 

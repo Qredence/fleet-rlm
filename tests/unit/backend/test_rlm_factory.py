@@ -126,15 +126,15 @@ def test_each_factory_call_returns_new_rlm_instance() -> None:
     assert first is not second
 
 
-def test_factory_is_only_dspy_rlm_call_site_in_rlm_package() -> None:
-    """Static guard: only factory.py may construct dspy.RLM in rlm/."""
+def test_compat_is_only_native_dspy_rlm_call_site_in_rlm_package() -> None:
+    """Static guard: only compat.py may directly construct native dspy.RLM."""
     import ast
     from pathlib import Path
 
     rlm_dir = Path(__file__).resolve().parents[3] / "src" / "fleet_rlm" / "rlm"
     offenders: list[str] = []
     for path in sorted(rlm_dir.glob("*.py")):
-        if path.name == "factory.py":
+        if path.name == "compat.py":
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -145,4 +145,4 @@ def test_factory_is_only_dspy_rlm_call_site_in_rlm_package() -> None:
                 offenders.append(path.name)
             if isinstance(func, ast.Name) and func.id == "RLM":
                 offenders.append(path.name)
-    assert offenders == [], f"dspy.RLM constructed outside factory: {offenders}"
+    assert offenders == [], f"dspy.RLM constructed outside compat: {offenders}"
