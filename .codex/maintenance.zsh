@@ -7,18 +7,11 @@ cd "$repo_root"
 zsh .codex/cloud-preflight.zsh --skip-harness
 
 if ! command -v uv >/dev/null 2>&1; then
-  echo "ERROR: uv is required for fleet-rlm bootstrap." >&2
+  echo "ERROR: uv is required for fleet-rlm maintenance." >&2
   exit 1
 fi
 
-echo "==> fleet-rlm Codex bootstrap"
-echo "repo: $repo_root"
-
-if [[ -f uv.lock ]]; then
-  uv sync --all-extras --dev --frozen
-else
-  uv sync --all-extras --dev
-fi
+uv sync --all-extras --dev --frozen
 
 if ! command -v pnpm >/dev/null 2>&1; then
   if ! command -v corepack >/dev/null 2>&1; then
@@ -29,8 +22,5 @@ if ! command -v pnpm >/dev/null 2>&1; then
 fi
 pnpm --dir tools/fleet-tui install --frozen-lockfile
 
-echo "python: $(uv run python --version 2>&1)"
 uv run python scripts/check_harness_engineering.py --skip-script-help
-
-echo "==> Bootstrap complete"
-echo "Use Codex actions for backend, terminal-client, OpenAPI, release, and validation lanes."
+echo "Codex Cloud maintenance complete"

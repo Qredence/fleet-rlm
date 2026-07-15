@@ -11,6 +11,25 @@ make check
 
 The safe loop requires no live Daytona or LLM credentials.
 
+## Codex Cloud Loop
+
+Cloud tasks for this repository start from `dev-0.7`; never select `main` or
+`master`. The environment setup script is
+`.codex/workspace-bootstrap.zsh`, and cached-container resumes use
+`.codex/maintenance.zsh`. Both scripts install the locked Python and TUI
+dependencies and enforce the branch guard.
+
+Run the repository preflight before dispatching or resuming work:
+
+```bash
+zsh .codex/cloud-preflight.zsh
+```
+
+Cloud internet is limited to the configured environment policy. Use an app or
+connector only when it is authorized in the Cloud/workspace surface, and never
+store its credentials, tokens, or secrets in the repository. Refresh the Cloud
+environment cache after changing setup, maintenance, or environment settings.
+
 ## API Smoke
 
 ```bash

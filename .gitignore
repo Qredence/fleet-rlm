@@ -70,6 +70,8 @@ droid-wiki/
 .codex/*
 !.codex/environments/
 !.codex/environments/environment.toml
+!.codex/cloud-preflight.zsh
+!.codex/maintenance.zsh
 !.codex/workspace-bootstrap.zsh
 !.codex/config.toml
 !.codex/hooks/

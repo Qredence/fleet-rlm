@@ -10,6 +10,11 @@ icon = "run"
 command = "zsh .codex/workspace-bootstrap.zsh"
 
 [[actions]]
+name = "Codex Cloud: Branch Preflight"
+icon = "check"
+command = "zsh .codex/cloud-preflight.zsh"
+
+[[actions]]
 name = "App: Run API"
 icon = "run"
 command = "uv run fleet web"

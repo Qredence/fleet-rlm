@@ -5,10 +5,13 @@
 ## Operating Model
 
 - Use closest applicable `AGENTS.md` before editing files; deeper guides override this map.
+- This guide describes the current checkout. `PLANS.md` describes future target changes; do not treat unchecked phase work as implemented.
 - Keep repo docs, generated contracts, and `.codex/` actions aligned with implementation changes.
 - Prefer smallest validation lane that covers the change, then escalate when contracts move.
 - Do not hand-edit generated/synced artifacts; use the commands listed below.
 - Do not mutate user-level Codex config. Ask before deploy, push, migrations, or deletion.
+
+For the current Codex Cloud delivery sequence, use `dev-0.7` as the base branch and never use `main` or `master`. Cloud tasks may use limited internet and explicitly authorized apps/connectors; keep credentials and tokens out of the repository.
 
 ## Reading Path
 

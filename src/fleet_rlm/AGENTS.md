@@ -4,6 +4,11 @@ This directory is the sole Fleet RLM Python backend.
 Root repository workflow and validation rules remain authoritative from
 [AGENTS.md](../../AGENTS.md); this guide narrows them for backend work.
 
+This guide records the current backend. The P0–P2 targets in `PLANS.md` are not
+implemented until their corresponding phase exit gates pass; preserve current
+`history`, `ObservableRLM`, authentication, and runtime-composition guidance
+until those changes are actually delivered and reviewed.
+
 ## Architecture
 
 - Read `CONTEXT.md` before changing domain names or lifecycle ownership.
