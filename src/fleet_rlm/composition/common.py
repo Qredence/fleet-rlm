@@ -43,9 +43,72 @@ class LocalCompositionHandles:
     turn_lifecycle: Any
 
 
+@dataclass(frozen=True, slots=True)
+class LocalStorageAdapters:
+    """Attachment and Artifact adapters shared by local runtime profiles."""
+
+    attachment_lifecycle: Any
+    artifact_reader: Any
+
+
 def host_roots(settings: Settings) -> tuple[str, str]:
     data_root = Path(settings.data_root)
     return str(data_root / "attachments"), str(data_root / "artifacts")
+
+
+def build_local_storage_adapters(
+    settings: Settings,
+    *,
+    session_factory: Any | None,
+    volume_paths: Any | None,
+    sql_attachment_blobs: Any | None,
+    sql_attachment_paths: Any | None,
+    sql_artifact_blobs: Any | None,
+) -> LocalStorageAdapters:
+    """Build the local or SQL metadata adapters for a local runtime."""
+    from fleet_rlm.artifacts.local_catalog import (
+        LocalArtifactBlobGateway,
+        LocalArtifactCatalog,
+        LocalArtifactReaderCatalog,
+    )
+    from fleet_rlm.artifacts.reader import ArtifactReader
+    from fleet_rlm.files.lifecycle import AttachmentModule
+    from fleet_rlm.files.local_catalog import LocalAttachmentBlobGateway, LocalAttachmentCatalog
+    from fleet_rlm.files.paths import LocalAttachmentPathPolicy
+    from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
+
+    upload_root, artifact_root = host_roots(settings)
+    if session_factory is None:
+        attachment_lifecycle: Any = AttachmentModule(
+            catalog=LocalAttachmentCatalog(upload_root),
+            blobs=LocalAttachmentBlobGateway(Path(upload_root)),
+            paths=LocalAttachmentPathPolicy(Path(upload_root)),
+            max_bytes=settings.max_upload_bytes,
+        )
+        artifact_catalog = LocalArtifactCatalog(
+            artifact_root,
+            max_bytes=settings.max_artifact_bytes,
+            volume_paths=volume_paths,
+        )
+        artifact_reader: Any = ArtifactReader(
+            catalog=LocalArtifactReaderCatalog(artifact_catalog),
+            blobs=LocalArtifactBlobGateway(artifact_catalog),
+        )
+        return LocalStorageAdapters(attachment_lifecycle, artifact_reader)
+
+    if sql_attachment_blobs is None or sql_attachment_paths is None or sql_artifact_blobs is None:
+        raise CompositionError("SQL local storage adapters require runtime-specific blob and path gateways")
+    attachment_lifecycle = AttachmentModule(
+        catalog=SqlAlchemyAttachmentCatalog(session_factory),
+        blobs=sql_attachment_blobs,
+        paths=sql_attachment_paths,
+        max_bytes=settings.max_upload_bytes,
+    )
+    artifact_reader = ArtifactReader(
+        catalog=SqlAlchemyArtifactCatalog(session_factory),
+        blobs=sql_artifact_blobs,
+    )
+    return LocalStorageAdapters(attachment_lifecycle, artifact_reader)
 
 
 def run_budget(settings: Settings) -> RunBudget:

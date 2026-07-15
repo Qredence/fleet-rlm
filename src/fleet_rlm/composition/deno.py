@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fleet_rlm.composition.common import (
     CompositionError,
     LocalCompositionHandles,
+    build_local_storage_adapters,
     host_roots,
     install_local_inventory,
     run_budget,
@@ -36,17 +37,10 @@ def install_deno_composition(
     session_factory: Any | None = None,
 ) -> LocalCompositionHandles:
     """Build Deno adapters once during lifespan."""
-    from fleet_rlm.artifacts.local_catalog import (
-        LocalArtifactBlobGateway,
-        LocalArtifactCatalog,
-        LocalArtifactReaderCatalog,
-    )
-    from fleet_rlm.artifacts.reader import ArtifactReader
+    from fleet_rlm.artifacts.local_catalog import LocalArtifactBlobGateway, LocalArtifactCatalog
     from fleet_rlm.chat.deno_run_environment import DenoRLMFactory, DenoTurnPreparation
-    from fleet_rlm.files.lifecycle import AttachmentModule
-    from fleet_rlm.files.local_catalog import LocalAttachmentBlobGateway, LocalAttachmentCatalog
+    from fleet_rlm.files.local_catalog import LocalAttachmentBlobGateway
     from fleet_rlm.files.paths import LocalAttachmentPathPolicy
-    from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
     from fleet_rlm.rlm.lm_factory import build_lm
 
     api_key = settings.llm_api_key.get_secret_value() if settings.llm_api_key else ""
@@ -63,46 +57,30 @@ def install_deno_composition(
         max_tokens=settings.llm_max_tokens,
     )
     upload_root, artifact_root = host_roots(settings)
-    if session_factory is None:
-        attachment_lifecycle: Any = AttachmentModule(
-            catalog=LocalAttachmentCatalog(upload_root),
-            blobs=LocalAttachmentBlobGateway(Path(upload_root)),
-            paths=LocalAttachmentPathPolicy(Path(upload_root)),
-            max_bytes=settings.max_upload_bytes,
-        )
+    sql_artifact_blobs = None
+    if session_factory is not None:
         artifact_catalog = LocalArtifactCatalog(
             artifact_root,
             max_bytes=settings.max_artifact_bytes,
             volume_paths=None,
         )
-        artifact_reader: Any = ArtifactReader(
-            catalog=LocalArtifactReaderCatalog(artifact_catalog),
-            blobs=LocalArtifactBlobGateway(artifact_catalog),
-        )
-    else:
-        attachment_lifecycle = AttachmentModule(
-            catalog=SqlAlchemyAttachmentCatalog(session_factory),
-            blobs=LocalAttachmentBlobGateway(Path(upload_root)),
-            paths=LocalAttachmentPathPolicy(Path(upload_root)),
-            max_bytes=settings.max_upload_bytes,
-        )
-        artifact_catalog = LocalArtifactCatalog(
-            artifact_root,
-            max_bytes=settings.max_artifact_bytes,
-            volume_paths=None,
-        )
-        artifact_reader = ArtifactReader(
-            catalog=SqlAlchemyArtifactCatalog(session_factory),
-            blobs=LocalArtifactBlobGateway(artifact_catalog),
-        )
+        sql_artifact_blobs = LocalArtifactBlobGateway(artifact_catalog)
+    storage = build_local_storage_adapters(
+        settings,
+        session_factory=session_factory,
+        volume_paths=None,
+        sql_attachment_blobs=LocalAttachmentBlobGateway(Path(upload_root)),
+        sql_attachment_paths=LocalAttachmentPathPolicy(Path(upload_root)),
+        sql_artifact_blobs=sql_artifact_blobs,
+    )
     return install_local_inventory(
         app,
         settings,
         session_factory=session_factory,
-        attachment_lifecycle=attachment_lifecycle,
-        artifact_reader=artifact_reader,
+        attachment_lifecycle=storage.attachment_lifecycle,
+        artifact_reader=storage.artifact_reader,
         preparation=DenoTurnPreparation(
-            attachments=attachment_lifecycle,
+            attachments=storage.attachment_lifecycle,
             budget=run_budget(settings),
             root_lm=root_lm,
             sub_lm=sub_lm,

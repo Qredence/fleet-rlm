@@ -8,12 +8,15 @@ shared product language used across packages, docs, and agent sessions.
 ### Identity and conversation
 
 **User**:
-An authenticated principal who acts inside a Workspace.
+A stable process-local actor namespace for the single-user BYOK API. Its
+deterministic identifier supports ownership checks; it is not caller-supplied
+or proof of authentication.
 _Avoid_: account, client, customer
 
 **Workspace**:
-A tenant isolation scope that owns Sessions, Skills, Attachments, and Artifacts
-for its members.
+A stable process-local isolation namespace that owns Sessions, Skills,
+Attachments, and Artifacts. Its deterministic identifier is not an external
+tenant or membership claim.
 _Avoid_: Sandbox Workspace, repo checkout, Volume, Sandbox filesystem
 
 **Session**:

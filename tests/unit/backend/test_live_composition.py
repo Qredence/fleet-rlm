@@ -24,6 +24,39 @@ def test_composition_module_imports_without_credentials() -> None:
     assert composition.build_daytona_composition is not None
 
 
+@pytest.mark.parametrize("session_factory", [None, object()], ids=["local", "sql"])
+def test_common_storage_adapter_builder_owns_local_and_sql_catalog_branches(tmp_path, session_factory) -> None:
+    import fleet_rlm.composition.common as common
+    from fleet_rlm.artifacts.local_catalog import LocalArtifactReaderCatalog
+    from fleet_rlm.files.local_catalog import LocalAttachmentCatalog
+    from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
+
+    builder = getattr(common, "build_local_storage_adapters", None)
+    assert builder is not None
+
+    sql_attachment_blobs = object()
+    sql_attachment_paths = object()
+    sql_artifact_blobs = object()
+    adapters = builder(
+        Settings(data_root=str(tmp_path)),
+        session_factory=session_factory,
+        volume_paths=None,
+        sql_attachment_blobs=sql_attachment_blobs,
+        sql_attachment_paths=sql_attachment_paths,
+        sql_artifact_blobs=sql_artifact_blobs,
+    )
+
+    if session_factory is None:
+        assert isinstance(adapters.attachment_lifecycle._catalog, LocalAttachmentCatalog)  # noqa: SLF001
+        assert isinstance(adapters.artifact_reader._catalog, LocalArtifactReaderCatalog)  # noqa: SLF001
+    else:
+        assert isinstance(adapters.attachment_lifecycle._catalog, SqlAlchemyAttachmentCatalog)  # noqa: SLF001
+        assert adapters.attachment_lifecycle._blobs is sql_attachment_blobs  # noqa: SLF001
+        assert adapters.attachment_lifecycle._paths is sql_attachment_paths  # noqa: SLF001
+        assert isinstance(adapters.artifact_reader._catalog, SqlAlchemyArtifactCatalog)  # noqa: SLF001
+        assert adapters.artifact_reader._blobs is sql_artifact_blobs  # noqa: SLF001
+
+
 def test_require_daytona_settings_fails_closed_without_deps() -> None:
     with pytest.raises(CompositionError, match="run_environment"):
         require_daytona_settings(Settings(run_environment="deno"))

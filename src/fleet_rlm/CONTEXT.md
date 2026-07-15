@@ -9,12 +9,14 @@ Volume, Workspace, Skill) mean what root `CONTEXT.md` says unless narrowed here.
 ### Identity and conversation
 
 **User**:
-Authenticated principal for a Turn and for ownership checks.
+Stable process-local actor namespace for a Turn and ownership checks. The local
+BYOK API supplies its deterministic identifier; callers do not authenticate or
+select it.
 _Avoid_: account, client
 
 **Workspace**:
-Tenant isolation scope (same as shared). Owns Sessions, Skills, Attachments,
-and Artifacts for members.
+Stable process-local isolation namespace (same as shared). Owns Sessions,
+Skills, Attachments, and Artifacts without an external tenant-membership claim.
 _Avoid_: Sandbox Workspace
 
 **Session**:

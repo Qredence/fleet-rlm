@@ -17,6 +17,7 @@ from fleet_rlm.chat.turn_preparation import (
 )
 from fleet_rlm.composition.common import (
     LocalCompositionHandles,
+    build_local_storage_adapters,
     host_roots,
     install_local_inventory,
     run_budget,
@@ -138,23 +139,13 @@ def install_testing_composition(
 ) -> LocalCompositionHandles:
     """Install credential-free deterministic adapters for a test lifespan."""
     from fleet_rlm.artifacts.daytona_catalog import DaytonaArtifactBlobGateway
-    from fleet_rlm.artifacts.local_catalog import (
-        LocalArtifactBlobGateway,
-        LocalArtifactCatalog,
-        LocalArtifactReaderCatalog,
-    )
-    from fleet_rlm.artifacts.reader import ArtifactReader
     from fleet_rlm.daytona.paths import volume_paths_from_settings
     from fleet_rlm.daytona.volume_fs import HostVolumeMirror
     from fleet_rlm.daytona.workspace_volume import OfflineHostVolumeGateway
-    from fleet_rlm.files.lifecycle import AttachmentModule
     from fleet_rlm.files.local_catalog import (
-        LocalAttachmentBlobGateway,
-        LocalAttachmentCatalog,
         WorkspaceAttachmentBlobGateway,
     )
-    from fleet_rlm.files.paths import DaytonaAttachmentPathPolicy, LocalAttachmentPathPolicy
-    from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
+    from fleet_rlm.files.paths import DaytonaAttachmentPathPolicy
 
     upload_root, artifact_root = host_roots(settings)
     mirror = HostVolumeMirror(
@@ -162,41 +153,22 @@ def install_testing_composition(
         volume_paths=volume_paths_from_settings(settings),
     )
     volume_gateway = OfflineHostVolumeGateway(mirror)
-    if session_factory is None:
-        attachment_lifecycle: Any = AttachmentModule(
-            catalog=LocalAttachmentCatalog(upload_root),
-            blobs=LocalAttachmentBlobGateway(Path(upload_root)),
-            paths=LocalAttachmentPathPolicy(Path(upload_root)),
-            max_bytes=settings.max_upload_bytes,
-        )
-        artifact_catalog = LocalArtifactCatalog(
-            artifact_root,
-            max_bytes=settings.max_artifact_bytes,
-            volume_paths=mirror.volume_paths,
-        )
-        artifact_reader: Any = ArtifactReader(
-            catalog=LocalArtifactReaderCatalog(artifact_catalog),
-            blobs=LocalArtifactBlobGateway(artifact_catalog),
-        )
-    else:
-        attachment_lifecycle = AttachmentModule(
-            catalog=SqlAlchemyAttachmentCatalog(session_factory),
-            blobs=WorkspaceAttachmentBlobGateway(volume_gateway),
-            paths=DaytonaAttachmentPathPolicy(mirror.volume_paths),
-            max_bytes=settings.max_upload_bytes,
-        )
-        artifact_reader = ArtifactReader(
-            catalog=SqlAlchemyArtifactCatalog(session_factory),
-            blobs=DaytonaArtifactBlobGateway(volume_gateway),
-        )
+    storage = build_local_storage_adapters(
+        settings,
+        session_factory=session_factory,
+        volume_paths=mirror.volume_paths,
+        sql_attachment_blobs=WorkspaceAttachmentBlobGateway(volume_gateway),
+        sql_attachment_paths=DaytonaAttachmentPathPolicy(mirror.volume_paths),
+        sql_artifact_blobs=DaytonaArtifactBlobGateway(volume_gateway),
+    )
     return install_local_inventory(
         app,
         settings,
         session_factory=session_factory,
-        attachment_lifecycle=attachment_lifecycle,
-        artifact_reader=artifact_reader,
+        attachment_lifecycle=storage.attachment_lifecycle,
+        artifact_reader=storage.artifact_reader,
         preparation=DeterministicTurnPreparation(
-            attachments=attachment_lifecycle,
+            attachments=storage.attachment_lifecycle,
             budget=run_budget(settings),
         ),
         rlm_factory=TestingRLMFactory(),

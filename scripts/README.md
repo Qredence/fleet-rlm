@@ -11,7 +11,6 @@
 | `validate_release.py` | Validate package metadata and wheel contents |
 | `codex_feedback_loop.py` | Run the local Codex feedback-loop probes |
 | `deployment_observability.py` | Inspect deployment observability inputs |
-| `dev_issue_token.py` | Generate a local development issue token |
 
 Legacy WebSocket, optimization, evaluation, snapshot, MLflow, and compatibility
 runtime scripts were retired with the backend hard cutover.
