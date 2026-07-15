@@ -163,3 +163,7 @@ transcript-vvqo_92l.jsonl
 .cursor/settings.json
 .cursor/hooks/state/continual-learning-index.json
 .cursor/hooks/state/continual-learning.json
+
+# Factory-installed local skills and generated lock state
+skills-lock.json
+.factory/skills/
