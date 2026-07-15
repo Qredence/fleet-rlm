@@ -194,7 +194,7 @@ class SqlAlchemySessionCatalog:
 
 
 class InMemorySessionCatalog:
-    """Hermetic CRUD catalog sharing authoritative Turn state registration."""
+    """In-memory CRUD catalog sharing authoritative Turn state registration."""
 
     def __init__(self, turns: InMemoryTurnStateStore) -> None:
         self._turns = turns

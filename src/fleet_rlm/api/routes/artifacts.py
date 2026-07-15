@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response
 
 from fleet_rlm.api.dependencies import ArtifactReaderDep
-from fleet_rlm.api.identity import RequestIdentity, get_request_identity
+from fleet_rlm.api.local_scope import LocalScope, get_local_scope
 from fleet_rlm.api.schemas import ArtifactResponse
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
@@ -38,7 +38,7 @@ def _to_response(ref: ArtifactRef) -> ArtifactResponse:
 )
 async def get_artifact(
     artifact_id: UUID,
-    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    identity: Annotated[LocalScope, Depends(get_local_scope)],
     reader: ArtifactReaderDep,
 ) -> ArtifactResponse:
     try:
@@ -66,7 +66,7 @@ async def get_artifact(
 )
 async def download_artifact(
     artifact_id: UUID,
-    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    identity: Annotated[LocalScope, Depends(get_local_scope)],
     reader: ArtifactReaderDep,
 ) -> Response:
     try:

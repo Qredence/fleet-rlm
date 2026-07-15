@@ -1,15 +1,12 @@
 PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/contracts/backend tests/e2e scripts/openapi_tools.py scripts/db_init.py migrations
 PYTEST_FAST_MARKERS = not deno and not live_llm and not live_daytona and not benchmark and not db
 PYTEST := uv run --no-sync pytest
-PYTEST_HERMETIC := env \
-	FLEET_RUN_ENVIRONMENT=hermetic \
+PYTEST_ISOLATED := env \
+	FLEET_RUN_ENVIRONMENT=daytona \
 	FLEET_DAYTONA_API_KEY= \
 	FLEET_LLM_API_KEY= \
 	FLEET_LLM_BASE_URL= \
 	FLEET_DATABASE_URL= \
-	FLEET_AUTH_MODE=dev \
-	FLEET_NEON_AUTH_URL= \
-	FLEET_NEON_TENANT_CLAIM= \
 	$(PYTEST)
 PYTEST_XDIST_MAX_WORKERS ?= 2
 PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
@@ -94,15 +91,15 @@ typecheck:
 	uv run ty check src/fleet_rlm
 
 test:
-	$(PYTEST_HERMETIC) -q $(PYTEST_PARALLEL) tests/unit/backend tests/contracts/backend tests/unit/test_litellm_invariant.py tests/e2e -m "$(PYTEST_FAST_MARKERS)"
+	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/contracts/backend tests/unit/test_litellm_invariant.py tests/e2e -m "$(PYTEST_FAST_MARKERS)"
 
 test-fast: test
 
 test-unit:
-	$(PYTEST_HERMETIC) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/test_litellm_invariant.py -m "$(PYTEST_FAST_MARKERS)"
+	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/test_litellm_invariant.py -m "$(PYTEST_FAST_MARKERS)"
 
 test-contract:
-	$(PYTEST_HERMETIC) -q tests/contracts/backend tests/e2e -m "$(PYTEST_FAST_MARKERS)" -n 0
+	$(PYTEST_ISOLATED) -q tests/contracts/backend tests/e2e -m "$(PYTEST_FAST_MARKERS)" -n 0
 
 test-deno:
 	$(PYTEST) -q tests/unit/backend/test_deno_run_environment.py tests/contracts/backend/test_deno_turn_flow.py -m "deno" -n 0 --timeout=120

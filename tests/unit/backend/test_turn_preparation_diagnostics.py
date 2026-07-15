@@ -29,7 +29,7 @@ class _UnavailableCoordinator:
 
 def _client(cause: BaseException) -> TestClient:
     app = FastAPI()
-    app.state.settings = Settings(auth_mode="dev")
+    app.state.settings = Settings()
     app.state.composition_ready = True
     app.state.turn_coordinator = _UnavailableCoordinator(cause)
     install_error_handlers(app)

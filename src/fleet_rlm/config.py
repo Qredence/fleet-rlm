@@ -54,7 +54,7 @@ class Settings(BaseSettings):
         default="/home/daytona/fleet",
         description="Absolute Sandbox mount path for the workspace Volume",
     )
-    run_environment: Literal["hermetic", "daytona", "deno"] = Field(default="hermetic")
+    run_environment: Literal["daytona", "deno"] = Field(default="daytona")
     data_root: str = Field(default=".fleet_rlm")
     max_upload_bytes: int = Field(
         default=10 * 1024 * 1024,
@@ -77,33 +77,12 @@ class Settings(BaseSettings):
     budget_max_skill_loads: int = Field(default=8, gt=0)
     run_heartbeat_seconds: int = Field(default=10, gt=0)
     run_stale_after_seconds: int = Field(default=60, gt=0)
-    auth_mode: str = Field(
-        default="dev",
-        description="dev = synthetic headers; neon = require Neon Auth Bearer JWT",
-    )
-    neon_auth_url: str | None = Field(
-        default=None,
-        description="Override Neon Auth base URL (default: product Neon project auth origin)",
-    )
-    neon_tenant_claim: str | None = Field(
-        default=None,
-        description="Default tenant/workspace key when JWT has no workspace claim",
-    )
 
     @model_validator(mode="after")
     def _validate_run_liveness(self) -> Settings:
         if self.run_stale_after_seconds < self.run_heartbeat_seconds * 3:
             raise ValueError("FLEET_RUN_STALE_AFTER_SECONDS must be at least three times FLEET_RUN_HEARTBEAT_SECONDS")
         return self
-
-    @field_validator("auth_mode", mode="before")
-    @classmethod
-    def _normalize_auth_mode(cls, value: object) -> str:
-        text = str(value or "dev").strip().lower()
-        if text not in {"dev", "neon"}:
-            # Fail closed: refuse unknown modes (do not silently fall back to dev)
-            raise ValueError("FLEET_AUTH_MODE must be 'dev' or 'neon'")
-        return text
 
     @field_validator("llm_base_url", mode="before")
     @classmethod

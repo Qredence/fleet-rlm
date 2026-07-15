@@ -26,15 +26,13 @@ backend when Ink exits. Forward Ink arguments after `--`, for example
 `uv run fleet doctor daytona` check validates database/provider access and a
 disposable scoped Sandbox without creating Fleet rows.
 
-The default app is offline/hermetic. Live DSPy and Daytona composition is
-explicit:
-
-For local development, keep the hermetic runtime on SQLite:
+Daytona is the default runtime. For reduced local compatibility development,
+use Deno with SQLite and a host-only BYOK provider key:
 
 ```bash
-export FLEET_RUN_ENVIRONMENT=hermetic
+export FLEET_RUN_ENVIRONMENT=deno
 export FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3'
-export FLEET_AUTH_MODE=dev
+export FLEET_LLM_API_KEY='...'
 uv run fleet-rlm serve-api
 ```
 
@@ -45,15 +43,13 @@ export FLEET_RUN_ENVIRONMENT=daytona
 export FLEET_DATABASE_URL='postgresql+asyncpg://...'
 export FLEET_DAYTONA_API_KEY='...'
 export FLEET_LLM_API_KEY='...'
-export FLEET_AUTH_MODE=neon
-export FLEET_NEON_AUTH_URL='https://...'
 uv run python scripts/db_init.py
 uv run fleet-rlm serve-api
 ```
 
 ## Backend API
 
-- `POST /api/sessions/{session_id}/turns` — authenticated, idempotent SSE Turn execution.
+- `POST /api/sessions/{session_id}/turns` — local-scope, idempotent SSE Turn execution.
 - `/api/sessions` — Session CRUD and ordered Turn history.
 - `/api/attachments` — durable Attachment upload and metadata lookup.
 - `GET /api/artifacts/{artifact_id}` — committed Artifact retrieval.
@@ -66,7 +62,7 @@ See [HTTP API](docs/reference/http-api.md) and generated [OpenAPI](openapi.yaml)
 
 ## Architecture
 
-One Turn validates identity and Attachment references before opening SSE,
+One Turn applies the deterministic local scope and validates Attachment references before opening SSE,
 restores durable Session History, creates a fresh `dspy.RLM`, executes
 host-mediated tools, commits the Turn transactionally, and emits exactly one
 terminal Runtime Event. Daytona Turns additionally acquire a Sandbox
@@ -79,7 +75,7 @@ and the [codebase map](docs/reference/codebase-map.md).
 ## Database
 
 Production schema evolution is owned by Alembic and starts from one fresh
-canonical baseline. Local SQLite is initialized by the hermetic app; use the
+canonical baseline. Deno SQLite is initialized by the local app; use the
 following only for a disposable PostgreSQL database:
 
 ```bash

@@ -44,23 +44,19 @@ def check_env() -> bool:
     env_ok = Path(".env").exists()
     print_status(".env file", "OK" if env_ok else "MISSING (optional)")
 
-    auth = (os.environ.get("FLEET_AUTH_MODE") or "dev").strip().lower()
-    auth_ok = auth in {"dev", "neon"}
-    print_status("FLEET_AUTH_MODE", auth if auth_ok else f"INVALID ({auth!r})")
-
     llm_key = os.environ.get("FLEET_LLM_API_KEY", "")
     daytona_key = os.environ.get("FLEET_DAYTONA_API_KEY", "")
     # Presence is informational for offline; live needs these set.
     secret_presence("FLEET_LLM_API_KEY", llm_key)
     secret_presence("FLEET_DAYTONA_API_KEY", daytona_key)
 
-    environment = (os.environ.get("FLEET_RUN_ENVIRONMENT") or "hermetic").strip().lower()
+    environment = (os.environ.get("FLEET_RUN_ENVIRONMENT") or "daytona").strip().lower()
     print_status("FLEET_RUN_ENVIRONMENT", environment)
 
     mount = os.environ.get("FLEET_VOLUME_MOUNT_PATH") or "/home/daytona/fleet"
     print_status("VOLUME_MOUNT_PATH", mount)
 
-    return auth_ok
+    return True
 
 
 def check_settings_import() -> bool:
@@ -70,7 +66,6 @@ def check_settings_import() -> bool:
 
         settings = Settings()
         print_status("Settings()", "OK")
-        print_status("auth_mode", settings.auth_mode)
         print_status("run_environment", settings.run_environment)
         return True
     except Exception as exc:  # noqa: BLE001 - operator script

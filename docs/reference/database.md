@@ -1,11 +1,11 @@
 # Database
 
-Canonical Run Environment set: `hermetic`, `deno`, `daytona`.
+Canonical Run Environment set: `deno`, `daytona`.
 
-Local development uses a hermetic SQLite database:
+Local compatibility development can use Deno with SQLite:
 
 ```bash
-export FLEET_RUN_ENVIRONMENT=hermetic
+export FLEET_RUN_ENVIRONMENT=deno
 export FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3'
 ```
 
@@ -13,9 +13,8 @@ export FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3'
 
 | Value | Code execution | LLM calls | Durable volume | Auth/scope |
 | --- | --- | --- | --- | --- |
-| `hermetic` (default) | stub interpreter | none | n/a | off |
-| `deno` | DSPy default `PythonInterpreter` (Deno + Pyodide WASM) | real `dspy.LM` | none | on |
-| `daytona` | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | on |
+| `deno` | DSPy default `PythonInterpreter` (Deno + Pyodide WASM) | real `dspy.LM` | none | local scope |
+| `daytona` (default) | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | local scope |
 
 `deno` is intentional vanilla local `dspy.RLM`: real LLM calls and in-process
 attachment/skill tools, but no `create_artifact`, no Artifact Candidate
@@ -40,5 +39,5 @@ The canonical tables are `fleet_users`, `fleet_workspaces`, `fleet_sessions`,
 `fleet_turns`, `fleet_runs`, `fleet_sandbox_bindings`, `fleet_attachments`, `fleet_artifacts`, and
 `fleet_skills`. SQLAlchemy models live in `fleet_rlm.persistence.models`.
 
-Production startup assumes migrations have already run. Test and offline SQLite
-helpers may call `create_tables` explicitly.
+Production startup assumes migrations have already run. Private testing and
+Deno SQLite helpers may call `create_tables` explicitly.

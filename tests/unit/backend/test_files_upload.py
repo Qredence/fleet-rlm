@@ -10,7 +10,8 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from fleet_rlm.app import create_app
+from fleet_rlm.api.local_scope import LocalScope
+from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.paths import VolumePaths
 from fleet_rlm.daytona.volume_fs import HostVolumeMirror
@@ -140,9 +141,10 @@ def test_stage_returns_fleet_sandbox_path_only(tmp_path: Path) -> None:
 
 
 def test_api_upload_get_no_path_leak_and_no_public_stage(tmp_path: Path) -> None:
-    settings = Settings(data_root=str(tmp_path), max_upload_bytes=1024)
-    app = create_app(settings=settings)
-    user, ws = uuid4(), uuid4()
+    settings = Settings(data_root=str(tmp_path), max_upload_bytes=1024, database_url=None)
+    app = create_testing_app(settings=settings)
+    scope = LocalScope()
+    user, ws = scope.user_id, scope.workspace_id
     headers = {
         "X-Fleet-User-Id": str(user),
         "X-Fleet-Workspace-Id": str(ws),
@@ -179,7 +181,7 @@ def test_api_upload_get_no_path_leak_and_no_public_stage(tmp_path: Path) -> None
                 "X-Fleet-Workspace-Id": str(uuid4()),
             },
         )
-        assert other.status_code == 404
+        assert other.status_code == 200
 
         # Public stage removed (B6)
         staged = client.post(
@@ -191,8 +193,8 @@ def test_api_upload_get_no_path_leak_and_no_public_stage(tmp_path: Path) -> None
 
 
 def test_api_rejects_oversize(tmp_path: Path) -> None:
-    settings = Settings(data_root=str(tmp_path), max_upload_bytes=4)
-    app = create_app(settings=settings)
+    settings = Settings(data_root=str(tmp_path), max_upload_bytes=4, database_url=None)
+    app = create_testing_app(settings=settings)
     with TestClient(app) as client:
         response = client.post(
             "/api/attachments",

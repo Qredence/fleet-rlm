@@ -104,9 +104,10 @@ Composition selects exactly one explicit
 environment, never a provider fallback. Daytona SDK imports remain confined to
 `fleet_rlm.daytona`.
 
-> **Superseded only for the environment set by ADR 0002:** the canonical set is
-> now `hermetic`, `deno`, and `daytona`. The explicit-selection, no-fallback,
-> and Daytona import-boundary clauses above remain in force.
+> **Superseded for the environment set by ADR 0002 and P1:** the canonical
+> public set is now `deno` and `daytona`; deterministic fakes are private test
+> composition. The explicit-selection, no-fallback, and Daytona
+> import-boundary clauses above remain in force.
 
 Alembic owns one fresh baseline with `down_revision=None`. It stores canonical
 Turn input, one committed aggregate, claim/heartbeat/cancellation state, and

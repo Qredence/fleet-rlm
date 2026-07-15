@@ -18,8 +18,6 @@ class ErrorResponse(BaseModel):
 
 _STATUS_DEFAULTS = {
     400: ErrorResponse(code="invalid_request", message="Invalid request"),
-    401: ErrorResponse(code="authentication_required", message="Authentication required"),
-    403: ErrorResponse(code="workspace_mismatch", message="Workspace mismatch"),
     404: ErrorResponse(code="not_found", message="Resource not found"),
     409: ErrorResponse(code="turn_in_progress", message="Turn conflict"),
     422: ErrorResponse(code="invalid_request", message="Invalid request"),
@@ -33,7 +31,6 @@ _DETAIL_CODES = {
     "attachment not found": "attachment_not_found",
     "artifact not found": "artifact_not_found",
     "skill not found": "skill_not_found",
-    "invalid token": "invalid_token",
 }
 
 

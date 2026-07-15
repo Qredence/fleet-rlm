@@ -35,7 +35,7 @@ LEGACY_EXPLANATION_MARKERS = (
 
 CLI_CONTRACT_COMMANDS = (("uv", "run", "fleet-rlm", "--help"),)
 
-CANONICAL_RUN_ENVIRONMENTS = frozenset({"hermetic", "deno", "daytona"})
+CANONICAL_RUN_ENVIRONMENTS = frozenset({"deno", "daytona"})
 CANONICAL_ENVIRONMENT_DOCS = (
     Path("docs/adr/0002-canonical-deno-and-ink-terminal.md"),
     Path("PRODUCT.md"),

@@ -122,7 +122,7 @@ def test_fleet_runtime_command_selects_environment_and_supervises_ink(
     expected_environment: str,
 ) -> None:
     calls: list[dict[str, object]] = []
-    monkeypatch.setenv("FLEET_RUN_ENVIRONMENT", "hermetic")
+    monkeypatch.setenv("FLEET_RUN_ENVIRONMENT", "deno")
     monkeypatch.setattr(
         supervisor,
         "supervise",
@@ -131,7 +131,7 @@ def test_fleet_runtime_command_selects_environment_and_supervises_ink(
 
     fleet_main([command, "--host", "0.0.0.0", "--port", "8123", "--", "--session", "session-id"])
 
-    assert os.environ["FLEET_RUN_ENVIRONMENT"] == "hermetic"
+    assert os.environ["FLEET_RUN_ENVIRONMENT"] == "deno"
     assert calls == [
         {
             "host": "0.0.0.0",
@@ -144,12 +144,12 @@ def test_fleet_runtime_command_selects_environment_and_supervises_ink(
 
 
 def test_fleet_web_preserves_explicit_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FLEET_RUN_ENVIRONMENT", "hermetic")
+    monkeypatch.setenv("FLEET_RUN_ENVIRONMENT", "deno")
     monkeypatch.setitem(sys.modules, "uvicorn", SimpleNamespace(run=lambda *_args, **_kwargs: None))
 
     fleet_main(["web"])
 
-    assert os.environ["FLEET_RUN_ENVIRONMENT"] == "hermetic"
+    assert os.environ["FLEET_RUN_ENVIRONMENT"] == "deno"
 
 
 @pytest.mark.parametrize(

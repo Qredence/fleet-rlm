@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from fleet_rlm.api.dependencies import TurnCoordinatorDep
-from fleet_rlm.api.identity import RequestIdentity, get_request_identity
+from fleet_rlm.api.local_scope import LocalScope, get_local_scope
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.api.sse import AI_SDK_UI_STREAM_HEADERS, AISDKUIProjector, SSEProjector, _json_default
 from fleet_rlm.chat.commands import OpenTurnCommand
@@ -81,7 +81,7 @@ async def create_turn(
     session_id: UUID,
     body: CreateTurnRequest,
     request: Request,
-    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    identity: Annotated[LocalScope, Depends(get_local_scope)],
     coordinator: TurnCoordinatorDep,
     idempotency_key: Annotated[
         str,

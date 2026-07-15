@@ -29,17 +29,14 @@ describe("FleetApiClient", () => {
     );
   });
 
-  it("sends synthetic dev identity and a Fleet chat request", async () => {
+  it("sends a local-scope Fleet chat request", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response("data: [DONE]\n\n", {
         headers: { "x-vercel-ai-ui-message-stream": "v1" },
       }),
     );
     globalThis.fetch = fetchMock;
-    const client = new FleetApiClient({
-      baseUrl: "http://fleet.test/",
-      identity: { userId: "user-id", workspaceId: "workspace-id" },
-    });
+    const client = new FleetApiClient({ baseUrl: "http://fleet.test/" });
 
     await client.streamTurn({
       message: "hello",
@@ -52,8 +49,6 @@ describe("FleetApiClient", () => {
       expect.objectContaining({
         body: JSON.stringify({ text: "hello", attachment_ids: [] }),
         headers: expect.objectContaining({
-          "x-fleet-user-id": "user-id",
-          "x-fleet-workspace-id": "workspace-id",
           "content-type": "application/json",
           "idempotency-key": "turn-key",
         }),

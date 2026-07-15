@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from fleet_rlm.api.dependencies import SessionCatalogDep
-from fleet_rlm.api.identity import RequestIdentity, get_request_identity
+from fleet_rlm.api.local_scope import LocalScope, get_local_scope
 from fleet_rlm.api.schemas import (
     SessionCreateRequest,
     SessionDetailResponse,
@@ -56,7 +56,7 @@ def _to_summary(record: SessionRecord) -> SessionSummaryResponse:
 )
 async def create_session(
     body: SessionCreateRequest,
-    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    identity: Annotated[LocalScope, Depends(get_local_scope)],
     repo: SessionCatalogDep,
 ) -> SessionDetailResponse:
     title = (body.title or "New Session").strip() or "New Session"
@@ -77,7 +77,7 @@ async def create_session(
 
 @router.get("/api/sessions", response_model=SessionListResponse, operation_id="list_sessions")
 async def list_sessions(
-    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    identity: Annotated[LocalScope, Depends(get_local_scope)],
     repo: SessionCatalogDep,
     status: Annotated[Literal["active", "archived"] | None, Query()] = None,
     search: Annotated[str | None, Query(description="Title contains")] = None,
@@ -108,7 +108,7 @@ async def list_sessions(
 )
 async def get_session(
     session_id: UUID,
-    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    identity: Annotated[LocalScope, Depends(get_local_scope)],
     repo: SessionCatalogDep,
 ) -> SessionDetailResponse:
     try:
@@ -137,7 +137,7 @@ async def get_session(
 async def patch_session(
     session_id: UUID,
     body: SessionPatchRequest,
-    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    identity: Annotated[LocalScope, Depends(get_local_scope)],
     repo: SessionCatalogDep,
 ) -> SessionDetailResponse:
     if body.title is None and body.status is None:
@@ -175,7 +175,7 @@ async def patch_session(
 )
 async def list_session_turns(
     session_id: UUID,
-    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    identity: Annotated[LocalScope, Depends(get_local_scope)],
     repo: SessionCatalogDep,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     after_sequence: Annotated[int | None, Query(ge=0)] = None,

@@ -25,7 +25,7 @@ class VolumeBlobFs(Protocol):
 
 
 class HostVolumeMirror:
-    """Hermetic Workspace Volume Scope double: host directory mirrors the mount root.
+    """Private Workspace Volume Scope double: host directory mirrors the mount root.
 
     Logical paths under ``volume_paths.mount_path`` map to files under ``host_root``.
     This is the offline stand-in for the Daytona Volume subpath mount — not a

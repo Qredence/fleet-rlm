@@ -12,7 +12,7 @@ from fleet_rlm.files.models import AttachmentRun
 
 @dataclass(frozen=True, slots=True)
 class LocalAttachmentPathPolicy:
-    """Opaque host-relative references for the hermetic Attachment catalog."""
+    """Opaque host-relative references for local Attachment catalogs."""
 
     root: Path
 

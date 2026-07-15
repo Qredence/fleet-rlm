@@ -28,7 +28,7 @@ from fleet_rlm.daytona.volume_fs import VolumeBlobFs
 class LocalArtifactCatalog:
     """Store artifact catalog under a host root; promote bytes into Volume scope.
 
-    Host ``root`` is a hermetic offline catalog. When ``volume_fs`` is set, durable
+    Host ``root`` is a local catalog. When ``volume_fs`` is set, durable
     blob+meta are written under Workspace Volume Scope (``artifacts/{id}/``) and
     the run-scoped logical sandbox path.
     """
@@ -262,7 +262,7 @@ class LocalArtifactCatalog:
 
 
 class LocalArtifactReaderCatalog:
-    """Async ArtifactReader catalog adapter over the hermetic local catalog."""
+    """Async ArtifactReader catalog adapter over the local catalog."""
 
     def __init__(self, store: LocalArtifactCatalog) -> None:
         self._store = store

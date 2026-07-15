@@ -14,9 +14,7 @@ Prefix: `FLEET_`.
 | `VOLUME_NAME` | `rlm-volume-dspy` | Daytona volume |
 | `VOLUME_MOUNT_PATH` | `/home/daytona/fleet` | Absolute mount |
 | `LIVE_KERNEL` | `false` | Opt-in live providers |
-| `AUTH_MODE` | `dev` | `dev` or `neon` only |
-| `NEON_AUTH_URL` | product default | Neon Auth base override |
 | `UPLOAD_ROOT` | unset | Host attachment blob root |
 | `ARTIFACT_ROOT` | unset | Host artifact blob root |
 
-Unknown `AUTH_MODE` values fail closed at settings load.
+The HTTP API uses one deterministic local User and Workspace scope.

@@ -21,7 +21,7 @@ five seconds. Examples of terminal argument forwarding are:
 
 ```bash
 uv run fleet cli -- --session <session-uuid>
-uv run fleet deno -- --user-id <uuid> --workspace-id <uuid>
+uv run fleet deno -- --session <session-uuid>
 ```
 
 `fleet web` and `fleet-rlm serve-api` remain backend-only and preserve

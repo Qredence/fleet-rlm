@@ -26,32 +26,6 @@ paths:
           minLength: 1
           maxLength: 128
           title: Idempotency-Key
-      - name: Authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: X-Fleet-User-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-User-Id
-      - name: X-Fleet-Workspace-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-Workspace-Id
       requestBody:
         required: true
         content:
@@ -130,32 +104,6 @@ paths:
             minimum: 0
           - type: 'null'
           title: After Sequence
-      - name: Authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: X-Fleet-User-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-User-Id
-      - name: X-Fleet-Workspace-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-Workspace-Id
       responses:
         '200':
           description: Successful Response
@@ -175,33 +123,6 @@ paths:
       - sessions
       summary: Create Session
       operationId: create_session
-      parameters:
-      - name: Authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: X-Fleet-User-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-User-Id
-      - name: X-Fleet-Workspace-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-Workspace-Id
       requestBody:
         required: true
         content:
@@ -265,32 +186,6 @@ paths:
           minimum: 0
           default: 0
           title: Offset
-      - name: Authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: X-Fleet-User-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-User-Id
-      - name: X-Fleet-Workspace-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-Workspace-Id
       responses:
         '200':
           description: Successful Response
@@ -318,32 +213,6 @@ paths:
           type: string
           format: uuid
           title: Session Id
-      - name: Authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: X-Fleet-User-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-User-Id
-      - name: X-Fleet-Workspace-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-Workspace-Id
       responses:
         '200':
           description: Successful Response
@@ -370,32 +239,6 @@ paths:
           type: string
           format: uuid
           title: Session Id
-      - name: Authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: X-Fleet-User-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-User-Id
-      - name: X-Fleet-Workspace-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-Workspace-Id
       requestBody:
         required: true
         content:
@@ -421,39 +264,12 @@ paths:
       - attachments
       summary: Upload Attachment
       operationId: create_attachment
-      parameters:
-      - name: Authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: X-Fleet-User-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-User-Id
-      - name: X-Fleet-Workspace-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-Workspace-Id
       requestBody:
-        required: true
         content:
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/Body_create_attachment'
+        required: true
       responses:
         '201':
           description: Successful Response
@@ -481,32 +297,6 @@ paths:
           type: string
           format: uuid
           title: Attachment Id
-      - name: Authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: X-Fleet-User-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-User-Id
-      - name: X-Fleet-Workspace-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-Workspace-Id
       responses:
         '200':
           description: Successful Response
@@ -534,32 +324,6 @@ paths:
           type: string
           format: uuid
           title: Artifact Id
-      - name: Authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: X-Fleet-User-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-User-Id
-      - name: X-Fleet-Workspace-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-Workspace-Id
       responses:
         '200':
           description: Successful Response
@@ -587,32 +351,6 @@ paths:
           type: string
           format: uuid
           title: Artifact Id
-      - name: Authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: X-Fleet-User-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-User-Id
-      - name: X-Fleet-Workspace-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-Workspace-Id
       responses:
         '200':
           description: Successful Response
@@ -640,32 +378,6 @@ paths:
           description: Optional ranking query
           title: Q
         description: Optional ranking query
-      - name: Authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: X-Fleet-User-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-User-Id
-      - name: X-Fleet-Workspace-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-Workspace-Id
       responses:
         '200':
           description: Successful Response
@@ -696,32 +408,6 @@ paths:
           type: string
           format: uuid
           title: Skill Id
-      - name: Authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: X-Fleet-User-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-User-Id
-      - name: X-Fleet-Workspace-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-Workspace-Id
       responses:
         '200':
           description: Successful Response
@@ -749,32 +435,6 @@ paths:
           type: string
           format: uuid
           title: Run Id
-      - name: Authorization
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Authorization
-      - name: X-Fleet-User-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-User-Id
-      - name: X-Fleet-Workspace-Id
-        in: header
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: X-Fleet-Workspace-Id
       responses:
         '200':
           description: Successful Response

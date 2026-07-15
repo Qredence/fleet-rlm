@@ -10,7 +10,7 @@ from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
 @dataclass(frozen=True, slots=True)
 class OpenTurnCommand:
-    """Canonical Turn intent after HTTP authentication and schema validation."""
+    """Canonical Turn intent after local-scope and schema validation."""
 
     access: TurnAccess
     session_id: UUID

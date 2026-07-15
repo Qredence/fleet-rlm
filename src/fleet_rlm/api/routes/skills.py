@@ -7,7 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from fleet_rlm.api.identity import RequestIdentity, get_request_identity
+from fleet_rlm.api.local_scope import LocalScope, get_local_scope
 from fleet_rlm.api.schemas import SkillCardResponse
 from fleet_rlm.skills.authorize import SkillAuthorizer
 from fleet_rlm.skills.errors import SkillNotFoundError
@@ -57,7 +57,7 @@ def _to_response(card: SkillCard) -> SkillCardResponse:
 
 @router.get("/api/skills", response_model=list[SkillCardResponse], operation_id="list_skills")
 async def list_skills(
-    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    identity: Annotated[LocalScope, Depends(get_local_scope)],
     authorizer: Annotated[SkillAuthorizer, Depends(get_skill_authorizer)],
     q: str | None = Query(default=None, description="Optional ranking query"),
 ) -> list[SkillCardResponse]:
@@ -77,7 +77,7 @@ async def list_skills(
 )
 async def get_skill(
     skill_id: UUID,
-    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    identity: Annotated[LocalScope, Depends(get_local_scope)],
     authorizer: Annotated[SkillAuthorizer, Depends(get_skill_authorizer)],
 ) -> SkillCardResponse:
     try:

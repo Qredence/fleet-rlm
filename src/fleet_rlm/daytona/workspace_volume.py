@@ -162,7 +162,7 @@ class DaytonaWorkspaceVolumeGateway:
 
 
 class HostWorkspaceVolumeGateway:
-    """Hermetic adapter with one isolated host root per Workspace."""
+    """Private test adapter with one isolated host root per Workspace."""
 
     def __init__(self, root: Path | str, *, volume_paths: VolumePaths) -> None:
         self._root = Path(root)

@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from fleet_rlm.app import create_app
+from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.skills.errors import SkillValidationError
 from fleet_rlm.skills.loader import (
     bundled_skills_root,
@@ -97,7 +97,7 @@ def test_load_skill_directory_collects_references(tmp_path: Path) -> None:
 
 
 def test_create_app_seeds_visible_skills_without_instruction_leak() -> None:
-    app = create_app()
+    app = create_testing_app()
     user = uuid4()
     workspace = uuid4()
     headers = {

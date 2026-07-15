@@ -1,22 +1,21 @@
 # Fleet RLM backend architecture
 
-Canonical Run Environment set: `hermetic`, `deno`, `daytona`.
+Canonical Run Environment set: `deno`, `daytona`.
 
 ## Runtime flow
 
 ```text
 HTTP POST /api/sessions/{session_id}/turns + Idempotency-Key
-  -> identity, Turn input, and Attachment validation
+  -> deterministic local scope, Turn input, and Attachment validation
   -> TurnCoordinator
   -> durable Session History + atomic Run claim
   -> Run environment selected by FLEET_RUN_ENVIRONMENT
-     - hermetic: stub interpreter, no live LLM
      - deno:     real dspy.LM, DSPy default PythonInterpreter (Deno/Pyodide WASM), in-process sinks
      - daytona:  Daytona Sandbox with Workspace Volume Scope
   -> fresh DSPy RLM and CodeInterpreter
   -> host-mediated Skill, Attachment, and Artifact Candidate tools
      (deno: read_attachment + skills only; no create_artifact or promotion)
-  -> candidate byte promotion (daytona only; deno/hermetic skip durable volume write)
+  -> candidate byte promotion (daytona only; deno skips durable volume write)
   -> atomic Turn/Run/Checkpoint/Artifact metadata commit
   -> artifact.created* then one run.completed terminal
   -> Interpreter Lease release
@@ -31,8 +30,8 @@ Artifact identity, and still releases the Interpreter Lease.
 - `app.create_app()` constructs only the FastAPI/router shell and empty state.
 - FastAPI lifespan installs exactly one complete Run Environment inventory,
   marks it ready after successful wiring, and owns shutdown or startup rollback.
-- `composition.py` owns profile wiring. Its local installers share one inventory
-  builder; its live installer/disposer own Daytona resources. A locally owned
+- `composition/` owns explicit Daytona, Deno, common, and private testing wiring.
+  Runtime installers share one inventory builder; Daytona owns live resources. A locally owned
   database engine creates tables only for SQLite and is disposed by lifespan.
 - Routes retrieve already-composed modules from `api/dependencies.py`.
 - `RLMRunner` executes one fresh DSPy RLM per Turn.

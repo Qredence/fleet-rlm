@@ -574,11 +574,7 @@ export interface operations {
                 limit?: number;
                 after_sequence?: number | null;
             };
-            header?: {
-                Authorization?: string | null;
-                "X-Fleet-User-Id"?: string | null;
-                "X-Fleet-Workspace-Id"?: string | null;
-            };
+            header?: never;
             path: {
                 session_id: string;
             };
@@ -611,9 +607,6 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": string;
-                Authorization?: string | null;
-                "X-Fleet-User-Id"?: string | null;
-                "X-Fleet-Workspace-Id"?: string | null;
             };
             path: {
                 session_id: string;
@@ -692,11 +685,7 @@ export interface operations {
                 limit?: number;
                 offset?: number;
             };
-            header?: {
-                Authorization?: string | null;
-                "X-Fleet-User-Id"?: string | null;
-                "X-Fleet-Workspace-Id"?: string | null;
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -725,11 +714,7 @@ export interface operations {
     create_session: {
         parameters: {
             query?: never;
-            header?: {
-                Authorization?: string | null;
-                "X-Fleet-User-Id"?: string | null;
-                "X-Fleet-Workspace-Id"?: string | null;
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -762,11 +747,7 @@ export interface operations {
     get_session: {
         parameters: {
             query?: never;
-            header?: {
-                Authorization?: string | null;
-                "X-Fleet-User-Id"?: string | null;
-                "X-Fleet-Workspace-Id"?: string | null;
-            };
+            header?: never;
             path: {
                 session_id: string;
             };
@@ -797,11 +778,7 @@ export interface operations {
     update_session: {
         parameters: {
             query?: never;
-            header?: {
-                Authorization?: string | null;
-                "X-Fleet-User-Id"?: string | null;
-                "X-Fleet-Workspace-Id"?: string | null;
-            };
+            header?: never;
             path: {
                 session_id: string;
             };
@@ -836,11 +813,7 @@ export interface operations {
     create_attachment: {
         parameters: {
             query?: never;
-            header?: {
-                Authorization?: string | null;
-                "X-Fleet-User-Id"?: string | null;
-                "X-Fleet-Workspace-Id"?: string | null;
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -873,11 +846,7 @@ export interface operations {
     get_attachment: {
         parameters: {
             query?: never;
-            header?: {
-                Authorization?: string | null;
-                "X-Fleet-User-Id"?: string | null;
-                "X-Fleet-Workspace-Id"?: string | null;
-            };
+            header?: never;
             path: {
                 attachment_id: string;
             };
@@ -908,11 +877,7 @@ export interface operations {
     get_artifact: {
         parameters: {
             query?: never;
-            header?: {
-                Authorization?: string | null;
-                "X-Fleet-User-Id"?: string | null;
-                "X-Fleet-Workspace-Id"?: string | null;
-            };
+            header?: never;
             path: {
                 artifact_id: string;
             };
@@ -943,11 +908,7 @@ export interface operations {
     download_artifact: {
         parameters: {
             query?: never;
-            header?: {
-                Authorization?: string | null;
-                "X-Fleet-User-Id"?: string | null;
-                "X-Fleet-Workspace-Id"?: string | null;
-            };
+            header?: never;
             path: {
                 artifact_id: string;
             };
@@ -979,11 +940,7 @@ export interface operations {
                 /** @description Optional ranking query */
                 q?: string | null;
             };
-            header?: {
-                Authorization?: string | null;
-                "X-Fleet-User-Id"?: string | null;
-                "X-Fleet-Workspace-Id"?: string | null;
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -1012,11 +969,7 @@ export interface operations {
     get_skill: {
         parameters: {
             query?: never;
-            header?: {
-                Authorization?: string | null;
-                "X-Fleet-User-Id"?: string | null;
-                "X-Fleet-Workspace-Id"?: string | null;
-            };
+            header?: never;
             path: {
                 skill_id: string;
             };
@@ -1047,11 +1000,7 @@ export interface operations {
     request_run_cancellation: {
         parameters: {
             query?: never;
-            header?: {
-                Authorization?: string | null;
-                "X-Fleet-User-Id"?: string | null;
-                "X-Fleet-Workspace-Id"?: string | null;
-            };
+            header?: never;
             path: {
                 run_id: string;
             };

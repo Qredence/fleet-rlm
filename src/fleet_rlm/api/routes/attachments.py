@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from fleet_rlm.api.dependencies import AttachmentLifecycleDep
-from fleet_rlm.api.identity import RequestIdentity, get_request_identity
+from fleet_rlm.api.local_scope import LocalScope, get_local_scope
 from fleet_rlm.api.schemas import AttachmentResponse
 from fleet_rlm.files.errors import AttachmentError, AttachmentNotFoundError
 from fleet_rlm.files.models import AttachmentAccess, AttachmentUpload
@@ -24,7 +24,7 @@ router = APIRouter(tags=["attachments"])
 )
 async def upload_attachment(
     attachment: Annotated[UploadFile, File()],
-    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    identity: Annotated[LocalScope, Depends(get_local_scope)],
     lifecycle: AttachmentLifecycleDep,
 ) -> AttachmentResponse:
     try:
@@ -53,7 +53,7 @@ async def upload_attachment(
 )
 async def get_attachment(
     attachment_id: UUID,
-    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    identity: Annotated[LocalScope, Depends(get_local_scope)],
     lifecycle: AttachmentLifecycleDep,
 ) -> AttachmentResponse:
     try:

@@ -11,8 +11,8 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from fleet_rlm.app import create_app
 from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
+from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.paths import UnsafePathError, VolumePaths, as_posix
 from fleet_rlm.daytona.volume_fs import HostVolumeMirror
@@ -178,8 +178,9 @@ def test_public_attachment_and_artifact_responses_omit_paths(tmp_path: Path) -> 
         data_root=str(tmp_path),
         max_upload_bytes=1024,
         max_artifact_bytes=1024,
+        database_url=None,
     )
-    app = create_app(settings=settings)
+    app = create_testing_app(settings=settings)
     user, ws = uuid4(), uuid4()
     headers = {
         "X-Fleet-User-Id": str(user),

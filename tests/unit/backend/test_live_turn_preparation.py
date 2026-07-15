@@ -60,7 +60,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(monkeypatch) -> 
 
     monkeypatch.setattr("fleet_rlm.daytona.volume_fs.DaytonaSandboxVolumeFs", VolumeFs)
     resources = object.__new__(LiveKernelResources)
-    resources.settings = Settings(run_environment="hermetic")
+    resources.settings = Settings(run_environment="daytona")
     resources.session_manager = SessionManager()
     resources.platform = SimpleNamespace(get=lambda _sandbox_id: object())
     resources.models = RLMModelBundle(object(), object())

@@ -7,8 +7,6 @@ import { FleetApiClient } from "./fleet-api-client.js";
 export type CliOptions = {
   apiUrl: string;
   sessionId?: string;
-  userId?: string;
-  workspaceId?: string;
   artifactId?: string;
   outputPath?: string;
 };
@@ -45,12 +43,6 @@ export function parseArgs(args: string[]): CliOptions | "help" {
       case "--session":
         options.sessionId = value;
         break;
-      case "--user-id":
-        options.userId = value;
-        break;
-      case "--workspace-id":
-        options.workspaceId = value;
-        break;
       case "--output":
         options.outputPath = value;
         break;
@@ -66,24 +58,7 @@ export function parseArgs(args: string[]): CliOptions | "help" {
 }
 
 export function createFleetClient(options: CliOptions): FleetApiClient {
-  validateIdentity(options);
-  return new FleetApiClient({
-    baseUrl: options.apiUrl,
-    identity: {
-      token: process.env.FLEET_API_TOKEN,
-      userId: options.userId,
-      workspaceId: options.workspaceId,
-    },
-  });
-}
-
-export function validateIdentity(options: CliOptions): void {
-  if (Boolean(options.userId) !== Boolean(options.workspaceId)) {
-    throw new Error("--user-id and --workspace-id must be provided together");
-  }
-  if (process.env.FLEET_API_TOKEN && options.userId) {
-    throw new Error("FLEET_API_TOKEN cannot be combined with synthetic dev identity");
-  }
+  return new FleetApiClient({ baseUrl: options.apiUrl });
 }
 
 export async function saveArtifact(
@@ -140,8 +115,6 @@ export function inkUsage(): string {
 Options:
   --api-url <url>          Fleet API base URL (default: http://127.0.0.1:8000)
   --session <uuid>         Resume an existing Fleet session
-  --user-id <uuid>         Synthetic dev identity header
-  --workspace-id <uuid>    Synthetic dev workspace header
   artifact <uuid> --output <path>
                             Download, verify, and atomically save an Artifact
   --help, -h               Show this help

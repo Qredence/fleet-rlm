@@ -9,7 +9,8 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from fleet_rlm.app import create_app
+from fleet_rlm.api.local_scope import LocalScope
+from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.skills.authorize import SkillAuthorizer
 from fleet_rlm.skills.cards import to_card
 from fleet_rlm.skills.errors import SkillNotFoundError, SkillValidationError
@@ -17,9 +18,9 @@ from fleet_rlm.skills.ranking import rank_authorized_cards
 from fleet_rlm.skills.registry import InMemorySkillRegistry
 
 
-def _seed_registry():
+def _seed_registry(*, workspace_id=None):
     registry = InMemorySkillRegistry()
-    ws_a = uuid4()
+    ws_a = workspace_id or uuid4()
     ws_b = uuid4()
     system = registry.register(
         name="system-echo",
@@ -142,8 +143,9 @@ def test_ranking_only_reorders_authorized() -> None:
 
 
 def test_api_list_and_get_no_instructions_leak() -> None:
-    registry, system, ws_skill, hidden, other_ws, ws_a, _ws_b = _seed_registry()
-    app = create_app()
+    scope = LocalScope()
+    registry, system, ws_skill, hidden, other_ws, ws_a, _ws_b = _seed_registry(workspace_id=scope.workspace_id)
+    app = create_testing_app()
     app.state.skill_registry = registry
     app.state.skill_authorizer = SkillAuthorizer(registry)
     user = uuid4()

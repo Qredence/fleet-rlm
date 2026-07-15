@@ -12,9 +12,9 @@ import pytest
 import pytest_asyncio
 
 from fleet_rlm.chat.commands import OpenTurnCommand
-from fleet_rlm.chat.hermetic_run_environment import HermeticTurnPreparation
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
 from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+from fleet_rlm.composition.testing import DeterministicTurnPreparation
 from fleet_rlm.files.models import PreparedAttachments
 from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
 from fleet_rlm.rlm.budgets import RunBudget
@@ -80,7 +80,7 @@ async def _build_harness(*, cancelled: bool = False) -> _MVPTurnHarness:
     lifecycle = TurnLifecycleModule(store, max_artifact_bytes=1024)
     coordinator = TurnCoordinator(
         lifecycle=lifecycle,
-        preparation=HermeticTurnPreparation(attachments=_NoAttachments(), budget=RunBudget(max_iterations=1)),
+        preparation=DeterministicTurnPreparation(attachments=_NoAttachments(), budget=RunBudget(max_iterations=1)),
         runner=RLMRunner(factory=_DeterministicRLMFactory(calls, cancelled=cancelled)),
     )
     return _MVPTurnHarness(access, store, session.id, coordinator, calls)

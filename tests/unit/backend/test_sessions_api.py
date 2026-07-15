@@ -7,8 +7,9 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from fleet_rlm.app import create_app
+from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn
+from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.rlm.outcome import RLMOutcome
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
@@ -21,7 +22,7 @@ def _headers(user_id=None, workspace_id=None):
 
 
 def test_sessions_crud_happy_path() -> None:
-    app = create_app()
+    app = create_testing_app()
     user, workspace = uuid4(), uuid4()
     headers = _headers(user, workspace)
     with TestClient(app) as client:
@@ -55,8 +56,8 @@ def test_sessions_crud_happy_path() -> None:
         assert archived.json()["status"] == "archived"
 
 
-def test_sessions_are_workspace_isolated() -> None:
-    app = create_app()
+def test_caller_supplied_identity_headers_do_not_change_local_scope() -> None:
+    app = create_testing_app()
     user, workspace_a, workspace_b = uuid4(), uuid4(), uuid4()
     with TestClient(app) as client:
         created = client.post(
@@ -66,17 +67,17 @@ def test_sessions_are_workspace_isolated() -> None:
         )
         session_id = created.json()["id"]
 
-        foreign = client.get(f"/api/sessions/{session_id}", headers=_headers(user, workspace_b))
-        assert foreign.status_code == 404
-        assert client.get("/api/sessions", headers=_headers(user, workspace_b)).json()["total"] == 0
+        same_local_scope = client.get(f"/api/sessions/{session_id}", headers=_headers(user, workspace_b))
+        assert same_local_scope.status_code == 200
+        assert client.get("/api/sessions", headers=_headers(user, workspace_b)).json()["total"] == 1
 
 
 @pytest.mark.asyncio
 async def test_session_turns_are_canonical_ui_messages() -> None:
-    app = create_app()
-    user, workspace = uuid4(), uuid4()
-    access = TurnAccess(user, workspace)
-    headers = _headers(user, workspace)
+    app = create_testing_app()
+    scope = LocalScope()
+    access = TurnAccess(scope.user_id, scope.workspace_id)
+    headers = {}
     with TestClient(app) as client:
         session_id = UUID(client.post("/api/sessions", json={}, headers=headers).json()["id"])
         started = await app.state.turn_lifecycle.begin(

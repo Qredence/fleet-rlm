@@ -20,13 +20,10 @@ which terminal modules own transport and projection.
 
 ## Decision
 
-Canonical Run Environment set: `hermetic`, `deno`, `daytona`.
+Canonical Run Environment set: `deno`, `daytona`.
 
 ### Run Environment profiles
 
-- `hermetic` is the default deterministic test and offline profile. It uses a
-  stub interpreter, makes no live LLM calls, and does not promise durable
-  Artifact promotion.
 - `deno` is the reduced-capability local profile. It uses real `dspy.LM`
   models and leaves the interpreter unset so DSPy creates its default
   Deno/Pyodide `PythonInterpreter`. Its host capabilities are Attachment reads
@@ -46,10 +43,10 @@ state. The FastAPI lifespan installs exactly one complete profile inventory,
 marks it ready only after successful wiring, and clears it during shutdown or
 failed startup.
 
-`fleet_rlm.composition` owns profile wiring. `install_offline_composition()`
-and `install_deno_composition()` share the local inventory builder;
-`install_live_composition()` and `dispose_live_composition()` own Daytona
-startup, rollback, and shutdown. The local lifespan may own a database engine
+`fleet_rlm.composition` owns profile wiring. `install_deno_composition()` uses
+the shared local inventory builder; `install_daytona_composition()` and
+`dispose_daytona_composition()` own Daytona startup, rollback, and shutdown.
+Private tests use `composition.testing` without adding a public profile. The local lifespan may own a database engine
 and Session factory, but calls `create_tables` only for SQLite and disposes any
 engine it created. Routes only retrieve lifespan-composed modules.
 

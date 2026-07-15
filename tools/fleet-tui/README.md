@@ -6,14 +6,14 @@ stream; it does not run a local model, a Harness agent, or any Vercel Sandbox.
 
 ## Run
 
-Start the Fleet API in a separate terminal with the local hermetic SQLite
-environment. This path needs no LLM or Daytona credentials.
+Start the Fleet API in a separate terminal with the local Deno SQLite
+environment. This path needs an LLM key but no Daytona credentials.
 
 ```bash
 # from repository root; model names are examples for an OpenAI-compatible endpoint
-FLEET_AUTH_MODE=dev \
-FLEET_RUN_ENVIRONMENT=hermetic \
+FLEET_RUN_ENVIRONMENT=deno \
 FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3' \
+FLEET_LLM_API_KEY='...' \
 uv run fleet-rlm serve-api --port 8000
 
 # in another terminal
@@ -24,7 +24,6 @@ For real Fleet RLM execution through Daytona and `dspy.RLM`, migrate the
 database, then use the combined backend-and-Ink command:
 
 ```bash
-FLEET_AUTH_MODE=dev \
 FLEET_DATABASE_URL='postgresql+asyncpg://...' \
 FLEET_DAYTONA_API_KEY='...' \
 FLEET_LLM_API_KEY='...' \
@@ -32,7 +31,6 @@ FLEET_ROOT_MODEL='openai/<model>' \
 FLEET_SUB_MODEL='openai/<model>' \
 uv run alembic upgrade head
 
-FLEET_AUTH_MODE=dev \
 FLEET_DATABASE_URL='postgresql+asyncpg://...' \
 FLEET_DAYTONA_API_KEY='...' \
 FLEET_LLM_API_KEY='...' \
@@ -43,8 +41,7 @@ uv run fleet cli --port 8000
 
 The supervised backend logs to `.fleet_rlm/logs/latest.log` and stops when Ink
 exits. Run `uv run fleet doctor daytona` first when validating provider access
-or diagnosing Sandbox creation. The SQLite/hermetic two-terminal command above
-is only for local transport/UI smoke testing.
+or diagnosing Sandbox creation.
 
 For local Deno/Pyodide execution, configure the LLM settings and run
 `uv run fleet deno --port 8000`; this mode intentionally has no durable
@@ -57,18 +54,10 @@ conversation context later with:
 uv run fleet cli -- --session <session-uuid>
 ```
 
-For non-default synthetic development identities, supply both headers:
-
-```bash
-uv run fleet deno -- \
-  --user-id <user-uuid> \
-  --workspace-id <workspace-uuid>
-```
-
 Use `--api-url <url>` to point the client at another dev API. `FLEET_ROOT_MODEL`
 and `FLEET_SUB_MODEL` are the canonical runtime settings; for an OpenAI-compatible
-endpoint they must use the `openai/<model-id>` form. Neon/Bearer JWT
-authentication is intentionally out of scope for this first version.
+endpoint they must use the `openai/<model-id>` form. The API uses one
+deterministic local User and Workspace scope.
 `FLEET_BUDGET_MAX_WALL_SECONDS` controls the maximum wall-clock duration of one
 live RLM turn and defaults to 900 seconds.
 

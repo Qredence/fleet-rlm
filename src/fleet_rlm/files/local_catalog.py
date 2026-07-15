@@ -1,4 +1,4 @@
-"""Hermetic Attachment catalog and blob adapters for AttachmentModule."""
+"""Local Attachment catalog and blob adapters for AttachmentModule."""
 
 from __future__ import annotations
 

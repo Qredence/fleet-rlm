@@ -24,12 +24,13 @@ sandbox lifecycle, persistence, or streaming themselves.
 - Session, Attachment, Artifact, Skill, and cancellation HTTP routes.
 - The standalone terminal client under `tools/fleet-tui/`.
 
-Canonical Run Environment set: `hermetic`, `deno`, `daytona`.
+Canonical Run Environment set: `deno`, `daytona`.
 
-Run Environments split by intent: `hermetic` is the deterministic offline and
-test profile; `deno` is vanilla local `dspy.RLM` with a real LLM and DSPy's
-default Deno/Pyodide interpreter; `daytona` is the full Fleet solution with
-Sandbox, Workspace Volume Scope, and Turn Commit. Deno is intentionally
+Run Environments split by intent: `deno` is vanilla local `dspy.RLM` with a
+real LLM and DSPy's default Deno/Pyodide interpreter; `daytona` is the full
+Fleet solution with Sandbox, Workspace Volume Scope, and Turn Commit. Private
+tests install deterministic in-process fakes without defining another public
+profile. Deno is intentionally
 reduced-capability: it supports Attachment reads and Skills, but not
 `create_artifact`, durable Artifact promotion, or Daytona resources.
 

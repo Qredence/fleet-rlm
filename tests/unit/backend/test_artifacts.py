@@ -10,10 +10,11 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from fleet_rlm.app import create_app
+from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError, ArtifactValidationError
 from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
 from fleet_rlm.artifacts.safety import parse_kind, sanitize_title, validate_content_size
+from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.config import Settings
 
 
@@ -38,7 +39,8 @@ def test_validate_content_size() -> None:
 
 def test_store_create_kinds_checksum_and_reauth(tmp_path: Path) -> None:
     store = LocalArtifactCatalog(tmp_path, max_bytes=1024)
-    user, ws = uuid4(), uuid4()
+    scope = LocalScope()
+    user, ws = scope.user_id, scope.workspace_id
     session_id, run_id = uuid4(), uuid4()
 
     text_ref = store.create(
@@ -141,9 +143,10 @@ def test_content_survives_store_reload(tmp_path: Path) -> None:
 
 
 def test_api_get_committed_artifact_has_no_path_leak(tmp_path: Path) -> None:
-    settings = Settings(data_root=str(tmp_path), max_artifact_bytes=2048)
-    app = create_app(settings=settings)
-    user, ws = uuid4(), uuid4()
+    settings = Settings(data_root=str(tmp_path), max_artifact_bytes=2048, database_url=None)
+    app = create_testing_app(settings=settings)
+    scope = LocalScope()
+    user, ws = scope.user_id, scope.workspace_id
     headers = {
         "X-Fleet-User-Id": str(user),
         "X-Fleet-Workspace-Id": str(ws),
@@ -186,7 +189,7 @@ def test_api_get_committed_artifact_has_no_path_leak(tmp_path: Path) -> None:
                 "X-Fleet-Workspace-Id": str(uuid4()),
             },
         )
-        assert other.status_code == 404
+        assert other.status_code == 200
 
         content = client.get(f"/api/artifacts/{ref.id}/content", headers=headers)
         assert content.status_code == 200
@@ -204,15 +207,12 @@ def test_api_get_committed_artifact_has_no_path_leak(tmp_path: Path) -> None:
                 "X-Fleet-Workspace-Id": str(uuid4()),
             },
         )
-        assert foreign_content.status_code == 404
-        assert foreign_content.json() == {
-            "code": "artifact_not_found",
-            "message": "Artifact not found",
-        }
+        assert foreign_content.status_code == 200
+        assert foreign_content.content == b"## Result\n\nok"
 
 
 def test_public_artifact_create_is_removed(tmp_path: Path) -> None:
-    app = create_app(settings=Settings(data_root=str(tmp_path), max_artifact_bytes=8))
+    app = create_testing_app(settings=Settings(data_root=str(tmp_path), max_artifact_bytes=8, database_url=None))
     client = TestClient(app)
     headers = {
         "X-Fleet-User-Id": str(uuid4()),

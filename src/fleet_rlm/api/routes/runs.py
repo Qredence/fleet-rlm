@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from fleet_rlm.api.dependencies import TurnLifecycleDep
-from fleet_rlm.api.identity import RequestIdentity, get_request_identity
+from fleet_rlm.api.local_scope import LocalScope, get_local_scope
 from fleet_rlm.chat.turn_lifecycle import TurnNotFoundError
 from fleet_rlm.sessions.models import TurnAccess
 
@@ -28,7 +28,7 @@ class CancellationResponse(BaseModel):
 )
 async def request_run_cancellation(
     run_id: UUID,
-    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    identity: Annotated[LocalScope, Depends(get_local_scope)],
     lifecycle: TurnLifecycleDep,
 ) -> CancellationResponse:
     try:

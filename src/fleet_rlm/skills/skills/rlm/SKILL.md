@@ -12,8 +12,8 @@ Canonical DSPy module: https://dspy.ai/api/modules/RLM/
 - **Transport:** `POST /api/sessions/{session_id}/turns` Server-Sent Events (`RuntimeEvent`). No WebSocket execution path.
 - **Engine:** host-owned `dspy.RLM` with signature `FleetRLMSignature` (`request -> answer`).
 - **Interpreter:** Daytona `code_interpreter` via a short-lived lease (never delete the sandbox on release).
-- **Auth:** `FLEET_AUTH_MODE=dev|neon` (fail-closed).
-- **Run environment:** explicit `FLEET_RUN_ENVIRONMENT=hermetic|daytona`; hermetic is default.
+- **Scope:** deterministic local User and Workspace identifiers; no public auth headers.
+- **Run environment:** explicit `FLEET_RUN_ENVIRONMENT=daytona|deno`; Daytona is default.
 
 ## When to use RLM
 

@@ -1,11 +1,5 @@
 import type { components } from "./generated/openapi.js";
 
-export type FleetIdentity = {
-  token?: string;
-  userId?: string;
-  workspaceId?: string;
-};
-
 export type FleetSession = components["schemas"]["SessionDetailResponse"];
 export type FleetTurnPart = components["schemas"]["UIMessagePart"];
 export type FleetTurn = components["schemas"]["UIMessageResponse"];
@@ -27,11 +21,8 @@ export class FleetApiError extends Error {
 
 export class FleetApiClient {
   readonly baseUrl: string;
-  readonly identity: FleetIdentity;
-
-  constructor({ baseUrl, identity = {} }: { baseUrl: string; identity?: FleetIdentity }) {
+  constructor({ baseUrl }: { baseUrl: string }) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
-    this.identity = identity;
   }
 
   async createSession(): Promise<FleetSession> {
@@ -89,7 +80,6 @@ export class FleetApiClient {
       {
         method: "POST",
         headers: {
-          ...this.headers(),
           "content-type": "application/json",
           "idempotency-key": idempotencyKey,
         },
@@ -119,7 +109,7 @@ export class FleetApiClient {
   async downloadArtifact(artifactId: string): Promise<Response> {
     const response = await this.fetch(
       `${this.baseUrl}/api/artifacts/${encodeURIComponent(artifactId)}/content`,
-      { method: "GET", headers: this.headers() },
+      { method: "GET" },
     );
     if (!response.ok) {
       throw await this.toApiError(response);
@@ -131,7 +121,6 @@ export class FleetApiClient {
     const response = await this.fetch(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
-        ...this.headers(),
         ...(init.body ? { "content-type": "application/json" } : {}),
         ...(init.headers ?? {}),
       },
@@ -140,16 +129,6 @@ export class FleetApiClient {
       throw await this.toApiError(response);
     }
     return (await response.json()) as T;
-  }
-
-  private headers(): HeadersInit {
-    if (this.identity.token) {
-      return { authorization: `Bearer ${this.identity.token}` };
-    }
-    return {
-      ...(this.identity.userId ? { "x-fleet-user-id": this.identity.userId } : {}),
-      ...(this.identity.workspaceId ? { "x-fleet-workspace-id": this.identity.workspaceId } : {}),
-    };
   }
 
   private async fetch(url: string, init: RequestInit): Promise<Response> {

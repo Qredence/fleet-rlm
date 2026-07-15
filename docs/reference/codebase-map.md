@@ -8,7 +8,7 @@ compatibility runtime and parallel foundation package no longer exist.
 | Module | Ownership | May depend on |
 | --- | --- | --- |
 | `app.py`, `main.py` | FastAPI/router shell, lifespan selection and cleanup, ASGI entrypoint | composition, API routers |
-| `api/` | HTTP translation, identity, dependency aliases, AI SDK UI SSE projection and UIMessage reload | domain interfaces and lifespan-composed modules |
+| `api/` | HTTP translation, deterministic local scope, dependency aliases, AI SDK UI SSE projection and UIMessage reload | domain interfaces and lifespan-composed modules |
 | `chat/` | Turn orchestration, context construction, commit and terminal ordering; Deno Run Environment, sinks, reduced capabilities, and RLM factory | RLM, sessions, Skills, files |
 | `rlm/` | DSPy signature, fresh-per-Turn RLM construction, budgets, events, runner | DSPy and domain values |
 | `daytona/` | Exclusive Daytona SDK boundary, Sandbox/lease/Volume adapters | Daytona SDK, domain values |
@@ -23,13 +23,13 @@ compatibility runtime and parallel foundation package no longer exist.
 
 - Daytona SDK imports are confined to `fleet_rlm.daytona`.
 - `create_app()` constructs no runtime inventory. FastAPI lifespan installs one
-  complete hermetic, Deno, or Daytona composition and owns rollback and
+  complete Deno or Daytona composition and owns rollback and
   cleanup; routes retrieve it through dependency aliases and do not construct
   repositories, engines, clients, or stores.
 - `RLMRunner` owns execution but not Turn Commit or Interpreter Lease release;
   `TurnCoordinator` owns commit, public terminal ordering, and final release.
 - Production schema evolution belongs to the root Alembic baseline. Explicit
-  `create_tables` calls are limited to hermetic SQLite tests/offline helpers.
+  `create_tables` calls are limited to private tests and Deno SQLite helpers.
 - Public chat transport is the AI SDK UI 7 v1 UIMessage protocol over FastAPI
   SSE. Runtime Events remain the internal transport-neutral progress model.
   There is no `/api/v1` compatibility or WebSocket execution surface.

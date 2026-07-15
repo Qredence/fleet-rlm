@@ -26,6 +26,6 @@ Owned by `fleet_rlm.daytona.paths.VolumePaths`.
 
 | Store | Location | Client-visible? |
 |-------|----------|-----------------|
-| Attachments | `FLEET_DATA_ROOT/attachments` in hermetic mode | Metadata + ids only |
-| Artifacts | `FLEET_DATA_ROOT/artifacts` in hermetic mode | Metadata + ids only |
+| Attachments | `FLEET_DATA_ROOT/attachments` in Deno and private tests | Metadata + ids only |
+| Artifacts | `FLEET_DATA_ROOT/artifacts` in Deno and private tests | Metadata + ids only |
 | Volume files | Daytona mount | Sandbox-only; not as host paths in API |

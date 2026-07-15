@@ -17,21 +17,13 @@ def load_script():
 diagnose = load_script()
 
 
-def test_check_env_accepts_dev_auth(monkeypatch, tmp_path) -> None:
+def test_check_env_accepts_local_scope(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
-    Path(".env").write_text("FLEET_AUTH_MODE=dev\n", encoding="utf-8")
-    monkeypatch.setenv("FLEET_AUTH_MODE", "dev")
+    Path(".env").write_text("FLEET_RUN_ENVIRONMENT=deno\n", encoding="utf-8")
     monkeypatch.delenv("FLEET_LLM_API_KEY", raising=False)
     monkeypatch.delenv("FLEET_DAYTONA_API_KEY", raising=False)
 
     assert diagnose.check_env() is True
-
-
-def test_check_env_rejects_invalid_auth(monkeypatch, tmp_path) -> None:
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("FLEET_AUTH_MODE", "oops")
-
-    assert diagnose.check_env() is False
 
 
 def test_check_package_reports_importable() -> None:

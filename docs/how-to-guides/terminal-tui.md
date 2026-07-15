@@ -8,12 +8,11 @@ The client has no local model, provider key, Harness agent, or sandbox. Fleet
 remains responsible for RLM execution, tools, Daytona, session persistence, and
 disconnect cancellation.
 
-Start the combined backend and terminal with dev authentication and the live kernel enabled. This
-requires configured LLM and Daytona credentials; the model values below are an
+Start the combined backend and terminal with Daytona enabled. This requires
+configured LLM and Daytona credentials; the model values below are an
 example for an OpenAI-compatible endpoint. Then from the repository root run:
 
 ```bash
-FLEET_AUTH_MODE=dev \
 FLEET_BUDGET_MAX_WALL_SECONDS=900 \
 FLEET_ROOT_MODEL=openai/deepseek-v4-flash-free \
 FLEET_SUB_MODEL=openai/deepseek-v4-flash-free \
@@ -27,9 +26,8 @@ backend conversation context from a new terminal process:
 uv run fleet cli -- --session <session-uuid>
 ```
 
-Optional `--user-id` and `--workspace-id` flags add synthetic `X-Fleet-*`
-headers for dev mode. The first version deliberately does not support Neon JWT
-authentication. On resume, the client atomically hydrates the Ink store with
+The backend assigns the deterministic local User and Workspace scope. On
+resume, the client atomically hydrates the Ink store with
 persisted text, sanitized reasoning, tool calls/results, and Fleet trajectory
 parts such as RLM code/output, structured results, artifacts, skills, and
 usage.

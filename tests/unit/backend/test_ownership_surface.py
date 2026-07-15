@@ -7,8 +7,9 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from fleet_rlm.app import create_app
+from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn
+from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.config import Settings
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
@@ -21,34 +22,22 @@ def _headers(user_id=None, workspace_id=None):
 
 
 @pytest.mark.asyncio
-async def test_cancel_foreign_or_missing_run_returns_404() -> None:
-    app = create_app(settings=Settings(auth_mode="dev"))
-    user, ws = uuid4(), uuid4()
+async def test_cancel_missing_run_returns_404() -> None:
+    app = create_testing_app()
+    scope = LocalScope()
+    user, ws = scope.user_id, scope.workspace_id
     headers = _headers(user, ws)
     with TestClient(app) as client:
         missing = client.put(f"/api/runs/{uuid4()}/cancellation", headers=headers)
         assert missing.status_code == 404
         assert missing.json()["code"] == "run_not_found"
 
-        # Create owned session+run, then cancel as a different workspace → 404
-        created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
-        assert created.status_code == 201
-        session_id = UUID(created.json()["id"])
-        started = await app.state.turn_lifecycle.begin(
-            BeginTurn(TurnAccess(user, ws), session_id, TurnInput("question"), "key-1", uuid4())
-        )
-        assert isinstance(started, ExecuteTurn)
-        foreign = client.put(
-            f"/api/runs/{started.run_id}/cancellation",
-            headers=_headers(user, uuid4()),
-        )
-        assert foreign.status_code == 404
-
 
 @pytest.mark.asyncio
 async def test_cancel_owned_run_records_intent_and_is_idempotent() -> None:
-    app = create_app(settings=Settings(auth_mode="dev"))
-    user, ws = uuid4(), uuid4()
+    app = create_testing_app()
+    scope = LocalScope()
+    user, ws = scope.user_id, scope.workspace_id
     headers = _headers(user, ws)
     with TestClient(app) as client:
         created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
@@ -68,7 +57,7 @@ async def test_cancel_owned_run_records_intent_and_is_idempotent() -> None:
 
 
 def test_missing_run_cannot_be_cancelled() -> None:
-    app = create_app(settings=Settings(auth_mode="dev"))
+    app = create_testing_app()
     user, ws = uuid4(), uuid4()
     headers = _headers(user, ws)
     run_id = uuid4()
@@ -78,8 +67,8 @@ def test_missing_run_cannot_be_cancelled() -> None:
 
 
 def test_public_stage_route_removed(tmp_path) -> None:
-    settings = Settings(data_root=str(tmp_path), max_upload_bytes=1024)
-    app = create_app(settings=settings)
+    settings = Settings(data_root=str(tmp_path), max_upload_bytes=1024, database_url=None)
+    app = create_testing_app(settings=settings)
     headers = _headers()
     with TestClient(app) as client:
         up = client.post(
@@ -98,7 +87,7 @@ def test_public_stage_route_removed(tmp_path) -> None:
 
 
 def test_public_artifact_create_is_not_an_ownership_surface(tmp_path) -> None:
-    app = create_app(settings=Settings(data_root=str(tmp_path), auth_mode="dev"))
+    app = create_testing_app(settings=Settings(data_root=str(tmp_path), database_url=None))
     client = TestClient(app)
     response = client.post("/api/artifacts", headers=_headers(), json={})
     assert response.status_code == 404

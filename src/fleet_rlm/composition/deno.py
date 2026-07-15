@@ -1,0 +1,114 @@
+"""Reduced local Deno/Pyodide runtime composition."""
+
+from __future__ import annotations
+
+import shutil
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI
+
+from fleet_rlm.composition.common import (
+    CompositionError,
+    LocalCompositionHandles,
+    host_roots,
+    install_local_inventory,
+    run_budget,
+)
+from fleet_rlm.config import Settings
+from fleet_rlm.skills.registry import InMemorySkillRegistry
+
+
+def require_deno_settings(settings: Settings) -> None:
+    """Fail closed when Deno dependencies are missing."""
+    if settings.run_environment != "deno":
+        raise CompositionError("Deno composition requires run_environment='deno'")
+    if settings.llm_api_key is None or not settings.llm_api_key.get_secret_value().strip():
+        raise CompositionError("FLEET_LLM_API_KEY is required in deno mode")
+    if shutil.which("deno") is None:
+        raise CompositionError("deno executable is required in deno mode")
+
+
+def install_deno_composition(
+    app: FastAPI,
+    settings: Settings,
+    *,
+    session_factory: Any | None = None,
+) -> LocalCompositionHandles:
+    """Build Deno adapters once during lifespan."""
+    from fleet_rlm.artifacts.local_catalog import (
+        LocalArtifactBlobGateway,
+        LocalArtifactCatalog,
+        LocalArtifactReaderCatalog,
+    )
+    from fleet_rlm.artifacts.reader import ArtifactReader
+    from fleet_rlm.chat.deno_run_environment import DenoRLMFactory, DenoTurnPreparation
+    from fleet_rlm.files.lifecycle import AttachmentModule
+    from fleet_rlm.files.local_catalog import LocalAttachmentBlobGateway, LocalAttachmentCatalog
+    from fleet_rlm.files.paths import LocalAttachmentPathPolicy
+    from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
+    from fleet_rlm.rlm.lm_factory import build_lm
+
+    api_key = settings.llm_api_key.get_secret_value() if settings.llm_api_key else ""
+    root_lm = build_lm(
+        settings.root_model,
+        api_key=api_key,
+        base_url=settings.llm_base_url,
+        max_tokens=settings.llm_max_tokens,
+    )
+    sub_lm = build_lm(
+        settings.sub_model,
+        api_key=api_key,
+        base_url=settings.llm_base_url,
+        max_tokens=settings.llm_max_tokens,
+    )
+    upload_root, artifact_root = host_roots(settings)
+    if session_factory is None:
+        attachment_lifecycle: Any = AttachmentModule(
+            catalog=LocalAttachmentCatalog(upload_root),
+            blobs=LocalAttachmentBlobGateway(Path(upload_root)),
+            paths=LocalAttachmentPathPolicy(Path(upload_root)),
+            max_bytes=settings.max_upload_bytes,
+        )
+        artifact_catalog = LocalArtifactCatalog(
+            artifact_root,
+            max_bytes=settings.max_artifact_bytes,
+            volume_paths=None,
+        )
+        artifact_reader: Any = ArtifactReader(
+            catalog=LocalArtifactReaderCatalog(artifact_catalog),
+            blobs=LocalArtifactBlobGateway(artifact_catalog),
+        )
+    else:
+        attachment_lifecycle = AttachmentModule(
+            catalog=SqlAlchemyAttachmentCatalog(session_factory),
+            blobs=LocalAttachmentBlobGateway(Path(upload_root)),
+            paths=LocalAttachmentPathPolicy(Path(upload_root)),
+            max_bytes=settings.max_upload_bytes,
+        )
+        artifact_catalog = LocalArtifactCatalog(
+            artifact_root,
+            max_bytes=settings.max_artifact_bytes,
+            volume_paths=None,
+        )
+        artifact_reader = ArtifactReader(
+            catalog=SqlAlchemyArtifactCatalog(session_factory),
+            blobs=LocalArtifactBlobGateway(artifact_catalog),
+        )
+    return install_local_inventory(
+        app,
+        settings,
+        session_factory=session_factory,
+        attachment_lifecycle=attachment_lifecycle,
+        artifact_reader=artifact_reader,
+        preparation=DenoTurnPreparation(
+            attachments=attachment_lifecycle,
+            budget=run_budget(settings),
+            root_lm=root_lm,
+            sub_lm=sub_lm,
+            skill_registry=getattr(app.state, "skill_registry", None) or InMemorySkillRegistry(),
+            capability_registry=getattr(app.state, "capability_registry", None),
+        ),
+        rlm_factory=DenoRLMFactory(),
+        workspace_volume_mirror=None,
+    )

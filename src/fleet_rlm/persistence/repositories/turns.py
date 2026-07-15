@@ -1,4 +1,4 @@
-"""Hermetic Turn state adapter; SQL adapter follows the same atomic contract."""
+"""In-memory Turn state adapter; SQL follows the same atomic contract."""
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ class _SessionState:
 
 
 class InMemoryTurnStateStore:
-    """Lock-backed parity adapter for hermetic composition and lifecycle tests."""
+    """Lock-backed parity adapter for private composition and lifecycle tests."""
 
     def __init__(self) -> None:
         self._lock = asyncio.Lock()

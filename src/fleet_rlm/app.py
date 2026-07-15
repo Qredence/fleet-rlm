@@ -45,7 +45,7 @@ async def _local_db_lifespan(
     settings_obj: Settings,
     install_fn: Callable[..., Any],
 ) -> AsyncIterator[None]:
-    from fleet_rlm.composition import _clear_composition_state
+    from fleet_rlm.composition import clear_composition_state
 
     engine = None
     session_factory = None
@@ -66,7 +66,7 @@ async def _local_db_lifespan(
         install_fn(app, settings_obj, session_factory=session_factory)
         yield
     finally:
-        _clear_composition_state(app)
+        clear_composition_state(app)
         try:
             if engine is not None:
                 await engine.dispose()
@@ -74,54 +74,51 @@ async def _local_db_lifespan(
             app.state.db_engine = None
 
 
-def create_app(*, settings: Settings | None = None) -> FastAPI:
+def create_app(
+    *,
+    settings: Settings | None = None,
+    _composition_installer: Callable[..., Any] | None = None,
+) -> FastAPI:
     """Create a FastAPI app.
 
-    Hermetic is the default. Daytona validates its complete inventory before serving.
+    Daytona is the default public profile. Runtime inventory validates at startup.
     """
     _reject_retired_environment_variables()
     resolved = settings if settings is not None else Settings()
 
-    if resolved.run_environment == "daytona":
-        from fleet_rlm.composition import require_live_settings
-
-        require_live_settings(resolved)
-    elif resolved.run_environment == "deno":
-        from fleet_rlm.composition import require_deno_settings
-
-        require_deno_settings(resolved)
-
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         settings_obj: Settings = app.state.settings
-        if settings_obj.run_environment == "daytona":
-            from fleet_rlm.composition import dispose_live_composition, install_live_composition
+        if _composition_installer is not None:
+            async with _local_db_lifespan(app, settings_obj, _composition_installer):
+                yield
+            return
 
+        if settings_obj.run_environment == "daytona":
+            from fleet_rlm.composition import (
+                dispose_daytona_composition,
+                install_daytona_composition,
+                require_daytona_settings,
+            )
+
+            require_daytona_settings(settings_obj)
             installed = False
             try:
-                await install_live_composition(app, settings_obj)
+                await install_daytona_composition(app, settings_obj)
                 installed = True
                 yield
             finally:
                 if installed:
-                    await dispose_live_composition(app)
+                    await dispose_daytona_composition(app)
             return
 
         if settings_obj.run_environment == "deno":
-            from fleet_rlm.composition import install_deno_composition
+            from fleet_rlm.composition import install_deno_composition, require_deno_settings
 
+            require_deno_settings(settings_obj)
             async with _local_db_lifespan(app, settings_obj, install_deno_composition):
                 yield
             return
-
-        if settings_obj.run_environment == "hermetic":
-            from fleet_rlm.composition import install_offline_composition
-
-            async with _local_db_lifespan(app, settings_obj, install_offline_composition):
-                yield
-            return
-
-        yield
 
     app = FastAPI(
         title=resolved.app_name,
@@ -131,20 +128,9 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     app.state.settings = resolved
     app.state.composition_ready = False
     app.state.db_engine = None
-    for name in (
-        "artifact_reader",
-        "attachment_lifecycle",
-        "auth_verifier",
-        "rlm_model_bundle",
-        "run_environment_resources",
-        "session_catalog",
-        "session_manager",
-        "turn_coordinator",
-        "turn_lifecycle",
-        "turn_state_store",
-        "workspace_volume_gateway",
-        "workspace_volume_mirror",
-    ):
+    from fleet_rlm.composition.common import COMPOSITION_STATE_FIELDS
+
+    for name in COMPOSITION_STATE_FIELDS:
         setattr(app.state, name, None)
 
     from fleet_rlm.api.errors import install_error_handlers

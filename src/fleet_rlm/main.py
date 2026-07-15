@@ -1,7 +1,7 @@
 """ASGI entrypoints for the canonical Fleet RLM backend.
 
-Default ``app`` uses the explicit hermetic Run environment. Set
-``FLEET_RUN_ENVIRONMENT=daytona`` with its required inventory for Daytona.
+The default ``app`` uses Daytona. Set ``FLEET_RUN_ENVIRONMENT=deno`` for the
+reduced local compatibility profile.
 """
 
 from __future__ import annotations
