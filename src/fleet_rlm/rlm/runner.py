@@ -14,6 +14,7 @@ from fleet_rlm.rlm.errors import RunBudgetError, TurnTerminalError
 from fleet_rlm.rlm.events import (
     AttachmentRead,
     EventRecorder,
+    ObservationDetail,
     RLMCode,
     RLMOutput,
     RLMReasoning,
@@ -24,15 +25,12 @@ from fleet_rlm.rlm.events import (
     Status,
     StepFinished,
     StepStarted,
-    ToolCompleted,
-    ToolFailed,
-    ToolStarted,
     WarningEvent,
 )
 from fleet_rlm.rlm.factory import RLMFactory
-from fleet_rlm.rlm.observable import DetailObserver, RLMDetail, RLMDetailKind
 from fleet_rlm.rlm.outcome import ExecutionDetail, RLMOutcome, TerminalStatus
 from fleet_rlm.rlm.sanitize import sanitize_public_error, sanitize_public_text, sanitize_public_value
+from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
 
@@ -46,7 +44,6 @@ class RLMFactoryLike(Protocol):
         tools: Sequence[Any] | None = None,
         signature: Any = None,
         verbose: bool = False,
-        observer: DetailObserver | None = None,
     ) -> Any: ...
 
 
@@ -89,10 +86,10 @@ class TurnEventStream:
 class _DetailRelay:
     def __init__(self, *, maxsize: int = 256) -> None:
         self._loop = asyncio.get_running_loop()
-        self._queue: asyncio.Queue[RLMDetail] = asyncio.Queue(maxsize=maxsize)
+        self._queue: asyncio.Queue[ObservationDetail] = asyncio.Queue(maxsize=maxsize)
         self.overflowed = False
 
-    def publish(self, detail: RLMDetail) -> None:
+    def publish(self, detail: ObservationDetail) -> None:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -102,17 +99,17 @@ class _DetailRelay:
         else:
             self._loop.call_soon_threadsafe(self._put, detail)
 
-    def _put(self, detail: RLMDetail) -> None:
+    def _put(self, detail: ObservationDetail) -> None:
         try:
             self._queue.put_nowait(detail)
         except asyncio.QueueFull:
             self.overflowed = True
 
-    async def get(self) -> RLMDetail:
+    async def get(self) -> ObservationDetail:
         return await self._queue.get()
 
-    def drain(self) -> list[RLMDetail]:
-        values: list[RLMDetail] = []
+    def drain(self) -> list[ObservationDetail]:
+        values: list[ObservationDetail] = []
         while True:
             try:
                 values.append(self._queue.get_nowait())
@@ -124,43 +121,32 @@ def _json(value: Any) -> Any:
     return sanitize_public_value(value, max_len=3_000)
 
 
-def _detail(value: RLMDetail) -> ExecutionDetail:
-    data = value.payload
-    step = data.get("step")
-    normalized_step = int(step) if step is not None else None
-    if value.kind is RLMDetailKind.STEP_STARTED:
-        return StepStarted(step=int(data["step"]))
-    if value.kind is RLMDetailKind.STEP_FINISHED:
-        duration = data.get("duration_ms")
-        return StepFinished(
-            step=int(data["step"]),
-            duration_ms=int(duration) if duration is not None else None,
-        )
-    if value.kind is RLMDetailKind.REASONING:
-        return RLMReasoning(text=str(data.get("text") or ""), step=normalized_step)
-    if value.kind is RLMDetailKind.CODE:
-        return RLMCode(code=str(data.get("code") or ""), step=normalized_step)
-    if value.kind is RLMDetailKind.OUTPUT:
-        return RLMOutput(output=str(data.get("output") or ""), step=normalized_step)
-    if value.kind is RLMDetailKind.TOOL_STARTED:
-        return ToolStarted(
-            tool_call_id=str(data.get("tool_call_id") or ""),
-            tool_name=str(data.get("tool_name") or ""),
-            input=_json(data.get("input")),
-        )
-    if value.kind is RLMDetailKind.TOOL_COMPLETED:
-        return ToolCompleted(
-            tool_call_id=str(data.get("tool_call_id") or ""),
-            tool_name=str(data.get("tool_name") or ""),
-            output=_json(data.get("output")),
-        )
-    if value.kind is RLMDetailKind.TOOL_FAILED:
-        return ToolFailed(
-            tool_call_id=str(data.get("tool_call_id") or ""),
-            tool_name=str(data.get("tool_name") or ""),
-            error=str(data.get("error") or "Tool failed"),
-        )
-    raise AssertionError(f"unhandled RLM detail: {value.kind}")
+def _observation_key(value: ExecutionDetail) -> tuple[type[object], int | None] | None:
+    if isinstance(value, (StepStarted, StepFinished, RLMReasoning, RLMCode, RLMOutput)):
+        return type(value), value.step
+    return None
+
+
+def _trajectory_details(prediction: Any, *, max_chars: int) -> list[ObservationDetail]:
+    trajectory = getattr(prediction, "trajectory", None)
+    if not isinstance(trajectory, Sequence) or isinstance(trajectory, (str, bytes, bytearray)):
+        return []
+    details: list[ObservationDetail] = []
+    for step, raw in enumerate(trajectory, start=1):
+        if not isinstance(raw, Mapping):
+            continue
+        details.append(StepStarted(step))
+        if "reasoning" in raw:
+            details.append(RLMReasoning(sanitize_public_text(str(raw.get("reasoning") or ""), max_len=max_chars), step))
+        if "code" in raw:
+            details.append(RLMCode(sanitize_public_text(str(raw.get("code") or ""), max_len=max_chars), step))
+        if "output" in raw:
+            output = str(raw.get("output") or "")
+            if output.startswith("FINAL:"):
+                output = "FINAL submitted"
+            details.append(RLMOutput(sanitize_public_text(output, max_len=max_chars), step))
+        details.append(StepFinished(step))
+    return details
 
 
 def _prediction_text(prediction: Any) -> str:
@@ -215,15 +201,25 @@ class RLMRunner:
                     yield recorder.record(item)
 
                 relay = _DetailRelay()
+                bind_observer = getattr(context.interpreter, "bind_observer", None)
+                if callable(bind_observer):
+                    bind_observer(relay.publish, max_chars=context.budget.budget.max_output_chars)
+                observed_tools = tuple(
+                    observe_tool(
+                        tool,
+                        relay.publish,
+                        ToolEventView(max_chars=context.budget.budget.max_output_chars),
+                    )
+                    for tool in blueprint.tools
+                )
                 rlm = self._factory.create(
                     models=context.models,
                     budget=context.budget.budget,
                     interpreter=context.interpreter,
-                    tools=blueprint.tools or None,
+                    tools=observed_tools or None,
                     signature=blueprint.signature,
-                    observer=relay.publish,
                 )
-                task = asyncio.create_task(self._execute_rlm(rlm, context, blueprint))
+                task = asyncio.create_task(self._execute_rlm_in_worker(rlm, context, blueprint))
                 try:
                     while not task.done():
                         if await context.cancellation_requested():
@@ -238,7 +234,7 @@ class RLMRunner:
                             {task, pending}, timeout=min(remaining, 0.25), return_when=asyncio.FIRST_COMPLETED
                         )
                         if pending in done:
-                            item = _detail(pending.result())
+                            item = pending.result()
                             details.append(item)
                             yield recorder.record(item)
                         else:
@@ -251,13 +247,22 @@ class RLMRunner:
                         await asyncio.gather(task, return_exceptions=True)
 
                 for observed in relay.drain():
-                    item = _detail(observed)
-                    details.append(item)
-                    yield recorder.record(item)
+                    details.append(observed)
+                    yield recorder.record(observed)
                 if relay.overflowed:
                     warning = WarningEvent("some detailed execution events were omitted")
                     details.append(warning)
                     yield recorder.record(warning)
+
+                seen = {key for item in details if (key := _observation_key(item)) is not None}
+                for item in _trajectory_details(prediction, max_chars=context.budget.budget.max_output_chars):
+                    key = _observation_key(item)
+                    if key is not None and key in seen:
+                        continue
+                    if key is not None:
+                        seen.add(key)
+                    details.append(item)
+                    yield recorder.record(item)
 
                 for item in context.capabilities.drain_public_details():
                     if not isinstance(item, (AttachmentRead, SkillLoaded, WarningEvent)):
@@ -270,12 +275,6 @@ class RLMRunner:
                 )
                 context.budget.consume_output_chars(max(1, len(text)))
                 usage = context.budget.snapshot()
-                usage.update(
-                    {
-                        "tool_calls": int(getattr(rlm, "tool_calls_used", usage["tool_calls"])),
-                        "llm_calls": int(getattr(rlm, "sub_lm_calls_used", usage["llm_calls"])),
-                    }
-                )
                 structured = None
                 schema_id = schema_version = None
                 if blueprint.task_contract is not None:
@@ -355,3 +354,14 @@ class RLMRunner:
             kwargs.update(blueprint.input_values)
         with dspy.context(lm=context.models.root_lm):
             return await rlm.acall(**kwargs)
+
+    async def _execute_rlm_in_worker(
+        self,
+        rlm: Any,
+        context: RLMExecutionContext,
+        blueprint: TurnCapabilityBlueprint,
+    ) -> Any:
+        def run() -> Any:
+            return asyncio.run(self._execute_rlm(rlm, context, blueprint))
+
+        return await asyncio.to_thread(run)

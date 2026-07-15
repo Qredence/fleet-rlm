@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -20,14 +19,11 @@ from fleet_rlm.files.models import PreparedAttachments
 from fleet_rlm.rlm.budgets import RunBudget, RunBudgetLedger
 from fleet_rlm.rlm.events import AttachmentRead, SkillLoaded
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.rlm.observable import DetailObserver, ObservableRLM
-from fleet_rlm.rlm.signature import FleetRLMSignature
 from fleet_rlm.skills.authorize import SkillAuthorizer
 from fleet_rlm.skills.capabilities import (
     CapabilityRegistry,
     CapabilityResolutionContext,
     CapabilityResolver,
-    RLMTool,
     TurnCapabilityBlueprint,
 )
 from fleet_rlm.skills.registry import InMemorySkillRegistry
@@ -208,39 +204,6 @@ class _DenoCapabilityPreparer:
         return DenoPreparedCapabilities(blueprint, files=file_host, skills=skill_host)
 
 
-class DenoRLMFactory:
-    """Creates a real ObservableRLM with interpreter=None (DSPy uses its default PythonInterpreter)."""
-
-    def create(
-        self,
-        *,
-        models: RLMModelBundle,
-        budget: RunBudget,
-        interpreter: Any,
-        tools: Sequence[RLMTool] | None = None,
-        signature: type[dspy.Signature] | str | None = None,
-        verbose: bool = False,
-        observer: DetailObserver | None = None,
-    ) -> Any:
-        resolved_signature: type[dspy.Signature] | str = signature if signature is not None else FleetRLMSignature
-        tool_list = list(tools) if tools is not None else None
-
-        return ObservableRLM(
-            resolved_signature,
-            max_iterations=budget.max_iterations,
-            max_llm_calls=budget.max_llm_calls,
-            max_output_chars=budget.max_output_chars,
-            verbose=verbose,
-            tools=tool_list,
-            sub_lm=models.sub_lm,
-            interpreter=interpreter,
-            observer=observer,
-            detail_max_chars=budget.max_output_chars,
-            max_tool_calls=budget.max_tool_calls,
-            max_sub_lm_concurrency=budget.max_sub_lm_concurrency,
-        )
-
-
 class DenoTurnPreparation:
     """Build Deno turns through the same module as Daytona turns.
 
@@ -279,6 +242,5 @@ class DenoTurnPreparation:
 __all__ = [
     "DenoRunSink",
     "DenoRunEnvironmentProvider",
-    "DenoRLMFactory",
     "DenoTurnPreparation",
 ]

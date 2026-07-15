@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -101,6 +101,12 @@ class ToolFailed:
     tool_call_id: str
     tool_name: str
     error: str
+
+
+ObservationDetail: TypeAlias = (
+    StepStarted | StepFinished | RLMReasoning | RLMCode | RLMOutput | ToolStarted | ToolCompleted | ToolFailed
+)
+ObservationObserver: TypeAlias = Callable[[ObservationDetail], None]
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import dspy
 import pytest
 
 pytestmark = pytest.mark.deno
@@ -71,28 +72,24 @@ async def test_deno_run_environment_provider_acquires_sink_pair() -> None:
     await env.release()
 
 
-def test_deno_rlm_factory_selects_dspy_default_interpreter(monkeypatch) -> None:
+def test_canonical_rlm_factory_selects_dspy_default_interpreter() -> None:
     """DSPy 3.3.x: interpreter=None triggers the default PythonInterpreter (Deno)."""
     from unittest.mock import MagicMock
 
-    from fleet_rlm import chat
     from fleet_rlm.rlm.budgets import RunBudget
+    from fleet_rlm.rlm.factory import RLMFactory
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
 
-    fake_observable = MagicMock()
-    monkeypatch.setattr(chat.deno_run_environment, "ObservableRLM", fake_observable)
-
     models = RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock())
-    chat.deno_run_environment.DenoRLMFactory().create(
+    rlm = RLMFactory().create(
         models=models,
         budget=RunBudget(),
         interpreter=None,
     )
 
-    assert fake_observable.call_count == 1
-    kwargs = fake_observable.call_args.kwargs
-    assert kwargs["interpreter"] is None
-    assert kwargs["sub_lm"] is models.sub_lm
+    assert type(rlm) is dspy.RLM
+    assert rlm._interpreter is None  # noqa: SLF001 - pinned DSPy Deno contract
+    assert rlm.sub_lm is models.sub_lm
 
 
 @pytest.mark.asyncio

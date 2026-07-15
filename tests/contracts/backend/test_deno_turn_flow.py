@@ -11,13 +11,14 @@ import dspy
 import pytest
 
 from fleet_rlm.chat.commands import OpenTurnCommand
-from fleet_rlm.chat.deno_run_environment import DenoRLMFactory, DenoTurnPreparation
+from fleet_rlm.chat.deno_run_environment import DenoTurnPreparation
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
 from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
 from fleet_rlm.files.models import PreparedAttachments
 from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
 from fleet_rlm.rlm.budgets import RunBudget
 from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, ArtifactCreated, RunCompleted
+from fleet_rlm.rlm.factory import RLMFactory
 from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.committed_turn import ArtifactPart
 from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
@@ -45,9 +46,9 @@ class _DeterministicActionPredictor:
         )
 
 
-class _DeterministicDenoRLMFactory:
+class _DeterministicNativeRLMFactory:
     def create(self, **kwargs):
-        rlm = DenoRLMFactory().create(**kwargs)
+        rlm = RLMFactory().create(**kwargs)
         rlm.generate_action = _DeterministicActionPredictor()
         return rlm
 
@@ -86,7 +87,7 @@ async def test_deno_turn_commits_once_without_artifact_or_live_dependencies(monk
             sub_lm=forbidden_lm,
             skill_registry=InMemorySkillRegistry(),
         ),
-        runner=RLMRunner(factory=_DeterministicDenoRLMFactory()),
+        runner=RLMRunner(factory=_DeterministicNativeRLMFactory()),
     )
 
     opened = await coordinator.open(

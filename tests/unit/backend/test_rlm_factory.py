@@ -96,12 +96,10 @@ def test_factory_passes_explicit_constructor_kwargs() -> None:
         tools=[host_echo],
     )
 
-    assert isinstance(rlm, dspy.RLM)
+    assert type(rlm) is dspy.RLM
     assert rlm.max_iterations == 7
     assert rlm.max_llm_calls == 11
     assert rlm.max_output_chars == 2048
-    assert rlm._fleet_max_tool_calls == 5  # noqa: SLF001 - factory budget contract
-    assert rlm._fleet_max_sub_lm_concurrency == 3  # noqa: SLF001 - factory budget contract
     assert rlm.sub_lm is sub
     assert rlm._interpreter is interpreter
     assert "host_echo" in rlm.tools

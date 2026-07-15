@@ -58,14 +58,8 @@ def test_dspy_rlm_accepts_file_tool_names_and_fresh_custom_interpreters() -> Non
     assert second._interpreter is second_interpreter  # noqa: SLF001 - installed DSPy contract
 
 
-def test_observable_rlm_iteration_override_matches_installed_async_contract() -> None:
-    import dspy
+def test_rlm_package_has_no_private_observable_override() -> None:
+    from pathlib import Path
 
-    from fleet_rlm.rlm.observable import ObservableRLM
-
-    installed = inspect.signature(dspy.RLM._aexecute_iteration)  # noqa: SLF001
-    observable = inspect.signature(ObservableRLM._aexecute_iteration)  # noqa: SLF001
-    assert tuple(observable.parameters) == tuple(installed.parameters)
-    assert [parameter.kind for parameter in observable.parameters.values()] == [
-        parameter.kind for parameter in installed.parameters.values()
-    ]
+    package = Path(__file__).resolve().parents[3] / "src" / "fleet_rlm" / "rlm"
+    assert not (package / "observable.py").exists()

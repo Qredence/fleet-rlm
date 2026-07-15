@@ -4,10 +4,10 @@ This directory is the sole Fleet RLM Python backend.
 Root repository workflow and validation rules remain authoritative from
 [AGENTS.md](../../AGENTS.md); this guide narrows them for backend work.
 
-This guide records the current backend. The P0–P2 targets in `PLANS.md` are not
+This guide records the current backend. Unchecked targets in `PLANS.md` are not
 implemented until their corresponding phase exit gates pass; preserve current
-`history`, `ObservableRLM`, local-scope, and runtime-composition guidance
-until those changes are actually delivered and reviewed.
+`history`, local-scope, and runtime-composition guidance until those changes
+are actually delivered and reviewed.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ until those changes are actually delivered and reviewed.
   aliases in `api/dependencies.py`; construct process resources only in lifespan
   composition.
 - Keep Daytona SDK imports inside `daytona/`.
-- Create a fresh DSPy RLM per Turn. Daytona supplies a fresh custom interpreter;
+- Create a fresh native DSPy RLM per Turn through `rlm.compat`. Daytona supplies a fresh custom interpreter;
   Deno passes `interpreter=None` so DSPy constructs its default Deno/Pyodide
   interpreter. Preserve `history: list[dict]` and call the supported
   `await rlm.acall(**named_inputs)` surface.
@@ -24,11 +24,12 @@ until those changes are actually delivered and reviewed.
   registry. Capability tools may be plain callables or explicit `dspy.Tool`
   objects; HTTP never supplies executable Python or serialized objects.
 - Keep Runtime Events transport-neutral. `api/sse.py` alone projects the public
-  AI SDK UI 7 v1 stream; sanitized RLM-authored reasoning is public, while
-  provider-hidden chain-of-thought, full prompts, paths, and secrets are not.
-- Sanitize observable code semantically: preserve harmless literals and
-  f-string structure, but redact protected query/artifact arguments, remembered
-  private values, credentials, and private paths before public projection.
+  AI SDK UI 7 v1 stream. Observe live code/output at the Daytona interpreter
+  boundary and host-tool activity through fresh wrapped `dspy.Tool` objects;
+  supplement missing details from the completed native trajectory.
+- Bound and sanitize public code, output, and post-run reasoning. Project
+  protected tool inputs and outputs without publishing attachment, Skill,
+  artifact, or subquery bodies.
 - `TurnCoordinator` owns candidate promotion, Turn Commit, terminal projection,
   final UI part ordering, and Interpreter Lease release.
 - Alembic owns live schema evolution. `create_tables` is test/offline-only.

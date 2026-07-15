@@ -38,9 +38,10 @@ def install_deno_composition(
 ) -> LocalCompositionHandles:
     """Build Deno adapters once during lifespan."""
     from fleet_rlm.artifacts.local_catalog import LocalArtifactBlobGateway, LocalArtifactCatalog
-    from fleet_rlm.chat.deno_run_environment import DenoRLMFactory, DenoTurnPreparation
+    from fleet_rlm.chat.deno_run_environment import DenoTurnPreparation
     from fleet_rlm.files.local_catalog import LocalAttachmentBlobGateway
     from fleet_rlm.files.paths import LocalAttachmentPathPolicy
+    from fleet_rlm.rlm.factory import RLMFactory
     from fleet_rlm.rlm.lm_factory import build_lm
 
     api_key = settings.llm_api_key.get_secret_value() if settings.llm_api_key else ""
@@ -87,6 +88,6 @@ def install_deno_composition(
             skill_registry=getattr(app.state, "skill_registry", None) or InMemorySkillRegistry(),
             capability_registry=getattr(app.state, "capability_registry", None),
         ),
-        rlm_factory=DenoRLMFactory(),
+        rlm_factory=RLMFactory(),
         workspace_volume_mirror=None,
     )

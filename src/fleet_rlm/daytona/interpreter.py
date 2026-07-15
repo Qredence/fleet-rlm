@@ -11,6 +11,7 @@ Host-tool / SUBMIT mediation (B1):
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
@@ -24,6 +25,8 @@ from fleet_rlm.daytona.errors import (
 from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.in_process import BackendExecutionResult, InProcessInterpreterBackend
 from fleet_rlm.daytona.submit import extract_final_payload
+from fleet_rlm.rlm.events import ObservationObserver, RLMCode, RLMOutput, StepFinished, StepStarted
+from fleet_rlm.rlm.sanitize import sanitize_public_error, sanitize_public_text
 
 
 class InterpreterBackend(Protocol):
@@ -111,6 +114,9 @@ class DaytonaCodeInterpreter:
         self._started = False
         self._shutdown = False
         self._http_broker: DaytonaHttpToolBroker | None = None
+        self._observer: ObservationObserver | None = None
+        self._observation_max_chars = 10_000
+        self._observation_step = 0
 
     @property
     def tools(self) -> dict[str, Callable[..., Any]]:
@@ -122,6 +128,25 @@ class DaytonaCodeInterpreter:
             raise DaytonaAdapterError(message=msg, cause_type="InterpreterLifecycleError")
         self._started = True
 
+    def bind_observer(self, observer: ObservationObserver | None, *, max_chars: int = 10_000) -> None:
+        """Bind one run-local observer without changing interpreter execution semantics."""
+        self._observer = observer
+        self._observation_max_chars = max(1, int(max_chars))
+        self._observation_step = 0
+
+    def _observe(self, detail: StepStarted | RLMCode | RLMOutput | StepFinished) -> None:
+        if self._observer is None:
+            return
+        try:
+            self._observer(detail)
+        except Exception:  # noqa: BLE001 - observation must never alter execution
+            return
+
+    def _public_output(self, result: Any) -> str:
+        if isinstance(result, FinalOutput):
+            return "FINAL submitted"
+        return sanitize_public_text(str(result or ""), max_len=self._observation_max_chars)
+
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         if self._shutdown:
             msg = "interpreter already shut down"
@@ -131,16 +156,30 @@ class DaytonaCodeInterpreter:
         if self._backend is None:
             msg = "interpreter backend is not configured"
             raise DaytonaAdapterError(message=msg, cause_type="InterpreterConfigurationError")
+        self._observation_step += 1
+        step = self._observation_step
+        step_started = time.perf_counter()
+        self._observe(StepStarted(step))
+        self._observe(RLMCode(sanitize_public_text(code, max_len=self._observation_max_chars), step))
         try:
             self._ensure_bindings()
             if self._http_broker is not None:
-                return self._execute_with_http_broker(code, variables)
-            raw = self._backend.run(code, variables)
-            return self._finalize(raw)
-        except DaytonaAdapterError:
+                result = self._execute_with_http_broker(code, variables)
+            else:
+                raw = self._backend.run(code, variables)
+                result = self._finalize(raw)
+            self._observe(RLMOutput(self._public_output(result), step))
+            return result
+        except DaytonaAdapterError as exc:
+            self._observe(RLMOutput(sanitize_public_error(exc), step))
             raise
         except Exception as exc:  # noqa: BLE001 - map all provider failures
-            raise map_provider_error(exc) from exc
+            mapped = map_provider_error(exc)
+            self._observe(RLMOutput(sanitize_public_error(mapped), step))
+            raise mapped from exc
+        finally:
+            duration_ms = int((time.perf_counter() - step_started) * 1_000)
+            self._observe(StepFinished(step, duration_ms))
 
     def shutdown(self) -> None:
         if self._shutdown:
