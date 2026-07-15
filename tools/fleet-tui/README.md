@@ -58,8 +58,8 @@ Use `--api-url <url>` to point the client at another dev API. `FLEET_ROOT_MODEL`
 and `FLEET_SUB_MODEL` are the canonical runtime settings; for an OpenAI-compatible
 endpoint they must use the `openai/<model-id>` form. The API uses one
 deterministic local User and Workspace scope.
-`FLEET_BUDGET_MAX_WALL_SECONDS` controls the maximum wall-clock duration of one
-live RLM turn and defaults to 900 seconds.
+`FLEET_TURN_TIMEOUT_SECONDS` controls the Turn Timeout for one live RLM Turn
+and defaults to 900 seconds.
 
 When resuming, the client atomically hydrates the Ink store with durable user
 and assistant text, sanitized RLM reasoning, tool calls/results, and Fleet

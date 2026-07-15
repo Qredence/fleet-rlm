@@ -33,7 +33,7 @@ def test_projected_turn_lifecycle_is_start_chunks_one_terminal_done() -> None:
     events = [
         recorder.record(RunStarted("live")),
         recorder.record(Status("execution", "running")),
-        recorder.record(Usage({"iterations": 1})),
+        recorder.record(Usage({"iterations": 1, "observed_lm_usage": {}, "duration_ms": 2})),
         recorder.record(TextDelta("ok")),
         recorder.record(TextCompleted("ok")),
         recorder.record(RunCompleted(1, "live")),

@@ -58,10 +58,11 @@ async def test_deno_run_environment_provider_acquires_sink_pair() -> None:
         _TurnClaimToken(uuid4()),
     )
 
-    env = await DenoRunEnvironmentProvider().acquire(turn)
+    env = await DenoRunEnvironmentProvider().acquire(turn, deadline=float("inf"))
 
     assert env.interpreter is None
     assert env.attachment_sink is env.artifact_sink
+    assert env.result_snapshot_sink is None
     assert env.attachment_sink.values == {}
 
     await env.attachment_sink.write("/probe", b"x")
@@ -76,14 +77,14 @@ def test_canonical_rlm_factory_selects_dspy_default_interpreter() -> None:
     """DSPy 3.3.x: interpreter=None triggers the default PythonInterpreter (Deno)."""
     from unittest.mock import MagicMock
 
-    from fleet_rlm.rlm.budgets import RunBudget
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.factory import RLMFactory
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
 
     models = RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock())
     rlm = RLMFactory().create(
         models=models,
-        budget=RunBudget(),
+        options=RLMOptions(),
         interpreter=None,
     )
 
@@ -103,7 +104,7 @@ async def test_deno_capability_preparer_excludes_create_artifact() -> None:
     )
     from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
     from fleet_rlm.files.models import PreparedAttachments
-    from fleet_rlm.rlm.budgets import RunBudget, RunBudgetLedger
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.skills.registry import InMemorySkillRegistry
@@ -120,16 +121,17 @@ async def test_deno_capability_preparer_excludes_create_artifact() -> None:
         not_cancelled,
         _TurnClaimToken(uuid4()),
     )
-    env = await DenoRunEnvironmentProvider().acquire(turn)
+    env = await DenoRunEnvironmentProvider().acquire(turn, deadline=float("inf"))
     preparer = _DenoCapabilityPreparer(
         skill_registry=InMemorySkillRegistry(),
         models=RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock()),
+        options=RLMOptions(),
+        max_artifact_bytes=1024,
     )
     prepared = await preparer.prepare(
         turn,
         env,
         PreparedAttachments((), ()),
-        RunBudgetLedger(RunBudget()),
     )
 
     tool_names = {tool.__name__ for tool in prepared.blueprint.tools}

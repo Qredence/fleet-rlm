@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -118,6 +119,10 @@ def _manager() -> tuple[DaytonaSessionManager, _FakePlatform, InMemoryBindingSto
     return mgr, plat, store
 
 
+async def _acquire(mgr: DaytonaSessionManager, request: LeaseRequest):
+    return await mgr.acquire(request, deadline=asyncio.get_running_loop().time() + 10)
+
+
 def test_workspace_volume_subpath_canonical() -> None:
     wid = uuid4()
     assert workspace_volume_subpath(wid) == f"workspaces/{wid}"
@@ -153,7 +158,7 @@ def test_live_platform_rejects_unscoped_volume_mount() -> None:
 async def test_acquire_persists_binding_workspace_scope_fields() -> None:
     mgr, plat, store = _manager()
     req = LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=uuid4())
-    lease = await mgr.acquire(req)
+    lease = await _acquire(mgr, req)
     binding = await store.get(req.session_id)
     assert binding is not None
     assert binding.workspace_id == req.workspace_id
@@ -169,8 +174,8 @@ async def test_sibling_workspaces_get_distinct_subpaths() -> None:
     mgr, plat, _store = _manager()
     ws_a = uuid4()
     ws_b = uuid4()
-    lease_a = await mgr.acquire(LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=ws_a))
-    lease_b = await mgr.acquire(LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=ws_b))
+    lease_a = await _acquire(mgr, LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=ws_a))
+    lease_b = await _acquire(mgr, LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=ws_b))
     assert lease_a.volume_id == lease_b.volume_id
     assert lease_a.volume_subpath != lease_b.volume_subpath
     assert lease_a.volume_subpath == f"workspaces/{ws_a}"
@@ -185,7 +190,7 @@ async def test_sibling_workspaces_get_distinct_subpaths() -> None:
 async def test_acquire_rejects_binding_with_wrong_workspace_scope_without_replacement() -> None:
     mgr, plat, store = _manager()
     req = LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=uuid4())
-    lease = await mgr.acquire(req)
+    lease = await _acquire(mgr, req)
     await mgr.release(lease)
     wrong_ws = uuid4()
     # Simulate a corrupted/stale binding pointing at another workspace subpath.
@@ -201,7 +206,7 @@ async def test_acquire_rejects_binding_with_wrong_workspace_scope_without_replac
         )
     )
     with pytest.raises(DaytonaAdapterError, match="binding does not match"):
-        await mgr.acquire(req)
+        await _acquire(mgr, req)
     assert plat.deleted == []
 
 
@@ -209,7 +214,7 @@ async def test_acquire_rejects_binding_with_wrong_workspace_scope_without_replac
 async def test_acquire_rejects_live_mount_mismatch_without_replacement() -> None:
     mgr, plat, store = _manager()
     req = LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=uuid4())
-    lease = await mgr.acquire(req)
+    lease = await _acquire(mgr, req)
     await mgr.release(lease)
     sandbox = plat.sandboxes[lease.sandbox_id]
     other = uuid4()
@@ -222,7 +227,7 @@ async def test_acquire_rejects_live_mount_mismatch_without_replacement() -> None
         }
     ]
     with pytest.raises(DaytonaAdapterError, match="volume mount does not match"):
-        await mgr.acquire(req)
+        await _acquire(mgr, req)
     assert plat.deleted == []
 
 
@@ -267,7 +272,7 @@ async def test_binding_store_rejects_zero_workspace_on_upsert() -> None:
 async def test_replace_rejects_zero_workspace_id() -> None:
     mgr, _plat, store = _manager()
     req = LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=uuid4())
-    lease = await mgr.acquire(req)
+    lease = await _acquire(mgr, req)
     binding = await store.get(req.session_id)
     assert binding is not None
     with pytest.raises(ValueError, match="zero UUID"):

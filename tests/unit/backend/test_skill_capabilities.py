@@ -8,13 +8,13 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.rlm.budgets import RunBudget
+from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.skills.capabilities import (
-    CapabilityBudgetRequirements,
     CapabilityRegistry,
     CapabilityResolutionContext,
     CapabilityResolver,
+    CapabilityRLMRequirements,
     SkillSelection,
     TaskContract,
 )
@@ -50,7 +50,7 @@ def _context(cards: tuple[SkillCard, ...], tools: tuple[Any, ...] = ()) -> Capab
     return CapabilityResolutionContext(
         request="analyze the long document",
         models=RLMModelBundle(root_lm=object(), sub_lm=object()),
-        budget=RunBudget(max_iterations=3, max_llm_calls=5, max_output_chars=1000),
+        options=RLMOptions(max_iterations=3, max_llm_calls=5, max_output_chars=1000),
         history=[],
         skill_cards=cards,
         tools=tools,
@@ -69,20 +69,22 @@ async def test_resolver_composes_plain_callable_dspy_tool_and_primary_contract()
 
     class ReportSignature(dspy.Signature):
         request: str = dspy.InputField()
+        summary: str = dspy.OutputField()
         findings: list[str] = dspy.OutputField()
 
     contract = TaskContract(
         id="report-v1",
+        schema_version="1",
         signature=ReportSignature,
         input_mapper=lambda context: {"request": context.request},
-        output_serializer=lambda prediction: {"findings": list(prediction.findings)},
+        text_field="summary",
     )
     registry = CapabilityRegistry()
     registry.register(
         "analysis",
         tools=(analyze, lookup),
         knowledge=("Use evidence before conclusions.",),
-        budget_requirements=CapabilityBudgetRequirements(min_iterations=2),
+        rlm_requirements=CapabilityRLMRequirements(min_iterations=2),
     )
     registry.register("report", task_contract=contract)
 
@@ -199,9 +201,10 @@ async def test_resolver_falls_back_before_execution_on_input_adapter_conflict() 
 
     contract = TaskContract(
         id="typed",
+        schema_version="1",
         signature=TypedSignature,
         input_mapper=lambda context: {"request": context.request},
-        output_serializer=lambda prediction: {"answer": prediction.answer},
+        text_field="answer",
     )
     registry = CapabilityRegistry()
     registry.register(
@@ -228,3 +231,23 @@ def test_registry_rejects_reserved_tools_and_unbounded_knowledge() -> None:
         registry.register("reserved", tools=(print,))
     with pytest.raises(ValueError, match="bounds"):
         registry.register("too-large", knowledge=("x" * 4_001,))
+
+
+@pytest.mark.parametrize("text_field", ["missing", "request", "optional", "count"])
+def test_registry_rejects_invalid_task_contract_text_field(text_field: str) -> None:
+    class ResultSignature(dspy.Signature):
+        request: str = dspy.InputField()
+        answer: str = dspy.OutputField()
+        optional: str | None = dspy.OutputField(default=None)
+        count: int = dspy.OutputField()
+
+    contract = TaskContract(
+        id="result",
+        schema_version="1",
+        signature=ResultSignature,
+        input_mapper=lambda context: {"request": context.request},
+        text_field=text_field,
+    )
+
+    with pytest.raises(ValueError, match="text field"):
+        CapabilityRegistry().register("result", task_contract=contract)

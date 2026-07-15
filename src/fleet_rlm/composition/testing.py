@@ -20,12 +20,12 @@ from fleet_rlm.composition.common import (
     build_local_storage_adapters,
     host_roots,
     install_local_inventory,
-    run_budget,
+    rlm_options,
 )
 from fleet_rlm.config import Settings
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.models import PreparedAttachments
-from fleet_rlm.rlm.budgets import RunBudget, RunBudgetLedger
+from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
@@ -68,8 +68,8 @@ class TestingRunSink:
 
 
 class TestingRunEnvironmentProvider(RunEnvironmentProvider):
-    async def acquire(self, turn: ExecuteTurn) -> RunEnvironment:
-        del turn
+    async def acquire(self, turn: ExecuteTurn, *, deadline: float) -> RunEnvironment:
+        del turn, deadline
         sink = TestingRunSink()
 
         async def release() -> None:
@@ -97,9 +97,8 @@ class TestingCapabilityPreparer:
         turn: ExecuteTurn,
         environment: RunEnvironment,
         attachments: PreparedAttachments,
-        budget: RunBudgetLedger,
     ) -> TestingPreparedCapabilities:
-        del turn, environment, attachments, budget
+        del turn, environment, attachments
         return TestingPreparedCapabilities()
 
 
@@ -118,10 +117,17 @@ class TestingRLMFactory:
 
 
 class DeterministicTurnPreparation:
-    def __init__(self, *, attachments: AttachmentLifecycle, budget: RunBudget | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        attachments: AttachmentLifecycle,
+        options: RLMOptions | None = None,
+        turn_timeout_seconds: int = 900,
+    ) -> None:
         self._module = TurnPreparationModule(
             models=RLMModelBundle(TestingLM("testing/root"), TestingLM("testing/sub")),
-            budget=budget or RunBudget(),
+            options=options or RLMOptions(),
+            turn_timeout_seconds=turn_timeout_seconds,
             attachments=attachments,
             environments=TestingRunEnvironmentProvider(),
             capabilities=TestingCapabilityPreparer(),
@@ -169,7 +175,8 @@ def install_testing_composition(
         artifact_reader=storage.artifact_reader,
         preparation=DeterministicTurnPreparation(
             attachments=storage.attachment_lifecycle,
-            budget=run_budget(settings),
+            options=rlm_options(settings),
+            turn_timeout_seconds=settings.turn_timeout_seconds,
         ),
         rlm_factory=TestingRLMFactory(),
         workspace_volume_mirror=mirror,

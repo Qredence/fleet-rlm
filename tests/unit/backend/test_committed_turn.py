@@ -31,7 +31,13 @@ def test_committed_turn_codec_round_trips_the_closed_v1_aggregate() -> None:
                 byte_size=12,
                 checksum_sha256="a" * 64,
             ),
-            UsagePart(value={"iterations": 1, "llm_calls": 2}),
+            UsagePart(
+                value={
+                    "iterations": 1,
+                    "observed_lm_usage": {"root": {"prompt_tokens": 3}},
+                    "duration_ms": 8,
+                }
+            ),
             StructuredResultPart(schema_id="analysis", schema_version="1", value={"total": 42}),
             TextPart(text="42"),
         ),
@@ -56,7 +62,14 @@ def test_committed_turn_codec_round_trips_the_closed_v1_aggregate() -> None:
                 "byte_size": 12,
                 "checksum_sha256": "a" * 64,
             },
-            {"type": "usage", "value": {"iterations": 1, "llm_calls": 2}},
+            {
+                "type": "usage",
+                "value": {
+                    "iterations": 1,
+                    "observed_lm_usage": {"root": {"prompt_tokens": 3}},
+                    "duration_ms": 8,
+                },
+            },
             {
                 "type": "structured_result",
                 "schema_id": "analysis",
@@ -114,12 +127,27 @@ def test_committed_turn_codec_handles_every_execution_part_variant() -> None:
             AttachmentPart(attachment_id=uuid4(), phase="read", filename="data.txt", byte_size=2),
             WarningPart(message="Some details were omitted", code="detail_overflow"),
             StepPart(state="finished", step=1, duration_ms=8),
-            UsagePart(value={}),
+            UsagePart(value={"iterations": 0, "observed_lm_usage": {}, "duration_ms": 0}),
             TextPart(text="42"),
         ),
     )
 
     assert CommittedTurnCodec.decode(CommittedTurnCodec.encode(committed)) == committed
+
+
+@pytest.mark.parametrize("invented_key", ["llm_calls", "root_lm_calls", "sub_lm_calls"])
+def test_usage_part_rejects_invented_call_counts(invented_key: str) -> None:
+    from fleet_rlm.sessions.committed_turn import CommittedTurnValidationError, UsagePart
+
+    with pytest.raises(CommittedTurnValidationError):
+        UsagePart(
+            value={
+                "iterations": 1,
+                "observed_lm_usage": {},
+                "duration_ms": 1,
+                invented_key: 1,
+            }
+        )
 
 
 @pytest.mark.parametrize(
@@ -135,3 +163,22 @@ def test_committed_turn_codec_rejects_unknown_or_noncanonical_values(payload: ob
 
     with pytest.raises(CommittedTurnValidationError):
         CommittedTurnCodec.decode(payload)
+
+
+@pytest.mark.parametrize("text", ["", "   \n"])
+def test_committed_turn_codec_rejects_blank_display_text(text: str) -> None:
+    from fleet_rlm.sessions.committed_turn import CommittedTurnCodec, CommittedTurnValidationError
+
+    with pytest.raises(CommittedTurnValidationError, match="final text"):
+        CommittedTurnCodec.decode(
+            {
+                "schema_version": 1,
+                "parts": [
+                    {
+                        "type": "usage",
+                        "value": {"iterations": 0, "observed_lm_usage": {}, "duration_ms": 0},
+                    },
+                    {"type": "text", "text": text},
+                ],
+            }
+        )

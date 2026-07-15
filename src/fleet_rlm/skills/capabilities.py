@@ -10,7 +10,7 @@ from uuid import UUID
 
 import dspy
 
-from fleet_rlm.rlm.budgets import RunBudget
+from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.signature import FleetRLMSignature
 from fleet_rlm.skills.models import SkillCard
@@ -28,7 +28,7 @@ class CapabilityResolutionContext:
     request: str
     history: Any
     models: RLMModelBundle
-    budget: RunBudget
+    options: RLMOptions
     skill_cards: tuple[SkillCard, ...] = ()
     attachments: tuple[Any, ...] = ()
     tools: tuple[RLMTool, ...] = ()
@@ -43,21 +43,21 @@ class SkillComposedFleetRLMSignature(FleetRLMSignature):
 
 
 @dataclass(frozen=True, slots=True)
-class CapabilityBudgetRequirements:
-    """Minimum host budget required to activate a capability safely."""
+class CapabilityRLMRequirements:
+    """Minimum native RLM options required to activate a capability safely."""
 
     min_iterations: int = 0
     min_llm_calls: int = 0
     min_output_chars: int = 0
 
     def validate(self, context: CapabilityResolutionContext) -> None:
-        budget = context.budget
+        options = context.options
         if (
-            budget.max_iterations < self.min_iterations
-            or budget.max_llm_calls < self.min_llm_calls
-            or budget.max_output_chars < self.min_output_chars
+            options.max_iterations < self.min_iterations
+            or options.max_llm_calls < self.min_llm_calls
+            or options.max_output_chars < self.min_output_chars
         ):
-            raise ValueError("Turn budget does not satisfy selected capability")
+            raise ValueError("RLM Options do not satisfy selected capability")
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,17 +65,33 @@ class TaskContract:
     """Registered typed DSPy task contract; never supplied as Skill code."""
 
     id: str
+    schema_version: str
     signature: type[dspy.Signature]
     input_mapper: InputAdapter
-    output_serializer: Callable[[Any], Mapping[str, Any]]
-    schema_version: str = "1"
+    text_field: str
     validator: OutputValidator | None = None
 
-    def serialize(self, prediction: Any) -> dict[str, Any]:
-        value = dict(self.output_serializer(prediction))
-        if self.validator is not None:
-            self.validator(value)
-        return value
+
+DEFAULT_TASK_CONTRACT = TaskContract(
+    id="fleet.default",
+    schema_version="1",
+    signature=FleetRLMSignature,
+    input_mapper=lambda _context: {},
+    text_field="answer",
+)
+
+
+def _validate_task_contract(contract: TaskContract) -> None:
+    field = getattr(contract.signature, "fields", {}).get(contract.text_field)
+    extra = getattr(field, "json_schema_extra", None) if field is not None else None
+    if (
+        field is None
+        or not isinstance(extra, dict)
+        or extra.get("__dspy_field_type") != "output"
+        or field.annotation is not str
+        or not field.is_required()
+    ):
+        raise ValueError("task contract text field must be a required non-optional string output")
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +102,7 @@ class CapabilityRegistration:
     input_adapters: tuple[InputAdapter, ...] = ()
     validators: tuple[OutputValidator, ...] = ()
     knowledge: tuple[str, ...] = ()
-    budget_requirements: CapabilityBudgetRequirements = CapabilityBudgetRequirements()
+    rlm_requirements: CapabilityRLMRequirements = CapabilityRLMRequirements()
 
 
 class CapabilityRegistry:
@@ -104,7 +120,7 @@ class CapabilityRegistry:
         input_adapters: Sequence[InputAdapter] = (),
         validators: Sequence[OutputValidator] = (),
         knowledge: Sequence[str] = (),
-        budget_requirements: CapabilityBudgetRequirements | None = None,
+        rlm_requirements: CapabilityRLMRequirements | None = None,
     ) -> CapabilityRegistration:
         key = capability_id.strip()
         if not key or len(key) > 128 or key in self._items:
@@ -117,6 +133,8 @@ class CapabilityRegistry:
         knowledge_values = tuple(str(item) for item in knowledge)
         if any(len(item) > 4_000 for item in knowledge_values) or sum(map(len, knowledge_values)) > 16_000:
             raise ValueError("capability knowledge exceeds host bounds")
+        if task_contract is not None:
+            _validate_task_contract(task_contract)
         item = CapabilityRegistration(
             id=key,
             tools=tool_values,
@@ -124,7 +142,7 @@ class CapabilityRegistry:
             input_adapters=tuple(input_adapters),
             validators=tuple(validators),
             knowledge=knowledge_values,
-            budget_requirements=budget_requirements or CapabilityBudgetRequirements(),
+            rlm_requirements=rlm_requirements or CapabilityRLMRequirements(),
         )
         self._items[key] = item
         return item
@@ -277,7 +295,7 @@ class CapabilityResolver:
                 registrations.append(registration)
                 seen_capabilities.add(ref)
         for registration in registrations:
-            registration.budget_requirements.validate(context)
+            registration.rlm_requirements.validate(context)
 
         tools: list[RLMTool] = []
         seen_tools: dict[str, RLMTool] = {}

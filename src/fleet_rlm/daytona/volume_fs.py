@@ -114,3 +114,6 @@ class DaytonaSandboxVolumeFs:
         except Exception:  # noqa: BLE001 - missing file surfaces as provider errors
             return False
         return True
+
+    def remove(self, logical_path: str) -> None:
+        self._sandbox.fs.delete_file(as_posix(logical_path))

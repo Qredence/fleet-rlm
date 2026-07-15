@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -12,13 +13,20 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
-from fleet_rlm.chat.turn_preparation import PreparedTurn, RunEnvironment, TurnPreparationModule
+from fleet_rlm.chat.turn_preparation import (
+    PreparedTurn,
+    RunEnvironment,
+    TurnPreparationModule,
+    TurnPreparationTimeout,
+    TurnPreparationUnavailable,
+)
 from fleet_rlm.config import Settings
+from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionTimeout
 from fleet_rlm.daytona.bindings import BindingStore, InMemoryBindingStore
 from fleet_rlm.daytona.client import build_daytona_client
-from fleet_rlm.daytona.paths import volume_paths_from_settings
+from fleet_rlm.daytona.paths import VolumePaths, volume_paths_from_settings
 from fleet_rlm.daytona.platform import LiveDaytonaPlatform, LiveDaytonaVolumeClient
-from fleet_rlm.daytona.session_manager import DaytonaSessionManager, LeaseRequest
+from fleet_rlm.daytona.session_manager import DaytonaLeaseAcquisitionTimeout, DaytonaSessionManager, LeaseRequest
 from fleet_rlm.daytona.volumes import volume_config_from_settings
 from fleet_rlm.files.models import (
     AttachmentAccess,
@@ -31,7 +39,7 @@ from fleet_rlm.persistence.database import (
     create_session_factory,
     create_tables,
 )
-from fleet_rlm.rlm.budgets import RunBudget, RunBudgetLedger
+from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import AttachmentRead, SkillLoaded
 from fleet_rlm.rlm.lm_factory import build_model_bundle
 from fleet_rlm.skills.capabilities import (
@@ -39,6 +47,28 @@ from fleet_rlm.skills.capabilities import (
     CapabilityResolver,
     TurnCapabilityBlueprint,
 )
+
+
+async def _settle_owned_thread(task: asyncio.Task[Any]) -> bool:
+    """Wait through repeated caller cancellation until owned thread work exits."""
+    cancellation_requested = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancellation_requested = True
+        except BaseException:
+            break
+    return cancellation_requested
+
+
+def _consume_task_result(task: asyncio.Task[Any]) -> None:
+    if task.cancelled():
+        return
+    try:
+        task.result()
+    except BaseException:
+        pass
 
 
 class LivePreparedCapabilities:
@@ -76,9 +106,13 @@ class _EmptySkillHost:
 
 
 class _DaytonaRunSink:
-    def __init__(self, volume_fs: Any, *, max_read_bytes: int) -> None:
+    def __init__(self, volume_fs: Any, *, max_read_bytes: int, paths: VolumePaths) -> None:
         self.volume_fs = volume_fs
         self._max_read_bytes = max_read_bytes
+        self._paths = paths
+
+    def result_path(self, session_id: UUID, run_id: UUID) -> str:
+        return str(self._paths.run_result_path(session_id, run_id))
 
     async def read(self, location: str, *, max_bytes: int) -> bytes:
         import asyncio
@@ -96,9 +130,7 @@ class _DaytonaRunSink:
     async def remove(self, location: str) -> None:
         import asyncio
 
-        remove = getattr(self.volume_fs, "remove", None)
-        if callable(remove):
-            await asyncio.to_thread(remove, location)
+        await asyncio.to_thread(self.volume_fs.remove, location)
 
     async def read_private(self, logical_path: str) -> bytes:
         return await self.read(logical_path, max_bytes=self._max_read_bytes)
@@ -114,35 +146,55 @@ class _DaytonaRunSink:
 class _DaytonaEnvironmentProvider:
     resources: LiveKernelResources
 
-    async def acquire(self, turn: ExecuteTurn) -> RunEnvironment:
-        import asyncio
-
-        lease = await self.resources.session_manager.acquire(
-            LeaseRequest(
-                session_id=turn.session_id,
-                user_id=turn.access.user_id,
-                workspace_id=turn.access.workspace_id,
-                run_id=turn.run_id,
+    async def acquire(self, turn: ExecuteTurn, *, deadline: float) -> RunEnvironment:
+        try:
+            lease = await self.resources.session_manager.acquire(
+                LeaseRequest(
+                    session_id=turn.session_id,
+                    user_id=turn.access.user_id,
+                    workspace_id=turn.access.workspace_id,
+                    run_id=turn.run_id,
+                ),
+                deadline=deadline,
             )
-        )
+        except DaytonaAdmissionTimeout as exc:
+            raise TurnPreparationUnavailable("Turn environment is unavailable") from exc
+        except DaytonaLeaseAcquisitionTimeout as exc:
+            raise TurnPreparationTimeout("Turn preparation timed out") from exc
         try:
             self.resources.track_sandbox(lease.sandbox_id)
             from fleet_rlm.daytona.volume_fs import DaytonaSandboxVolumeFs
 
-            sandbox = await asyncio.to_thread(self.resources.platform.get, lease.sandbox_id)
+            lookup = asyncio.create_task(asyncio.to_thread(self.resources.platform.get, lease.sandbox_id))
+            try:
+                async with asyncio.timeout_at(deadline):
+                    sandbox = await asyncio.shield(lookup)
+            except TimeoutError:
+                if lookup.done():
+                    raise
+                cancelled = await _settle_owned_thread(lookup)
+                _consume_task_result(lookup)
+                if cancelled:
+                    raise asyncio.CancelledError from None
+                raise TurnPreparationTimeout("Turn preparation timed out") from None
+            except asyncio.CancelledError:
+                await _settle_owned_thread(lookup)
+                _consume_task_result(lookup)
+                raise
             if sandbox is None:
                 raise RuntimeError("acquired Sandbox is unavailable")
             sink = _DaytonaRunSink(
                 DaytonaSandboxVolumeFs(sandbox),
                 max_read_bytes=self.resources.settings.max_upload_bytes,
+                paths=volume_paths_from_settings(self.resources.settings),
             )
 
             async def release() -> None:
                 await self.resources.session_manager.release(lease)
 
-            return RunEnvironment(lease.interpreter, sink, sink, release)
-        except Exception:
-            await self.resources.session_manager.release(lease)
+            return RunEnvironment(lease.interpreter, sink, sink, release, sink)
+        except BaseException:
+            await asyncio.shield(self.resources.session_manager.release(lease))
             raise
 
 
@@ -202,7 +254,6 @@ class _LiveCapabilityPreparer:
         turn: ExecuteTurn,
         environment: RunEnvironment,
         attachments: PreparedAttachments,
-        budget: RunBudgetLedger,
     ) -> LivePreparedCapabilities:
         from fleet_rlm.files.tools import FileToolHost
         from fleet_rlm.skills.authorize import SkillAuthorizer
@@ -233,7 +284,6 @@ class _LiveCapabilityPreparer:
             authorizer,
             user_id=turn.access.user_id,
             workspace_id=turn.access.workspace_id,
-            max_skill_loads=budget.budget.max_skill_loads,
         )
         tools = (*file_host.as_tool_callables(), *skill_host.as_tool_callables())
         cards = authorizer.list_cards(user_id=turn.access.user_id, workspace_id=turn.access.workspace_id)
@@ -245,7 +295,11 @@ class _LiveCapabilityPreparer:
                     request=turn.input.text,
                     history=[{"role": item.role, "content": item.content} for item in turn.history.messages],
                     models=self.resources.models,
-                    budget=budget.budget,
+                    options=RLMOptions(
+                        max_iterations=self.resources.settings.rlm_max_iterations,
+                        max_llm_calls=self.resources.settings.rlm_max_llm_calls,
+                        max_output_chars=self.resources.settings.rlm_max_output_chars,
+                    ),
                     skill_cards=cards,
                     attachments=attachments.refs,
                     tools=tools,
@@ -287,11 +341,15 @@ class LiveKernelResources:
             self.bindings = BindingStore(session_factory)
         else:
             self.bindings = InMemoryBindingStore()
+        self.daytona_admission = DaytonaAdmission(
+            max_active_leases=self.settings.max_active_daytona_leases,
+        )
         self.session_manager = DaytonaSessionManager(
             platform=self.platform,
             volume_client=self.volume_client,
             volume_config=self.volume_config,
             bindings=self.bindings,
+            admission=self.daytona_admission,
         )
         self.models = build_model_bundle(self.settings)
         self._sandbox_ids: list[str] = []
@@ -338,18 +396,15 @@ class LiveKernelResources:
         """Acquire exactly one live Interpreter Lease before stream construction."""
         preparation = getattr(self, "_preparation", None)
         if preparation is None:
-            budget = RunBudget(
-                max_iterations=self.settings.budget_max_iterations,
-                max_llm_calls=self.settings.budget_max_llm_calls,
-                max_output_chars=self.settings.budget_max_output_chars,
-                max_wall_seconds=self.settings.budget_max_wall_seconds,
-                max_sub_lm_concurrency=self.settings.budget_max_sub_lm_concurrency,
-                max_tool_calls=self.settings.budget_max_tool_calls,
-                max_skill_loads=self.settings.budget_max_skill_loads,
+            options = RLMOptions(
+                max_iterations=self.settings.rlm_max_iterations,
+                max_llm_calls=self.settings.rlm_max_llm_calls,
+                max_output_chars=self.settings.rlm_max_output_chars,
             )
             preparation = TurnPreparationModule(
                 models=self.models,
-                budget=budget,
+                options=options,
+                turn_timeout_seconds=self.settings.turn_timeout_seconds,
                 attachments=_LiveAttachmentLifecycle(self),
                 environments=_DaytonaEnvironmentProvider(self),
                 capabilities=_LiveCapabilityPreparer(self),
@@ -357,19 +412,16 @@ class LiveKernelResources:
         return await preparation.prepare(turn)
 
     def configure_preparation(self, attachment_lifecycle: Any) -> None:
-        budget = RunBudget(
-            max_iterations=self.settings.budget_max_iterations,
-            max_llm_calls=self.settings.budget_max_llm_calls,
-            max_output_chars=self.settings.budget_max_output_chars,
-            max_wall_seconds=self.settings.budget_max_wall_seconds,
-            max_sub_lm_concurrency=self.settings.budget_max_sub_lm_concurrency,
-            max_tool_calls=self.settings.budget_max_tool_calls,
-            max_skill_loads=self.settings.budget_max_skill_loads,
+        options = RLMOptions(
+            max_iterations=self.settings.rlm_max_iterations,
+            max_llm_calls=self.settings.rlm_max_llm_calls,
+            max_output_chars=self.settings.rlm_max_output_chars,
         )
         self.attachment_lifecycle = attachment_lifecycle
         self._preparation = TurnPreparationModule(
             models=self.models,
-            budget=budget,
+            options=options,
+            turn_timeout_seconds=self.settings.turn_timeout_seconds,
             attachments=_LiveAttachmentLifecycle(self),
             environments=_DaytonaEnvironmentProvider(self),
             capabilities=_LiveCapabilityPreparer(self),

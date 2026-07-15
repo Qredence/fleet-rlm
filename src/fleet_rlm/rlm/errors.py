@@ -1,14 +1,10 @@
-"""Typed errors for RLM construction, budgets, and turn termination."""
+"""Typed errors for RLM construction and turn termination."""
 
 from __future__ import annotations
 
 
 class RLMConfigError(ValueError):
     """Base class for Fleet RLM RLM configuration failures."""
-
-
-class RunBudgetError(RLMConfigError):
-    """Raised when immutable Run budget limits are invalid."""
 
 
 class RLMModelBundleError(RLMConfigError):
@@ -35,8 +31,3 @@ class TurnCancelled(TurnTerminalError):
 class TurnTimeout(TurnTerminalError):
     status = "timeout"
     public_message = "Turn timed out"
-
-
-class TurnBudgetExhausted(TurnTerminalError):
-    status = "budget_exhausted"
-    public_message = "Turn budget exhausted"

@@ -74,6 +74,8 @@ def test_caller_supplied_identity_headers_do_not_change_local_scope() -> None:
 
 @pytest.mark.asyncio
 async def test_session_turns_are_canonical_ui_messages() -> None:
+    from fleet_rlm.rlm.dspy_contract import PredictionResult
+
     app = create_testing_app()
     scope = LocalScope()
     access = TurnAccess(scope.user_id, scope.workspace_id)
@@ -86,7 +88,15 @@ async def test_session_turns_are_canonical_ui_messages() -> None:
         assert isinstance(started, ExecuteTurn)
         await app.state.turn_lifecycle.finish(
             started,
-            RLMOutcome("completed", text="answer", usage={"total_tokens": 3}),
+            RLMOutcome(
+                "completed",
+                prediction=PredictionResult("answer", {"answer": "answer"}, "fleet.default", "1"),
+                usage={
+                    "iterations": 1,
+                    "observed_lm_usage": {"root": {"total_tokens": 3}},
+                    "duration_ms": 4,
+                },
+            ),
         )
 
         response = client.get(f"/api/sessions/{session_id}/turns", headers=headers)

@@ -34,8 +34,6 @@ class FileToolHost:
         workspace_id: UUID,
         session_id: UUID,
         run_id: UUID,
-        max_attachment_reads: int = 16,
-        max_artifact_creates: int = 8,
         max_artifact_bytes: int = 10 * 1024 * 1024,
         volume_paths: VolumePaths | None = None,
     ) -> None:
@@ -46,12 +44,8 @@ class FileToolHost:
         self._workspace_id = workspace_id
         self._session_id = session_id
         self._run_id = run_id
-        self._max_attachment_reads = max(0, int(max_attachment_reads))
-        self._max_artifact_creates = max(0, int(max_artifact_creates))
         self._max_artifact_bytes = max(1, int(max_artifact_bytes))
         self._paths = volume_paths or VolumePaths.from_mount()
-        self._read_count = 0
-        self._create_count = 0
         self._pending_events: list[dict[str, Any]] = []
         self._artifact_candidates: list[ArtifactCandidate] = []
 
@@ -68,8 +62,6 @@ class FileToolHost:
 
     def read_attachment(self, attachment_id: str) -> dict[str, Any]:
         """Return attachment body after reauth. Public event omits content."""
-        if self._read_count >= self._max_attachment_reads:
-            return {"ok": False, "error": "budget_exceeded"}
         try:
             aid = UUID(str(attachment_id).strip())
         except (ValueError, AttributeError, TypeError):
@@ -83,7 +75,6 @@ class FileToolHost:
         except Exception:  # noqa: BLE001 - provider details never reach the model
             return {"ok": False, "error": "not_found"}
 
-        self._read_count += 1
         self._pending_events.append(
             {
                 "event_kind": "attachment.read",
@@ -123,8 +114,6 @@ class FileToolHost:
         title: str | None = None,
     ) -> dict[str, Any]:
         """Stage a private Artifact Candidate. Turn Commit owns publication."""
-        if self._create_count >= self._max_artifact_creates:
-            return {"ok": False, "error": "budget_exceeded"}
         try:
             parsed_kind = parse_kind(kind)
             safe_title = sanitize_title(title)
@@ -156,7 +145,6 @@ class FileToolHost:
         except Exception:  # noqa: BLE001 - never leak internals to model
             return {"ok": False, "error": "validation"}
 
-        self._create_count += 1
         self._artifact_candidates.append(candidate)
         return {
             "ok": True,

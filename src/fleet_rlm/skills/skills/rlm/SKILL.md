@@ -1,6 +1,6 @@
 ---
 name: rlm
-description: "Hub for fleet_rlm: when to use dspy.RLM, turn budgets, progressive skills, and which workflow skill to load next."
+description: "Hub for fleet_rlm: when to use dspy.RLM, RLM Options, progressive skills, and which workflow skill to load next."
 ---
 
 # fleet_rlm RLM Hub
@@ -28,16 +28,17 @@ Clean turns always run through the RLM runner (no EscalatingFleet / ReAct route 
 - Host tools (when bound): progressive `load_skill` / `read_skill_resource` (by **skill UUID**, not volume name); `read_attachment` / `create_artifact`.
 - Do **not** assume live helpers: `sub_rlm`, `remember`/`recall`, WebSocket batch concurrency, or `fleet_rlm.runtime.*`.
 
-## Budgets (`RunBudget`)
+## Native RLM options
 
 | Limit | Default | Maps to |
 |-------|---------|---------|
 | `max_iterations` | 20 | `dspy.RLM(..., max_iterations=...)` (not `max_iters`) |
 | `max_llm_calls` | 50 | Semantic sub-LM calls |
 | `max_output_chars` | 10_000 | Truncation of emitted text |
-| `max_wall_seconds` | 300 | Host wall clock |
-| `max_skill_loads` | 8 | Progressive skill loads per turn |
-| `max_tool_calls` | 32 | Host tool invocations |
+
+Turn Timeout, Daytona Admission, and attachment/artifact payload limits are
+separate host controls. Public provider telemetry is `observed_lm_usage`; Fleet
+does not invent recursive call counts.
 
 ## Route to a workflow skill
 

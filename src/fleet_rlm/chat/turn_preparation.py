@@ -17,13 +17,14 @@ from fleet_rlm.files.models import (
     PreparedAttachments,
     RunAttachmentSink,
 )
-from fleet_rlm.rlm.budgets import RunBudget, RunBudgetLedger
+from fleet_rlm.result_snapshot import ResultSnapshotSink
 from fleet_rlm.rlm.context import (
     PreparedCapabilities,
     RLMExecutionContext,
     RLMHistoryMessage,
     RLMInterpreter,
 )
+from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 
 AsyncCleanup = Callable[[], Awaitable[None]]
@@ -76,6 +77,7 @@ class PreparedTurn:
     execution: RLMExecutionContext
     artifact_sink: RunArtifactSink
     _resources: _PreparedTurnResources
+    result_snapshot_sink: ResultSnapshotSink | None = None
 
     async def aclose(self) -> None:
         await self._resources.aclose()
@@ -91,10 +93,11 @@ class RunEnvironment:
     attachment_sink: RunAttachmentSink
     artifact_sink: RunArtifactSink
     release: AsyncCleanup
+    result_snapshot_sink: ResultSnapshotSink | None = None
 
 
 class RunEnvironmentProvider(Protocol):
-    async def acquire(self, turn: ExecuteTurn) -> RunEnvironment: ...
+    async def acquire(self, turn: ExecuteTurn, *, deadline: float) -> RunEnvironment: ...
 
 
 class RunAttachmentPreparer(Protocol):
@@ -113,7 +116,6 @@ class CapabilityPreparer(Protocol):
         turn: ExecuteTurn,
         environment: RunEnvironment,
         attachments: PreparedAttachments,
-        budget: RunBudgetLedger,
     ) -> PreparedCapabilities: ...
 
 
@@ -124,26 +126,27 @@ class TurnPreparationModule:
         self,
         *,
         models: RLMModelBundle,
-        budget: RunBudget,
+        options: RLMOptions,
+        turn_timeout_seconds: int,
         attachments: RunAttachmentPreparer,
         environments: RunEnvironmentProvider,
         capabilities: CapabilityPreparer,
     ) -> None:
         self._models = models
-        self._budget = budget
+        self._options = options
+        self._turn_timeout_seconds = turn_timeout_seconds
         self._attachments = attachments
         self._environments = environments
         self._capabilities = capabilities
 
     async def prepare(self, turn: ExecuteTurn) -> PreparedTurn:
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + self._budget.max_wall_seconds
-        ledger = RunBudgetLedger(self._budget)
+        deadline = loop.time() + self._turn_timeout_seconds
         if await turn.cancellation_requested():
             raise TurnPreparationCancelled("Turn cancelled")
 
         try:
-            environment = await self._environments.acquire(turn)
+            environment = await self._environments.acquire(turn, deadline=deadline)
         except TurnPreparationError:
             raise
         except Exception as exc:
@@ -159,11 +162,11 @@ class TurnPreparationModule:
                 AttachmentRun(turn.session_id, turn.run_id),
                 environment.attachment_sink,
             )
-            capabilities = await self._capabilities.prepare(turn, environment, staged, ledger)
+            capabilities = await self._capabilities.prepare(turn, environment, staged)
             if await turn.cancellation_requested():
                 raise TurnPreparationCancelled("Turn cancelled")
             self._check_deadline(deadline)
-        except Exception:
+        except BaseException:
 
             async def remove_partial() -> None:
                 await self._remove_staged(environment.attachment_sink, staged)
@@ -172,7 +175,7 @@ class TurnPreparationModule:
             if capabilities is not None:
                 cleanups.append(capabilities.aclose)
             cleanups.append(remove_partial)
-            await _PreparedTurnResources(tuple(cleanups)).aclose()
+            await asyncio.shield(_PreparedTurnResources(tuple(cleanups)).aclose())
             raise
 
         async def remove_staged() -> None:
@@ -187,7 +190,7 @@ class TurnPreparationModule:
             request=turn.input.text,
             history=tuple(RLMHistoryMessage(message.role, message.content) for message in turn.history.messages),
             models=self._models,
-            budget=ledger,
+            options=self._options,
             deadline=deadline,
             interpreter=environment.interpreter,
             attachments=tuple(
@@ -204,7 +207,12 @@ class TurnPreparationModule:
             cancellation_requested=turn.cancellation_requested,
             preparation_notices=(),
         )
-        return PreparedTurn(execution, environment.artifact_sink, resources)
+        return PreparedTurn(
+            execution,
+            environment.artifact_sink,
+            resources,
+            environment.result_snapshot_sink,
+        )
 
     @staticmethod
     def _check_deadline(deadline: float) -> None:

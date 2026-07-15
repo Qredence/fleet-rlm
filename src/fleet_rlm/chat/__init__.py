@@ -1,7 +1,8 @@
-"""Session-first Turn application modules."""
+"""Session-first Turn application package.
+
+Import concrete command and use-case types from their owning modules. Keeping
+package initialization side-effect free avoids loading persistence and RLM
+graphs in an order-dependent cycle.
+"""
 
 from __future__ import annotations
-
-from fleet_rlm.chat.commands import OpenTurnCommand
-
-__all__ = ["OpenTurnCommand"]

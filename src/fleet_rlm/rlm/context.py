@@ -9,7 +9,7 @@ from uuid import UUID
 
 from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.files.models import PreparedAttachment
-from fleet_rlm.rlm.budgets import RunBudgetLedger
+from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.sessions.models import TurnAccess
 
@@ -61,7 +61,7 @@ class RLMExecutionContext:
     request: str
     history: tuple[RLMHistoryMessage, ...]
     models: RLMModelBundle
-    budget: RunBudgetLedger
+    options: RLMOptions
     deadline: float
     interpreter: RLMInterpreter | None
     attachments: tuple[PreparedAttachment, ...]

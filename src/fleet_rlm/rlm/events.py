@@ -9,6 +9,8 @@ from types import MappingProxyType
 from typing import ClassVar, Literal, TypeAlias
 from uuid import UUID, uuid4
 
+from fleet_rlm.rlm.dspy_contract import RLMUsage, validate_rlm_usage
+
 JsonScalar: TypeAlias = None | bool | int | float | str
 JsonValue: TypeAlias = JsonScalar | tuple["JsonValue", ...] | Mapping[str, "JsonValue"]
 
@@ -156,10 +158,14 @@ class ArtifactCreated:
 @dataclass(frozen=True, slots=True)
 class Usage:
     kind: ClassVar[Literal["usage"]] = "usage"
-    value: Mapping[str, JsonValue]
+    value: RLMUsage
 
     def __post_init__(self) -> None:
-        frozen = _freeze_json(self.value)
+        try:
+            usage = validate_rlm_usage(self.value)
+        except ValueError as exc:
+            raise TypeError(str(exc)) from exc
+        frozen = _freeze_json(usage)
         if not isinstance(frozen, Mapping):
             raise TypeError("usage must be an object")
         object.__setattr__(self, "value", frozen)
@@ -218,13 +224,6 @@ class RunTimedOut:
     duration_ms: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class RunBudgetExhausted:
-    kind: ClassVar[Literal["run.budget_exhausted"]] = "run.budget_exhausted"
-    message: Literal["Turn budget exhausted"] = "Turn budget exhausted"
-    duration_ms: int | None = None
-
-
 RuntimeEventDetail: TypeAlias = (
     RunStarted
     | Status
@@ -249,7 +248,6 @@ RuntimeEventDetail: TypeAlias = (
     | RunFailed
     | RunCancelled
     | RunTimedOut
-    | RunBudgetExhausted
 )
 
 RUNTIME_DETAIL_TYPES = (
@@ -276,10 +274,9 @@ RUNTIME_DETAIL_TYPES = (
     RunFailed,
     RunCancelled,
     RunTimedOut,
-    RunBudgetExhausted,
 )
 
-TERMINAL_DETAIL_TYPES = (RunCompleted, RunFailed, RunCancelled, RunTimedOut, RunBudgetExhausted)
+TERMINAL_DETAIL_TYPES = (RunCompleted, RunFailed, RunCancelled, RunTimedOut)
 
 
 class EventSequenceError(RuntimeError):

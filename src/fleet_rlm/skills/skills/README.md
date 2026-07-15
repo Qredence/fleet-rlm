@@ -7,7 +7,7 @@ Bundled skills for the canonical backend: `dspy.RLM` + Daytona
 
 | Skill | Purpose | Model-invoked |
 |-------|---------|---------------|
-| `rlm` | Hub: budgets, SSE surface, next skill | yes |
+| `rlm` | Hub: RLM Options, SSE surface, next skill | yes |
 | `sandbox-execution` | Interpreter lease + volume settings | yes |
 | `volume-bootstrap` | Mount layout contract | yes |
 | `long-context` | Variable-mode large inputs | yes |

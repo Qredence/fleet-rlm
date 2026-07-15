@@ -51,7 +51,11 @@ describe("terminal projection", () => {
         type: "data-usage",
         id: "usage-part",
         data: {
-          usage: { prompt_tokens: 4, completion_tokens: 5, tool_calls: 1, llm_calls: 2 },
+          usage: {
+            iterations: 2,
+            observed_lm_usage: { root: { prompt_tokens: 4, completion_tokens: 5 } },
+            duration_ms: 1200,
+          },
         },
       },
       { type: "data-status", id: "status-part", data: { phase: "running", detail: "work" } },
@@ -98,7 +102,11 @@ describe("terminal projection", () => {
             },
             {
               type: "data-usage",
-              data: { prompt_tokens: 4, completion_tokens: 5, tool_calls: 1, llm_calls: 2 },
+              data: {
+                iterations: 2,
+                observed_lm_usage: { root: { prompt_tokens: 4, completion_tokens: 5 } },
+                duration_ms: 1200,
+              },
             },
             { type: "data-status", data: { phase: "running", detail: "work" } },
             { type: "data-warning", data: { code: "w", message: "warn" } },
@@ -140,6 +148,18 @@ describe("terminal projection", () => {
       "run-1:12",
     ]);
     expect(correlations(liveMessages)).toEqual(correlations(durableMessages));
+    const usageMessage = liveMessages.find(
+      (message): message is Extract<Message, { kind: "usage" }> => message.kind === "usage",
+    );
+    expect(usageMessage).toMatchObject({
+      kind: "usage",
+      runId: "run-1",
+      iterations: 2,
+      prompt: 4,
+      completion: 5,
+      durationMs: 1200,
+      observedLmUsage: { root: { prompt_tokens: 4, completion_tokens: 5 } },
+    });
     expect(liveMessages.map((message) => message.id)).toEqual([
       "result-run-1",
       "thinking-reasoning-2",
@@ -369,10 +389,11 @@ function correlations(messages: Message[]): unknown[] {
         return {
           kind: message.kind,
           runId: message.runId,
+          iterations: message.iterations,
           prompt: message.prompt,
           completion: message.completion,
-          toolCalls: message.toolCalls,
-          llmCalls: message.llmCalls,
+          durationMs: message.durationMs,
+          observedLmUsage: message.observedLmUsage,
         };
       case "status":
         return {

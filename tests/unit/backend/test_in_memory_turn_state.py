@@ -21,7 +21,10 @@ async def test_begin_commit_replay_and_history_are_input_bound() -> None:
 
     begun = await store.begin(request)
     assert isinstance(begun, ExecuteTurn)
-    committed = CommittedTurn(1, (UsagePart({}), TextPart("world")))
+    committed = CommittedTurn(
+        1,
+        (UsagePart({"iterations": 0, "observed_lm_usage": {}, "duration_ms": 0}), TextPart("world")),
+    )
     await store.commit(begun, committed, ())
     replay = await store.begin(request)
 

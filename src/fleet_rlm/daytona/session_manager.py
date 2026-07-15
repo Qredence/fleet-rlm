@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
+from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionPermit
 from fleet_rlm.daytona.bindings import SandboxBinding
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
@@ -35,6 +36,10 @@ from fleet_rlm.daytona.volumes import (
     volume_mount_spec,
     workspace_volume_subpath,
 )
+
+
+class DaytonaLeaseAcquisitionTimeout(RuntimeError):
+    """The Turn deadline elapsed while provider lease work was in flight."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,11 +178,13 @@ class DaytonaSessionManager:
         volume_client: VolumeClient,
         volume_config: VolumeConfig,
         bindings: BindingStoreLike,
+        admission: DaytonaAdmission | None = None,
     ) -> None:
         self._platform = platform
         self._volume_client = volume_client
         self._volume_config = volume_config
         self._bindings = bindings
+        self._admission = admission or DaytonaAdmission()
 
     def _expected_mount(self, *, volume_id: str, workspace_id: UUID) -> ExpectedWorkspaceMount:
         require_non_zero_workspace_id(workspace_id)
@@ -189,7 +196,7 @@ class DaytonaSessionManager:
             workspace_id=workspace_id,
         )
 
-    async def acquire(self, request: LeaseRequest) -> InterpreterLease:
+    async def acquire(self, request: LeaseRequest, *, deadline: float) -> InterpreterLease:
         """Ensure a running Sandbox with Workspace Volume Scope; return a lease."""
         from fleet_rlm.daytona.active_leases import get_active_lease_registry
 
@@ -197,126 +204,208 @@ class DaytonaSessionManager:
         run_id = request.run_id or uuid4()
         session_id = request.session_id
         get_active_lease_registry().acquire(session_id, run_id)
+        claim_held = True
+        permit: DaytonaAdmissionPermit | None = None
         try:
-            volume_id = await self._resolve_volume_id()
-            expected = self._expected_mount(volume_id=volume_id, workspace_id=request.workspace_id)
-            binding = await self._bindings.get(session_id)
-
-            sandbox: Any | None = None
-            if binding is not None and binding.sandbox_id:
-                if not binding_matches_expected(binding, expected):
-                    raise DaytonaAdapterError(
-                        message="sandbox binding does not match workspace scope",
-                        cause_type="WorkspaceMountMismatch",
-                    )
-                else:
-                    try:
-                        sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id)
-                    except ProviderRequestError:
-                        raise
-                    except DaytonaAdapterError:
-                        raise
-                    except Exception as exc:  # noqa: BLE001
-                        raise map_provider_error(exc) from exc
-
-            if sandbox is not None:
-                try:
-                    verify_sandbox_workspace_mount(sandbox, expected)
-                    state = sandbox_state(sandbox)
-                    sandbox = await self._ensure_running(
-                        sandbox,
-                        state,
-                        volume_id=expected.volume_id,
-                        mount_path=expected.mount_path,
-                    )
-                    verify_sandbox_workspace_mount(sandbox, expected)
-                except ProviderRequestError:
+            permit = await self._admission.acquire(deadline=deadline)
+            acquisition = asyncio.create_task(self._acquire_provider(request, run_id=run_id))
+            try:
+                async with asyncio.timeout_at(deadline):
+                    lease = await asyncio.shield(acquisition)
+            except TimeoutError:
+                if acquisition.done():
                     raise
-                except DaytonaAdapterError as exc:
-                    if exc.cause_type != "SandboxUnrecoverable":
-                        raise
-                    if binding is not None:
-                        binding = await self.replace(
-                            SandboxBinding(
-                                session_id=session_id,
-                                sandbox_id=binding.sandbox_id,
-                                workspace_id=request.workspace_id,
-                                volume_id=expected.volume_id,
-                                volume_subpath=expected.volume_subpath,
-                                mount_path=expected.mount_path,
-                                provider_state="unrecoverable",
-                            ),
-                            workspace_id=request.workspace_id,
-                            user_id=request.user_id,
-                        )
-                        sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id or "")
-                    else:
-                        sandbox = None
-                except LifecycleCapabilityError:
-                    if binding is not None:
-                        binding = await self.replace(
-                            SandboxBinding(
-                                session_id=session_id,
-                                sandbox_id=binding.sandbox_id,
-                                workspace_id=request.workspace_id,
-                                volume_id=expected.volume_id,
-                                volume_subpath=expected.volume_subpath,
-                                mount_path=expected.mount_path,
-                                provider_state="unrecoverable",
-                            ),
-                            workspace_id=request.workspace_id,
-                            user_id=request.user_id,
-                        )
-                        sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id or "")
-                    else:
-                        sandbox = None
-            if sandbox is None:
-                sandbox = await asyncio.to_thread(
-                    self._create_sandbox,
+                try:
+                    lease = await self._settle_provider_acquisition(acquisition)
+                except BaseException:
+                    try:
+                        permit.release()
+                    finally:
+                        permit = None
+                        get_active_lease_registry().release(session_id, run_id)
+                        claim_held = False
+                else:
+                    self._bind_lease_ownership(lease, permit, session_id=session_id, run_id=run_id)
+                    try:
+                        lease.release()
+                    finally:
+                        permit = None
+                        claim_held = False
+                raise DaytonaLeaseAcquisitionTimeout("Daytona lease acquisition timed out") from None
+            except asyncio.CancelledError:
+                try:
+                    lease = await self._settle_provider_acquisition(acquisition)
+                except BaseException:
+                    try:
+                        permit.release()
+                    finally:
+                        permit = None
+                        get_active_lease_registry().release(session_id, run_id)
+                        claim_held = False
+                else:
+                    self._bind_lease_ownership(lease, permit, session_id=session_id, run_id=run_id)
+                    try:
+                        lease.release()
+                    except Exception:
+                        pass
+                    finally:
+                        permit = None
+                        claim_held = False
+                raise
+
+            self._bind_lease_ownership(lease, permit, session_id=session_id, run_id=run_id)
+            return lease
+        except BaseException:
+            try:
+                if permit is not None:
+                    permit.release()
+            finally:
+                if claim_held:
+                    get_active_lease_registry().release(session_id, run_id)
+            raise
+
+    @staticmethod
+    async def _settle_provider_acquisition(
+        acquisition: asyncio.Task[InterpreterLease],
+    ) -> InterpreterLease:
+        """Wait through repeated caller cancellation until provider work settles."""
+        while not acquisition.done():
+            try:
+                await asyncio.shield(acquisition)
+            except asyncio.CancelledError:
+                continue
+        return acquisition.result()
+
+    @staticmethod
+    def _bind_lease_ownership(
+        lease: InterpreterLease,
+        permit: DaytonaAdmissionPermit,
+        *,
+        session_id: UUID,
+        run_id: UUID,
+    ) -> None:
+        from fleet_rlm.daytona.active_leases import get_active_lease_registry
+
+        def _clear_active() -> None:
+            try:
+                permit.release()
+            finally:
+                get_active_lease_registry().release(session_id, run_id)
+
+        lease._on_release = _clear_active  # noqa: SLF001
+
+    async def _acquire_provider(self, request: LeaseRequest, *, run_id: UUID) -> InterpreterLease:
+        """Complete provider work after admission; caller owns settlement."""
+        session_id = request.session_id
+        volume_id = await self._resolve_volume_id()
+        expected = self._expected_mount(volume_id=volume_id, workspace_id=request.workspace_id)
+        binding = await self._bindings.get(session_id)
+
+        sandbox: Any | None = None
+        if binding is not None and binding.sandbox_id:
+            if not binding_matches_expected(binding, expected):
+                raise DaytonaAdapterError(
+                    message="sandbox binding does not match workspace scope",
+                    cause_type="WorkspaceMountMismatch",
+                )
+            try:
+                sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id)
+            except ProviderRequestError:
+                raise
+            except DaytonaAdapterError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                raise map_provider_error(exc) from exc
+
+        if sandbox is not None:
+            try:
+                verify_sandbox_workspace_mount(sandbox, expected)
+                state = sandbox_state(sandbox)
+                sandbox = await self._ensure_running(
+                    sandbox,
+                    state,
                     volume_id=expected.volume_id,
                     mount_path=expected.mount_path,
-                    volume_subpath=expected.volume_subpath,
-                    request=request,
                 )
                 verify_sandbox_workspace_mount(sandbox, expected)
-
-            sid = _sandbox_id(sandbox)
-            now = datetime.now(UTC)
-            await self._bindings.upsert(
-                SandboxBinding(
-                    session_id=session_id,
-                    sandbox_id=sid,
-                    workspace_id=request.workspace_id,
-                    volume_id=expected.volume_id,
-                    volume_subpath=expected.volume_subpath,
-                    mount_path=expected.mount_path,
-                    provider_state="running",
-                    last_verified_at=now,
-                )
-            )
-
-            interpreter = _build_interpreter(sandbox)
-            interpreter_id = f"interp-{sid}-{uuid4().hex[:8]}"
-            lease = InterpreterLease(
-                sandbox_id=sid,
-                interpreter_id=interpreter_id,
+            except ProviderRequestError:
+                raise
+            except DaytonaAdapterError as exc:
+                if exc.cause_type != "SandboxUnrecoverable":
+                    raise
+                if binding is not None:
+                    binding = await self.replace(
+                        SandboxBinding(
+                            session_id=session_id,
+                            sandbox_id=binding.sandbox_id,
+                            workspace_id=request.workspace_id,
+                            volume_id=expected.volume_id,
+                            volume_subpath=expected.volume_subpath,
+                            mount_path=expected.mount_path,
+                            provider_state="unrecoverable",
+                        ),
+                        workspace_id=request.workspace_id,
+                        user_id=request.user_id,
+                    )
+                    sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id or "")
+                else:
+                    sandbox = None
+            except LifecycleCapabilityError:
+                if binding is not None:
+                    binding = await self.replace(
+                        SandboxBinding(
+                            session_id=session_id,
+                            sandbox_id=binding.sandbox_id,
+                            workspace_id=request.workspace_id,
+                            volume_id=expected.volume_id,
+                            volume_subpath=expected.volume_subpath,
+                            mount_path=expected.mount_path,
+                            provider_state="unrecoverable",
+                        ),
+                        workspace_id=request.workspace_id,
+                        user_id=request.user_id,
+                    )
+                    sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id or "")
+                else:
+                    sandbox = None
+        if sandbox is None:
+            sandbox = await asyncio.to_thread(
+                self._create_sandbox,
                 volume_id=expected.volume_id,
                 mount_path=expected.mount_path,
                 volume_subpath=expected.volume_subpath,
-                interpreter=interpreter,
-                session_id=str(session_id),
-                run_id=str(run_id),
-                delete_sandbox=None,
+                request=request,
             )
+            verify_sandbox_workspace_mount(sandbox, expected)
 
-            def _clear_active() -> None:
-                get_active_lease_registry().release(session_id, run_id)
+        sid = _sandbox_id(sandbox)
+        now = datetime.now(UTC)
+        await self._bindings.upsert(
+            SandboxBinding(
+                session_id=session_id,
+                sandbox_id=sid,
+                workspace_id=request.workspace_id,
+                volume_id=expected.volume_id,
+                volume_subpath=expected.volume_subpath,
+                mount_path=expected.mount_path,
+                provider_state="running",
+                last_verified_at=now,
+            )
+        )
 
-            lease._on_release = _clear_active  # noqa: SLF001
-            return lease
-        except Exception:
-            get_active_lease_registry().release(session_id, run_id)
-            raise
+        interpreter = _build_interpreter(sandbox)
+        interpreter_id = f"interp-{sid}-{uuid4().hex[:8]}"
+        return InterpreterLease(
+            sandbox_id=sid,
+            interpreter_id=interpreter_id,
+            volume_id=expected.volume_id,
+            mount_path=expected.mount_path,
+            volume_subpath=expected.volume_subpath,
+            interpreter=interpreter,
+            session_id=str(session_id),
+            run_id=str(run_id),
+            delete_sandbox=None,
+        )
 
     async def release(self, lease: InterpreterLease) -> None:
         """Release interpreter resources only — never deletes the Sandbox."""

@@ -46,8 +46,8 @@ lease correlation.
 _Avoid_: Turn (when meaning the user message), Sandbox
 
 **Run Cancellation**:
-An authorized request to stop a specific in-flight Run. Distinct from timeout
-and Budget exhaustion. Ownership is re-checked. Outcome is one terminal Runtime
+An authorized request to stop a specific in-flight Run. Distinct from timeout.
+Ownership is re-checked. Outcome is one terminal Runtime
 Event and never a successful Committed Turn for work that did not complete.
 _Avoid_: disconnect alone, kill Sandbox (as the product act), Turn Cancellation
 
@@ -80,15 +80,33 @@ _Avoid_: raw HTTP body
 
 **Turn Context**:
 Everything required to execute one recursive Turn after isolation: identity,
-request, Session History, Root Model, Sub Model, Budget, Interpreter Lease,
+request, Session History, Root Model, Sub Model, RLM Options, Turn Timeout deadline, Interpreter Lease,
 Skill Cards, Attachment references (and any Staged Attachments), and
 Host-Mediated Tools as bound for the Run.
 _Avoid_: HTTP request, Chat Execution Context (live term)
 
-**Budget**:
-Finite limits that bound one Run (iterations, Sub Model calls, wall time, skill
-loads, tool calls).
-_Avoid_: billing quota, plan limit
+**RLM Options**:
+The native DSPy limits for one Run: iterations, LM calls, and output characters.
+Turn timeout and payload-size limits are separate operational controls.
+_Avoid_: Fleet budget ledger, billing quota, plan limit
+
+**Observed LM Usage**:
+Potentially incomplete provider telemetry exposed under `observed_lm_usage` after
+a completed Prediction. Its closed public policy admits only token, cache, and
+cost measurements; unknown provider fields are dropped. Fleet does not expose
+retry or call counters and does not infer missing provider or recursive-call
+counters.
+_Avoid_: estimated calls, remaining calls, complete billing record
+
+**Turn Timeout**:
+The overall wall-clock limit for one Turn, represented internally by one
+absolute deadline shared with Daytona Admission. It is not an RLM Option.
+_Avoid_: LM call limit, Daytona Admission timeout, payload-size limit
+
+**Daytona Admission**:
+The process-wide bound on acquiring or active Daytona Interpreter Leases. A
+wait uses the Turn Timeout deadline and never creates a second timeout policy.
+_Avoid_: Sandbox retention limit, per-Session claim, RLM Option
 
 **Root Model**:
 The model role that steers the recursive trajectory for a Run (generates and
@@ -138,7 +156,7 @@ _Avoid_: Skill Card, Memory
 **Capability Package**:
 Host-registered, executable contribution referenced by a Skill: tools, bounded
 knowledge, typed task contract, serializable input adapters, validators, and
-Budget requirements. Skill content cannot define executable host capabilities.
+minimum RLM Options. Skill content cannot define executable host capabilities.
 _Avoid_: arbitrary Skill code, plugin import, prompt body
 
 **Turn Capability Blueprint**:
@@ -166,7 +184,7 @@ _Avoid_: free Sandbox helper, public HTTP route as the product concept
 
 **Progressive Load**:
 Fetching a Skill body or resource on demand during a Run via a Host-Mediated
-Tool after re-authorization, subject to Budget.
+Tool after re-authorization and host policy.
 _Avoid_: always-in-prompt skills
 
 **Attachment**:
@@ -192,6 +210,12 @@ Committed, publicly retrievable Run output owned by User and Workspace. An
 Artifact exists only after its Artifact Candidate is promoted through Turn
 Commit.
 _Avoid_: Artifact Candidate, Attachment, Staged Attachment, log, transcript
+
+**Result Snapshot**:
+Private commit-gated Daytona Volume derivative of one successful typed Turn
+result. It is never the replay source, a public Artifact, or an API resource;
+Deno does not write one.
+_Avoid_: CommittedTurn, Artifact, checkpoint, Code-Interpreter Context
 
 ### Public progress
 

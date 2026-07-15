@@ -10,6 +10,7 @@ import pytest
 def test_commit_success_normalizes_details_and_appends_the_canonical_suffix() -> None:
     from fleet_rlm.artifacts.models import ArtifactRef
     from fleet_rlm.chat.turn_detail_policy import commit_success
+    from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import RLMReasoning, StepFinished, StepStarted, ToolCompleted, ToolStarted
     from fleet_rlm.rlm.outcome import RLMOutcome
 
@@ -25,11 +26,8 @@ def test_commit_success_normalizes_details_and_appends_the_canonical_suffix() ->
     )
     outcome = RLMOutcome(
         terminal_status="completed",
-        text="42",
-        usage={"iterations": 1},
-        structured_output={"total": 42},
-        result_schema_id="analysis",
-        result_schema_version="1",
+        prediction=PredictionResult("42", {"answer": "42", "total": 42}, "analysis", "1"),
+        usage={"iterations": 1, "observed_lm_usage": {}, "duration_ms": 3},
         execution_details=(
             StepStarted(step=1),
             RLMReasoning(text="bounded", step=1),
@@ -52,11 +50,29 @@ def test_commit_success_normalizes_details_and_appends_the_canonical_suffix() ->
         "text",
     ]
     assert committed.text == "42"
-    assert committed.structured_result == {"total": 42}
+    assert committed.structured_result == {"answer": "42", "total": 42}
+
+
+def test_commit_omits_structured_duplicate_for_single_output_prediction() -> None:
+    from fleet_rlm.chat.turn_detail_policy import commit_success
+    from fleet_rlm.rlm.dspy_contract import PredictionResult
+    from fleet_rlm.rlm.outcome import RLMOutcome
+
+    committed = commit_success(
+        RLMOutcome(
+            terminal_status="completed",
+            prediction=PredictionResult("done", {"answer": "done"}, "default", "1"),
+        ),
+        (),
+    )
+
+    assert [part.type for part in committed.parts] == ["usage", "text"]
+    assert committed.structured_result is None
 
 
 def test_commit_success_rejects_failed_outcomes_or_unmatched_tool_calls() -> None:
     from fleet_rlm.chat.turn_detail_policy import TurnDetailPolicyError, commit_success
+    from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import ToolStarted
     from fleet_rlm.rlm.outcome import RLMOutcome
 
@@ -66,6 +82,7 @@ def test_commit_success_rejects_failed_outcomes_or_unmatched_tool_calls() -> Non
         commit_success(
             RLMOutcome(
                 terminal_status="completed",
+                prediction=PredictionResult("done", {"answer": "done"}, "default", "1"),
                 execution_details=(ToolStarted(tool_call_id="call-1", tool_name="lookup", input={}),),
             ),
             (),

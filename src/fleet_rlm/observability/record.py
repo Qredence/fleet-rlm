@@ -22,7 +22,6 @@ class TurnTrace:
     duration_ms: int | None = None
     usage: dict[str, Any] = field(default_factory=dict)
     model_profiles: dict[str, str] = field(default_factory=dict)
-    budget_limits: dict[str, int] = field(default_factory=dict)
     skill_ids: list[str] = field(default_factory=list)
     attachment_ids: list[str] = field(default_factory=list)
     artifact_ids: list[str] = field(default_factory=list)
@@ -43,7 +42,6 @@ class TurnTrace:
             "duration_ms": self.duration_ms,
             "usage": dict(self.usage),
             "model_profiles": dict(self.model_profiles),
-            "budget_limits": dict(self.budget_limits),
             "skill_ids": list(self.skill_ids),
             "attachment_ids": list(self.attachment_ids),
             "artifact_ids": list(self.artifact_ids),

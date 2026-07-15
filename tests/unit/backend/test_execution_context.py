@@ -11,8 +11,8 @@ import pytest
 
 
 def test_execution_context_has_only_prepared_runner_inputs() -> None:
-    from fleet_rlm.rlm.budgets import RunBudgetLedger
     from fleet_rlm.rlm.context import RLMExecutionContext, RLMHistoryMessage
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
     from fleet_rlm.sessions.models import TurnAccess
 
@@ -23,7 +23,7 @@ def test_execution_context_has_only_prepared_runner_inputs() -> None:
         request="inspect",
         history=(RLMHistoryMessage(role="user", content="prior"),),
         models=RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock()),
-        budget=RunBudgetLedger(),
+        options=RLMOptions(),
         deadline=123.0,
         interpreter=SimpleNamespace(execute=lambda code: code),
         attachments=(),
@@ -39,7 +39,7 @@ def test_execution_context_has_only_prepared_runner_inputs() -> None:
         "request",
         "history",
         "models",
-        "budget",
+        "options",
         "deadline",
         "interpreter",
         "attachments",

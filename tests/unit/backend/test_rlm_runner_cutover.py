@@ -27,9 +27,11 @@ def test_trajectory_projection_is_optional_and_fail_soft() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_uses_supported_async_call_and_returns_typed_outcome() -> None:
-    from fleet_rlm.rlm.budgets import RunBudget, RunBudgetLedger
+async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
@@ -48,12 +50,12 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome() -> N
             return None
 
     class Factory:
-        budget = None
+        options = None
         tools = None
 
         def create(self, **kwargs):
             assert "observer" not in kwargs
-            self.budget = kwargs["budget"]
+            self.options = kwargs["options"]
             self.tools = kwargs["tools"]
             factory = self
 
@@ -66,7 +68,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome() -> N
                     assert factory.tools[0](value="sample") == "done:sample"
                     interpreter.observer(RLMOutput("FINAL submitted", 1))
                     interpreter.observer(StepFinished(1, 1))
-                    return SimpleNamespace(
+                    prediction = dspy.Prediction(
                         answer="42",
                         trajectory=[
                             {
@@ -76,6 +78,8 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome() -> N
                             }
                         ],
                     )
+                    prediction.set_lm_usage({"root": {"prompt_tokens": 4, "completion_tokens": 2}})
+                    return prediction
 
             return Program()
 
@@ -83,7 +87,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome() -> N
         observer = None
 
         def bind_observer(self, observer, *, max_chars):
-            assert max_chars == RunBudget().max_output_chars
+            assert max_chars == RLMOptions().max_output_chars
             self.observer = observer
 
     def helper(value: str) -> str:
@@ -95,6 +99,14 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome() -> N
     factory = Factory()
     interpreter = Interpreter()
     main_thread = threading.get_ident()
+    contexts: list[dict[str, object]] = []
+    original_context = dspy.context
+
+    def tracked_context(**kwargs):
+        contexts.append(kwargs)
+        return original_context(**kwargs)
+
+    monkeypatch.setattr(dspy, "context", tracked_context)
     context = RLMExecutionContext(
         uuid4(),
         uuid4(),
@@ -102,7 +114,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome() -> N
         "answer",
         (),
         SimpleNamespace(root_lm=object(), sub_lm=object()),
-        RunBudgetLedger(RunBudget()),
+        RLMOptions(),
         asyncio.get_running_loop().time() + 10,
         interpreter,
         (),
@@ -126,7 +138,150 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome() -> N
         "rlm.reasoning",
     ]
     assert stream.outcome is not None
-    assert stream.outcome.text == "42"
+    assert stream.outcome.prediction is not None
+    assert stream.outcome.prediction.display_text == "42"
+    assert stream.outcome.prediction.outputs == {"answer": "42"}
     assert stream.outcome.succeeded
-    assert factory.budget is context.budget.budget
+    assert factory.options is context.options
     assert isinstance(factory.tools[0], dspy.Tool)
+    assert stream.outcome.usage["iterations"] == 1
+    assert stream.outcome.usage["observed_lm_usage"] == {"root": {"prompt_tokens": 4, "completion_tokens": 2}}
+    assert set(stream.outcome.usage) == {"iterations", "observed_lm_usage", "duration_ms"}
+    assert contexts == [{"lm": context.models.root_lm, "track_usage": True}]
+
+
+@pytest.mark.asyncio
+async def test_runner_settles_blocking_worker_before_internal_cancellation_finishes() -> None:
+    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.sessions.models import TurnAccess
+    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
+
+    entered = threading.Event()
+    release = threading.Event()
+    cancel_requested = False
+
+    class Capabilities:
+        blueprint = TurnCapabilityBlueprint()
+
+        def drain_public_details(self):
+            return ()
+
+        def drain_artifact_candidates(self):
+            return ()
+
+    class Factory:
+        def create(self, **_kwargs):
+            class Program:
+                async def acall(self, **_call_kwargs):
+                    entered.set()
+                    while not release.is_set():
+                        await asyncio.sleep(0.01)
+                    return dspy.Prediction(answer="late", trajectory=[])
+
+            return Program()
+
+    async def cancellation_probe() -> bool:
+        return cancel_requested
+
+    context = RLMExecutionContext(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        "answer",
+        (),
+        SimpleNamespace(root_lm=object(), sub_lm=object()),
+        RLMOptions(),
+        asyncio.get_running_loop().time() + 10,
+        None,
+        (),
+        Capabilities(),
+        cancellation_probe,
+        (),
+    )
+    stream = RLMRunner(factory=Factory()).stream(context)
+
+    async def consume_all() -> None:
+        async for _event in stream:
+            pass
+
+    consume = asyncio.create_task(consume_all())
+    assert await asyncio.to_thread(entered.wait, 2)
+
+    cancel_requested = True
+    await asyncio.sleep(0.3)
+    assert not consume.done(), "the lease-owning stream must wait for the actual worker"
+
+    release.set()
+    await asyncio.wait_for(consume, timeout=2)
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_runner_settles_blocking_worker_through_repeated_caller_cancellation() -> None:
+    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.sessions.models import TurnAccess
+    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    class Capabilities:
+        blueprint = TurnCapabilityBlueprint()
+
+        def drain_public_details(self):
+            return ()
+
+        def drain_artifact_candidates(self):
+            return ()
+
+    class Factory:
+        def create(self, **_kwargs):
+            class Program:
+                async def acall(self, **_call_kwargs):
+                    entered.set()
+                    while not release.is_set():
+                        await asyncio.sleep(0.01)
+                    return dspy.Prediction(answer="late", trajectory=[])
+
+            return Program()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        "answer",
+        (),
+        SimpleNamespace(root_lm=object(), sub_lm=object()),
+        RLMOptions(),
+        asyncio.get_running_loop().time() + 10,
+        None,
+        (),
+        Capabilities(),
+        not_cancelled,
+        (),
+    )
+    stream = RLMRunner(factory=Factory()).stream(context)
+
+    async def consume_all() -> None:
+        async for _event in stream:
+            pass
+
+    consume = asyncio.create_task(consume_all())
+    assert await asyncio.to_thread(entered.wait, 2)
+    consume.cancel()
+    await asyncio.sleep(0.05)
+    consume.cancel()
+    await asyncio.sleep(0.05)
+    assert not consume.done()
+
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(consume, timeout=2)

@@ -150,15 +150,16 @@ def commit_success(outcome: RLMOutcome, artifacts: tuple[ArtifactRef, ...]) -> C
     )
     parts.append(UsagePart(value=outcome.usage))
 
-    if outcome.structured_output is not None:
-        if outcome.result_schema_id is None or outcome.result_schema_version is None:
-            raise TurnDetailPolicyError("structured output requires a result schema")
+    prediction = outcome.prediction
+    if prediction is None:
+        raise TurnDetailPolicyError("successful outcome requires a prediction")
+    if len(prediction.outputs) > 1:
         parts.append(
             StructuredResultPart(
-                schema_id=outcome.result_schema_id,
-                schema_version=outcome.result_schema_version,
-                value=outcome.structured_output,
+                schema_id=prediction.schema_id,
+                schema_version=prediction.schema_version,
+                value=prediction.outputs,
             )
         )
-    parts.append(TextPart(text=outcome.text))
+    parts.append(TextPart(text=prediction.display_text))
     return CommittedTurn(schema_version=1, parts=tuple(parts))

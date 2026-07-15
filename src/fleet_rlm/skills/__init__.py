@@ -2,17 +2,16 @@
 
 from fleet_rlm.skills.authorize import SkillAuthorizer
 from fleet_rlm.skills.capabilities import (
-    CapabilityBudgetRequirements,
     CapabilityRegistry,
     CapabilityResolutionContext,
     CapabilityResolver,
+    CapabilityRLMRequirements,
     SkillSelection,
     TaskContract,
     TurnCapabilityBlueprint,
 )
 from fleet_rlm.skills.cards import to_card
 from fleet_rlm.skills.errors import (
-    SkillBudgetError,
     SkillError,
     SkillNotFoundError,
     SkillPathError,
@@ -32,12 +31,11 @@ from fleet_rlm.skills.tools import SkillToolHost, skill_loaded_public_payload
 __all__ = [
     "InMemorySkillRegistry",
     "CapabilityRegistry",
-    "CapabilityBudgetRequirements",
+    "CapabilityRLMRequirements",
     "CapabilityResolutionContext",
     "CapabilityResolver",
     "SkillAuthorizer",
     "SkillSelection",
-    "SkillBudgetError",
     "SkillCard",
     "SkillError",
     "SkillNotFoundError",

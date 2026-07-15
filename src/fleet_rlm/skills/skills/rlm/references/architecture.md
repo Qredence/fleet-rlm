@@ -13,7 +13,7 @@ Paths relative to `src/fleet_rlm/`.
 | `rlm/runner.py` | `dspy.RLM` execute + event projection |
 | `rlm/factory.py` | RLM construction (`max_iterations`, tools) |
 | `rlm/signature.py` | `FleetRLMSignature` |
-| `rlm/budgets.py` | Finite turn budgets |
+| `rlm/dspy_contract.py` | Native `RLMOptions`, typed Prediction results, and observed usage |
 | `rlm/context.py` | immutable `RLMExecutionContext` |
 | `daytona/session_manager.py` | Sandbox acquire / volume mount |
 | `daytona/interpreter.py` | `code_interpreter` adapter |

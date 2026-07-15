@@ -13,7 +13,7 @@ async def test_preparation_adapts_history_and_closes_in_dependency_order() -> No
     from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
     from fleet_rlm.chat.turn_preparation import RunEnvironment, TurnPreparationModule
     from fleet_rlm.files.models import PreparedAttachments
-    from fleet_rlm.rlm.budgets import RunBudget
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
@@ -58,14 +58,16 @@ async def test_preparation_adapts_history_and_closes_in_dependency_order() -> No
     sink = Sink()
 
     class Environments:
-        async def acquire(self, turn):
+        async def acquire(self, turn, *, deadline):
+            assert deadline > 0
+
             async def release():
                 operations.append("release-environment")
 
             return RunEnvironment(SimpleNamespace(), sink, sink, release)
 
     class CapabilityFactory:
-        async def prepare(self, turn, environment, attachments, budget):
+        async def prepare(self, turn, environment, attachments):
             return Capabilities()
 
     async def not_cancelled():
@@ -82,13 +84,15 @@ async def test_preparation_adapts_history_and_closes_in_dependency_order() -> No
     )
     prepared = await TurnPreparationModule(
         models=RLMModelBundle(object(), object()),
-        budget=RunBudget(),
+        options=RLMOptions(),
+        turn_timeout_seconds=900,
         attachments=Attachments(),
         environments=Environments(),
         capabilities=CapabilityFactory(),
     ).prepare(turn)
 
     assert [(item.role, item.content) for item in prepared.execution.history] == [("user", "prior")]
+    assert prepared.result_snapshot_sink is None
     await prepared.aclose()
     await prepared.aclose()
     assert operations == ["close-capabilities", "release-environment"]

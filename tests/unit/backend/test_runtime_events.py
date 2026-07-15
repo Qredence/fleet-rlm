@@ -35,7 +35,6 @@ def test_runtime_detail_union_has_the_exact_v1_discriminators() -> None:
         "run.failed",
         "run.cancelled",
         "run.timed_out",
-        "run.budget_exhausted",
     }
 
 
@@ -67,3 +66,10 @@ def test_event_recorder_rejects_second_or_post_terminal_details() -> None:
 
     with pytest.raises(EventSequenceError):
         recorder.record(TextDelta(text="late"))
+
+
+def test_usage_event_rejects_noncanonical_usage() -> None:
+    from fleet_rlm.rlm.events import Usage
+
+    with pytest.raises(TypeError):
+        Usage({"iterations": 1, "observed_lm_usage": {}, "duration_ms": 1, "llm_calls": 2})

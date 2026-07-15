@@ -478,16 +478,27 @@ function artifact(
 
 function usage(id: string, runId: string, source: Record<string, unknown>, clock: Clock): Message {
   const value = data(source.usage ?? source);
+  const observedLmUsage = data(value.observed_lm_usage ?? value.observedLmUsage);
   return {
     id,
     kind: "usage",
     runId,
-    prompt: number(value.prompt_tokens ?? value.promptTokens),
-    completion: number(value.completion_tokens ?? value.completionTokens),
-    toolCalls: number(value.tool_calls ?? value.toolCalls),
-    llmCalls: number(value.llm_calls ?? value.llmCalls),
+    iterations: number(value.iterations),
+    prompt: observedTokens(observedLmUsage, "prompt_tokens", "promptTokens"),
+    completion: observedTokens(observedLmUsage, "completion_tokens", "completionTokens"),
+    durationMs: number(value.duration_ms ?? value.durationMs),
+    observedLmUsage,
     ts: clock(),
   };
+}
+
+function observedTokens(value: Record<string, unknown>, snake: string, camel: string): number {
+  const direct = value[snake] ?? value[camel];
+  if (direct !== undefined) return number(direct);
+  return Object.values(value).reduce<number>(
+    (total, nested) => total + observedTokens(data(nested), snake, camel),
+    0,
+  );
 }
 
 function data(value: unknown): Record<string, unknown> {

@@ -1,4 +1,4 @@
-"""impl-01: RLMFactory, model bundle, and budgets."""
+"""RLMFactory, model bundle, and native RLM Options."""
 
 from __future__ import annotations
 
@@ -57,22 +57,22 @@ def test_model_bundle_rejects_missing_roles() -> None:
         RLMModelBundle(root_lm=MagicMock(), sub_lm=None)  # type: ignore[arg-type]
 
 
-def test_invalid_budget_fails_before_construction() -> None:
-    from fleet_rlm.rlm.budgets import RunBudget
-    from fleet_rlm.rlm.errors import RunBudgetError
+def test_invalid_options_fail_before_construction() -> None:
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.errors import RLMConfigError
 
-    with pytest.raises(RunBudgetError):
-        RunBudget(max_iterations=0)
-    with pytest.raises(RunBudgetError):
-        RunBudget(max_llm_calls=-1)
-    with pytest.raises(RunBudgetError):
-        RunBudget(max_output_chars=0)
+    with pytest.raises(RLMConfigError):
+        RLMOptions(max_iterations=0)
+    with pytest.raises(RLMConfigError):
+        RLMOptions(max_llm_calls=-1)
+    with pytest.raises(RLMConfigError):
+        RLMOptions(max_output_chars=0)
 
 
 def test_factory_passes_explicit_constructor_kwargs() -> None:
     import dspy
 
-    from fleet_rlm.rlm.budgets import RunBudget
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.factory import RLMFactory
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
     from fleet_rlm.rlm.signature import FleetRLMSignature
@@ -80,18 +80,16 @@ def test_factory_passes_explicit_constructor_kwargs() -> None:
     root = MagicMock(name="root_lm")
     sub = MagicMock(name="sub_lm")
     interpreter = _FakeInterpreter()
-    budget = RunBudget(
+    options = RLMOptions(
         max_iterations=7,
         max_llm_calls=11,
         max_output_chars=2048,
-        max_tool_calls=5,
-        max_sub_lm_concurrency=3,
     )
     models = RLMModelBundle(root_lm=root, sub_lm=sub)
 
     rlm = RLMFactory().create(
         models=models,
-        budget=budget,
+        options=options,
         interpreter=interpreter,
         tools=[host_echo],
     )
@@ -109,30 +107,30 @@ def test_factory_passes_explicit_constructor_kwargs() -> None:
 
 
 def test_each_factory_call_returns_new_rlm_instance() -> None:
-    from fleet_rlm.rlm.budgets import RunBudget
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.factory import RLMFactory
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
 
     factory = RLMFactory()
     models = RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock())
-    budget = RunBudget()
+    options = RLMOptions()
     interpreter = _FakeInterpreter()
 
-    first = factory.create(models=models, budget=budget, interpreter=interpreter)
-    second = factory.create(models=models, budget=budget, interpreter=interpreter)
+    first = factory.create(models=models, options=options, interpreter=interpreter)
+    second = factory.create(models=models, options=options, interpreter=interpreter)
 
     assert first is not second
 
 
-def test_compat_is_only_native_dspy_rlm_call_site_in_rlm_package() -> None:
-    """Static guard: only compat.py may directly construct native dspy.RLM."""
+def test_dspy_contract_is_only_native_dspy_rlm_call_site_in_rlm_package() -> None:
+    """Static guard: only dspy_contract.py may directly construct native dspy.RLM."""
     import ast
     from pathlib import Path
 
     rlm_dir = Path(__file__).resolve().parents[3] / "src" / "fleet_rlm" / "rlm"
     offenders: list[str] = []
     for path in sorted(rlm_dir.glob("*.py")):
-        if path.name == "compat.py":
+        if path.name == "dspy_contract.py":
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -143,4 +141,4 @@ def test_compat_is_only_native_dspy_rlm_call_site_in_rlm_package() -> None:
                 offenders.append(path.name)
             if isinstance(func, ast.Name) and func.id == "RLM":
                 offenders.append(path.name)
-    assert offenders == [], f"dspy.RLM constructed outside compat: {offenders}"
+    assert offenders == [], f"dspy.RLM constructed outside dspy_contract: {offenders}"

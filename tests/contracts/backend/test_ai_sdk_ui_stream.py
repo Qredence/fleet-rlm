@@ -37,7 +37,15 @@ def test_projector_maps_detailed_runtime_events_to_ui_message_chunks() -> None:
         recorder.record(ToolCompleted("call-1", "lookup", {"value": 1})),
         recorder.record(RLMOutput("42", 1)),
         recorder.record(StepFinished(1)),
-        recorder.record(Usage({"totalTokens": 12})),
+        recorder.record(
+            Usage(
+                {
+                    "iterations": 1,
+                    "observed_lm_usage": {"root": {"total_tokens": 12}},
+                    "duration_ms": 3,
+                }
+            )
+        ),
         recorder.record(StructuredResult("report", "1", {"score": 1})),
         recorder.record(TextDelta("answer")),
         recorder.record(TextCompleted("answer")),

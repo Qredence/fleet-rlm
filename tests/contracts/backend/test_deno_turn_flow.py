@@ -16,7 +16,7 @@ from fleet_rlm.chat.turn_coordinator import TurnCoordinator
 from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
 from fleet_rlm.files.models import PreparedAttachments
 from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
-from fleet_rlm.rlm.budgets import RunBudget
+from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, ArtifactCreated, RunCompleted
 from fleet_rlm.rlm.factory import RLMFactory
 from fleet_rlm.rlm.runner import RLMRunner
@@ -82,7 +82,7 @@ async def test_deno_turn_commits_once_without_artifact_or_live_dependencies(monk
         lifecycle=lifecycle,
         preparation=DenoTurnPreparation(
             attachments=_NoAttachments(),
-            budget=RunBudget(max_iterations=1),
+            options=RLMOptions(max_iterations=1),
             root_lm=forbidden_lm,
             sub_lm=forbidden_lm,
             skill_registry=InMemorySkillRegistry(),

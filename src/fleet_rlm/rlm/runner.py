@@ -10,7 +10,8 @@ from typing import Any, Protocol, Self, cast
 import dspy
 
 from fleet_rlm.rlm.context import RLMExecutionContext
-from fleet_rlm.rlm.errors import RunBudgetError, TurnTerminalError
+from fleet_rlm.rlm.dspy_contract import PredictionOutputError, observed_usage, prediction_result
+from fleet_rlm.rlm.errors import TurnCancelled, TurnTerminalError
 from fleet_rlm.rlm.events import (
     AttachmentRead,
     EventRecorder,
@@ -29,9 +30,9 @@ from fleet_rlm.rlm.events import (
 )
 from fleet_rlm.rlm.factory import RLMFactory
 from fleet_rlm.rlm.outcome import ExecutionDetail, RLMOutcome, TerminalStatus
-from fleet_rlm.rlm.sanitize import sanitize_public_error, sanitize_public_text, sanitize_public_value
+from fleet_rlm.rlm.sanitize import sanitize_public_error, sanitize_public_text
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
-from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
+from fleet_rlm.skills.capabilities import DEFAULT_TASK_CONTRACT, TurnCapabilityBlueprint
 
 
 class RLMFactoryLike(Protocol):
@@ -39,7 +40,7 @@ class RLMFactoryLike(Protocol):
         self,
         *,
         models: Any,
-        budget: Any,
+        options: Any,
         interpreter: Any,
         tools: Sequence[Any] | None = None,
         signature: Any = None,
@@ -117,10 +118,6 @@ class _DetailRelay:
                 return values
 
 
-def _json(value: Any) -> Any:
-    return sanitize_public_value(value, max_len=3_000)
-
-
 def _observation_key(value: ExecutionDetail) -> tuple[type[object], int | None] | None:
     if isinstance(value, (StepStarted, StepFinished, RLMReasoning, RLMCode, RLMOutput)):
         return type(value), value.step
@@ -149,26 +146,27 @@ def _trajectory_details(prediction: Any, *, max_chars: int) -> list[ObservationD
     return details
 
 
-def _prediction_text(prediction: Any) -> str:
-    if prediction is None:
-        return ""
-    if hasattr(prediction, "answer"):
-        return str(prediction.answer)
-    if isinstance(prediction, Mapping) and "answer" in prediction:
-        return str(prediction["answer"])
-    return str(prediction)
-
-
 def _terminal_status(exc: BaseException) -> TerminalStatus:
     if isinstance(exc, TurnTerminalError):
         return cast(TerminalStatus, exc.status)
     if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
         return "timeout"
-    if isinstance(exc, RunBudgetError):
-        return "budget_exhausted"
     if isinstance(exc, asyncio.CancelledError):
         return "cancelled"
     return "failed"
+
+
+async def _settle_worker(task: asyncio.Task[Any]) -> bool:
+    """Wait through repeated caller cancellation until the owned worker exits."""
+    cancellation_requested = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancellation_requested = True
+        except BaseException:
+            break
+    return cancellation_requested
 
 
 class RLMRunner:
@@ -192,7 +190,7 @@ class RLMRunner:
                 for notice in context.preparation_notices:
                     yield recorder.record(WarningEvent(notice.message, notice.code))
                 if await context.cancellation_requested():
-                    raise asyncio.CancelledError
+                    raise TurnCancelled
 
                 blueprint = cast(TurnCapabilityBlueprint, context.capabilities.blueprint)
                 for card in blueprint.activated_skills:
@@ -203,32 +201,35 @@ class RLMRunner:
                 relay = _DetailRelay()
                 bind_observer = getattr(context.interpreter, "bind_observer", None)
                 if callable(bind_observer):
-                    bind_observer(relay.publish, max_chars=context.budget.budget.max_output_chars)
+                    bind_observer(relay.publish, max_chars=context.options.max_output_chars)
                 observed_tools = tuple(
                     observe_tool(
                         tool,
                         relay.publish,
-                        ToolEventView(max_chars=context.budget.budget.max_output_chars),
+                        ToolEventView(max_chars=context.options.max_output_chars),
                     )
                     for tool in blueprint.tools
                 )
                 rlm = self._factory.create(
                     models=context.models,
-                    budget=context.budget.budget,
+                    options=context.options,
                     interpreter=context.interpreter,
                     tools=observed_tools or None,
                     signature=blueprint.signature,
                 )
                 task = asyncio.create_task(self._execute_rlm_in_worker(rlm, context, blueprint))
+                pending: asyncio.Task[ObservationDetail] | None = None
+                intended_stop: BaseException | None = None
+                caller_cancelled = False
                 try:
                     while not task.done():
                         if await context.cancellation_requested():
-                            task.cancel()
-                            raise asyncio.CancelledError
+                            intended_stop = TurnCancelled()
+                            break
                         remaining = context.deadline - asyncio.get_running_loop().time()
                         if remaining <= 0:
-                            task.cancel()
-                            raise asyncio.TimeoutError
+                            intended_stop = asyncio.TimeoutError()
+                            break
                         pending = asyncio.create_task(relay.get())
                         done, _ = await asyncio.wait(
                             {task, pending}, timeout=min(remaining, 0.25), return_when=asyncio.FIRST_COMPLETED
@@ -240,11 +241,24 @@ class RLMRunner:
                         else:
                             pending.cancel()
                             await asyncio.gather(pending, return_exceptions=True)
-                    prediction = await task
+                        pending = None
+                except asyncio.CancelledError:
+                    caller_cancelled = True
                 finally:
-                    if not task.done():
-                        task.cancel()
-                        await asyncio.gather(task, return_exceptions=True)
+                    if pending is not None and not pending.done():
+                        pending.cancel()
+                        caller_cancelled |= await _settle_worker(pending)
+                    caller_cancelled |= await _settle_worker(task)
+
+                if caller_cancelled:
+                    if task.done() and not task.cancelled():
+                        task.exception()
+                    raise asyncio.CancelledError
+                if intended_stop is not None:
+                    if task.done() and not task.cancelled():
+                        task.exception()
+                    raise intended_stop
+                prediction = task.result()
 
                 for observed in relay.drain():
                     details.append(observed)
@@ -255,12 +269,17 @@ class RLMRunner:
                     yield recorder.record(warning)
 
                 seen = {key for item in details if (key := _observation_key(item)) is not None}
-                for item in _trajectory_details(prediction, max_chars=context.budget.budget.max_output_chars):
+                for item in _trajectory_details(prediction, max_chars=context.options.max_output_chars):
                     key = _observation_key(item)
                     if key is not None and key in seen:
                         continue
                     if key is not None:
                         seen.add(key)
+                    details.append(item)
+                    yield recorder.record(item)
+                final_reasoning = getattr(prediction, "final_reasoning", None)
+                if isinstance(final_reasoning, str) and final_reasoning.strip():
+                    item = RLMReasoning(sanitize_public_text(final_reasoning, max_len=context.options.max_output_chars))
                     details.append(item)
                     yield recorder.record(item)
 
@@ -270,37 +289,33 @@ class RLMRunner:
                     details.append(item)
                     yield recorder.record(item)
 
-                text = sanitize_public_text(
-                    _prediction_text(prediction), max_len=context.budget.budget.max_output_chars
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                usage = observed_usage(prediction, duration_ms=duration_ms)
+                result = prediction_result(
+                    prediction,
+                    blueprint.task_contract or DEFAULT_TASK_CONTRACT,
+                    max_output_chars=context.options.max_output_chars,
                 )
-                context.budget.consume_output_chars(max(1, len(text)))
-                usage = context.budget.snapshot()
-                structured = None
-                schema_id = schema_version = None
-                if blueprint.task_contract is not None:
-                    structured = _json(blueprint.task_contract.serialize(prediction))
-                    for validator in blueprint.validators:
-                        validator(structured)
-                    schema_id = blueprint.task_contract.id
-                    schema_version = blueprint.task_contract.schema_version
+                for validator in blueprint.validators:
+                    try:
+                        validator(result.outputs)
+                    except Exception:
+                        raise PredictionOutputError from None
                 outcome.append(
                     RLMOutcome(
                         terminal_status="completed",
-                        text=text,
+                        prediction=result,
                         usage=usage,
                         artifact_candidates=context.capabilities.drain_artifact_candidates(),
                         execution_details=tuple(details),
-                        structured_output=structured,
-                        result_schema_id=schema_id,
-                        result_schema_version=schema_version,
-                        duration_ms=int((time.perf_counter() - started) * 1000),
+                        duration_ms=duration_ms,
                     )
                 )
             except (GeneratorExit, asyncio.CancelledError):
                 outcome.append(
                     RLMOutcome(
                         terminal_status="cancelled",
-                        usage=context.budget.snapshot(),
+                        usage=observed_usage(None, duration_ms=int((time.perf_counter() - started) * 1000)),
                         public_error_message="Turn cancelled",
                         duration_ms=int((time.perf_counter() - started) * 1000),
                     )
@@ -310,7 +325,7 @@ class RLMRunner:
                 outcome.append(
                     RLMOutcome(
                         terminal_status=_terminal_status(exc),
-                        usage=context.budget.snapshot(),
+                        usage=observed_usage(None, duration_ms=int((time.perf_counter() - started) * 1000)),
                         public_error_message=sanitize_public_error(exc),
                         duration_ms=int((time.perf_counter() - started) * 1000),
                     )
@@ -352,7 +367,7 @@ class RLMRunner:
             if blueprint.knowledge:
                 kwargs["capability_knowledge"] = list(blueprint.knowledge)
             kwargs.update(blueprint.input_values)
-        with dspy.context(lm=context.models.root_lm):
+        with dspy.context(lm=context.models.root_lm, track_usage=True):
             return await rlm.acall(**kwargs)
 
     async def _execute_rlm_in_worker(

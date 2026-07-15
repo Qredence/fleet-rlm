@@ -113,11 +113,11 @@ def upgrade() -> None:
         ),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint(
-            "(status = 'running' AND claim_owner IS NOT NULL AND claim_heartbeat_at IS NOT NULL AND commit_checkpoint_version IS NULL AND failure_code IS NULL) OR (status = 'completed' AND claim_owner IS NULL AND commit_checkpoint_version IS NOT NULL AND failure_code IS NULL) OR (status IN ('failed', 'cancelled', 'timeout', 'budget_exhausted') AND claim_owner IS NULL AND commit_checkpoint_version IS NULL AND failure_code IS NOT NULL)",
+            "(status = 'running' AND claim_owner IS NOT NULL AND claim_heartbeat_at IS NOT NULL AND commit_checkpoint_version IS NULL AND failure_code IS NULL) OR (status = 'completed' AND claim_owner IS NULL AND commit_checkpoint_version IS NOT NULL AND failure_code IS NULL) OR (status IN ('failed', 'cancelled', 'timeout') AND claim_owner IS NULL AND commit_checkpoint_version IS NULL AND failure_code IS NOT NULL)",
             name="ck_fleet_runs_terminal_shape",
         ),
         sa.CheckConstraint(
-            "status IN ('running', 'completed', 'failed', 'cancelled', 'timeout', 'budget_exhausted')",
+            "status IN ('running', 'completed', 'failed', 'cancelled', 'timeout')",
             name="ck_fleet_runs_status",
         ),
         sa.CheckConstraint("length(input_fingerprint) = 64", name="ck_fleet_runs_fingerprint"),

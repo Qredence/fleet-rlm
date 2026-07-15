@@ -28,7 +28,7 @@ def test_projector_replays_every_semantic_part_in_order() -> None:
             ToolCallPart("c1", "lookup", "completed", {"q": "x"}, {"ok": True}),
             AttachmentPart(uuid4(), "read", "a.txt", 3),
             ArtifactPart(uuid4(), "json", None, "application/json", 2, "a" * 64),
-            UsagePart({"iterations": 1}),
+            UsagePart({"iterations": 1, "observed_lm_usage": {}, "duration_ms": 3}),
             StructuredResultPart("answer", "1", {"value": 42}),
             TextPart("42"),
         ),
@@ -59,7 +59,11 @@ def test_live_suffix_excludes_execution_parts() -> None:
 
     turn = CommittedTurn(
         schema_version=1,
-        parts=(ReasoningPart("think"), UsagePart({}), TextPart("done")),
+        parts=(
+            ReasoningPart("think"),
+            UsagePart({"iterations": 0, "observed_lm_usage": {}, "duration_ms": 0}),
+            TextPart("done"),
+        ),
     )
 
     events = CommittedTurnEventProjector().project(

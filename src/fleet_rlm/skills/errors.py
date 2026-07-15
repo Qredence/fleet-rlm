@@ -17,7 +17,3 @@ class SkillValidationError(SkillError):
 
 class SkillPathError(SkillValidationError):
     """Invalid skill-relative resource path."""
-
-
-class SkillBudgetError(SkillError):
-    """Skill load budget exhausted for the turn."""

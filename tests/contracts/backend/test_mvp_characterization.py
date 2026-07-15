@@ -17,7 +17,7 @@ from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
 from fleet_rlm.composition.testing import DeterministicTurnPreparation
 from fleet_rlm.files.models import PreparedAttachments
 from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
-from fleet_rlm.rlm.budgets import RunBudget
+from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.errors import TurnCancelled
 from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, RunCancelled, RunCompleted, RunStarted, RuntimeEvent
 from fleet_rlm.rlm.runner import RLMRunner
@@ -80,7 +80,7 @@ async def _build_harness(*, cancelled: bool = False) -> _MVPTurnHarness:
     lifecycle = TurnLifecycleModule(store, max_artifact_bytes=1024)
     coordinator = TurnCoordinator(
         lifecycle=lifecycle,
-        preparation=DeterministicTurnPreparation(attachments=_NoAttachments(), budget=RunBudget(max_iterations=1)),
+        preparation=DeterministicTurnPreparation(attachments=_NoAttachments(), options=RLMOptions(max_iterations=1)),
         runner=RLMRunner(factory=_DeterministicRLMFactory(calls, cancelled=cancelled)),
     )
     return _MVPTurnHarness(access, store, session.id, coordinator, calls)

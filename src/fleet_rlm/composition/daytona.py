@@ -59,6 +59,9 @@ async def _dispose_components(
 
 async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHandles:
     """Construct the Daytona lifespan inventory and clean partial failures."""
+    from fleet_rlm.rlm.dspy_contract import assert_dspy_version
+
+    assert_dspy_version()
     require_daytona_settings(settings)
 
     from fleet_rlm.artifacts.daytona_catalog import DaytonaArtifactBlobGateway

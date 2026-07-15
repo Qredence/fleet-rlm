@@ -97,7 +97,7 @@ class RunRow(Base):
     __tablename__ = "fleet_runs"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('running', 'completed', 'failed', 'cancelled', 'timeout', 'budget_exhausted')",
+            "status IN ('running', 'completed', 'failed', 'cancelled', 'timeout')",
             name="ck_fleet_runs_status",
         ),
         CheckConstraint("length(input_fingerprint) = 64", name="ck_fleet_runs_fingerprint"),
@@ -106,7 +106,7 @@ class RunRow(Base):
             "AND commit_checkpoint_version IS NULL AND failure_code IS NULL) OR "
             "(status = 'completed' AND claim_owner IS NULL AND commit_checkpoint_version IS NOT NULL "
             "AND failure_code IS NULL) OR "
-            "(status IN ('failed', 'cancelled', 'timeout', 'budget_exhausted') "
+            "(status IN ('failed', 'cancelled', 'timeout') "
             "AND claim_owner IS NULL AND commit_checkpoint_version IS NULL AND failure_code IS NOT NULL)",
             name="ck_fleet_runs_terminal_shape",
         ),

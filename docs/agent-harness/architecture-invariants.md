@@ -11,7 +11,7 @@ and its matching automated check in the same patch.
 - `chat/` owns Turn context construction, orchestration, Turn Commit, terminal
   ordering, and final Interpreter Lease release.
 - `rlm/` owns DSPy model roles, signature inputs, fresh-per-Turn RLM creation,
-  Runtime Events, budgets, cancellation, and execution.
+  RLM Options, Runtime Events, cancellation, and execution.
 - `daytona/` is the exclusive Daytona SDK boundary and owns Sandbox, lease,
   Volume, interpreter, and provider-error normalization.
 - `sessions/`, `files/`, `artifacts/`, and `skills/` own domain interfaces and

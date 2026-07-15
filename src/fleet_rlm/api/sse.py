@@ -14,7 +14,6 @@ from fleet_rlm.rlm.events import (
     RLMCode,
     RLMOutput,
     RLMReasoning,
-    RunBudgetExhausted,
     RunCancelled,
     RunCompleted,
     RunFailed,
@@ -87,6 +86,14 @@ def _detail_data(detail: object) -> dict[str, Any]:
         if name != "kind"
         for value in (getattr(detail, name),)
     }
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_json_value(item) for item in value]
+    return value
 
 
 def _event_to_public_dict(event: RuntimeEvent) -> dict[str, Any]:
@@ -184,7 +191,7 @@ class AISDKUIProjector:
         if isinstance(detail, ArtifactCreated):
             return [self._data("artifact", data, part_id=str(detail.artifact_id))]
         if isinstance(detail, Usage):
-            return [self._data("usage", {"usage": dict(detail.value)}, part_id=f"usage-{event.run_id}")]
+            return [self._data("usage", {"usage": _json_value(detail.value)}, part_id=f"usage-{event.run_id}")]
         if isinstance(detail, StructuredResult):
             return [self._data("structured-result", data, part_id=f"result-{event.run_id}")]
         if isinstance(detail, WarningEvent):
@@ -206,7 +213,7 @@ class AISDKUIProjector:
             chunks.append({"type": "text-end", "id": text_id})
             self._text_ended.add(event.run_id)
             return chunks
-        if isinstance(detail, (RunFailed, RunCancelled, RunTimedOut, RunBudgetExhausted)):
+        if isinstance(detail, (RunFailed, RunCancelled, RunTimedOut)):
             if isinstance(detail, RunCancelled):
                 return [{"type": "abort", "reason": detail.message}]
             return [

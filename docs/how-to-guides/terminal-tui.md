@@ -13,7 +13,7 @@ configured LLM and Daytona credentials; the model values below are an
 example for an OpenAI-compatible endpoint. Then from the repository root run:
 
 ```bash
-FLEET_BUDGET_MAX_WALL_SECONDS=900 \
+FLEET_TURN_TIMEOUT_SECONDS=900 \
 FLEET_ROOT_MODEL=openai/deepseek-v4-flash-free \
 FLEET_SUB_MODEL=openai/deepseek-v4-flash-free \
 uv run fleet cli --port 8000
@@ -48,8 +48,8 @@ Sandbox execution or local Deno/Pyodide execution, according to the selected
 Run Environment. `FLEET_ROOT_MODEL` and `FLEET_SUB_MODEL` are the canonical
 model settings; for an OpenAI-compatible base URL, use
 `openai/<model-id>` rather than provider-specific environment aliases.
-`FLEET_BUDGET_MAX_WALL_SECONDS` defaults to 900 seconds and can be raised for
-long-running research turns.
+`FLEET_TURN_TIMEOUT_SECONDS` configures the Turn Timeout, defaults to 900
+seconds, and can be raised for long-running research turns.
 
 Use `uv run fleet deno --port 8000` instead to run the same terminal with
 DSPy's local Deno/Pyodide interpreter and no durable Artifact promotion. Use

@@ -16,7 +16,7 @@ from fleet_rlm.chat.turn_preparation import (
 )
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.models import PreparedAttachments
-from fleet_rlm.rlm.budgets import RunBudget, RunBudgetLedger
+from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import AttachmentRead, SkillLoaded
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.skills.authorize import SkillAuthorizer
@@ -58,8 +58,8 @@ class DenoRunSink:
 
 
 class DenoRunEnvironmentProvider(RunEnvironmentProvider):
-    async def acquire(self, turn: ExecuteTurn) -> RunEnvironment:
-        del turn
+    async def acquire(self, turn: ExecuteTurn, *, deadline: float) -> RunEnvironment:
+        del turn, deadline
         sink = DenoRunSink()
 
         async def release() -> None:
@@ -138,17 +138,20 @@ class _DenoCapabilityPreparer:
         skill_registry: InMemorySkillRegistry,
         capability_registry: CapabilityRegistry | None = None,
         models: RLMModelBundle,
+        options: RLMOptions,
+        max_artifact_bytes: int,
     ) -> None:
         self._skill_registry = skill_registry
         self._capability_registry = capability_registry or CapabilityRegistry()
         self._models = models
+        self._options = options
+        self._max_artifact_bytes = max_artifact_bytes
 
     async def prepare(
         self,
         turn: ExecuteTurn,
         environment: RunEnvironment,
         attachments: PreparedAttachments,
-        budget: RunBudgetLedger,
     ) -> DenoPreparedCapabilities:
         from fleet_rlm.files.tools import FileToolHost
         from fleet_rlm.skills.tools import SkillToolHost
@@ -168,7 +171,7 @@ class _DenoCapabilityPreparer:
             workspace_id=turn.access.workspace_id,
             session_id=turn.session_id,
             run_id=turn.run_id,
-            max_artifact_bytes=budget.budget.max_output_chars,
+            max_artifact_bytes=self._max_artifact_bytes,
             volume_paths=None,
         )
 
@@ -177,7 +180,6 @@ class _DenoCapabilityPreparer:
             authorizer,
             user_id=turn.access.user_id,
             workspace_id=turn.access.workspace_id,
-            max_skill_loads=budget.budget.max_skill_loads,
         )
 
         file_tools = tuple(
@@ -194,7 +196,7 @@ class _DenoCapabilityPreparer:
                 request=turn.input.text,
                 history=[{"role": item.role, "content": item.content} for item in turn.history.messages],
                 models=self._models,
-                budget=budget.budget,
+                options=self._options,
                 skill_cards=cards,
                 attachments=attachments.refs,
                 tools=tools,
@@ -215,23 +217,28 @@ class DenoTurnPreparation:
         self,
         *,
         attachments: AttachmentLifecycle,
-        budget: RunBudget | None = None,
+        options: RLMOptions | None = None,
+        turn_timeout_seconds: int = 900,
         root_lm: dspy.LM,
         sub_lm: dspy.LM,
         skill_registry: InMemorySkillRegistry,
         capability_registry: CapabilityRegistry | None = None,
+        max_artifact_bytes: int = 10 * 1024 * 1024,
     ) -> None:
-        selected_budget = budget or RunBudget()
+        selected_options = options or RLMOptions()
         models = RLMModelBundle(root_lm=root_lm, sub_lm=sub_lm)
         self._module = TurnPreparationModule(
             models=models,
-            budget=selected_budget,
+            options=selected_options,
+            turn_timeout_seconds=turn_timeout_seconds,
             attachments=attachments,
             environments=DenoRunEnvironmentProvider(),
             capabilities=_DenoCapabilityPreparer(
                 skill_registry=skill_registry,
                 capability_registry=capability_registry,
                 models=models,
+                options=selected_options,
+                max_artifact_bytes=max_artifact_bytes,
             ),
         )
 

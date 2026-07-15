@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
@@ -20,6 +20,7 @@ from fleet_rlm.chat.turn_lifecycle import (
     CommittedTurnReceipt,
     ExecuteTurn,
     FailedRunReceipt,
+    FailureCode,
     ReplayTurn,
     TurnFailure,
     TurnIdempotencyMismatchError,
@@ -28,6 +29,7 @@ from fleet_rlm.chat.turn_lifecycle import (
     TurnStart,
     TurnStateError,
     _TurnClaimToken,
+    failure_code_for_terminal_status,
 )
 from fleet_rlm.persistence.models import ArtifactRow, RunRow, SessionRow, TurnRow
 from fleet_rlm.sessions.committed_turn import CommittedTurn, CommittedTurnCodec
@@ -51,7 +53,8 @@ class _RunState:
     input_fingerprint: str
     input: TurnInput
     claim: _TurnClaimToken
-    status: Literal["running", "completed", "failed", "cancelled", "timeout", "budget_exhausted"]
+    status: Literal["running", "completed", "failed", "cancelled", "timeout"]
+    failure_code: FailureCode | None = None
     cancel_requested: bool = False
     committed: CommittedTurn | None = None
     checkpoint_version: int | None = None
@@ -65,6 +68,27 @@ class _SessionState:
     history: list[HistoryMessage] = field(default_factory=list)
     checkpoint_version: int = 0
     status: Literal["active", "archived"] = "active"
+
+
+def _decode_failure_status(value: str) -> Literal["failed", "cancelled", "timeout"]:
+    """Decode the sole retired durable status without restoring it publicly."""
+    if value == "budget_exhausted":
+        return "failed"
+    if value in {"failed", "cancelled", "timeout"}:
+        return cast(Literal["failed", "cancelled", "timeout"], value)
+    raise TurnStateError("persisted Run has an invalid failure status")
+
+
+def _decode_failure_code(
+    value: str | None,
+    *,
+    status: Literal["failed", "cancelled", "timeout"],
+) -> FailureCode:
+    if value in {"preparation_failed", "execution_failed", "commit_failed", "cancelled", "timeout", "stale_claim"}:
+        return cast(FailureCode, value)
+    if value in {None, "failed"}:
+        return failure_code_for_terminal_status(status)
+    raise TurnStateError("persisted Run has an invalid failure code")
 
 
 class InMemoryTurnStateStore:
@@ -230,7 +254,12 @@ class InMemoryTurnStateStore:
                 raise TurnStateError("Turn claim is invalid")
             if run.status == "running":
                 run.status = failure.terminal_status
-            return FailedRunReceipt(run.run_id, failure.terminal_status, failure.public_message, True)
+                run.failure_code = failure.failure_code
+                status = failure.terminal_status
+            else:
+                status = _decode_failure_status(run.status)
+            code = _decode_failure_code(run.failure_code, status=status)
+            return FailedRunReceipt(run.run_id, status, code, failure.public_message, True)
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         async with self._lock:
@@ -456,13 +485,17 @@ class SqlAlchemyTurnStateStore:
                 raise TurnStateError("Turn claim is invalid")
             if run.status == "running":
                 run.status = failure.terminal_status
-                run.failure_code = failure.terminal_status
+                run.failure_code = failure.failure_code
                 run.failure_public_message = failure.public_message
                 run.failure_usage_json = dict(failure.usage)
                 run.finished_at = datetime.now(UTC)
                 run.claim_owner = None
                 run.claim_heartbeat_at = None
-            return FailedRunReceipt(run.id, failure.terminal_status, failure.public_message, True)
+                status = failure.terminal_status
+            else:
+                status = _decode_failure_status(run.status)
+            code = _decode_failure_code(run.failure_code, status=status)
+            return FailedRunReceipt(run.id, status, code, failure.public_message, True)
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         async with self._sessions() as db, db.begin():

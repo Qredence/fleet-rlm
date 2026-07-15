@@ -172,6 +172,10 @@ class VolumePaths:
         """Run-scoped durable artifacts: sessions/{session}/runs/{run}/artifacts/."""
         return resolve_under_root(self.run_dir(session_id, run_id), "artifacts")
 
+    def run_result_path(self, session_id: str | UUID, run_id: str | UUID) -> PurePosixPath:
+        """Private typed-result derivative for one unique Run."""
+        return resolve_under_root(self.run_dir(session_id, run_id), "result.json")
+
     def attachment_dir(self, attachment_id: str | UUID) -> PurePosixPath:
         """Durable Attachment catalog root: attachments/{attachment_id}/."""
         aid = validate_path_id(attachment_id, label="attachment_id")

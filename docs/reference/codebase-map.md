@@ -10,7 +10,7 @@ compatibility runtime and parallel foundation package no longer exist.
 | `app.py`, `main.py` | FastAPI/router shell, lifespan selection and cleanup, ASGI entrypoint | composition, API routers |
 | `api/` | HTTP translation, deterministic local scope, dependency aliases, AI SDK UI SSE projection and UIMessage reload | domain interfaces and lifespan-composed modules |
 | `chat/` | Turn orchestration, context construction, commit and terminal ordering; Deno Run Environment, sinks, reduced capabilities, and RLM factory | RLM, sessions, Skills, files |
-| `rlm/` | DSPy signature, fresh-per-Turn RLM construction, budgets, events, runner | DSPy and domain values |
+| `rlm/` | DSPy signature, fresh-per-Turn RLM construction, RLM Options, events, runner | DSPy and domain values |
 | `daytona/` | Exclusive Daytona SDK boundary, Sandbox/lease/Volume adapters | Daytona SDK, domain values |
 | `sessions/` | Session Catalog, canonical Turn input/history, and versioned Committed Turn aggregate | domain values only |
 | `files/`, `artifacts/` | Attachment staging and Artifact Candidate promotion | storage interfaces, safe paths |

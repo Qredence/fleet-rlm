@@ -16,7 +16,7 @@ are actually delivered and reviewed.
   aliases in `api/dependencies.py`; construct process resources only in lifespan
   composition.
 - Keep Daytona SDK imports inside `daytona/`.
-- Create a fresh native DSPy RLM per Turn through `rlm.compat`. Daytona supplies a fresh custom interpreter;
+- Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Daytona supplies a fresh custom interpreter;
   Deno passes `interpreter=None` so DSPy constructs its default Deno/Pyodide
   interpreter. Preserve `history: list[dict]` and call the supported
   `await rlm.acall(**named_inputs)` surface.
@@ -32,6 +32,10 @@ are actually delivered and reviewed.
   artifact, or subquery bodies.
 - `TurnCoordinator` owns candidate promotion, Turn Commit, terminal projection,
   final UI part ordering, and Interpreter Lease release.
+- `CommittedTurn` is the only replay source. A successful Daytona Run may retain
+  one private commit-gated `result.json` derivative under its unique Run path;
+  Deno has no result-snapshot sink, and the derivative is not an Artifact or API
+  resource.
 - Alembic owns live schema evolution. `create_tables` is test/offline-only.
 - Do not add `/api/v1`, WebSocket, legacy-backend, or environment compatibility
   aliases.

@@ -22,12 +22,13 @@ from fleet_rlm.chat.turn_preparation import (
     PreparedTurn,
     TurnPreparation,
     TurnPreparationCancelled,
+    TurnPreparationTimeout,
 )
 from fleet_rlm.rlm.context import RLMExecutionContext
+from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 from fleet_rlm.rlm.events import (
     TERMINAL_DETAIL_TYPES,
     EventRecorder,
-    RunBudgetExhausted,
     RunCancelled,
     RunCompleted,
     RunFailed,
@@ -86,12 +87,11 @@ def _terminal(recorder: EventRecorder, receipt: CommittedTurnReceipt | FailedRun
         return recorder.record(RunCancelled())
     if receipt.terminal_status == "timeout":
         return recorder.record(RunTimedOut())
-    if receipt.terminal_status == "budget_exhausted":
-        return recorder.record(RunBudgetExhausted())
-    message = (
-        "Turn could not be committed" if receipt.public_message == "Turn could not be committed" else "Turn failed"
-    )
-    return recorder.record(RunFailed(code="execution_failed", message=message))
+    if receipt.failure_code == "preparation_failed":
+        return recorder.record(RunFailed(code="preparation_failed", message="Turn could not be prepared"))
+    if receipt.failure_code == "commit_failed":
+        return recorder.record(RunFailed(code="commit_failed", message="Turn could not be committed"))
+    return recorder.record(RunFailed(code="execution_failed", message="Turn failed"))
 
 
 class TurnCoordinator:
@@ -130,7 +130,15 @@ class TurnCoordinator:
             await _shield_cleanup(
                 self._lifecycle.finish(
                     start,
-                    TurnFailure("cancelled", "Turn cancelled", {}),
+                    TurnFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()),
+                )
+            )
+            raise
+        except TurnPreparationTimeout:
+            await _shield_cleanup(
+                self._lifecycle.finish(
+                    start,
+                    TurnFailure("timeout", "timeout", "Turn preparation timed out", empty_rlm_usage()),
                 )
             )
             raise
@@ -138,7 +146,12 @@ class TurnCoordinator:
             await _shield_cleanup(
                 self._lifecycle.finish(
                     start,
-                    TurnFailure("failed", "Turn could not be prepared", {}),
+                    TurnFailure(
+                        "failed",
+                        "preparation_failed",
+                        "Turn could not be prepared",
+                        empty_rlm_usage(),
+                    ),
                 )
             )
             raise
@@ -178,8 +191,8 @@ class TurnCoordinator:
                 if isinstance(event.detail, TERMINAL_DETAIL_TYPES):
                     raise RuntimeError("runner emitted a terminal Runtime Event")
                 last_sequence = event.sequence
+                recorder = EventRecorder(turn.run_id, turn.session_id, start_sequence=last_sequence)
                 yield event
-            recorder = EventRecorder(turn.run_id, turn.session_id, start_sequence=last_sequence)
             outcome = stream.outcome or RLMOutcome(
                 terminal_status="failed",
                 public_error_message="Turn failed",
@@ -188,6 +201,7 @@ class TurnCoordinator:
                 turn,
                 outcome,
                 artifact_sink=prepared.artifact_sink,
+                result_snapshot_sink=prepared.result_snapshot_sink,
             )
             settled = True
             if isinstance(receipt, CommittedTurnReceipt):
@@ -209,8 +223,9 @@ class TurnCoordinator:
                     await asyncio.shield(
                         self._lifecycle.finish(
                             turn,
-                            TurnFailure("cancelled", "Turn cancelled", {}),
+                            TurnFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()),
                             artifact_sink=prepared.artifact_sink,
+                            result_snapshot_sink=prepared.result_snapshot_sink,
                         )
                     )
                 except Exception:
@@ -222,8 +237,9 @@ class TurnCoordinator:
                     receipt = await asyncio.shield(
                         self._lifecycle.finish(
                             turn,
-                            TurnFailure("failed", "Turn failed", {}),
+                            TurnFailure("failed", "execution_failed", "Turn failed", empty_rlm_usage()),
                             artifact_sink=prepared.artifact_sink,
+                            result_snapshot_sink=prepared.result_snapshot_sink,
                         )
                     )
                     settled = True

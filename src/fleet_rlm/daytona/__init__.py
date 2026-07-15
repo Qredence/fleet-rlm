@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionTimeout
 from fleet_rlm.daytona.bindings import InMemoryBindingStore, SandboxBinding
 from fleet_rlm.daytona.client import build_daytona_client
 from fleet_rlm.daytona.errors import DaytonaAdapterError, map_provider_error
@@ -27,6 +28,8 @@ __all__ = [
     "DEFAULT_VOLUME_MOUNT_PATH",
     "DEFAULT_VOLUME_NAME",
     "DaytonaAdapterError",
+    "DaytonaAdmission",
+    "DaytonaAdmissionTimeout",
     "DaytonaCodeInterpreter",
     "DaytonaSandboxVolumeFs",
     "DaytonaSessionManager",

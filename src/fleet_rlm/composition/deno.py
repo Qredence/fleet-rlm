@@ -14,7 +14,7 @@ from fleet_rlm.composition.common import (
     build_local_storage_adapters,
     host_roots,
     install_local_inventory,
-    run_budget,
+    rlm_options,
 )
 from fleet_rlm.config import Settings
 from fleet_rlm.skills.registry import InMemorySkillRegistry
@@ -82,11 +82,13 @@ def install_deno_composition(
         artifact_reader=storage.artifact_reader,
         preparation=DenoTurnPreparation(
             attachments=storage.attachment_lifecycle,
-            budget=run_budget(settings),
+            options=rlm_options(settings),
+            turn_timeout_seconds=settings.turn_timeout_seconds,
             root_lm=root_lm,
             sub_lm=sub_lm,
             skill_registry=getattr(app.state, "skill_registry", None) or InMemorySkillRegistry(),
             capability_registry=getattr(app.state, "capability_registry", None),
+            max_artifact_bytes=settings.max_artifact_bytes,
         ),
         rlm_factory=RLMFactory(),
         workspace_volume_mirror=None,

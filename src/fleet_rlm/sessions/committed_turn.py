@@ -8,6 +8,8 @@ from types import MappingProxyType
 from typing import Any, Literal, TypeAlias, cast
 from uuid import UUID
 
+from fleet_rlm.rlm.dspy_contract import RLMUsage, validate_rlm_usage
+
 JsonScalar: TypeAlias = None | bool | int | float | str
 JsonValue: TypeAlias = JsonScalar | tuple["JsonValue", ...] | Mapping[str, "JsonValue"]
 
@@ -179,11 +181,15 @@ class ArtifactPart:
 
 @dataclass(frozen=True, slots=True)
 class UsagePart:
-    value: Mapping[str, JsonValue]
+    value: RLMUsage
     type: Literal["usage"] = "usage"
 
     def __post_init__(self) -> None:
-        value = _freeze_json(self.value, path="usage.value")
+        try:
+            usage = validate_rlm_usage(self.value)
+        except ValueError as exc:
+            raise CommittedTurnValidationError(str(exc)) from exc
+        value = _freeze_json(usage, path="usage.value")
         if not isinstance(value, Mapping):
             raise CommittedTurnValidationError("usage value must be a JSON object")
         object.__setattr__(self, "value", value)
@@ -206,6 +212,10 @@ class StructuredResultPart:
 class TextPart:
     text: str
     type: Literal["text"] = "text"
+
+    def __post_init__(self) -> None:
+        if not self.text.strip():
+            raise CommittedTurnValidationError("a committed Turn requires non-blank final text")
 
 
 CommittedPart: TypeAlias = (
@@ -428,7 +438,7 @@ def _decode_part(value: object) -> CommittedPart:
         )
     if part_type == "usage":
         _expect_exact(data, {"type", "value"})
-        return UsagePart(value=cast(Mapping[str, JsonValue], _expect_mapping(data["value"], "usage.value")))
+        return UsagePart(value=cast(RLMUsage, _expect_mapping(data["value"], "usage.value")))
     if part_type == "structured_result":
         _expect_exact(data, {"type", "schema_id", "schema_version", "value"})
         return StructuredResultPart(

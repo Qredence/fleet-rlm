@@ -1,0 +1,179 @@
+"""Coordinator acceptance through the real RLMRunner failure boundary."""
+
+from __future__ import annotations
+
+import asyncio
+import threading
+from types import SimpleNamespace
+from typing import Literal
+from uuid import uuid4
+
+import dspy
+import pytest
+
+from fleet_rlm.chat.commands import OpenTurnCommand
+from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, TurnLifecycleModule
+from fleet_rlm.persistence.repositories import InMemoryTurnStateStore
+from fleet_rlm.rlm.context import RLMExecutionContext
+from fleet_rlm.rlm.dspy_contract import RLMOptions
+from fleet_rlm.rlm.events import (
+    TERMINAL_DETAIL_TYPES,
+    RunCancelled,
+    RunFailed,
+    RunStarted,
+    RunTimedOut,
+    RuntimeEvent,
+)
+from fleet_rlm.rlm.runner import RLMRunner
+from fleet_rlm.sessions.models import TurnAccess, TurnInput
+from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
+
+FailureMode = Literal["invalid_output", "internal_cancel", "timeout"]
+HarnessMode = FailureMode | Literal["caller_cancel"]
+
+
+class _Capabilities:
+    blueprint = TurnCapabilityBlueprint()
+
+    def drain_public_details(self):
+        return ()
+
+    def drain_artifact_candidates(self):
+        return ()
+
+    async def aclose(self) -> None:
+        return None
+
+
+class _Program:
+    def __init__(self, mode: HarnessMode, started: threading.Event) -> None:
+        self._mode = mode
+        self._started = started
+
+    async def acall(self, **_kwargs) -> dspy.Prediction:
+        self._started.set()
+        if self._mode == "invalid_output":
+            return dspy.Prediction(answer="")
+        await asyncio.sleep(0.05)
+        return dspy.Prediction(answer="too late")
+
+
+class _Factory:
+    def __init__(self, mode: HarnessMode, started: threading.Event) -> None:
+        self._mode = mode
+        self._started = started
+
+    def create(self, **_kwargs):
+        return _Program(self._mode, self._started)
+
+
+class _Harness:
+    def __init__(self, mode: HarnessMode) -> None:
+        self.mode = mode
+        self.access = TurnAccess(uuid4(), uuid4())
+        self.store = InMemoryTurnStateStore()
+        self.lifecycle = TurnLifecycleModule(self.store, max_artifact_bytes=1024)
+        self.session_id = uuid4()
+        self.run_id = uuid4()
+        self.cleanup_calls = 0
+        self.program_started = threading.Event()
+
+    async def start(self) -> None:
+        await self.store.add_session(self.session_id, self.access)
+
+    async def prepare(self, turn: ExecuteTurn):
+        if self.mode == "internal_cancel":
+            assert await self.lifecycle.request_cancel(self.access, turn.run_id) == "requested"
+        now = asyncio.get_running_loop().time()
+        deadline = now if self.mode == "timeout" else now + 10
+        execution = RLMExecutionContext(
+            run_id=turn.run_id,
+            session_id=turn.session_id,
+            access=turn.access,
+            request=turn.input.text,
+            history=(),
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=deadline,
+            interpreter=None,
+            attachments=(),
+            capabilities=_Capabilities(),
+            cancellation_requested=turn.cancellation_requested,
+            preparation_notices=(),
+        )
+        harness = self
+
+        class Prepared:
+            artifact_sink = None
+            result_snapshot_sink = None
+
+            def __init__(self) -> None:
+                self.execution = execution
+
+            async def aclose(self) -> None:
+                harness.cleanup_calls += 1
+
+        return Prepared()
+
+    async def collect(self) -> list[RuntimeEvent]:
+        await self.start()
+        coordinator = TurnCoordinator(
+            lifecycle=self.lifecycle,
+            preparation=self,
+            runner=RLMRunner(factory=_Factory(self.mode, self.program_started)),
+        )
+        opened = await coordinator.open(
+            OpenTurnCommand(
+                self.access,
+                self.session_id,
+                TurnInput(self.mode),
+                self.mode,
+                self.run_id,
+            )
+        )
+        return [event async for event in opened]
+
+
+def _assert_stream_invariants(events: list[RuntimeEvent], terminal_type: type[object]) -> None:
+    assert isinstance(events[0].detail, RunStarted)
+    assert [event.sequence for event in events] == list(range(1, len(events) + 1))
+    assert all(not isinstance(event.detail, TERMINAL_DETAIL_TYPES) for event in events[:-1])
+    assert sum(isinstance(event.detail, TERMINAL_DETAIL_TYPES) for event in events) == 1
+    assert isinstance(events[-1].detail, terminal_type)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "terminal_type"),
+    (
+        ("invalid_output", RunFailed),
+        ("internal_cancel", RunCancelled),
+        ("timeout", RunTimedOut),
+    ),
+)
+async def test_real_runner_failure_modes_have_one_ordered_terminal(
+    mode: FailureMode,
+    terminal_type: type[object],
+) -> None:
+    harness = _Harness(mode)
+
+    events = await harness.collect()
+
+    _assert_stream_invariants(events, terminal_type)
+    assert harness.cleanup_calls == 1
+    assert await harness.store.turn_records(harness.session_id, harness.access) == ()
+
+
+@pytest.mark.asyncio
+async def test_true_caller_cancellation_still_propagates_after_runner_starts() -> None:
+    harness = _Harness("caller_cancel")
+    task = asyncio.create_task(harness.collect())
+    assert await asyncio.to_thread(harness.program_started.wait, 1)
+
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert harness.cleanup_calls == 1
+    assert await harness.store.turn_records(harness.session_id, harness.access) == ()

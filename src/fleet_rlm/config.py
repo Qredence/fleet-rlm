@@ -64,17 +64,20 @@ class Settings(BaseSettings):
         default=10 * 1024 * 1024,
         description="Maximum artifact body size in bytes",
     )
-    budget_max_wall_seconds: int = Field(
+    turn_timeout_seconds: int = Field(
         default=900,
         gt=0,
-        description="Maximum wall-clock seconds allowed for one RLM Turn",
+        description="Turn Timeout in wall-clock seconds for one RLM Turn",
     )
-    budget_max_iterations: int = Field(default=6, gt=0)
-    budget_max_llm_calls: int = Field(default=16, gt=0)
-    budget_max_output_chars: int = Field(default=3_000, gt=0)
-    budget_max_sub_lm_concurrency: int = Field(default=8, gt=0)
-    budget_max_tool_calls: int = Field(default=32, gt=0)
-    budget_max_skill_loads: int = Field(default=8, gt=0)
+    max_active_daytona_leases: int = Field(
+        default=8,
+        gt=0,
+        le=8,
+        description="Daytona Admission bound for process-wide acquiring or active Interpreter Leases",
+    )
+    rlm_max_iterations: int = Field(default=20, gt=0)
+    rlm_max_llm_calls: int = Field(default=50, gt=0)
+    rlm_max_output_chars: int = Field(default=10_000, gt=0)
     run_heartbeat_seconds: int = Field(default=10, gt=0)
     run_stale_after_seconds: int = Field(default=60, gt=0)
 

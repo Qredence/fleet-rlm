@@ -33,15 +33,12 @@ class SkillToolHost:
         *,
         user_id: UUID,
         workspace_id: UUID,
-        max_skill_loads: int = 8,
         allowed_trust: frozenset[str] | None = None,
     ) -> None:
         self._authorizer = authorizer
         self._user_id = user_id
         self._workspace_id = workspace_id
-        self._max_skill_loads = max(0, int(max_skill_loads))
         self._allowed_trust = allowed_trust if allowed_trust is not None else _DEFAULT_TRUST
-        self._load_count = 0
         self._pending_events: list[dict[str, Any]] = []
 
     def drain_public_events(self) -> list[dict[str, Any]]:
@@ -79,12 +76,9 @@ class SkillToolHost:
         expected_version: str | None = None,
     ) -> dict[str, Any]:
         """Return instructions only after host reauth. Emits skill.loaded ledger entry."""
-        if self._load_count >= self._max_skill_loads:
-            return {"ok": False, "error": "budget_exceeded"}
         record, err = self._resolve_record(skill_id, expected_version=expected_version)
         if err or record is None:
             return {"ok": False, "error": err or "skill_not_found"}
-        self._load_count += 1
         self._pending_events.append(skill_loaded_public_payload(record))
         return {
             "ok": True,

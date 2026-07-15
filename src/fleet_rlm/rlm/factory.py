@@ -7,8 +7,7 @@ from typing import Any
 
 import dspy
 
-from fleet_rlm.rlm.budgets import RunBudget
-from fleet_rlm.rlm.compat import build_native_rlm
+from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.signature import FleetRLMSignature
 from fleet_rlm.skills.capabilities import RLMTool
@@ -23,7 +22,7 @@ class RLMFactory:
         self,
         *,
         models: RLMModelBundle,
-        budget: RunBudget,
+        options: RLMOptions,
         interpreter: Any,
         tools: Sequence[RLMTool] | None = None,
         signature: type[dspy.Signature] | str | None = None,
@@ -33,9 +32,7 @@ class RLMFactory:
         resolved_signature: type[dspy.Signature] | str = signature if signature is not None else FleetRLMSignature
         return build_native_rlm(
             signature=resolved_signature,
-            max_iters=budget.max_iterations,
-            max_llm_calls=budget.max_llm_calls,
-            max_output_chars=budget.max_output_chars,
+            options=options,
             tools=tools,
             sub_lm=models.sub_lm,
             interpreter=interpreter,

@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from fleet_rlm.config import Settings
-from fleet_rlm.rlm.budgets import RunBudget
+from fleet_rlm.rlm.dspy_contract import RLMOptions, assert_dspy_version
 
 
 class CompositionError(RuntimeError):
@@ -111,16 +111,12 @@ def build_local_storage_adapters(
     return LocalStorageAdapters(attachment_lifecycle, artifact_reader)
 
 
-def run_budget(settings: Settings) -> RunBudget:
-    """Project Settings onto the canonical per-Run Budget."""
-    return RunBudget(
-        max_iterations=settings.budget_max_iterations,
-        max_llm_calls=settings.budget_max_llm_calls,
-        max_output_chars=settings.budget_max_output_chars,
-        max_wall_seconds=settings.budget_max_wall_seconds,
-        max_sub_lm_concurrency=settings.budget_max_sub_lm_concurrency,
-        max_tool_calls=settings.budget_max_tool_calls,
-        max_skill_loads=settings.budget_max_skill_loads,
+def rlm_options(settings: Settings) -> RLMOptions:
+    """Project Settings onto the exact native DSPy RLM options."""
+    return RLMOptions(
+        max_iterations=settings.rlm_max_iterations,
+        max_llm_calls=settings.rlm_max_llm_calls,
+        max_output_chars=settings.rlm_max_output_chars,
     )
 
 
@@ -143,6 +139,7 @@ def install_local_inventory(
     workspace_volume_mirror: Any | None,
 ) -> LocalCompositionHandles:
     """Attach the shared in-memory/SQL inventory for one local runtime."""
+    assert_dspy_version()
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
     from fleet_rlm.persistence.repositories import (

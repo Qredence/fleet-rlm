@@ -1,6 +1,6 @@
 ---
 name: diagnostics
-description: "Diagnose fleet_rlm failures — Daytona leases, SSE chat, budgets, and runtime profiles. Use when something is broken."
+description: "Diagnose fleet_rlm failures — Daytona Admission, Interpreter Leases, SSE chat, Turn Timeout, RLM Options, and runtime profiles. Use when something is broken."
 ---
 
 # Diagnostics (clean)
@@ -14,13 +14,13 @@ description: "Diagnose fleet_rlm failures — Daytona leases, SSE chat, budgets,
    - Run `scripts/diagnose.py` (presence checks only; never print secrets)
 
 2. **"Turn cancelled / timed out"**
-   - Client cancel via runs API vs wall budget `max_wall_seconds`
+   - Client cancel via runs API vs `turn_timeout_seconds`
    - Lease must release on cancel; sandbox must not be deleted by release
 
 3. **"Skill load fails"**
    - Cards are metadata only; body requires `load_skill(skill_id)` after authorize
    - Hidden / foreign-workspace skills look like not found
-   - Budget: `max_skill_loads`
+   - Recheck authorization, expected version, and normalized resource path
 
 4. **"Attachment / artifact tool fails"**
    - Invalid UUID ids → sanitized error
@@ -64,4 +64,4 @@ Checks package import, key env **presence** (values redacted), and runtime setti
 ## See also
 
 - **sandbox-execution** — interpreter and volume settings
-- **rlm** — budgets and product surface
+- **rlm** — RLM Options and product surface

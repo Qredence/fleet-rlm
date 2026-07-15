@@ -72,4 +72,4 @@ finally:
 
 - **volume-bootstrap** — directory contract under the mount
 - **diagnostics** — lease / Daytona / auth failures
-- **rlm** — budgets and SSE turn surface
+- **rlm** — RLM Options and SSE Turn surface

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any, assert_never
 
 from fleet_rlm.sessions.committed_turn import (
@@ -20,6 +21,14 @@ from fleet_rlm.sessions.committed_turn import (
     WarningPart,
 )
 from fleet_rlm.sessions.models import AssistantTurnRecord, UserTurnRecord
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_json_value(item) for item in value]
+    return value
 
 
 def _assistant_part(part: CommittedPart) -> dict[str, Any]:
@@ -85,7 +94,7 @@ def _assistant_part(part: CommittedPart) -> dict[str, Any]:
             },
         }
     if isinstance(part, UsagePart):
-        return {"type": "data-usage", "data": dict(part.value)}
+        return {"type": "data-usage", "data": _json_value(part.value)}
     if isinstance(part, StructuredResultPart):
         return {
             "type": "data-structured-result",

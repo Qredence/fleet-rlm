@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 
+from fleet_rlm.daytona.active_leases import ActiveLeaseConflictError
+from fleet_rlm.daytona.admission import DaytonaAdmission
 from fleet_rlm.daytona.bindings import InMemoryBindingStore, SandboxBinding
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
 from fleet_rlm.daytona.lifecycle import LifecycleCapabilityError
@@ -152,9 +156,42 @@ class _FakePlatform:
         self.sandboxes.pop(sandbox_id, None)
 
 
+class _CountingBackend:
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+class _BlockingCreatePlatform(_FakePlatform):
+    def __init__(self, expected_entries: int) -> None:
+        super().__init__()
+        self.expected_entries = expected_entries
+        self.entered = 0
+        self.entered_lock = threading.Lock()
+        self.all_entered = threading.Event()
+        self.release_creates = threading.Event()
+        self.backends: list[_CountingBackend] = []
+
+    def create(self, **kwargs: Any) -> _FakeSandbox:
+        sandbox = super().create(**kwargs)
+        backend = _CountingBackend()
+        sandbox.backend = backend
+        self.backends.append(backend)
+        with self.entered_lock:
+            self.entered += 1
+            if self.entered >= self.expected_entries:
+                self.all_entered.set()
+        if not self.release_creates.wait(timeout=5):
+            raise TimeoutError("test provider create gate timed out")
+        return sandbox
+
+
 def _manager(
     platform: _FakePlatform | None = None,
     bindings: InMemoryBindingStore | None = None,
+    admission: DaytonaAdmission | None = None,
 ) -> tuple[DaytonaSessionManager, _FakePlatform, InMemoryBindingStore, _FakeVolumeClient]:
     plat = platform or _FakePlatform()
     store = bindings or InMemoryBindingStore()
@@ -164,6 +201,7 @@ def _manager(
         volume_client=volumes,
         volume_config=VolumeConfig(),
         bindings=store,
+        admission=admission,
     )
     return mgr, plat, store, volumes
 
@@ -172,11 +210,15 @@ def _request() -> LeaseRequest:
     return LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=uuid4())
 
 
+async def _acquire(mgr: DaytonaSessionManager, request: LeaseRequest):
+    return await mgr.acquire(request, deadline=asyncio.get_running_loop().time() + 10)
+
+
 @pytest.mark.asyncio
 async def test_acquire_creates_running_sandbox_and_lease() -> None:
     mgr, plat, store, volumes = _manager()
     req = _request()
-    lease = await mgr.acquire(req)
+    lease = await _acquire(mgr, req)
 
     assert lease.sandbox_id in plat.sandboxes
     assert lease.volume_id.startswith("vol-")
@@ -213,11 +255,11 @@ async def test_acquire_retries_only_safe_pre_creation_failures(
     volumes.failures = [failure]
 
     if expected_calls == 2:
-        lease = await mgr.acquire(_request())
+        lease = await _acquire(mgr, _request())
         assert lease.sandbox_id in plat.sandboxes
     else:
         with pytest.raises(ProviderRequestError):
-            await mgr.acquire(_request())
+            await _acquire(mgr, _request())
 
     assert len(volumes.gets) == expected_calls
 
@@ -233,7 +275,7 @@ async def test_acquire_never_retries_ambiguous_sandbox_creation_failure() -> Non
     mgr, _plat, _store, _volumes = _manager(platform=platform)
 
     with pytest.raises(ProviderRequestError):
-        await mgr.acquire(_request())
+        await _acquire(mgr, _request())
 
     assert platform._n == 1
 
@@ -244,7 +286,7 @@ async def test_acquire_retries_a_transient_pre_creation_failure_at_most_once() -
     volumes.failures = [TimeoutError("one"), TimeoutError("two"), TimeoutError("three")]
 
     with pytest.raises(ProviderRequestError):
-        await mgr.acquire(_request())
+        await _acquire(mgr, _request())
 
     assert len(volumes.gets) == 2
     assert len(volumes.failures) == 1
@@ -254,16 +296,16 @@ async def test_acquire_retries_a_transient_pre_creation_failure_at_most_once() -
 async def test_acquire_rejects_zero_workspace_id() -> None:
     mgr, _plat, _store, _volumes = _manager()
     with pytest.raises(ValueError, match="zero UUID"):
-        await mgr.acquire(LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=UUID(int=0)))
+        await _acquire(mgr, LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=UUID(int=0)))
 
 
 @pytest.mark.asyncio
 async def test_acquire_reuses_running_sandbox() -> None:
     mgr, plat, store, _volumes = _manager()
     req = _request()
-    first = await mgr.acquire(req)
+    first = await _acquire(mgr, req)
     await mgr.release(first)  # release active lease before re-acquire
-    second = await mgr.acquire(req)
+    second = await _acquire(mgr, req)
     assert first.sandbox_id == second.sandbox_id
     assert len(plat.created) == 1
 
@@ -272,7 +314,7 @@ async def test_acquire_reuses_running_sandbox() -> None:
 async def test_stop_start_lifecycle() -> None:
     mgr, plat, _store, _volumes = _manager()
     req = _request()
-    lease = await mgr.acquire(req)
+    lease = await _acquire(mgr, req)
     await mgr.stop(lease.sandbox_id)
     assert plat.sandboxes[lease.sandbox_id].state == "stopped"
     await mgr.start(lease.sandbox_id)
@@ -283,7 +325,7 @@ async def test_stop_start_lifecycle() -> None:
 async def test_pause_resume_when_supported() -> None:
     mgr, plat, _store, _volumes = _manager()
     req = _request()
-    lease = await mgr.acquire(req)
+    lease = await _acquire(mgr, req)
     await mgr.pause(lease.sandbox_id)
     assert plat.sandboxes[lease.sandbox_id].state == "paused"
     await mgr.resume(lease.sandbox_id)
@@ -318,7 +360,7 @@ async def test_pause_raises_when_unsupported() -> None:
 async def test_release_never_deletes_sandbox() -> None:
     mgr, plat, _store, _volumes = _manager()
     req = _request()
-    lease = await mgr.acquire(req)
+    lease = await _acquire(mgr, req)
     sid = lease.sandbox_id
     await mgr.release(lease)
     await mgr.release(lease)  # idempotent
@@ -327,10 +369,167 @@ async def test_release_never_deletes_sandbox() -> None:
 
 
 @pytest.mark.asyncio
+async def test_acquisition_error_restores_admission_capacity() -> None:
+    admission = DaytonaAdmission(max_active_leases=1)
+    mgr, plat, _store, volumes = _manager(admission=admission)
+    request = _request()
+    volumes.failures = [ProviderRequestError("quota", cause_type="QuotaError", status_code=429)]
+
+    with pytest.raises(ProviderRequestError):
+        await mgr.acquire(request, deadline=asyncio.get_running_loop().time() + 10)
+
+    lease = await mgr.acquire(request, deadline=asyncio.get_running_loop().time() + 10)
+    await mgr.release(lease)
+    assert lease.sandbox_id in plat.sandboxes
+
+
+@pytest.mark.asyncio
+async def test_eight_provider_acquisitions_hold_admission_and_ninth_waits() -> None:
+    platform = _BlockingCreatePlatform(expected_entries=8)
+    admission = DaytonaAdmission(max_active_leases=8)
+    mgr, _plat, _store, _volumes = _manager(platform=platform, admission=admission)
+    deadline = asyncio.get_running_loop().time() + 10
+    acquisitions = [asyncio.create_task(mgr.acquire(_request(), deadline=deadline)) for _ in range(8)]
+    assert await asyncio.to_thread(platform.all_entered.wait, 2)
+
+    ninth = asyncio.create_task(mgr.acquire(_request(), deadline=deadline))
+    await asyncio.sleep(0)
+    assert platform.entered == 8
+    assert not ninth.done()
+
+    platform.release_creates.set()
+    leases = list(await asyncio.gather(*acquisitions))
+    await asyncio.sleep(0)
+    assert platform.entered == 8
+    assert not ninth.done()
+
+    await mgr.release(leases.pop())
+    ninth_lease = await asyncio.wait_for(ninth, timeout=2)
+    assert platform.entered == 9
+    await mgr.release(ninth_lease)
+    for lease in leases:
+        await mgr.release(lease)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_provider_create_settles_before_releasing_ownership() -> None:
+    platform = _BlockingCreatePlatform(expected_entries=1)
+    admission = DaytonaAdmission(max_active_leases=1)
+    mgr, _plat, _store, _volumes = _manager(platform=platform, admission=admission)
+    deadline = asyncio.get_running_loop().time() + 10
+    cancelled_request = _request()
+    cancelled = asyncio.create_task(mgr.acquire(cancelled_request, deadline=deadline))
+    assert await asyncio.to_thread(platform.all_entered.wait, 2)
+
+    cancelled.cancel()
+    replacement = asyncio.create_task(mgr.acquire(_request(), deadline=deadline))
+    await asyncio.sleep(0)
+    assert not cancelled.done()
+    assert not replacement.done()
+    assert platform.entered == 1
+
+    platform.release_creates.set()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled
+    replacement_lease = await asyncio.wait_for(replacement, timeout=2)
+
+    from fleet_rlm.daytona.active_leases import get_active_lease_registry
+
+    assert get_active_lease_registry().holder(cancelled_request.session_id) is None
+    assert platform.backends[0].close_calls == 1
+    assert platform.deleted == []
+    await mgr.release(replacement_lease)
+
+
+@pytest.mark.asyncio
+async def test_provider_acquisition_deadline_settles_late_lease_before_releasing_ownership() -> None:
+    from fleet_rlm.daytona.active_leases import get_active_lease_registry
+    from fleet_rlm.daytona.session_manager import DaytonaLeaseAcquisitionTimeout
+
+    platform = _BlockingCreatePlatform(expected_entries=1)
+    admission = DaytonaAdmission(max_active_leases=1)
+    mgr, _plat, _store, _volumes = _manager(platform=platform, admission=admission)
+    request = _request()
+    acquisition = asyncio.create_task(mgr.acquire(request, deadline=asyncio.get_running_loop().time() + 0.05))
+    assert await asyncio.to_thread(platform.all_entered.wait, 2)
+    await asyncio.sleep(0.1)
+
+    assert not acquisition.done(), "late provider work must settle before ownership is released"
+    assert get_active_lease_registry().holder(request.session_id) is not None
+
+    platform.release_creates.set()
+    with pytest.raises(DaytonaLeaseAcquisitionTimeout):
+        await acquisition
+    assert get_active_lease_registry().holder(request.session_id) is None
+    assert platform.backends[0].close_calls == 1
+
+    replacement = await mgr.acquire(_request(), deadline=asyncio.get_running_loop().time() + 2)
+    await mgr.release(replacement)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_admission_wait_restores_session_claim() -> None:
+    admission = DaytonaAdmission(max_active_leases=1)
+    held = await admission.acquire(deadline=asyncio.get_running_loop().time() + 10)
+    mgr, _plat, _store, _volumes = _manager(admission=admission)
+    request = _request()
+    waiter = asyncio.create_task(mgr.acquire(request, deadline=asyncio.get_running_loop().time() + 10))
+    await asyncio.sleep(0)
+
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    held.release()
+
+    lease = await mgr.acquire(request, deadline=asyncio.get_running_loop().time() + 10)
+    await mgr.release(lease)
+
+
+@pytest.mark.asyncio
+async def test_admission_timeout_restores_session_claim() -> None:
+    from fleet_rlm.daytona.admission import DaytonaAdmissionTimeout
+
+    admission = DaytonaAdmission(max_active_leases=1)
+    held = await admission.acquire(deadline=asyncio.get_running_loop().time() + 10)
+    mgr, _plat, _store, _volumes = _manager(admission=admission)
+    request = _request()
+
+    with pytest.raises(DaytonaAdmissionTimeout):
+        await mgr.acquire(request, deadline=asyncio.get_running_loop().time())
+    held.release()
+
+    lease = await mgr.acquire(request, deadline=asyncio.get_running_loop().time() + 10)
+    await mgr.release(lease)
+
+
+@pytest.mark.asyncio
+async def test_session_claim_precedes_admission_wait() -> None:
+    admission = DaytonaAdmission(max_active_leases=1)
+    mgr, _plat, _store, _volumes = _manager(admission=admission)
+    first = _request()
+    lease = await mgr.acquire(first, deadline=asyncio.get_running_loop().time() + 10)
+    duplicate = LeaseRequest(
+        session_id=first.session_id,
+        user_id=first.user_id,
+        workspace_id=first.workspace_id,
+        run_id=uuid4(),
+    )
+
+    try:
+        with pytest.raises(ActiveLeaseConflictError):
+            await asyncio.wait_for(
+                mgr.acquire(duplicate, deadline=asyncio.get_running_loop().time() + 10),
+                timeout=0.1,
+            )
+    finally:
+        await mgr.release(lease)
+
+
+@pytest.mark.asyncio
 async def test_acquire_starts_stopped_sandbox() -> None:
     mgr, plat, store, _volumes = _manager()
     req = _request()
-    lease = await mgr.acquire(req)
+    lease = await _acquire(mgr, req)
     plat.sandboxes[lease.sandbox_id].state = "stopped"
     await store.upsert(
         SandboxBinding(
@@ -344,7 +543,7 @@ async def test_acquire_starts_stopped_sandbox() -> None:
         )
     )
     await mgr.release(lease)
-    again = await mgr.acquire(req)
+    again = await _acquire(mgr, req)
     assert again.sandbox_id == lease.sandbox_id
     assert "start" in plat.sandboxes[lease.sandbox_id].ops
 
@@ -353,7 +552,7 @@ async def test_acquire_starts_stopped_sandbox() -> None:
 async def test_acquire_maps_lifecycle_provider_failure_without_replacement() -> None:
     mgr, plat, _store, _volumes = _manager()
     req = _request()
-    lease = await mgr.acquire(req)
+    lease = await _acquire(mgr, req)
     await mgr.release(lease)
     sandbox = plat.sandboxes[lease.sandbox_id]
     sandbox.state = "stopped"
@@ -367,7 +566,7 @@ async def test_acquire_maps_lifecycle_provider_failure_without_replacement() -> 
     sandbox.start = fail_start  # type: ignore[method-assign]
 
     with pytest.raises(ProviderRequestError) as caught:
-        await mgr.acquire(req)
+        await _acquire(mgr, req)
 
     assert caught.value.status_code == 503
     assert "private" not in str(caught.value)
@@ -379,7 +578,7 @@ async def test_acquire_maps_lifecycle_provider_failure_without_replacement() -> 
 async def test_replace_keeps_volume_id() -> None:
     mgr, plat, store, _volumes = _manager()
     req = _request()
-    lease = await mgr.acquire(req)
+    lease = await _acquire(mgr, req)
     old_sid = lease.sandbox_id
     volume_id = lease.volume_id
     binding = await store.get(req.session_id)
@@ -401,7 +600,7 @@ async def test_replace_keeps_volume_id() -> None:
 async def test_replace_rejects_zero_user_id() -> None:
     mgr, _plat, store, _volumes = _manager()
     req = _request()
-    await mgr.acquire(req)
+    await _acquire(mgr, req)
     binding = await store.get(req.session_id)
     assert binding is not None
     with pytest.raises(DaytonaAdapterError, match="user_id"):
@@ -414,7 +613,7 @@ async def test_replace_rejects_zero_user_id() -> None:
 async def test_acquire_replaces_unrecoverable_provider_state() -> None:
     mgr, plat, store, _volumes = _manager()
     req = _request()
-    lease = await mgr.acquire(req)
+    lease = await _acquire(mgr, req)
     old_sid = lease.sandbox_id
     plat.sandboxes[old_sid].state = "booting"
     await store.upsert(
@@ -429,17 +628,17 @@ async def test_acquire_replaces_unrecoverable_provider_state() -> None:
         )
     )
     await mgr.release(lease)
-    again = await mgr.acquire(req)
+    again = await _acquire(mgr, req)
     assert again.sandbox_id != old_sid
     assert old_sid in plat.deleted
     assert plat.created[-1]["labels"]["user_id"] == str(req.user_id)
 
     mgr, plat, store, _volumes = _manager()
     req = _request()
-    first = await mgr.acquire(req)
+    first = await _acquire(mgr, req)
     await mgr.release(first)
     # Simulate gone sandbox
     plat.sandboxes.clear()
-    second = await mgr.acquire(req)
+    second = await _acquire(mgr, req)
     assert second.sandbox_id != first.sandbox_id
     assert len(plat.created) == 2

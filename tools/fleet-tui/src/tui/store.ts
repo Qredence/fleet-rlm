@@ -89,10 +89,11 @@ export type Message =
       id: string;
       kind: "usage";
       runId: string;
+      iterations: number;
       prompt: number;
       completion: number;
-      toolCalls: number;
-      llmCalls: number;
+      durationMs: number;
+      observedLmUsage: Record<string, unknown>;
       ts: number;
     }
   | { id: string; kind: "warning"; runId: string; code: string; message: string; ts: number }
