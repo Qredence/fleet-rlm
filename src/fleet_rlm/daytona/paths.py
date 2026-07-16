@@ -158,6 +158,11 @@ class VolumePaths:
         sid = validate_path_id(session_id, label="session_id")
         return resolve_under_root(self.mount_path, "sessions", sid, "staging")
 
+    def session_workspace_dir(self, session_id: str | UUID) -> PurePosixPath:
+        """Private durable workspace for one Session."""
+        sid = validate_path_id(session_id, label="session_id")
+        return resolve_under_root(self.mount_path, "sessions", sid, "workspace")
+
     def run_dir(self, session_id: str | UUID, run_id: str | UUID) -> PurePosixPath:
         """Unique per-run root: sessions/{session_id}/runs/{run_id}/."""
         sid = validate_path_id(session_id, label="session_id")

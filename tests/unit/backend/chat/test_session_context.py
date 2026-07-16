@@ -131,6 +131,11 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
             }
             for index in range(94, 100)
         ],
+        "workspace": {
+            "available": False,
+            "root": ".",
+            "instructions": ("Durable workspace files require the Daytona runtime; REPL variables are not durable."),
+        },
     }
     assert all(len(item["preview"]) <= 320 for item in manifest["recent"])
     encoded = json.dumps(factory.kwargs)

@@ -34,6 +34,7 @@ from fleet_rlm.files.models import (
     PreparedAttachments,
     StagedAttachment,
 )
+from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY
 from fleet_rlm.persistence.database import (
     create_async_engine_from_url,
     create_session_factory,
@@ -256,7 +257,9 @@ class _LiveCapabilityPreparer:
         environment: RunEnvironment,
         attachments: PreparedAttachments,
     ) -> LivePreparedCapabilities:
+        from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
         from fleet_rlm.files.tools import FileToolHost
+        from fleet_rlm.files.workspace_tools import WorkspaceToolHost
         from fleet_rlm.skills.authorize import SkillAuthorizer
         from fleet_rlm.skills.tools import SkillToolHost
 
@@ -274,10 +277,22 @@ class _LiveCapabilityPreparer:
             max_artifact_bytes=self.resources.settings.max_artifact_bytes,
             volume_paths=paths,
         )
+        workspace_tools = WorkspaceToolHost(
+            DaytonaSessionWorkspaceFS(
+                volume_fs.sandbox,
+                volume_root=str(paths.mount_path),
+                root=str(paths.session_workspace_dir(turn.session_id)),
+                max_file_bytes=self.resources.settings.max_upload_bytes,
+            ),
+            max_file_bytes=self.resources.settings.max_upload_bytes,
+        ).as_tools()
         history_tools = SessionHistoryToolHost(turn.history).as_tools()
         if self.resources.skill_registry is None:
             return LivePreparedCapabilities(
-                TurnCapabilityBlueprint(tools=(*file_host.as_tool_callables(), *history_tools)),
+                TurnCapabilityBlueprint(
+                    tools=(*file_host.as_tool_callables(), *workspace_tools, *history_tools),
+                    workspace=DAYTONA_WORKSPACE_CAPABILITY,
+                ),
                 files=file_host,
                 skills=_EmptySkillHost(),
             )
@@ -287,10 +302,18 @@ class _LiveCapabilityPreparer:
             user_id=turn.access.user_id,
             workspace_id=turn.access.workspace_id,
         )
-        tools = (*file_host.as_tool_callables(), *history_tools, *skill_host.as_tool_callables())
+        tools = (
+            *file_host.as_tool_callables(),
+            *workspace_tools,
+            *history_tools,
+            *skill_host.as_tool_callables(),
+        )
         cards = authorizer.list_cards(user_id=turn.access.user_id, workspace_id=turn.access.workspace_id)
         if self.resources.capability_registry is None:
-            blueprint = TurnCapabilityBlueprint(tools=tools)
+            blueprint = TurnCapabilityBlueprint(
+                tools=tools,
+                workspace=DAYTONA_WORKSPACE_CAPABILITY,
+            )
         else:
             blueprint = await CapabilityResolver(self.resources.capability_registry).resolve(
                 CapabilityResolutionContext(
@@ -305,6 +328,7 @@ class _LiveCapabilityPreparer:
                     skill_cards=cards,
                     attachments=attachments.refs,
                     tools=tools,
+                    workspace=DAYTONA_WORKSPACE_CAPABILITY,
                 )
             )
         return LivePreparedCapabilities(blueprint, files=file_host, skills=skill_host)

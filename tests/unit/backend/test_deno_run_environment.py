@@ -136,8 +136,17 @@ async def test_deno_capability_preparer_excludes_create_artifact() -> None:
 
     tool_names = {str(getattr(tool, "name", getattr(tool, "__name__", ""))) for tool in prepared.blueprint.tools}
     assert "create_artifact" not in tool_names
+    assert not {
+        "list_workspace_files",
+        "stat_workspace_file",
+        "read_workspace_text",
+        "write_workspace_text",
+    }.intersection(tool_names)
     assert "read_attachment" in tool_names
     assert "read_session_history" in tool_names
+    assert prepared.blueprint.workspace.available is False
+    assert prepared.blueprint.workspace.root == "."
+    assert "Daytona" in prepared.blueprint.workspace.instructions
     assert prepared.drain_artifact_candidates() == ()
 
 

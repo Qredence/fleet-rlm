@@ -31,6 +31,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.files.workspace_models import WorkspaceCapabilityMetadata
     from fleet_rlm.rlm.context import RLMExecutionContext
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted
@@ -39,7 +40,9 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
     class Capabilities:
-        blueprint = TurnCapabilityBlueprint()
+        blueprint = TurnCapabilityBlueprint(
+            workspace=WorkspaceCapabilityMetadata(True, ".", "Use durable workspace tools."),
+        )
 
         def drain_public_details(self):
             return ()
@@ -63,6 +66,11 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
             class Program:
                 async def acall(self, **call_kwargs):
                     assert call_kwargs["request"] == "answer"
+                    assert call_kwargs["session_context"]["workspace"] == {
+                        "available": True,
+                        "root": ".",
+                        "instructions": "Use durable workspace tools.",
+                    }
                     assert threading.get_ident() != main_thread
                     interpreter.observer(StepStarted(1))
                     interpreter.observer(RLMCode("answer = helper(value='sample')", 1))
@@ -124,7 +132,10 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         (),
     )
     stream = RLMRunner(factory=factory).stream(context)
-    Capabilities.blueprint = TurnCapabilityBlueprint(tools=(helper,))
+    Capabilities.blueprint = TurnCapabilityBlueprint(
+        tools=(helper,),
+        workspace=WorkspaceCapabilityMetadata(True, ".", "Use durable workspace tools."),
+    )
     events = [event async for event in stream]
 
     assert [event.kind for event in events] == [

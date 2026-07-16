@@ -21,7 +21,9 @@ and reviewed.
   interpreter. The default Fleet Signature receives only the bounded
   `session_context: dict`; registered custom Task Contracts receive only their
   declared host-bounded inputs. Older committed messages remain behind the
-  Session-scoped `read_session_history` Tool. Call the supported
+  Session-scoped `read_session_history` Tool. Runtime-specific Session Workspace
+  metadata is bounded inside the default context; Daytona alone registers the
+  four text workspace Tools. Call the supported
   `await rlm.acall(**named_inputs)` surface.
 - Compose zero to four authorized Skills through the host-owned capability
   registry. Capability tools may be plain callables or explicit `dspy.Tool`
@@ -32,13 +34,17 @@ and reviewed.
   supplement missing details from the completed native trajectory.
 - Bound and sanitize public code, output, and post-run reasoning. Project
   protected tool inputs and outputs without publishing attachment, Skill,
-  artifact, or subquery bodies.
+  artifact, Session Workspace, or subquery bodies.
 - `TurnCoordinator` owns candidate promotion, Turn Commit, terminal projection,
   final UI part ordering, and Interpreter Lease release.
 - `CommittedTurn` is the only replay source. A successful Daytona Run may retain
   one private commit-gated `result.json` derivative under its unique Run path;
   Deno has no result-snapshot sink, and the derivative is not an Artifact or API
   resource.
+- Session Workspace files are private immediate working state under
+  `sessions/{session_id}/workspace/`. They survive failed/cancelled Runs and
+  Sandbox replacement independently of Turn Commit; Deno advertises them as
+  unavailable.
 - Alembic owns live schema evolution. `create_tables` is test/offline-only.
 - Do not add `/api/v1`, WebSocket, legacy-backend, or environment compatibility
   aliases.

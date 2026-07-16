@@ -112,8 +112,20 @@ async def test_resolver_composes_plain_callable_dspy_tool_and_primary_contract()
 
 @pytest.mark.asyncio
 async def test_resolver_falls_back_to_no_skills_on_selector_failure_or_more_than_four() -> None:
+    from fleet_rlm.files.workspace_models import WorkspaceCapabilityMetadata
+
     cards = tuple(_card(f"skill-{index}") for index in range(5))
     context = _context(cards)
+    context = CapabilityResolutionContext(
+        request=context.request,
+        history=context.history,
+        models=context.models,
+        options=context.options,
+        skill_cards=context.skill_cards,
+        attachments=context.attachments,
+        tools=context.tools,
+        workspace=WorkspaceCapabilityMetadata(True, ".", "durable"),
+    )
     failed = await CapabilityResolver(
         CapabilityRegistry(),
         selector=_Selector(RuntimeError("selector unavailable")),
@@ -126,6 +138,7 @@ async def test_resolver_falls_back_to_no_skills_on_selector_failure_or_more_than
     assert failed.activated_skills == ()
     assert overflow.activated_skills == ()
     assert failed.tools == () == overflow.tools
+    assert failed.workspace == context.workspace == overflow.workspace
 
 
 @pytest.mark.asyncio

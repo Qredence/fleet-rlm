@@ -131,3 +131,111 @@ def test_observe_tool_hides_session_history_message_bodies() -> None:
         "message_count": 1,
     }
     assert "private history body" not in str(observed)
+
+
+def test_observe_tool_hides_workspace_file_bodies() -> None:
+    observed: list[object] = []
+
+    def list_workspace_files(path: str = ".", limit: int = 100) -> dict[str, object]:
+        return {
+            "ok": True,
+            "path": path,
+            "count": 1,
+            "entries": [
+                {
+                    "path": "notes/private.md",
+                    "kind": "file",
+                    "byte_size": 22,
+                    "modified_at": "2026-07-16T12:00:00Z",
+                }
+            ][:limit],
+        }
+
+    list_tool = dspy.Tool(list_workspace_files, name="list_workspace_files")
+    wrapped_list = observe_tool(list_tool, observed.append, ToolEventView(max_chars=1_000))
+    wrapped_list(path=".", limit=100)
+
+    assert observed[-1].output == {"ok": True, "path": ".", "count": 1}
+    assert "private.md" not in str(observed[-1])
+    observed.clear()
+
+    def write_workspace_text(path: str, content: str, overwrite: bool = False) -> dict[str, object]:
+        return {
+            "ok": True,
+            "path": path,
+            "kind": "file",
+            "byte_size": len(content.encode()),
+            "modified_at": "2026-07-16T12:00:00Z",
+            "private": content,
+        }
+
+    write_tool = dspy.Tool(write_workspace_text, name="write_workspace_text")
+    wrapped_write = observe_tool(write_tool, observed.append, ToolEventView(max_chars=1_000))
+    wrapped_write(path="notes/private.md", content="private workspace body", overwrite=False)
+
+    assert observed[0].input == {
+        "path": "notes/private.md",
+        "overwrite": False,
+        "content_chars": 22,
+    }
+    assert observed[1].output == {"ok": True, "path": "notes/private.md", "byte_size": 22}
+    assert "private workspace body" not in str(observed)
+
+    def read_workspace_text(path: str, max_chars: int = 10_000) -> dict[str, object]:
+        return {
+            "ok": True,
+            "path": path,
+            "content": "private workspace body",
+            "encoding": "utf-8",
+            "chars": 22,
+            "byte_size": 22,
+        }
+
+    read_tool = dspy.Tool(read_workspace_text, name="read_workspace_text")
+    wrapped_read = observe_tool(read_tool, observed.append, ToolEventView(max_chars=1_000))
+    result = wrapped_read(path="notes/private.md", max_chars=100)
+
+    assert result["content"] == "private workspace body"
+    assert observed[-2].input == {"path": "notes/private.md", "max_chars": 100}
+    assert observed[-1].output == {
+        "ok": True,
+        "path": "notes/private.md",
+        "chars": 22,
+        "byte_size": 22,
+    }
+    assert "private workspace body" not in str(observed)
+
+    def stat_workspace_file(path: str) -> dict[str, object]:
+        return {
+            "ok": True,
+            "entry": {
+                "path": path,
+                "kind": "file",
+                "byte_size": 22,
+                "modified_at": "2026-07-16T12:00:00Z",
+            },
+        }
+
+    stat_tool = dspy.Tool(stat_workspace_file, name="stat_workspace_file")
+    wrapped_stat = observe_tool(stat_tool, observed.append, ToolEventView(max_chars=1_000))
+    wrapped_stat(path="notes/private.md")
+
+    assert observed[-1].output == {
+        "ok": True,
+        "path": "notes/private.md",
+        "byte_size": 22,
+    }
+    assert "modified_at" not in str(observed[-1])
+    assert "kind" not in str(observed[-1])
+
+    def failed_workspace_read(path: str, max_chars: int = 10_000) -> dict[str, object]:
+        del path, max_chars
+        raise RuntimeError("provider secret and internal path")
+
+    failed_tool = dspy.Tool(failed_workspace_read, name="read_workspace_text")
+    wrapped_failure = observe_tool(failed_tool, observed.append, ToolEventView(max_chars=1_000))
+    with pytest.raises(RuntimeError, match="provider secret"):
+        wrapped_failure(path="notes/private.md", max_chars=100)
+
+    assert observed[-1].error == "Protected tool failed"
+    assert "internal path" not in str(observed[-1])

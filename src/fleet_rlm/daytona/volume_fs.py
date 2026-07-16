@@ -87,6 +87,11 @@ class DaytonaSandboxVolumeFs:
     def __init__(self, sandbox: Any) -> None:
         self._sandbox = sandbox
 
+    @property
+    def sandbox(self) -> Any:
+        """Live Sandbox used by richer Daytona-only filesystem adapters."""
+        return self._sandbox
+
     def write_bytes(self, logical_path: str, data: bytes) -> None:
         path = as_posix(logical_path)
         parent = str(PurePosixPath(path).parent)

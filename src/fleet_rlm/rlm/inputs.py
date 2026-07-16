@@ -10,6 +10,7 @@ from uuid import UUID
 
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.files.models import AttachmentRef
+from fleet_rlm.files.workspace_models import DENO_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
 from fleet_rlm.skills.models import SkillCard
 
 
@@ -51,11 +52,14 @@ def build_rlm_input_kwargs(
     session_context: SessionContextManifest,
     skill_cards: tuple[Any, ...] | list[Any] = (),
     attachments: tuple[Any, ...] | list[Any] = (),
+    workspace: WorkspaceCapabilityMetadata = DENO_WORKSPACE_CAPABILITY,
 ) -> dict[str, Any]:
     """Kwargs for ``rlm.aforward`` / ``forward`` matching FleetRLMSignature."""
+    context = session_context.to_input()
+    context["workspace"] = workspace.to_input()
     return {
         "request": request,
-        "session_context": session_context.to_input(),
+        "session_context": context,
         "skill_cards": [skill_card_metadata(card) for card in skill_cards],
         "attachments": [attachment_metadata(ref) for ref in attachments],
     }

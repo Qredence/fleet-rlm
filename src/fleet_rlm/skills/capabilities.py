@@ -10,6 +10,7 @@ from uuid import UUID
 
 import dspy
 
+from fleet_rlm.files.workspace_models import DENO_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.signature import FleetRLMSignature
@@ -32,6 +33,7 @@ class CapabilityResolutionContext:
     skill_cards: tuple[SkillCard, ...] = ()
     attachments: tuple[Any, ...] = ()
     tools: tuple[RLMTool, ...] = ()
+    workspace: WorkspaceCapabilityMetadata = DENO_WORKSPACE_CAPABILITY
 
 
 class SkillComposedFleetRLMSignature(FleetRLMSignature):
@@ -221,6 +223,7 @@ class TurnCapabilityBlueprint:
     input_values: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
     validators: tuple[OutputValidator, ...] = ()
     knowledge: tuple[str, ...] = ()
+    workspace: WorkspaceCapabilityMetadata = DENO_WORKSPACE_CAPABILITY
 
     @property
     def signature(self) -> type[dspy.Signature]:
@@ -263,7 +266,10 @@ class CapabilityResolver:
             )
             return self._compose(context, cards, selection)
         except Exception:  # noqa: BLE001 - selector/capability failure degrades to no Skills
-            return TurnCapabilityBlueprint(tools=tuple(context.tools or ()))
+            return TurnCapabilityBlueprint(
+                tools=tuple(context.tools or ()),
+                workspace=context.workspace,
+            )
 
     def _compose(
         self,
@@ -337,6 +343,7 @@ class CapabilityResolver:
             input_values=MappingProxyType(bound_inputs),
             validators=tuple(validator for item in registrations for validator in item.validators),
             knowledge=tuple(value for item in registrations for value in item.knowledge),
+            workspace=context.workspace,
         )
         signature_fields = getattr(blueprint.signature, "fields", {})
         if any(key not in signature_fields for key in bound_inputs):

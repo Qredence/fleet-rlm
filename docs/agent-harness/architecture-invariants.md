@@ -28,7 +28,8 @@ and its matching automated check in the same patch.
 - Pass a bounded sandbox-safe `session_context: dict` to the default Fleet
   Signature and only declared host-bounded inputs to custom Task Contracts.
   Keep older committed messages behind the Session-scoped
-  `read_session_history` Tool and invoke the supported
+  `read_session_history` Tool. Include only bounded runtime availability—not a
+  file listing—for the Session Workspace, and invoke the supported
   `await rlm.acall(**named_signature_inputs)` surface.
 - Attachment ownership validation finishes before SSE begins.
 - Artifact Candidates remain private until byte promotion and transactional Turn
@@ -49,6 +50,12 @@ them to FastAPI routes. Do not move provider calls or raw exceptions across the
 - Durable Attachment and Artifact bytes live in Workspace Volume Scope.
   Non-Turn I/O uses short-lived, workspace-labelled Sandboxes that mount only
   `workspaces/<workspace_id>` and are explicitly deleted in `finally`.
+- Daytona Session Workspace text lives under
+  `sessions/{session_id}/workspace/` inside Workspace Volume Scope. Successful
+  writes are immediate private working state, not Turn-commit candidates; Deno
+  registers no workspace tools.
+- Workspace tool events expose relative paths, counts, sizes, and status but
+  never file contents, provider paths, or raw provider failures.
 - Bytes are written before metadata. UUID-unique orphan bytes are acceptable;
   rows or public success claims without committed metadata are not.
 

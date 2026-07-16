@@ -80,6 +80,15 @@ def test_run_staging_roots_are_unique_per_run() -> None:
     assert a.name == "staging"
 
 
+def test_session_workspace_root_is_session_scoped() -> None:
+    paths = VolumePaths.from_mount()
+    session_id = uuid4()
+
+    workspace = paths.session_workspace_dir(session_id)
+
+    assert workspace == paths.session_dir(session_id) / "workspace"
+
+
 def test_resolve_under_root_rejects_escape() -> None:
     root = PurePosixPath("/home/daytona/fleet")
     with pytest.raises(UnsafePathError):

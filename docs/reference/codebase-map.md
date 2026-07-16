@@ -13,7 +13,7 @@ compatibility runtime and parallel foundation package no longer exist.
 | `rlm/` | DSPy signature, fresh-per-Turn RLM construction, RLM Options, events, runner | DSPy and domain values |
 | `daytona/` | Exclusive Daytona SDK boundary, Sandbox/lease/Volume adapters | Daytona SDK, domain values |
 | `sessions/` | Session Catalog, canonical Turn input/history, and versioned Committed Turn aggregate | domain values only |
-| `files/`, `artifacts/` | Attachment staging and Artifact Candidate promotion | storage interfaces, safe paths |
+| `files/`, `artifacts/` | Attachment staging, private Session Workspace policy/tools, and Artifact Candidate promotion | storage interfaces, safe paths |
 | `skills/` | bundled Skills, authorization, host capability registry, selection, typed task contracts, and progressive tools | domain values and package resources |
 | `persistence/` | SQLAlchemy models and repository adapters | sessions/files/artifact interfaces |
 | `observability/` | sanitized Turn records and exporters | Runtime Events |

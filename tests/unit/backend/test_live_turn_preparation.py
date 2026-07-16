@@ -20,7 +20,11 @@ from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
 
 @pytest.mark.asyncio
-async def test_live_preparation_stages_attachment_and_cleans_it(monkeypatch) -> None:
+@pytest.mark.parametrize("with_skill_registry", [False, True])
+async def test_live_preparation_stages_attachment_and_cleans_it(
+    monkeypatch,
+    with_skill_registry: bool,
+) -> None:
     data = b"attachment body"
     attachment_id = uuid4()
     ref = AttachmentRef(
@@ -33,8 +37,8 @@ async def test_live_preparation_stages_attachment_and_cleans_it(monkeypatch) -> 
     volume: dict[str, bytes] = {}
 
     class VolumeFs:
-        def __init__(self, _sandbox) -> None:
-            pass
+        def __init__(self, sandbox) -> None:
+            self.sandbox = sandbox
 
         def read_bytes(self, path: str) -> bytes:
             return volume[path]
@@ -69,7 +73,12 @@ async def test_live_preparation_stages_attachment_and_cleans_it(monkeypatch) -> 
     resources.platform = SimpleNamespace(get=lambda _sandbox_id: object())
     resources.models = RLMModelBundle(object(), object())
     resources._sandbox_ids = []
-    resources.skill_registry = None
+    if with_skill_registry:
+        from fleet_rlm.skills.registry import InMemorySkillRegistry
+
+        resources.skill_registry = InMemorySkillRegistry()
+    else:
+        resources.skill_registry = None
     resources.capability_registry = None
     resources.attachment_store = AttachmentStore()
 
@@ -89,14 +98,23 @@ async def test_live_preparation_stages_attachment_and_cleans_it(monkeypatch) -> 
 
     assert prepared.execution.attachments[0].attachment_id == attachment_id
     assert data in volume.values()
+    expected_tools = {
+        "create_artifact",
+        "list_workspace_files",
+        "read_attachment",
+        "read_workspace_text",
+        "read_session_history",
+        "stat_workspace_file",
+        "write_workspace_text",
+    }
+    if with_skill_registry:
+        expected_tools.update({"load_skill", "read_skill_resource"})
     assert {
         str(getattr(tool, "name", getattr(tool, "__name__", "")))
         for tool in prepared.execution.capabilities.blueprint.tools
-    } == {
-        "create_artifact",
-        "read_attachment",
-        "read_session_history",
-    }
+    } == expected_tools
+    assert prepared.execution.capabilities.blueprint.workspace.available is True
+    assert prepared.execution.capabilities.blueprint.workspace.root == "."
     assert prepared.result_snapshot_sink is prepared.artifact_sink
     assert prepared.result_snapshot_sink.result_path(turn.session_id, turn.run_id).endswith(
         f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"

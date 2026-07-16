@@ -16,6 +16,7 @@ from fleet_rlm.chat.turn_preparation import (
 )
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.models import PreparedAttachments
+from fleet_rlm.files.workspace_models import DENO_WORKSPACE_CAPABILITY
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import AttachmentRead, SkillLoaded
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
@@ -202,6 +203,7 @@ class _DenoCapabilityPreparer:
                 skill_cards=cards,
                 attachments=attachments.refs,
                 tools=tools,
+                workspace=DENO_WORKSPACE_CAPABILITY,
             )
         )
 

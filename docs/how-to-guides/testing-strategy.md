@@ -10,6 +10,7 @@ client. Generated API types are synchronized only through `make api-sync`.
 | Unit | `tests/unit/backend/` | domain, adapters, configuration, and route modules |
 | Contract | `tests/contracts/backend/` | API, persistence, packaging, and boundary contracts |
 | Live durability | `tests/live/backend/test_b5_attachment_artifact_durability.py` | Workspace Volume Attachment/Artifact persistence |
+| Live workspace | `tests/live/backend/test_phase7_workspace_durability.py` | Session Workspace persistence across Sandbox replacement |
 
 ## Local Gate
 
@@ -75,6 +76,7 @@ Live tests require canonical `FLEET_*` credentials and explicit opt-in:
 
 ```bash
 FLEET_LIVE=1 uv run pytest tests/live/backend/test_b5_attachment_artifact_durability.py -q
+FLEET_LIVE=1 uv run pytest tests/live/backend/test_phase7_workspace_durability.py -q
 ```
 
 No pre-cutover or provider-specific environment aliases are supported.

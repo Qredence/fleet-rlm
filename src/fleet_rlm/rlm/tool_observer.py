@@ -21,6 +21,10 @@ _PROTECTED_TOOL_NAMES = frozenset(
         "load_skill",
         "read_skill_resource",
         "read_session_history",
+        "list_workspace_files",
+        "stat_workspace_file",
+        "read_workspace_text",
+        "write_workspace_text",
         "llm_query",
         "llm_query_batched",
     }
@@ -81,6 +85,25 @@ def _public_tool_input(
             "offset": _safe_value(_argument(args, kwargs, "offset", 0), max_chars=max_chars),
             "limit": _safe_value(_argument(args, kwargs, "limit", 1), max_chars=max_chars),
         }
+    if name == "list_workspace_files":
+        return {
+            "path": _safe_value(_argument(args, kwargs, "path", 0), max_chars=max_chars),
+            "limit": _safe_value(_argument(args, kwargs, "limit", 1), max_chars=max_chars),
+        }
+    if name == "stat_workspace_file":
+        return {"path": _safe_value(_argument(args, kwargs, "path", 0), max_chars=max_chars)}
+    if name == "read_workspace_text":
+        return {
+            "path": _safe_value(_argument(args, kwargs, "path", 0), max_chars=max_chars),
+            "max_chars": _safe_value(_argument(args, kwargs, "max_chars", 1), max_chars=max_chars),
+        }
+    if name == "write_workspace_text":
+        content = _argument(args, kwargs, "content", 1)
+        return {
+            "path": _safe_value(_argument(args, kwargs, "path", 0), max_chars=max_chars),
+            "overwrite": _safe_value(_argument(args, kwargs, "overwrite", 2), max_chars=max_chars),
+            "content_chars": len(str(content or "")),
+        }
     if name == "llm_query":
         prompt = _argument(args, kwargs, "prompt", 0)
         return {"prompt_chars": len(str(prompt or ""))}
@@ -114,6 +137,20 @@ def _public_tool_output(name: str, result: Any, *, max_chars: int) -> Any:
         }
         projected["message_count"] = len(messages) if isinstance(messages, list) else 0
         return projected
+    elif name == "list_workspace_files":
+        allowed = ("ok", "error", "path", "count")
+    elif name == "stat_workspace_file":
+        projected = {key: _safe_value(result[key], max_chars=max_chars) for key in ("ok", "error") if key in result}
+        entry = result.get("entry")
+        if isinstance(entry, dict):
+            for key in ("path", "byte_size"):
+                if key in entry:
+                    projected[key] = _safe_value(entry[key], max_chars=max_chars)
+        return projected
+    elif name == "read_workspace_text":
+        allowed = ("ok", "error", "path", "chars", "byte_size")
+    elif name == "write_workspace_text":
+        allowed = ("ok", "error", "path", "byte_size")
     else:
         return _safe_value(result, max_chars=max_chars)
     return {key: _safe_value(result[key], max_chars=max_chars) for key in allowed if key in result}

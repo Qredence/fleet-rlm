@@ -353,6 +353,7 @@ class RLMRunner:
                 request=context.request,
                 session_context=context.session_context,
                 attachments=context.attachments,
+                workspace=blueprint.workspace,
             )
             if blueprint.knowledge:
                 kwargs["capability_knowledge"] = list(blueprint.knowledge)

@@ -152,6 +152,13 @@ _Avoid_: tenant Workspace alone, whole shared Volume root, Sandbox Workspace
 
 ### Skills and files
 
+**Session Workspace**:
+Private durable working files owned by one Session within Workspace Volume
+Scope. Successful writes persist immediately across Turns, failed or cancelled
+Runs, and Sandbox replacement; they are not Session History, commit-gated
+Artifacts, or Code-Interpreter Context.
+_Avoid_: Sandbox Workspace, Artifact, Attachment, durable REPL variables
+
 **Skill Card**:
 Public discovery metadata for a Skill (name, description, trust, affordances)
 without the instruction body.
