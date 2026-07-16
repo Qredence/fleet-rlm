@@ -24,8 +24,8 @@ def test_rlm_events_module_does_not_import_fastapi() -> None:
     assert "starlette" not in imported
 
 
-def test_sse_projector_emits_ai_sdk_ui_message_chunks() -> None:
-    from fleet_rlm.api.sse import SSEProjector
+def test_ai_sdk_projector_emits_typed_ui_message_chunks() -> None:
+    from fleet_rlm.api.sse import AISDKUIProjector
     from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted, TextDelta
 
     recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
@@ -34,9 +34,8 @@ def test_sse_projector_emits_ai_sdk_ui_message_chunks() -> None:
         recorder.record(TextDelta("hello")),
         recorder.record(RunCompleted(0, "live", 1)),
     ]
-    lines = list(SSEProjector().project(events))
-    assert all(line.startswith("data: ") and line.endswith("\n\n") for line in lines)
-    payloads = [json.loads(line.removeprefix("data: ").rstrip("\n")) for line in lines]
+    projector = AISDKUIProjector()
+    payloads = [chunk for event in events for chunk in projector.project(event)]
     assert [item["type"] for item in payloads] == [
         "start",
         "text-start",
@@ -47,20 +46,23 @@ def test_sse_projector_emits_ai_sdk_ui_message_chunks() -> None:
     assert payloads[-1]["finishReason"] == "stop"
 
 
-def test_keepalive_does_not_consume_sequence() -> None:
-    from fleet_rlm.api.sse import SSEProjector
+def test_projection_does_not_consume_extra_runtime_event_sequences() -> None:
+    from fleet_rlm.api.sse import AISDKUIProjector
     from fleet_rlm.rlm.events import EventRecorder, RunStarted, Status
 
     recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
-    projector = SSEProjector()
     before = recorder.record(RunStarted("live"))
-    keepalive = projector.keepalive()
     after = recorder.record(Status("execution", "running", "working"))
 
-    assert keepalive == ": keepalive\n\n"
     assert before.sequence == 1
     assert after.sequence == 2
-    assert next(iter(projector.project((after,)))).startswith('data: {"type": "data-status"')
+    assert AISDKUIProjector().project(after) == [
+        {
+            "type": "data-status",
+            "data": {"phase": "execution", "status": "running", "message": "working"},
+            "transient": True,
+        }
+    ]
 
 
 def test_committed_fixture_is_valid_sse_transcript() -> None:

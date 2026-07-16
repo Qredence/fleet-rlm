@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from uuid import uuid4
 
-from fleet_rlm.api.sse import SSEProjector
+from fleet_rlm.api.sse import AISDKUIProjector
 from fleet_rlm.rlm.events import (
     TERMINAL_DETAIL_TYPES,
     EventRecorder,
@@ -21,11 +20,10 @@ from fleet_rlm.rlm.events import (
 )
 
 
-def _projected_stream(events: list[RuntimeEvent]) -> tuple[list[str], str]:
-    projector = SSEProjector()
-    frames = [*projector.project(events), projector.done()]
-    chunks = [json.loads(frame.removeprefix("data: ")) for frame in frames[:-1]]
-    return [chunk["type"] for chunk in chunks], frames[-1]
+def _projected_types(events: list[RuntimeEvent]) -> list[str]:
+    projector = AISDKUIProjector()
+    chunks = [chunk for event in events for chunk in projector.project(event)]
+    return [chunk["type"] for chunk in chunks]
 
 
 def test_projected_turn_lifecycle_is_start_chunks_one_terminal_done() -> None:
@@ -43,12 +41,11 @@ def test_projected_turn_lifecycle_is_start_chunks_one_terminal_done() -> None:
     assert len(terminal_events) == 1
     assert terminal_events[0] is events[-1]
 
-    types, done = _projected_stream(events)
+    types = _projected_types(events)
     assert types[0] == "start"
     assert types[-1] == "finish"
     assert types.count("finish") == 1
     assert not any(chunk_type in {"finish", "abort", "error"} for chunk_type in types[1:-1])
-    assert done == "data: [DONE]\n\n"
 
 
 def test_error_terminal_projects_error_then_finish_as_single_runtime_terminal() -> None:
@@ -57,9 +54,8 @@ def test_error_terminal_projects_error_then_finish_as_single_runtime_terminal() 
 
     assert len([event for event in events if isinstance(event.detail, TERMINAL_DETAIL_TYPES)]) == 1
     assert isinstance(events[-1].detail, TERMINAL_DETAIL_TYPES)
-    types, done = _projected_stream(events)
+    types = _projected_types(events)
     assert types == ["start", "error", "finish"]
-    assert done == "data: [DONE]\n\n"
 
 
 def test_abort_terminal_projects_abort_as_single_runtime_terminal() -> None:
@@ -68,6 +64,5 @@ def test_abort_terminal_projects_abort_as_single_runtime_terminal() -> None:
 
     assert len([event for event in events if isinstance(event.detail, TERMINAL_DETAIL_TYPES)]) == 1
     assert isinstance(events[-1].detail, TERMINAL_DETAIL_TYPES)
-    types, done = _projected_stream(events)
+    types = _projected_types(events)
     assert types == ["start", "abort"]
-    assert done == "data: [DONE]\n\n"

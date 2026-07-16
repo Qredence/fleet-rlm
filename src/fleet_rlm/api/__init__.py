@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from fleet_rlm.api.sse import SSEProjector
+from fleet_rlm.api.sse import AISDKUIProjector
 
-__all__ = ["SSEProjector"]
+__all__ = ["AISDKUIProjector"]

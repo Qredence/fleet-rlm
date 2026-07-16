@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from collections.abc import Iterable, Iterator, Mapping
-from datetime import datetime
+from collections.abc import Mapping
 from typing import Any
 from uuid import UUID
 
@@ -35,13 +33,6 @@ from fleet_rlm.rlm.events import (
     WarningEvent,
 )
 
-AI_SDK_UI_STREAM_HEADERS = {
-    "cache-control": "no-cache",
-    "connection": "keep-alive",
-    "x-vercel-ai-ui-message-stream": "v1",
-    "x-accel-buffering": "no",
-}
-
 FLEET_UI_CHUNK_TYPES = (
     "start",
     "start-step",
@@ -68,14 +59,6 @@ FLEET_UI_CHUNK_TYPES = (
     "abort",
     "error",
 )
-
-
-def _json_default(value: Any) -> Any:
-    if isinstance(value, UUID):
-        return str(value)
-    if isinstance(value, datetime):
-        return value.isoformat()
-    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 def _detail_data(detail: object) -> dict[str, Any]:
@@ -256,19 +239,3 @@ class AISDKUIProjector:
     @staticmethod
     def _step_id(event: RuntimeEvent, step: int | None, name: str) -> str:
         return f"{name}-{event.run_id}-{step or event.sequence}"
-
-
-class SSEProjector:
-    def __init__(self) -> None:
-        self._projector = AISDKUIProjector()
-
-    def project(self, events: Iterable[RuntimeEvent]) -> Iterator[str]:
-        for event in events:
-            for chunk in self._projector.project(event):
-                yield f"data: {json.dumps(chunk, default=_json_default)}\n\n"
-
-    def done(self) -> str:
-        return "data: [DONE]\n\n"
-
-    def keepalive(self) -> str:
-        return ": keepalive\n\n"

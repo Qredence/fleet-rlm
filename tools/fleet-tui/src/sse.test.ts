@@ -35,6 +35,20 @@ describe("Fleet SSE parser", () => {
     ]);
   });
 
+  it("ignores heartbeat comment frames without dropping adjacent data", async () => {
+    const body = streamFrom([
+      ": ping\n\n",
+      'data: {"type":"start","messageId":"run-1","messageMetadata":{}}\n\n',
+      ": ping\n\n",
+      "data: [DONE]\n\n",
+    ]);
+
+    await expect(collect(parseSSE(body))).resolves.toEqual([
+      '{"type":"start","messageId":"run-1","messageMetadata":{}}',
+      "[DONE]",
+    ]);
+  });
+
   it("rejects malformed UI chunks", () => {
     expect(() => parseUIChunk("[]")).toThrow("invalid AI SDK UI stream chunk");
     expect(() => parseUIChunk('{"type":"data-unknown"}')).toThrow("invalid AI SDK UI stream chunk");

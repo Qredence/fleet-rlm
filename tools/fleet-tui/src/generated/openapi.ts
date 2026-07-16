@@ -16,7 +16,7 @@ export interface paths {
         put?: never;
         /**
          * Create Turn
-         * @description Open the Turn fully, then construct its public SSE response.
+         * @description Project one prepared Turn through FastAPI's native SSE transport.
          */
         post: operations["create_turn"];
         delete?: never;
@@ -622,10 +622,13 @@ export interface operations {
             /** @description AI SDK UI v1 UIMessage SSE stream */
             200: {
                 headers: {
+                    "Cache-Control"?: string;
+                    "X-Accel-Buffering"?: string;
+                    "x-vercel-ai-ui-message-stream"?: string;
+                    "X-Fleet-Run-ID"?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
                     "text/event-stream": string;
                 };
             };

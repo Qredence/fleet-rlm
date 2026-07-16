@@ -55,7 +55,7 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(HTTPException)
     async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:
         error = _error(exc.status_code, exc.detail)
-        return JSONResponse(status_code=exc.status_code, content=error.model_dump())
+        return JSONResponse(status_code=exc.status_code, content=error.model_dump(), headers=exc.headers)
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(

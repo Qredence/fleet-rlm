@@ -8,6 +8,41 @@ import type { Message, StoreEvent } from "./store.js";
 const clock = () => 100;
 
 describe("terminal projection", () => {
+  it("renders a default text-only Prediction identically live and after hydration", () => {
+    const live = new LiveTurnProjector(clock);
+    const liveMessages = finalMessages(
+      [
+        { type: "start", messageId: "run-1", messageMetadata: {} },
+        { type: "text-start", id: "text-run-1" },
+        { type: "text-delta", id: "text-run-1", delta: "The answer." },
+        { type: "text-end", id: "text-run-1" },
+      ].flatMap((chunk) => live.push(chunk as FleetUIMessageChunk)),
+    );
+    const durableMessages = finalMessages(
+      projectDurableTurns(
+        [
+          {
+            id: "run-1",
+            role: "assistant",
+            metadata: { runId: "run-1" },
+            parts: [{ type: "text", text: "The answer.", state: "done" }],
+          },
+        ] satisfies FleetTurn[],
+        clock,
+      ),
+    );
+
+    expect(correlations(liveMessages)).toEqual(correlations(durableMessages));
+    expect(correlations(liveMessages)).toEqual([
+      {
+        kind: "text",
+        role: "assistant",
+        text: "The answer.",
+        streaming: false,
+      },
+    ]);
+  });
+
   it("emits store events with live/reload parity for every visible kind", () => {
     const live = new LiveTurnProjector(clock);
     const chunks: FleetUIMessageChunk[] = [

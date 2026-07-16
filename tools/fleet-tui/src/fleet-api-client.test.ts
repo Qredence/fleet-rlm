@@ -54,6 +54,10 @@ describe("FleetApiClient", () => {
         }),
       }),
     );
+    const requestHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(requestHeaders.has("authorization")).toBe(false);
+    expect(requestHeaders.has("x-fleet-user-id")).toBe(false);
+    expect(requestHeaders.has("x-fleet-workspace-id")).toBe(false);
   });
 
   it("rejects a non-v1 SSE response", async () => {
