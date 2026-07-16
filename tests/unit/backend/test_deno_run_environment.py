@@ -134,9 +134,10 @@ async def test_deno_capability_preparer_excludes_create_artifact() -> None:
         PreparedAttachments((), ()),
     )
 
-    tool_names = {tool.__name__ for tool in prepared.blueprint.tools}
+    tool_names = {str(getattr(tool, "name", getattr(tool, "__name__", ""))) for tool in prepared.blueprint.tools}
     assert "create_artifact" not in tool_names
     assert "read_attachment" in tool_names
+    assert "read_session_history" in tool_names
     assert prepared.drain_artifact_candidates() == ()
 
 

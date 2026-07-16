@@ -19,6 +19,7 @@ from fleet_rlm.files.models import PreparedAttachments
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import AttachmentRead, SkillLoaded
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
 from fleet_rlm.skills.authorize import SkillAuthorizer
 from fleet_rlm.skills.capabilities import (
     CapabilityRegistry,
@@ -185,7 +186,8 @@ class _DenoCapabilityPreparer:
         file_tools = tuple(
             tool for tool in file_host.as_tool_callables() if getattr(tool, "__name__", "") != "create_artifact"
         )
-        tools = (*file_tools, *skill_host.as_tool_callables())
+        history_tools = SessionHistoryToolHost(turn.history).as_tools()
+        tools = (*file_tools, *history_tools, *skill_host.as_tool_callables())
         cards = authorizer.list_cards(
             user_id=turn.access.user_id,
             workspace_id=turn.access.workspace_id,

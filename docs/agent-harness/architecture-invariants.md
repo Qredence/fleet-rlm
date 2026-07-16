@@ -25,7 +25,8 @@ and its matching automated check in the same patch.
   a fresh custom `CodeInterpreter`; Deno passes `interpreter=None` so DSPy owns
   a fresh default Deno/Pyodide interpreter. Interpreters are never shared
   concurrently.
-- Preserve sandbox-safe `history: list[dict]` and invoke
+- Pass a bounded sandbox-safe `session_context: dict`, keep older committed
+  messages behind the Session-scoped `read_session_history` Tool, and invoke
   the supported `await rlm.acall(**named_signature_inputs)` surface.
 - Attachment ownership validation finishes before SSE begins.
 - Artifact Candidates remain private until byte promotion and transactional Turn

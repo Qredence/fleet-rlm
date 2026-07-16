@@ -42,6 +42,7 @@ from fleet_rlm.persistence.database import (
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import AttachmentRead, SkillLoaded
 from fleet_rlm.rlm.lm_factory import build_model_bundle
+from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
 from fleet_rlm.skills.capabilities import (
     CapabilityResolutionContext,
     CapabilityResolver,
@@ -273,9 +274,10 @@ class _LiveCapabilityPreparer:
             max_artifact_bytes=self.resources.settings.max_artifact_bytes,
             volume_paths=paths,
         )
+        history_tools = SessionHistoryToolHost(turn.history).as_tools()
         if self.resources.skill_registry is None:
             return LivePreparedCapabilities(
-                TurnCapabilityBlueprint(tools=file_host.as_tool_callables()),
+                TurnCapabilityBlueprint(tools=(*file_host.as_tool_callables(), *history_tools)),
                 files=file_host,
                 skills=_EmptySkillHost(),
             )
@@ -285,7 +287,7 @@ class _LiveCapabilityPreparer:
             user_id=turn.access.user_id,
             workspace_id=turn.access.workspace_id,
         )
-        tools = (*file_host.as_tool_callables(), *skill_host.as_tool_callables())
+        tools = (*file_host.as_tool_callables(), *history_tools, *skill_host.as_tool_callables())
         cards = authorizer.list_cards(user_id=turn.access.user_id, workspace_id=turn.access.workspace_id)
         if self.resources.capability_registry is None:
             blueprint = TurnCapabilityBlueprint(tools=tools)

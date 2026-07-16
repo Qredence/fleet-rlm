@@ -30,6 +30,13 @@ Committed Turns. Failed Runs do not append. Distinct from Code-Interpreter
 Context and from Runtime Event logs.
 _Avoid_: transcript wire log, REPL state, dspy.History (implementation type)
 
+**Session Context Manifest**:
+The bounded RLM input projection of one Session checkpoint: Session identity,
+committed message count, and short previews of at most the six most recent
+messages. Older canonical content remains in Session History and is read through
+the Session-scoped Host-Mediated Tool.
+_Avoid_: complete transcript, summary, durable Memory
+
 **Turn**:
 One user message processed to a terminal outcome for a Session.
 _Avoid_: request, job
@@ -80,9 +87,10 @@ _Avoid_: raw HTTP body
 
 **Turn Context**:
 Everything required to execute one recursive Turn after isolation: identity,
-request, Session History, Root Model, Sub Model, RLM Options, Turn Timeout deadline, Interpreter Lease,
-Skill Cards, Attachment references (and any Staged Attachments), and
-Host-Mediated Tools as bound for the Run.
+request, host-owned Session History, bounded Session Context Manifest, Root
+Model, Sub Model, RLM Options, Turn Timeout deadline, Interpreter Lease, Skill
+Cards, Attachment references (and any Staged Attachments), and Host-Mediated
+Tools as bound for the Run.
 _Avoid_: HTTP request, Chat Execution Context (live term)
 
 **RLM Options**:

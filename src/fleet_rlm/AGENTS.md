@@ -6,8 +6,8 @@ Root repository workflow and validation rules remain authoritative from
 
 This guide records the current backend. Unchecked targets in `PLANS.md` are not
 implemented until their corresponding phase exit gates pass; preserve current
-`history`, local-scope, and runtime-composition guidance until those changes
-are actually delivered and reviewed.
+local-scope and runtime-composition guidance until later changes are delivered
+and reviewed.
 
 ## Architecture
 
@@ -18,8 +18,9 @@ are actually delivered and reviewed.
 - Keep Daytona SDK imports inside `daytona/`.
 - Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Daytona supplies a fresh custom interpreter;
   Deno passes `interpreter=None` so DSPy constructs its default Deno/Pyodide
-  interpreter. Preserve `history: list[dict]` and call the supported
-  `await rlm.acall(**named_inputs)` surface.
+  interpreter. Pass only the bounded `session_context: dict`; older committed
+  messages remain behind the Session-scoped `read_session_history` Tool. Call
+  the supported `await rlm.acall(**named_inputs)` surface.
 - Compose zero to four authorized Skills through the host-owned capability
   registry. Capability tools may be plain callables or explicit `dspy.Tool`
   objects; HTTP never supplies executable Python or serialized objects.

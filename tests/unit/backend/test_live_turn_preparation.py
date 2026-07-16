@@ -89,9 +89,13 @@ async def test_live_preparation_stages_attachment_and_cleans_it(monkeypatch) -> 
 
     assert prepared.execution.attachments[0].attachment_id == attachment_id
     assert data in volume.values()
-    assert {tool.__name__ for tool in prepared.execution.capabilities.blueprint.tools} == {
+    assert {
+        str(getattr(tool, "name", getattr(tool, "__name__", "")))
+        for tool in prepared.execution.capabilities.blueprint.tools
+    } == {
         "create_artifact",
         "read_attachment",
+        "read_session_history",
     }
     assert prepared.result_snapshot_sink is prepared.artifact_sink
     assert prepared.result_snapshot_sink.result_path(turn.session_id, turn.run_id).endswith(
