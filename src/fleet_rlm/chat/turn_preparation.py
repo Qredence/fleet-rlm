@@ -9,6 +9,7 @@ from typing import Protocol
 from uuid import UUID
 
 from fleet_rlm.artifacts.promotion import RunArtifactSink
+from fleet_rlm.chat.session_context import build_session_context_manifest
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
 from fleet_rlm.files.models import (
     AttachmentAccess,
@@ -21,7 +22,6 @@ from fleet_rlm.result_snapshot import ResultSnapshotSink
 from fleet_rlm.rlm.context import (
     PreparedCapabilities,
     RLMExecutionContext,
-    RLMHistoryMessage,
     RLMInterpreter,
 )
 from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -188,7 +188,11 @@ class TurnPreparationModule:
             session_id=turn.session_id,
             access=turn.access,
             request=turn.input.text,
-            history=tuple(RLMHistoryMessage(message.role, message.content) for message in turn.history.messages),
+            session_context=build_session_context_manifest(
+                turn.session_id,
+                turn.checkpoint_version,
+                turn.history,
+            ),
             models=self._models,
             options=self._options,
             deadline=deadline,

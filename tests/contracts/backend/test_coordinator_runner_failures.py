@@ -83,6 +83,8 @@ class _Harness:
         await self.store.add_session(self.session_id, self.access)
 
     async def prepare(self, turn: ExecuteTurn):
+        from fleet_rlm.chat.session_context import build_session_context_manifest
+
         if self.mode == "internal_cancel":
             assert await self.lifecycle.request_cancel(self.access, turn.run_id) == "requested"
         now = asyncio.get_running_loop().time()
@@ -92,7 +94,11 @@ class _Harness:
             session_id=turn.session_id,
             access=turn.access,
             request=turn.input.text,
-            history=(),
+            session_context=build_session_context_manifest(
+                turn.session_id,
+                turn.checkpoint_version,
+                turn.history,
+            ),
             models=SimpleNamespace(root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=deadline,

@@ -46,6 +46,7 @@ class _Factory:
 
 
 async def _run_prediction(prediction: dspy.Prediction, blueprint):
+    from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import RLMExecutionContext
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
@@ -60,7 +61,7 @@ async def _run_prediction(prediction: dspy.Prediction, blueprint):
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         "review this report",
-        (),
+        SessionContextManifest(uuid4(), 0, 0, ()),
         SimpleNamespace(root_lm=object(), sub_lm=object()),
         RLMOptions(),
         asyncio.get_running_loop().time() + 10,
@@ -141,6 +142,7 @@ async def test_default_and_custom_signatures_commit_native_typed_predictions() -
 
 @pytest.mark.asyncio
 async def test_invalid_submit_repair_commits_only_the_final_typed_prediction() -> None:
+    from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.chat.turn_detail_policy import commit_success
     from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
@@ -177,7 +179,7 @@ async def test_invalid_submit_repair_commits_only_the_final_typed_prediction() -
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         "repair",
-        (),
+        SessionContextManifest(uuid4(), 0, 0, ()),
         RLMModelBundle(root_lm=object(), sub_lm=object()),
         RLMOptions(max_iterations=2),
         asyncio.get_running_loop().time() + 10,

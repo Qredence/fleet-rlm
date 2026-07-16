@@ -8,20 +8,13 @@ from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from fleet_rlm.artifacts.models import ArtifactCandidate
+from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.files.models import PreparedAttachment
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.sessions.models import TurnAccess
 
 AsyncCancellationProbe = Callable[[], Awaitable[bool]]
-
-
-@dataclass(frozen=True, slots=True)
-class RLMHistoryMessage:
-    """One validated conversational message adapted from committed Session state."""
-
-    role: Literal["user", "assistant"]
-    content: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +52,7 @@ class RLMExecutionContext:
     session_id: UUID
     access: TurnAccess
     request: str
-    history: tuple[RLMHistoryMessage, ...]
+    session_context: SessionContextManifest
     models: RLMModelBundle
     options: RLMOptions
     deadline: float

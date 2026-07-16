@@ -30,6 +30,7 @@ def test_trajectory_projection_is_optional_and_fail_soft() -> None:
 async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import RLMExecutionContext
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted
@@ -112,7 +113,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         "answer",
-        (),
+        SessionContextManifest(uuid4(), 0, 0, ()),
         SimpleNamespace(root_lm=object(), sub_lm=object()),
         RLMOptions(),
         asyncio.get_running_loop().time() + 10,
@@ -152,6 +153,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
 
 @pytest.mark.asyncio
 async def test_runner_settles_blocking_worker_before_internal_cancellation_finishes() -> None:
+    from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import RLMExecutionContext
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
@@ -190,7 +192,7 @@ async def test_runner_settles_blocking_worker_before_internal_cancellation_finis
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         "answer",
-        (),
+        SessionContextManifest(uuid4(), 0, 0, ()),
         SimpleNamespace(root_lm=object(), sub_lm=object()),
         RLMOptions(),
         asyncio.get_running_loop().time() + 10,
@@ -221,6 +223,7 @@ async def test_runner_settles_blocking_worker_before_internal_cancellation_finis
 
 @pytest.mark.asyncio
 async def test_runner_settles_blocking_worker_through_repeated_caller_cancellation() -> None:
+    from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import RLMExecutionContext
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
@@ -258,7 +261,7 @@ async def test_runner_settles_blocking_worker_through_repeated_caller_cancellati
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         "answer",
-        (),
+        SessionContextManifest(uuid4(), 0, 0, ()),
         SimpleNamespace(root_lm=object(), sub_lm=object()),
         RLMOptions(),
         asyncio.get_running_loop().time() + 10,

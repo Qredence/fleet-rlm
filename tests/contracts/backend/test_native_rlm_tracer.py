@@ -130,6 +130,7 @@ async def test_native_rlm_repairs_invalid_submit_and_typed_extract_fallback() ->
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fallback", [False, True], ids=["invalid-submit-repair", "typed-extract"])
 async def test_runner_completes_native_repair_and_extract_as_prediction_result(fallback: bool) -> None:
+    from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import RLMExecutionContext
 
     class Capabilities:
@@ -160,7 +161,7 @@ async def test_runner_completes_native_repair_and_extract_as_prediction_result(f
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
         "complete natively",
-        (),
+        SessionContextManifest(uuid4(), 0, 0, ()),
         SimpleNamespace(root_lm=object(), sub_lm=object()),
         options,
         asyncio.get_running_loop().time() + 10,

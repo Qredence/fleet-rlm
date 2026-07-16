@@ -96,6 +96,11 @@ class ExecuteTurn:
     cancellation_requested: AsyncCancellationProbe
     _claim: _TurnClaimToken
 
+    @property
+    def checkpoint_version(self) -> int:
+        """Checkpoint from which this Turn was claimed."""
+        return self._claim.base_checkpoint_version
+
 
 @dataclass(frozen=True, slots=True)
 class ReplayTurn:

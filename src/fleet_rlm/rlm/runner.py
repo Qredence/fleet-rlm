@@ -29,6 +29,7 @@ from fleet_rlm.rlm.events import (
     WarningEvent,
 )
 from fleet_rlm.rlm.factory import RLMFactory
+from fleet_rlm.rlm.inputs import build_rlm_input_kwargs
 from fleet_rlm.rlm.outcome import ExecutionDetail, RLMOutcome, TerminalStatus
 from fleet_rlm.rlm.sanitize import sanitize_public_error, sanitize_public_text
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
@@ -348,22 +349,11 @@ class RLMRunner:
             if blueprint.knowledge and "capability_knowledge" in fields:
                 kwargs["capability_knowledge"] = list(blueprint.knowledge)
         else:
-            kwargs = {
-                "request": context.request,
-                "history": [{"role": message.role, "content": message.content} for message in context.history],
-                "session_summary": "",
-                "skill_cards": [],
-                "attachments": [
-                    {
-                        "id": str(item.attachment_id),
-                        "filename": item.filename,
-                        "content_type": item.content_type,
-                        "byte_size": item.byte_size,
-                        "checksum_sha256": item.checksum_sha256,
-                    }
-                    for item in context.attachments
-                ],
-            }
+            kwargs = build_rlm_input_kwargs(
+                request=context.request,
+                session_context=context.session_context,
+                attachments=context.attachments,
+            )
             if blueprint.knowledge:
                 kwargs["capability_knowledge"] = list(blueprint.knowledge)
             kwargs.update(blueprint.input_values)

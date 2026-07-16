@@ -9,7 +9,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_preparation_adapts_history_and_closes_in_dependency_order() -> None:
+async def test_preparation_bounds_history_and_closes_in_dependency_order() -> None:
     from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
     from fleet_rlm.chat.turn_preparation import RunEnvironment, TurnPreparationModule
     from fleet_rlm.files.models import PreparedAttachments
@@ -91,7 +91,12 @@ async def test_preparation_adapts_history_and_closes_in_dependency_order() -> No
         capabilities=CapabilityFactory(),
     ).prepare(turn)
 
-    assert [(item.role, item.content) for item in prepared.execution.history] == [("user", "prior")]
+    assert prepared.execution.session_context.to_input() == {
+        "session_id": str(turn.session_id),
+        "checkpoint_version": 0,
+        "message_count": 1,
+        "recent": [{"ordinal": 1, "role": "user", "preview": "prior"}],
+    }
     assert prepared.result_snapshot_sink is None
     await prepared.aclose()
     await prepared.aclose()
