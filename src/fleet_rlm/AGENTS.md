@@ -18,9 +18,11 @@ and reviewed.
 - Keep Daytona SDK imports inside `daytona/`.
 - Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Daytona supplies a fresh custom interpreter;
   Deno passes `interpreter=None` so DSPy constructs its default Deno/Pyodide
-  interpreter. Pass only the bounded `session_context: dict`; older committed
-  messages remain behind the Session-scoped `read_session_history` Tool. Call
-  the supported `await rlm.acall(**named_inputs)` surface.
+  interpreter. The default Fleet Signature receives only the bounded
+  `session_context: dict`; registered custom Task Contracts receive only their
+  declared host-bounded inputs. Older committed messages remain behind the
+  Session-scoped `read_session_history` Tool. Call the supported
+  `await rlm.acall(**named_inputs)` surface.
 - Compose zero to four authorized Skills through the host-owned capability
   registry. Capability tools may be plain callables or explicit `dspy.Tool`
   objects; HTTP never supplies executable Python or serialized objects.

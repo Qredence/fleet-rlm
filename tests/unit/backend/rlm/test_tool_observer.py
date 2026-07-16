@@ -106,3 +106,28 @@ def test_observe_tool_bounds_generic_input_and_output() -> None:
 
     assert len(observed[0].input["kwargs"]["value"]) <= 12
     assert len(observed[1].output) <= 12
+
+
+def test_observe_tool_hides_session_history_message_bodies() -> None:
+    observed: list[object] = []
+
+    def read_session_history(offset: int, limit: int) -> dict[str, object]:
+        return {
+            "offset": offset,
+            "next_offset": offset + 1,
+            "total": 42,
+            "messages": [{"ordinal": 1, "role": "user", "content": "private history body"}],
+        }
+
+    wrapped = observe_tool(read_session_history, observed.append, ToolEventView(max_chars=1_000))
+    result = wrapped(offset=0, limit=1)
+
+    assert result["messages"][0]["content"] == "private history body"
+    assert observed[0].input == {"offset": 0, "limit": 1}
+    assert observed[1].output == {
+        "offset": 0,
+        "next_offset": 1,
+        "total": 42,
+        "message_count": 1,
+    }
+    assert "private history body" not in str(observed)

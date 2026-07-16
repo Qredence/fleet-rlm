@@ -20,6 +20,7 @@ _PROTECTED_TOOL_NAMES = frozenset(
         "create_artifact",
         "load_skill",
         "read_skill_resource",
+        "read_session_history",
         "llm_query",
         "llm_query_batched",
     }
@@ -75,6 +76,11 @@ def _public_tool_input(
             "skill_id": _safe_value(_argument(args, kwargs, "skill_id", 0), max_chars=max_chars),
             "resource_id": _safe_value(_argument(args, kwargs, "resource_id", 1), max_chars=max_chars),
         }
+    if name == "read_session_history":
+        return {
+            "offset": _safe_value(_argument(args, kwargs, "offset", 0), max_chars=max_chars),
+            "limit": _safe_value(_argument(args, kwargs, "limit", 1), max_chars=max_chars),
+        }
     if name == "llm_query":
         prompt = _argument(args, kwargs, "prompt", 0)
         return {"prompt_chars": len(str(prompt or ""))}
@@ -99,6 +105,15 @@ def _public_tool_output(name: str, result: Any, *, max_chars: int) -> Any:
         allowed = ("ok", "skill_id", "name", "version", "trust")
     elif name == "read_skill_resource":
         allowed = ("ok", "skill_id", "resource_id", "byte_size")
+    elif name == "read_session_history":
+        messages = result.get("messages")
+        projected = {
+            key: _safe_value(result[key], max_chars=max_chars)
+            for key in ("offset", "next_offset", "total")
+            if key in result
+        }
+        projected["message_count"] = len(messages) if isinstance(messages, list) else 0
+        return projected
     else:
         return _safe_value(result, max_chars=max_chars)
     return {key: _safe_value(result[key], max_chars=max_chars) for key in allowed if key in result}

@@ -19,7 +19,10 @@ def test_history_tool_pages_canonical_messages_with_stable_ordinals() -> None:
     (tool,) = SessionHistoryToolHost(SessionHistory(messages)).as_tools()
 
     assert tool.name == "read_session_history"
-    assert set(tool.args) == {"offset", "limit"}
+    assert tool.args == {
+        "offset": {"type": "integer", "minimum": 0},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+    }
     assert tool(offset=0, limit=2) == {
         "offset": 0,
         "next_offset": 2,
@@ -57,5 +60,5 @@ def test_history_tool_rejects_invalid_bounds(offset: int, limit: int) -> None:
 
     (tool,) = SessionHistoryToolHost(SessionHistory()).as_tools()
 
-    with pytest.raises(ValueError, match="Session history request is invalid"):
+    with pytest.raises(ValueError, match=r"Arg (offset|limit) is invalid"):
         tool(offset=offset, limit=limit)
