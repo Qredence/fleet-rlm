@@ -25,6 +25,11 @@ Failures after streaming begins are sanitized Runtime Events. A failed Turn
 Commit emits exactly one error terminal, advances no history, publishes no
 Artifact identity, and still releases the Interpreter Lease.
 
+Within one Daytona Run, repeated interpreter calls reuse one explicit context,
+so Python state persists across RLM iterations. Every later Run receives a
+fresh context. Replacing a Sandbox remounts the same Workspace Volume Scope but
+does not preserve interpreter globals.
+
 Host capability registries normalize compatibility callables into explicit
 `dspy.Tool` objects before Turn composition. Final Turn blueprints are
 Tool-only and associate host-owned event views by Tool name. A declared view
@@ -71,6 +76,12 @@ Referenced Attachments are staged into the Run Sandbox. Artifact Candidates are
 private Run outputs until promoted to UUID-unique durable paths and committed
 with Turn metadata. Failed metadata commits may leave GC-eligible orphan bytes,
 never public Artifact rows.
+
+Session Workspace files are immediate private state under the Session's Volume
+path. They survive failed Runs, later Turns, and Sandbox replacement independently
+of the commit-gated result snapshot and Artifact lifecycle. The opt-in
+[Daytona MVP proof](how-to-guides/dspy-integration.md#run-the-complete-daytona-proof)
+verifies this boundary through the real FastAPI and native DSPy path.
 
 ## Compatibility
 

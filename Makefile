@@ -1,4 +1,4 @@
-PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/contracts/backend tests/e2e scripts/openapi_tools.py scripts/db_init.py migrations
+PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/unit/scripts tests/contracts/backend tests/e2e scripts/openapi_tools.py scripts/db_init.py scripts/live_daytona_verify.py migrations
 PYTEST_FAST_MARKERS = not deno and not live_llm and not live_daytona and not benchmark and not db
 PYTEST := uv run --no-sync pytest
 PYTEST_ISOLATED := env \
@@ -91,12 +91,12 @@ typecheck:
 	uv run ty check src/fleet_rlm
 
 test:
-	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/contracts/backend tests/unit/test_litellm_invariant.py tests/e2e -m "$(PYTEST_FAST_MARKERS)"
+	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/scripts tests/contracts/backend tests/unit/test_litellm_invariant.py tests/e2e -m "$(PYTEST_FAST_MARKERS)"
 
 test-fast: test
 
 test-unit:
-	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/test_litellm_invariant.py -m "$(PYTEST_FAST_MARKERS)"
+	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/scripts tests/unit/test_litellm_invariant.py -m "$(PYTEST_FAST_MARKERS)"
 
 test-contract:
 	$(PYTEST_ISOLATED) -q tests/contracts/backend tests/e2e -m "$(PYTEST_FAST_MARKERS)" -n 0

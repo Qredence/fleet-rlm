@@ -10,9 +10,10 @@ Daytona, and SQLAlchemy/Alembic.
 2. [Backend API](reference/http-api.md)
 3. [CLI](reference/cli.md)
 4. [Testing strategy](how-to-guides/testing-strategy.md)
-5. [Terminal UI](how-to-guides/terminal-tui.md)
-6. [Agent harness](agent-harness/README.md)
-7. [Architecture decisions](adr/README.md)
+5. [DSPy RLM and Daytona integration](how-to-guides/dspy-integration.md)
+6. [Terminal UI](how-to-guides/terminal-tui.md)
+7. [Agent harness](agent-harness/README.md)
+8. [Architecture decisions](adr/README.md)
 
 ## Reference
 

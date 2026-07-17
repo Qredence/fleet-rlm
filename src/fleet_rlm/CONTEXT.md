@@ -131,6 +131,8 @@ _Avoid_: Root Model, helper model (vague), utility model (optional third role)
 Python REPL state for one Run inside a Sandbox. Fleet RLM backend uses **per-Run**
 Context only: it does not survive across Runs. Continuity between Runs is
 Session History and Workspace Volume Scope, never REPL variables.
+Sandbox replacement therefore creates fresh interpreter state even when the
+replacement remounts the same Workspace Volume Scope.
 _Avoid_: durable Memory, Session History, warm multi-run REPL (not a clean claim)
 
 **Interpreter Lease**:
@@ -157,6 +159,8 @@ Private durable working files owned by one Session within Workspace Volume
 Scope. Successful writes persist immediately across Turns, failed or cancelled
 Runs, and Sandbox replacement; they are not Session History, commit-gated
 Artifacts, or Code-Interpreter Context.
+Replacement continuity applies to the mounted bytes only, never interpreter
+globals or an Interpreter Lease.
 _Avoid_: Sandbox Workspace, Artifact, Attachment, durable REPL variables
 
 **Skill Card**:

@@ -9,6 +9,7 @@
 | `check_docs_quality.py` | Validate documentation structure and links |
 | `check_agents_md_freshness.py` | Validate agent-guide reachability |
 | `validate_release.py` | Validate package metadata and wheel contents |
+| `live_daytona_verify.py` | Run the opt-in Daytona MVP proof and validate its bounded JSON receipt |
 | `codex_feedback_loop.py` | Run the local Codex feedback-loop probes |
 | `deployment_observability.py` | Inspect deployment observability inputs |
 

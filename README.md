@@ -90,8 +90,14 @@ Runtime live startup never calls SQLAlchemy `create_all`.
 
 ```bash
 make check
-FLEET_LIVE=1 uv run pytest tests/live/backend/test_b5_attachment_artifact_durability.py -q
+make check-security
+make build-release
+FLEET_LIVE=1 uv run python scripts/live_daytona_verify.py \
+  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json
 ```
 
 `make api-sync` regenerates only root `openapi.yaml`; frontend generated
 contracts remain deferred to the frontend adaptation effort.
+The live verifier requires Daytona and LLM credentials in the host environment,
+keeps them out of the Sandbox, and writes only bounded local evidence. See the
+[DSPy RLM and Daytona integration guide](docs/how-to-guides/dspy-integration.md).

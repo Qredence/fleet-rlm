@@ -7,6 +7,7 @@
   * [ADR 0001: Coordinated Session-first Turn contract](adr/0001-coordinated-turn-contract.md)
 * [Runtime Execution Flow](explanation/agent-runtime-execution-flow.md)
 * [Testing Strategy](how-to-guides/testing-strategy.md)
+* [DSPy RLM and Daytona Integration](how-to-guides/dspy-integration.md)
 * [Reference](reference/index.md)
   * [HTTP API](reference/http-api.md)
   * [CLI](reference/cli.md)
