@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -45,6 +46,7 @@ _WORKSPACE_PATH = "notes/findings.md"
 _RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
 _EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _SECRET_NAMES = ("FLEET_DAYTONA_API_KEY", "FLEET_LLM_API_KEY")
+_CLEANUP_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
 
 
 class LiveDaytonaMVPResult(dspy.Signature):
@@ -307,24 +309,39 @@ def _sandbox_environment_names(sandbox: Any) -> set[str]:
     return set(json.loads(result.result.strip()))
 
 
+def _retry_cleanup(operation: Any) -> bool:
+    for attempt, delay in enumerate((0.0, *_CLEANUP_RETRY_DELAYS)):
+        try:
+            operation()
+            return True
+        except Exception:  # noqa: BLE001 - retain only a bounded cleanup phase
+            if attempt == len(_CLEANUP_RETRY_DELAYS):
+                return False
+            if delay:
+                time.sleep(delay)
+    return False
+
+
 def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: str) -> tuple[str, ...]:
     failures: list[str] = []
     tracked_ids = sandbox_ids | set(resources._sandbox_ids)  # noqa: SLF001 - strict test cleanup
     for sandbox_id in sorted(tracked_ids):
-        try:
+        def delete_sandbox(sandbox_id: str = sandbox_id) -> None:
             sandbox = resources.platform.get(sandbox_id)
             if sandbox is not None:
                 resources.platform.delete(sandbox)
-        except Exception:  # noqa: BLE001 - retain only a bounded cleanup phase
+
+        if not _retry_cleanup(delete_sandbox):
             failures.append("sandbox")
     try:
         resources.forget_sandboxes()
     except Exception:  # noqa: BLE001 - retain only a bounded cleanup phase
         failures.append("tracking")
-    try:
+    def delete_volume() -> None:
         volume = resources.client.volume.get(volume_name, create=False)
         resources.client.volume.delete(volume)
-    except Exception:  # noqa: BLE001 - retain only a bounded cleanup phase
+
+    if not _retry_cleanup(delete_volume):
         failures.append("volume")
     return tuple(failures)
 
