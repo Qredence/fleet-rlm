@@ -13,7 +13,15 @@ import pytest
 from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted, ToolCompleted, ToolStarted
+from fleet_rlm.rlm.events import (
+    RLMCode,
+    RLMOutput,
+    StepFinished,
+    StepStarted,
+    ToolCompleted,
+    ToolFailed,
+    ToolStarted,
+)
 from fleet_rlm.rlm.factory import RLMFactory
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.runner import RLMRunner
@@ -49,6 +57,16 @@ class _InvalidThenValidSubmit:
         return dspy.Prediction(reasoning="repair invalid typed submit", code=code)
 
 
+class _InvalidToolThenSubmit:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+        self.calls += 1
+        code = "value = helper(value=123)" if self.calls == 1 else "SUBMIT(answer='repaired')"
+        return dspy.Prediction(reasoning="repair invalid host Tool input", code=code)
+
+
 class _NeverSubmit:
     async def acall(self, **_kwargs: Any) -> dspy.Prediction:
         return dspy.Prediction(reasoning="inspect", code="value = 42")
@@ -72,7 +90,7 @@ async def test_native_rlm_preserves_state_tools_submit_prediction_and_trajectory
         models=RLMModelBundle(root_lm=object(), sub_lm=object()),  # type: ignore[arg-type]
         options=RLMOptions(max_iterations=2),
         interpreter=interpreter,
-        tools=(observe_tool(helper, observed.append, ToolEventView(max_chars=1_000)),),
+        tools=(observe_tool(dspy.Tool(helper), observed.append, ToolEventView.metadata_only()),),
         signature="request -> answer",
     )
     rlm.generate_action = _StatefulActionPredictor()
@@ -125,6 +143,36 @@ async def test_native_rlm_repairs_invalid_submit_and_typed_extract_fallback() ->
     assert len(repaired_prediction.trajectory) == 2
     assert extracted_prediction.answer == "extracted"
     assert extracted_prediction.final_reasoning == "Extract forced final output"
+
+
+@pytest.mark.asyncio
+async def test_native_rlm_rejects_invalid_host_tool_type_before_host_logic() -> None:
+    observed: list[object] = []
+    host_calls = 0
+
+    def helper(value: str) -> str:
+        nonlocal host_calls
+        host_calls += 1
+        return value
+
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interpreter.bind_observer(observed.append, max_chars=1_000)
+    rlm = RLMFactory().create(
+        models=RLMModelBundle(root_lm=object(), sub_lm=object()),  # type: ignore[arg-type]
+        options=RLMOptions(max_iterations=2),
+        interpreter=interpreter,
+        tools=(observe_tool(dspy.Tool(helper), observed.append, ToolEventView.metadata_only()),),
+        signature="request -> answer: str",
+    )
+    rlm.generate_action = _InvalidToolThenSubmit()
+
+    prediction = await rlm.acall(request="repair invalid host Tool input")
+
+    assert prediction.answer == "repaired"
+    assert host_calls == 0
+    assert any(isinstance(item, ToolStarted) for item in observed)
+    assert any(isinstance(item, ToolFailed) for item in observed)
+    assert not any(isinstance(item, ToolCompleted) for item in observed)
 
 
 @pytest.mark.asyncio

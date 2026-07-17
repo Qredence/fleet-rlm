@@ -10,6 +10,7 @@ import pytest
 
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.tool_observer import ToolEventView
 from fleet_rlm.skills.capabilities import (
     CapabilityRegistry,
     CapabilityResolutionContext,
@@ -17,6 +18,7 @@ from fleet_rlm.skills.capabilities import (
     CapabilityRLMRequirements,
     SkillSelection,
     TaskContract,
+    TurnCapabilityBlueprint,
 )
 from fleet_rlm.skills.models import SkillCard
 
@@ -96,7 +98,7 @@ async def test_resolver_composes_plain_callable_dspy_tool_and_primary_contract()
     )
 
     blueprint = await CapabilityResolver(registry, selector=_Selector(selection)).resolve(
-        _context((primary, auxiliary), tools=(base_tool,))
+        _context((primary, auxiliary), tools=(dspy.Tool(base_tool),))
     )
 
     assert [card.id for card in blueprint.activated_skills] == [primary.id, auxiliary.id]
@@ -186,6 +188,34 @@ async def test_resolver_rejects_unknown_or_conflicting_capability_references() -
 
 
 @pytest.mark.asyncio
+async def test_optional_tool_conflict_retains_validated_base_but_invalid_base_aborts() -> None:
+    def base() -> str:
+        return "base"
+
+    def optional() -> str:
+        return "optional"
+
+    optional.__name__ = "base"
+    base_tool = dspy.Tool(base)
+    registry = CapabilityRegistry()
+    registry.register("optional", tools=(optional,))
+    card = _card("optional", refs=("optional",))
+
+    blueprint = await CapabilityResolver(
+        registry,
+        selector=_Selector(SkillSelection((card.id,), card.id)),
+    ).resolve(_context((card,), tools=(base_tool,)))
+
+    assert blueprint.activated_skills == ()
+    assert blueprint.tools == (base_tool,)
+
+    with pytest.raises(TypeError, match="dspy.Tool"):
+        await CapabilityResolver(CapabilityRegistry(), selector=_Selector(SkillSelection())).resolve(
+            _context((), tools=(base,))
+        )
+
+
+@pytest.mark.asyncio
 async def test_resolver_rejects_untrusted_selected_skill() -> None:
     card = _card("untrusted")
     card = SkillCard(
@@ -244,6 +274,28 @@ def test_registry_rejects_reserved_tools_and_unbounded_knowledge() -> None:
         registry.register("reserved", tools=(print,))
     with pytest.raises(ValueError, match="bounds"):
         registry.register("too-large", knowledge=("x" * 4_001,))
+
+
+def test_registry_normalizes_callables_and_blueprint_enforces_tool_only_unique_names() -> None:
+    def lookup(value: int = 3) -> int:
+        return value
+
+    view = ToolEventView.metadata_only()
+    registration = CapabilityRegistry().register(
+        "lookup",
+        tools=(lookup,),
+        tool_event_views={"lookup": view},
+    )
+
+    assert len(registration.tools) == 1
+    assert type(registration.tools[0]) is dspy.Tool
+    assert registration.tools[0].name == "lookup"
+    assert registration.tool_event_views == {"lookup": view}
+
+    with pytest.raises(TypeError, match="dspy.Tool"):
+        TurnCapabilityBlueprint(tools=(lookup,))
+    with pytest.raises(ValueError, match="duplicate"):
+        TurnCapabilityBlueprint(tools=(dspy.Tool(lookup), dspy.Tool(lookup)))
 
 
 @pytest.mark.parametrize("text_field", ["missing", "request", "optional", "count"])

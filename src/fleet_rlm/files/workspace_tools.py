@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict
+from types import MappingProxyType
+from typing import Any, cast
 
 import dspy
 
 from fleet_rlm.files.workspace_models import SessionWorkspaceFS, WorkspaceEntry
+from fleet_rlm.files.workspace_validation import WorkspacePathError, normalize_workspace_path
+from fleet_rlm.rlm.events import JsonValue
+from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
 
 MAX_WORKSPACE_READ_CHARS = 10_000
 
@@ -129,4 +135,90 @@ class WorkspaceToolHost:
                     "overwrite": {"type": "boolean"},
                 },
             ),
+        )
+
+    def event_views(self) -> Mapping[str, ToolEventView]:
+        """Return bounded metadata-only projections for Workspace Tools."""
+
+        def fields(
+            arguments: Mapping[str, Any],
+            names: tuple[str, ...],
+            *,
+            allow_root: bool = False,
+        ) -> dict[str, JsonValue]:
+            projected: dict[str, JsonValue] = {}
+            for name in names:
+                if name not in arguments:
+                    continue
+                value = arguments[name]
+                if name == "path":
+                    try:
+                        value = normalize_workspace_path(str(value), allow_root=allow_root)
+                    except WorkspacePathError:
+                        continue
+                projected[name] = bound_event_text(value) if isinstance(value, str) else cast(JsonValue, value)
+            return projected
+
+        def output(result: object, names: tuple[str, ...]) -> JsonValue:
+            if not isinstance(result, Mapping):
+                return {}
+            values = cast(Mapping[str, JsonValue], result)
+            return {
+                name: bound_event_text(values[name]) if isinstance(values[name], str) else values[name]
+                for name in names
+                if name in values
+            }
+
+        def stat_output(result: object) -> JsonValue:
+            if not isinstance(result, Mapping):
+                return {}
+            values = cast(Mapping[str, JsonValue], result)
+            projected: dict[str, JsonValue] = {
+                name: bound_event_text(values[name]) if isinstance(values[name], str) else values[name]
+                for name in ("ok", "error")
+                if name in values
+            }
+            entry = result.get("entry")
+            if isinstance(entry, Mapping):
+                entry_values = cast(Mapping[str, JsonValue], entry)
+                projected.update(
+                    {
+                        name: bound_event_text(entry_values[name])
+                        if isinstance(entry_values[name], str)
+                        else entry_values[name]
+                        for name in ("path", "byte_size")
+                        if name in entry_values
+                    }
+                )
+            return projected
+
+        def write_input(arguments: Mapping[str, Any]) -> JsonValue:
+            content = arguments.get("content")
+            return {
+                **fields(arguments, ("path", "overwrite")),
+                "content_chars": len(str(content or "")),
+            }
+
+        return MappingProxyType(
+            {
+                "list_workspace_files": ToolEventView(
+                    input_projection=lambda arguments: fields(arguments, ("path", "limit"), allow_root=True),
+                    output_projection=lambda result: output(result, ("ok", "error", "path", "count")),
+                ),
+                "stat_workspace_file": ToolEventView(
+                    input_projection=lambda arguments: fields(arguments, ("path",)),
+                    output_projection=stat_output,
+                ),
+                "read_workspace_text": ToolEventView(
+                    input_projection=lambda arguments: fields(arguments, ("path", "max_chars")),
+                    output_projection=lambda result: output(
+                        result,
+                        ("ok", "error", "path", "chars", "byte_size"),
+                    ),
+                ),
+                "write_workspace_text": ToolEventView(
+                    input_projection=write_input,
+                    output_projection=lambda result: output(result, ("ok", "error", "path", "byte_size")),
+                ),
+            }
         )

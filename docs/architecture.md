@@ -25,6 +25,15 @@ Failures after streaming begins are sanitized Runtime Events. A failed Turn
 Commit emits exactly one error terminal, advances no history, publishes no
 Artifact identity, and still releases the Interpreter Lease.
 
+Host capability registries normalize compatibility callables into explicit
+`dspy.Tool` objects before Turn composition. Final Turn blueprints are
+Tool-only and associate host-owned event views by Tool name. A declared view
+exposes bounded allowlisted metadata; a Tool without one exposes only its call
+identity, name, status, and fixed failure message. Explicit RLM reasoning,
+generated code, and interpreter output are preserved verbatim up to the Run's
+`max_output_chars` bound. Provider and transport failures use closed public
+messages rather than provider exception text.
+
 ## Ownership
 
 - `app.create_app()` constructs only the FastAPI/router shell and empty state.

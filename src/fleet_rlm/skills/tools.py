@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import Any, cast
 from uuid import UUID
 
+import dspy
+
+from fleet_rlm.rlm.events import JsonValue
+from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
 from fleet_rlm.skills.authorize import SkillAuthorizer
 from fleet_rlm.skills.errors import SkillNotFoundError, SkillPathError
 from fleet_rlm.skills.models import SkillRecord
@@ -115,8 +120,8 @@ class SkillToolHost:
             "content": body,
         }
 
-    def as_tool_callables(self) -> tuple[Callable[..., Any], ...]:
-        """Named callables suitable for dspy.RLM tools=."""
+    def as_tools(self) -> tuple[dspy.Tool, ...]:
+        """Return the canonical typed Tools owned by this host."""
 
         def load_skill(
             skill_id: str,
@@ -137,4 +142,67 @@ class SkillToolHost:
                 expected_version=expected_version,
             )
 
-        return (load_skill, read_skill_resource)
+        return (
+            dspy.Tool(
+                load_skill,
+                name="load_skill",
+                desc="Load one authorized Skill instruction body after host reauthorization.",
+            ),
+            dspy.Tool(
+                read_skill_resource,
+                name="read_skill_resource",
+                desc="Read one authorized Skill resource after host reauthorization.",
+            ),
+        )
+
+    def event_views(self) -> Mapping[str, ToolEventView]:
+        """Return bounded public metadata projections for Skill Tools."""
+
+        def load_input(arguments: Mapping[str, Any]) -> JsonValue:
+            return {
+                key: bound_event_text(arguments[key])
+                for key in ("skill_id", "expected_version")
+                if arguments.get(key) is not None
+            }
+
+        def resource_input(arguments: Mapping[str, Any]) -> JsonValue:
+            return {
+                key: bound_event_text(arguments[key])
+                for key in ("skill_id", "resource_path", "expected_version")
+                if arguments.get(key) is not None
+            }
+
+        def load_output(result: object) -> JsonValue:
+            if not isinstance(result, Mapping):
+                return {}
+            values = cast(Mapping[str, JsonValue], result)
+            return {
+                key: bound_event_text(values[key]) if isinstance(values[key], str) else values[key]
+                for key in ("ok", "error", "skill_id", "name", "version", "trust")
+                if key in values
+            }
+
+        def resource_output(result: object) -> JsonValue:
+            if not isinstance(result, Mapping):
+                return {}
+            values = cast(Mapping[str, JsonValue], result)
+            content = result.get("content")
+            projected: dict[str, JsonValue] = {
+                key: bound_event_text(values[key]) if isinstance(values[key], str) else values[key]
+                for key in ("ok", "error", "skill_id", "path")
+                if key in values
+            }
+            if isinstance(content, str):
+                projected["content_chars"] = len(content)
+                projected["byte_size"] = len(content.encode("utf-8"))
+            return projected
+
+        return MappingProxyType(
+            {
+                "load_skill": ToolEventView(input_projection=load_input, output_projection=load_output),
+                "read_skill_resource": ToolEventView(
+                    input_projection=resource_input,
+                    output_projection=resource_output,
+                ),
+            }
+        )

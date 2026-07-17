@@ -86,6 +86,16 @@ def sanitize_public_text(text: str, *, max_len: int = 10_000) -> str:
     return cleaned
 
 
+def truncate_public_text(text: str, *, max_len: int = 10_000) -> str:
+    """Bound explicit semantic product text without content-dependent rewriting."""
+    limit = max(1, int(max_len))
+    if len(text) <= limit:
+        return text
+    if limit <= 3:
+        return "." * limit
+    return text[: limit - 3] + "..."
+
+
 def sanitize_public_value(value: Any, *, max_len: int = 2_000, depth: int = 0) -> Any:
     """Recursively bound and redact JSON-like public detail values."""
     if depth >= 8:

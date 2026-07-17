@@ -14,9 +14,10 @@ from fleet_rlm.files.workspace_models import DENO_WORKSPACE_CAPABILITY, Workspac
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.signature import FleetRLMSignature
+from fleet_rlm.rlm.tool_observer import ToolEventView
 from fleet_rlm.skills.models import SkillCard
 
-RLMTool = Callable[..., Any] | dspy.Tool
+ToolRegistrationInput = Callable[..., Any] | dspy.Tool
 InputAdapter = Callable[["CapabilityResolutionContext"], Mapping[str, Any]]
 OutputValidator = Callable[[Mapping[str, Any]], None]
 _RESERVED_TOOL_NAMES = frozenset({"llm_query", "llm_query_batched", "SUBMIT", "print"})
@@ -32,7 +33,8 @@ class CapabilityResolutionContext:
     options: RLMOptions
     skill_cards: tuple[SkillCard, ...] = ()
     attachments: tuple[Any, ...] = ()
-    tools: tuple[RLMTool, ...] = ()
+    tools: tuple[dspy.Tool, ...] = ()
+    tool_event_views: Mapping[str, ToolEventView] = field(default_factory=lambda: MappingProxyType({}))
     workspace: WorkspaceCapabilityMetadata = DENO_WORKSPACE_CAPABILITY
 
 
@@ -99,7 +101,8 @@ def _validate_task_contract(contract: TaskContract) -> None:
 @dataclass(frozen=True, slots=True)
 class CapabilityRegistration:
     id: str
-    tools: tuple[RLMTool, ...] = ()
+    tools: tuple[dspy.Tool, ...] = ()
+    tool_event_views: Mapping[str, ToolEventView] = field(default_factory=lambda: MappingProxyType({}))
     task_contract: TaskContract | None = None
     input_adapters: tuple[InputAdapter, ...] = ()
     validators: tuple[OutputValidator, ...] = ()
@@ -117,7 +120,8 @@ class CapabilityRegistry:
         self,
         capability_id: str,
         *,
-        tools: Sequence[RLMTool] = (),
+        tools: Sequence[ToolRegistrationInput] = (),
+        tool_event_views: Mapping[str, ToolEventView] | None = None,
         task_contract: TaskContract | None = None,
         input_adapters: Sequence[InputAdapter] = (),
         validators: Sequence[OutputValidator] = (),
@@ -127,11 +131,9 @@ class CapabilityRegistry:
         key = capability_id.strip()
         if not key or len(key) > 128 or key in self._items:
             raise ValueError("capability id is empty or already registered")
-        tool_values = tuple(tools)
-        for tool in tool_values:
-            name = _tool_name(tool)
-            if not name.isidentifier() or name in _RESERVED_TOOL_NAMES:
-                raise ValueError("capability tool name is invalid or reserved")
+        tool_values = tuple(tool if isinstance(tool, dspy.Tool) else dspy.Tool(tool) for tool in tools)
+        _validate_tools(tool_values)
+        view_values = _validate_event_views(tool_values, tool_event_views or {})
         knowledge_values = tuple(str(item) for item in knowledge)
         if any(len(item) > 4_000 for item in knowledge_values) or sum(map(len, knowledge_values)) > 16_000:
             raise ValueError("capability knowledge exceeds host bounds")
@@ -140,6 +142,7 @@ class CapabilityRegistry:
         item = CapabilityRegistration(
             id=key,
             tools=tool_values,
+            tool_event_views=view_values,
             task_contract=task_contract,
             input_adapters=tuple(input_adapters),
             validators=tuple(validators),
@@ -218,12 +221,17 @@ class DSPySkillSelector:
 @dataclass(frozen=True, slots=True)
 class TurnCapabilityBlueprint:
     activated_skills: tuple[SkillCard, ...] = ()
-    tools: tuple[RLMTool, ...] = ()
+    tools: tuple[dspy.Tool, ...] = ()
+    tool_event_views: Mapping[str, ToolEventView] = field(default_factory=lambda: MappingProxyType({}))
     task_contract: TaskContract | None = None
     input_values: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
     validators: tuple[OutputValidator, ...] = ()
     knowledge: tuple[str, ...] = ()
     workspace: WorkspaceCapabilityMetadata = DENO_WORKSPACE_CAPABILITY
+
+    def __post_init__(self) -> None:
+        _validate_tools(self.tools)
+        object.__setattr__(self, "tool_event_views", _validate_event_views(self.tools, self.tool_event_views))
 
     @property
     def signature(self) -> type[dspy.Signature]:
@@ -234,10 +242,34 @@ class TurnCapabilityBlueprint:
         return FleetRLMSignature
 
 
-def _tool_name(tool: RLMTool) -> str:
-    if isinstance(tool, dspy.Tool):
-        return str(tool.name)
-    return str(getattr(tool, "__name__", ""))
+def _tool_name(tool: dspy.Tool) -> str:
+    return str(tool.name)
+
+
+def _validate_tools(tools: Sequence[dspy.Tool]) -> None:
+    seen: set[str] = set()
+    for tool in tools:
+        if not isinstance(tool, dspy.Tool):
+            raise TypeError("Turn capabilities must contain only dspy.Tool objects")
+        name = _tool_name(tool)
+        if not name.isidentifier() or name in _RESERVED_TOOL_NAMES:
+            raise ValueError("capability tool name is invalid or reserved")
+        if name in seen:
+            raise ValueError("capability tool name is duplicate")
+        seen.add(name)
+
+
+def _validate_event_views(
+    tools: Sequence[dspy.Tool],
+    views: Mapping[str, ToolEventView],
+) -> Mapping[str, ToolEventView]:
+    names = {_tool_name(tool) for tool in tools}
+    values = dict(views)
+    if any(name not in names for name in values):
+        raise ValueError("tool event view names an unavailable Tool")
+    if any(not isinstance(view, ToolEventView) for view in values.values()):
+        raise TypeError("tool event views must contain ToolEventView values")
+    return MappingProxyType(values)
 
 
 class CapabilityResolver:
@@ -256,6 +288,11 @@ class CapabilityResolver:
 
     async def resolve(self, context: CapabilityResolutionContext) -> TurnCapabilityBlueprint:
         cards = tuple(context.skill_cards or ())
+        base = TurnCapabilityBlueprint(
+            tools=tuple(context.tools or ()),
+            tool_event_views=context.tool_event_views,
+            workspace=context.workspace,
+        )
         try:
             selection = await self._selector.select(
                 request=context.request,
@@ -266,10 +303,7 @@ class CapabilityResolver:
             )
             return self._compose(context, cards, selection)
         except Exception:  # noqa: BLE001 - selector/capability failure degrades to no Skills
-            return TurnCapabilityBlueprint(
-                tools=tuple(context.tools or ()),
-                workspace=context.workspace,
-            )
+            return base
 
     def _compose(
         self,
@@ -303,19 +337,24 @@ class CapabilityResolver:
         for registration in registrations:
             registration.rlm_requirements.validate(context)
 
-        tools: list[RLMTool] = []
-        seen_tools: dict[str, RLMTool] = {}
+        tools: list[dspy.Tool] = []
+        seen_tools: dict[str, dspy.Tool] = {}
         for tool in (*tuple(context.tools or ()), *(tool for item in registrations for tool in item.tools)):
             name = _tool_name(tool)
             if not name:
                 raise ValueError("capability tool has no valid name")
             previous = seen_tools.get(name)
             if previous is not None:
-                if previous is tool:
-                    continue
                 raise ValueError("capability tool name conflict")
             seen_tools[name] = tool
             tools.append(tool)
+
+        event_views = dict(context.tool_event_views)
+        for registration in registrations:
+            for name, view in registration.tool_event_views.items():
+                if name in event_views:
+                    raise ValueError("capability tool event view conflict")
+                event_views[name] = view
 
         task_contract: TaskContract | None = None
         if selection.primary_skill_id is not None:
@@ -339,6 +378,7 @@ class CapabilityResolver:
         blueprint = TurnCapabilityBlueprint(
             activated_skills=selected,
             tools=tuple(tools),
+            tool_event_views=event_views,
             task_contract=task_contract,
             input_values=MappingProxyType(bound_inputs),
             validators=tuple(validator for item in registrations for validator in item.validators),

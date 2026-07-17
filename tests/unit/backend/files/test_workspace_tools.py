@@ -7,6 +7,7 @@ from dataclasses import replace
 import dspy
 
 from fleet_rlm.files.workspace_models import WorkspaceEntry
+from fleet_rlm.rlm.tool_observer import observe_tool
 
 
 class FakeWorkspace:
@@ -105,6 +106,59 @@ def test_round_trips_text_with_bounded_json_results() -> None:
         "chars": 16,
         "byte_size": 16,
     }
+
+
+def test_workspace_event_views_expose_metadata_without_file_bodies_or_entries() -> None:
+    from fleet_rlm.files.workspace_tools import WorkspaceToolHost
+
+    workspace = FakeWorkspace()
+    host = WorkspaceToolHost(workspace, max_file_bytes=64)
+    tools = {str(tool.name): tool for tool in host.as_tools()}
+    views = host.event_views()
+    observed: list[object] = []
+
+    observe_tool(tools["write_workspace_text"], observed.append, views["write_workspace_text"])(
+        path="notes/private.md",
+        content="private workspace body",
+        overwrite=False,
+    )
+    observe_tool(tools["list_workspace_files"], observed.append, views["list_workspace_files"])(
+        path=".",
+        limit=100,
+    )
+    observe_tool(tools["read_workspace_text"], observed.append, views["read_workspace_text"])(
+        path="notes/private.md",
+        max_chars=64,
+    )
+
+    assert observed[0].input == {
+        "path": "notes/private.md",
+        "overwrite": False,
+        "content_chars": 22,
+    }
+    assert observed[1].output == {"ok": True, "path": "notes/private.md", "byte_size": 22}
+    assert observed[3].output == {"ok": True, "path": ".", "count": 1}
+    assert observed[5].output == {
+        "ok": True,
+        "path": "notes/private.md",
+        "chars": 22,
+        "byte_size": 22,
+    }
+    assert "private workspace body" not in str(observed)
+    assert "entries" not in str(observed)
+
+    observed.clear()
+    oversized_path = "x" * 2_000
+    observe_tool(tools["stat_workspace_file"], observed.append, views["stat_workspace_file"])(path=oversized_path)
+    assert observed[0].input == {}
+    assert oversized_path not in str(observed)
+
+    observed.clear()
+    observe_tool(tools["stat_workspace_file"], observed.append, views["stat_workspace_file"])(
+        path="/home/daytona/private"
+    )
+    assert observed[0].input == {}
+    assert "/home/daytona" not in str(observed)
 
 
 def test_returns_stable_error_codes_without_exception_details() -> None:

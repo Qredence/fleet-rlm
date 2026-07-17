@@ -15,6 +15,7 @@ import time
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
+import dspy
 from dspy.primitives.code_interpreter import FinalOutput
 
 from fleet_rlm.daytona.errors import (
@@ -26,7 +27,8 @@ from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.in_process import BackendExecutionResult, InProcessInterpreterBackend
 from fleet_rlm.daytona.submit import extract_final_payload
 from fleet_rlm.rlm.events import ObservationObserver, RLMCode, RLMOutput, StepFinished, StepStarted
-from fleet_rlm.rlm.sanitize import sanitize_public_error, sanitize_public_text
+from fleet_rlm.rlm.sanitize import truncate_public_text
+from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 
 
 class InterpreterBackend(Protocol):
@@ -35,6 +37,10 @@ class InterpreterBackend(Protocol):
     def run(self, code: str, variables: dict[str, object] | None = None) -> str | BackendExecutionResult: ...
 
     def close(self) -> None: ...
+
+
+class _RepairFeedback(str):
+    """Detailed interpreter feedback returned to RLM but not public projection."""
 
 
 def _assignments_preamble(variables: dict[str, object] | None) -> str:
@@ -109,6 +115,7 @@ class DaytonaCodeInterpreter:
     ) -> None:
         self._backend = backend
         self._tools: dict[str, Callable[..., Any]] = dict(tools or {})
+        self._bound_tools: dict[str, Callable[..., Any]] = {}
         self.output_fields: list[dict[str, Any]] | None = list(output_fields) if output_fields is not None else None
         self._tools_registered = False
         self._started = False
@@ -145,7 +152,36 @@ class DaytonaCodeInterpreter:
     def _public_output(self, result: Any) -> str:
         if isinstance(result, FinalOutput):
             return "FINAL submitted"
-        return sanitize_public_text(str(result or ""), max_len=self._observation_max_chars)
+        if isinstance(result, _RepairFeedback):
+            return "Execution error"
+        return truncate_public_text(str(result or ""), max_len=self._observation_max_chars)
+
+    def _execution_tools(self) -> dict[str, Callable[..., Any]]:
+        tools = dict(self._tools)
+        if self._observer is None:
+            return tools
+
+        def single_input(arguments: Mapping[str, Any]) -> Any:
+            prompt = arguments.get("prompt")
+            return {"prompt_count": 1, "prompt_chars": len(str(prompt or ""))}
+
+        def batch_input(arguments: Mapping[str, Any]) -> Any:
+            raw = arguments.get("prompts")
+            prompts = list(raw) if isinstance(raw, (list, tuple)) else []
+            return {
+                "prompt_count": len(prompts),
+                "prompt_chars": sum(len(str(prompt)) for prompt in prompts),
+            }
+
+        views = {
+            "llm_query": ToolEventView(input_projection=single_input),
+            "llm_query_batched": ToolEventView(input_projection=batch_input),
+        }
+        for name, view in views.items():
+            fn = tools.get(name)
+            if fn is not None:
+                tools[name] = observe_tool(dspy.Tool(fn, name=name), self._observer, view).func
+        return tools
 
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         if self._shutdown:
@@ -160,7 +196,7 @@ class DaytonaCodeInterpreter:
         step = self._observation_step
         step_started = time.perf_counter()
         self._observe(StepStarted(step))
-        self._observe(RLMCode(sanitize_public_text(code, max_len=self._observation_max_chars), step))
+        self._observe(RLMCode(truncate_public_text(code, max_len=self._observation_max_chars), step))
         try:
             self._ensure_bindings()
             if self._http_broker is not None:
@@ -170,12 +206,12 @@ class DaytonaCodeInterpreter:
                 result = self._finalize(raw)
             self._observe(RLMOutput(self._public_output(result), step))
             return result
-        except DaytonaAdapterError as exc:
-            self._observe(RLMOutput(sanitize_public_error(exc), step))
+        except DaytonaAdapterError:
+            self._observe(RLMOutput("Execution failed", step))
             raise
         except Exception as exc:  # noqa: BLE001 - map all provider failures
             mapped = map_provider_error(exc)
-            self._observe(RLMOutput(sanitize_public_error(mapped), step))
+            self._observe(RLMOutput("Execution failed", step))
             raise mapped from exc
         finally:
             duration_ms = int((time.perf_counter() - step_started) * 1_000)
@@ -198,8 +234,10 @@ class DaytonaCodeInterpreter:
         backend = self._backend
         if backend is None:
             return
+        tools = self._execution_tools()
+        self._bound_tools = tools
         if isinstance(backend, InProcessInterpreterBackend):
-            backend.bind_host_tools(self._tools)
+            backend.bind_host_tools(tools)
             backend.ensure_submit(self.output_fields)
             self._tools_registered = True
             return
@@ -213,7 +251,7 @@ class DaytonaCodeInterpreter:
         if self._http_broker is None:
             self._http_broker = DaytonaHttpToolBroker(sandbox=backend.sandbox)
             self._http_broker.ensure_started()
-        self._http_broker.register_tools(self._tools)
+        self._http_broker.register_tools(tools)
         backend.run(self._http_broker.submit_setup_code(self.output_fields))
         self._tools_registered = True
 
@@ -229,7 +267,7 @@ class DaytonaCodeInterpreter:
             raise DaytonaAdapterError(message=msg, cause_type="InterpreterConfigurationError")
 
         def tool_executor(name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
-            fn = self._tools.get(name)
+            fn = self._bound_tools.get(name)
             if fn is None:
                 msg = f"unknown tool: {name}"
                 raise DaytonaAdapterError(message=msg, cause_type="UnknownToolError")
@@ -250,7 +288,7 @@ class DaytonaCodeInterpreter:
     def _finalize(self, raw: str | BackendExecutionResult) -> Any:
         if isinstance(raw, BackendExecutionResult):
             if raw.error:
-                return f"[Error] {sanitize_provider_message(raw.error)}"
+                return _RepairFeedback(f"[Error] {sanitize_provider_message(raw.error)}")
             if raw.final is not None:
                 return FinalOutput(raw.final)
             return raw.stdout

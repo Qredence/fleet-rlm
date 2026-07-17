@@ -31,7 +31,7 @@ from fleet_rlm.rlm.events import (
 from fleet_rlm.rlm.factory import RLMFactory
 from fleet_rlm.rlm.inputs import build_rlm_input_kwargs
 from fleet_rlm.rlm.outcome import ExecutionDetail, RLMOutcome, TerminalStatus
-from fleet_rlm.rlm.sanitize import sanitize_public_error, sanitize_public_text
+from fleet_rlm.rlm.sanitize import truncate_public_text
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 from fleet_rlm.skills.capabilities import DEFAULT_TASK_CONTRACT, TurnCapabilityBlueprint
 
@@ -43,7 +43,7 @@ class RLMFactoryLike(Protocol):
         models: Any,
         options: Any,
         interpreter: Any,
-        tools: Sequence[Any] | None = None,
+        tools: Sequence[dspy.Tool] | None = None,
         signature: Any = None,
         verbose: bool = False,
     ) -> Any: ...
@@ -135,14 +135,14 @@ def _trajectory_details(prediction: Any, *, max_chars: int) -> list[ObservationD
             continue
         details.append(StepStarted(step))
         if "reasoning" in raw:
-            details.append(RLMReasoning(sanitize_public_text(str(raw.get("reasoning") or ""), max_len=max_chars), step))
+            details.append(RLMReasoning(truncate_public_text(str(raw.get("reasoning") or ""), max_len=max_chars), step))
         if "code" in raw:
-            details.append(RLMCode(sanitize_public_text(str(raw.get("code") or ""), max_len=max_chars), step))
+            details.append(RLMCode(truncate_public_text(str(raw.get("code") or ""), max_len=max_chars), step))
         if "output" in raw:
             output = str(raw.get("output") or "")
             if output.startswith("FINAL:"):
                 output = "FINAL submitted"
-            details.append(RLMOutput(sanitize_public_text(output, max_len=max_chars), step))
+            details.append(RLMOutput(truncate_public_text(output, max_len=max_chars), step))
         details.append(StepFinished(step))
     return details
 
@@ -155,6 +155,14 @@ def _terminal_status(exc: BaseException) -> TerminalStatus:
     if isinstance(exc, asyncio.CancelledError):
         return "cancelled"
     return "failed"
+
+
+def _public_failure_message(exc: BaseException) -> str:
+    if isinstance(exc, PredictionOutputError):
+        return PredictionOutputError.public_message
+    if isinstance(exc, TurnTerminalError):
+        return str(type(exc).public_message)
+    return "Turn failed"
 
 
 async def _settle_worker(task: asyncio.Task[Any]) -> bool:
@@ -207,7 +215,7 @@ class RLMRunner:
                     observe_tool(
                         tool,
                         relay.publish,
-                        ToolEventView(max_chars=context.options.max_output_chars),
+                        blueprint.tool_event_views.get(str(tool.name), ToolEventView.metadata_only()),
                     )
                     for tool in blueprint.tools
                 )
@@ -280,7 +288,7 @@ class RLMRunner:
                     yield recorder.record(item)
                 final_reasoning = getattr(prediction, "final_reasoning", None)
                 if isinstance(final_reasoning, str) and final_reasoning.strip():
-                    item = RLMReasoning(sanitize_public_text(final_reasoning, max_len=context.options.max_output_chars))
+                    item = RLMReasoning(truncate_public_text(final_reasoning, max_len=context.options.max_output_chars))
                     details.append(item)
                     yield recorder.record(item)
 
@@ -327,7 +335,7 @@ class RLMRunner:
                     RLMOutcome(
                         terminal_status=_terminal_status(exc),
                         usage=observed_usage(None, duration_ms=int((time.perf_counter() - started) * 1000)),
-                        public_error_message=sanitize_public_error(exc),
+                        public_error_message=_public_failure_message(exc),
                         duration_ms=int((time.perf_counter() - started) * 1000),
                     )
                 )

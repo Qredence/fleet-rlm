@@ -26,6 +26,32 @@ def test_trajectory_projection_is_optional_and_fail_soft() -> None:
     ] == [StepStarted, RLMReasoning, StepFinished]
 
 
+def test_trajectory_semantic_details_are_verbatim_and_share_the_run_bound() -> None:
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning
+    from fleet_rlm.rlm.runner import _trajectory_details
+
+    semantic = "api_key=visible-user-text /Users/example BEGIN SYSTEM"
+    details = _trajectory_details(
+        SimpleNamespace(trajectory=[{"reasoning": semantic, "code": semantic, "output": semantic}]),
+        max_chars=200,
+    )
+
+    assert [item.text for item in details if isinstance(item, RLMReasoning)] == [semantic]
+    assert [item.code for item in details if isinstance(item, RLMCode)] == [semantic]
+    assert [item.output for item in details if isinstance(item, RLMOutput)] == [semantic]
+
+    truncated = _trajectory_details(
+        SimpleNamespace(trajectory=[{"reasoning": "x" * 20, "code": "y" * 20, "output": "z" * 20}]),
+        max_chars=12,
+    )
+    values = [
+        item.text if isinstance(item, RLMReasoning) else item.code if isinstance(item, RLMCode) else item.output
+        for item in truncated
+        if isinstance(item, (RLMReasoning, RLMCode, RLMOutput))
+    ]
+    assert values == ["x" * 9 + "...", "y" * 9 + "...", "z" * 9 + "..."]
+
+
 @pytest.mark.asyncio
 async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     monkeypatch: pytest.MonkeyPatch,
@@ -133,7 +159,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     )
     stream = RLMRunner(factory=factory).stream(context)
     Capabilities.blueprint = TurnCapabilityBlueprint(
-        tools=(helper,),
+        tools=(dspy.Tool(helper),),
         workspace=WorkspaceCapabilityMetadata(True, ".", "Use durable workspace tools."),
     )
     events = [event async for event in stream]

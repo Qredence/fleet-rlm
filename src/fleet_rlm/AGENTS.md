@@ -26,15 +26,18 @@ and reviewed.
   four text workspace Tools. Call the supported
   `await rlm.acall(**named_inputs)` surface.
 - Compose zero to four authorized Skills through the host-owned capability
-  registry. Capability tools may be plain callables or explicit `dspy.Tool`
-  objects; HTTP never supplies executable Python or serialized objects.
+  registry. The registry may accept a plain callable only at registration and
+  normalizes it immediately; Turn blueprints, runners, and factories contain
+  only explicit `dspy.Tool` objects. HTTP never supplies executable Python or
+  serialized objects.
 - Keep Runtime Events transport-neutral. `api/sse.py` alone projects the public
   AI SDK UI 7 v1 stream. Observe live code/output at the Daytona interpreter
   boundary and host-tool activity through fresh wrapped `dspy.Tool` objects;
   supplement missing details from the completed native trajectory.
-- Bound and sanitize public code, output, and post-run reasoning. Project
-  protected tool inputs and outputs without publishing attachment, Skill,
-  artifact, Session Workspace, or subquery bodies.
+- Preserve explicit public code, output, and post-run reasoning verbatim up to
+  the Run's output-character bound. Host-owned Tool event views expose only
+  bounded allowlisted metadata; Tools without a view expose no arguments or
+  results. Provider failures use closed public messages.
 - `TurnCoordinator` owns candidate promotion, Turn Commit, terminal projection,
   final UI part ordering, and Interpreter Lease release.
 - `CommittedTurn` is the only replay source. A successful Daytona Run may retain

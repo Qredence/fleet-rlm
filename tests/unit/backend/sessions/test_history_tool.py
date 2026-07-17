@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from fleet_rlm.rlm.tool_observer import observe_tool
+
 
 def test_history_tool_pages_canonical_messages_with_stable_ordinals() -> None:
     from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
@@ -48,6 +50,22 @@ def test_history_tool_pages_canonical_messages_with_stable_ordinals() -> None:
         "total": 5,
         "messages": [],
     }
+
+
+def test_history_event_view_exposes_page_metadata_without_message_bodies() -> None:
+    from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
+    from fleet_rlm.sessions.models import HistoryMessage, SessionHistory
+
+    host = SessionHistoryToolHost(SessionHistory((HistoryMessage("user", "private history body"),)))
+    (tool,) = host.as_tools()
+    observed: list[object] = []
+
+    result = observe_tool(tool, observed.append, host.event_views()["read_session_history"])(offset=0, limit=1)
+
+    assert result["messages"][0]["content"] == "private history body"
+    assert observed[0].input == {"offset": 0, "limit": 1}
+    assert observed[1].output == {"offset": 0, "next_offset": 1, "total": 1, "message_count": 1}
+    assert "private history body" not in str(observed)
 
 
 @pytest.mark.parametrize(

@@ -184,11 +184,19 @@ class _DenoCapabilityPreparer:
             workspace_id=turn.access.workspace_id,
         )
 
-        file_tools = tuple(
-            tool for tool in file_host.as_tool_callables() if getattr(tool, "__name__", "") != "create_artifact"
-        )
-        history_tools = SessionHistoryToolHost(turn.history).as_tools()
-        tools = (*file_tools, *history_tools, *skill_host.as_tool_callables())
+        file_tools = tuple(tool for tool in file_host.as_tools() if str(tool.name) != "create_artifact")
+        history_host = SessionHistoryToolHost(turn.history)
+        history_tools = history_host.as_tools()
+        tools = (*file_tools, *history_tools, *skill_host.as_tools())
+        tool_event_views = {
+            name: view
+            for name, view in {
+                **file_host.event_views(),
+                **history_host.event_views(),
+                **skill_host.event_views(),
+            }.items()
+            if name != "create_artifact"
+        }
         cards = authorizer.list_cards(
             user_id=turn.access.user_id,
             workspace_id=turn.access.workspace_id,
@@ -203,6 +211,7 @@ class _DenoCapabilityPreparer:
                 skill_cards=cards,
                 attachments=attachments.refs,
                 tools=tools,
+                tool_event_views=tool_event_views,
                 workspace=DENO_WORKSPACE_CAPABILITY,
             )
         )

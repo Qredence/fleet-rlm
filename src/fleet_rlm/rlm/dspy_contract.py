@@ -17,7 +17,7 @@ from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.sanitize import sanitize_public_value
 
 if TYPE_CHECKING:
-    from fleet_rlm.skills.capabilities import RLMTool, TaskContract
+    from fleet_rlm.skills.capabilities import TaskContract
 
 DSPY_VERSION = "3.3.0b1"
 
@@ -266,7 +266,7 @@ def build_native_rlm(
     *,
     signature: type[dspy.Signature] | str,
     options: RLMOptions,
-    tools: Sequence[RLMTool] | None = None,
+    tools: Sequence[dspy.Tool] | None = None,
     sub_lm: dspy.LM | None = None,
     interpreter: Any = None,
     verbose: bool = False,

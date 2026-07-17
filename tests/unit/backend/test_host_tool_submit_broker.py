@@ -101,10 +101,10 @@ def test_host_tool_public_errors_are_sanitized() -> None:
     interp.output_fields = [{"name": "answer", "type": "str"}]
     interp.start()
 
-    with pytest.raises(Exception) as exc_info:
-        interp.execute("leaky()")
+    result = interp.execute("leaky()")
 
-    message = str(exc_info.value)
+    message = str(result)
+    assert message.startswith("[Error]")
     assert "sk-secret" not in message
     assert "/tmp/secret" not in message
 

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import Any, cast
 from uuid import UUID, uuid4
+
+import dspy
 
 from fleet_rlm.artifacts.models import KIND_EXTENSIONS, ArtifactCandidate
 from fleet_rlm.artifacts.safety import (
@@ -19,6 +22,27 @@ from fleet_rlm.artifacts.safety import (
 from fleet_rlm.daytona.paths import VolumePaths, as_posix
 from fleet_rlm.daytona.volume_fs import VolumeBlobFs
 from fleet_rlm.files.models import AttachmentRef, StagedAttachment
+from fleet_rlm.rlm.events import JsonValue
+from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
+
+_EVENT_TEXT_MAX_CHARS = 256
+
+
+def _bounded_text(value: object) -> str:
+    return bound_event_text(value, max_chars=_EVENT_TEXT_MAX_CHARS)
+
+
+def _project_fields(result: object, fields: tuple[str, ...]) -> JsonValue:
+    if not isinstance(result, Mapping):
+        return {}
+    values = cast(Mapping[str, JsonValue], result)
+    return {
+        key: bound_event_text(values[key], max_chars=_EVENT_TEXT_MAX_CHARS)
+        if isinstance(values[key], str)
+        else values[key]
+        for key in fields
+        if key in values
+    }
 
 
 class FileToolHost:
@@ -155,8 +179,8 @@ class FileToolHost:
             "checksum_sha256": candidate.checksum_sha256,
         }
 
-    def as_tool_callables(self) -> tuple[Callable[..., Any], ...]:
-        """Named callables suitable for dspy.RLM tools=."""
+    def as_tools(self) -> tuple[dspy.Tool, ...]:
+        """Return the canonical typed Tools owned by this host."""
 
         def read_attachment(attachment_id: str) -> dict[str, Any]:
             """Read an authorized attachment by opaque ID (host rechecks every call)."""
@@ -170,4 +194,48 @@ class FileToolHost:
             """Stage a text/markdown/json Artifact Candidate for Turn Commit."""
             return self.create_artifact(kind, content, title=title)
 
-        return (read_attachment, create_artifact)
+        return (
+            dspy.Tool(
+                read_attachment,
+                name="read_attachment",
+                desc="Read one authorized Attachment by opaque identity.",
+            ),
+            dspy.Tool(
+                create_artifact,
+                name="create_artifact",
+                desc="Stage a text, markdown, or JSON Artifact Candidate for Turn Commit.",
+            ),
+        )
+
+    def event_views(self) -> Mapping[str, ToolEventView]:
+        """Return bounded public metadata projections for File Tools."""
+
+        def read_input(arguments: Mapping[str, Any]) -> JsonValue:
+            return {"attachment_id": _bounded_text(arguments.get("attachment_id"))}
+
+        def artifact_input(arguments: Mapping[str, Any]) -> JsonValue:
+            content = arguments.get("content")
+            return {
+                "kind": _bounded_text(arguments.get("kind")),
+                "title": _bounded_text(arguments.get("title")) if arguments.get("title") is not None else None,
+                "content_chars": len(str(content or "")),
+            }
+
+        return MappingProxyType(
+            {
+                "read_attachment": ToolEventView(
+                    input_projection=read_input,
+                    output_projection=lambda result: _project_fields(
+                        result,
+                        ("ok", "error", "attachment_id", "filename", "content_type", "encoding"),
+                    ),
+                ),
+                "create_artifact": ToolEventView(
+                    input_projection=artifact_input,
+                    output_projection=lambda result: _project_fields(
+                        result,
+                        ("ok", "error", "kind", "title", "byte_size"),
+                    ),
+                ),
+            }
+        )

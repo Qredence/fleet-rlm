@@ -10,7 +10,6 @@ import dspy
 from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.signature import FleetRLMSignature
-from fleet_rlm.skills.capabilities import RLMTool
 
 __all__ = ["RLMFactory", "build_native_rlm"]
 
@@ -24,7 +23,7 @@ class RLMFactory:
         models: RLMModelBundle,
         options: RLMOptions,
         interpreter: Any,
-        tools: Sequence[RLMTool] | None = None,
+        tools: Sequence[dspy.Tool] | None = None,
         signature: type[dspy.Signature] | str | None = None,
         verbose: bool = False,
     ) -> Any:

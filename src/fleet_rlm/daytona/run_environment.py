@@ -277,7 +277,7 @@ class _LiveCapabilityPreparer:
             max_artifact_bytes=self.resources.settings.max_artifact_bytes,
             volume_paths=paths,
         )
-        workspace_tools = WorkspaceToolHost(
+        workspace_host = WorkspaceToolHost(
             DaytonaSessionWorkspaceFS(
                 volume_fs.sandbox,
                 volume_root=str(paths.mount_path),
@@ -285,12 +285,21 @@ class _LiveCapabilityPreparer:
                 max_file_bytes=self.resources.settings.max_upload_bytes,
             ),
             max_file_bytes=self.resources.settings.max_upload_bytes,
-        ).as_tools()
-        history_tools = SessionHistoryToolHost(turn.history).as_tools()
+        )
+        file_tools = file_host.as_tools()
+        workspace_tools = workspace_host.as_tools()
+        history_host = SessionHistoryToolHost(turn.history)
+        history_tools = history_host.as_tools()
+        base_views = {
+            **file_host.event_views(),
+            **workspace_host.event_views(),
+            **history_host.event_views(),
+        }
         if self.resources.skill_registry is None:
             return LivePreparedCapabilities(
                 TurnCapabilityBlueprint(
-                    tools=(*file_host.as_tool_callables(), *workspace_tools, *history_tools),
+                    tools=(*file_tools, *workspace_tools, *history_tools),
+                    tool_event_views=base_views,
                     workspace=DAYTONA_WORKSPACE_CAPABILITY,
                 ),
                 files=file_host,
@@ -303,15 +312,17 @@ class _LiveCapabilityPreparer:
             workspace_id=turn.access.workspace_id,
         )
         tools = (
-            *file_host.as_tool_callables(),
+            *file_tools,
             *workspace_tools,
             *history_tools,
-            *skill_host.as_tool_callables(),
+            *skill_host.as_tools(),
         )
+        tool_event_views = {**base_views, **skill_host.event_views()}
         cards = authorizer.list_cards(user_id=turn.access.user_id, workspace_id=turn.access.workspace_id)
         if self.resources.capability_registry is None:
             blueprint = TurnCapabilityBlueprint(
                 tools=tools,
+                tool_event_views=tool_event_views,
                 workspace=DAYTONA_WORKSPACE_CAPABILITY,
             )
         else:
@@ -328,6 +339,7 @@ class _LiveCapabilityPreparer:
                     skill_cards=cards,
                     attachments=attachments.refs,
                     tools=tools,
+                    tool_event_views=tool_event_views,
                     workspace=DAYTONA_WORKSPACE_CAPABILITY,
                 )
             )
