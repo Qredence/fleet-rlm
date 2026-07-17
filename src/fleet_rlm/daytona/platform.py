@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
-from fleet_rlm.daytona.errors import is_sandbox_not_found, map_provider_error
+from fleet_rlm.daytona.errors import DaytonaAdapterError, is_sandbox_not_found, map_provider_error
 from fleet_rlm.daytona.volumes import require_scoped_volume_subpath
+
+_VOLUME_READY_RETRY_DELAYS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
+_VOLUME_FAILED_STATES = frozenset({"deleting", "deleted", "error"})
 
 
 class LiveDaytonaVolumeClient:
@@ -15,7 +19,31 @@ class LiveDaytonaVolumeClient:
         self._client = client
 
     def get(self, name: str, *, create: bool = False) -> Any:
-        return self._client.volume.get(name, create=create)
+        volume = self._client.volume.get(name, create=create)
+        if not create:
+            return volume
+
+        state = _volume_state(volume)
+        if state is None or state == "ready":
+            return volume
+        if state in _VOLUME_FAILED_STATES:
+            raise DaytonaAdapterError(message="Daytona Volume did not become ready", cause_type="VolumeLifecycleError")
+        for delay in _VOLUME_READY_RETRY_DELAYS:
+            time.sleep(delay)
+            volume = self._client.volume.get(name, create=False)
+            state = _volume_state(volume)
+            if state is None or state == "ready":
+                return volume
+            if state in _VOLUME_FAILED_STATES:
+                break
+        raise DaytonaAdapterError(message="Daytona Volume did not become ready", cause_type="VolumeLifecycleError")
+
+
+def _volume_state(volume: Any) -> str | None:
+    state = getattr(volume, "state", None)
+    if state is None:
+        return None
+    return str(getattr(state, "value", state)).lower()
 
 
 class LiveDaytonaPlatform:

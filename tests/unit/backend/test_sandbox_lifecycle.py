@@ -16,7 +16,7 @@ from fleet_rlm.daytona.errors import (
     sanitize_provider_message,
 )
 from fleet_rlm.daytona.lifecycle import normalize_state
-from fleet_rlm.daytona.platform import LiveDaytonaPlatform
+from fleet_rlm.daytona.platform import LiveDaytonaPlatform, LiveDaytonaVolumeClient
 
 
 class DaytonaNotFoundError(Exception):
@@ -116,6 +116,33 @@ def test_live_platform_get_raises_on_auth_error() -> None:
     platform = LiveDaytonaPlatform(client)
     with pytest.raises(ProviderRequestError):
         platform.get("sb-1")
+
+
+def test_live_volume_client_waits_for_created_volume_to_be_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = MagicMock()
+    client.volume.get.side_effect = [
+        SimpleNamespace(id="vol-1", state="creating"),
+        SimpleNamespace(id="vol-1", state="ready"),
+    ]
+    monkeypatch.setattr("fleet_rlm.daytona.platform.time.sleep", lambda _delay: None)
+
+    volume = LiveDaytonaVolumeClient(client).get("vol-1", create=True)
+
+    assert volume.state == "ready"
+    assert client.volume.get.call_args_list == [
+        (("vol-1",), {"create": True}),
+        (("vol-1",), {"create": False}),
+    ]
+
+
+def test_live_volume_client_rejects_failed_volume_state() -> None:
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+
+    client = MagicMock()
+    client.volume.get.side_effect = [SimpleNamespace(id="vol-1", state="error")]
+
+    with pytest.raises(DaytonaAdapterError, match="did not become ready"):
+        LiveDaytonaVolumeClient(client).get("vol-1", create=True)
 
 
 def test_live_platform_delete_resolves_id_for_daytona_0_192_contract() -> None:
