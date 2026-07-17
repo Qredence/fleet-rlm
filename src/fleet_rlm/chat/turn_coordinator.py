@@ -32,6 +32,7 @@ from fleet_rlm.rlm.events import (
     RunCancelled,
     RunCompleted,
     RunFailed,
+    RunFailedMessage,
     RunStarted,
     RunTimedOut,
     RuntimeEvent,
@@ -91,7 +92,11 @@ def _terminal(recorder: EventRecorder, receipt: CommittedTurnReceipt | FailedRun
         return recorder.record(RunFailed(code="preparation_failed", message="Turn could not be prepared"))
     if receipt.failure_code == "commit_failed":
         return recorder.record(RunFailed(code="commit_failed", message="Turn could not be committed"))
-    return recorder.record(RunFailed(code="execution_failed", message="Turn failed"))
+    message = receipt.public_message.strip() if receipt.public_message else ""
+    public_message: RunFailedMessage = (
+        "Turn output is invalid" if message == "Turn output is invalid" else "Turn failed"
+    )
+    return recorder.record(RunFailed(code="execution_failed", message=public_message))
 
 
 class TurnCoordinator:

@@ -42,6 +42,62 @@ def test_extracted_observer_func_binds_defaults_validates_and_enters_host_once()
     assert [item.error for item in failures] == ["Tool arguments are invalid"] * 3
 
 
+def test_observed_semantic_tool_validates_exact_string_and_list_shape() -> None:
+    calls: list[tuple[str, str, list[str], list[str]]] = []
+
+    def verify_semantic_work(
+        iteration_token: str,
+        single_result: str,
+        batch_results: list[str],
+        accumulator: list[str],
+    ) -> dict[str, bool]:
+        calls.append((iteration_token, single_result, batch_results, accumulator))
+        return {"ok": True}
+
+    observed: list[Any] = []
+    wrapped = observe_tool(
+        dspy.Tool(verify_semantic_work),
+        observed.append,
+        ToolEventView.metadata_only(),
+    )
+    expected_batch = ["ALPHA", "BETA", "GAMMA"]
+    expected_accumulator = ["iteration-1", "ROOT", *expected_batch]
+
+    assert wrapped.func(
+        iteration_token="iteration-1",
+        single_result="ROOT",
+        batch_results=expected_batch,
+        accumulator=expected_accumulator,
+    ) == {"ok": True}
+
+    invalid_calls = (
+        lambda: wrapped.func(
+            iteration_token="iteration-1",
+            single_result="ROOT",
+            batch_results=expected_batch,
+            wrong_accumulator=expected_accumulator,
+        ),
+        lambda: wrapped.func(
+            iteration_token="iteration-1",
+            single_result="ROOT",
+            batch_results=expected_batch,
+        ),
+        lambda: wrapped.func(
+            iteration_token="iteration-1",
+            single_result="ROOT",
+            batch_results=["ALPHA", 2, "GAMMA"],
+            accumulator=expected_accumulator,
+        ),
+    )
+    for invalid in invalid_calls:
+        with pytest.raises((TypeError, ValueError)):
+            invalid()
+
+    assert calls == [("iteration-1", "ROOT", expected_batch, expected_accumulator)]
+    failures = [item for item in observed if isinstance(item, ToolFailed)]
+    assert [item.error for item in failures] == ["Tool arguments are invalid"] * 3
+
+
 def test_observe_tool_preserves_metadata_and_correlates_explicit_view() -> None:
     def lookup(key: str) -> dict[str, str]:
         """Look up a registered value."""

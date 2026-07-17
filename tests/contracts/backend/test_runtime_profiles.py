@@ -13,7 +13,7 @@ def test_public_runtime_profiles_are_exactly_daytona_and_deno() -> None:
     assert Settings(run_environment="deno").run_environment == "deno"
 
     with pytest.raises(ValidationError):
-        Settings(run_environment="hermetic")  # type: ignore[arg-type]
+        Settings(run_environment="unsupported")  # type: ignore[arg-type]
 
 
 def test_daytona_is_the_default_public_runtime_profile(monkeypatch: pytest.MonkeyPatch) -> None:

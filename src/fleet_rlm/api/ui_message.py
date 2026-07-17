@@ -48,11 +48,11 @@ def _assistant_part(part: CommittedPart) -> dict[str, Any]:
             "type": "dynamic-tool",
             "toolName": part.tool_name,
             "toolCallId": part.tool_call_id,
-            "input": part.input,
+            "input": _json_value(part.input),
             "providerExecuted": True,
         }
         if part.state == "completed":
-            value.update(state="output-available", output=part.output)
+            value.update(state="output-available", output=_json_value(part.output))
         else:
             value.update(state="output-error", errorText=part.error)
         return value
@@ -101,7 +101,7 @@ def _assistant_part(part: CommittedPart) -> dict[str, Any]:
             "data": {
                 "schemaId": part.schema_id,
                 "schemaVersion": part.schema_version,
-                "value": part.value,
+                "value": _json_value(part.value),
             },
         }
     if isinstance(part, TextPart):

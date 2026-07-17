@@ -106,3 +106,44 @@ async def test_session_turns_are_canonical_ui_messages() -> None:
         assert [message["role"] for message in payload["items"]] == ["user", "assistant"]
         assert payload["items"][0]["parts"][0]["text"] == "question"
         assert payload["items"][1]["parts"][-1]["text"] == "answer"
+
+
+def test_session_turn_ui_projection_thaws_nested_json_values() -> None:
+    from fleet_rlm.api.ui_message import assistant_turn_to_ui_message
+    from fleet_rlm.sessions.committed_turn import (
+        CommittedTurn,
+        StructuredResultPart,
+        TextPart,
+        ToolCallPart,
+        UsagePart,
+    )
+    from fleet_rlm.sessions.models import AssistantTurnRecord
+
+    committed = CommittedTurn(
+        schema_version=1,
+        parts=(
+            ToolCallPart(
+                "call-1",
+                "verify_semantic_work",
+                "completed",
+                {"batch_results": ["ALPHA", "BETA", "GAMMA"]},
+                {"ok": True, "nested": {"checksum": "abc"}},
+            ),
+            UsagePart(
+                {
+                    "iterations": 1,
+                    "observed_lm_usage": {},
+                    "duration_ms": 1,
+                }
+            ),
+            StructuredResultPart("contract", "1", {"findings": [{"status": "ok"}]}),
+            TextPart("answer"),
+        ),
+    )
+
+    message = assistant_turn_to_ui_message(AssistantTurnRecord(uuid4(), uuid4(), 1, committed, uuid4()))
+    tool_part = message["parts"][0]
+    result_part = message["parts"][2]
+    assert tool_part["input"] == {"batch_results": ["ALPHA", "BETA", "GAMMA"]}
+    assert tool_part["output"] == {"ok": True, "nested": {"checksum": "abc"}}
+    assert result_part["data"]["value"] == {"findings": [{"status": "ok"}]}

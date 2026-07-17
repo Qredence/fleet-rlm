@@ -113,6 +113,7 @@ def test_main_records_missing_live_precondition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     output = tmp_path / "receipt.json"
+    monkeypatch.setattr(verifier, "_load_repo_env", lambda: None)
     monkeypatch.delenv("FLEET_LIVE", raising=False)
     monkeypatch.delenv("FLEET_DAYTONA_API_KEY", raising=False)
     monkeypatch.delenv("FLEET_LLM_API_KEY", raising=False)

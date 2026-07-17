@@ -325,3 +325,70 @@ async def test_runner_settles_blocking_worker_through_repeated_caller_cancellati
     release.set()
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(consume, timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() -> None:
+    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.sessions.models import TurnAccess
+    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
+
+    class Capabilities:
+        blueprint = TurnCapabilityBlueprint()
+
+        def drain_public_details(self):
+            return ()
+
+        def drain_artifact_candidates(self):
+            return ()
+
+        async def aclose(self):
+            return None
+
+    class Factory:
+        def create(self, **_kwargs):
+            class Program:
+                async def acall(self, **_call_kwargs):
+                    prediction = dspy.Prediction(
+                        answer="",
+                        trajectory=[
+                            {"reasoning": "step one", "code": "x=1", "output": "1"},
+                            {"reasoning": "step two", "code": "SUBMIT()", "output": "FINAL submitted"},
+                        ],
+                    )
+                    prediction.set_lm_usage({"root": {"prompt_tokens": 9, "completion_tokens": 3}})
+                    return prediction
+
+            return Program()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        "answer",
+        SessionContextManifest(uuid4(), 0, 0, ()),
+        SimpleNamespace(root_lm=object(), sub_lm=object()),
+        RLMOptions(),
+        asyncio.get_running_loop().time() + 10,
+        None,
+        (),
+        Capabilities(),
+        not_cancelled,
+        (),
+    )
+    stream = RLMRunner(factory=Factory()).stream(context)
+    _ = [event async for event in stream]
+
+    assert stream.outcome is not None
+    assert not stream.outcome.succeeded
+    assert stream.outcome.public_error_message == "Turn output is invalid"
+    assert stream.outcome.usage["iterations"] == 2
+    assert stream.outcome.usage["observed_lm_usage"] == {
+        "root": {"prompt_tokens": 9, "completion_tokens": 3},
+    }

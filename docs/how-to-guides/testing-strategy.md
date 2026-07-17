@@ -72,9 +72,13 @@ Tests may use explicit helpers to create ephemeral SQLite schemas.
 
 ## Live Gate
 
-Live tests require canonical `FLEET_*` credentials and explicit opt-in:
+Live tests require canonical `FLEET_*` credentials and explicit opt-in.
+The Daytona MVP proof loads repo `.env` via `python-dotenv` (`override=False`)
+and defaults models to bare `deepseek-v4-flash-free` when unset
+(`normalize_model_id` adds the `openai/` provider prefix for `dspy.LM`):
 
 ```bash
+FLEET_LIVE=1 uv run pytest tests/live/backend/test_fleet_rlm_daytona_mvp.py -q -n 0 --timeout=900
 FLEET_LIVE=1 uv run pytest tests/live/backend/test_b5_attachment_artifact_durability.py -q
 FLEET_LIVE=1 uv run pytest tests/live/backend/test_phase7_workspace_durability.py -q
 ```

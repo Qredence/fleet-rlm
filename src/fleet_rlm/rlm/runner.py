@@ -193,6 +193,7 @@ class RLMRunner:
             started = time.perf_counter()
             details: list[ExecutionDetail] = []
             rlm: Any = None
+            prediction: Any | None = None
             try:
                 yield recorder.record(RunStarted(delivery="live"))
                 yield recorder.record(Status("execution", "running"))
@@ -321,22 +322,24 @@ class RLMRunner:
                     )
                 )
             except (GeneratorExit, asyncio.CancelledError):
+                duration_ms = int((time.perf_counter() - started) * 1000)
                 outcome.append(
                     RLMOutcome(
                         terminal_status="cancelled",
-                        usage=observed_usage(None, duration_ms=int((time.perf_counter() - started) * 1000)),
+                        usage=observed_usage(prediction, duration_ms=duration_ms),
                         public_error_message="Turn cancelled",
-                        duration_ms=int((time.perf_counter() - started) * 1000),
+                        duration_ms=duration_ms,
                     )
                 )
                 raise
             except Exception as exc:
+                duration_ms = int((time.perf_counter() - started) * 1000)
                 outcome.append(
                     RLMOutcome(
                         terminal_status=_terminal_status(exc),
-                        usage=observed_usage(None, duration_ms=int((time.perf_counter() - started) * 1000)),
+                        usage=observed_usage(prediction, duration_ms=duration_ms),
                         public_error_message=_public_failure_message(exc),
-                        duration_ms=int((time.perf_counter() - started) * 1000),
+                        duration_ms=duration_ms,
                     )
                 )
             finally:

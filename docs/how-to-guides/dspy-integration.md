@@ -31,18 +31,21 @@ repository or pass them through Fleet API requests.
 
 ```bash
 export FLEET_LIVE=1
-export FLEET_DAYTONA_API_KEY='...'
-export FLEET_LLM_API_KEY='...'
+# Credentials may come from the process environment or repo `.env`
+# (loaded via python-dotenv; existing exports win).
 uv run python scripts/live_daytona_verify.py \
   --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json \
-  --root-model <approved-root-model> \
-  --sub-model <approved-sub-model>
+  --root-model deepseek-v4-flash-free \
+  --sub-model deepseek-v4-flash-free
 ```
 
 The verifier requires a clean tracked tree on a non-`main` branch, invokes the
 single live pytest scenario once, and performs no automatic retry. The model
 options override only the child proof process and must be supplied together;
-they do not modify `.env`. Its `--help` path requires no credentials.
+they do not modify `.env`. When omitted, the proof defaults to the gateway-local
+bare id `deepseek-v4-flash-free`; `normalize_model_id` turns that into
+`openai/deepseek-v4-flash-free` for `dspy.LM`. Its `--help` path requires no
+credentials.
 
 The proof exercises a typed host Signature, state across RLM iterations,
 single and batched recursive calls, a host Tool, a durable workspace write,

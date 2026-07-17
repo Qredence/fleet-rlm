@@ -12,10 +12,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
 EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _LIVE_TEST = "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_complete_daytona_mvp_through_fastapi"
 _REQUIRED_ENV = ("FLEET_DAYTONA_API_KEY", "FLEET_LLM_API_KEY")
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_LIVE_MODEL = "deepseek-v4-flash-free"
 _SUCCESS_FIELDS = frozenset(
     {
         "schema",
@@ -312,6 +316,13 @@ def _write_failure(
     )
 
 
+def _load_repo_env() -> None:
+    """Load repo ``.env`` into the process without overriding exported values."""
+    load_dotenv(_REPO_ROOT / ".env", override=False)
+    os.environ.setdefault("FLEET_ROOT_MODEL", _LIVE_MODEL)
+    os.environ.setdefault("FLEET_SUB_MODEL", _LIVE_MODEL)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if (args.root_model is None) != (args.sub_model is None):
@@ -322,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.timeout_seconds <= 0 or not _path_is_allowed(output):
         print("Live proof precondition failed.", file=sys.stderr)
         return EXIT_PRECONDITION
+    _load_repo_env()
     live_enabled = os.environ.get("FLEET_LIVE", "").strip().lower() in {"1", "true", "yes"}
     if not live_enabled or any(not os.environ.get(name) for name in _REQUIRED_ENV):
         _write_failure(

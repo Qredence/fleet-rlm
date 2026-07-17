@@ -13,6 +13,12 @@ from fleet_rlm.rlm.dspy_contract import RLMUsage, validate_rlm_usage
 
 JsonScalar: TypeAlias = None | bool | int | float | str
 JsonValue: TypeAlias = JsonScalar | tuple["JsonValue", ...] | Mapping[str, "JsonValue"]
+RunFailedMessage: TypeAlias = Literal[
+    "Turn failed",
+    "Turn output is invalid",
+    "Turn could not be prepared",
+    "Turn could not be committed",
+]
 
 
 def _freeze_json(value: object) -> JsonValue:
@@ -206,7 +212,7 @@ class RunCompleted:
 class RunFailed:
     kind: ClassVar[Literal["run.failed"]] = "run.failed"
     code: Literal["preparation_failed", "execution_failed", "commit_failed", "protocol_error", "unavailable"]
-    message: Literal["Turn failed", "Turn could not be prepared", "Turn could not be committed"]
+    message: RunFailedMessage
     duration_ms: int | None = None
 
 

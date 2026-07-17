@@ -91,7 +91,10 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
         def __init__(self, execution):
             recorder = EventRecorder(execution.run_id, execution.session_id)
             self._events = iter(
-                (recorder.record(RunStarted(delivery="live")), recorder.record(Status("execution", "running")))
+                (
+                    recorder.record(RunStarted(delivery="live")),
+                    recorder.record(Status("execution", "running")),
+                )
             )
             self.outcome = RLMOutcome(
                 terminal_status="completed",
@@ -229,7 +232,7 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
             self.outcome = RLMOutcome(
                 "failed",
                 artifact_candidates=(candidate,),
-                public_error_message="Turn could not be committed",
+                public_error_message="Turn output is invalid",
             )
 
         def __aiter__(self):
@@ -265,7 +268,7 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
     assert sum(isinstance(event.detail, TERMINAL_DETAIL_TYPES) for event in events) == 1
     assert isinstance(events[-1].detail, RunFailed)
     assert events[-1].detail.code == "execution_failed"
-    assert events[-1].detail.message == "Turn failed"
+    assert events[-1].detail.message == "Turn output is invalid"
     assert not any(isinstance(event.detail, ArtifactCreated) for event in events)
     assert sink_operations == []
     assert closes == 1
@@ -353,7 +356,10 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
         def __init__(self):
             recorder = EventRecorder(run_id, session.id)
             self._events = iter(
-                (recorder.record(RunStarted(delivery="live")), recorder.record(Status("execution", "running")))
+                (
+                    recorder.record(RunStarted(delivery="live")),
+                    recorder.record(Status("execution", "running")),
+                )
             )
             self.outcome = RLMOutcome(
                 status,  # type: ignore[arg-type]
@@ -903,7 +909,10 @@ async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_orde
         def __init__(self):
             recorder = EventRecorder(run_id, session.id)
             self._events = iter(
-                (recorder.record(RunStarted(delivery="live")), recorder.record(Status("execution", "running")))
+                (
+                    recorder.record(RunStarted(delivery="live")),
+                    recorder.record(Status("execution", "running")),
+                )
             )
             self.outcome = None
 

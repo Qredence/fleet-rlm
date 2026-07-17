@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.metadata
 import json
@@ -21,6 +22,7 @@ from uuid import UUID, uuid4
 
 import dspy
 import pytest
+from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
@@ -40,6 +42,7 @@ from tests.live.backend._database import upgrade_to_head
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(900)]
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 _CONTRACT_ID = "fleet.live-daytona-mvp"
 _CAPABILITY_ID = "fleet.live-daytona-mvp"
 _WORKSPACE_PATH = "notes/findings.md"
@@ -47,6 +50,8 @@ _RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
 _EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _SECRET_NAMES = ("FLEET_DAYTONA_API_KEY", "FLEET_LLM_API_KEY")
 _CLEANUP_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
+# Gateway-local bare id; normalize_model_id adds openai/ for dspy.LM.
+_LIVE_MODEL = "deepseek-v4-flash-free"
 
 
 class LiveDaytonaMVPResult(dspy.Signature):
@@ -59,43 +64,29 @@ class LiveDaytonaMVPResult(dspy.Signature):
 
 
 _FIRST_SCENARIO = """
-Execute this proof in exactly three separate RLM iterations.
-
-Iteration 1: call issue_iteration_token(), assign the returned string to
-`iteration_token`, assign `accumulator = [iteration_token]`, print
-`FIRST_ITERATION_READY`, and stop this iteration. Do not call SUBMIT.
-
-Iteration 2: reuse the existing `accumulator` without recreating it. Call
-llm_query("Return exactly ROOT") once. Then call llm_query_batched with these
-prompts in this exact order: ["Return exactly ALPHA", "Return exactly BETA",
-"Return exactly GAMMA"]. Reject any result starting with "[ERROR]". Extend the
-accumulator with the single result followed by the ordered batch results. Call
-verify_semantic_work(iteration_token, single_result, batch_results,
-accumulator). Create a concise Markdown document containing the semantic
-results and the returned proof checksum. Call write_workspace_text with path
-"notes/findings.md", that Markdown content, and overwrite=False. Require its
-`ok` field to be true, print `SECOND_ITERATION_READY`, and stop this iteration.
-Do not call SUBMIT.
-
-Iteration 3: call SUBMIT with a non-empty summary and a findings list containing
-at least one object whose string fields describe the completed recursive,
-batched, host-tool, and workspace work. Do not use extraction fallback.
+3 iterations; do not inspect `scenario`, improvise, or retry. 1) Once:
+`iteration_token = issue_iteration_token(); accumulator = [iteration_token]; print("FIRST_ITERATION_READY")`.
+2) Reuse it. Run `single_result = llm_query("Return exactly ROOT")` and
+`batch_results = llm_query_batched(["Return exactly ALPHA", "Return exactly BETA", "Return exactly GAMMA"])`.
+Reject `[ERROR]`; extend with `[single_result, *batch_results]`. Call once, no
+casts/copies/positional args:
+`verification = verify_semantic_work(iteration_token=iteration_token, single_result=single_result, batch_results=batch_results, accumulator=accumulator)`.
+Write `notes/findings.md` with results and `verification["checksum"]` via
+`write_workspace_text(path="notes/findings.md", content=content, overwrite=False)`;
+require `workspace_result["ok"]`; print `SECOND_ITERATION_READY`. 3) Set
+non-empty string-only `summary`/`findings`; call exactly
+`SUBMIT(summary=summary, findings=findings)` with keywords. No fallback.
 """.strip()
 
 _SECOND_SCENARIO = """
-Execute this proof in exactly two separate RLM iterations.
-
-Iteration 1: evaluate whether "accumulator" is present in globals() without
-creating it. Call read_workspace_text("notes/findings.md", 10000), require its
-`ok` field to be true, and pass its `content` plus the globals() boolean to
-verify_workspace_reload. Require the returned `ok` field to be true, assign the
-returned checksum to `workspace_checksum`, print `RELOAD_ITERATION_READY`, and
-stop this iteration. Do not call SUBMIT.
-
-Iteration 2: call SUBMIT with a non-empty summary and a findings list containing
-at least one object whose string fields state that the interpreter was fresh
-and the durable workspace was read successfully. Do not use extraction
-fallback.
+Exactly two RLM iterations; do not create `accumulator`, explore, parse, or
+retry. 1) Set `accumulator_present = "accumulator" in globals()`, then call
+`workspace_result = read_workspace_text(path="notes/findings.md", max_chars=10000)`.
+Require dictionary key `workspace_result["ok"]`; call exactly once
+`reload_verification = verify_workspace_reload(workspace_content=workspace_result["content"], accumulator_present=accumulator_present)`;
+require `reload_verification["ok"]`, set `workspace_checksum`, and print
+`RELOAD_ITERATION_READY`. 2) Set non-empty string-only `summary` and `findings`,
+then call exactly `SUBMIT(summary=summary, findings=findings)` with keywords.
 """.strip()
 
 
@@ -166,18 +157,29 @@ class _ProofLedger:
         return {"ok": True, "checksum": checksum}
 
 
+def _load_repo_env() -> None:
+    """Load repo ``.env`` into the process without overriding exported values."""
+    load_dotenv(_REPO_ROOT / ".env", override=False)
+
+
 def _live_settings(tmp_path: Path) -> Settings:
+    _load_repo_env()
     if os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"}:
         pytest.skip("Set FLEET_LIVE=1 for the complete Daytona MVP proof")
     missing = [name for name in ("FLEET_DAYTONA_API_KEY", "FLEET_LLM_API_KEY") if not os.environ.get(name)]
     if missing:
         pytest.fail("Live Daytona MVP proof missing required credentials: " + ", ".join(missing))
+    # Prefer verify-script / shell overrides; otherwise pin the approved free DeepSeek id.
+    os.environ.setdefault("FLEET_ROOT_MODEL", _LIVE_MODEL)
+    os.environ.setdefault("FLEET_SUB_MODEL", _LIVE_MODEL)
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'live-mvp.db').resolve()}"
     upgrade_to_head(database_url)
     return Settings(
         run_environment="daytona",
         database_url=database_url,
         volume_name=f"fleet-rlm-live-mvp-{uuid4()}",
+        root_model=os.environ["FLEET_ROOT_MODEL"],
+        sub_model=os.environ["FLEET_SUB_MODEL"],
         rlm_max_iterations=8,
         rlm_max_llm_calls=12,
         turn_timeout_seconds=840,
@@ -196,6 +198,124 @@ def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
         else:
             chunks.append(json.loads(payload))
     return chunks, done
+
+
+def _call_shapes(chunks: list[dict[str, Any]], call_name: str) -> list[dict[str, object]]:
+    shapes: list[dict[str, object]] = []
+    for chunk in chunks:
+        if chunk.get("type") != "data-rlm-code":
+            continue
+        code = str(chunk.get("data", {}).get("code", ""))
+        if call_name not in code:
+            continue
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            shapes.append({"parse": "invalid"})
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
+            if name != call_name:
+                continue
+            shapes.append(
+                {
+                    "positional_count": len(node.args),
+                    "positional_kinds": [type(argument).__name__ for argument in node.args],
+                    "keyword_names": [keyword.arg or "**" for keyword in node.keywords],
+                    "keyword_kinds": {keyword.arg or "**": type(keyword.value).__name__ for keyword in node.keywords},
+                }
+            )
+    return shapes
+
+
+def _semantic_tool_diagnostic(chunks: list[dict[str, Any]]) -> dict[str, object]:
+    inputs = [
+        chunk.get("input") if isinstance(chunk.get("input"), dict) else {}
+        for chunk in chunks
+        if chunk.get("type") == "tool-input-available" and chunk.get("toolName") == "verify_semantic_work"
+    ]
+    call_ids = {
+        str(chunk.get("toolCallId", ""))
+        for chunk in chunks
+        if chunk.get("type") == "tool-input-available" and chunk.get("toolName") == "verify_semantic_work"
+    }
+    failures = [
+        str(chunk.get("errorText", ""))
+        for chunk in chunks
+        if chunk.get("type") == "tool-output-error" and str(chunk.get("toolCallId", "")) in call_ids
+    ]
+    if not inputs:
+        classification = "semantic_tool_not_observed"
+    elif not failures:
+        classification = "semantic_tool_not_failed"
+    elif any(not values for values in inputs):
+        classification = "signature_bind_failed"
+    elif any(error == "Tool arguments are invalid" for error in failures):
+        expected_types = {
+            "iteration_token_type": "str",
+            "single_result_type": "str",
+            "batch_results_type": "list",
+            "batch_result_item_types": ["str"],
+            "accumulator_type": "list",
+            "accumulator_item_types": ["str"],
+        }
+        classification = (
+            "validator_or_transport_mismatch"
+            if all(all(values.get(key) == value for key, value in expected_types.items()) for values in inputs)
+            else "dspy_type_validation_failed"
+        )
+    else:
+        classification = "semantic_tool_execution_failed"
+    return {
+        "call_shapes": _call_shapes(chunks, "verify_semantic_work"),
+        "bound_shapes": inputs,
+        "classification": classification,
+    }
+
+
+def _sse_finish_diagnostic(chunks: list[dict[str, Any]]) -> str:
+    """Bounded summary for failed stop assertions (no code dumps or secrets)."""
+    type_counts: dict[str, int] = {}
+    tool_names_by_call: dict[str, str] = {}
+    for chunk in chunks:
+        kind = str(chunk.get("type", "?"))
+        type_counts[kind] = type_counts.get(kind, 0) + 1
+        if kind == "tool-input-available":
+            call_id = str(chunk.get("toolCallId", ""))
+            name = str(chunk.get("toolName", ""))
+            if call_id and name:
+                tool_names_by_call[call_id] = name
+    error_texts = [str(chunk.get("errorText", ""))[:200] for chunk in chunks if chunk.get("type") == "error"]
+    finish_reasons = [str(chunk.get("finishReason", "")) for chunk in chunks if chunk.get("type") == "finish"]
+    tool_errors = [
+        {
+            "toolName": tool_names_by_call.get(str(chunk.get("toolCallId", "")), "unknown"),
+            "errorText": str(chunk.get("errorText", ""))[:200],
+        }
+        for chunk in chunks
+        if chunk.get("type") == "tool-output-error"
+    ]
+    return (
+        f"chunk_types={dict(sorted(type_counts.items()))} "
+        f"finish_reasons={finish_reasons} "
+        f"error_texts={error_texts} "
+        f"tool_errors={tool_errors} "
+        f"semantic_tool={_semantic_tool_diagnostic(chunks)} "
+        f"submit_call_shapes={_call_shapes(chunks, 'SUBMIT')}"
+    )
+
+
+def _assert_sse_stop(chunks: list[dict[str, Any]], *, label: str) -> None:
+    if not chunks:
+        pytest.fail(f"{label}: no SSE chunks")
+    last = chunks[-1]
+    if last.get("type") != "finish" or last.get("finishReason") != "stop":
+        pytest.fail(
+            f"{label}: expected finish/stop, got type={last.get('type')!r} "
+            f"finishReason={last.get('finishReason')!r}; {_sse_finish_diagnostic(chunks)}"
+        )
 
 
 def _assistant_messages(page: dict[str, Any]) -> list[dict[str, Any]]:
@@ -326,6 +446,7 @@ def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: str) -> 
     failures: list[str] = []
     tracked_ids = sandbox_ids | set(resources._sandbox_ids)  # noqa: SLF001 - strict test cleanup
     for sandbox_id in sorted(tracked_ids):
+
         def delete_sandbox(sandbox_id: str = sandbox_id) -> None:
             sandbox = resources.platform.get(sandbox_id)
             if sandbox is not None:
@@ -337,6 +458,7 @@ def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: str) -> 
         resources.forget_sandboxes()
     except Exception:  # noqa: BLE001 - retain only a bounded cleanup phase
         failures.append("tracking")
+
     def delete_volume() -> None:
         volume = resources.client.volume.get(volume_name, create=False)
         resources.client.volume.delete(volume)
@@ -383,7 +505,21 @@ def test_complete_daytona_mvp_through_fastapi(
     semantic_tool = dspy.Tool(
         ledger.verify_semantic_work,
         name="verify_semantic_work",
-        desc="Verify ordered recursive semantic work and the persisted Python accumulator.",
+        desc=(
+            "One-shot assertion for ordered recursive semantic work and the persisted Python accumulator. "
+            "Call exactly once after the single and batch queries succeed; never retry or repeat it."
+        ),
+        arg_desc={
+            "iteration_token": "Opaque string returned by issue_iteration_token; pass it unchanged.",
+            "single_result": "String returned by the single llm_query call.",
+            "batch_results": (
+                "Ordered Python list of exactly three strings returned by llm_query_batched for ALPHA, BETA, GAMMA."
+            ),
+            "accumulator": (
+                "Existing persisted Python list containing iteration_token, then single_result, then batch_results; "
+                "do not recreate or convert it."
+            ),
+        },
     )
     reload_tool = dspy.Tool(
         ledger.verify_workspace_reload,
@@ -407,8 +543,26 @@ def test_complete_daytona_mvp_through_fastapi(
                 ),
                 "verify_semantic_work": ToolEventView(
                     input_projection=lambda values: {
-                        "batch_count": len(values.get("batch_results", ())),
-                        "accumulator_count": len(values.get("accumulator", ())),
+                        "iteration_token_type": type(values.get("iteration_token")).__name__,
+                        "single_result_type": type(values.get("single_result")).__name__,
+                        "batch_results_type": type(values.get("batch_results")).__name__,
+                        "batch_result_item_types": sorted(
+                            {type(value).__name__ for value in values.get("batch_results", ())}
+                        )
+                        if isinstance(values.get("batch_results"), (list, tuple))
+                        else [],
+                        "batch_count": len(values["batch_results"])
+                        if isinstance(values.get("batch_results"), (list, tuple))
+                        else 0,
+                        "accumulator_type": type(values.get("accumulator")).__name__,
+                        "accumulator_item_types": sorted(
+                            {type(value).__name__ for value in values.get("accumulator", ())}
+                        )
+                        if isinstance(values.get("accumulator"), (list, tuple))
+                        else [],
+                        "accumulator_count": len(values["accumulator"])
+                        if isinstance(values.get("accumulator"), (list, tuple))
+                        else 0,
                     },
                     output_projection=lambda result: {
                         "ok": bool(result.get("ok")),
@@ -474,17 +628,29 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert first_done == 1
                 assert sum(chunk["type"] == "start" for chunk in first_chunks) == 1
                 assert sum(chunk["type"] == "finish" for chunk in first_chunks) == 1
-                assert first_chunks[-1]["type"] == "finish"
-                assert first_chunks[-1]["finishReason"] == "stop"
+                _assert_sse_stop(first_chunks, label="first_turn")
                 code_chunks = [chunk for chunk in first_chunks if chunk["type"] == "data-rlm-code"]
                 assert len(code_chunks) >= 3
                 generated_code = [str(chunk["data"]["code"]) for chunk in code_chunks]
                 assert "issue_iteration_token" in generated_code[0]
                 assert re.search(r"\baccumulator\s*=", generated_code[0])
-                semantic_step = next(code for code in generated_code[1:] if "llm_query_batched" in code)
+                semantic_steps = [code for code in generated_code[1:] if "llm_query_batched" in code]
+                if not semantic_steps:
+                    pytest.fail(f"first_turn: no semantic batch step; {_sse_finish_diagnostic(first_chunks)}")
+                semantic_step = semantic_steps[0]
                 assert re.search(r"\bllm_query\s*\(", semantic_step)
                 assert "verify_semantic_work" in semantic_step
-                assert not re.search(r"\baccumulator\s*=", semantic_step)
+                semantic_tree = ast.parse(semantic_step)
+                assert not any(
+                    isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign))
+                    and (
+                        any(isinstance(target, ast.Name) and target.id == "accumulator" for target in node.targets)
+                        if isinstance(node, ast.Assign)
+                        else isinstance(getattr(node, "target", None), ast.Name)
+                        and getattr(node.target, "id", None) == "accumulator"
+                    )
+                    for node in ast.walk(semantic_tree)
+                )
                 assert re.search(r"\bSUBMIT\s*\(", generated_code[-1])
                 tool_names = [chunk["toolName"] for chunk in first_chunks if chunk["type"] == "tool-input-available"]
                 assert tool_names.count("issue_iteration_token") == 1
@@ -567,8 +733,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert second_done == 1
                 assert sum(chunk["type"] == "start" for chunk in second_chunks) == 1
                 assert sum(chunk["type"] == "finish" for chunk in second_chunks) == 1
-                assert second_chunks[-1]["type"] == "finish"
-                assert second_chunks[-1]["finishReason"] == "stop"
+                _assert_sse_stop(second_chunks, label="second_turn")
                 second_code = [chunk for chunk in second_chunks if chunk["type"] == "data-rlm-code"]
                 assert len(second_code) >= 2
                 second_generated_code = [str(chunk["data"]["code"]) for chunk in second_code]
