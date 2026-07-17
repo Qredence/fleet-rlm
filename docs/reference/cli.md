@@ -19,6 +19,12 @@ unused port are required. Backend output is written to timestamped files under
 `Ctrl+C`, and backend shutdown escalates from termination to a forced stop after
 five seconds. Examples of terminal argument forwarding are:
 
+Before spawning either process, `fleet cli` verifies that the configured
+Daytona database is at the canonical Alembic head. It does not apply migrations
+automatically. If the database is empty or stale, initialize it with
+`uv run python scripts/db_init.py` and retry. `fleet deno` skips this preflight
+and retains its local SQLite development setup.
+
 ```bash
 uv run fleet cli -- --session <session-uuid>
 uv run fleet deno -- --session <session-uuid>

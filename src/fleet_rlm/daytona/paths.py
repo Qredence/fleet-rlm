@@ -163,6 +163,11 @@ class VolumePaths:
         sid = validate_path_id(session_id, label="session_id")
         return resolve_under_root(self.mount_path, "sessions", sid, "workspace")
 
+    def session_runs_dir(self, session_id: str | UUID) -> PurePosixPath:
+        """Container for one Session's Run-scoped private state."""
+        sid = validate_path_id(session_id, label="session_id")
+        return resolve_under_root(self.mount_path, "sessions", sid, "runs")
+
     def run_dir(self, session_id: str | UUID, run_id: str | UUID) -> PurePosixPath:
         """Unique per-run root: sessions/{session_id}/runs/{run_id}/."""
         sid = validate_path_id(session_id, label="session_id")
@@ -176,6 +181,10 @@ class VolumePaths:
     def run_artifacts_dir(self, session_id: str | UUID, run_id: str | UUID) -> PurePosixPath:
         """Run-scoped durable artifacts: sessions/{session}/runs/{run}/artifacts/."""
         return resolve_under_root(self.run_dir(session_id, run_id), "artifacts")
+
+    def run_attachments_dir(self, session_id: str | UUID, run_id: str | UUID) -> PurePosixPath:
+        """Container for Attachments staged into one Run."""
+        return resolve_under_root(self.run_dir(session_id, run_id), "attachments")
 
     def run_result_path(self, session_id: str | UUID, run_id: str | UUID) -> PurePosixPath:
         """Private typed-result derivative for one unique Run."""

@@ -53,7 +53,9 @@ them to FastAPI routes. Do not move provider calls or raw exceptions across the
 - Daytona Session Workspace text lives under
   `sessions/{session_id}/workspace/` inside Workspace Volume Scope. Successful
   writes are immediate private working state, not Turn-commit candidates; Deno
-  registers no workspace tools.
+  registers no workspace tools. Before returning an Interpreter Lease, Daytona
+  acquisition idempotently creates the canonical shared roots and current
+  Session/Run container directories.
 - Workspace tool events expose relative paths, counts, sizes, and status but
   never file contents, provider paths, or raw provider failures.
 - Bytes are written before metadata. UUID-unique orphan bytes are acceptable;

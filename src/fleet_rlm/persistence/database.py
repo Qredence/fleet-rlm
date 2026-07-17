@@ -6,7 +6,13 @@ explicit helper for private SQLite tests and local Deno development only.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -19,6 +25,14 @@ from fleet_rlm.persistence.models import Base
 
 class DatabaseNotConfiguredError(RuntimeError):
     """Raised when a database URL is required but missing."""
+
+
+class DatabaseCompatibilityError(RuntimeError):
+    """Raised when a reachable database is not at the canonical Alembic head."""
+
+
+class DatabaseConnectionError(RuntimeError):
+    """Raised when database connectivity cannot be validated safely."""
 
 
 def is_sqlite_url(url: str) -> bool:
@@ -70,6 +84,40 @@ def create_async_engine_from_url(url: str, *, echo: bool = False) -> AsyncEngine
 
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+
+async def check_database_compatibility(
+    database_url: str,
+    *,
+    repo_root: Path | None = None,
+) -> None:
+    """Require a reachable database whose Alembic revision matches every head."""
+    try:
+        engine = create_async_engine_from_url(database_url)
+    except (OSError, SQLAlchemyError) as exc:
+        raise DatabaseConnectionError("database connectivity check failed") from exc
+    try:
+        try:
+            async with engine.connect() as connection:
+                await connection.execute(text("SELECT 1"))
+                has_revision_table = await connection.run_sync(
+                    lambda sync_connection: inspect(sync_connection).has_table("alembic_version")
+                )
+                if not has_revision_table:
+                    raise DatabaseCompatibilityError("database revision does not match Alembic head")
+                result = await connection.execute(text("SELECT version_num FROM alembic_version"))
+                current_revisions = {str(revision) for revision in result.scalars().all()}
+        except (OSError, SQLAlchemyError) as exc:
+            raise DatabaseConnectionError("database connectivity check failed") from exc
+
+        root = repo_root or Path(__file__).resolve().parents[3]
+        config = Config(str(root / "alembic.ini"))
+        config.set_main_option("script_location", str(root / "migrations"))
+        expected_revisions = set(ScriptDirectory.from_config(config).get_heads())
+        if not expected_revisions or current_revisions != expected_revisions:
+            raise DatabaseCompatibilityError("database revision does not match Alembic head")
+    finally:
+        await engine.dispose()
 
 
 async def create_tables(engine: AsyncEngine) -> None:

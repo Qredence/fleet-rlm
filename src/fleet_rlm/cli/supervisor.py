@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import signal
@@ -15,6 +16,9 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import FrameType
+
+from fleet_rlm.config import Settings
+from fleet_rlm.persistence.database import DatabaseCompatibilityError, check_database_compatibility
 
 SignalHandler = int | Callable[[int, FrameType | None], object] | None
 
@@ -76,6 +80,22 @@ def _api_url(host: str, port: int) -> str:
     return f"http://{client_host}:{port}"
 
 
+def _validate_daytona_database(repo_root: Path) -> None:
+    try:
+        settings = Settings()
+    except Exception as exc:  # noqa: BLE001 - CLI configuration failures must remain secret-free
+        raise SupervisorError("Fleet database preflight failed; verify FLEET_DATABASE_URL") from exc
+    database_url = (settings.database_url or "").strip()
+    if not database_url:
+        raise SupervisorError("Fleet database preflight failed; verify FLEET_DATABASE_URL")
+    try:
+        asyncio.run(check_database_compatibility(database_url, repo_root=repo_root))
+    except DatabaseCompatibilityError as exc:
+        raise SupervisorError("Fleet database is not at Alembic head; run uv run python scripts/db_init.py") from exc
+    except Exception as exc:  # noqa: BLE001 - connectivity errors must not expose database credentials
+        raise SupervisorError("Fleet database preflight failed; verify FLEET_DATABASE_URL") from exc
+
+
 def _wait_until_ready(
     backend: subprocess.Popen[bytes],
     *,
@@ -134,6 +154,8 @@ def supervise(
     root = repo_root or Path(__file__).resolve().parents[3]
     workspace, pnpm = _validate_prerequisites(root)
     _require_available_port(host, port)
+    if run_environment == "daytona":
+        _validate_daytona_database(root)
     logs = root / ".fleet_rlm" / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")

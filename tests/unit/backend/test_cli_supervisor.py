@@ -7,6 +7,14 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.cli import supervisor
+from fleet_rlm.persistence.database import DatabaseCompatibilityError, DatabaseConnectionError
+
+_VALIDATE_DAYTONA_DATABASE = supervisor._validate_daytona_database  # noqa: SLF001
+
+
+@pytest.fixture(autouse=True)
+def _compatible_daytona_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(supervisor, "_validate_daytona_database", lambda _repo_root: None)
 
 
 class _ReadyResponse:
@@ -113,11 +121,91 @@ def test_supervisor_rejects_ephemeral_port() -> None:
         supervisor._require_available_port("127.0.0.1", 0)  # noqa: SLF001
 
 
+def test_supervisor_rejects_incompatible_daytona_database_before_spawn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _tui_workspace(tmp_path)
+    monkeypatch.setattr(supervisor.shutil, "which", lambda command: f"/usr/bin/{command}")
+    monkeypatch.setattr(
+        supervisor.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.0.0", stderr=""),
+    )
+
+    def reject_database(_repo_root: Path) -> None:
+        raise supervisor.SupervisorError("Fleet database is not at Alembic head; run uv run python scripts/db_init.py")
+
+    monkeypatch.setattr(supervisor, "_validate_daytona_database", reject_database)
+    popen_calls: list[object] = []
+    monkeypatch.setattr(supervisor.subprocess, "Popen", lambda *args, **kwargs: popen_calls.append((args, kwargs)))
+
+    with pytest.raises(
+        supervisor.SupervisorError,
+        match=r"Fleet database is not at Alembic head; run uv run python scripts/db_init\.py",
+    ):
+        supervisor.supervise(
+            host="127.0.0.1",
+            port=8123,
+            reload=False,
+            run_environment="daytona",
+            repo_root=tmp_path,
+        )
+
+    assert popen_calls == []
+
+
+def test_daytona_database_preflight_maps_revision_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        supervisor,
+        "Settings",
+        lambda: SimpleNamespace(database_url="sqlite+aiosqlite:///private/database.sqlite3"),
+    )
+
+    async def reject_database(*_args: object, **_kwargs: object) -> None:
+        raise DatabaseCompatibilityError("database revision does not match Alembic head")
+
+    monkeypatch.setattr(supervisor, "check_database_compatibility", reject_database)
+
+    with pytest.raises(
+        supervisor.SupervisorError,
+        match=r"Fleet database is not at Alembic head; run uv run python scripts/db_init\.py",
+    ):
+        _VALIDATE_DAYTONA_DATABASE(tmp_path)
+
+
+def test_daytona_database_preflight_sanitizes_connectivity_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    secret_url = "postgresql+asyncpg://user:top-secret@private-db/fleet"
+    monkeypatch.setattr(supervisor, "Settings", lambda: SimpleNamespace(database_url=secret_url))
+
+    async def reject_database(*_args: object, **_kwargs: object) -> None:
+        raise DatabaseConnectionError(f"could not connect to {secret_url}")
+
+    monkeypatch.setattr(supervisor, "check_database_compatibility", reject_database)
+
+    with pytest.raises(supervisor.SupervisorError) as error:
+        _VALIDATE_DAYTONA_DATABASE(tmp_path)
+
+    assert str(error.value) == "Fleet database preflight failed; verify FLEET_DATABASE_URL"
+    assert "top-secret" not in str(error.value)
+
+
 def test_supervisor_runs_ink_against_ready_backend_and_terminates_backend_group(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     workspace = _tui_workspace(tmp_path)
+    monkeypatch.setattr(
+        supervisor,
+        "_validate_daytona_database",
+        lambda _repo_root: pytest.fail("Deno must not run the Daytona database preflight"),
+    )
     monkeypatch.setattr(supervisor.shutil, "which", lambda command: f"/usr/bin/{command}")
     monkeypatch.setattr(
         supervisor.subprocess,

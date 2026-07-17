@@ -35,6 +35,24 @@ class _FakeVolumeClient:
         return _FakeVolume()
 
 
+class _FakeFileInfo:
+    is_dir = True
+
+
+class _FakeFilesystem:
+    def __init__(self, mount_path: str) -> None:
+        self.directories = {mount_path}
+
+    def get_file_info(self, path: str) -> _FakeFileInfo:
+        if path not in self.directories:
+            raise FileNotFoundError(path)
+        return _FakeFileInfo()
+
+    def create_folder(self, path: str, mode: str) -> None:
+        del mode
+        self.directories.add(path)
+
+
 class _FakeSandbox:
     def __init__(
         self,
@@ -51,6 +69,7 @@ class _FakeSandbox:
         self.mount_path = mount_path
         self.volume_subpath = volume_subpath
         self.labels = labels
+        self.fs = _FakeFilesystem(mount_path)
         self.volumes = [
             {
                 "volume_id": volume_id,

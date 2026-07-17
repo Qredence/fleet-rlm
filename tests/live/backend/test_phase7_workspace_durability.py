@@ -25,12 +25,38 @@ def _skip_unless_live(settings: Settings) -> None:
         pytest.skip("FLEET_DAYTONA_API_KEY not configured")
 
 
+def _assert_complete_layout(sandbox: object, *, mount: str, session_id: object, run_id: object) -> None:
+    session = f"{mount}/sessions/{session_id}"
+    run = f"{session}/runs/{run_id}"
+    required = (
+        f"{mount}/skills",
+        f"{mount}/memory",
+        f"{mount}/artifacts",
+        f"{mount}/attachments",
+        f"{mount}/sessions",
+        session,
+        f"{session}/exports",
+        f"{session}/staging",
+        f"{session}/workspace",
+        f"{session}/runs",
+        run,
+        f"{run}/staging",
+        f"{run}/artifacts",
+        f"{run}/attachments",
+    )
+    filesystem = getattr(sandbox, "fs")
+    for path in required:
+        info = filesystem.get_file_info(path)
+        assert info.is_dir, path
+
+
 @pytest.mark.asyncio
 @pytest.mark.timeout(600)
 async def test_session_workspace_survives_sandbox_replacement() -> None:
     settings = Settings(run_environment="daytona")
     _skip_unless_live(settings)
     user_id, workspace_id, session_id = uuid4(), uuid4(), uuid4()
+    first_run_id, second_run_id = uuid4(), uuid4()
     resources = LiveKernelResources(settings)
     first_lease = None
     second_lease = None
@@ -41,6 +67,7 @@ async def test_session_workspace_survives_sandbox_replacement() -> None:
                 session_id=session_id,
                 user_id=user_id,
                 workspace_id=workspace_id,
+                run_id=first_run_id,
             ),
             deadline=asyncio.get_running_loop().time() + 600,
         )
@@ -48,6 +75,12 @@ async def test_session_workspace_survives_sandbox_replacement() -> None:
         first_sandbox = resources.platform.get(first_lease.sandbox_id)
         assert first_sandbox is not None
         paths = volume_paths_from_settings(settings)
+        _assert_complete_layout(
+            first_sandbox,
+            mount=str(paths.mount_path),
+            session_id=session_id,
+            run_id=first_run_id,
+        )
         first_workspace = DaytonaSessionWorkspaceFS(
             first_sandbox,
             volume_root=str(paths.mount_path),
@@ -88,12 +121,19 @@ async def test_session_workspace_survives_sandbox_replacement() -> None:
                 session_id=session_id,
                 user_id=user_id,
                 workspace_id=workspace_id,
+                run_id=second_run_id,
             ),
             deadline=asyncio.get_running_loop().time() + 600,
         )
         resources.track_sandbox(second_lease.sandbox_id)
         second_sandbox = resources.platform.get(second_lease.sandbox_id)
         assert second_sandbox is not None
+        _assert_complete_layout(
+            second_sandbox,
+            mount=str(paths.mount_path),
+            session_id=session_id,
+            run_id=second_run_id,
+        )
         second_workspace = DaytonaSessionWorkspaceFS(
             second_sandbox,
             volume_root=str(paths.mount_path),

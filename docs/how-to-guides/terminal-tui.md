@@ -10,7 +10,16 @@ disconnect cancellation.
 
 Start the combined backend and terminal with Daytona enabled. This requires
 configured LLM and Daytona credentials; the model values below are an
-example for an OpenAI-compatible endpoint. Then from the repository root run:
+example for an OpenAI-compatible endpoint. Initialize a fresh configured
+database once before the first Daytona launch:
+
+```bash
+uv run python scripts/db_init.py
+```
+
+`fleet cli` checks the Alembic revision before starting the backend or Ink and
+prints that recovery command when the database is empty or stale; it never
+applies migrations automatically. Then from the repository root run:
 
 ```bash
 FLEET_TURN_TIMEOUT_SECONDS=900 \

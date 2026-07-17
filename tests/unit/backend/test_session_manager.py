@@ -35,6 +35,33 @@ class _FakeVolumeClient:
         return _FakeVolume(f"vol-{name}")
 
 
+class _FakeFileInfo:
+    def __init__(self, *, is_dir: bool) -> None:
+        self.is_dir = is_dir
+
+
+class _FakeFilesystem:
+    def __init__(self, mount_path: str | None) -> None:
+        self.directories = {mount_path} if mount_path else set()
+        self.files: set[str] = set()
+        self.created: list[tuple[str, str]] = []
+        self.info_failures: dict[str, BaseException] = {}
+
+    def get_file_info(self, path: str) -> _FakeFileInfo:
+        failure = self.info_failures.pop(path, None)
+        if failure is not None:
+            raise failure
+        if path in self.directories:
+            return _FakeFileInfo(is_dir=True)
+        if path in self.files:
+            return _FakeFileInfo(is_dir=False)
+        raise FileNotFoundError(path)
+
+    def create_folder(self, path: str, mode: str) -> None:
+        self.directories.add(path)
+        self.created.append((path, mode))
+
+
 class _FakeSandbox:
     def __init__(
         self,
@@ -54,6 +81,7 @@ class _FakeSandbox:
         self.mount_path = mount_path
         self.volume_subpath = volume_subpath
         self.labels = labels or {}
+        self.fs = _FakeFilesystem(mount_path)
         self.volumes = (
             [
                 {
@@ -188,6 +216,47 @@ class _BlockingCreatePlatform(_FakePlatform):
         return sandbox
 
 
+class _FailingLayoutPlatform(_FakePlatform):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fail_layout = True
+
+    def create(self, **kwargs: Any) -> _FakeSandbox:
+        sandbox = super().create(**kwargs)
+        if self.fail_layout:
+            sandbox.fs.info_failures["/home/daytona/fleet/skills"] = RuntimeError(
+                "provider failed at /home/daytona/private"
+            )
+        return sandbox
+
+
+class _RacingFilesystem(_FakeFilesystem):
+    def __init__(self, mount_path: str) -> None:
+        super().__init__(mount_path)
+        self._skills_barrier = threading.Barrier(2)
+        self._skills_lock = threading.Lock()
+
+    def create_folder(self, path: str, mode: str) -> None:
+        if path != "/home/daytona/fleet/skills":
+            return super().create_folder(path, mode)
+        self._skills_barrier.wait(timeout=5)
+        with self._skills_lock:
+            if path in self.directories:
+                raise FileExistsError(path)
+            super().create_folder(path, mode)
+
+
+class _SharedFilesystemPlatform(_FakePlatform):
+    def __init__(self) -> None:
+        super().__init__()
+        self.filesystem = _RacingFilesystem("/home/daytona/fleet")
+
+    def create(self, **kwargs: Any) -> _FakeSandbox:
+        sandbox = super().create(**kwargs)
+        sandbox.fs = self.filesystem
+        return sandbox
+
+
 def _manager(
     platform: _FakePlatform | None = None,
     bindings: InMemoryBindingStore | None = None,
@@ -232,6 +301,186 @@ async def test_acquire_creates_running_sandbox_and_lease() -> None:
     assert binding.sandbox_id == lease.sandbox_id
     assert binding.workspace_id == req.workspace_id
     assert binding.volume_subpath == lease.volume_subpath
+
+
+@pytest.mark.asyncio
+async def test_acquire_provisions_complete_workspace_volume_layout() -> None:
+    mgr, plat, _store, _volumes = _manager()
+    session_id = uuid4()
+    run_id = uuid4()
+    request = LeaseRequest(
+        session_id=session_id,
+        user_id=uuid4(),
+        workspace_id=uuid4(),
+        run_id=run_id,
+    )
+
+    lease = await _acquire(mgr, request)
+
+    sandbox = plat.sandboxes[lease.sandbox_id]
+    root = "/home/daytona/fleet"
+    session = f"{root}/sessions/{session_id}"
+    run = f"{session}/runs/{run_id}"
+    assert sandbox.fs.directories == {
+        root,
+        f"{root}/skills",
+        f"{root}/memory",
+        f"{root}/artifacts",
+        f"{root}/attachments",
+        f"{root}/sessions",
+        session,
+        f"{session}/exports",
+        f"{session}/staging",
+        f"{session}/workspace",
+        f"{session}/runs",
+        run,
+        f"{run}/staging",
+        f"{run}/artifacts",
+        f"{run}/attachments",
+    }
+    assert {path for path, _mode in sandbox.fs.created} == sandbox.fs.directories - {root}
+    assert {mode for _path, mode in sandbox.fs.created} == {"700"}
+    created_paths = [path for path, _mode in sandbox.fs.created]
+    assert created_paths.index(session) < created_paths.index(f"{session}/workspace")
+    assert created_paths.index(run) < created_paths.index(f"{run}/attachments")
+
+
+@pytest.mark.asyncio
+async def test_reacquire_repairs_missing_containers_without_touching_files() -> None:
+    mgr, plat, _store, _volumes = _manager()
+    session_id = uuid4()
+    workspace_id = uuid4()
+    first = await _acquire(
+        mgr,
+        LeaseRequest(
+            session_id=session_id,
+            user_id=uuid4(),
+            workspace_id=workspace_id,
+            run_id=uuid4(),
+        ),
+    )
+    await mgr.release(first)
+    sandbox = plat.sandboxes[first.sandbox_id]
+    workspace_path = f"/home/daytona/fleet/sessions/{session_id}/workspace"
+    exports_path = f"/home/daytona/fleet/sessions/{session_id}/exports"
+    durable_file = f"{workspace_path}/decision.md"
+    sandbox.fs.directories.remove(exports_path)
+    sandbox.fs.files.add(durable_file)
+
+    second_run_id = uuid4()
+    second = await _acquire(
+        mgr,
+        LeaseRequest(
+            session_id=session_id,
+            user_id=uuid4(),
+            workspace_id=workspace_id,
+            run_id=second_run_id,
+        ),
+    )
+
+    assert second.sandbox_id == first.sandbox_id
+    assert exports_path in sandbox.fs.directories
+    assert durable_file in sandbox.fs.files
+    assert f"/home/daytona/fleet/sessions/{session_id}/runs/{second_run_id}/attachments" in (sandbox.fs.directories)
+
+
+@pytest.mark.asyncio
+async def test_reacquire_repairs_stopped_sandbox_after_restart() -> None:
+    mgr, plat, _store, _volumes = _manager()
+    request = LeaseRequest(
+        session_id=uuid4(),
+        user_id=uuid4(),
+        workspace_id=uuid4(),
+        run_id=uuid4(),
+    )
+    first = await _acquire(mgr, request)
+    await mgr.release(first)
+    sandbox = plat.sandboxes[first.sandbox_id]
+    attachments_path = "/home/daytona/fleet/attachments"
+    sandbox.fs.directories.remove(attachments_path)
+    await mgr.stop(first.sandbox_id)
+
+    second = await _acquire(
+        mgr,
+        LeaseRequest(
+            session_id=request.session_id,
+            user_id=request.user_id,
+            workspace_id=request.workspace_id,
+            run_id=uuid4(),
+        ),
+    )
+
+    assert second.sandbox_id == first.sandbox_id
+    assert sandbox.state == "running"
+    assert attachments_path in sandbox.fs.directories
+
+
+@pytest.mark.asyncio
+async def test_acquire_fails_closed_when_required_directory_is_a_file() -> None:
+    mgr, plat, store, _volumes = _manager()
+    request = LeaseRequest(
+        session_id=uuid4(),
+        user_id=uuid4(),
+        workspace_id=uuid4(),
+        run_id=uuid4(),
+    )
+    first = await _acquire(mgr, request)
+    await mgr.release(first)
+    sandbox = plat.sandboxes[first.sandbox_id]
+    skills_path = "/home/daytona/fleet/skills"
+    sandbox.fs.directories.remove(skills_path)
+    sandbox.fs.files.add(skills_path)
+
+    with pytest.raises(DaytonaAdapterError) as captured:
+        await _acquire(mgr, request)
+
+    assert captured.value.cause_type == "VolumeLayoutConflict"
+    binding = await store.get(request.session_id)
+    assert binding is not None
+    assert binding.sandbox_id == first.sandbox_id
+
+
+@pytest.mark.asyncio
+async def test_layout_provider_failure_prevents_lease_and_releases_admission() -> None:
+    platform = _FailingLayoutPlatform()
+    admission = DaytonaAdmission(max_active_leases=1)
+    mgr, _plat, store, _volumes = _manager(platform=platform, admission=admission)
+    failed_request = _request()
+
+    with pytest.raises(ProviderRequestError) as captured:
+        await _acquire(mgr, failed_request)
+
+    assert "/home/daytona" not in str(captured.value)
+    assert await store.get(failed_request.session_id) is None
+    assert platform.deleted == ["sb-1"]
+    assert platform.sandboxes == {}
+    platform.fail_layout = False
+    replacement = await _acquire(mgr, _request())
+    await mgr.release(replacement)
+
+
+@pytest.mark.asyncio
+async def test_sibling_session_acquisitions_tolerate_shared_root_creation_race() -> None:
+    platform = _SharedFilesystemPlatform()
+    mgr, _plat, _store, _volumes = _manager(platform=platform)
+    workspace_id = uuid4()
+    requests = [
+        LeaseRequest(
+            session_id=uuid4(),
+            user_id=uuid4(),
+            workspace_id=workspace_id,
+            run_id=uuid4(),
+        )
+        for _ in range(2)
+    ]
+
+    leases = await asyncio.gather(*(_acquire(mgr, request) for request in requests))
+
+    assert "/home/daytona/fleet/skills" in platform.filesystem.directories
+    for request in requests:
+        assert f"/home/daytona/fleet/sessions/{request.session_id}/workspace" in (platform.filesystem.directories)
+    for lease in leases:
+        await mgr.release(lease)
 
 
 @pytest.mark.asyncio

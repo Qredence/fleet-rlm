@@ -27,6 +27,7 @@ from fleet_rlm.daytona.lifecycle import (
     call_if_supported,
     sandbox_state,
 )
+from fleet_rlm.daytona.volume_layout import ensure_volume_layout
 from fleet_rlm.daytona.volumes import (
     VolumeClient,
     VolumeConfig,
@@ -368,6 +369,7 @@ class DaytonaSessionManager:
                     sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id or "")
                 else:
                     sandbox = None
+        created_sandbox = False
         if sandbox is None:
             sandbox = await asyncio.to_thread(
                 self._create_sandbox,
@@ -376,7 +378,24 @@ class DaytonaSessionManager:
                 volume_subpath=expected.volume_subpath,
                 request=request,
             )
+            created_sandbox = True
+
+        try:
             verify_sandbox_workspace_mount(sandbox, expected)
+            await asyncio.to_thread(
+                ensure_volume_layout,
+                sandbox,
+                self._volume_config.paths(),
+                session_id=session_id,
+                run_id=run_id,
+            )
+        except BaseException:
+            if created_sandbox:
+                try:
+                    await asyncio.to_thread(self._platform.delete, _sandbox_id(sandbox))
+                except Exception:  # noqa: BLE001 - preserve the acquisition failure
+                    pass
+            raise
 
         sid = _sandbox_id(sandbox)
         now = datetime.now(UTC)

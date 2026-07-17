@@ -9,13 +9,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Literal, Protocol
 from uuid import uuid4
-
-from alembic.config import Config
-from alembic.script import ScriptDirectory
-from sqlalchemy import text
 
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.client import build_daytona_client
@@ -27,7 +22,7 @@ from fleet_rlm.daytona.volumes import (
     volume_config_from_settings,
     workspace_volume_subpath,
 )
-from fleet_rlm.persistence.database import create_async_engine_from_url
+from fleet_rlm.persistence.database import check_database_compatibility
 
 DoctorStepName = Literal["settings", "database", "provider", "sandbox", "interpreter", "cleanup"]
 DoctorFailureCategory = Literal[
@@ -88,10 +83,6 @@ class DaytonaDoctorDependencies(Protocol):
     async def close(self) -> None: ...
 
 
-class _DatabaseCompatibilityError(RuntimeError):
-    """Internal marker for a reachable database at a non-canonical revision."""
-
-
 class _ProductionDaytonaDoctorDependencies:
     """Production operations composed from Fleet's canonical adapters."""
 
@@ -103,20 +94,7 @@ class _ProductionDaytonaDoctorDependencies:
 
     async def check_database(self, settings: Settings) -> None:
         database_url = (settings.database_url or "").strip()
-        engine = create_async_engine_from_url(database_url)
-        try:
-            async with engine.connect() as connection:
-                await connection.execute(text("SELECT 1"))
-                result = await connection.execute(text("SELECT version_num FROM alembic_version"))
-                current_revisions = {str(revision) for revision in result.scalars().all()}
-            root = Path(__file__).resolve().parents[3]
-            config = Config(str(root / "alembic.ini"))
-            config.set_main_option("script_location", str(root / "migrations"))
-            expected_revisions = set(ScriptDirectory.from_config(config).get_heads())
-            if not expected_revisions or current_revisions != expected_revisions:
-                raise _DatabaseCompatibilityError("database revision does not match Alembic head")
-        finally:
-            await engine.dispose()
+        await check_database_compatibility(database_url)
 
     async def resolve_volume(self, settings: Settings) -> str:
         del settings

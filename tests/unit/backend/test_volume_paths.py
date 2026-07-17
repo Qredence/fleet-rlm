@@ -89,6 +89,15 @@ def test_session_workspace_root_is_session_scoped() -> None:
     assert workspace == paths.session_dir(session_id) / "workspace"
 
 
+def test_session_and_run_container_paths_are_canonical() -> None:
+    paths = VolumePaths.from_mount()
+    session_id = uuid4()
+    run_id = uuid4()
+
+    assert paths.session_runs_dir(session_id) == paths.session_dir(session_id) / "runs"
+    assert paths.run_attachments_dir(session_id, run_id) == paths.run_dir(session_id, run_id) / "attachments"
+
+
 def test_resolve_under_root_rejects_escape() -> None:
     root = PurePosixPath("/home/daytona/fleet")
     with pytest.raises(UnsafePathError):

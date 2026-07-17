@@ -6,6 +6,8 @@ description: "Clean Daytona volume filesystem contract under the Fleet mount. Us
 # Volume bootstrap (clean)
 
 When a volume is attached, treat the mount root as the only durable workspace root.
+Fleet creates the canonical container tree before returning an Interpreter Lease;
+callers do not need to bootstrap these directories themselves.
 
 Default mount: `/home/daytona/fleet` (`FLEET_VOLUME_MOUNT_PATH`).
 
@@ -20,12 +22,17 @@ MOUNT/                              ← e.g. /home/daytona/fleet
 └── sessions/<session_uuid>/
     ├── exports/
     ├── staging/
+    ├── workspace/                  ← immediate private Session working state
     └── runs/<run_uuid>/
         ├── staging/
-        └── artifacts/
+        ├── artifacts/
+        └── attachments/
 ```
 
 Use UUID session/run ids only. Do not invent free-form path segments.
+The shared roots and the current Session/Run containers above exist when the
+Run begins. Files such as `result.json`, workspace documents, and UUID-specific
+Artifact or Attachment entries remain write-created.
 
 ## What clean does **not** provide (yet)
 
