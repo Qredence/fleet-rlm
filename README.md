@@ -93,7 +93,9 @@ make check
 make check-security
 make build-release
 FLEET_LIVE=1 uv run python scripts/live_daytona_verify.py \
-  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json
+  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json \
+  --root-model <approved-root-model> \
+  --sub-model <approved-sub-model>
 ```
 
 `make api-sync` regenerates only root `openapi.yaml`; frontend generated

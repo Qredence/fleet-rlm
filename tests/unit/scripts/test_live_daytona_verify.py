@@ -70,7 +70,29 @@ def test_help_is_credential_free(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit, match="0"):
         verifier.build_parser().parse_args(["--help"])
 
-    assert "--output" in capsys.readouterr().out
+    help_text = capsys.readouterr().out
+    assert "--output" in help_text
+    assert "--root-model" in help_text
+    assert "--sub-model" in help_text
+
+
+def test_model_overrides_must_be_paired(tmp_path: Path) -> None:
+    assert (
+        verifier.main(
+            [
+                "--output",
+                str(tmp_path / "receipt.json"),
+                "--root-model",
+                "openai/root",
+            ]
+        )
+        == verifier.EXIT_PRECONDITION
+    )
+
+
+def test_empty_model_override_is_rejected() -> None:
+    with pytest.raises(SystemExit, match="2"):
+        verifier.build_parser().parse_args(["--output", "receipt.json", "--root-model", " "])
 
 
 def test_pytest_command_is_exact_and_has_no_retry() -> None:
@@ -146,11 +168,27 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
 
     monkeypatch.setattr(verifier.subprocess, "run", run_once)
 
-    assert verifier.main(["--output", str(output), "--timeout-seconds", "840"]) == 0
+    assert (
+        verifier.main(
+            [
+                "--output",
+                str(output),
+                "--timeout-seconds",
+                "840",
+                "--root-model",
+                "openai/root-override",
+                "--sub-model",
+                "openai/sub-override",
+            ]
+        )
+        == 0
+    )
     assert len(calls) == 1
     command, child_env, timeout = calls[0]
     assert command == verifier.pytest_command(840)
     assert child_env[verifier.EVIDENCE_ENV] == str(output.resolve())
+    assert child_env["FLEET_ROOT_MODEL"] == "openai/root-override"
+    assert child_env["FLEET_SUB_MODEL"] == "openai/sub-override"
     assert timeout == 900
     assert not list(tmp_path.glob(".receipt.json.*.tmp"))
 

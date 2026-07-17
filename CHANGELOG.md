@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-17
+
+### Added
+
+- **Change:** Added the credentialed Daytona-backed Fleet RLM MVP proof,
+  bounded receipt validation, strict cleanup, and release evidence.
+  **Outcome:** The backend MVP can be promoted only after the live proof,
+  local release gates, and human review all pass.
+
 ## [0.6.2] - 2026-06-29
 
 ### Added

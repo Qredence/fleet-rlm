@@ -34,12 +34,15 @@ export FLEET_LIVE=1
 export FLEET_DAYTONA_API_KEY='...'
 export FLEET_LLM_API_KEY='...'
 uv run python scripts/live_daytona_verify.py \
-  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json
+  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json \
+  --root-model <approved-root-model> \
+  --sub-model <approved-sub-model>
 ```
 
 The verifier requires a clean tracked tree on a non-`main` branch, invokes the
-single live pytest scenario once, and performs no automatic retry. Its
-`--help` path requires no credentials.
+single live pytest scenario once, and performs no automatic retry. The model
+options override only the child proof process and must be supplied together;
+they do not modify `.env`. Its `--help` path requires no credentials.
 
 The proof exercises a typed host Signature, state across RLM iterations,
 single and batched recursive calls, a host Tool, a durable workspace write,

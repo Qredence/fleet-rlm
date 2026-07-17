@@ -54,6 +54,13 @@ class ReceiptError(ValueError):
         self.phase = phase
 
 
+def _model_argument(value: str) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        raise argparse.ArgumentTypeError("model must not be empty")
+    return cleaned
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -67,6 +74,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=900,
         help="Pytest timeout for the live proof (default: 900).",
+    )
+    parser.add_argument(
+        "--root-model",
+        type=_model_argument,
+        help="Optional non-secret FLEET_ROOT_MODEL override for the child proof process.",
+    )
+    parser.add_argument(
+        "--sub-model",
+        type=_model_argument,
+        help="Optional non-secret FLEET_SUB_MODEL override for the child proof process.",
     )
     return parser
 
@@ -297,6 +314,9 @@ def _write_failure(
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if (args.root_model is None) != (args.sub_model is None):
+        print("--root-model and --sub-model must be provided together.", file=sys.stderr)
+        return EXIT_PRECONDITION
     output = args.output.expanduser().resolve()
     started_at = _utc_now()
     if args.timeout_seconds <= 0 or not _path_is_allowed(output):
@@ -327,6 +347,9 @@ def main(argv: list[str] | None = None) -> int:
     output.unlink(missing_ok=True)
     child_env = os.environ.copy()
     child_env[EVIDENCE_ENV] = str(output)
+    if args.root_model is not None:
+        child_env["FLEET_ROOT_MODEL"] = args.root_model
+        child_env["FLEET_SUB_MODEL"] = args.sub_model
     try:
         completed = subprocess.run(
             pytest_command(args.timeout_seconds),
