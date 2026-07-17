@@ -112,7 +112,7 @@ async def test_default_and_custom_signatures_commit_native_typed_predictions() -
     )
     custom_turn = commit_success(custom_outcome, ())
 
-    assert factory.kwargs == {"request": "review this report"}
+    assert factory.kwargs == {"request": "review this report", "skill_cards": []}
     assert custom_turn.text == "Three findings"
     assert custom_turn.structured_result == {
         "summary": "Three findings",

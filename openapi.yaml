@@ -589,6 +589,12 @@ components:
             format: uuid
           type: array
           title: Attachment Ids
+        skill_selections:
+          items:
+            $ref: '#/components/schemas/SkillSelectionRequest'
+          type: array
+          maxItems: 4
+          title: Skill Selections
       additionalProperties: false
       type: object
       required:
@@ -787,6 +793,25 @@ components:
       - resources_available
       title: SkillCardResponse
       description: Bounded Skill discovery metadata — no instructions body.
+    SkillSelectionRequest:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        expected_version:
+          type: string
+          maxLength: 64
+          minLength: 1
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$
+          title: Expected Version
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - expected_version
+      title: SkillSelectionRequest
+      description: One exact version-pinned Skill requested for the next Turn.
     UIMessagePart:
       properties:
         type:

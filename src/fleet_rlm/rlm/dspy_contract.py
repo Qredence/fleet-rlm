@@ -14,7 +14,7 @@ from pydantic import TypeAdapter
 from pydantic_core import PydanticSerializationError
 
 from fleet_rlm.rlm.errors import RLMConfigError
-from fleet_rlm.rlm.sanitize import sanitize_public_value
+from fleet_rlm.rlm.sanitize import validate_declared_public_value
 
 if TYPE_CHECKING:
     from fleet_rlm.skills.capabilities import TaskContract
@@ -114,8 +114,10 @@ def prediction_result(
     encoded = json.dumps(plain_outputs, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     if len(encoded) > max_output_chars:
         raise PredictionOutputError
-    if sanitize_public_value(plain_outputs, max_len=max_output_chars) != plain_outputs:
-        raise PredictionOutputError
+    try:
+        validate_declared_public_value(result.outputs)
+    except ValueError:
+        raise PredictionOutputError from None
     if contract.validator is not None:
         try:
             contract.validator(result.outputs)

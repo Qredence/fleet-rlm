@@ -1,8 +1,11 @@
-"""Host-mediated progressive skill tools for dspy.RLM."""
+"""Host-mediated progressive Skill loading and resource reads."""
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Mapping
+from dataclasses import asdict
+from threading import RLock
 from types import MappingProxyType
 from typing import Any, cast
 from uuid import UUID
@@ -19,18 +22,30 @@ from fleet_rlm.skills.paths import normalize_skill_resource_path
 _DEFAULT_TRUST = frozenset({"system", "workspace"})
 
 
-def skill_loaded_public_payload(record: SkillRecord) -> dict[str, Any]:
-    """Safe public event payload — never includes instructions or resource bodies."""
+def skill_activated_public_payload(record: SkillRecord) -> dict[str, Any]:
+    """Return bounded activation event metadata, never Skill bodies."""
     return {
+        "kind": "skill.activated",
         "skill_id": str(record.id),
         "name": record.name,
         "version": record.version,
         "trust": record.trust,
+        "affordances": list(record.affordances),
+    }
+
+
+def skill_loaded_public_payload(record: SkillRecord) -> dict[str, Any]:
+    """Return bounded loaded event metadata, never Skill bodies."""
+    return {
+        "kind": "skill.loaded",
+        "skill_id": str(record.id),
+        "name": record.name,
+        "version": record.version,
     }
 
 
 class SkillToolHost:
-    """Bound tools for one turn: reauthorize every call; track safe public events."""
+    """Turn-bound progressive Skill tools with per-call authorization."""
 
     def __init__(
         self,
@@ -39,17 +54,29 @@ class SkillToolHost:
         user_id: UUID,
         workspace_id: UUID,
         allowed_trust: frozenset[str] | None = None,
+        allowed_skill_ids: frozenset[UUID] | None = None,
+        max_loaded_skills: int = 4,
     ) -> None:
         self._authorizer = authorizer
         self._user_id = user_id
         self._workspace_id = workspace_id
         self._allowed_trust = allowed_trust if allowed_trust is not None else _DEFAULT_TRUST
+        self._allowed_skill_ids = allowed_skill_ids
+        self._max_loaded_skills = min(4, max(0, int(max_loaded_skills)))
+        self._loaded_ids: set[UUID] = set()
         self._pending_events: list[dict[str, Any]] = []
+        self._lock = RLock()
+
+    @property
+    def loaded_skill_ids(self) -> frozenset[UUID]:
+        with self._lock:
+            return frozenset(self._loaded_ids)
 
     def drain_public_events(self) -> list[dict[str, Any]]:
-        events = list(self._pending_events)
-        self._pending_events.clear()
-        return events
+        with self._lock:
+            events = list(self._pending_events)
+            self._pending_events.clear()
+            return events
 
     def _resolve_record(
         self,
@@ -61,11 +88,14 @@ class SkillToolHost:
             sid = UUID(str(skill_id).strip())
         except (ValueError, AttributeError, TypeError):
             return None, "skill_not_found"
+        if self._allowed_skill_ids is not None and sid not in self._allowed_skill_ids:
+            return None, "skill_not_found"
         try:
             record = self._authorizer.get_record_if_authorized(
                 sid,
                 user_id=self._user_id,
                 workspace_id=self._workspace_id,
+                include_hidden=self._allowed_skill_ids is not None,
             )
         except SkillNotFoundError:
             return None, "skill_not_found"
@@ -75,23 +105,42 @@ class SkillToolHost:
             return None, "untrusted"
         return record, None
 
-    def load_skill(
-        self,
-        skill_id: str,
-        expected_version: str | None = None,
-    ) -> dict[str, Any]:
-        """Return instructions only after host reauth. Emits skill.loaded ledger entry."""
-        record, err = self._resolve_record(skill_id, expected_version=expected_version)
-        if err or record is None:
-            return {"ok": False, "error": err or "skill_not_found"}
-        self._pending_events.append(skill_loaded_public_payload(record))
+    def mark_preloaded(self, record: SkillRecord) -> None:
+        """Record an already-authorized explicit preload and its lifecycle events."""
+        with self._lock:
+            if self._allowed_skill_ids is not None and record.id not in self._allowed_skill_ids:
+                raise ValueError("preloaded Skill is outside the explicit restriction")
+            if record.id in self._loaded_ids:
+                return
+            if len(self._loaded_ids) >= self._max_loaded_skills:
+                raise ValueError("too many loaded Skills")
+            self._loaded_ids.add(record.id)
+            self._pending_events.extend((skill_activated_public_payload(record), skill_loaded_public_payload(record)))
+
+    def load_skill(self, skill_id: str, expected_version: str | None = None) -> dict[str, Any]:
+        """Return full SKILL.md and its resource manifest after authorization."""
+        record, error = self._resolve_record(skill_id, expected_version=expected_version)
+        if error or record is None:
+            return {"ok": False, "error": error or "skill_not_found"}
+        with self._lock:
+            if record.id not in self._loaded_ids:
+                if len(self._loaded_ids) >= self._max_loaded_skills:
+                    return {"ok": False, "error": "skill_limit_exceeded"}
+                self.mark_preloaded(record)
         return {
             "ok": True,
             "skill_id": str(record.id),
             "name": record.name,
+            "description": record.description,
             "version": record.version,
-            "instructions": record.instructions,
-            "resources": list(record.resources),
+            "skill_markdown": record.skill_markdown,
+            "metadata": {
+                "license": record.license,
+                "compatibility": record.compatibility,
+                "allowed_tools": list(record.allowed_tools),
+                "custom": dict(record.metadata),
+            },
+            "resources": [asdict(descriptor) for descriptor in record.resource_manifest()],
         }
 
     def read_skill_resource(
@@ -100,34 +149,41 @@ class SkillToolHost:
         resource_path: str,
         expected_version: str | None = None,
     ) -> dict[str, Any]:
-        """Read one skill-relative resource after reauth + path normalize."""
-        record, err = self._resolve_record(skill_id, expected_version=expected_version)
-        if err or record is None:
-            return {"ok": False, "error": err or "skill_not_found"}
+        """Read an allowlisted resource only after its Skill has been loaded."""
+        record, error = self._resolve_record(skill_id, expected_version=expected_version)
+        if error or record is None:
+            return {"ok": False, "error": error or "skill_not_found"}
+        with self._lock:
+            if record.id not in self._loaded_ids:
+                return {"ok": False, "error": "skill_not_loaded"}
         try:
             path = normalize_skill_resource_path(resource_path)
         except SkillPathError:
             return {"ok": False, "error": "invalid_path"}
-        if path not in record.resources:
+        resource = record.resource_map().get(path)
+        if resource is None:
             return {"ok": False, "error": "resource_not_found"}
-        body = record.resource_body_map().get(path)
-        if body is None:
-            return {"ok": False, "error": "resource_not_found"}
+        descriptor = resource.descriptor
+        content = (
+            resource.body.decode("utf-8")
+            if descriptor.encoding == "utf-8"
+            else base64.b64encode(resource.body).decode("ascii")
+        )
         return {
             "ok": True,
             "skill_id": str(record.id),
             "path": path,
-            "content": body,
+            "content": content,
+            "encoding": descriptor.encoding,
+            "media_type": descriptor.media_type,
+            "byte_size": descriptor.byte_size,
         }
 
     def as_tools(self) -> tuple[dspy.Tool, ...]:
-        """Return the canonical typed Tools owned by this host."""
+        """Return canonical typed Tools owned by this host."""
 
-        def load_skill(
-            skill_id: str,
-            expected_version: str | None = None,
-        ) -> dict[str, Any]:
-            """Load authorized skill instructions (host rechecks every call)."""
+        def load_skill(skill_id: str, expected_version: str | None = None) -> dict[str, Any]:
+            """Load one authorized Skill body and resource manifest."""
             return self.load_skill(skill_id, expected_version=expected_version)
 
         def read_skill_resource(
@@ -135,7 +191,7 @@ class SkillToolHost:
             resource_path: str,
             expected_version: str | None = None,
         ) -> dict[str, Any]:
-            """Read one skill-relative resource after host reauthorization."""
+            """Read one resource from a previously loaded Skill."""
             return self.read_skill_resource(
                 skill_id,
                 resource_path,
@@ -143,20 +199,16 @@ class SkillToolHost:
             )
 
         return (
-            dspy.Tool(
-                load_skill,
-                name="load_skill",
-                desc="Load one authorized Skill instruction body after host reauthorization.",
-            ),
+            dspy.Tool(load_skill, name="load_skill", desc="Load an authorized Skill progressively."),
             dspy.Tool(
                 read_skill_resource,
                 name="read_skill_resource",
-                desc="Read one authorized Skill resource after host reauthorization.",
+                desc="Read one resource from a previously loaded Skill.",
             ),
         )
 
     def event_views(self) -> Mapping[str, ToolEventView]:
-        """Return bounded public metadata projections for Skill Tools."""
+        """Return metadata-only public projections for Skill Tools."""
 
         def load_input(arguments: Mapping[str, Any]) -> JsonValue:
             return {
@@ -178,7 +230,7 @@ class SkillToolHost:
             values = cast(Mapping[str, JsonValue], result)
             return {
                 key: bound_event_text(values[key]) if isinstance(values[key], str) else values[key]
-                for key in ("ok", "error", "skill_id", "name", "version", "trust")
+                for key in ("ok", "error", "skill_id", "name", "version")
                 if key in values
             }
 
@@ -186,16 +238,11 @@ class SkillToolHost:
             if not isinstance(result, Mapping):
                 return {}
             values = cast(Mapping[str, JsonValue], result)
-            content = result.get("content")
-            projected: dict[str, JsonValue] = {
+            return {
                 key: bound_event_text(values[key]) if isinstance(values[key], str) else values[key]
-                for key in ("ok", "error", "skill_id", "path")
+                for key in ("ok", "error", "skill_id", "path", "encoding", "media_type", "byte_size")
                 if key in values
             }
-            if isinstance(content, str):
-                projected["content_chars"] = len(content)
-                projected["byte_size"] = len(content.encode("utf-8"))
-            return projected
 
         return MappingProxyType(
             {

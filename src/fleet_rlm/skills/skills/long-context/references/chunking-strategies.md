@@ -1,31 +1,44 @@
-# Chunking strategies (offline)
+# Deterministic chunking helpers
 
-Use only when the task needs manual chunk files on the host. Prefer RLM variable-mode inspection when a Daytona interpreter is available.
+Prefer direct variable inspection for a small number of searches. Create chunk files only when structure-aware partitioning or repeated ranking materially reduces the evidence set.
 
-## Semantic chunking
+## Split one explicit input
 
-```bash
-uv run python src/fleet_rlm/skills/skills/long-context/scripts/semantic_chunk.py \
-  --state .codex/rlm_state/state.pkl \
-  --type markdown \
-  --max-size 8000 \
-  --output .codex/rlm_state/chunks
+Load `scripts/semantic_chunk.py`, execute its UTF-8 source in an isolated
+namespace, and call its pure functions from generated Python:
+
+```python
+namespace = {"__name__": "skill_resource"}
+exec(compile(script_source, "scripts/semantic_chunk.py", "exec"), namespace)
+chunks = namespace["chunk_content"](document, "markdown", 8000, 0)
 ```
 
-Supported `--type` values: `auto`, `markdown`, `log`, `json`, `python`, `text`.
+The content type accepts `auto`, `markdown`, `log`, `json`, `python`, or
+`text`. Each returned tuple contains a stable source start, source end, and
+text. Call `write_chunks` only when persistent chunk files are actually useful.
+Its output directory is the only location the helper writes.
 
-## Query ranking
+Use a new or empty output directory. The splitter refuses a non-empty directory so stale chunks cannot enter a later ranking pass. Manifest positions are character offsets in the UTF-8 text decoded by the script; re-align them before applying them to a different source variable.
 
-```bash
-uv run python src/fleet_rlm/skills/skills/long-context/scripts/rank_chunks.py \
-  --state .codex/rlm_state/state.pkl \
-  --query "authentication token refresh" \
-  --top-k 8 \
-  --chunks-dir .codex/rlm_state/chunks
+## Rank explicit chunk files
+
+```python
+namespace = {"__name__": "skill_resource"}
+exec(compile(ranker_source, "scripts/rank_chunks.py", "exec"), namespace)
+ranked = namespace["rank_chunk_files"](
+    chunks_dir="chunks",
+    query="authentication token refresh",
+    top_k=8,
+)
 ```
 
-Feed top-ranked excerpts into `llm_query` / parent synthesis. Clean does not ship host `delegate_to_rlm` — keep map-reduce inside one RLM turn or sequential host turns.
+The ranker reads direct `*.txt` children in lexical path order and returns path
+and score pairs. Ties are ordered by path. Scores are lexical hints, not
+evidence; read and verify each selected excerpt against the source. Do not use
+lexical rank to exclude unseen chunks when the task requires high recall.
 
-## Codebase inputs
+`read_skill_resource` returns script source, not a host executable. Execute that
+source only inside the existing RLM interpreter. Fleet does not add a host shell
+or unrestricted script-execution endpoint.
 
-Avoid concatenating dependency folders. Build a bounded snapshot of relevant paths first; preserve `FILE: <path>` markers in each chunk.
+For codebases, build a bounded input containing only relevant source files. Preserve source-path markers and exclude generated output, dependencies, caches, and secrets.

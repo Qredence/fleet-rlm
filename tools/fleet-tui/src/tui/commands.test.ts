@@ -47,8 +47,8 @@ describe("parseInput", () => {
     }
   });
 
-  it("falls back to a message for unknown commands (preserves /foo text)", () => {
-    expect(parseInput("/unknown-cmd")).toEqual({ kind: "message", text: "/unknown-cmd" });
+  it("rejects unknown commands locally", () => {
+    expect(parseInput("/unknown-cmd")).toEqual({ kind: "unknown-command", name: "unknown-cmd" });
   });
 });
 
@@ -110,5 +110,97 @@ describe("command handlers", () => {
     const cancel = listCommands().find((c) => c.name === "cancel");
     if (cancel) cancel.handler([], ctx);
     expect(cancelSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("/skills lists only cards returned by discovery", async () => {
+    const { ctx } = makeContext();
+    ctx.client.listSkills = vi.fn().mockResolvedValue([
+      {
+        id: "00000000-0000-4000-8000-000000000001",
+        name: "long-context",
+        description: "Process inputs that exceed the context window.",
+        scope: "system",
+        version: "2.0.0",
+        trust: "system",
+        affordances: [],
+        resources_available: true,
+      },
+    ]);
+
+    const skills = listCommands().find((command) => command.name === "skills");
+    if (skills) await skills.handler([], ctx);
+
+    const message = ctx.store.getState().messages.at(-1);
+    expect(message).toMatchObject({ kind: "text", role: "system" });
+    if (message?.kind === "text") {
+      expect(message.text).toContain("long-context@2.0.0");
+      expect(message.text).toContain("Process inputs that exceed the context window.");
+    }
+  });
+
+  it("/skill resolves a visible name and pins its current version", async () => {
+    const { ctx } = makeContext();
+    ctx.client.listSkills = vi.fn().mockResolvedValue([
+      {
+        id: "00000000-0000-4000-8000-000000000001",
+        name: "long-context",
+        description: "Long context",
+        scope: "system",
+        version: "2.0.0",
+        trust: "system",
+        affordances: [],
+        resources_available: true,
+      },
+    ]);
+
+    const skill = listCommands().find((command) => command.name === "skill");
+    if (skill) await skill.handler(["long-context"], ctx);
+
+    expect(ctx.store.getState().pendingSkillSelections).toEqual([
+      {
+        id: "00000000-0000-4000-8000-000000000001",
+        expectedVersion: "2.0.0",
+        displayName: "long-context",
+      },
+    ]);
+  });
+
+  it("/skill accepts an exact hidden UUID and version without discovery", async () => {
+    const { ctx } = makeContext();
+    ctx.client.listSkills = vi.fn();
+    const skill = listCommands().find((command) => command.name === "skill");
+
+    if (skill) {
+      await skill.handler(["00000000-0000-4000-8000-000000000099@1.4.0"], ctx);
+    }
+
+    expect(ctx.client.listSkills).not.toHaveBeenCalled();
+    expect(ctx.store.getState().pendingSkillSelections).toMatchObject([
+      {
+        id: "00000000-0000-4000-8000-000000000099",
+        expectedVersion: "1.4.0",
+      },
+    ]);
+  });
+
+  it("/skill enforces four unique selections and /skill clear removes them", async () => {
+    const { ctx } = makeContext();
+    const skill = listCommands().find((command) => command.name === "skill");
+    for (let index = 1; index <= 5; index += 1) {
+      const suffix = String(index).padStart(12, "0");
+      if (skill) {
+        await skill.handler([`00000000-0000-4000-8000-${suffix}@1.0.0`], ctx);
+      }
+    }
+
+    expect(ctx.store.getState().pendingSkillSelections).toHaveLength(4);
+    const limitMessage = ctx.store.getState().messages.at(-1);
+    expect(limitMessage).toMatchObject({ kind: "text", role: "system" });
+    if (limitMessage?.kind === "text") {
+      expect(limitMessage.text).toContain("At most four unique Skills");
+    }
+
+    if (skill) await skill.handler(["clear"], ctx);
+    expect(ctx.store.getState().pendingSkillSelections).toEqual([]);
   });
 });

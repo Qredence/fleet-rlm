@@ -120,6 +120,7 @@ class AISDKUIProjector:
         if isinstance(detail, Status):
             return [self._data("status", data, transient=True)]
         if isinstance(detail, (SkillActivated, SkillLoaded)):
+            data["phase"] = "activated" if isinstance(detail, SkillActivated) else "loaded"
             return [self._data("skill", data, part_id=detail.skill_id)]
         if isinstance(detail, StepStarted):
             return [{"type": "start-step"}]

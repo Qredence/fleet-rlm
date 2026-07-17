@@ -1,8 +1,8 @@
 # Use the Fleet terminal UI
 
-`tools/fleet-tui/` is a standalone Node 22+ development client for the
+`tools/fleet-tui/` is a standalone Node 22.19+ development client for the
 canonical FastAPI `POST /api/sessions/{session_id}/turns` SSE endpoint. It
-projects the backend's AI SDK UI v1 chunks into the maintained Ink store.
+projects the backend's AI SDK UI v1 chunks into the maintained pi-tui store.
 
 The client has no local model, provider key, Harness agent, or sandbox. Fleet
 remains responsible for RLM execution, tools, Daytona, session persistence, and
@@ -17,7 +17,7 @@ database once before the first Daytona launch:
 uv run python scripts/db_init.py
 ```
 
-`fleet cli` checks the Alembic revision before starting the backend or Ink and
+`fleet cli` checks the Alembic revision before starting the backend or pi-tui and
 prints that recovery command when the database is empty or stale; it never
 applies migrations automatically. Then from the repository root run:
 
@@ -36,20 +36,27 @@ uv run fleet cli -- --session <session-uuid>
 ```
 
 The backend assigns the deterministic local User and Workspace scope. On
-resume, the client atomically hydrates the Ink store with
+resume, the client atomically hydrates the renderer-neutral store with
 persisted text, sanitized reasoning, tool calls/results, and Fleet trajectory
 parts such as RLM code/output, structured results, artifacts, skills, and
 usage.
 
 The screen is an achromatic execution timeline. Reasoning, code, interpreter
 output, tools, recoverable errors, and the final Result appear in stream order.
-Cards start expanded. Use `Tab` or the documented thread-navigation keys to
-move focus, `Enter` or `Space` to collapse or expand the focused card,
-`PageUp`/`PageDown` to inspect older output, and `End` to return to live-follow
-mode at the bottom. New messages grow upward from the fixed prompt, execution
-events have a single separating row, and code is displayed without line
-numbers. Keyboard help is rendered below the input border; the prompt and run
-status remain fixed while the timeline scrolls.
+Messages remain fully expanded and untruncated. The transcript, activity,
+editor, and footer form one native-scrollback history; Fleet never captures the
+mouse, pins the prompt, or clips old evidence. Use the terminal's wheel,
+trackpad, or `Shift+PageUp/PageDown` shortcuts to inspect earlier output. Plain
+`PageUp` and `PageDown` remain available to the editor. Resize or hydration may
+replay the transcript and return to the live bottom.
+
+Use `/skills` to list discoverable Skill Cards. `/skill <name-or-id>` pins the
+current discoverable version for the next accepted Turn, while
+`/skill <hidden-uuid>@<version>` pins an explicit-only Skill without listing or
+otherwise exposing it. `/skill clear` clears all pending selections. At most
+four unique Skills may be pending. The terminal clears them once the Turn
+stream opens; a pre-header validation or network failure keeps them so the
+request can be corrected or retried.
 
 The terminal client does not host a model or a sandbox. It only consumes the
 FastAPI SSE stream; the server performs every model call and either Daytona
@@ -63,7 +70,7 @@ seconds, and can be raised for long-running research turns.
 Use `uv run fleet deno --port 8000` instead to run the same terminal with
 DSPy's local Deno/Pyodide interpreter and no durable Artifact promotion. Use
 `fleet web` or `fleet-rlm serve-api` plus the standalone pnpm command only when
-you intentionally want backend and Ink in separate terminals. Supervised
+you intentionally want backend and pi-tui in separate terminals. Supervised
 backend logs are available at `.fleet_rlm/logs/latest.log`; correlated public
 Turn failures display the request id needed to find the matching safe log line.
 

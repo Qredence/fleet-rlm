@@ -138,7 +138,7 @@ class InMemoryTurnStateStore:
             prior_id = self._keys.get(key)
             if prior_id is not None:
                 prior = self._runs[prior_id]
-                if prior.input_fingerprint != request.input.fingerprint:
+                if prior.input_fingerprint not in request.input.acceptable_fingerprints:
                     raise TurnIdempotencyMismatchError("idempotency key is bound to different input")
                 if prior.status == "running":
                     raise TurnInProgressError("Turn is already running")
@@ -340,7 +340,7 @@ class SqlAlchemyTurnStateStore:
                 .limit(1)
             )
             if prior is not None:
-                if prior.input_fingerprint != request.input.fingerprint:
+                if prior.input_fingerprint not in request.input.acceptable_fingerprints:
                     raise TurnIdempotencyMismatchError("idempotency key is bound to different input")
                 if prior.status == "running":
                     raise TurnInProgressError("Turn is already running")

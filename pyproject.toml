@@ -137,6 +137,19 @@ namespaces = false
     "skills/skills/**/SKILL.md",
     "skills/skills/**/*.md",
     "skills/skills/**/*.py",
+    "skills/skills/**/*.txt",
+    "skills/skills/**/*.json",
+    "skills/skills/**/*.yaml",
+    "skills/skills/**/*.yml",
+    "skills/skills/**/*.toml",
+    "skills/skills/**/*.csv",
+    "skills/skills/**/*.png",
+    "skills/skills/**/*.jpg",
+    "skills/skills/**/*.jpeg",
+    "skills/skills/**/*.gif",
+    "skills/skills/**/*.webp",
+    "skills/skills/**/*.svg",
+    "skills/skills/**/*.pdf",
 ]
 
 [tool.pytest.ini_options]

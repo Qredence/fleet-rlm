@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.composition.testing import create_testing_app
-from fleet_rlm.skills.authorize import SkillAuthorizer
+from fleet_rlm.skills.authorize import InvalidSkillSelectionError, SkillAuthorizer
 from fleet_rlm.skills.cards import to_card
 from fleet_rlm.skills.errors import SkillNotFoundError, SkillValidationError
 from fleet_rlm.skills.ranking import rank_authorized_cards
@@ -62,7 +62,7 @@ def test_to_card_omits_instructions() -> None:
         name="demo",
         description="d",
         instructions="FULL BODY MUST NOT LEAK",
-        resources=("a.md",),
+        resource_bodies={"references/a.md": "body"},
     )
     card = to_card(record)
     assert card.name == "demo"
@@ -117,11 +117,21 @@ def test_authorizer_list_and_invisible() -> None:
     with pytest.raises(SkillNotFoundError):
         authorizer.authorize(other_ws.id, user_id=user, workspace_id=ws_a)
 
-    # host-only authorized body for future load
+    # host-only authorized body for implicit loading
     record = authorizer.get_record_if_authorized(system.id, user_id=user, workspace_id=ws_a)
     assert "SECRET system body" in record.instructions
     with pytest.raises(SkillNotFoundError):
         authorizer.get_record_if_authorized(hidden.id, user_id=user, workspace_id=ws_a)
+
+    # Exact version-pinned selection can resolve an explicit-only Skill.
+    from fleet_rlm.skills.models import SkillSelectionRef
+
+    selected = authorizer.authorize_explicit(
+        SkillSelectionRef(hidden.id, hidden.version),
+        user_id=user,
+        workspace_id=ws_a,
+    )
+    assert selected.id == hidden.id
 
 
 def test_ranking_only_reorders_authorized() -> None:
@@ -140,6 +150,30 @@ def test_ranking_only_reorders_authorized() -> None:
     only_system = tuple(c for c in cards if c.id == system.id)
     ranked_narrow = rank_authorized_cards(only_system, "workspace")
     assert {c.id for c in ranked_narrow} == {system.id}
+
+
+def test_explicit_selection_errors_are_generic() -> None:
+    from fleet_rlm.skills.models import SkillSelectionRef
+
+    registry, system, _workspace, _hidden, other, ws_a, _ws_b = _seed_registry()
+    authorizer = SkillAuthorizer(registry)
+    user = uuid4()
+    invalid = (
+        SkillSelectionRef(uuid4(), "1.0.0"),
+        SkillSelectionRef(system.id, "9.9.9"),
+        SkillSelectionRef(other.id, other.version),
+    )
+    for selection in invalid:
+        with pytest.raises(InvalidSkillSelectionError, match="^invalid skill selection$"):
+            authorizer.authorize_explicit(selection, user_id=user, workspace_id=ws_a)
+
+    duplicate = SkillSelectionRef(system.id, system.version)
+    with pytest.raises(InvalidSkillSelectionError, match="^invalid skill selection$"):
+        authorizer.authorize_explicit_many(
+            (duplicate, duplicate),
+            user_id=user,
+            workspace_id=ws_a,
+        )
 
 
 def test_api_list_and_get_no_instructions_leak() -> None:

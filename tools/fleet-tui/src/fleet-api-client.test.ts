@@ -47,7 +47,7 @@ describe("FleetApiClient", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "http://fleet.test/api/sessions/session-id/turns",
       expect.objectContaining({
-        body: JSON.stringify({ text: "hello", attachment_ids: [] }),
+        body: JSON.stringify({ text: "hello", attachment_ids: [], skill_selections: [] }),
         headers: expect.objectContaining({
           "content-type": "application/json",
           "idempotency-key": "turn-key",
@@ -58,6 +58,68 @@ describe("FleetApiClient", () => {
     expect(requestHeaders.has("authorization")).toBe(false);
     expect(requestHeaders.has("x-fleet-user-id")).toBe(false);
     expect(requestHeaders.has("x-fleet-workspace-id")).toBe(false);
+  });
+
+  it("serializes pinned Skills and acknowledges them only after stream headers are accepted", async () => {
+    const onStreamOpen = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("data: [DONE]\n\n", {
+        headers: { "x-vercel-ai-ui-message-stream": "v1" },
+      }),
+    );
+    globalThis.fetch = fetchMock;
+    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
+
+    await client.streamTurn({
+      message: "hello",
+      sessionId: "session-id",
+      idempotencyKey: "turn-key",
+      skillSelections: [{ id: "00000000-0000-4000-8000-000000000001", expected_version: "2.0.0" }],
+      onStreamOpen,
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
+      text: "hello",
+      attachment_ids: [],
+      skill_selections: [{ id: "00000000-0000-4000-8000-000000000001", expected_version: "2.0.0" }],
+    });
+    expect(onStreamOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not acknowledge pinned Skills when Turn preparation fails before SSE", async () => {
+    const onStreamOpen = vi.fn();
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: "invalid_skill_selection" }), {
+        status: 422,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
+
+    await expect(
+      client.streamTurn({
+        message: "hello",
+        sessionId: "session-id",
+        idempotencyKey: "turn-key",
+        skillSelections: [
+          { id: "00000000-0000-4000-8000-000000000001", expected_version: "2.0.0" },
+        ],
+        onStreamOpen,
+      }),
+    ).rejects.toMatchObject({ status: 422, message: "invalid_skill_selection" });
+    expect(onStreamOpen).not.toHaveBeenCalled();
+  });
+
+  it("lists discoverable Skill cards", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([{ id: "skill-1", name: "long-context" }]), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect(
+      new FleetApiClient({ baseUrl: "http://fleet.test" }).listSkills(),
+    ).resolves.toEqual([{ id: "skill-1", name: "long-context" }]);
   });
 
   it("rejects a non-v1 SSE response", async () => {

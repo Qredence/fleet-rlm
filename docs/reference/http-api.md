@@ -19,8 +19,18 @@ The generated source of truth is [`openapi.yaml`](../../openapi.yaml).
 
 The API uses one deterministic local User and Workspace scope. It accepts no
 Authorization or caller-supplied identity headers.
-Turn creation requires an `Idempotency-Key` header. Attachment ownership is validated before SSE begins. Provider exceptions,
-credentials, and storage paths never enter public responses.
+Turn creation requires an `Idempotency-Key` header. Its JSON body accepts
+`text`, `attachment_ids`, and up to four unique `skill_selections` entries,
+each containing an exact Skill `id` and `expected_version`. Explicit selections
+are authoritative for that Turn and are included in its idempotency
+fingerprint. Missing, unauthorized, or version-mismatched selections fail
+before SSE begins with the generic
+`invalid_skill_selection` response; the response does not reveal hidden
+catalog entries.
+
+Attachment ownership and explicit Skill selections are validated before SSE
+begins. Provider exceptions, credentials, Skill instructions, resource bodies,
+and storage paths never enter public responses or Skill lifecycle projections.
 
 `POST /api/artifacts` does not exist. Artifacts become public only through Turn
 Commit after host-mediated `create_artifact` produces a private candidate.

@@ -65,7 +65,8 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
     assert all(result["ok"] is True for result in skill_results)
     assert all(result["ok"] is True for result in attachment_results)
     assert all(result["ok"] is True for result in artifact_results)
-    assert len(skill_host.drain_public_events()) == 20
+    skill_events = skill_host.drain_public_events()
+    assert [event["kind"] for event in skill_events] == ["skill.activated", "skill.loaded"]
     assert len(file_host.drain_public_events()) == 20
     assert len(file_host.drain_artifact_candidates()) == 20
     assert all(type(tool) is dspy.Tool for tool in (*skill_host.as_tools(), *file_host.as_tools()))
@@ -145,7 +146,8 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
         "ok": True,
         "skill_id": str(skill.id),
         "path": "references/private.md",
-        "content_chars": 27,
+        "encoding": "utf-8",
+        "media_type": "text/markdown",
         "byte_size": 27,
     }
     serialized = str(observed)

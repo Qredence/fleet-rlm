@@ -4,6 +4,12 @@ export type FleetSession = components["schemas"]["SessionDetailResponse"];
 export type FleetTurnPart = components["schemas"]["UIMessagePart"];
 export type FleetTurn = components["schemas"]["UIMessageResponse"];
 type FleetTurnPage = components["schemas"]["SessionTurnPageResponse"];
+export type FleetSkillCard = components["schemas"]["SkillCardResponse"];
+
+export type FleetSkillSelection = {
+  id: string;
+  expected_version: string;
+};
 
 export type SessionListPage = components["schemas"]["SessionListResponse"];
 
@@ -64,15 +70,23 @@ export class FleetApiClient {
     throw new FleetApiError(502, "Fleet API returned too many Turn pages");
   }
 
+  async listSkills(): Promise<FleetSkillCard[]> {
+    return this.requestJson<FleetSkillCard[]>("/api/skills");
+  }
+
   async streamTurn({
     message,
     sessionId,
     idempotencyKey,
+    skillSelections = [],
+    onStreamOpen,
     signal,
   }: {
     message: string;
     sessionId: string;
     idempotencyKey: string;
+    skillSelections?: readonly FleetSkillSelection[];
+    onStreamOpen?: () => void;
     signal?: AbortSignal;
   }): Promise<Response> {
     const response = await this.fetch(
@@ -83,7 +97,11 @@ export class FleetApiClient {
           "content-type": "application/json",
           "idempotency-key": idempotencyKey,
         },
-        body: JSON.stringify({ text: message, attachment_ids: [] }),
+        body: JSON.stringify({
+          text: message,
+          attachment_ids: [],
+          skill_selections: skillSelections,
+        }),
         signal,
       },
     );
@@ -97,6 +115,7 @@ export class FleetApiClient {
     if (!response.body) {
       throw new FleetApiError(502, "Fleet API returned an empty SSE response");
     }
+    onStreamOpen?.();
     return response;
   }
 

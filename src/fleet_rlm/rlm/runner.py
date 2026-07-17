@@ -29,7 +29,7 @@ from fleet_rlm.rlm.events import (
     WarningEvent,
 )
 from fleet_rlm.rlm.factory import RLMFactory
-from fleet_rlm.rlm.inputs import build_rlm_input_kwargs
+from fleet_rlm.rlm.inputs import build_rlm_input_kwargs, skill_card_metadata
 from fleet_rlm.rlm.outcome import ExecutionDetail, RLMOutcome, TerminalStatus
 from fleet_rlm.rlm.sanitize import truncate_public_text
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
@@ -88,10 +88,14 @@ class TurnEventStream:
 class _DetailRelay:
     def __init__(self, *, maxsize: int = 256) -> None:
         self._loop = asyncio.get_running_loop()
-        self._queue: asyncio.Queue[ObservationDetail] = asyncio.Queue(maxsize=maxsize)
+        # Lifecycle is a durable protocol signal, not optional diagnostic
+        # detail. Keep it even while normal observation traffic is capped.
+        self._queue: asyncio.Queue[ExecutionDetail] = asyncio.Queue()
+        self._maxsize = max(0, maxsize)
+        self._ordinary_count = 0
         self.overflowed = False
 
-    def publish(self, detail: ObservationDetail) -> None:
+    def publish(self, detail: ExecutionDetail) -> None:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -101,20 +105,28 @@ class _DetailRelay:
         else:
             self._loop.call_soon_threadsafe(self._put, detail)
 
-    def _put(self, detail: ObservationDetail) -> None:
-        try:
-            self._queue.put_nowait(detail)
-        except asyncio.QueueFull:
+    def _put(self, detail: ExecutionDetail) -> None:
+        if not isinstance(detail, (SkillActivated, SkillLoaded)) and self._ordinary_count >= self._maxsize:
             self.overflowed = True
+            return
+        if not isinstance(detail, (SkillActivated, SkillLoaded)):
+            self._ordinary_count += 1
+        self._queue.put_nowait(detail)
 
-    async def get(self) -> ObservationDetail:
-        return await self._queue.get()
+    async def get(self) -> ExecutionDetail:
+        detail = await self._queue.get()
+        if not isinstance(detail, (SkillActivated, SkillLoaded)):
+            self._ordinary_count -= 1
+        return detail
 
-    def drain(self) -> list[ObservationDetail]:
-        values: list[ObservationDetail] = []
+    def drain(self) -> list[ExecutionDetail]:
+        values: list[ExecutionDetail] = []
         while True:
             try:
-                values.append(self._queue.get_nowait())
+                detail = self._queue.get_nowait()
+                if not isinstance(detail, (SkillActivated, SkillLoaded)):
+                    self._ordinary_count -= 1
+                values.append(detail)
             except asyncio.QueueEmpty:
                 return values
 
@@ -199,24 +211,28 @@ class RLMRunner:
                 yield recorder.record(Status("execution", "running"))
                 for notice in context.preparation_notices:
                     yield recorder.record(WarningEvent(notice.message, notice.code))
+                for item in self._drain_capability_details(context):
+                    details.append(item)
+                    yield recorder.record(item)
                 if await context.cancellation_requested():
                     raise TurnCancelled
 
                 blueprint = cast(TurnCapabilityBlueprint, context.capabilities.blueprint)
-                for card in blueprint.activated_skills:
-                    item = SkillActivated(str(card.id), card.name, card.version, card.trust, tuple(card.affordances))
-                    details.append(item)
-                    yield recorder.record(item)
-
                 relay = _DetailRelay()
                 bind_observer = getattr(context.interpreter, "bind_observer", None)
                 if callable(bind_observer):
                     bind_observer(relay.publish, max_chars=context.options.max_output_chars)
+
+                def relay_capability_details(_result: Any) -> None:
+                    for detail in self._drain_capability_details(context):
+                        relay.publish(detail)
+
                 observed_tools = tuple(
                     observe_tool(
                         tool,
                         relay.publish,
                         blueprint.tool_event_views.get(str(tool.name), ToolEventView.metadata_only()),
+                        after_result=(relay_capability_details if str(tool.name) == "load_skill" else None),
                     )
                     for tool in blueprint.tools
                 )
@@ -228,7 +244,7 @@ class RLMRunner:
                     signature=blueprint.signature,
                 )
                 task = asyncio.create_task(self._execute_rlm_in_worker(rlm, context, blueprint))
-                pending: asyncio.Task[ObservationDetail] | None = None
+                pending: asyncio.Task[ExecutionDetail] | None = None
                 intended_stop: BaseException | None = None
                 caller_cancelled = False
                 try:
@@ -252,6 +268,9 @@ class RLMRunner:
                             pending.cancel()
                             await asyncio.gather(pending, return_exceptions=True)
                         pending = None
+                        for item in self._drain_capability_details(context):
+                            details.append(item)
+                            yield recorder.record(item)
                 except asyncio.CancelledError:
                     caller_cancelled = True
                 finally:
@@ -259,6 +278,17 @@ class RLMRunner:
                         pending.cancel()
                         caller_cancelled |= await _settle_worker(pending)
                     caller_cancelled |= await _settle_worker(task)
+
+                for item in self._drain_capability_details(context):
+                    details.append(item)
+                    yield recorder.record(item)
+                for observed in relay.drain():
+                    details.append(observed)
+                    yield recorder.record(observed)
+                if relay.overflowed:
+                    warning = WarningEvent("some detailed execution events were omitted")
+                    details.append(warning)
+                    yield recorder.record(warning)
 
                 if caller_cancelled:
                     if task.done() and not task.cancelled():
@@ -268,15 +298,8 @@ class RLMRunner:
                     if task.done() and not task.cancelled():
                         task.exception()
                     raise intended_stop
-                prediction = task.result()
 
-                for observed in relay.drain():
-                    details.append(observed)
-                    yield recorder.record(observed)
-                if relay.overflowed:
-                    warning = WarningEvent("some detailed execution events were omitted")
-                    details.append(warning)
-                    yield recorder.record(warning)
+                prediction = task.result()
 
                 seen = {key for item in details if (key := _observation_key(item)) is not None}
                 for item in _trajectory_details(prediction, max_chars=context.options.max_output_chars):
@@ -293,9 +316,7 @@ class RLMRunner:
                     details.append(item)
                     yield recorder.record(item)
 
-                for item in context.capabilities.drain_public_details():
-                    if not isinstance(item, (AttachmentRead, SkillLoaded, WarningEvent)):
-                        raise TypeError("capability host returned an unsupported public detail")
+                for item in self._drain_capability_details(context):
                     details.append(item)
                     yield recorder.record(item)
 
@@ -357,12 +378,15 @@ class RLMRunner:
         if blueprint.task_contract is not None:
             kwargs = dict(blueprint.input_values)
             fields = getattr(blueprint.signature, "fields", {})
+            if "skill_cards" in fields:
+                kwargs["skill_cards"] = [skill_card_metadata(card) for card in blueprint.skill_cards]
             if blueprint.knowledge and "capability_knowledge" in fields:
                 kwargs["capability_knowledge"] = list(blueprint.knowledge)
         else:
             kwargs = build_rlm_input_kwargs(
                 request=context.request,
                 session_context=context.session_context,
+                skill_cards=blueprint.skill_cards,
                 attachments=context.attachments,
                 workspace=blueprint.workspace,
             )
@@ -382,3 +406,10 @@ class RLMRunner:
             return asyncio.run(self._execute_rlm(rlm, context, blueprint))
 
         return await asyncio.to_thread(run)
+
+    @staticmethod
+    def _drain_capability_details(context: RLMExecutionContext) -> tuple[ExecutionDetail, ...]:
+        values = context.capabilities.drain_public_details()
+        if not all(isinstance(item, (AttachmentRead, SkillActivated, SkillLoaded, WarningEvent)) for item in values):
+            raise TypeError("capability host returned an unsupported public detail")
+        return cast(tuple[ExecutionDetail, ...], values)

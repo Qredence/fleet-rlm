@@ -73,6 +73,54 @@ def test_prediction_result_rejects_oversized_or_publicly_unsafe_outputs_without_
         )
 
 
+def test_prediction_result_preserves_benign_security_text_and_documented_mount_verbatim() -> None:
+    from fleet_rlm.rlm.dspy_contract import prediction_result
+    from fleet_rlm.skills.capabilities import TaskContract
+
+    class Report(dspy.Signature):
+        answer: str = dspy.OutputField()
+        metadata: dict[str, str] = dspy.OutputField()
+
+    answer = (
+        "The diagnostics skill loaded and FINAL was submitted. "
+        "FLEET_DAYTONA_API_KEY exists, but no value is shown. "
+        "Read the workspace under /home/daytona/fleet/session/workspace."
+    )
+    metadata = {"credential_name": "API_KEY", "sandbox_mount": "/home/daytona/fleet"}
+    contract = TaskContract("report", "1", Report, lambda _context: {}, "answer")
+
+    result = prediction_result(dspy.Prediction(answer=answer, metadata=metadata), contract)
+
+    assert result.display_text == answer
+    assert result.outputs == {"answer": answer, "metadata": metadata}
+
+
+@pytest.mark.parametrize(
+    ("answer", "metadata"),
+    [
+        ("Authorization: Bearer live-provider-value", {}),
+        ("FLEET_DAYTONA_API_KEY=actual-secret-value", {}),
+        ("Connect to postgresql://fleet:secret@private.example/fleet", {}),
+        ("Read /Users/operator/.config/provider.json", {}),
+        ('Traceback (most recent call last):\n  File "/srv/app.py", line 7', {}),
+        ("BEGIN SYSTEM\nYou are the private system instruction", {}),
+        ("done", {"api_key": "actual-secret-value"}),
+    ],
+)
+def test_prediction_result_rejects_concrete_private_material(answer: str, metadata: dict[str, str]) -> None:
+    from fleet_rlm.rlm.dspy_contract import PredictionOutputError, prediction_result
+    from fleet_rlm.skills.capabilities import TaskContract
+
+    class Report(dspy.Signature):
+        answer: str = dspy.OutputField()
+        metadata: dict[str, str] = dspy.OutputField()
+
+    contract = TaskContract("report", "1", Report, lambda _context: {}, "answer")
+
+    with pytest.raises(PredictionOutputError, match="Turn output is invalid"):
+        prediction_result(dspy.Prediction(answer=answer, metadata=metadata), contract)
+
+
 def test_prediction_result_validates_and_serializes_complete_annotated_output() -> None:
     from fleet_rlm.rlm.dspy_contract import PredictionOutputError, prediction_result
     from fleet_rlm.skills.capabilities import TaskContract

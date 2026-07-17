@@ -1,15 +1,30 @@
 /** Slash command registry for the Fleet TUI. */
 
-import type { FleetApiClient } from "../fleet-api-client.js";
+import type { FleetApiClient, FleetSession, FleetSkillCard } from "../fleet-api-client.js";
 import { projectDurableTurns } from "./projection.js";
-import { newMessageId, type ConversationStore, type Message } from "./store.js";
+import {
+  newMessageId,
+  type ConversationStore,
+  type Message,
+  type PendingSkillSelection,
+} from "./store.js";
 
 export type CommandContext = {
   store: ConversationStore;
   client: FleetApiClient;
   cancelActiveRun: () => Promise<void> | void;
   exit: () => void;
+  presenter?: CommandPresenter;
 };
+
+export interface CommandPresenter {
+  showHelp(commands: CommandSpec[]): void;
+  chooseSession(sessions: FleetSession[]): Promise<string | null>;
+  chooseSkills(
+    skills: FleetSkillCard[],
+    current: PendingSkillSelection[],
+  ): Promise<PendingSkillSelection[] | null>;
+}
 
 export type CommandHandler = (args: string[], ctx: CommandContext) => Promise<void> | void;
 
@@ -37,6 +52,7 @@ export function listCommands(): CommandSpec[] {
 export type ParsedInput =
   | { kind: "command"; spec: CommandSpec; args: string[] }
   | { kind: "message"; text: string }
+  | { kind: "unknown-command"; name: string }
   | { kind: "empty" };
 
 export function parseInput(raw: string): ParsedInput {
@@ -47,9 +63,7 @@ export function parseInput(raw: string): ParsedInput {
   const name = tokens[0]?.slice(1) ?? "";
   if (!name) return { kind: "message", text };
   const spec = commands.get(name);
-  if (!spec) {
-    return { kind: "message", text };
-  }
+  if (!spec) return { kind: "unknown-command", name };
   return { kind: "command", spec, args: tokens.slice(1) };
 }
 
@@ -73,6 +87,10 @@ registerCommand({
   description: "List all slash commands",
   usage: "/help",
   handler: (_args, ctx) => {
+    if (ctx.presenter) {
+      ctx.presenter.showHelp(listCommands());
+      return;
+    }
     const lines = listCommands()
       .map((spec) => `  ${spec.usage.padEnd(28)}  ${spec.description}`)
       .join("\n");
@@ -107,6 +125,11 @@ registerCommand({
         appendSystem(ctx.store, "No sessions yet.");
         return;
       }
+      if (ctx.presenter) {
+        const id = await ctx.presenter.chooseSession(items);
+        if (id) await resumeSession(id, ctx);
+        return;
+      }
       const lines = items
         .map(
           (item, index) =>
@@ -133,28 +156,7 @@ registerCommand({
       appendSystem(ctx.store, "Usage: /resume <session-uuid>");
       return;
     }
-    try {
-      const [session, turns] = await Promise.all([
-        ctx.client.getSession(id),
-        ctx.client.listTurns(id),
-      ]);
-      ctx.store.dispatch({
-        type: "session/hydrate",
-        session: {
-          id: session.id,
-          title: session.title,
-          status: session.status,
-          resumed: true,
-        },
-        events: projectDurableTurns(turns),
-      });
-      appendSystem(
-        ctx.store,
-        turns.length > 0 ? `Resumed session ${id}.` : `Resumed session ${id} (no prior turns).`,
-      );
-    } catch (error) {
-      appendSystem(ctx.store, `Failed to resume: ${errorMessage(error)}`);
-    }
+    await resumeSession(id, ctx);
   },
 });
 
@@ -169,6 +171,86 @@ registerCommand({
 });
 
 registerCommand({
+  name: "skills",
+  description: "List Skills available for the next Turn",
+  usage: "/skills",
+  handler: async (_args, ctx) => {
+    try {
+      const cards = await ctx.client.listSkills();
+      if (cards.length === 0) {
+        appendSystem(ctx.store, "No discoverable Skills are available.");
+        return;
+      }
+      if (ctx.presenter) {
+        const selections = await ctx.presenter.chooseSkills(
+          cards,
+          ctx.store.getState().pendingSkillSelections,
+        );
+        if (selections) ctx.store.dispatch({ type: "skill-selection/replace", selections });
+        return;
+      }
+      const lines = cards
+        .map((card) => `  ${card.name}@${card.version}  ${card.id}\n    ${card.description}`)
+        .join("\n");
+      appendSystem(
+        ctx.store,
+        `Discoverable Skills\n\n${lines}\n\nUse /skill <name-or-id> to pin the current version.`,
+      );
+    } catch (error) {
+      appendSystem(ctx.store, `Failed to list Skills: ${errorMessage(error)}`);
+    }
+  },
+});
+
+registerCommand({
+  name: "skill",
+  description: "Pin or clear Skills for the next Turn",
+  usage: "/skill <name-or-id>|<hidden-uuid>@<version>|clear",
+  handler: async (args, ctx) => {
+    const reference = args[0];
+    if (!reference || args.length !== 1) {
+      appendSystem(
+        ctx.store,
+        "Usage: /skill <name-or-id> | /skill <hidden-uuid>@<version> | /skill clear",
+      );
+      return;
+    }
+    if (reference === "clear") {
+      ctx.store.dispatch({ type: "skill-selection/clear" });
+      appendSystem(ctx.store, "Pending Skill selections cleared.");
+      return;
+    }
+
+    const exact = parseExactHiddenSelection(reference);
+    if (exact) {
+      pinSkill(ctx.store, exact);
+      return;
+    }
+
+    try {
+      const cards = await ctx.client.listSkills();
+      const card = cards.find(
+        (candidate) => candidate.name === reference || candidate.id === reference,
+      );
+      if (!card) {
+        appendSystem(
+          ctx.store,
+          `Skill ${reference} is not discoverable. Hidden Skills require /skill <uuid>@<version>.`,
+        );
+        return;
+      }
+      pinSkill(ctx.store, {
+        id: card.id,
+        expectedVersion: card.version,
+        displayName: card.name,
+      });
+    } catch (error) {
+      appendSystem(ctx.store, `Failed to resolve Skill: ${errorMessage(error)}`);
+    }
+  },
+});
+
+registerCommand({
   name: "status",
   description: "Show session, run, and token usage",
   usage: "/status",
@@ -179,6 +261,7 @@ registerCommand({
       `Run:        ${state.run.id ?? "(none)"}  phase=${state.run.phase}  finish=${state.run.finishReason ?? "—"}`,
       `Model:      ${state.run.model ?? "—"}`,
       `Tools:      ${state.run.toolCount}    Steps: ${state.run.completedSteps}`,
+      `Skills:     ${formatPendingSkills(state.pendingSkillSelections)}`,
       `Messages:   ${state.messages.length}`,
     ];
     appendSystem(ctx.store, lines.join("\n"));
@@ -197,4 +280,57 @@ registerCommand({
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+async function resumeSession(id: string, ctx: CommandContext): Promise<void> {
+  try {
+    const [session, turns] = await Promise.all([
+      ctx.client.getSession(id),
+      ctx.client.listTurns(id),
+    ]);
+    ctx.store.dispatch({
+      type: "session/hydrate",
+      session: { id: session.id, title: session.title, status: session.status, resumed: true },
+      events: projectDurableTurns(turns),
+    });
+    appendSystem(
+      ctx.store,
+      turns.length ? `Resumed session ${id}.` : `Resumed session ${id} (no prior turns).`,
+    );
+  } catch (error) {
+    appendSystem(ctx.store, `Failed to resume: ${errorMessage(error)}`);
+  }
+}
+
+function parseExactHiddenSelection(reference: string): PendingSkillSelection | null {
+  const match = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@([^\s@]+)$/i.exec(
+    reference,
+  );
+  if (!match?.[1] || !match[2]) return null;
+  return {
+    id: match[1].toLowerCase(),
+    expectedVersion: match[2],
+    displayName: `${match[1].slice(0, 8)}…`,
+  };
+}
+
+function pinSkill(store: ConversationStore, selection: PendingSkillSelection): void {
+  const pending = store.getState().pendingSkillSelections;
+  const existing = pending.find((candidate) => candidate.id === selection.id);
+  if (!existing && pending.length >= 4) {
+    appendSystem(store, "At most four unique Skills may be selected for one Turn.");
+    return;
+  }
+  store.dispatch({ type: "skill-selection/pin", selection });
+  appendSystem(
+    store,
+    `${existing ? "Updated" : "Pinned"} ${selection.displayName}@${selection.expectedVersion} for the next Turn.`,
+  );
+}
+
+function formatPendingSkills(selections: readonly PendingSkillSelection[]): string {
+  if (selections.length === 0) return "(none)";
+  return selections
+    .map((selection) => `${selection.displayName}@${selection.expectedVersion}`)
+    .join(", ");
 }

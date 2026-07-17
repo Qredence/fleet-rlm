@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Protocol
-from uuid import UUID
+from typing import Any, Awaitable
 
 import dspy
 
@@ -15,12 +16,14 @@ from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.signature import FleetRLMSignature
 from fleet_rlm.rlm.tool_observer import ToolEventView
-from fleet_rlm.skills.models import SkillCard
+from fleet_rlm.skills.models import SkillCard, SkillRecord
 
 ToolRegistrationInput = Callable[..., Any] | dspy.Tool
-InputAdapter = Callable[["CapabilityResolutionContext"], Mapping[str, Any]]
+InputAdapter = Callable[["CapabilityResolutionContext"], Awaitable[Mapping[str, Any]]]
 OutputValidator = Callable[[Mapping[str, Any]], None]
 _RESERVED_TOOL_NAMES = frozenset({"llm_query", "llm_query_batched", "SUBMIT", "print"})
+_MAX_SELECTED_SKILLS = 4
+_MAX_PRELOADED_INSTRUCTION_BYTES = 128 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,10 +35,12 @@ class CapabilityResolutionContext:
     models: RLMModelBundle
     options: RLMOptions
     skill_cards: tuple[SkillCard, ...] = ()
+    selected_skills: tuple[SkillRecord, ...] = ()
     attachments: tuple[Any, ...] = ()
     tools: tuple[dspy.Tool, ...] = ()
     tool_event_views: Mapping[str, ToolEventView] = field(default_factory=lambda: MappingProxyType({}))
     workspace: WorkspaceCapabilityMetadata = DENO_WORKSPACE_CAPABILITY
+    deadline: float | None = None
 
 
 class SkillComposedFleetRLMSignature(FleetRLMSignature):
@@ -76,11 +81,15 @@ class TaskContract:
     validator: OutputValidator | None = None
 
 
+async def _default_input_mapper(_context: CapabilityResolutionContext) -> Mapping[str, Any]:
+    return {}
+
+
 DEFAULT_TASK_CONTRACT = TaskContract(
     id="fleet.default",
     schema_version="1",
     signature=FleetRLMSignature,
-    input_mapper=lambda _context: {},
+    input_mapper=_default_input_mapper,
     text_field="answer",
 )
 
@@ -139,6 +148,10 @@ class CapabilityRegistry:
             raise ValueError("capability knowledge exceeds host bounds")
         if task_contract is not None:
             _validate_task_contract(task_contract)
+            if not inspect.iscoroutinefunction(task_contract.input_mapper):
+                raise ValueError("task contract input mapper must be async")
+        if any(not inspect.iscoroutinefunction(adapter) for adapter in input_adapters):
+            raise ValueError("capability input adapters must be async")
         item = CapabilityRegistration(
             id=key,
             tools=tool_values,
@@ -157,70 +170,10 @@ class CapabilityRegistry:
 
 
 @dataclass(frozen=True, slots=True)
-class SkillSelection:
-    selected_skill_ids: tuple[UUID, ...] = ()
-    primary_skill_id: UUID | None = None
-
-
-class SkillSelector(Protocol):
-    async def select(
-        self,
-        *,
-        request: str,
-        history: Any,
-        cards: tuple[SkillCard, ...],
-        attachments: tuple[Any, ...],
-        sub_lm: Any,
-    ) -> SkillSelection: ...
-
-
-class SkillSelectionSignature(dspy.Signature):
-    """Select only useful authorized Skills; an empty selection is valid."""
-
-    request: str = dspy.InputField()
-    history: list[dict] = dspy.InputField()
-    skill_cards: list[dict] = dspy.InputField()
-    attachments: list[dict] = dspy.InputField()
-    selected_skill_ids: list[str] = dspy.OutputField()
-    primary_skill_id: str = dspy.OutputField(desc="Selected primary Skill UUID, or empty string")
-
-
-class DSPySkillSelector:
-    """Typed, bounded preflight selector using the configured Sub Model."""
-
-    async def select(
-        self,
-        *,
-        request: str,
-        history: Any,
-        cards: tuple[SkillCard, ...],
-        attachments: tuple[Any, ...],
-        sub_lm: Any,
-    ) -> SkillSelection:
-        from fleet_rlm.rlm.inputs import attachment_metadata, skill_card_metadata
-
-        messages = list(getattr(history, "messages", history) or [])[-8:]
-        predictor = dspy.Predict(SkillSelectionSignature)
-        with dspy.settings.context(lm=sub_lm):
-            result = await predictor.acall(
-                request=request,
-                history=[dict(item) for item in messages if isinstance(item, dict)],
-                skill_cards=[skill_card_metadata(card) for card in cards],
-                attachments=[attachment_metadata(item) for item in attachments],
-            )
-        selected: list[UUID] = []
-        for raw in list(getattr(result, "selected_skill_ids", []) or []):
-            selected.append(UUID(str(raw)))
-        primary_raw = str(getattr(result, "primary_skill_id", "") or "").strip()
-        return SkillSelection(
-            selected_skill_ids=tuple(selected),
-            primary_skill_id=UUID(primary_raw) if primary_raw else None,
-        )
-
-
-@dataclass(frozen=True, slots=True)
 class TurnCapabilityBlueprint:
+    skill_cards: tuple[SkillCard, ...] = ()
     activated_skills: tuple[SkillCard, ...] = ()
+    preloaded_skill_markdown: tuple[str, ...] = ()
     tools: tuple[dspy.Tool, ...] = ()
     tool_event_views: Mapping[str, ToolEventView] = field(default_factory=lambda: MappingProxyType({}))
     task_contract: TaskContract | None = None
@@ -236,10 +189,22 @@ class TurnCapabilityBlueprint:
     @property
     def signature(self) -> type[dspy.Signature]:
         if self.task_contract is not None:
-            return self.task_contract.signature
-        if self.knowledge:
-            return SkillComposedFleetRLMSignature
-        return FleetRLMSignature
+            base = self.task_contract.signature
+            if "skill_cards" not in getattr(base, "fields", {}):
+                base = base.append(
+                    "skill_cards",
+                    dspy.InputField(desc="Authorized Skill Card metadata only (no instruction bodies)"),
+                    list[dict],
+                )
+        elif self.knowledge:
+            base = SkillComposedFleetRLMSignature
+        else:
+            base = FleetRLMSignature
+        if not self.preloaded_skill_markdown:
+            return base
+        instructions = base.instructions
+        skill_instructions = "\n\n".join(self.preloaded_skill_markdown)
+        return base.with_instructions(f"{instructions}\n\n{skill_instructions}")
 
 
 def _tool_name(tool: dspy.Tool) -> str:
@@ -273,56 +238,59 @@ def _validate_event_views(
 
 
 class CapabilityResolver:
-    """Validate a selector result and compose a safe zero-to-four Skill blueprint."""
+    """Compose explicit Skill selections without using a model preflight gate."""
 
     def __init__(
         self,
         registry: CapabilityRegistry,
         *,
-        selector: SkillSelector | None = None,
         max_selected_skills: int = 4,
     ) -> None:
         self._registry = registry
-        self._selector = selector if selector is not None else DSPySkillSelector()
-        self._max_selected = max(0, int(max_selected_skills))
+        self._max_selected = min(_MAX_SELECTED_SKILLS, max(0, int(max_selected_skills)))
 
     async def resolve(self, context: CapabilityResolutionContext) -> TurnCapabilityBlueprint:
+        return await self._compose(context)
+
+    async def _compose(self, context: CapabilityResolutionContext) -> TurnCapabilityBlueprint:
         cards = tuple(context.skill_cards or ())
         base = TurnCapabilityBlueprint(
+            skill_cards=cards,
             tools=tuple(context.tools or ()),
             tool_event_views=context.tool_event_views,
             workspace=context.workspace,
         )
-        try:
-            selection = await self._selector.select(
-                request=context.request,
-                history=context.history,
-                cards=cards,
-                attachments=tuple(context.attachments or ()),
-                sub_lm=context.models.sub_lm,
-            )
-            return self._compose(context, cards, selection)
-        except Exception:  # noqa: BLE001 - selector/capability failure degrades to no Skills
+        selected_records = tuple(context.selected_skills or ())
+        if not selected_records:
             return base
-
-    def _compose(
-        self,
-        context: CapabilityResolutionContext,
-        cards: tuple[SkillCard, ...],
-        selection: SkillSelection,
-    ) -> TurnCapabilityBlueprint:
-        selected_ids = tuple(dict.fromkeys(selection.selected_skill_ids))
-        if len(selected_ids) > self._max_selected:
+        await self._check_deadline(context)
+        selected_ids = tuple(record.id for record in selected_records)
+        if len(selected_ids) > self._max_selected or len(set(selected_ids)) != len(selected_ids):
             raise ValueError("too many selected Skills")
         by_id = {card.id: card for card in cards}
-        if any(skill_id not in by_id for skill_id in selected_ids):
-            raise ValueError("selector returned an unauthorized Skill")
-        if selection.primary_skill_id is not None and selection.primary_skill_id not in selected_ids:
-            raise ValueError("primary Skill is not selected")
-
-        selected = tuple(by_id[skill_id] for skill_id in selected_ids)
+        selected = tuple(
+            by_id.get(
+                record.id,
+                SkillCard(
+                    id=record.id,
+                    name=record.name,
+                    description=record.description,
+                    scope=record.scope,
+                    version=record.version,
+                    trust=record.trust,
+                    affordances=record.affordances,
+                    resources_available=record.resources_available,
+                    capability_refs=record.capability_refs,
+                    task_contract_ref=record.task_contract_ref,
+                ),
+            )
+            for record in selected_records
+        )
         if any(card.trust == "untrusted" for card in selected):
             raise ValueError("untrusted Skill cannot activate host capabilities")
+        skill_markdown = tuple(record.skill_markdown for record in selected_records)
+        if sum(len(value.encode("utf-8")) for value in skill_markdown) > _MAX_PRELOADED_INSTRUCTION_BYTES:
+            raise ValueError("preloaded Skill instructions exceed host bounds")
         registrations: list[CapabilityRegistration] = []
         seen_capabilities: set[str] = set()
         for card in selected:
@@ -357,26 +325,31 @@ class CapabilityResolver:
                 event_views[name] = view
 
         task_contract: TaskContract | None = None
-        if selection.primary_skill_id is not None:
-            primary = by_id[selection.primary_skill_id]
-            if primary.task_contract_ref:
-                registration = self._registry.get(primary.task_contract_ref)
-                if registration is None or registration.task_contract is None:
-                    raise ValueError("primary Skill task contract is unavailable")
-                task_contract = registration.task_contract
+        task_contract_refs = tuple(dict.fromkeys(card.task_contract_ref for card in selected if card.task_contract_ref))
+        if len(task_contract_refs) > 1:
+            raise ValueError("selected Skills require conflicting task contracts")
+        if task_contract_refs:
+            registration = self._registry.get(task_contract_refs[0])
+            if registration is None or registration.task_contract is None:
+                raise ValueError("selected Skill task contract is unavailable")
+            task_contract = registration.task_contract
 
         bound_inputs: dict[str, Any] = {}
         if task_contract is not None:
-            bound_inputs.update(dict(task_contract.input_mapper(context)))
+            bound_inputs.update(dict(await task_contract.input_mapper(context)))
+            await self._check_deadline(context)
         for registration in registrations:
             for adapter in registration.input_adapters:
-                for key, value in dict(adapter(context)).items():
+                for key, value in dict(await adapter(context)).items():
                     if key in bound_inputs:
                         raise ValueError("capability input adapter field conflict")
                     bound_inputs[key] = value
+                await self._check_deadline(context)
 
         blueprint = TurnCapabilityBlueprint(
+            skill_cards=cards,
             activated_skills=selected,
+            preloaded_skill_markdown=skill_markdown,
             tools=tuple(tools),
             tool_event_views=event_views,
             task_contract=task_contract,
@@ -389,3 +362,9 @@ class CapabilityResolver:
         if any(key not in signature_fields for key in bound_inputs):
             raise ValueError("capability input adapter targets an unknown Signature field")
         return blueprint
+
+    @staticmethod
+    async def _check_deadline(context: CapabilityResolutionContext) -> None:
+        await asyncio.sleep(0)
+        if context.deadline is not None and asyncio.get_running_loop().time() >= context.deadline:
+            raise TimeoutError("Turn preparation timed out")

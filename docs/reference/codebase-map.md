@@ -14,10 +14,10 @@ compatibility runtime and parallel foundation package no longer exist.
 | `daytona/` | Exclusive Daytona SDK boundary, Sandbox/lease/Volume adapters | Daytona SDK, domain values |
 | `sessions/` | Session Catalog, canonical Turn input/history, and versioned Committed Turn aggregate | domain values only |
 | `files/`, `artifacts/` | Attachment staging, private Session Workspace policy/tools, and Artifact Candidate promotion | storage interfaces, safe paths |
-| `skills/` | bundled Skills, authorization, host capability registry, selection, typed task contracts, and progressive tools | domain values and package resources |
+| `skills/` | Agent Skills-compatible bundled catalog, authorization, explicit host capability composition, and progressive body/resource tools | domain values and package resources |
 | `persistence/` | SQLAlchemy models and repository adapters | sessions/files/artifact interfaces |
 | `observability/` | sanitized Turn records and exporters | Runtime Events |
-| `cli/` | Daytona/Deno backend-plus-Ink supervision, backend-only launchers, and doctor dispatch | canonical ASGI entrypoint, Daytona diagnostics |
+| `cli/` | Daytona/Deno backend-plus-pi-tui supervision, backend-only launchers, and doctor dispatch | canonical ASGI entrypoint, Daytona diagnostics |
 
 ## Hard boundaries
 
@@ -52,13 +52,16 @@ compatibility runtime and parallel foundation package no longer exist.
 | `tools/fleet-tui/src/tui/projection.ts` | shared live-chunk and durable-Turn display projection |
 | `tools/fleet-tui/src/tui/store.ts` | conversation state and atomic Session hydration |
 | `tools/fleet-tui/src/tui/theme.ts` | white-and-gray palette and shared visual hierarchy |
-| `tools/fleet-tui/src/tui/views/` | Ink-only execution cards, structured Result formatting, Markdown, and code presentation |
+| `tools/fleet-tui/src/tui/application.ts` | pi-tui lifecycle, editor, input routing, progress, and cleanup |
+| `tools/fleet-tui/src/tui/screen.ts` | flat native-scrollback screen and progressive compact layout |
+| `tools/fleet-tui/src/tui/message-renderer.ts` | complete static event, Markdown, Result, and code presentation |
 
 The client has no classic renderer. Live and reload use the same display
-semantics, including visible typed structured Result cards. Execution cards
-start expanded and are individually collapsible. A future graphical client is
-a separate implementation effort.
+semantics, including visible typed structured Result cards. Execution evidence
+is fully expanded and uses native terminal scrollback rather than application
+focus, collapsing, or viewport state. A future graphical client is a separate
+implementation effort.
 
 `fleet cli` and `fleet deno` supervise this client against a selected local
-backend while keeping backend output out of Ink. `daytona/diagnostics.py` owns
+backend while keeping backend output out of pi-tui. `daytona/diagnostics.py` owns
 the opt-in disposable Sandbox doctor and never composes Fleet domain stores.

@@ -6,14 +6,15 @@ Canonical Run Environment set: `deno`, `daytona`.
 
 ```text
 HTTP POST /api/sessions/{session_id}/turns + Idempotency-Key
-  -> deterministic local scope, Turn input, and Attachment validation
+  -> deterministic local scope, Turn input, Attachment validation, and optional exact Skill selections
   -> TurnCoordinator
   -> durable Session History + atomic Run claim
   -> Run environment selected by FLEET_RUN_ENVIRONMENT
      - deno:     real dspy.LM, DSPy default PythonInterpreter (Deno/Pyodide WASM), in-process sinks
      - daytona:  Daytona Sandbox with Workspace Volume Scope
   -> fresh DSPy RLM and CodeInterpreter
-  -> host-mediated Skill, Attachment, and Artifact Candidate tools
+  -> all authorized visible Skill summaries in the primary RLM input
+  -> progressive Skill body/resource, Attachment, and Artifact Candidate tools
      (deno: read_attachment + skills only; no create_artifact or promotion)
   -> candidate byte promotion (daytona only; deno skips durable volume write)
   -> atomic Turn/Run/Checkpoint/Artifact metadata commit
@@ -38,6 +39,13 @@ identity, name, status, and fixed failure message. Explicit RLM reasoning,
 generated code, and interpreter output are preserved verbatim up to the Run's
 `max_output_chars` bound. Provider and transport failures use closed public
 messages rather than provider exception text.
+
+Skill disclosure is three-level: visible names and descriptions are available
+at Turn startup, a full `SKILL.md` loads only when invoked (or explicitly
+preloaded by exact pinned selection), and a declared resource loads only after
+the Skill body. Host executable capabilities remain a separate registry and
+can be composed only during preparation for an explicit selection; Skill
+Markdown and Python resources cannot register host tools.
 
 ## Ownership
 

@@ -12,6 +12,7 @@ describe("ConversationStore", () => {
     const state = store.getState();
     expect(state.run.phase).toBe("idle");
     expect(state.messages).toHaveLength(0);
+    expect(state.pendingSkillSelections).toEqual([]);
   });
 
   it("appends only the user message on submit", () => {
@@ -61,14 +62,6 @@ describe("ConversationStore", () => {
     expect(store.getState().run.error).toBe("boom");
   });
 
-  it("toggles expanded ids", () => {
-    const store = makeStore();
-    store.dispatch({ type: "message/toggle-expanded", id: "x" });
-    expect(store.getState().expandedIds.has("x")).toBe(true);
-    store.dispatch({ type: "message/toggle-expanded", id: "x" });
-    expect(store.getState().expandedIds.has("x")).toBe(false);
-  });
-
   it("clears messages but keeps session", () => {
     const store = makeStore();
     store.dispatch({
@@ -113,7 +106,84 @@ describe("ConversationStore", () => {
     expect(store.getState().run.statusDetail).toBeNull();
   });
 
-  it("auto-expands toggleable messages and tracks tool metrics", () => {
+  it("pins at most four unique Skills and updates an existing pin in place", () => {
+    const store = makeStore();
+    for (let index = 1; index <= 5; index += 1) {
+      store.dispatch({
+        type: "skill-selection/pin",
+        selection: {
+          id: `skill-${index}`,
+          expectedVersion: "1.0.0",
+          displayName: `skill-${index}`,
+        },
+      });
+    }
+    store.dispatch({
+      type: "skill-selection/pin",
+      selection: {
+        id: "skill-2",
+        expectedVersion: "2.0.0",
+        displayName: "renamed",
+      },
+    });
+
+    expect(store.getState().pendingSkillSelections).toHaveLength(4);
+    expect(store.getState().pendingSkillSelections[1]).toEqual({
+      id: "skill-2",
+      expectedVersion: "2.0.0",
+      displayName: "renamed",
+    });
+  });
+
+  it("consumes only accepted Skill versions and retains selections after unrelated failures", () => {
+    const store = makeStore();
+    const accepted = {
+      id: "skill-1",
+      expectedVersion: "1.0.0",
+      displayName: "one",
+    };
+    store.dispatch({ type: "skill-selection/pin", selection: accepted });
+    store.dispatch({
+      type: "skill-selection/pin",
+      selection: { id: "skill-2", expectedVersion: "2.0.0", displayName: "two" },
+    });
+
+    store.dispatch({
+      type: "skill-selection/consume",
+      selections: [{ ...accepted, expectedVersion: "0.9.0" }],
+    });
+    expect(store.getState().pendingSkillSelections).toHaveLength(2);
+
+    store.dispatch({ type: "skill-selection/consume", selections: [accepted] });
+    expect(store.getState().pendingSkillSelections).toEqual([
+      { id: "skill-2", expectedVersion: "2.0.0", displayName: "two" },
+    ]);
+  });
+
+  it("keeps replayed Skill cards visible during session hydration", () => {
+    const store = makeStore();
+    const skillMessage = {
+      id: "skill-card",
+      kind: "skill",
+      runId: "run-1",
+      skillId: "skill-1",
+      name: "long-context",
+      phase: "activated",
+      version: "2.0.0",
+      trust: "system",
+      ts: 1,
+    } as const;
+
+    store.dispatch({
+      type: "session/hydrate",
+      session: { id: "session-1", title: "Session", status: "active", resumed: true },
+      events: [{ type: "message/upsert", message: skillMessage }],
+    });
+
+    expect(store.getState().messages).toEqual([skillMessage]);
+  });
+
+  it("tracks tool metrics", () => {
     const store = makeStore();
     store.dispatch({
       type: "message/upsert",
@@ -130,11 +200,10 @@ describe("ConversationStore", () => {
       },
     });
     const state = store.getState();
-    expect(state.expandedIds.has("tool-1")).toBe(true);
     expect(state.run.toolCount).toBe(1);
   });
 
-  it("auto-expands each operator timeline variant and counts outputs once", () => {
+  it("retains each operator timeline variant and counts outputs once", () => {
     const store = makeStore();
     const messages = [
       { id: "reason", kind: "reasoning", runId: "r", step: 1, text: "think", ts: 1 },
@@ -154,7 +223,12 @@ describe("ConversationStore", () => {
     for (const message of messages) store.dispatch({ type: "message/upsert", message });
     store.dispatch({ type: "message/upsert", message: messages[2] });
 
-    expect([...store.getState().expandedIds]).toEqual(["reason", "code", "output", "result"]);
+    expect(store.getState().messages.map((message) => message.id)).toEqual([
+      "reason",
+      "code",
+      "output",
+      "result",
+    ]);
     expect(store.getState().run.completedSteps).toBe(1);
   });
 });

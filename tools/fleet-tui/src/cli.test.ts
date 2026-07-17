@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseArgs } from "./cli.js";
+import { parseArgs, run } from "./cli.js";
 
 describe("CLI options", () => {
   it("uses the local API by default and accepts a resumed session", () => {
@@ -15,5 +15,11 @@ describe("CLI options", () => {
   });
   it("rejects the removed classic renderer flag", () => {
     expect(() => parseArgs(["--classic"])).toThrow("Missing value for --classic");
+  });
+
+  it("rejects interactive chat when either stream is not a TTY", async () => {
+    await expect(run({ apiUrl: "http://fleet.test" })).rejects.toThrow(
+      "requires interactive stdin and stdout terminals",
+    );
   });
 });

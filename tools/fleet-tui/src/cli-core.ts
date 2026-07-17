@@ -109,7 +109,7 @@ export async function runArtifactDownload(options: CliOptions): Promise<boolean>
   return true;
 }
 
-export function inkUsage(): string {
+export function tuiUsage(): string {
   return `Usage: pnpm start -- [options]
 
 Options:
@@ -125,6 +125,8 @@ Slash commands:
   /sessions  list recent sessions
   /resume    resume a session by id
   /cancel    cancel the current run
+  /skills    select Skills for the next Turn
+  /skill     pin a Skill by name or exact UUID@version
   /status    show session, run, and usage
   /exit      exit
 `;

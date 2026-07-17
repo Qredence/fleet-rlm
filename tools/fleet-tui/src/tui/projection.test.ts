@@ -302,6 +302,55 @@ describe("terminal projection", () => {
     ]);
   });
 
+  it("preserves distinct Skill lifecycle metadata live and after hydration", () => {
+    const live = new LiveTurnProjector(clock);
+    const chunks: FleetUIMessageChunk[] = [
+      { type: "start", messageId: "run-1", messageMetadata: {} },
+      {
+        type: "data-skill",
+        id: "skill-1",
+        data: {
+          skill_id: "skill-1",
+          name: "inspect",
+          phase: "activated",
+          version: "2",
+          trust: "workspace",
+        },
+      },
+      {
+        type: "data-skill",
+        id: "skill-1",
+        data: { skill_id: "skill-1", name: "inspect", phase: "loaded", version: "2" },
+      },
+    ];
+    const liveMessages = finalMessages(chunks.flatMap((chunk) => live.push(chunk)));
+    const durableMessages = finalMessages(
+      projectDurableTurns(
+        [
+          {
+            id: "run-1",
+            role: "assistant",
+            parts: chunks.slice(1).map((chunk) => ({
+              type: "data-skill" as const,
+              id: "id" in chunk ? chunk.id : undefined,
+              data: "data" in chunk ? chunk.data : undefined,
+            })),
+          },
+        ] satisfies FleetTurn[],
+        clock,
+      ),
+    );
+
+    const expected = [
+      { kind: "skill", phase: "activated", trust: "workspace" },
+      { kind: "skill", phase: "loaded" },
+    ];
+    expect(liveMessages).toMatchObject(expected);
+    expect(durableMessages).toMatchObject(expected);
+    expect(liveMessages[1]).not.toHaveProperty("trust");
+    expect(durableMessages[1]).not.toHaveProperty("trust");
+  });
+
   it("merges narrative and result regardless of durable part order", () => {
     const parts = [
       { type: "text", text: "Explanation", state: "done" } as const,
@@ -432,6 +481,7 @@ function correlations(messages: Message[]): unknown[] {
           runId: message.runId,
           skillId: message.skillId,
           name: message.name,
+          phase: message.phase,
           version: message.version,
           trust: message.trust,
         };

@@ -80,6 +80,7 @@ class TestingRunEnvironmentProvider(RunEnvironmentProvider):
 
 class TestingPreparedCapabilities:
     blueprint = TurnCapabilityBlueprint()
+    preparation_notices: tuple[()] = ()
 
     def drain_public_details(self) -> tuple[()]:
         return ()
@@ -97,8 +98,10 @@ class TestingCapabilityPreparer:
         turn: ExecuteTurn,
         environment: RunEnvironment,
         attachments: PreparedAttachments,
+        *,
+        deadline: float,
     ) -> TestingPreparedCapabilities:
-        del turn, environment, attachments
+        del turn, environment, attachments, deadline
         return TestingPreparedCapabilities()
 
 

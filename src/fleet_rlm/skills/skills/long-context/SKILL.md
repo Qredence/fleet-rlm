@@ -1,49 +1,38 @@
 ---
 name: long-context
-description: "Process documents and codebases exceeding a single context window using dspy.RLM variable mode in the Daytona REPL."
+description: Use when a document, codebase, transcript, or dataset is too large to inspect reliably in one model context, especially for exact retrieval or evidence synthesis.
+compatibility: Requires Fleet RLM variable mode with a Python interpreter.
+metadata:
+  version: "2.0.0"
+allowed-tools: read_skill_resource
 ---
 
-# Long-context processing (dspy.RLM)
+# Long-context analysis
 
-Official references:
+Keep large inputs in variable space. Explore them with bounded Python operations, send only relevant excerpts to sub-model calls, and verify every reported fact against the original variable before submitting.
 
-- https://dspy.ai/api/modules/RLM/
-- https://dspy.ai/diving-deeper/rlm/
+## Analyze
 
-## Core pattern (variable space vs token space)
+1. Inspect variable names, types, lengths, and small previews. Do not print a whole large value.
+2. Locate candidate regions with deterministic searches, indexes, regular expressions, or bounded slices.
+3. When the relevant regions are unknown, scan every bounded chunk for structured candidates before reducing them. Query ranking may prioritize reading order, but it must not exclude unseen evidence.
+4. Call `llm_query` or `llm_query_batched` only on self-contained excerpts that include the question and their source offsets.
+5. Reconcile candidates against definitions, scope, dates, exceptions, amendments, cross-references, and precedence rules relevant to the task.
+6. Recover complete operative language from the original variable, then re-slice it to verify quotes, offsets, qualifiers, and conclusions.
+7. Call `SUBMIT(...)` once with exactly the requested output fields. If the evidence is absent, ambiguous, or insufficient, state that instead of forcing the requested count.
 
-`dspy.RLM` stores large inputs as **REPL variables**. The model should see metadata (name, type, length, preview) and explore with Python:
+Treat sub-model output as a candidate, never as source evidence. Respect the Turn's call and output budgets; reduce excerpts before making another call.
 
-1. Peek: `print(text[:2000])`, `print(len(text))`.
-2. Locate: slices, `re`, indexes — not full dumps into the action prompt.
-3. Reason on excerpts: `llm_query(snippet)` or `llm_query_batched([...])`.
-4. Finish: `SUBMIT(answer=...)`.
+## Optional deterministic helpers
 
-When attachments are bound, use host `read_attachment(attachment_id)` for file bodies instead of inventing host paths.
+Read these resources only when structural chunk files or query ranking will help:
 
-## Clean turn context
+- `scripts/semantic_chunk.py` splits one explicit UTF-8 input file into deterministic text chunks.
+- `scripts/rank_chunks.py` ranks an explicit directory of text chunks using lexical query matches.
+- `references/chunking-strategies.md` documents their arguments and when chunking is useful.
 
-`RLMExecutionContext` carries validated request/history, native RLM Options, the Turn Timeout deadline, prepared Attachments, authorized capabilities, and one Interpreter. There is **no** live auto-router (`large_context_rlm` / EscalatingFleet). Prefer this skill whenever the user paste or attachment is large.
+The scripts have no hidden state. Supply every input and output path explicitly and use a new or empty output directory; do not create pickle state or rely on a previous Run. Manifest offsets are Python character offsets in the helper's decoded input file, not byte offsets and not offsets into another variable until re-aligned and verified.
 
-## Optional offline pre-chunking
+## Exact retrieval
 
-Host-side scripts (not required inside the sandbox):
-
-- `scripts/semantic_chunk.py` — split by structure
-- `scripts/rank_chunks.py` — rank chunks against a query
-
-See `references/chunking-strategies.md`. Chunking complements RLM; it does not replace REPL inspection.
-
-## Guardrails
-
-- Do not paste whole documents into the action prompt or final answer.
-- Do not call `llm_query` on an entire large variable; slice first.
-- Respect `max_llm_calls` and `max_output_chars`; print summaries, not raw dumps.
-- Load deeper skill text via host `load_skill(skill_id)` using SkillCard ids — not volume name lookup.
-
-## Exact quote retrieval
-
-When the user asks for a verbatim quote:
-
-- Locate with Python search, slice the span, return **one** exact quote in `SUBMIT(answer=...)`.
-- Do not paraphrase or invent speaker labels without evidence.
+For an exact quote, find the text with Python, retain its source offset, and compare the final excerpt byte-for-byte or character-for-character with the original input. If the evidence is absent or ambiguous, report that instead of inventing a quote or speaker.

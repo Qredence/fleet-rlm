@@ -33,14 +33,14 @@ def _fleet_parser() -> argparse.ArgumentParser:
     _add_serve_command(
         subcommands,
         "cli",
-        help_text="start the Daytona backend and Ink terminal",
+        help_text="start the Daytona backend and pi-tui terminal",
         run_environment="daytona",
         supervise_tui=True,
     )
     _add_serve_command(
         subcommands,
         "deno",
-        help_text="start the Deno backend and Ink terminal",
+        help_text="start the Deno backend and pi-tui terminal",
         run_environment="deno",
         supervise_tui=True,
     )

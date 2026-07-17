@@ -1,4 +1,4 @@
-"""Process supervision for the backend-backed Ink development client."""
+"""Process supervision for the backend-backed pi-tui development client."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def _validate_prerequisites(repo_root: Path) -> tuple[Path, str]:
     if (
         not workspace.is_dir()
         or not (workspace / "package.json").is_file()
-        or not (workspace / "src" / "cli.tsx").is_file()
+        or not (workspace / "src" / "cli.ts").is_file()
     ):
         raise SupervisorError(f"Fleet TUI workspace is missing: {workspace}")
 
@@ -41,7 +41,7 @@ def _validate_prerequisites(repo_root: Path) -> tuple[Path, str]:
         raise SupervisorError("pnpm is required to launch the Fleet TUI")
     node = shutil.which("node")
     if node is None:
-        raise SupervisorError("Node.js 22 or newer is required to launch the Fleet TUI")
+        raise SupervisorError("Node.js 22.19 or newer is required to launch the Fleet TUI")
     try:
         result = subprocess.run(
             [node, "--version"],
@@ -51,14 +51,15 @@ def _validate_prerequisites(repo_root: Path) -> tuple[Path, str]:
             timeout=5,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise SupervisorError("Could not execute Node.js to validate version 22 or newer") from exc
+        raise SupervisorError("Could not execute Node.js to validate version 22.19 or newer") from exc
     version = result.stdout.strip().removeprefix("v")
     try:
-        major = int(version.split(".", maxsplit=1)[0])
+        parts = version.split(".")
+        installed = tuple(int(part) for part in parts[:3])
     except ValueError as exc:
         raise SupervisorError(f"Could not determine the installed Node.js version: {version or 'unknown'}") from exc
-    if result.returncode != 0 or major < 22:
-        raise SupervisorError(f"Node.js 22 or newer is required; found {version or 'unknown'}")
+    if result.returncode != 0 or installed < (22, 19, 0):
+        raise SupervisorError(f"Node.js 22.19 or newer is required; found {version or 'unknown'}")
     return workspace, pnpm
 
 
@@ -150,7 +151,7 @@ def supervise(
     tui_args: Sequence[str] = (),
     repo_root: Path | None = None,
 ) -> None:
-    """Run the selected backend and repository Ink client together."""
+    """Run the selected backend and repository pi-tui client together."""
     root = repo_root or Path(__file__).resolve().parents[3]
     workspace, pnpm = _validate_prerequisites(root)
     _require_available_port(host, port)
@@ -221,7 +222,7 @@ def supervise(
                             start_new_session=True,
                         )
                     except OSError as exc:
-                        raise SupervisorError("Could not start the Fleet Ink TUI") from exc
+                        raise SupervisorError("Could not start the Fleet pi-tui TUI") from exc
 
                 tui_returncode: int | None = None
                 while received_signal is None and tui is not None:
@@ -237,7 +238,7 @@ def supervise(
                     128 + signal.SIGINT,
                     -signal.SIGINT,
                 }:
-                    raise SupervisorError(f"Fleet Ink TUI exited with status {tui_returncode}")
+                    raise SupervisorError(f"Fleet pi-tui TUI exited with status {tui_returncode}")
             finally:
                 if tui is not None:
                     _stop_process_group(tui)

@@ -67,7 +67,8 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
             return RunEnvironment(SimpleNamespace(), sink, sink, release)
 
     class CapabilityFactory:
-        async def prepare(self, turn, environment, attachments):
+        async def prepare(self, turn, environment, attachments, *, deadline):
+            assert deadline > 0
             return Capabilities()
 
     async def not_cancelled():
@@ -101,3 +102,68 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
     await prepared.aclose()
     await prepared.aclose()
     assert operations == ["close-capabilities", "release-environment"]
+
+
+@pytest.mark.asyncio
+async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_environment() -> None:
+    import asyncio
+
+    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
+    from fleet_rlm.chat.turn_preparation import RunEnvironment, TurnPreparationModule, TurnPreparationTimeout
+    from fleet_rlm.files.models import PreparedAttachments
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+
+    released = False
+
+    class Sink:
+        async def remove_private(self, _location):
+            return None
+
+    class Environments:
+        async def acquire(self, turn, *, deadline):
+            del turn, deadline
+
+            async def release():
+                nonlocal released
+                released = True
+
+            sink = Sink()
+            return RunEnvironment(None, sink, sink, release)
+
+    class Attachments:
+        async def prepare_run(self, access, ids, run, sink):
+            del access, ids, run, sink
+            return PreparedAttachments((), ())
+
+    class SlowCapabilities:
+        async def prepare(self, turn, environment, attachments, *, deadline):
+            del turn, environment, attachments, deadline
+            await asyncio.sleep(60)
+            raise AssertionError("deadline did not cancel capability preparation")
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ExecuteTurn(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("prepare"),
+        SessionHistory(()),
+        not_cancelled,
+        _TurnClaimToken(uuid4()),
+    )
+    module = TurnPreparationModule(
+        models=RLMModelBundle(object(), object()),
+        options=RLMOptions(),
+        turn_timeout_seconds=0.01,
+        attachments=Attachments(),
+        environments=Environments(),
+        capabilities=SlowCapabilities(),
+    )
+
+    with pytest.raises(TurnPreparationTimeout, match="timed out"):
+        await module.prepare(turn)
+    assert released is True

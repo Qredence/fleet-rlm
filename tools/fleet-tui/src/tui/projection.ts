@@ -406,14 +406,22 @@ function skill(
   value: Record<string, unknown>,
   clock: Clock,
 ): Message {
+  const phase =
+    value.phase === "activated" || value.phase === "loaded"
+      ? value.phase
+      : value.trust !== undefined && value.trust !== null
+        ? "activated"
+        : "loaded";
+  const trust = optionalString(value.trust);
   return {
     id,
     kind: "skill",
     runId,
     skillId: string(value.skillId ?? value.skill_id ?? fallbackId),
     name: string(value.name, "(skill)"),
+    phase,
     version: string(value.version, "1.0.0"),
-    trust: string(value.trust, "system"),
+    ...(trust ? { trust } : {}),
     ts: clock(),
   };
 }
@@ -499,6 +507,12 @@ function data(value: unknown): Record<string, unknown> {
 
 function string(value: unknown, fallback = ""): string {
   return value === undefined || value === null ? fallback : String(value);
+}
+
+function optionalString(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const result = String(value);
+  return result || undefined;
 }
 
 function number(value: unknown, fallback = 0): number {

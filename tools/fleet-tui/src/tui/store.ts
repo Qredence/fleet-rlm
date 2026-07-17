@@ -1,6 +1,4 @@
-/** Multi-turn conversation store. Single source of truth for the Ink TUI. */
-
-import { useSyncExternalStore } from "react";
+/** Multi-turn conversation store. Renderer-independent source of truth. */
 
 export type Phase = "idle" | "submitting" | "running" | "cancelling" | "completed" | "error";
 
@@ -62,8 +60,9 @@ export type Message =
       runId: string;
       skillId: string;
       name: string;
+      phase: "activated" | "loaded";
       version: string;
-      trust: string;
+      trust?: string;
       ts: number;
     }
   | {
@@ -120,13 +119,17 @@ export type Session = {
   resumed: boolean;
 };
 
+export type PendingSkillSelection = {
+  id: string;
+  expectedVersion: string;
+  displayName: string;
+};
+
 export type State = {
   session: Session | null;
   messages: Message[];
   run: Run;
-  selectedId: string | null;
-  focusedGroupId: string | null;
-  expandedIds: Set<string>;
+  pendingSkillSelections: PendingSkillSelection[];
 };
 
 let messageCounter = 0;
@@ -153,9 +156,7 @@ function initialState(): State {
       toolCount: 0,
       completedSteps: 0,
     },
-    selectedId: null,
-    focusedGroupId: null,
-    expandedIds: new Set(),
+    pendingSkillSelections: [],
   };
 }
 
@@ -170,9 +171,10 @@ type Event =
   | { type: "run/cancelled" }
   | { type: "message/upsert"; message: Message }
   | { type: "message/patch"; id: string; patch: Partial<Message> }
-  | { type: "message/toggle-expanded"; id: string }
-  | { type: "focus/set"; id: string | null }
-  | { type: "focus/group"; groupId: string | null }
+  | { type: "skill-selection/pin"; selection: PendingSkillSelection }
+  | { type: "skill-selection/clear" }
+  | { type: "skill-selection/replace"; selections: PendingSkillSelection[] }
+  | { type: "skill-selection/consume"; selections: PendingSkillSelection[] }
   | { type: "clear" }
   | { type: "reset" };
 
@@ -301,10 +303,6 @@ function reduce(state: State, event: Event): State {
       };
     case "message/upsert": {
       const existing = state.messages.findIndex((m) => m.id === event.message.id);
-      const expandedIds = new Set(state.expandedIds);
-      if (isToggleableMessage(event.message)) {
-        expandedIds.add(event.message.id);
-      }
       let run = state.run;
       if (existing < 0 && event.message.kind === "tool") {
         run = { ...run, toolCount: run.toolCount + 1 };
@@ -315,9 +313,9 @@ function reduce(state: State, event: Event): State {
       if (existing >= 0) {
         const messages = state.messages.slice();
         messages[existing] = event.message;
-        return { ...state, messages, expandedIds, run };
+        return { ...state, messages, run };
       }
-      return { ...state, messages: [...state.messages, event.message], expandedIds, run };
+      return { ...state, messages: [...state.messages, event.message], run };
     }
     case "message/patch": {
       const existing = state.messages.findIndex((m) => m.id === event.id);
@@ -333,27 +331,43 @@ function reduce(state: State, event: Event): State {
       messages[existing] = { ...target, ...event.patch } as Message;
       return { ...state, messages, run };
     }
-    case "message/toggle-expanded": {
-      const expanded = new Set(state.expandedIds);
-      if (expanded.has(event.id)) {
-        expanded.delete(event.id);
-      } else {
-        expanded.add(event.id);
+    case "skill-selection/pin": {
+      const existing = state.pendingSkillSelections.findIndex(
+        (selection) => selection.id === event.selection.id,
+      );
+      if (existing >= 0) {
+        const pendingSkillSelections = state.pendingSkillSelections.slice();
+        pendingSkillSelections[existing] = event.selection;
+        return { ...state, pendingSkillSelections };
       }
-      return { ...state, expandedIds: expanded };
+      if (state.pendingSkillSelections.length >= 4) return state;
+      return {
+        ...state,
+        pendingSkillSelections: [...state.pendingSkillSelections, event.selection],
+      };
     }
-    case "focus/set":
-      return { ...state, selectedId: event.id };
-    case "focus/group":
-      return { ...state, focusedGroupId: event.groupId };
+    case "skill-selection/clear":
+      return state.pendingSkillSelections.length === 0
+        ? state
+        : { ...state, pendingSkillSelections: [] };
+    case "skill-selection/replace":
+      return { ...state, pendingSkillSelections: event.selections.slice(0, 4) };
+    case "skill-selection/consume": {
+      const consumed = new Set(
+        event.selections.map((selection) => `${selection.id}\u0000${selection.expectedVersion}`),
+      );
+      const pendingSkillSelections = state.pendingSkillSelections.filter(
+        (selection) => !consumed.has(`${selection.id}\u0000${selection.expectedVersion}`),
+      );
+      return pendingSkillSelections.length === state.pendingSkillSelections.length
+        ? state
+        : { ...state, pendingSkillSelections };
+    }
     case "clear":
       return {
         ...state,
         messages: [],
         run: { ...state.run, phase: "idle", statusPhase: null, statusDetail: null },
-        selectedId: null,
-        focusedGroupId: null,
-        expandedIds: new Set(),
       };
     case "reset":
       return initialState();
@@ -361,27 +375,4 @@ function reduce(state: State, event: Event): State {
       return state;
   }
 }
-
-export function useConversationStore(store: ConversationStore): State {
-  return useSyncExternalStore(
-    (listener) => store.subscribe(listener),
-    () => store.getState(),
-    () => store.getState(),
-  );
-}
-
-export function isToggleableMessage(message: Message): boolean {
-  return (
-    message.kind === "reasoning" ||
-    message.kind === "tool" ||
-    message.kind === "code" ||
-    message.kind === "output" ||
-    message.kind === "result"
-  );
-}
-
-export function listToggleableMessageIds(messages: Message[]): string[] {
-  return messages.filter(isToggleableMessage).map((message) => message.id);
-}
-
 export type { Event as StoreEvent };

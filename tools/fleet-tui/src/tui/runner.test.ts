@@ -123,6 +123,24 @@ describe("RunController", () => {
     expect(controller.isRunning()).toBe(false);
   });
 
+  it("passes pending Skill selections and acknowledges them when the stream opens", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(completedResponse("r-skills", "done"));
+    globalThis.fetch = fetchMock;
+    const { store, controller } = setup();
+    const onStreamOpen = vi.fn();
+
+    controller.start("use the skill", {
+      skillSelections: [{ id: "00000000-0000-4000-8000-000000000001", expected_version: "2.0.0" }],
+      onStreamOpen,
+    });
+    await vi.waitFor(() => expect(store.getState().run.phase).toBe("completed"));
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
+      skill_selections: [{ id: "00000000-0000-4000-8000-000000000001", expected_version: "2.0.0" }],
+    });
+    expect(onStreamOpen).toHaveBeenCalledTimes(1);
+  });
+
   it("renders a completed text Turn identically live and after hydration", async () => {
     globalThis.fetch = vi
       .fn()
@@ -407,7 +425,7 @@ describe("RunController", () => {
     ).toEqual(["one", "two"]);
   });
 
-  it("an aborted overlapping run can never cancel the replacement run", async () => {
+  it("prevents a replacement while a run is active", async () => {
     const encoder = new TextEncoder();
     let failFirst: (() => void) | undefined;
     const first = new Response(
@@ -420,28 +438,20 @@ describe("RunController", () => {
         },
       }),
     );
-    const second = new Response(
-      new ReadableStream<Uint8Array>({
-        start(stream) {
-          stream.enqueue(
-            encoder.encode('data: {"type":"start","messageId":"run-b","messageMetadata":{}}\n\n'),
-          );
-        },
-      }),
-    );
     const { client, store, controller } = setup();
-    client.streamTurn = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    client.streamTurn = vi.fn().mockResolvedValueOnce(first);
     client.requestCancellation = vi.fn().mockResolvedValue({ status: "cancelled" });
 
     controller.start("first");
     await vi.waitFor(() => expect(store.getState().run.id).toBe("run-a"));
     controller.start("second");
-    await vi.waitFor(() => expect(store.getState().run.id).toBe("run-b"));
+    expect(client.streamTurn).toHaveBeenCalledTimes(1);
+    expect(store.getState().run.id).toBe("run-a");
+    controller.cancel();
     failFirst?.();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(client.requestCancellation).toHaveBeenCalledWith("run-a");
-    expect(client.requestCancellation).not.toHaveBeenCalledWith("run-b");
   });
 });
 

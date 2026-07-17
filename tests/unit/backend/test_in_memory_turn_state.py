@@ -63,6 +63,39 @@ async def test_idempotency_mismatch_single_active_and_cancellation() -> None:
 
 
 @pytest.mark.asyncio
+async def test_idempotency_claim_changes_when_skill_selections_change() -> None:
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, TurnIdempotencyMismatchError
+    from fleet_rlm.persistence.repositories.turns import InMemoryTurnStateStore
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.skills.models import SkillSelectionRef
+
+    store = InMemoryTurnStateStore()
+    access, session_id = TurnAccess(uuid4(), uuid4()), uuid4()
+    skill_id = uuid4()
+    await store.add_session(session_id, access)
+    await store.begin(
+        BeginTurn(
+            access,
+            session_id,
+            TurnInput("hello", skill_selections=(SkillSelectionRef(skill_id, "1.0.0"),)),
+            "skill-key",
+            uuid4(),
+        )
+    )
+
+    with pytest.raises(TurnIdempotencyMismatchError):
+        await store.begin(
+            BeginTurn(
+                access,
+                session_id,
+                TurnInput("hello", skill_selections=(SkillSelectionRef(skill_id, "2.0.0"),)),
+                "skill-key",
+                uuid4(),
+            )
+        )
+
+
+@pytest.mark.asyncio
 async def test_archived_session_cannot_begin_turn() -> None:
     from fleet_rlm.chat.turn_lifecycle import BeginTurn, TurnNotFoundError
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore

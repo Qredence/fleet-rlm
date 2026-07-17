@@ -15,6 +15,7 @@ def test_projector_maps_detailed_runtime_events_to_ui_message_chunks() -> None:
         RunCompleted,
         RunStarted,
         SkillActivated,
+        SkillLoaded,
         StepFinished,
         StepStarted,
         StructuredResult,
@@ -30,6 +31,7 @@ def test_projector_maps_detailed_runtime_events_to_ui_message_chunks() -> None:
     events = [
         recorder.record(RunStarted("live")),
         recorder.record(SkillActivated("s1", "long-context", "1", "system")),
+        recorder.record(SkillLoaded("s1", "long-context", "1")),
         recorder.record(StepStarted(1)),
         recorder.record(RLMReasoning("Inspect the corpus", 1)),
         recorder.record(RLMCode("print(len(context))", 1)),
@@ -58,6 +60,8 @@ def test_projector_maps_detailed_runtime_events_to_ui_message_chunks() -> None:
     assert types[0] == "start"
     assert chunks[0]["messageId"] == str(recorder.run_id)
     assert "data-skill" in types
+    skill_chunks = [chunk for chunk in chunks if chunk["type"] == "data-skill"]
+    assert [chunk["data"]["phase"] for chunk in skill_chunks] == ["activated", "loaded"]
     assert types[types.index("start-step") + 1 : types.index("data-rlm-code")] == [
         "reasoning-start",
         "reasoning-delta",

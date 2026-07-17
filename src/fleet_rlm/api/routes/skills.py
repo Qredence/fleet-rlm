@@ -13,7 +13,7 @@ from fleet_rlm.skills.authorize import SkillAuthorizer
 from fleet_rlm.skills.errors import SkillNotFoundError
 from fleet_rlm.skills.models import SkillCard
 from fleet_rlm.skills.ranking import rank_authorized_cards
-from fleet_rlm.skills.registry import InMemorySkillRegistry
+from fleet_rlm.skills.registry import InMemorySkillRegistry, UnavailableSkillRegistry
 
 router = APIRouter(tags=["skills"])
 
@@ -25,7 +25,10 @@ def get_skill_registry(request: Request) -> InMemorySkillRegistry:
     from fleet_rlm.skills.loader import seed_bundled_skills
 
     registry = InMemorySkillRegistry()
-    seed_bundled_skills(registry)
+    try:
+        seed_bundled_skills(registry)
+    except Exception:  # noqa: BLE001 - catalog discovery is intentionally optional
+        registry = UnavailableSkillRegistry()
     request.app.state.skill_registry = registry
     return registry
 

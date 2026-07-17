@@ -132,6 +132,7 @@ async def test_deno_capability_preparer_excludes_create_artifact() -> None:
         turn,
         env,
         PreparedAttachments((), ()),
+        deadline=float("inf"),
     )
 
     tool_names = {str(getattr(tool, "name", getattr(tool, "__name__", ""))) for tool in prepared.blueprint.tools}
@@ -179,3 +180,258 @@ def test_deno_prepared_capabilities_drains_public_attachment_events() -> None:
     assert len(details) == 1
     assert details[0].filename == "notes.txt"
     assert prepared.drain_artifact_candidates() == ()
+
+
+@pytest.mark.asyncio
+async def test_deno_implicit_skill_discovery_and_progressive_load_events() -> None:
+    from unittest.mock import MagicMock
+
+    from fleet_rlm.chat.deno_run_environment import DenoRunEnvironmentProvider, _DenoCapabilityPreparer
+    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
+    from fleet_rlm.files.models import PreparedAttachments
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.skills.registry import InMemorySkillRegistry
+
+    async def not_cancelled() -> bool:
+        return False
+
+    registry = InMemorySkillRegistry()
+    skill = registry.register(
+        name="long-context",
+        description="Analyze long inputs progressively.",
+        instructions="Read all relevant chunks.",
+        version="2.0.0",
+        skill_markdown="---\nname: long-context\ndescription: Analyze long inputs progressively.\n---\nRead all relevant chunks.",
+    )
+    turn = ExecuteTurn(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("analyze this"),
+        SessionHistory(()),
+        not_cancelled,
+        _TurnClaimToken(uuid4()),
+    )
+    environment = await DenoRunEnvironmentProvider().acquire(turn, deadline=float("inf"))
+    prepared = await _DenoCapabilityPreparer(
+        skill_registry=registry,
+        models=RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock()),
+        options=RLMOptions(),
+        max_artifact_bytes=1024,
+    ).prepare(turn, environment, PreparedAttachments((), ()), deadline=float("inf"))
+
+    assert len(prepared.blueprint.skill_cards) == 1
+    assert prepared.blueprint.skill_cards[0].id == skill.id
+    assert prepared.blueprint.activated_skills == ()
+    load_skill = next(tool for tool in prepared.blueprint.tools if str(tool.name) == "load_skill")
+    first = load_skill(skill_id=str(skill.id), expected_version="2.0.0")
+    second = load_skill(skill_id=str(skill.id), expected_version="2.0.0")
+
+    assert first["skill_markdown"] == skill.skill_markdown
+    assert second["ok"] is True
+    assert [detail.kind for detail in prepared.drain_public_details()] == ["skill.activated", "skill.loaded"]
+    assert prepared.drain_public_details() == ()
+
+
+@pytest.mark.asyncio
+async def test_deno_explicit_hidden_skill_preloads_and_restricts_loads() -> None:
+    from unittest.mock import MagicMock
+
+    from fleet_rlm.chat.deno_run_environment import DenoRunEnvironmentProvider, _DenoCapabilityPreparer
+    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
+    from fleet_rlm.files.models import PreparedAttachments
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.skills.models import SkillSelectionRef
+    from fleet_rlm.skills.registry import InMemorySkillRegistry
+
+    async def not_cancelled() -> bool:
+        return False
+
+    registry = InMemorySkillRegistry()
+    hidden = registry.register(
+        name="private-workflow",
+        description="Explicit-only private workflow.",
+        instructions="Use the private workflow.",
+        version="3.0.0",
+        visibility="hidden",
+        skill_markdown="---\nname: private-workflow\ndescription: Explicit-only private workflow.\n---\nUse it.",
+    )
+    visible = registry.register(
+        name="visible-workflow",
+        description="Visible workflow.",
+        instructions="Use the visible workflow.",
+    )
+    turn = ExecuteTurn(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("run private", (), (SkillSelectionRef(hidden.id, hidden.version),)),
+        SessionHistory(()),
+        not_cancelled,
+        _TurnClaimToken(uuid4()),
+    )
+    environment = await DenoRunEnvironmentProvider().acquire(turn, deadline=float("inf"))
+    prepared = await _DenoCapabilityPreparer(
+        skill_registry=registry,
+        models=RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock()),
+        options=RLMOptions(),
+        max_artifact_bytes=1024,
+    ).prepare(turn, environment, PreparedAttachments((), ()), deadline=float("inf"))
+
+    assert [card.id for card in prepared.blueprint.skill_cards] == [visible.id]
+    assert [card.id for card in prepared.blueprint.activated_skills] == [hidden.id]
+    assert hidden.skill_markdown in prepared.blueprint.signature.instructions
+    assert [detail.kind for detail in prepared.drain_public_details()] == ["skill.activated", "skill.loaded"]
+    load_skill = next(tool for tool in prepared.blueprint.tools if str(tool.name) == "load_skill")
+    assert load_skill(skill_id=str(visible.id))["error"] == "skill_not_found"
+    assert load_skill(skill_id=str(hidden.id), expected_version=hidden.version)["ok"] is True
+    assert prepared.drain_public_details() == ()
+
+
+@pytest.mark.asyncio
+async def test_deno_catalog_failure_degrades_to_bounded_skills_unavailable_notice() -> None:
+    from unittest.mock import MagicMock
+
+    from fleet_rlm.chat.deno_run_environment import DenoRunEnvironmentProvider, _DenoCapabilityPreparer
+    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
+    from fleet_rlm.files.models import PreparedAttachments
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.skills.registry import UnavailableSkillRegistry
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ExecuteTurn(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("continue without skills"),
+        SessionHistory(()),
+        not_cancelled,
+        _TurnClaimToken(uuid4()),
+    )
+    environment = await DenoRunEnvironmentProvider().acquire(turn, deadline=float("inf"))
+    prepared = await _DenoCapabilityPreparer(
+        skill_registry=UnavailableSkillRegistry(),
+        models=RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock()),
+        options=RLMOptions(),
+        max_artifact_bytes=1024,
+    ).prepare(turn, environment, PreparedAttachments((), ()), deadline=float("inf"))
+
+    assert prepared.blueprint.skill_cards == ()
+    assert "load_skill" not in {str(tool.name) for tool in prepared.blueprint.tools}
+    assert [(notice.code, notice.message) for notice in prepared.preparation_notices] == [
+        ("skills_unavailable", "Skills are unavailable")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_deno_explicit_preload_honors_cancellation_boundary() -> None:
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from fleet_rlm.chat.deno_run_environment import DenoRunEnvironmentProvider, _DenoCapabilityPreparer
+    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
+    from fleet_rlm.chat.turn_preparation import TurnPreparationCancelled
+    from fleet_rlm.files.models import PreparedAttachments
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.skills.models import SkillSelectionRef
+    from fleet_rlm.skills.registry import InMemorySkillRegistry
+
+    registry = InMemorySkillRegistry()
+    skill = registry.register(
+        name="selected-skill",
+        description="Explicitly selected Skill.",
+        instructions="Use this Skill.",
+    )
+
+    async def cancelled() -> bool:
+        return True
+
+    turn = ExecuteTurn(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("cancel", (), (SkillSelectionRef(skill.id, skill.version),)),
+        SessionHistory(()),
+        cancelled,
+        _TurnClaimToken(uuid4()),
+    )
+    environment = await DenoRunEnvironmentProvider().acquire(turn, deadline=float("inf"))
+    preparer = _DenoCapabilityPreparer(
+        skill_registry=registry,
+        models=RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock()),
+        options=RLMOptions(),
+        max_artifact_bytes=1024,
+    )
+
+    with pytest.raises(TurnPreparationCancelled, match="cancelled"):
+        await preparer.prepare(
+            turn,
+            environment,
+            PreparedAttachments((), ()),
+            deadline=asyncio.get_running_loop().time() + 10,
+        )
+
+
+@pytest.mark.asyncio
+async def test_deno_explicit_preload_preserves_preparation_timeout() -> None:
+    from unittest.mock import MagicMock
+
+    from fleet_rlm.chat.deno_run_environment import DenoTurnPreparation
+    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
+    from fleet_rlm.chat.turn_preparation import TurnPreparationTimeout
+    from fleet_rlm.files.models import PreparedAttachments
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.skills.capabilities import CapabilityRegistry
+    from fleet_rlm.skills.models import SkillSelectionRef
+    from fleet_rlm.skills.registry import InMemorySkillRegistry
+
+    class NoAttachments:
+        async def prepare_run(self, access, attachment_ids, run, sink) -> PreparedAttachments:
+            del access, attachment_ids, run, sink
+            return PreparedAttachments((), ())
+
+    async def times_out(_context):
+        raise TimeoutError("capability mapper timed out")
+
+    registry = InMemorySkillRegistry()
+    skill = registry.register(
+        name="timeout-skill",
+        description="Exercises capability preparation timeout semantics.",
+        instructions="Use the timeout capability.",
+        capability_refs=("timeout-capability",),
+    )
+    capabilities = CapabilityRegistry()
+    capabilities.register("timeout-capability", input_adapters=(times_out,))
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ExecuteTurn(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("run", (), (SkillSelectionRef(skill.id, skill.version),)),
+        SessionHistory(()),
+        not_cancelled,
+        _TurnClaimToken(uuid4()),
+    )
+    preparation = DenoTurnPreparation(
+        attachments=NoAttachments(),
+        root_lm=MagicMock(),
+        sub_lm=MagicMock(),
+        skill_registry=registry,
+        capability_registry=capabilities,
+    )
+
+    with pytest.raises(TurnPreparationTimeout, match="timed out"):
+        await preparation.prepare(turn)

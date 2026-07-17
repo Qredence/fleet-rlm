@@ -65,11 +65,11 @@ def _tui_workspace(repo_root: Path) -> Path:
     workspace = repo_root / "tools" / "fleet-tui"
     (workspace / "src").mkdir(parents=True)
     (workspace / "package.json").write_text('{"engines":{"node":">=22"}}')
-    (workspace / "src" / "cli.tsx").write_text("// test Ink entry point")
+    (workspace / "src" / "cli.ts").write_text("// test pi-tui entry point")
     return workspace
 
 
-def test_supervisor_rejects_node_older_than_22(
+def test_supervisor_rejects_node_older_than_22_19(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -78,10 +78,10 @@ def test_supervisor_rejects_node_older_than_22(
     monkeypatch.setattr(
         supervisor.subprocess,
         "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v21.9.0", stderr=""),
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.18.0", stderr=""),
     )
 
-    with pytest.raises(supervisor.SupervisorError, match="Node.js 22 or newer"):
+    with pytest.raises(supervisor.SupervisorError, match="Node.js 22.19 or newer"):
         supervisor.supervise(
             host="127.0.0.1",
             port=8123,
@@ -100,7 +100,7 @@ def test_supervisor_fails_before_spawn_when_port_is_occupied(
     monkeypatch.setattr(
         supervisor.subprocess,
         "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.0.0", stderr=""),
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
     )
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -130,7 +130,7 @@ def test_supervisor_rejects_incompatible_daytona_database_before_spawn(
     monkeypatch.setattr(
         supervisor.subprocess,
         "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.0.0", stderr=""),
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
     )
 
     def reject_database(_repo_root: Path) -> None:
@@ -196,7 +196,7 @@ def test_daytona_database_preflight_sanitizes_connectivity_failure(
     assert "top-secret" not in str(error.value)
 
 
-def test_supervisor_runs_ink_against_ready_backend_and_terminates_backend_group(
+def test_supervisor_runs_pi_tui_against_ready_backend_and_terminates_backend_group(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -210,7 +210,7 @@ def test_supervisor_runs_ink_against_ready_backend_and_terminates_backend_group(
     monkeypatch.setattr(
         supervisor.subprocess,
         "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.1.0", stderr=""),
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
     )
     monkeypatch.setattr(supervisor.urllib.request, "urlopen", lambda *_args, **_kwargs: _ReadyResponse())
     processes = [
@@ -279,7 +279,7 @@ def test_supervisor_reports_backend_early_exit_with_log_path(
     monkeypatch.setattr(
         supervisor.subprocess,
         "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.1.0", stderr=""),
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
     )
     monkeypatch.setattr(supervisor.subprocess, "Popen", lambda *_args, **_kwargs: _ExitedProcess(pid=7, returncode=3))
 
@@ -306,7 +306,7 @@ def test_supervisor_reports_backend_exit_after_readiness_and_stops_tui_group(
     monkeypatch.setattr(
         supervisor.subprocess,
         "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.1.0", stderr=""),
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
     )
     monkeypatch.setattr(supervisor.urllib.request, "urlopen", lambda *_args, **_kwargs: _ReadyResponse())
     backend = _Process(pid=21, returncode=3, poll_results=(None, 3))
@@ -344,7 +344,7 @@ def test_supervisor_termination_signal_stops_both_groups_and_restores_handlers(
     monkeypatch.setattr(
         supervisor.subprocess,
         "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.1.0", stderr=""),
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
     )
     monkeypatch.setattr(supervisor.urllib.request, "urlopen", lambda *_args, **_kwargs: _ReadyResponse())
     processes = iter((_Process(pid=31), _Process(pid=32)))
@@ -401,7 +401,7 @@ def test_supervisor_termination_during_readiness_stops_backend_and_restores_hand
     monkeypatch.setattr(
         supervisor.subprocess,
         "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.1.0", stderr=""),
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
     )
     backend = _Process(pid=35)
     monkeypatch.setattr(supervisor.subprocess, "Popen", lambda *_args, **_kwargs: backend)
@@ -455,7 +455,7 @@ def test_supervisor_sigint_stops_both_groups_and_returns_cleanly(
     monkeypatch.setattr(
         supervisor.subprocess,
         "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.1.0", stderr=""),
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
     )
     monkeypatch.setattr(supervisor.urllib.request, "urlopen", lambda *_args, **_kwargs: _ReadyResponse())
     processes = iter((_Process(pid=41), _Process(pid=42)))
@@ -504,7 +504,7 @@ def test_supervisor_reports_readiness_timeout_with_log_path(
     monkeypatch.setattr(
         supervisor.subprocess,
         "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.1.0", stderr=""),
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
     )
     backend = _Process(pid=8)
     monkeypatch.setattr(supervisor.subprocess, "Popen", lambda *_args, **_kwargs: backend)

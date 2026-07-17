@@ -6,17 +6,65 @@ from uuid import UUID
 
 import pytest
 
+from fleet_rlm.skills.models import SkillSelectionRef
+
 
 def test_turn_input_preserves_text_and_has_a_stable_versioned_fingerprint() -> None:
     from fleet_rlm.sessions.models import TurnInput
 
     attachment_id = UUID("00000000-0000-0000-0000-000000000001")
-    value = TurnInput(text="  inspect  ", attachment_ids=(attachment_id,))
+    skill_id = UUID("00000000-0000-0000-0000-000000000002")
+    value = TurnInput(
+        text="  inspect  ",
+        attachment_ids=(attachment_id,),
+        skill_selections=(SkillSelectionRef(skill_id, "2.0.0"),),
+    )
 
     assert value.canonical_json == (
-        '{"attachment_ids":["00000000-0000-0000-0000-000000000001"],"schema_version":1,"text":"  inspect  "}'
+        '{"attachment_ids":["00000000-0000-0000-0000-000000000001"],"schema_version":2,'
+        '"skill_selections":[{"expected_version":"2.0.0","id":"00000000-0000-0000-0000-000000000002"}],'
+        '"text":"  inspect  "}'
     )
-    assert value.fingerprint == "51e05eeee8a53adbf45688f66640162ddd376fa78ab5b502c3216548d86f41d3"
+    assert value.fingerprint == "3764042e0539d2a63f558174332d98d06908f971df2ac7dbbd8faf76b04670ef"
+
+
+def test_turn_input_codec_writes_v2_and_decodes_v1_without_skill_selections() -> None:
+    from fleet_rlm.sessions.models import TurnInput, TurnInputCodec
+
+    skill_id = UUID("00000000-0000-0000-0000-000000000002")
+    current = TurnInput("inspect", skill_selections=(SkillSelectionRef(skill_id, "2.0.0"),))
+
+    assert TurnInputCodec.decode(TurnInputCodec.encode(current)) == current
+    assert TurnInputCodec.decode(
+        {
+            "schema_version": 1,
+            "text": "legacy",
+            "attachment_ids": [],
+        }
+    ) == TurnInput("legacy")
+
+
+def test_turn_input_fingerprint_includes_version_pinned_skill_selections() -> None:
+    from fleet_rlm.sessions.models import TurnInput
+
+    skill_id = UUID("00000000-0000-0000-0000-000000000002")
+
+    without_skill = TurnInput("inspect")
+    with_v1 = TurnInput("inspect", skill_selections=(SkillSelectionRef(skill_id, "1.0.0"),))
+    with_v2 = TurnInput("inspect", skill_selections=(SkillSelectionRef(skill_id, "2.0.0"),))
+
+    assert len({without_skill.fingerprint, with_v1.fingerprint, with_v2.fingerprint}) == 3
+
+
+def test_empty_v2_input_accepts_a_legacy_v1_idempotency_fingerprint() -> None:
+    from fleet_rlm.sessions.models import TurnInput
+
+    value = TurnInput("inspect")
+    assert value.fingerprint in value.acceptable_fingerprints
+    assert len(value.acceptable_fingerprints) == 2
+    assert TurnInput("inspect", skill_selections=(SkillSelectionRef(UUID(int=2), "1.0.0"),)).fingerprint not in (
+        value.acceptable_fingerprints
+    )
 
 
 @pytest.mark.parametrize(
@@ -35,6 +83,21 @@ def test_turn_input_rejects_blank_duplicate_or_oversized_input(
 
     with pytest.raises(TurnInputValidationError):
         TurnInput(text=text, attachment_ids=attachment_ids)
+
+
+def test_turn_input_rejects_duplicate_or_oversized_skill_selections() -> None:
+    from fleet_rlm.sessions.models import TurnInput, TurnInputValidationError
+
+    selection = SkillSelectionRef(UUID(int=1), "1.0.0")
+
+    with pytest.raises(TurnInputValidationError):
+        TurnInput("inspect", skill_selections=(selection, selection))
+
+    with pytest.raises(TurnInputValidationError):
+        TurnInput(
+            "inspect",
+            skill_selections=tuple(SkillSelectionRef(UUID(int=index), "1.0.0") for index in range(1, 6)),
+        )
 
 
 def test_sequence_cursor_is_an_actual_nonnegative_sequence() -> None:

@@ -66,7 +66,8 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
             return None
 
     class CapabilityFactory:
-        async def prepare(self, turn, environment, attachments):
+        async def prepare(self, turn, environment, attachments, *, deadline):
+            assert deadline > 0
             return Capabilities()
 
     sink = Sink()

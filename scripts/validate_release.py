@@ -33,6 +33,7 @@ REQUIRED_WHEEL_FILES = {
     "fleet_rlm/daytona/workspace_volume.py",
     "fleet_rlm/persistence/models.py",
     "fleet_rlm/rlm/runner.py",
+    "fleet_rlm/skills/skills/workspace-files/assets/skill-marker.pdf",
 }
 
 

@@ -116,7 +116,7 @@ def test_fleet_doctor_prints_cleanup_action_after_primary_failure(
     ("command", "expected_environment"),
     [("cli", "daytona"), ("deno", "deno")],
 )
-def test_fleet_runtime_command_selects_environment_and_supervises_ink(
+def test_fleet_runtime_command_selects_environment_and_supervises_pi_tui(
     monkeypatch: pytest.MonkeyPatch,
     command: str,
     expected_environment: str,

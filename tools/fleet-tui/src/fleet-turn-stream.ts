@@ -1,4 +1,4 @@
-import type { FleetApiClient } from "./fleet-api-client.js";
+import type { FleetApiClient, FleetSkillSelection } from "./fleet-api-client.js";
 import { parseSSE, parseUIChunk, type FleetUIMessageChunk } from "./sse.js";
 
 export type StreamFleetTurnOptions = {
@@ -6,6 +6,8 @@ export type StreamFleetTurnOptions = {
   sessionId: string;
   message: string;
   idempotencyKey?: string;
+  skillSelections?: readonly FleetSkillSelection[];
+  onStreamOpen?: () => void;
   signal?: AbortSignal;
 };
 
@@ -14,11 +16,13 @@ export async function* streamFleetTurn({
   sessionId,
   message,
   idempotencyKey = crypto.randomUUID(),
+  skillSelections = [],
+  onStreamOpen,
   signal,
 }: StreamFleetTurnOptions): AsyncGenerator<FleetUIMessageChunk> {
   const response = await openWithOneNetworkRetry(
     client,
-    { message, sessionId, idempotencyKey, signal },
+    { message, sessionId, idempotencyKey, skillSelections, onStreamOpen, signal },
     signal,
   );
 

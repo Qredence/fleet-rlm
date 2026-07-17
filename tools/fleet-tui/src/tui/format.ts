@@ -1,4 +1,4 @@
-/** Shared formatters for the Fleet TUI. Pure, no React, no Ink. */
+/** Renderer-neutral shared formatters for the Fleet TUI. */
 
 const ESC = String.fromCharCode(27);
 const ansiPrefixPattern = new RegExp(`${ESC}\\[[0-9;]*m`);

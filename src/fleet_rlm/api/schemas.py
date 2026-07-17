@@ -11,6 +11,26 @@ from fleet_rlm.artifacts.models import ArtifactKind
 from fleet_rlm.skills.models import SkillScope, SkillTrust
 
 
+class SkillSelectionRequest(BaseModel):
+    """One exact version-pinned Skill requested for the next Turn."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    expected_version: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$",
+    )
+
+    @model_validator(mode="after")
+    def validate_expected_version(self) -> SkillSelectionRequest:
+        if self.expected_version != self.expected_version.strip() or not self.expected_version.isprintable():
+            raise ValueError("expected_version must be a printable non-whitespace value")
+        return self
+
+
 class CreateTurnRequest(BaseModel):
     """Canonical body for POST /api/sessions/{session_id}/turns."""
 
@@ -18,6 +38,7 @@ class CreateTurnRequest(BaseModel):
 
     text: str = Field(..., min_length=1, max_length=100_000)
     attachment_ids: list[UUID] = Field(default_factory=list)
+    skill_selections: list[SkillSelectionRequest] = Field(default_factory=list, max_length=4)
 
     @model_validator(mode="after")
     def validate_canonical_input(self) -> CreateTurnRequest:
@@ -27,6 +48,9 @@ class CreateTurnRequest(BaseModel):
             raise ValueError("at most 32 Attachments may be selected")
         if len(set(self.attachment_ids)) != len(self.attachment_ids):
             raise ValueError("attachment_ids must not contain duplicates")
+        selection_ids = [selection.id for selection in self.skill_selections]
+        if len(set(selection_ids)) != len(selection_ids):
+            raise ValueError("skill_selections must not contain duplicate ids")
         return self
 
 

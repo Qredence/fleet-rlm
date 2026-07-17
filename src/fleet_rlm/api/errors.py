@@ -59,8 +59,17 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(
-        _request: Request,
-        _exc: RequestValidationError,
+        request: Request,
+        exc: RequestValidationError,
     ) -> JSONResponse:
+        # Selection validation happens while FastAPI binds the body, before the
+        # route can translate authorization failures. Keep every malformed
+        # selection on the same non-leaking public contract.
+        if request.url.path.endswith("/turns") and any(
+            "skill_selections" in error.get("loc", ()) or "skill_selections" in str(error.get("msg", ""))
+            for error in exc.errors()
+        ):
+            error = ErrorResponse(code="invalid_skill_selection", message="Invalid Skill selection")
+            return JSONResponse(status_code=422, content=error.model_dump())
         error = ErrorResponse(code="invalid_request", message="Invalid request")
         return JSONResponse(status_code=422, content=error.model_dump())

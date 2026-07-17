@@ -267,6 +267,8 @@ export interface components {
             text: string;
             /** Attachment Ids */
             attachment_ids?: string[];
+            /** Skill Selections */
+            skill_selections?: components["schemas"]["SkillSelectionRequest"][];
         };
         JsonValue: unknown;
         /** SessionCreateRequest */
@@ -373,6 +375,19 @@ export interface components {
             affordances: string[];
             /** Resources Available */
             resources_available: boolean;
+        };
+        /**
+         * SkillSelectionRequest
+         * @description One exact version-pinned Skill requested for the next Turn.
+         */
+        SkillSelectionRequest: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Expected Version */
+            expected_version: string;
         };
         /**
          * UIMessagePart

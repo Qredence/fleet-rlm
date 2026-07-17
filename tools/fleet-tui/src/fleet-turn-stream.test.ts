@@ -65,6 +65,36 @@ describe("streamFleetTurn", () => {
     expect(streamTurn.mock.calls[1]?.[0].idempotencyKey).toBe("same-key");
   });
 
+  it("forwards pinned Skill selections and the stream-open acknowledgement", async () => {
+    const onStreamOpen = vi.fn();
+    const streamTurn = vi
+      .fn()
+      .mockImplementation(async (options: { onStreamOpen?: () => void }) => {
+        options.onStreamOpen?.();
+        return response(
+          '{"type":"start","messageId":"run-1","messageMetadata":{}}',
+          '{"type":"finish","finishReason":"stop"}',
+          "[DONE]",
+        );
+      });
+    const skillSelections = [
+      { id: "00000000-0000-4000-8000-000000000001", expected_version: "2.0.0" },
+    ];
+
+    await collect({
+      client: client(streamTurn),
+      sessionId: "session-1",
+      message: "hello",
+      skillSelections,
+      onStreamOpen,
+    });
+
+    expect(streamTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ skillSelections, onStreamOpen }),
+    );
+    expect(onStreamOpen).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ["missing start", ['{"type":"finish","finishReason":"stop"}', "[DONE]"]],
     [

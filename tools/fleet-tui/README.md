@@ -1,7 +1,7 @@
 # Fleet RLM Terminal UI
 
-This is a local Node 22+ terminal client for Fleet RLM's existing FastAPI SSE
-API. It uses Ink to render the backend's AI SDK UI v1
+This is a local Node 22.19+ terminal client for Fleet RLM's existing FastAPI SSE
+API. It uses pi-tui to render the backend's AI SDK UI v1
 stream; it does not run a local model, a Harness agent, or any Vercel Sandbox.
 
 ## Run
@@ -21,7 +21,7 @@ pnpm --dir tools/fleet-tui start
 ```
 
 For real Fleet RLM execution through Daytona and `dspy.RLM`, migrate the
-database, then use the combined backend-and-Ink command:
+database, then use the combined backend-and-pi-tui command:
 
 ```bash
 FLEET_DATABASE_URL='postgresql+asyncpg://...' \
@@ -39,7 +39,7 @@ FLEET_SUB_MODEL='openai/<model>' \
 uv run fleet cli --port 8000
 ```
 
-The supervised backend logs to `.fleet_rlm/logs/latest.log` and stops when Ink
+The supervised backend logs to `.fleet_rlm/logs/latest.log` and stops when pi-tui
 exits. Run `uv run fleet doctor daytona` first when validating provider access
 or diagnosing Sandbox creation.
 
@@ -61,22 +61,21 @@ deterministic local User and Workspace scope.
 `FLEET_TURN_TIMEOUT_SECONDS` controls the Turn Timeout for one live RLM Turn
 and defaults to 900 seconds.
 
-When resuming, the client atomically hydrates the Ink store with durable user
+When resuming, the client atomically hydrates the renderer-neutral store with durable user
 and assistant text, sanitized RLM reasoning, tool calls/results, and Fleet
 trajectory data such as RLM code/output, structured results, artifacts, skills,
 and usage.
 
 ## Operator timeline
 
-Ink renders one white-and-gray execution timeline with no semantic color
+pi-tui renders one white-and-gray execution timeline with no semantic color
 dependency. Reasoning, code, interpreter output, tools, errors, Result, and
-usage remain chronological. The timeline grows upward from the prompt and
-follows new output at the bottom. Execution cards start expanded; focus a card
-and press `Enter` or `Space` to collapse it. Code is shown without a line-number
-gutter. Use `PageUp` and `PageDown` to scroll, and `End` to jump to the bottom
-and resume live-follow. Keyboard help sits below the input border. HTML
-character references are decoded for readability while HTML tags remain inert
-text.
+usage remain chronological, complete, static, and expanded. The transcript,
+activity, multiline editor, and footer form one flat terminal history. Fleet
+does not capture the mouse, clip old messages, or maintain a viewport. Use the
+terminal's native wheel, trackpad, or `Shift+PageUp/PageDown` scrollback. Plain
+`PageUp/PageDown` remain available to the editor. Resize, hydration, and clear
+may replay the transcript and return to the live bottom.
 
 While a Turn is submitting, running, or cancelling, one restrained monochrome
 activity rail above the prompt shows the current phase, backend detail, elapsed

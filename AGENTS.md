@@ -98,8 +98,8 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 
 ## Learned Workspace Facts
 
-- Local development runs on `:8000`. `fleet cli` supervises Daytona plus Ink,
-  `fleet deno` supervises Deno plus Ink, and `fleet web` or `fleet-rlm serve-api`
+- Local development runs on `:8000`. `fleet cli` supervises Daytona plus pi-tui,
+  `fleet deno` supervises Deno plus pi-tui, and `fleet web` or `fleet-rlm serve-api`
   remains backend-only. Supervised backend logs live under `.fleet_rlm/logs/`;
   `fleet doctor daytona` is the opt-in disposable provider/mount probe.
   `POST /api/sessions/{session_id}/turns`
@@ -108,7 +108,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - `src/fleet_rlm/` is the canonical RLM-native backend. The parallel foundation package was cut over after exit-bar evidence on `71e79271`; there is no compatibility runtime or dual-serve path.
 - The canonical public Run Environment set is `deno` and `daytona`. Private tests install a credential-free deterministic composition explicitly. Deno is intentional local vanilla `dspy.RLM` (real LM + DSPy default Deno/Pyodide) with Attachment reads and Skills but no durable Artifact promotion; Daytona is the full Fleet path (Sandbox, Workspace Volume Scope, Artifact promotion).
 - Application composition is lifespan-only: `create_app()` builds the shell, `composition/` installs one complete inventory, and routes only retrieve composed modules.
-- The maintained terminal uses Ink only. `fleet-turn-stream.ts` owns strict stream lifecycle, `sse.ts` owns frame/chunk validation, `tui/projection.ts` owns live/reload projection, and `tui/store.ts` owns atomic hydration. The white-and-gray operator timeline shows typed structured Result cards and expanded, individually collapsible execution events. Ink runs every `useInput` hook on each keystroke—gate Prompt vs thread-navigation handlers with `isActive` (prompt/thread focus) so editing keys do not also navigate or toggle.
+- The maintained terminal uses pi-tui only. `fleet-turn-stream.ts` owns strict stream lifecycle, `sse.ts` owns frame/chunk validation, `tui/projection.ts` owns live/reload projection, and `tui/store.ts` owns atomic hydration. The monochrome operator timeline renders all evidence statically expanded in native terminal scrollback; Fleet does not capture the mouse or maintain a transcript viewport.
 - Live Daytona MVP proof (`tests/live/backend/`, `scripts/live_daytona_verify.py`) loads repo `.env` via `python-dotenv` with `override=False`; existing process exports still win.
 - Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments and Artifacts use Workspace Volume Scope; Artifact Candidates become public only through Turn Commit.
 - Settings use only `FLEET_*`. The local BYOK API uses one deterministic process-local User and Workspace scope and accepts no Authorization or synthetic identity headers.

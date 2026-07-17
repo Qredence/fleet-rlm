@@ -34,8 +34,6 @@ from fleet_rlm.daytona.volume_fs import DaytonaSandboxVolumeFs
 from fleet_rlm.rlm.tool_observer import ToolEventView
 from fleet_rlm.skills.capabilities import (
     CapabilityRLMRequirements,
-    DSPySkillSelector,
-    SkillSelection,
     TaskContract,
 )
 from tests.live.backend._database import upgrade_to_head
@@ -90,7 +88,7 @@ then call exactly `SUBMIT(summary=summary, findings=findings)` with keywords.
 """.strip()
 
 
-def _task_inputs(context: Any) -> dict[str, str]:
+async def _task_inputs(context: Any) -> dict[str, str]:
     request = str(context.request)
     scenario = _SECOND_SCENARIO if request.startswith("SECOND") else _FIRST_SCENARIO
     return {"request": request, "scenario": scenario}
@@ -198,6 +196,24 @@ def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
         else:
             chunks.append(json.loads(payload))
     return chunks, done
+
+
+def _assert_skill_lifecycle(chunks: list[dict[str, Any]], *, skill_id: UUID, version: str) -> None:
+    events = [
+        chunk["data"]
+        for chunk in chunks
+        if chunk.get("type") == "data-skill"
+        and isinstance(chunk.get("data"), dict)
+        and chunk["data"].get("skill_id") == str(skill_id)
+    ]
+    assert len(events) == 2
+    assert events[0]["version"] == version
+    assert events[0]["trust"] == "system"
+    assert events[1] == {
+        "skill_id": str(skill_id),
+        "name": "live-daytona-mvp-proof",
+        "version": version,
+    }
 
 
 def _call_shapes(chunks: list[dict[str, Any]], call_name: str) -> list[dict[str, object]]:
@@ -478,7 +494,6 @@ async def _replace_binding(resources: Any, binding: SandboxBinding) -> SandboxBi
 
 def test_complete_daytona_mvp_through_fastapi(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     settings = _live_settings(tmp_path)
@@ -593,11 +608,6 @@ def test_complete_daytona_mvp_through_fastapi(
         task_contract_ref=_CAPABILITY_ID,
     )
 
-    async def select_live_skill(self: DSPySkillSelector, **kwargs: Any) -> SkillSelection:
-        del self, kwargs
-        return SkillSelection(selected_skill_ids=(skill.id,), primary_skill_id=skill.id)
-
-    monkeypatch.setattr(DSPySkillSelector, "select", select_live_skill)
     secret_values = tuple(
         value
         for secret in (settings.daytona_api_key, settings.llm_api_key)
@@ -619,12 +629,16 @@ def test_complete_daytona_mvp_through_fastapi(
 
                 first = client.post(
                     f"/api/sessions/{session_id}/turns",
-                    json={"text": "FIRST: execute the complete recursive Daytona MVP proof."},
+                    json={
+                        "text": "FIRST: execute the complete recursive Daytona MVP proof.",
+                        "skill_selections": [{"id": str(skill.id), "expected_version": skill.version}],
+                    },
                     headers={"Idempotency-Key": f"live-mvp-first-{uuid4()}"},
                 )
                 assert first.status_code == 200
                 first_run_id = UUID(first.headers["x-fleet-run-id"])
                 first_chunks, first_done = _sse_chunks(first)
+                _assert_skill_lifecycle(first_chunks, skill_id=skill.id, version=skill.version)
                 assert first_done == 1
                 assert sum(chunk["type"] == "start" for chunk in first_chunks) == 1
                 assert sum(chunk["type"] == "finish" for chunk in first_chunks) == 1
@@ -724,12 +738,16 @@ def test_complete_daytona_mvp_through_fastapi(
                 phase = "second_turn"
                 second = client.post(
                     f"/api/sessions/{session_id}/turns",
-                    json={"text": "SECOND: verify fresh interpreter state and durable workspace reload."},
+                    json={
+                        "text": "SECOND: verify fresh interpreter state and durable workspace reload.",
+                        "skill_selections": [{"id": str(skill.id), "expected_version": skill.version}],
+                    },
                     headers={"Idempotency-Key": f"live-mvp-second-{uuid4()}"},
                 )
                 assert second.status_code == 200
                 second_run_id = UUID(second.headers["x-fleet-run-id"])
                 second_chunks, second_done = _sse_chunks(second)
+                _assert_skill_lifecycle(second_chunks, skill_id=skill.id, version=skill.version)
                 assert second_done == 1
                 assert sum(chunk["type"] == "start" for chunk in second_chunks) == 1
                 assert sum(chunk["type"] == "finish" for chunk in second_chunks) == 1

@@ -1,4 +1,8 @@
-import { FleetApiError, type FleetApiClient } from "../fleet-api-client.js";
+import {
+  FleetApiError,
+  type FleetApiClient,
+  type FleetSkillSelection,
+} from "../fleet-api-client.js";
 import { streamFleetTurn } from "../fleet-turn-stream.js";
 import { LiveTurnProjector } from "./projection.js";
 import { newMessageId, type ConversationStore } from "./store.js";
@@ -11,14 +15,14 @@ export class RunController {
     private readonly client: FleetApiClient,
   ) {}
 
-  start(text: string): AbortController {
-    this.cancel();
+  start(text: string, options: RunStartOptions = {}): AbortController {
+    if (this.active) return this.active.controller;
     const controller = new AbortController();
     const execution: RunExecution = { controller, runId: null, cancellationRequested: false };
     this.active = execution;
     this.store.setCancelToken(controller);
     this.store.dispatch({ type: "user/submit", text });
-    void this.execute(text, execution);
+    void this.execute(text, execution, options);
     return controller;
   }
 
@@ -34,15 +38,30 @@ export class RunController {
     }
     this.store.dispatch({ type: "run/cancelling" });
     controller.abort();
-    void this.requestRunCancellation(execution);
+    void this.ensureCancellation(execution);
+  }
+
+  async cancelAndWait(timeoutMs: number): Promise<void> {
+    const execution = this.active;
+    if (!execution) return;
+    this.cancel();
+    await Promise.race([
+      this.ensureCancellation(execution),
+      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
   }
 
   isRunning(): boolean {
     return this.active !== null && !this.active.controller.signal.aborted;
   }
 
-  private async execute(text: string, execution: RunExecution): Promise<void> {
+  private async execute(
+    text: string,
+    execution: RunExecution,
+    options: RunStartOptions,
+  ): Promise<void> {
     const { controller } = execution;
+    let streamOpened = false;
     try {
       const session = this.store.getState().session;
       if (!session) throw new Error("no active session");
@@ -53,12 +72,17 @@ export class RunController {
         client: this.client,
         sessionId: session.id,
         message: text,
+        skillSelections: options.skillSelections,
+        onStreamOpen: () => {
+          streamOpened = true;
+          options.onStreamOpen?.();
+        },
         signal: controller.signal,
       })) {
         if (chunk.type === "start") {
           execution.runId = chunk.messageId;
           if (controller.signal.aborted) {
-            await this.requestRunCancellation(execution);
+            await this.ensureCancellation(execution);
           }
         }
         if (this.active !== execution) {
@@ -81,10 +105,11 @@ export class RunController {
       }
     } catch (error) {
       if (controller.signal.aborted) {
-        await this.requestRunCancellation(execution);
+        await this.ensureCancellation(execution);
         if (this.active === execution) this.store.dispatch({ type: "run/cancelled" });
       } else if (this.active === execution) {
         const message = errorMessage(error);
+        if (!streamOpened) options.onPreStreamFailure?.(text);
         this.store.dispatch({ type: "run/finish", finishReason: "error", error: message });
         this.appendError(message);
       }
@@ -102,6 +127,12 @@ export class RunController {
     await this.client.requestCancellation(execution.runId).catch(() => undefined);
   }
 
+  private ensureCancellation(execution: RunExecution): Promise<void> {
+    if (!execution.runId) return Promise.resolve();
+    execution.cancellationPromise ??= this.requestRunCancellation(execution);
+    return execution.cancellationPromise;
+  }
+
   private appendError(text: string): void {
     this.store.dispatch({
       type: "message/upsert",
@@ -114,6 +145,13 @@ type RunExecution = {
   controller: AbortController;
   runId: string | null;
   cancellationRequested: boolean;
+  cancellationPromise?: Promise<void>;
+};
+
+export type RunStartOptions = {
+  skillSelections?: readonly FleetSkillSelection[];
+  onStreamOpen?: () => void;
+  onPreStreamFailure?: (draft: string) => void;
 };
 
 function errorMessage(error: unknown): string {

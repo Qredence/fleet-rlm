@@ -164,12 +164,15 @@ globals or an Interpreter Lease.
 _Avoid_: Sandbox Workspace, Artifact, Attachment, durable REPL variables
 
 **Skill Card**:
-Public discovery metadata for a Skill (name, description, trust, affordances)
-without the instruction body.
+Bounded discovery metadata for an authorized visible Skill. Every Card's name
+and description is available to the primary RLM at Turn startup; instructions
+and resource bodies are excluded.
 _Avoid_: full Skill, prompt dump
 
 **Skill**:
-Host-held instruction and optional resources, loadable only after authorization.
+Agent Skills-compatible directory containing `SKILL.md` plus optional bounded
+`scripts/`, `references/`, and `assets/`. The instruction body loads only when
+invoked; each supporting resource loads only after a subsequent explicit read.
 _Avoid_: Skill Card, Memory
 
 **Capability Package**:
@@ -179,10 +182,12 @@ minimum RLM Options. Skill content cannot define executable host capabilities.
 _Avoid_: arbitrary Skill code, plugin import, prompt body
 
 **Turn Capability Blueprint**:
-Immutable, host-validated composition for one Turn after optional Sub Model
-selection of zero to four authorized Skills. It fixes the fresh RLM Signature,
-tools, knowledge, adapters, validators, and primary task contract.
-_Avoid_: mutable global tool registry, client-selected execution mode
+Immutable, host-validated composition for one Turn. Exact client selections may
+preload up to four pinned Skills and their separately registered host
+capabilities before execution. Without selections, visible Cards remain
+available for progressive model invocation but do not activate host
+capabilities. The Sub Model does not gate discovery.
+_Avoid_: mutable global tool registry, Markdown-defined host capability
 
 **Task Contract**:
 Host-registered typed DSPy Signature plus input mapper, structured-result
@@ -202,8 +207,9 @@ effects are enforced on the host, not as unconstrained Sandbox-local code alone.
 _Avoid_: free Sandbox helper, public HTTP route as the product concept
 
 **Progressive Load**:
-Fetching a Skill body or resource on demand during a Run via a Host-Mediated
-Tool after re-authorization and host policy.
+Fetching a Skill body on demand, then fetching individual declared resources
+only as needed, via Host-Mediated Tools that re-authorize every call. An exact
+explicit selection performs the body-load step during bounded preparation.
 _Avoid_: always-in-prompt skills
 
 **Attachment**:

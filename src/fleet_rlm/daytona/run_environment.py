@@ -16,6 +16,7 @@ from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
 from fleet_rlm.chat.turn_preparation import (
     PreparedTurn,
     RunEnvironment,
+    TurnPreparationCancelled,
     TurnPreparationModule,
     TurnPreparationTimeout,
     TurnPreparationUnavailable,
@@ -40,11 +41,13 @@ from fleet_rlm.persistence.database import (
     create_session_factory,
     create_tables,
 )
+from fleet_rlm.rlm.context import PreparationNotice
 from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.events import AttachmentRead, SkillLoaded
+from fleet_rlm.rlm.events import AttachmentRead, SkillActivated, SkillLoaded
 from fleet_rlm.rlm.lm_factory import build_model_bundle
 from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
 from fleet_rlm.skills.capabilities import (
+    CapabilityRegistry,
     CapabilityResolutionContext,
     CapabilityResolver,
     TurnCapabilityBlueprint,
@@ -76,13 +79,21 @@ def _consume_task_result(task: asyncio.Task[Any]) -> None:
 class LivePreparedCapabilities:
     """Run-bound Skill/Attachment tools and their typed public ledgers."""
 
-    def __init__(self, blueprint: TurnCapabilityBlueprint, *, files: Any, skills: Any) -> None:
+    def __init__(
+        self,
+        blueprint: TurnCapabilityBlueprint,
+        *,
+        files: Any,
+        skills: Any,
+        preparation_notices: tuple[PreparationNotice, ...] = (),
+    ) -> None:
         self.blueprint = blueprint
         self._files = files
         self._skills = skills
+        self.preparation_notices = preparation_notices
 
-    def drain_public_details(self) -> tuple[AttachmentRead | SkillLoaded, ...]:
-        values: list[AttachmentRead | SkillLoaded] = []
+    def drain_public_details(self) -> tuple[AttachmentRead | SkillActivated | SkillLoaded, ...]:
+        values: list[AttachmentRead | SkillActivated | SkillLoaded] = []
         for item in self._files.drain_public_events():
             values.append(
                 AttachmentRead(
@@ -92,7 +103,7 @@ class LivePreparedCapabilities:
                 )
             )
         for item in self._skills.drain_public_events():
-            values.append(SkillLoaded(str(item["skill_id"]), str(item["name"]), str(item["version"])))
+            values.append(_skill_event(item))
         return tuple(values)
 
     def drain_artifact_candidates(self):
@@ -105,6 +116,18 @@ class LivePreparedCapabilities:
 class _EmptySkillHost:
     def drain_public_events(self) -> list[dict[str, Any]]:
         return []
+
+
+def _skill_event(item: dict[str, Any]) -> SkillActivated | SkillLoaded:
+    if item.get("kind") == "skill.activated":
+        return SkillActivated(
+            str(item["skill_id"]),
+            str(item["name"]),
+            str(item["version"]),
+            str(item["trust"]),
+            tuple(str(value) for value in item.get("affordances", ())),
+        )
+    return SkillLoaded(str(item["skill_id"]), str(item["name"]), str(item["version"]))
 
 
 class _DaytonaRunSink:
@@ -256,6 +279,8 @@ class _LiveCapabilityPreparer:
         turn: ExecuteTurn,
         environment: RunEnvironment,
         attachments: PreparedAttachments,
+        *,
+        deadline: float,
     ) -> LivePreparedCapabilities:
         from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
         from fleet_rlm.files.tools import FileToolHost
@@ -296,6 +321,10 @@ class _LiveCapabilityPreparer:
             **history_host.event_views(),
         }
         if self.resources.skill_registry is None:
+            if turn.input.skill_selections:
+                from fleet_rlm.skills.authorize import InvalidSkillSelectionError
+
+                raise InvalidSkillSelectionError()
             return LivePreparedCapabilities(
                 TurnCapabilityBlueprint(
                     tools=(*file_tools, *workspace_tools, *history_tools),
@@ -306,10 +335,46 @@ class _LiveCapabilityPreparer:
                 skills=_EmptySkillHost(),
             )
         authorizer = SkillAuthorizer(self.resources.skill_registry)
+        selections = tuple(turn.input.skill_selections)
+        try:
+            if getattr(self.resources.skill_registry, "unavailable", False):
+                raise RuntimeError("skills unavailable")
+            cards = authorizer.list_cards(user_id=turn.access.user_id, workspace_id=turn.access.workspace_id)
+            selected_records = (
+                authorizer.authorize_explicit_many(
+                    selections,
+                    user_id=turn.access.user_id,
+                    workspace_id=turn.access.workspace_id,
+                )
+                if selections
+                else ()
+            )
+        except Exception as exc:
+            from fleet_rlm.skills.authorize import InvalidSkillSelectionError
+
+            if selections:
+                if isinstance(exc, InvalidSkillSelectionError):
+                    raise
+                raise InvalidSkillSelectionError() from None
+            return LivePreparedCapabilities(
+                TurnCapabilityBlueprint(
+                    tools=(*file_tools, *workspace_tools, *history_tools),
+                    tool_event_views=base_views,
+                    workspace=DAYTONA_WORKSPACE_CAPABILITY,
+                ),
+                files=file_host,
+                skills=_EmptySkillHost(),
+                preparation_notices=(PreparationNotice("skills_unavailable", "Skills are unavailable"),),
+            )
+        if await turn.cancellation_requested():
+            raise TurnPreparationCancelled("Turn cancelled")
+        if asyncio.get_running_loop().time() >= deadline:
+            raise TurnPreparationTimeout("Turn preparation timed out")
         skill_host = SkillToolHost(
             authorizer,
             user_id=turn.access.user_id,
             workspace_id=turn.access.workspace_id,
+            allowed_skill_ids=(frozenset(record.id for record in selected_records) if selections else None),
         )
         tools = (
             *file_tools,
@@ -318,15 +383,8 @@ class _LiveCapabilityPreparer:
             *skill_host.as_tools(),
         )
         tool_event_views = {**base_views, **skill_host.event_views()}
-        cards = authorizer.list_cards(user_id=turn.access.user_id, workspace_id=turn.access.workspace_id)
-        if self.resources.capability_registry is None:
-            blueprint = TurnCapabilityBlueprint(
-                tools=tools,
-                tool_event_views=tool_event_views,
-                workspace=DAYTONA_WORKSPACE_CAPABILITY,
-            )
-        else:
-            blueprint = await CapabilityResolver(self.resources.capability_registry).resolve(
+        try:
+            blueprint = await CapabilityResolver(self.resources.capability_registry or CapabilityRegistry()).resolve(
                 CapabilityResolutionContext(
                     request=turn.input.text,
                     history=[{"role": item.role, "content": item.content} for item in turn.history.messages],
@@ -337,12 +395,24 @@ class _LiveCapabilityPreparer:
                         max_output_chars=self.resources.settings.rlm_max_output_chars,
                     ),
                     skill_cards=cards,
+                    selected_skills=selected_records,
                     attachments=attachments.refs,
                     tools=tools,
                     tool_event_views=tool_event_views,
                     workspace=DAYTONA_WORKSPACE_CAPABILITY,
+                    deadline=deadline,
                 )
             )
+        except TimeoutError as exc:
+            raise TurnPreparationTimeout("Turn preparation timed out") from exc
+        except Exception:
+            from fleet_rlm.skills.authorize import InvalidSkillSelectionError
+
+            if selections:
+                raise InvalidSkillSelectionError() from None
+            raise
+        for record in selected_records:
+            skill_host.mark_preloaded(record)
         return LivePreparedCapabilities(blueprint, files=file_host, skills=skill_host)
 
 

@@ -135,6 +135,28 @@ def test_observe_tool_preserves_metadata_and_correlates_explicit_view() -> None:
     assert "private-result" not in str(observed)
 
 
+def test_after_result_hook_runs_between_started_and_completed_without_projecting_body() -> None:
+    def load() -> str:
+        return "private-skill-body"
+
+    observed: list[Any] = []
+    wrapped = observe_tool(
+        dspy.Tool(load),
+        observed.append,
+        ToolEventView.metadata_only(),
+        after_result=lambda result: observed.append(("lifecycle", len(result))),
+    )
+
+    assert wrapped() == "private-skill-body"
+    assert [type(item) if not isinstance(item, tuple) else item[0] for item in observed] == [
+        ToolStarted,
+        "lifecycle",
+        ToolCompleted,
+    ]
+    assert observed[1] == ("lifecycle", len("private-skill-body"))
+    assert "private-skill-body" not in str((observed[0], observed[2]))
+
+
 def test_metadata_only_fallback_never_exposes_arguments_results_or_failures() -> None:
     observed: list[Any] = []
 

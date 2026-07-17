@@ -43,6 +43,8 @@ pnpm --dir tools/fleet-tui run typecheck
 pnpm --dir tools/fleet-tui run test
 ```
 
+The TUI suite observes `FleetTuiApplication` through an injected deterministic terminal. It proves complete static rendering, live/durable ordering, native-scrollback output without mouse-mode sequences, 10,000-row rendering, command behavior, cancellation, and terminal cleanup.
+
 ## Deno Gate
 
 Deno-runtime contracts use the `deno` pytest marker and run only in the
@@ -52,6 +54,13 @@ dedicated lane:
 # from repo root; requires Deno on PATH
 make test-deno
 ```
+
+Progressive Skill changes should first run the focused loader, authorization,
+Turn-input, runtime, SSE, and terminal command/client slices. The required
+regression flow is discovery metadata, `load_skill`, one resource read,
+interpreter execution, `SUBMIT`, and terminal SSE projection. Tests must also
+cover chronological Skill events on later failure, cancellation, and timeout,
+plus declared-output acceptance and rejection without rewriting accepted text.
 
 CircleCI installs exactly Deno 2.9.2 under `$HOME/.deno`, exports
 `$HOME/.deno/bin` on `PATH`, records `deno --version`, and runs

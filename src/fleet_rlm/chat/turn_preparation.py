@@ -116,6 +116,8 @@ class CapabilityPreparer(Protocol):
         turn: ExecuteTurn,
         environment: RunEnvironment,
         attachments: PreparedAttachments,
+        *,
+        deadline: float,
     ) -> PreparedCapabilities: ...
 
 
@@ -127,14 +129,14 @@ class TurnPreparationModule:
         *,
         models: RLMModelBundle,
         options: RLMOptions,
-        turn_timeout_seconds: int,
+        turn_timeout_seconds: int | float,
         attachments: RunAttachmentPreparer,
         environments: RunEnvironmentProvider,
         capabilities: CapabilityPreparer,
     ) -> None:
         self._models = models
         self._options = options
-        self._turn_timeout_seconds = turn_timeout_seconds
+        self._turn_timeout_seconds = float(turn_timeout_seconds)
         self._attachments = attachments
         self._environments = environments
         self._capabilities = capabilities
@@ -162,7 +164,11 @@ class TurnPreparationModule:
                 AttachmentRun(turn.session_id, turn.run_id),
                 environment.attachment_sink,
             )
-            capabilities = await self._capabilities.prepare(turn, environment, staged)
+            try:
+                async with asyncio.timeout_at(deadline):
+                    capabilities = await self._prepare_capabilities(turn, environment, staged, deadline)
+            except TimeoutError:
+                raise TurnPreparationTimeout("Turn preparation timed out") from None
             if await turn.cancellation_requested():
                 raise TurnPreparationCancelled("Turn cancelled")
             self._check_deadline(deadline)
@@ -182,6 +188,7 @@ class TurnPreparationModule:
             await self._remove_staged(environment.attachment_sink, staged)
 
         assert capabilities is not None
+
         resources = _PreparedTurnResources((environment.release, capabilities.aclose, remove_staged))
         execution = RLMExecutionContext(
             run_id=turn.run_id,
@@ -209,7 +216,7 @@ class TurnPreparationModule:
             ),
             capabilities=capabilities,
             cancellation_requested=turn.cancellation_requested,
-            preparation_notices=(),
+            preparation_notices=tuple(getattr(capabilities, "preparation_notices", ())),
         )
         return PreparedTurn(
             execution,
@@ -217,6 +224,30 @@ class TurnPreparationModule:
             resources,
             environment.result_snapshot_sink,
         )
+
+    async def _prepare_capabilities(
+        self,
+        turn: ExecuteTurn,
+        environment: RunEnvironment,
+        staged: PreparedAttachments,
+        deadline: float,
+    ) -> PreparedCapabilities:
+        task = asyncio.create_task(self._capabilities.prepare(turn, environment, staged, deadline=deadline))
+        try:
+            while not task.done():
+                if await turn.cancellation_requested():
+                    task.cancel()
+                    raise TurnPreparationCancelled("Turn cancelled")
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    task.cancel()
+                    raise TurnPreparationTimeout("Turn preparation timed out")
+                await asyncio.wait((task,), timeout=min(0.05, remaining))
+            return await task
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     @staticmethod
     def _check_deadline(deadline: float) -> None:

@@ -15,6 +15,7 @@ from fleet_rlm.rlm.events import JsonValue, ObservationObserver, ToolCompleted, 
 
 ToolInputProjection = Callable[[Mapping[str, Any]], JsonValue]
 ToolOutputProjection = Callable[[Any], JsonValue]
+ToolAfterResult = Callable[[Any], None]
 
 
 def _empty_input(_arguments: Mapping[str, Any]) -> JsonValue:
@@ -77,6 +78,8 @@ def observe_tool(
     tool: dspy.Tool,
     observer: ObservationObserver,
     event_view: ToolEventView,
+    *,
+    after_result: ToolAfterResult | None = None,
 ) -> dspy.Tool:
     """Return a fresh Tool whose extracted ``func`` preserves DSPy validation."""
     if not isinstance(tool, dspy.Tool):
@@ -110,6 +113,8 @@ def observe_tool(
                 if inspect.iscoroutine(result):
                     result.close()
                 raise TypeError("async host tools are not supported inside the synchronous interpreter bridge")
+            if after_result is not None:
+                after_result(result)
         except Exception:
             observer(ToolFailed(call_id, str(source.name), event_view.error(validation=False)))
             raise
