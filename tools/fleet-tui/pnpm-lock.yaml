@@ -11,6 +11,9 @@ importers:
       ai:
         specifier: 7.0.22
         version: 7.0.22(zod@4.4.3)
+      cli-spinners:
+        specifier: 3.4.0
+        version: 3.4.0
       ink:
         specifier: 7.1.0
         version: 7.1.0(@types/react@19.2.2)(react@19.2.0)
@@ -552,6 +555,10 @@ packages:
   cli-cursor@4.0.0:
     resolution: {integrity: sha512-VGtlMu3x/4DOtIUwEkRezxUZ2lBacNJCHash0N0WeZDBS+7Ux1dm3XWAgWYxLJFMMdOeXMHXorshEFhbMSGelg==}
     engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
+
+  cli-spinners@3.4.0:
+    resolution: {integrity: sha512-bXfOC4QcT1tKXGorxL3wbJm6XJPDqEnij2gQ2m7ESQuE+/z9YFIWnl/5RpTiKWbMq3EVKR4fRLJGn6DVfu0mpw==}
+    engines: {node: '>=18.20'}
 
   cli-truncate@6.1.1:
     resolution: {integrity: sha512-06p9vyLahLa4zkGcgsGxU6iEkSOiuI4fhCH6Emhe2lPAcoUv73n72DnODsnHA+5wwXGnV0n9M9/qOQJSjYhFhw==}
@@ -1318,6 +1325,8 @@ snapshots:
   cli-cursor@4.0.0:
     dependencies:
       restore-cursor: 4.0.0
+
+  cli-spinners@3.4.0: {}
 
   cli-truncate@6.1.1:
     dependencies:

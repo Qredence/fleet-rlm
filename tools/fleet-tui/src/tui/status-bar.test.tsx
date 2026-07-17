@@ -5,7 +5,7 @@ import { StatusBar } from "./status-bar.js";
 import type { Run } from "./store.js";
 
 describe("StatusBar", () => {
-  it("shows transient execution activity while the Run is active", () => {
+  it("shows quiet run metadata without identifiers or transient activity", () => {
     const run: Run = {
       id: "run-12345678",
       phase: "running",
@@ -22,15 +22,23 @@ describe("StatusBar", () => {
 
     const output = renderToString(
       <StatusBar
-        session={null}
         run={run}
-        promptTokens={0}
-        completionTokens={0}
+        promptTokens={1200}
+        completionTokens={300}
         width={120}
       />,
       { columns: 120 },
     );
 
-    expect(output).toContain("execution · running");
+    const text = output.replaceAll(/\u001b\[[0-9;]*m/g, "");
+    expect(text).toContain("model —");
+    expect(text).toContain("tokens 1.5k");
+    expect(text).toContain("steps 0");
+    expect(text).toContain("tools 0");
+    expect(text).not.toContain("session");
+    expect(text).not.toContain("run-12345678");
+    expect(text).not.toContain("run ");
+    expect(text).not.toContain("execution");
+    expect(text).not.toContain("elapsed");
   });
 });

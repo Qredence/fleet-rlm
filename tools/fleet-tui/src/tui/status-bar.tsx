@@ -1,50 +1,28 @@
-/** Bottom status line: session, run, model, tokens, phase, elapsed. */
+/** Quiet bottom metadata line. Transient Run activity lives above the prompt. */
 
 import { Box, Text } from "ink";
 import type { FC } from "react";
 
-import { formatDuration, formatTokens, shortId } from "./format.js";
-import type { Run, Session, Phase } from "./store.js";
-import { ansi, statusGlyph, theme } from "./theme.js";
+import { formatTokens } from "./format.js";
+import type { Run } from "./store.js";
+import { ansi } from "./theme.js";
 
-const PHASE_COLORS: Record<Phase, string> = {
-  idle: ansi.dim,
-  submitting: ansi.white,
-  running: ansi.white,
-  cancelling: ansi.white,
-  completed: ansi.white,
-  error: ansi.white,
-};
-
-export const StatusBar: FC<{ session: Session | null; run: Run; promptTokens: number; completionTokens: number; width: number }> = ({
-  session,
+export const StatusBar: FC<{ run: Run; promptTokens: number; completionTokens: number; width: number }> = ({
   run,
   promptTokens,
   completionTokens,
   width,
 }) => {
-  const phaseColor = PHASE_COLORS[run.phase];
-  const elapsed = run.startedAt ? formatDuration((run.endedAt ?? Date.now()) - run.startedAt) : "—";
-  const sessionLabel = session ? shortId(session.id) : "no-session";
-  const runLabel = run.id ? shortId(run.id) : "—";
   const totalTokens = promptTokens + completionTokens;
   const line =
-    `${ansi.dim}session ${ansi.reset}${sessionLabel}` +
-    `  ${ansi.dim}run ${ansi.reset}${runLabel}` +
-    `  ${ansi.dim}model ${ansi.reset}${run.model ?? "—"}` +
+    `${ansi.dim}model ${ansi.reset}${run.model ?? "—"}` +
     `  ${ansi.dim}tokens ${ansi.reset}${formatTokens(totalTokens)}` +
     `  ${ansi.dim}steps ${ansi.reset}${run.completedSteps}` +
-    `  ${ansi.dim}tools ${ansi.reset}${run.toolCount}` +
-    `  ${phaseColor}${run.phase === "completed" ? statusGlyph.success : run.phase === "error" ? statusGlyph.error : run.phase === "running" ? statusGlyph.running : statusGlyph.idle} ${run.phase}${ansi.reset}` +
-    `  ${ansi.dim}elapsed ${ansi.reset}${elapsed}`;
+    `  ${ansi.dim}tools ${ansi.reset}${run.toolCount}`;
 
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text wrap="truncate">{line}</Text>
-      {run.statusPhase ? (
-        <Text dimColor>{`${run.statusPhase}${run.statusDetail ? ` · ${run.statusDetail}` : ""}`}</Text>
-      ) : null}
-      {run.error ? <Text color={theme.paper}>{`${statusGlyph.error} ${run.error}`}</Text> : null}
       {width < 80 ? null : <Text dimColor>{"─".repeat(Math.min(width, 120))}</Text>}
     </Box>
   );

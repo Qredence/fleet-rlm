@@ -78,6 +78,13 @@ and resume live-follow. Keyboard help sits below the input border. HTML
 character references are decoded for readability while HTML tags remain inert
 text.
 
+While a Turn is submitting, running, or cancelling, one restrained monochrome
+activity rail above the prompt shows the current phase, backend detail, elapsed
+time, step/tool counts, and cancellation shortcut. Only this rail animates, and
+it uses a stable glyph when terminal animation is unavailable. The quiet status
+line below the prompt shows only model and usage metadata; session and Run IDs
+remain out of the input area.
+
 ## Validate
 
 ```bash

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FC } from "reac
 import type { FleetApiClient, FleetSession } from "../fleet-api-client.js";
 import { parseInput, type CommandContext } from "./commands.js";
 import { Prompt, PromptHelp } from "./prompt.js";
+import { RunActivity } from "./run-activity.js";
 import { StatusBar } from "./status-bar.js";
 import { ConversationStore, useConversationStore, listToggleableMessageIds, type Message, type StoreEvent } from "./store.js";
 import { RunController } from "./runner.js";
@@ -53,8 +54,10 @@ export const App: FC<AppProps> = ({ client, session, resumed, initialEvents }) =
   const state = useConversationStore(store);
   const [timelineScroll, setTimelineScroll] = useState(initialTimelineScroll);
   const [inputFocus, setInputFocus] = useState<"prompt" | "thread">("prompt");
+  const busy = state.run.phase === "submitting" || state.run.phase === "running" || state.run.phase === "cancelling";
   const inputHeight = 5;
-  const threadHeight = Math.max(6, height - inputHeight - 4);
+  const activityHeight = busy ? 3 : 0;
+  const threadHeight = Math.max(6, height - inputHeight - 4 - activityHeight);
 
   useEffect(() => {
     setTimelineScroll((scroll) => reduceTimelineScroll(scroll, { type: "reset" }));
@@ -144,7 +147,6 @@ export const App: FC<AppProps> = ({ client, session, resumed, initialEvents }) =
     { isActive: inputFocus === "thread" },
   );
 
-  const busy = state.run.phase === "submitting" || state.run.phase === "running" || state.run.phase === "cancelling";
   const onTimelineMetrics = useCallback(
     (contentHeight: number, viewportHeight: number) =>
       setTimelineScroll((scroll) =>
@@ -208,6 +210,7 @@ export const App: FC<AppProps> = ({ client, session, resumed, initialEvents }) =
         ))}
         {state.messages.length === 0 ? <Text dimColor>{"(empty conversation — type a prompt or /help)"}</Text> : null}
       </TimelineViewport>
+      <RunActivity run={state.run} />
       <Box borderStyle="single" borderColor={inputFocus === "prompt" ? theme.paper : theme.rule} paddingX={1} marginTop={1}>
         <Prompt busy={busy} active={inputFocus === "prompt"} onSubmit={onSubmit} onCancel={onCancel} />
       </Box>
@@ -215,7 +218,6 @@ export const App: FC<AppProps> = ({ client, session, resumed, initialEvents }) =
         <PromptHelp busy={busy} active={inputFocus === "prompt"} />
       </Box>
       <StatusBar
-        session={state.session}
         run={state.run}
         promptTokens={promptTokens}
         completionTokens={completionTokens}
