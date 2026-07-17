@@ -41,6 +41,9 @@ export const StatusBar: FC<{ session: Session | null; run: Run; promptTokens: nu
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text wrap="truncate">{line}</Text>
+      {run.statusPhase ? (
+        <Text dimColor>{`${run.statusPhase}${run.statusDetail ? ` · ${run.statusDetail}` : ""}`}</Text>
+      ) : null}
       {run.error ? <Text color={theme.paper}>{`${statusGlyph.error} ${run.error}`}</Text> : null}
       {width < 80 ? null : <Text dimColor>{"─".repeat(Math.min(width, 120))}</Text>}
     </Box>

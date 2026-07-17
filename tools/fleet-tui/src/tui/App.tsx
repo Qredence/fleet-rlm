@@ -1,7 +1,7 @@
 /** Root Ink app: chat thread + prompt + status bar. */
 
 import { Box, Text, useApp, useInput, useWindowSize } from "ink";
-import { useEffect, useMemo, useRef, useState, type FC } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FC } from "react";
 
 import type { FleetApiClient, FleetSession } from "../fleet-api-client.js";
 import { parseInput, type CommandContext } from "./commands.js";
@@ -18,13 +18,16 @@ import {
   Reasoning,
   Result,
   Skill,
-  Status,
   ToolCall,
   Usage,
   Warning,
 } from "./views/index.js";
 import { theme } from "./theme.js";
-import { TimelineViewport } from "./timeline.js";
+import {
+  initialTimelineScroll,
+  reduceTimelineScroll,
+  TimelineViewport,
+} from "./timeline.js";
 
 export type AppProps = {
   apiUrl: string;
@@ -48,10 +51,13 @@ export const App: FC<AppProps> = ({ client, session, resumed, initialEvents }) =
   const store = storeRef.current;
   const controller = controllerRef.current;
   const state = useConversationStore(store);
-  const [scrollOffset, setScrollOffset] = useState(0);
+  const [timelineScroll, setTimelineScroll] = useState(initialTimelineScroll);
   const [inputFocus, setInputFocus] = useState<"prompt" | "thread">("prompt");
+  const inputHeight = 5;
+  const threadHeight = Math.max(6, height - inputHeight - 4);
 
   useEffect(() => {
+    setTimelineScroll((scroll) => reduceTimelineScroll(scroll, { type: "reset" }));
     store.dispatch({
       type: "session/hydrate",
       session: {
@@ -80,23 +86,19 @@ export const App: FC<AppProps> = ({ client, session, resumed, initialEvents }) =
       return;
     }
     if (key.pageUp) {
-      setScrollOffset((offset) =>
-        Math.max(
-          0,
-          Math.min(
-            Math.max(0, state.messages.length - 1),
-            offset + Math.max(1, Math.floor(height * 0.6)),
-          ),
-        ),
+      setTimelineScroll((scroll) =>
+        reduceTimelineScroll(scroll, { type: "page-up", viewportHeight: threadHeight }),
       );
       return;
     }
     if (key.pageDown) {
-      setScrollOffset((offset) => Math.max(0, offset - Math.max(1, Math.floor(height * 0.6))));
+      setTimelineScroll((scroll) =>
+        reduceTimelineScroll(scroll, { type: "page-down", viewportHeight: threadHeight }),
+      );
       return;
     }
     if (key.end) {
-      setScrollOffset(0);
+      setTimelineScroll((scroll) => reduceTimelineScroll(scroll, { type: "end" }));
       return;
     }
     if (key.tab) {
@@ -143,11 +145,12 @@ export const App: FC<AppProps> = ({ client, session, resumed, initialEvents }) =
   );
 
   const busy = state.run.phase === "submitting" || state.run.phase === "running" || state.run.phase === "cancelling";
-  const visibleMessageLimit = Math.max(4, threadHeightEstimate(height));
-  const visibleEnd = Math.max(0, state.messages.length - scrollOffset);
-  const visibleMessages = useMemo(
-    () => state.messages.slice(Math.max(0, visibleEnd - visibleMessageLimit), visibleEnd),
-    [state.messages, visibleEnd, visibleMessageLimit],
+  const onTimelineMetrics = useCallback(
+    (contentHeight: number, viewportHeight: number) =>
+      setTimelineScroll((scroll) =>
+        reduceTimelineScroll(scroll, { type: "metrics", contentHeight, viewportHeight }),
+      ),
+    [],
   );
 
   const promptTokens = state.messages
@@ -175,9 +178,7 @@ export const App: FC<AppProps> = ({ client, session, resumed, initialEvents }) =
     }
   };
 
-  const inputHeight = 5;
-  const threadHeight = Math.max(6, height - inputHeight - 4);
-  const renderedHeight = visibleMessages.length;
+  const rowsBehind = timelineScroll.maxScroll - timelineScroll.scrollTop;
   const activeSession = state.session ?? {
     id: session.id,
     title: session.title,
@@ -189,10 +190,14 @@ export const App: FC<AppProps> = ({ client, session, resumed, initialEvents }) =
     <Box flexDirection="column" height={height}>
       <Box flexDirection="column" marginBottom={1}>
         <Text color={theme.paper} bold>FLEET</Text>
-        <Text color={theme.muted}>{`session ${activeSession.id.slice(0, 8)}… · ${activeSession.resumed ? "resumed" : "new"}${scrollOffset ? ` · ${scrollOffset} messages behind` : " · live"}`}</Text>
+        <Text color={theme.muted}>{`session ${activeSession.id.slice(0, 8)}… · ${activeSession.resumed ? "resumed" : "new"}${rowsBehind ? ` · ${rowsBehind} rows behind` : " · live"}`}</Text>
       </Box>
-      <TimelineViewport height={threadHeight}>
-        {visibleMessages.map((message) => (
+      <TimelineViewport
+        height={threadHeight}
+        scroll={timelineScroll}
+        onMetrics={onTimelineMetrics}
+      >
+        {state.messages.map((message) => (
           <MessageView
             key={message.id}
             message={message}
@@ -201,7 +206,7 @@ export const App: FC<AppProps> = ({ client, session, resumed, initialEvents }) =
             focused={state.selectedId === message.id}
           />
         ))}
-        {renderedHeight === 0 ? <Text dimColor>{"(empty conversation — type a prompt or /help)"}</Text> : null}
+        {state.messages.length === 0 ? <Text dimColor>{"(empty conversation — type a prompt or /help)"}</Text> : null}
       </TimelineViewport>
       <Box borderStyle="single" borderColor={inputFocus === "prompt" ? theme.paper : theme.rule} paddingX={1} marginTop={1}>
         <Prompt busy={busy} active={inputFocus === "prompt"} onSubmit={onSubmit} onCancel={onCancel} />
@@ -266,8 +271,6 @@ const MessageView: FC<{
       return <Usage message={message} />;
     case "warning":
       return <Warning message={message} />;
-    case "status":
-      return <Status message={message} />;
     case "error":
       return <ChatMessage message={{ ...message, kind: "text", role: "system", text: message.text, streaming: false }} width={width} />;
   }
@@ -275,8 +278,4 @@ const MessageView: FC<{
 
 function state_isExpanded(store: ConversationStore, id: string): boolean {
   return store.getState().expandedIds.has(id);
-}
-
-function threadHeightEstimate(height: number): number {
-  return Math.max(4, Math.floor((height - 10) / 2));
 }

@@ -14,10 +14,7 @@ export class LiveTurnProjector {
   private resultId: string | undefined;
   private textId: string | undefined;
 
-  constructor(
-    private readonly clock: Clock = Date.now,
-    private readonly assistantMessageId?: string,
-  ) {}
+  constructor(private readonly clock: Clock = Date.now) {}
 
   push(chunk: FleetUIMessageChunk): StoreEvent[] {
     switch (chunk.type) {
@@ -50,9 +47,8 @@ export class LiveTurnProjector {
       }
       case "text-start": {
         if (this.resultId) return [];
-        const id = this.assistantMessageId ?? chunk.id;
-        this.textId = id;
-        return this.save(text(id, "assistant", "", true, this.clock));
+        this.textId = chunk.id;
+        return [];
       }
       case "text-delta": {
         if (this.resultId) {
@@ -63,7 +59,7 @@ export class LiveTurnProjector {
             narrative: normalizedNarrative(`${prior.narrative ?? ""}${chunk.delta}`, prior.value),
           });
         }
-        const id = this.assistantMessageId ?? chunk.id;
+        const id = chunk.id;
         this.textId = id;
         const prior = this.messages.get(id);
         const value = prior?.kind === "text" ? prior.text + chunk.delta : chunk.delta;
@@ -71,9 +67,9 @@ export class LiveTurnProjector {
       }
       case "text-end": {
         if (this.resultId) return [];
-        const id = this.assistantMessageId ?? chunk.id;
+        const id = chunk.id;
         const prior = this.messages.get(id);
-        if (prior?.kind !== "text") return this.save(text(id, "assistant", "", false, this.clock));
+        if (prior?.kind !== "text") return [];
         return this.save({ ...prior, streaming: false });
       }
       case "tool-input-available": {
@@ -100,10 +96,16 @@ export class LiveTurnProjector {
         return this.projectRlm(chunk, "code");
       case "data-rlm-output":
         return this.projectRlm(chunk, "output");
-      case "data-status":
-        return this.save(
-          status(this.liveId(chunk.type, chunk.id), this.runId, data(chunk.data), this.clock),
-        );
+      case "data-status": {
+        const value = data(chunk.data);
+        return [
+          {
+            type: "run/status",
+            phase: string(value.phase),
+            detail: string(value.message ?? value.status ?? value.detail),
+          },
+        ];
+      }
       case "data-skill":
         return this.save(
           skill(
@@ -172,7 +174,7 @@ export class LiveTurnProjector {
     chunk: Extract<FleetUIMessageChunk, { type: "data-structured-result" }>,
   ): StoreEvent[] {
     const value = data(chunk.data);
-    const id = this.assistantMessageId ?? this.textId ?? chunk.id ?? `result-${this.runId}`;
+    const id = this.textId ?? chunk.id ?? `result-${this.runId}`;
     const prior = this.messages.get(id);
     this.resultId = id;
     return this.save(
@@ -288,7 +290,6 @@ export function projectDurableTurns(turns: FleetTurn[], clock: Clock = Date.now)
           break;
         }
         case "data-status":
-          messages.push(status(id, runId, value, clock));
           break;
         case "data-skill":
           messages.push(skill(id, runId, part.id ?? undefined, value, clock));
@@ -396,17 +397,6 @@ function singleScalar(value: unknown): string | number | boolean | null | undefi
   return candidate === null || ["string", "number", "boolean"].includes(typeof candidate)
     ? (candidate as string | number | boolean | null)
     : undefined;
-}
-
-function status(id: string, runId: string, value: Record<string, unknown>, clock: Clock): Message {
-  return {
-    id,
-    kind: "status",
-    runId,
-    phase: string(value.phase),
-    detail: string(value.detail ?? value.message),
-    ts: clock(),
-  };
 }
 
 function skill(

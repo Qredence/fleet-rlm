@@ -8,6 +8,41 @@ import type { Message, StoreEvent } from "./store.js";
 const clock = () => 100;
 
 describe("terminal projection", () => {
+  it("does not create an empty assistant message before text content arrives", () => {
+    const live = new LiveTurnProjector(clock);
+
+    expect(live.push({ type: "text-start", id: "text-1" })).toEqual([]);
+    expect(live.push({ type: "text-end", id: "text-1" })).toEqual([]);
+  });
+
+  it("projects live status into Run state and omits transient durable status", () => {
+    const live = new LiveTurnProjector(clock);
+
+    expect(
+      live.push({
+        type: "data-status",
+        data: { phase: "execution", status: "running", message: null },
+      }),
+    ).toEqual([{ type: "run/status", phase: "execution", detail: "running" }]);
+    expect(
+      projectDurableTurns(
+        [
+          {
+            id: "run-1",
+            role: "assistant",
+            parts: [
+              {
+                type: "data-status",
+                data: { phase: "execution", status: "running" },
+              },
+            ],
+          },
+        ],
+        clock,
+      ),
+    ).toEqual([]);
+  });
+
   it("renders a default text-only Prediction identically live and after hydration", () => {
     const live = new LiveTurnProjector(clock);
     const liveMessages = finalMessages(
@@ -163,7 +198,6 @@ describe("terminal projection", () => {
       "attachment",
       "artifact",
       "usage",
-      "status",
       "warning",
     ]);
     expect(durableMessages.map((message) => message.kind)).toEqual(
@@ -179,7 +213,6 @@ describe("terminal projection", () => {
       "run-1:8",
       "run-1:9",
       "run-1:10",
-      "run-1:11",
       "run-1:12",
     ]);
     expect(correlations(liveMessages)).toEqual(correlations(durableMessages));
@@ -205,7 +238,6 @@ describe("terminal projection", () => {
       "attachment-part",
       "artifact-part",
       "usage-part",
-      "status-part",
       "warning-part",
     ]);
   });
@@ -429,13 +461,6 @@ function correlations(messages: Message[]): unknown[] {
           completion: message.completion,
           durationMs: message.durationMs,
           observedLmUsage: message.observedLmUsage,
-        };
-      case "status":
-        return {
-          kind: message.kind,
-          runId: message.runId,
-          phase: message.phase,
-          detail: message.detail,
         };
       case "warning":
         return {

@@ -14,20 +14,15 @@ describe("ConversationStore", () => {
     expect(state.messages).toHaveLength(0);
   });
 
-  it("appends a user message and an empty assistant bubble on submit", () => {
+  it("appends only the user message on submit", () => {
     const store = makeStore();
     store.dispatch({ type: "user/submit", text: "hello" });
     const state = store.getState();
-    expect(state.messages).toHaveLength(2);
+    expect(state.messages).toHaveLength(1);
     expect(state.messages[0]?.kind).toBe("text");
     if (state.messages[0]?.kind === "text") {
       expect(state.messages[0].role).toBe("user");
       expect(state.messages[0].text).toBe("hello");
-    }
-    expect(state.messages[1]?.kind).toBe("text");
-    if (state.messages[1]?.kind === "text") {
-      expect(state.messages[1].role).toBe("assistant");
-      expect(state.messages[1].streaming).toBe(true);
     }
   });
 
@@ -39,6 +34,23 @@ describe("ConversationStore", () => {
     expect(state.run.phase).toBe("completed");
     expect(state.run.finishReason).toBe("stop");
     expect(state.run.error).toBeNull();
+  });
+
+  it("keeps transient status in Run state and clears it on terminal", () => {
+    const store = makeStore();
+    store.dispatch({ type: "run/start", runId: "r-1", model: null });
+    store.dispatch({ type: "run/status", phase: "execution", detail: "running" });
+
+    expect(store.getState().run).toMatchObject({
+      statusPhase: "execution",
+      statusDetail: "running",
+    });
+    expect(store.getState().messages).toEqual([]);
+
+    store.dispatch({ type: "run/finish", finishReason: "stop", error: null });
+
+    expect(store.getState().run.statusPhase).toBeNull();
+    expect(store.getState().run.statusDetail).toBeNull();
   });
 
   it("flags run as error when finish carries an error", () => {
@@ -77,6 +89,8 @@ describe("ConversationStore", () => {
       session: { id: "old", title: "Old", status: "active", resumed: false },
     });
     store.dispatch({ type: "user/submit", text: "old message" });
+    store.dispatch({ type: "run/start", runId: "old-run", model: null });
+    store.dispatch({ type: "run/status", phase: "execution", detail: "running" });
     const message = {
       id: "new:0",
       kind: "text",
@@ -95,6 +109,8 @@ describe("ConversationStore", () => {
     expect(store.getState().session?.id).toBe("new");
     expect(store.getState().messages).toEqual([message]);
     expect(store.getState().run.phase).toBe("idle");
+    expect(store.getState().run.statusPhase).toBeNull();
+    expect(store.getState().run.statusDetail).toBeNull();
   });
 
   it("auto-expands toggleable messages and tracks tool metrics", () => {

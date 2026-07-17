@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FleetApiClient, FleetApiError } from "../fleet-api-client.js";
+import type { FleetTurn } from "../fleet-api-client.js";
+import { projectDurableTurns } from "./projection.js";
 import { RunController } from "./runner.js";
-import { ConversationStore } from "./store.js";
+import { ConversationStore, type Message } from "./store.js";
 
 const originalFetch = globalThis.fetch;
 
@@ -14,7 +16,9 @@ function completedResponse(runId: string, text: string): Response {
   return sseResponse(
     [
       `data: {"type":"start","messageId":"${runId}","messageMetadata":{}}\n\n`,
-      `data: {"type":"text-delta","id":"t","delta":"${text}"}\n\n`,
+      `data: {"type":"text-start","id":"text-${runId}"}\n\n`,
+      `data: {"type":"text-delta","id":"text-${runId}","delta":"${text}"}\n\n`,
+      `data: {"type":"text-end","id":"text-${runId}"}\n\n`,
       'data: {"type":"finish","finishReason":"stop"}\n\n',
       "data: [DONE]\n\n",
     ].join(""),
@@ -36,6 +40,75 @@ afterEach(() => {
 });
 
 describe("RunController", () => {
+  it("publishes execution events while the Turn stream is still open", async () => {
+    const encoder = new TextEncoder();
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamController = controller;
+          },
+        }),
+        { headers: { "x-vercel-ai-ui-message-stream": "v1" } },
+      ),
+    );
+    const { store, controller } = setup();
+
+    controller.start("stream the work");
+    await vi.waitFor(() => expect(streamController).toBeDefined());
+    streamController?.enqueue(
+      encoder.encode(
+        [
+          'data: {"type":"start","messageId":"run-streaming","messageMetadata":{}}\n\n',
+          'data: {"type":"data-status","data":{"phase":"execution","status":"running"},"transient":true}\n\n',
+          'data: {"type":"reasoning-start","id":"reasoning-run-streaming-1"}\n\n',
+          'data: {"type":"reasoning-delta","id":"reasoning-run-streaming-1","delta":"inspect"}\n\n',
+        ].join(""),
+      ),
+    );
+
+    await vi.waitFor(() => {
+      expect(store.getState().run).toMatchObject({
+        phase: "running",
+        statusPhase: "execution",
+        statusDetail: "running",
+      });
+      expect(store.getState().messages.at(-1)).toMatchObject({
+        kind: "reasoning",
+        text: "inspect",
+      });
+    });
+
+    streamController?.enqueue(
+      encoder.encode(
+        [
+          'data: {"type":"data-rlm-code","id":"code-run-streaming-1","data":{"step":1,"code":"print(1)"}}\n\n',
+          'data: {"type":"data-rlm-output","id":"output-run-streaming-1","data":{"step":1,"output":"1"}}\n\n',
+        ].join(""),
+      ),
+    );
+
+    await vi.waitFor(() =>
+      expect(
+        store
+          .getState()
+          .messages.slice(-2)
+          .map((message) => message.kind),
+      ).toEqual(["code", "output"]),
+    );
+    expect(controller.isRunning()).toBe(true);
+
+    streamController?.enqueue(
+      encoder.encode(
+        ['data: {"type":"finish","finishReason":"stop"}\n\n', "data: [DONE]\n\n"].join(""),
+      ),
+    );
+    streamController?.close();
+
+    await vi.waitFor(() => expect(store.getState().run.phase).toBe("completed"));
+  });
+
   it("projects a completed turn and clears its active controller", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(completedResponse("r-1", "yo"));
     const { store, controller } = setup();
@@ -46,8 +119,162 @@ describe("RunController", () => {
     const assistant = store
       .getState()
       .messages.find((message) => message.kind === "text" && message.role === "assistant");
-    expect(assistant).toMatchObject({ kind: "text", text: "yo", streaming: true });
+    expect(assistant).toMatchObject({ kind: "text", text: "yo", streaming: false });
     expect(controller.isRunning()).toBe(false);
+  });
+
+  it("renders a completed text Turn identically live and after hydration", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        sseResponse(
+          [
+            'data: {"type":"start","messageId":"run-1","messageMetadata":{}}\n\n',
+            'data: {"type":"data-status","data":{"phase":"execution","status":"running","message":null},"transient":true}\n\n',
+            'data: {"type":"reasoning-start","id":"reasoning-run-1-1"}\n\n',
+            'data: {"type":"reasoning-delta","id":"reasoning-run-1-1","delta":"check"}\n\n',
+            'data: {"type":"reasoning-end","id":"reasoning-run-1-1"}\n\n',
+            'data: {"type":"data-rlm-code","id":"code-run-1-1","data":{"step":1,"code":"print(1)"}}\n\n',
+            'data: {"type":"data-rlm-output","id":"output-run-1-1","data":{"step":1,"output":"1"}}\n\n',
+            'data: {"type":"data-usage","id":"usage-run-1","data":{"usage":{"iterations":1,"observed_lm_usage":{},"duration_ms":12}}}\n\n',
+            'data: {"type":"text-start","id":"text-run-1"}\n\n',
+            'data: {"type":"text-delta","id":"text-run-1","delta":"The answer is 1."}\n\n',
+            'data: {"type":"text-end","id":"text-run-1"}\n\n',
+            'data: {"type":"finish","finishReason":"stop"}\n\n',
+            "data: [DONE]\n\n",
+          ].join(""),
+        ),
+      );
+    const { store, controller } = setup();
+
+    controller.start("calculate");
+    await vi.waitFor(() => expect(store.getState().run.phase).toBe("completed"));
+
+    const live = store.getState().messages;
+    const hydrated = projectedMessages(
+      projectDurableTurns([
+        {
+          id: "user-1",
+          role: "user",
+          parts: [{ type: "text", text: "calculate", state: "done" }],
+        },
+        {
+          id: "run-1",
+          role: "assistant",
+          metadata: { runId: "run-1" },
+          parts: [
+            { type: "data-step", data: { step: 1 } },
+            { type: "reasoning", text: "check", state: "done" },
+            { type: "data-rlm-code", data: { step: 1, code: "print(1)" } },
+            { type: "data-rlm-output", data: { step: 1, output: "1" } },
+            {
+              type: "data-usage",
+              data: { iterations: 1, observed_lm_usage: {}, duration_ms: 12 },
+            },
+            { type: "text", text: "The answer is 1.", state: "done" },
+          ],
+        },
+      ] satisfies FleetTurn[]),
+    );
+
+    expect(live.map((message) => message.kind)).toEqual([
+      "text",
+      "reasoning",
+      "code",
+      "output",
+      "usage",
+      "text",
+    ]);
+    expect(visibleSemantics(live)).toEqual(visibleSemantics(hydrated));
+    expect(store.getState().run.statusPhase).toBeNull();
+    expect(store.getState().run.statusDetail).toBeNull();
+  });
+
+  it("renders structured output and repeated execution evidence identically after hydration", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        sseResponse(
+          [
+            'data: {"type":"start","messageId":"run-structured","messageMetadata":{}}\n\n',
+            'data: {"type":"data-status","data":{"phase":"execution","status":"running"},"transient":true}\n\n',
+            'data: {"type":"reasoning-start","id":"reasoning-run-structured-1"}\n\n',
+            'data: {"type":"reasoning-delta","id":"reasoning-run-structured-1","delta":"verify independently"}\n\n',
+            'data: {"type":"reasoning-end","id":"reasoning-run-structured-1"}\n\n',
+            'data: {"type":"data-rlm-output","id":"output-run-structured-1","data":{"step":1,"output":"candidate: 9"}}\n\n',
+            'data: {"type":"reasoning-start","id":"reasoning-run-structured-2"}\n\n',
+            'data: {"type":"reasoning-delta","id":"reasoning-run-structured-2","delta":"verify independently"}\n\n',
+            'data: {"type":"reasoning-end","id":"reasoning-run-structured-2"}\n\n',
+            'data: {"type":"data-rlm-output","id":"output-run-structured-2","data":{"step":2,"output":"verified: 1"}}\n\n',
+            'data: {"type":"data-usage","id":"usage-run-structured","data":{"usage":{"iterations":2,"observed_lm_usage":{},"duration_ms":20}}}\n\n',
+            'data: {"type":"data-structured-result","id":"result-run-structured","data":{"schemaId":"digit","schemaVersion":"1","value":{"digit":"1"}}}\n\n',
+            'data: {"type":"text-start","id":"text-run-structured"}\n\n',
+            'data: {"type":"text-delta","id":"text-run-structured","delta":"The verified digit is 1."}\n\n',
+            'data: {"type":"text-end","id":"text-run-structured"}\n\n',
+            'data: {"type":"finish","finishReason":"stop"}\n\n',
+            "data: [DONE]\n\n",
+          ].join(""),
+        ),
+      );
+    const { store, controller } = setup();
+
+    controller.start("find the digit");
+    await vi.waitFor(() => expect(store.getState().run.phase).toBe("completed"));
+
+    const live = store.getState().messages;
+    const hydrated = projectedMessages(
+      projectDurableTurns([
+        {
+          id: "user-structured",
+          role: "user",
+          parts: [{ type: "text", text: "find the digit", state: "done" }],
+        },
+        {
+          id: "run-structured",
+          role: "assistant",
+          metadata: { runId: "run-structured" },
+          parts: [
+            { type: "data-step", data: { step: 1 } },
+            { type: "reasoning", text: "verify independently", state: "done" },
+            { type: "data-rlm-output", data: { step: 1, output: "candidate: 9" } },
+            { type: "data-step", data: { step: 2 } },
+            { type: "reasoning", text: "verify independently", state: "done" },
+            { type: "data-rlm-output", data: { step: 2, output: "verified: 1" } },
+            {
+              type: "data-usage",
+              data: { iterations: 2, observed_lm_usage: {}, duration_ms: 20 },
+            },
+            {
+              type: "data-structured-result",
+              data: { schemaId: "digit", schemaVersion: "1", value: { digit: "1" } },
+            },
+            { type: "text", text: "The verified digit is 1.", state: "done" },
+          ],
+        },
+      ] satisfies FleetTurn[]),
+    );
+
+    expect(live.map((message) => message.kind)).toEqual([
+      "text",
+      "reasoning",
+      "output",
+      "reasoning",
+      "output",
+      "usage",
+      "result",
+    ]);
+    expect(visibleSemantics(live)).toEqual(visibleSemantics(hydrated));
+    expect(
+      live.filter(
+        (message): message is Extract<Message, { kind: "reasoning" }> =>
+          message.kind === "reasoning",
+      ),
+    ).toHaveLength(2);
+    expect(live.at(-1)).toMatchObject({
+      kind: "result",
+      value: { digit: "1" },
+      narrative: "The verified digit is 1.",
+    });
   });
 
   it("shows a correlated backend-log hint for Turn preparation failures", async () => {
@@ -64,6 +291,56 @@ describe("RunController", () => {
       kind: "error",
       text: "Turn is unavailable (request request-123; see .fleet_rlm/logs/latest.log)",
     });
+    expect(
+      store
+        .getState()
+        .messages.some((message) => message.kind === "text" && message.role === "assistant"),
+    ).toBe(false);
+  });
+
+  it("does not create an assistant message when execution fails", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        sseResponse(
+          [
+            'data: {"type":"start","messageId":"run-failed","messageMetadata":{}}\n\n',
+            'data: {"type":"data-status","data":{"phase":"execution","status":"running"},"transient":true}\n\n',
+            'data: {"type":"error","errorText":"Turn failed"}\n\n',
+            'data: {"type":"finish","finishReason":"error"}\n\n',
+            "data: [DONE]\n\n",
+          ].join(""),
+        ),
+      );
+    const { store, controller } = setup();
+
+    controller.start("fail");
+    await vi.waitFor(() => expect(store.getState().run.phase).toBe("error"));
+
+    expect(store.getState().messages.map((message) => message.kind)).toEqual(["text", "error"]);
+    expect(store.getState().run.statusPhase).toBeNull();
+  });
+
+  it("does not create an assistant message when submission is cancelled", async () => {
+    const { client, store, controller } = setup();
+    client.streamTurn = vi.fn(
+      ({ signal }) =>
+        new Promise<Response>((_resolve, reject) => {
+          signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        }),
+    );
+
+    controller.start("cancel");
+    await vi.waitFor(() => expect(client.streamTurn).toHaveBeenCalled());
+    controller.cancel();
+    await vi.waitFor(() => expect(store.getState().run.phase).toBe("idle"));
+
+    expect(store.getState().messages).toMatchObject([
+      { kind: "text", role: "user", text: "cancel" },
+    ]);
+    expect(store.getState().run.statusPhase).toBeNull();
   });
 
   it("requests durable cancellation for an active run", async () => {
@@ -107,6 +384,29 @@ describe("RunController", () => {
     expect(client.requestCancellation).not.toHaveBeenCalled();
   });
 
+  it("appends each completed assistant answer without replacing the prior Turn", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(completedResponse("r-1", "one"))
+      .mockResolvedValueOnce(completedResponse("r-2", "two"));
+    const { store, controller } = setup();
+
+    controller.start("first");
+    await vi.waitFor(() => expect(controller.isRunning()).toBe(false));
+    controller.start("second");
+    await vi.waitFor(() => expect(controller.isRunning()).toBe(false));
+
+    expect(
+      store
+        .getState()
+        .messages.filter(
+          (message): message is Extract<Message, { kind: "text" }> =>
+            message.kind === "text" && message.role === "assistant",
+        )
+        .map((message) => message.text),
+    ).toEqual(["one", "two"]);
+  });
+
   it("an aborted overlapping run can never cancel the replacement run", async () => {
     const encoder = new TextEncoder();
     let failFirst: (() => void) | undefined;
@@ -144,3 +444,17 @@ describe("RunController", () => {
     expect(client.requestCancellation).not.toHaveBeenCalledWith("run-b");
   });
 });
+
+function projectedMessages(events: ReturnType<typeof projectDurableTurns>): Message[] {
+  return events.flatMap((event) => (event.type === "message/upsert" ? [event.message] : []));
+}
+
+function visibleSemantics(messages: Message[]): unknown[] {
+  return messages.map(({ id: _id, ts: _ts, ...message }) => {
+    if ("runId" in message) {
+      const { runId: _runId, ...visible } = message;
+      return visible;
+    }
+    return message;
+  });
+}

@@ -97,12 +97,13 @@ export type Message =
       ts: number;
     }
   | { id: string; kind: "warning"; runId: string; code: string; message: string; ts: number }
-  | { id: string; kind: "status"; runId: string; phase: string; detail: string; ts: number }
   | { id: string; kind: "error"; text: string; ts: number };
 
 export type Run = {
   id: string | null;
   phase: Phase;
+  statusPhase: string | null;
+  statusDetail: string | null;
   model: string | null;
   startedAt: number | null;
   endedAt: number | null;
@@ -142,6 +143,8 @@ function initialState(): State {
     run: {
       id: null,
       phase: "idle",
+      statusPhase: null,
+      statusDetail: null,
       model: null,
       startedAt: null,
       endedAt: null,
@@ -161,6 +164,7 @@ type Event =
   | { type: "session/hydrate"; session: Session; events: Event[] }
   | { type: "user/submit"; text: string }
   | { type: "run/start"; runId: string; model: string | null }
+  | { type: "run/status"; phase: string; detail: string }
   | { type: "run/finish"; finishReason: string | null; error: string | null }
   | { type: "run/cancelling" }
   | { type: "run/cancelled" }
@@ -237,18 +241,15 @@ function reduce(state: State, event: Event): State {
         ts: Date.now(),
         streaming: false,
       };
-      const assistantMessage: Message = {
-        id: newMessageId("assistant"),
-        kind: "text",
-        role: "assistant",
-        text: "",
-        ts: Date.now(),
-        streaming: true,
-      };
       return {
         ...state,
-        messages: [...state.messages, userMessage, assistantMessage],
-        run: { ...state.run, phase: "submitting" },
+        messages: [...state.messages, userMessage],
+        run: {
+          ...state.run,
+          phase: "submitting",
+          statusPhase: null,
+          statusDetail: null,
+        },
       };
     }
     case "run/start":
@@ -258,6 +259,8 @@ function reduce(state: State, event: Event): State {
           ...state.run,
           id: event.runId,
           phase: "running",
+          statusPhase: null,
+          statusDetail: null,
           model: event.model ?? state.run.model,
           startedAt: Date.now(),
           endedAt: null,
@@ -267,12 +270,23 @@ function reduce(state: State, event: Event): State {
           completedSteps: 0,
         },
       };
+    case "run/status":
+      return {
+        ...state,
+        run: {
+          ...state.run,
+          statusPhase: event.phase,
+          statusDetail: event.detail,
+        },
+      };
     case "run/finish":
       return {
         ...state,
         run: {
           ...state.run,
           phase: event.error ? "error" : "completed",
+          statusPhase: null,
+          statusDetail: null,
           endedAt: Date.now(),
           finishReason: event.finishReason,
           error: event.error,
@@ -281,7 +295,10 @@ function reduce(state: State, event: Event): State {
     case "run/cancelling":
       return { ...state, run: { ...state.run, phase: "cancelling" } };
     case "run/cancelled":
-      return { ...state, run: { ...state.run, phase: "idle" } };
+      return {
+        ...state,
+        run: { ...state.run, phase: "idle", statusPhase: null, statusDetail: null },
+      };
     case "message/upsert": {
       const existing = state.messages.findIndex((m) => m.id === event.message.id);
       const expandedIds = new Set(state.expandedIds);
@@ -333,7 +350,7 @@ function reduce(state: State, event: Event): State {
       return {
         ...state,
         messages: [],
-        run: { ...state.run, phase: "idle" },
+        run: { ...state.run, phase: "idle", statusPhase: null, statusDetail: null },
         selectedId: null,
         focusedGroupId: null,
         expandedIds: new Set(),

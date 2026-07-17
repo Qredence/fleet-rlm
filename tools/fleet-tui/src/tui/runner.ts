@@ -1,7 +1,7 @@
 import { FleetApiError, type FleetApiClient } from "../fleet-api-client.js";
 import { streamFleetTurn } from "../fleet-turn-stream.js";
 import { LiveTurnProjector } from "./projection.js";
-import { newMessageId, type ConversationStore, type Message } from "./store.js";
+import { newMessageId, type ConversationStore } from "./store.js";
 
 export class RunController {
   private active: RunExecution | null = null;
@@ -46,8 +46,7 @@ export class RunController {
     try {
       const session = this.store.getState().session;
       if (!session) throw new Error("no active session");
-      const assistantId = lastAssistantText(this.store)?.id;
-      const projector = new LiveTurnProjector(Date.now, assistantId);
+      const projector = new LiveTurnProjector(Date.now);
       let streamError: string | null = null;
 
       for await (const chunk of streamFleetTurn({
@@ -116,16 +115,6 @@ type RunExecution = {
   runId: string | null;
   cancellationRequested: boolean;
 };
-
-function lastAssistantText(
-  store: ConversationStore,
-): Extract<Message, { kind: "text" }> | undefined {
-  for (let index = store.getState().messages.length - 1; index >= 0; index -= 1) {
-    const message = store.getState().messages[index];
-    if (message?.kind === "text" && message.role === "assistant") return message;
-  }
-  return undefined;
-}
 
 function errorMessage(error: unknown): string {
   if (error instanceof FleetApiError && error.correlationId) {
