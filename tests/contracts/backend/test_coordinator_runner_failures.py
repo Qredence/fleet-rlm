@@ -14,23 +14,27 @@ import pytest
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, TurnLifecycleModule
+from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 from fleet_rlm.persistence.repositories import InMemoryTurnStateStore
 from fleet_rlm.rlm.context import RLMExecutionContext
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import (
     TERMINAL_DETAIL_TYPES,
     RunCancelled,
+    RunCompleted,
     RunFailed,
     RunStarted,
     RunTimedOut,
     RuntimeEvent,
 )
+from fleet_rlm.rlm.factory import RLMFactory
 from fleet_rlm.rlm.runner import RLMRunner
-from fleet_rlm.sessions.models import TurnAccess, TurnInput
+from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
 from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
-FailureMode = Literal["invalid_output", "internal_cancel", "timeout"]
-HarnessMode = FailureMode | Literal["caller_cancel"]
+FailureMode = Literal["invalid_output", "malformed_trajectory", "internal_cancel", "timeout"]
+HarnessMode = FailureMode | Literal["caller_cancel", "native_success"]
 
 
 class _Capabilities:
@@ -55,8 +59,23 @@ class _Program:
         self._started.set()
         if self._mode == "invalid_output":
             return dspy.Prediction(answer="")
+        if self._mode == "malformed_trajectory":
+            return dspy.Prediction(answer="valid", trajectory="not a trajectory")
         await asyncio.sleep(0.05)
         return dspy.Prediction(answer="too late")
+
+
+class _NativeSuccessActions:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def acall(self, **_kwargs) -> dspy.Prediction:
+        self.calls += 1
+        if self.calls == 1:
+            return dspy.Prediction(reasoning="initialize", code="values = [1, 2, 3]\n_out = 'initialized'")
+        if self.calls == 2:
+            return dspy.Prediction(reasoning="reuse", code="values.append(4)\n_out = sum(values)")
+        return dspy.Prediction(reasoning="submit", code="SUBMIT(answer=str(sum(values)))")
 
 
 class _Factory:
@@ -64,7 +83,11 @@ class _Factory:
         self._mode = mode
         self._started = started
 
-    def create(self, **_kwargs):
+    def create(self, **kwargs):
+        if self._mode == "native_success":
+            rlm = RLMFactory().create(**kwargs)
+            rlm.generate_action = _NativeSuccessActions()
+            return rlm
         return _Program(self._mode, self._started)
 
 
@@ -102,7 +125,9 @@ class _Harness:
             models=SimpleNamespace(root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=deadline,
-            interpreter=None,
+            interpreter=(
+                DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()) if self.mode == "native_success" else None
+            ),
             attachments=(),
             capabilities=_Capabilities(),
             cancellation_requested=turn.cancellation_requested,
@@ -154,6 +179,7 @@ def _assert_stream_invariants(events: list[RuntimeEvent], terminal_type: type[ob
     ("mode", "terminal_type"),
     (
         ("invalid_output", RunFailed),
+        ("malformed_trajectory", RunFailed),
         ("internal_cancel", RunCancelled),
         ("timeout", RunTimedOut),
     ),
@@ -167,6 +193,9 @@ async def test_real_runner_failure_modes_have_one_ordered_terminal(
     events = await harness.collect()
 
     _assert_stream_invariants(events, terminal_type)
+    if mode == "malformed_trajectory":
+        assert isinstance(events[-1].detail, RunFailed)
+        assert events[-1].detail.message == "Turn output is invalid"
     assert harness.cleanup_calls == 1
     assert await harness.store.turn_records(harness.session_id, harness.access) == ()
 
@@ -183,3 +212,36 @@ async def test_true_caller_cancellation_still_propagates_after_runner_starts() -
         await task
     assert harness.cleanup_calls == 1
     assert await harness.store.turn_records(harness.session_id, harness.access) == ()
+
+
+@pytest.mark.asyncio
+async def test_completed_trajectory_turn_commits_typed_text_and_canonical_details() -> None:
+    from fleet_rlm.sessions.committed_turn import CodePart, OutputPart, ReasoningPart
+
+    harness = _Harness("native_success")
+
+    events = await harness.collect()
+
+    _assert_stream_invariants(events, RunCompleted)
+    records = await harness.store.turn_records(harness.session_id, harness.access)
+    assistant = records[-1]
+    assert isinstance(assistant, AssistantTurnRecord)
+    assert assistant.content == "10"
+    reasoning = [part for part in assistant.committed.parts if isinstance(part, ReasoningPart)]
+    assert [part.text for part in reasoning] == [
+        "initialize",
+        "reuse",
+        "submit",
+        "submit",
+    ]
+    assert reasoning[-1].step is None
+    assert [part.code for part in assistant.committed.parts if isinstance(part, CodePart)] == [
+        "values = [1, 2, 3]\n_out = 'initialized'",
+        "values.append(4)\n_out = sum(values)",
+        "SUBMIT(answer=str(sum(values)))",
+    ]
+    assert [part.output for part in assistant.committed.parts if isinstance(part, OutputPart)] == [
+        "initialized",
+        "10",
+        "FINAL submitted",
+    ]

@@ -97,3 +97,18 @@ def test_projector_does_not_create_an_empty_reasoning_panel() -> None:
     event = EventRecorder(run_id=uuid4(), session_id=uuid4()).record(RLMReasoning("   ", 1))
 
     assert AISDKUIProjector().project(event) == []
+
+
+def test_projector_reuses_same_step_ids_for_trajectory_corrections() -> None:
+    from fleet_rlm.api.sse import AISDKUIProjector
+    from fleet_rlm.rlm.events import EventRecorder, RLMCode, RLMOutput
+
+    recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
+    projector = AISDKUIProjector()
+    first_code = projector.project(recorder.record(RLMCode("stale", 1)))[0]
+    corrected_code = projector.project(recorder.record(RLMCode("canonical", 1)))[0]
+    first_output = projector.project(recorder.record(RLMOutput("stale", 1)))[0]
+    corrected_output = projector.project(recorder.record(RLMOutput("canonical", 1)))[0]
+
+    assert first_code["id"] == corrected_code["id"]
+    assert first_output["id"] == corrected_output["id"]

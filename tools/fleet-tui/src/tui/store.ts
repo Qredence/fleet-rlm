@@ -315,6 +315,20 @@ function reduce(state: State, event: Event): State {
         messages[existing] = event.message;
         return { ...state, messages, run };
       }
+      if (event.message.kind === "reasoning") {
+        const reasoning = event.message;
+        const firstStepDetail = state.messages.findIndex(
+          (message) =>
+            (message.kind === "code" || message.kind === "output") &&
+            message.runId === reasoning.runId &&
+            message.step === reasoning.step,
+        );
+        if (firstStepDetail >= 0) {
+          const messages = state.messages.slice();
+          messages.splice(firstStepDetail, 0, reasoning);
+          return { ...state, messages, run };
+        }
+      }
       return { ...state, messages: [...state.messages, event.message], run };
     }
     case "message/patch": {

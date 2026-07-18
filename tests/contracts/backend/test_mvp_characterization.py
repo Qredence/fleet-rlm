@@ -41,7 +41,7 @@ class _DeterministicRLM:
         self.calls["acall"] += 1
         if self.cancelled:
             raise TurnCancelled
-        return dspy.Prediction(answer="ok")
+        return dspy.Prediction(answer="ok", trajectory=[])
 
 
 @dataclass

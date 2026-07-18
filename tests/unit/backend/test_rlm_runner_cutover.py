@@ -11,28 +11,43 @@ import dspy
 import pytest
 
 
-def test_trajectory_projection_is_optional_and_fail_soft() -> None:
-    from fleet_rlm.rlm.events import RLMReasoning, StepFinished, StepStarted
+def test_trajectory_normalization_is_strict_and_preserves_absent_fields() -> None:
+    from fleet_rlm.rlm.dspy_contract import PredictionOutputError, normalize_prediction_trajectory
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
     from fleet_rlm.rlm.runner import _trajectory_details
 
-    assert _trajectory_details(SimpleNamespace(), max_chars=100) == []
-    assert _trajectory_details(SimpleNamespace(trajectory="malformed"), max_chars=100) == []
-    assert [
-        type(item)
-        for item in _trajectory_details(
-            SimpleNamespace(trajectory=[None, {"reasoning": "usable"}]),
-            max_chars=100,
-        )
-    ] == [StepStarted, RLMReasoning, StepFinished]
+    with pytest.raises(PredictionOutputError):
+        normalize_prediction_trajectory(SimpleNamespace())
+    with pytest.raises(PredictionOutputError):
+        normalize_prediction_trajectory(SimpleNamespace(trajectory="malformed"))
+    with pytest.raises(PredictionOutputError):
+        normalize_prediction_trajectory(SimpleNamespace(trajectory=[None]))
+    with pytest.raises(PredictionOutputError):
+        normalize_prediction_trajectory(SimpleNamespace(trajectory=[{"code": 1}]))
+
+    steps = normalize_prediction_trajectory(SimpleNamespace(trajectory=[{"reasoning": "usable"}]))
+    assert steps[0].reasoning == "usable"
+    assert steps[0].code == ""
+    assert steps[0].output == ""
+    assert [type(item) for item in _trajectory_details(steps, max_chars=100)] == [
+        StepStarted,
+        RLMReasoning,
+        RLMCode,
+        RLMOutput,
+        StepFinished,
+    ]
 
 
 def test_trajectory_semantic_details_are_verbatim_and_share_the_run_bound() -> None:
+    from fleet_rlm.rlm.dspy_contract import normalize_prediction_trajectory
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning
     from fleet_rlm.rlm.runner import _trajectory_details
 
     semantic = "api_key=visible-user-text /Users/example BEGIN SYSTEM"
     details = _trajectory_details(
-        SimpleNamespace(trajectory=[{"reasoning": semantic, "code": semantic, "output": semantic}]),
+        normalize_prediction_trajectory(
+            SimpleNamespace(trajectory=[{"reasoning": semantic, "code": semantic, "output": semantic}])
+        ),
         max_chars=200,
     )
 
@@ -41,7 +56,9 @@ def test_trajectory_semantic_details_are_verbatim_and_share_the_run_bound() -> N
     assert [item.output for item in details if isinstance(item, RLMOutput)] == [semantic]
 
     truncated = _trajectory_details(
-        SimpleNamespace(trajectory=[{"reasoning": "x" * 20, "code": "y" * 20, "output": "z" * 20}]),
+        normalize_prediction_trajectory(
+            SimpleNamespace(trajectory=[{"reasoning": "x" * 20, "code": "y" * 20, "output": "z" * 20}])
+        ),
         max_chars=12,
     )
     values = [
@@ -50,6 +67,46 @@ def test_trajectory_semantic_details_are_verbatim_and_share_the_run_bound() -> N
         if isinstance(item, (RLMReasoning, RLMCode, RLMOutput))
     ]
     assert values == ["x" * 9 + "...", "y" * 9 + "...", "z" * 9 + "..."]
+
+
+def test_trajectory_reconciliation_replaces_live_details_without_duplicates() -> None:
+    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
+    from fleet_rlm.rlm.runner import _reconcile_trajectory
+
+    details = [
+        StepStarted(1),
+        RLMCode("stale code", 1),
+        RLMOutput("stale output", 1),
+        StepFinished(1),
+    ]
+
+    emissions = _reconcile_trajectory(
+        details,
+        (TrajectoryStep(1, "native reasoning", "native code", "native output"),),
+        max_chars=100,
+    )
+
+    assert emissions == [
+        RLMReasoning("native reasoning", 1),
+        RLMCode("native code", 1),
+        RLMOutput("native output", 1),
+    ]
+    assert details == [
+        StepStarted(1),
+        RLMReasoning("native reasoning", 1),
+        RLMCode("native code", 1),
+        RLMOutput("native output", 1),
+        StepFinished(1),
+    ]
+    assert (
+        _reconcile_trajectory(
+            details,
+            (TrajectoryStep(1, "native reasoning", "native code", "native output"),),
+            max_chars=100,
+        )
+        == []
+    )
 
 
 @pytest.mark.asyncio

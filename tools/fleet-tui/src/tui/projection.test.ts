@@ -78,6 +78,51 @@ describe("terminal projection", () => {
     ]);
   });
 
+  it("upserts a same-step trajectory correction into one canonical live card", () => {
+    const live = new LiveTurnProjector(clock);
+    const events = [
+      { type: "data-rlm-code", id: "code-run-1-1", data: { step: 1, code: "stale" } },
+      { type: "data-rlm-output", id: "output-run-1-1", data: { step: 1, output: "stale" } },
+      { type: "data-rlm-code", id: "code-run-1-1", data: { step: 1, code: "canonical" } },
+      { type: "data-rlm-output", id: "output-run-1-1", data: { step: 1, output: "canonical" } },
+    ] satisfies FleetUIMessageChunk[];
+
+    const messages = finalMessages(events.flatMap((chunk) => live.push(chunk)));
+
+    expect(messages).toHaveLength(2);
+    expect(messages).toMatchObject([
+      { kind: "code", code: "canonical" },
+      { kind: "output", output: "canonical" },
+    ]);
+  });
+
+  it("omits empty trajectory code and output cards in live and durable projection", () => {
+    const live = new LiveTurnProjector(clock);
+    const liveEvents = [
+      { type: "start", messageId: "run-1", messageMetadata: {} },
+      { type: "data-rlm-code", id: "code-run-1-1", data: { step: 1, code: "" } },
+      { type: "data-rlm-output", id: "output-run-1-1", data: { step: 1, output: "" } },
+    ] satisfies FleetUIMessageChunk[];
+    const durableEvents = projectDurableTurns(
+      [
+        {
+          id: "run-1",
+          role: "assistant",
+          metadata: { runId: "run-1" },
+          parts: [
+            { type: "data-step", data: { step: 1 } },
+            { type: "data-rlm-code", data: { step: 1, code: "" } },
+            { type: "data-rlm-output", data: { step: 1, output: "" } },
+          ],
+        },
+      ] satisfies FleetTurn[],
+      clock,
+    );
+
+    expect(finalMessages(liveEvents.flatMap((chunk) => live.push(chunk)))).toEqual([]);
+    expect(finalMessages(durableEvents)).toEqual([]);
+  });
+
   it("emits store events with live/reload parity for every visible kind", () => {
     const live = new LiveTurnProjector(clock);
     const chunks: FleetUIMessageChunk[] = [

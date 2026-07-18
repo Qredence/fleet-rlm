@@ -231,4 +231,55 @@ describe("ConversationStore", () => {
     ]);
     expect(store.getState().run.completedSteps).toBe(1);
   });
+
+  it("replaces a same-ID trajectory correction without increasing output metrics", () => {
+    const store = makeStore();
+    store.dispatch({
+      type: "message/upsert",
+      message: { id: "output-r-1", kind: "output", runId: "r", step: 1, output: "stale", ts: 1 },
+    });
+    store.dispatch({
+      type: "message/upsert",
+      message: {
+        id: "output-r-1",
+        kind: "output",
+        runId: "r",
+        step: 1,
+        output: "canonical",
+        ts: 2,
+      },
+    });
+
+    expect(store.getState().messages).toMatchObject([{ id: "output-r-1", output: "canonical" }]);
+    expect(store.getState().run.completedSteps).toBe(1);
+  });
+
+  it("inserts late trajectory reasoning before its already-streamed step details", () => {
+    const store = makeStore();
+    store.dispatch({
+      type: "message/upsert",
+      message: { id: "code-r-1", kind: "code", runId: "r", step: 1, code: "stale", ts: 1 },
+    });
+    store.dispatch({
+      type: "message/upsert",
+      message: { id: "output-r-1", kind: "output", runId: "r", step: 1, output: "stale", ts: 2 },
+    });
+    store.dispatch({
+      type: "message/upsert",
+      message: {
+        id: "reasoning-r-1",
+        kind: "reasoning",
+        runId: "r",
+        step: 1,
+        text: "canonical",
+        ts: 3,
+      },
+    });
+
+    expect(store.getState().messages.map((message) => message.kind)).toEqual([
+      "reasoning",
+      "code",
+      "output",
+    ]);
+  });
 });

@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 import inspect
+from typing import Any
+
+import dspy
+import pytest
+
+from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 
 
 def test_dspy_rlm_constructor_uses_max_iterations_not_max_iters() -> None:
@@ -63,3 +70,42 @@ def test_rlm_package_has_no_private_observable_override() -> None:
 
     package = Path(__file__).resolve().parents[3] / "src" / "fleet_rlm" / "rlm"
     assert not (package / "observable.py").exists()
+
+
+@pytest.mark.asyncio
+async def test_pinned_async_rlm_creates_fresh_native_history_and_honors_output_bound() -> None:
+    from dspy.primitives.repl_types import REPLHistory
+
+    class Actions:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.initial_histories: list[REPLHistory] = []
+
+        async def acall(self, **kwargs: Any) -> dspy.Prediction:
+            history = kwargs["repl_history"]
+            assert type(history) is REPLHistory
+            self.calls += 1
+            if self.calls in (1, 3):
+                assert len(history.entries) == 0
+                self.initial_histories.append(history)
+                return dspy.Prediction(reasoning="create long output", code="_out = 'x' * 64")
+            assert history.max_output_chars == 12
+            assert "x" * 64 not in history.format()
+            return dspy.Prediction(reasoning="submit typed output", code="SUBMIT(answer='ok')")
+
+    actions = Actions()
+    rlm = dspy.RLM(
+        "request -> answer: str",
+        max_iterations=2,
+        max_output_chars=12,
+        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+    )
+    rlm.generate_action = actions
+
+    first = await rlm.acall(request="first")
+    second = await rlm.acall(request="second")
+
+    assert first.answer == second.answer == "ok"
+    assert first.final_reasoning == second.final_reasoning == "submit typed output"
+    assert len(actions.initial_histories) == 2
+    assert actions.initial_histories[0] is not actions.initial_histories[1]

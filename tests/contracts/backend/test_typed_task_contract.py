@@ -83,7 +83,7 @@ async def test_default_and_custom_signatures_commit_native_typed_predictions() -
     from fleet_rlm.skills.capabilities import DEFAULT_TASK_CONTRACT, TaskContract, TurnCapabilityBlueprint
 
     default_outcome, _ = await _run_prediction(
-        dspy.Prediction(answer="hello"),
+        dspy.Prediction(answer="hello", trajectory=[]),
         TurnCapabilityBlueprint(),
     )
     default_turn = commit_success(default_outcome, ())
@@ -104,6 +104,7 @@ async def test_default_and_custom_signatures_commit_native_typed_predictions() -
         dspy.Prediction(
             summary="Three findings",
             findings=[{"title": "First", "severity": "high"}],
+            trajectory=[],
         ),
         TurnCapabilityBlueprint(
             task_contract=contract,
@@ -129,7 +130,7 @@ async def test_default_and_custom_signatures_commit_native_typed_predictions() -
         lambda _outputs: (_ for _ in ()).throw(RuntimeError("private validator detail")),
     )
     rejected, _ = await _run_prediction(
-        dspy.Prediction(summary="hidden", findings=[]),
+        dspy.Prediction(summary="hidden", findings=[], trajectory=[]),
         TurnCapabilityBlueprint(
             task_contract=rejecting_contract,
             input_values=MappingProxyType({"request": "review this report"}),

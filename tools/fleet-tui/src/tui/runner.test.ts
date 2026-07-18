@@ -208,6 +208,59 @@ describe("RunController", () => {
     expect(store.getState().run.statusDetail).toBeNull();
   });
 
+  it("keeps a trajectory-corrected live step identical to durable reload", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        sseResponse(
+          [
+            'data: {"type":"start","messageId":"run-corrected","messageMetadata":{}}\n\n',
+            'data: {"type":"data-rlm-code","id":"code-run-corrected-1","data":{"step":1,"code":"stale"}}\n\n',
+            'data: {"type":"data-rlm-output","id":"output-run-corrected-1","data":{"step":1,"output":"stale"}}\n\n',
+            'data: {"type":"data-rlm-code","id":"code-run-corrected-1","data":{"step":1,"code":"canonical"}}\n\n',
+            'data: {"type":"data-rlm-output","id":"output-run-corrected-1","data":{"step":1,"output":"canonical"}}\n\n',
+            'data: {"type":"reasoning-start","id":"reasoning-run-corrected-1"}\n\n',
+            'data: {"type":"reasoning-delta","id":"reasoning-run-corrected-1","delta":"canonical reasoning"}\n\n',
+            'data: {"type":"reasoning-end","id":"reasoning-run-corrected-1"}\n\n',
+            'data: {"type":"finish","finishReason":"stop"}\n\n',
+            "data: [DONE]\n\n",
+          ].join(""),
+        ),
+      );
+    const { store, controller } = setup();
+
+    controller.start("correct the trace");
+    await vi.waitFor(() => expect(store.getState().run.phase).toBe("completed"));
+
+    const live = store
+      .getState()
+      .messages.filter(
+        (message) =>
+          message.kind === "reasoning" || message.kind === "code" || message.kind === "output",
+      );
+    const hydrated = projectedMessages(
+      projectDurableTurns([
+        {
+          id: "run-corrected",
+          role: "assistant",
+          metadata: { runId: "run-corrected" },
+          parts: [
+            { type: "data-step", data: { step: 1 } },
+            { type: "reasoning", text: "canonical reasoning", state: "done" },
+            { type: "data-rlm-code", data: { step: 1, code: "canonical" } },
+            { type: "data-rlm-output", data: { step: 1, output: "canonical" } },
+          ],
+        },
+      ] satisfies FleetTurn[]),
+    ).filter(
+      (message) =>
+        message.kind === "reasoning" || message.kind === "code" || message.kind === "output",
+    );
+
+    expect(live).toHaveLength(3);
+    expect(visibleSemantics(live)).toEqual(visibleSemantics(hydrated));
+  });
+
   it("renders structured output and repeated execution evidence identically after hydration", async () => {
     globalThis.fetch = vi
       .fn()

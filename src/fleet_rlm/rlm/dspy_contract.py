@@ -44,6 +44,41 @@ class PredictionOutputError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class TrajectoryStep:
+    """One strictly normalized native DSPy REPL interaction."""
+
+    index: int
+    reasoning: str
+    code: str
+    output: str
+
+
+def normalize_prediction_trajectory(prediction: Any) -> tuple[TrajectoryStep, ...]:
+    """Validate the native trajectory without mutating its ``Prediction`` owner.
+
+    DSPy owns the trajectory lifecycle. Fleet only accepts its documented list of
+    iteration mappings and turns absent public fields into empty strings for the
+    internal reconciliation seam.
+    """
+    trajectory = getattr(prediction, "trajectory", None)
+    if not isinstance(trajectory, Sequence) or isinstance(trajectory, (str, bytes, bytearray)):
+        raise PredictionOutputError
+
+    steps: list[TrajectoryStep] = []
+    for index, raw in enumerate(trajectory, start=1):
+        if not isinstance(raw, Mapping) or any(not isinstance(key, str) for key in raw):
+            raise PredictionOutputError
+        values: dict[str, str] = {}
+        for field in ("reasoning", "code", "output"):
+            value = raw.get(field, "")
+            if not isinstance(value, str):
+                raise PredictionOutputError
+            values[field] = value
+        steps.append(TrajectoryStep(index, values["reasoning"], values["code"], values["output"]))
+    return tuple(steps)
+
+
+@dataclass(frozen=True, slots=True)
 class PredictionResult:
     """Validated declared Signature outputs selected for Turn Commit."""
 

@@ -163,10 +163,12 @@ export class LiveTurnProjector {
     const value = data(chunk.data);
     const step = number(value.step, inferStep(chunk.id));
     const id = `${field}-${chunk.id ?? `${this.runId}-${step}`}`;
+    const content = string(field === "code" ? value.code : value.output);
+    if (!content) return [];
     return this.save(
       field === "code"
-        ? code(id, this.runId, step, string(value.code), this.clock)
-        : output(id, this.runId, step, string(value.output), this.clock),
+        ? code(id, this.runId, step, content, this.clock)
+        : output(id, this.runId, step, content, this.clock),
     );
   }
 
@@ -281,11 +283,13 @@ export function projectDurableTurns(turns: FleetTurn[], clock: Clock = Date.now)
         case "data-rlm-code":
         case "data-rlm-output": {
           const step = number(value.step, currentStep || index + 1);
+          const content = string(part.type === "data-rlm-code" ? value.code : value.output);
+          if (!content) break;
           currentStep = step;
           messages.push(
             part.type === "data-rlm-code"
-              ? code(id, runId, step, string(value.code), clock)
-              : output(id, runId, step, string(value.output), clock),
+              ? code(id, runId, step, content, clock)
+              : output(id, runId, step, content, clock),
           );
           break;
         }

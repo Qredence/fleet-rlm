@@ -77,6 +77,84 @@ class _TypedExtract:
         return dspy.Prediction(answer="extracted")
 
 
+class _ThreeIterationActions:
+    def __init__(self) -> None:
+        self.histories: list[object] = []
+        self.calls = 0
+
+    async def acall(self, **kwargs: Any) -> dspy.Prediction:
+        from dspy.primitives.repl_types import REPLHistory
+
+        history = kwargs["repl_history"]
+        assert type(history) is REPLHistory
+        self.histories.append(history)
+        self.calls += 1
+        if self.calls == 1:
+            assert len(history.entries) == 0
+            return dspy.Prediction(
+                reasoning="initialize an accumulator",
+                code="values = [1, 2, 3]\n_out = 'initialized'",
+            )
+        if self.calls == 2:
+            assert len(history.entries) == 1
+            assert history.entries[0].reasoning == "initialize an accumulator"
+            assert "values = [1, 2, 3]" in history.entries[0].code
+            assert "initialized" in history.entries[0].output
+            return dspy.Prediction(
+                reasoning="reuse the existing accumulator",
+                code="values.append(4)\n_out = sum(values)",
+            )
+        assert len(history.entries) == 2
+        assert history.entries[1].reasoning == "reuse the existing accumulator"
+        assert "values.append(4)" in history.entries[1].code
+        assert "10" in history.entries[1].output
+        return dspy.Prediction(
+            reasoning="submit the verified result",
+            code="SUBMIT(answer=str(sum(values)))",
+        )
+
+
+class _FreshTurnAction:
+    def __init__(self) -> None:
+        self.history: object | None = None
+
+    async def acall(self, **kwargs: Any) -> dspy.Prediction:
+        from dspy.primitives.repl_types import REPLHistory
+
+        history = kwargs["repl_history"]
+        assert type(history) is REPLHistory
+        assert len(history.entries) == 0
+        self.history = history
+        return dspy.Prediction(
+            reasoning="confirm a fresh interpreter",
+            code="assert 'values' not in globals()\nSUBMIT(answer='fresh')",
+        )
+
+
+class _CapturingExtract:
+    def __init__(self) -> None:
+        self.history: object | None = None
+
+    async def acall(self, **kwargs: Any) -> dspy.Prediction:
+        from dspy.primitives.repl_types import REPLHistory
+
+        history = kwargs["repl_history"]
+        assert type(history) is REPLHistory
+        self.history = history
+        return dspy.Prediction(answer="extracted")
+
+
+class _TwoIterationNoSubmit:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+        self.calls += 1
+        if self.calls == 1:
+            return dspy.Prediction(reasoning="initialize", code="values = [1]\n_out = values")
+        return dspy.Prediction(reasoning="extend", code="values.append(2)\n_out = values")
+
+
 @pytest.mark.asyncio
 async def test_native_rlm_preserves_state_tools_submit_prediction_and_trajectory() -> None:
     observed: list[object] = []
@@ -115,6 +193,76 @@ async def test_native_rlm_preserves_state_tools_submit_prediction_and_trajectory
         RLMOutput,
         StepFinished,
     ]
+
+
+@pytest.mark.asyncio
+async def test_native_repl_history_and_python_state_are_isolated_per_turn() -> None:
+    models = RLMModelBundle(root_lm=object(), sub_lm=object())  # type: ignore[arg-type]
+    first_interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    first = RLMFactory().create(
+        models=models,
+        options=RLMOptions(max_iterations=3),
+        interpreter=first_interpreter,
+        signature="request -> answer: str",
+    )
+    actions = _ThreeIterationActions()
+    first.generate_action = actions
+
+    prediction = await first.acall(request="complete the accumulator contract")
+
+    assert prediction.answer == "10"
+    assert prediction.final_reasoning == "submit the verified result"
+    assert [entry["reasoning"] for entry in prediction.trajectory] == [
+        "initialize an accumulator",
+        "reuse the existing accumulator",
+        "submit the verified result",
+    ]
+    assert [entry["code"] for entry in prediction.trajectory] == [
+        "values = [1, 2, 3]\n_out = 'initialized'",
+        "values.append(4)\n_out = sum(values)",
+        "SUBMIT(answer=str(sum(values)))",
+    ]
+    assert len(actions.histories) == 3
+
+    second_interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    second = RLMFactory().create(
+        models=models,
+        options=RLMOptions(max_iterations=1),
+        interpreter=second_interpreter,
+        signature="request -> answer: str",
+    )
+    fresh_action = _FreshTurnAction()
+    second.generate_action = fresh_action
+
+    fresh_prediction = await second.acall(request="confirm transient state was discarded")
+
+    assert first is not second
+    assert first_interpreter is not second_interpreter
+    assert fresh_prediction.answer == "fresh"
+    assert fresh_action.history is not None
+    assert fresh_action.history is not actions.histories[0]
+
+
+@pytest.mark.asyncio
+async def test_native_extract_fallback_receives_accumulated_repl_history() -> None:
+    extractor = _CapturingExtract()
+    rlm = RLMFactory().create(
+        models=RLMModelBundle(root_lm=object(), sub_lm=object()),  # type: ignore[arg-type]
+        options=RLMOptions(max_iterations=2),
+        interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        signature="request -> answer: str",
+    )
+    rlm.generate_action = _TwoIterationNoSubmit()
+    rlm.extract = extractor
+
+    prediction = await rlm.acall(request="exercise extraction")
+
+    assert extractor.history is not None
+    assert len(extractor.history.entries) == 2
+    assert [entry.reasoning for entry in extractor.history.entries] == ["initialize", "extend"]
+    assert prediction.answer == "extracted"
+    assert prediction.final_reasoning == "Extract forced final output"
+    assert [entry["reasoning"] for entry in prediction.trajectory] == ["initialize", "extend"]
 
 
 @pytest.mark.asyncio

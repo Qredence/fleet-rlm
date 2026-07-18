@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any, Protocol, Self, cast
 
 import dspy
 
 from fleet_rlm.rlm.context import RLMExecutionContext
-from fleet_rlm.rlm.dspy_contract import PredictionOutputError, observed_usage, prediction_result
+from fleet_rlm.rlm.dspy_contract import (
+    PredictionOutputError,
+    TrajectoryStep,
+    normalize_prediction_trajectory,
+    observed_usage,
+    prediction_result,
+)
 from fleet_rlm.rlm.errors import TurnCancelled, TurnTerminalError
 from fleet_rlm.rlm.events import (
     AttachmentRead,
@@ -131,32 +137,92 @@ class _DetailRelay:
                 return values
 
 
-def _observation_key(value: ExecutionDetail) -> tuple[type[object], int | None] | None:
-    if isinstance(value, (StepStarted, StepFinished, RLMReasoning, RLMCode, RLMOutput)):
-        return type(value), value.step
-    return None
-
-
-def _trajectory_details(prediction: Any, *, max_chars: int) -> list[ObservationDetail]:
-    trajectory = getattr(prediction, "trajectory", None)
-    if not isinstance(trajectory, Sequence) or isinstance(trajectory, (str, bytes, bytearray)):
-        return []
+def _trajectory_details(steps: Sequence[TrajectoryStep], *, max_chars: int) -> list[ObservationDetail]:
+    """Project strictly normalized DSPy trajectory steps into public details."""
     details: list[ObservationDetail] = []
-    for step, raw in enumerate(trajectory, start=1):
-        if not isinstance(raw, Mapping):
-            continue
-        details.append(StepStarted(step))
-        if "reasoning" in raw:
-            details.append(RLMReasoning(truncate_public_text(str(raw.get("reasoning") or ""), max_len=max_chars), step))
-        if "code" in raw:
-            details.append(RLMCode(truncate_public_text(str(raw.get("code") or ""), max_len=max_chars), step))
-        if "output" in raw:
-            output = str(raw.get("output") or "")
-            if output.startswith("FINAL:"):
-                output = "FINAL submitted"
-            details.append(RLMOutput(truncate_public_text(output, max_len=max_chars), step))
-        details.append(StepFinished(step))
+    for step in steps:
+        output = step.output
+        if output.startswith("FINAL:"):
+            output = "FINAL submitted"
+        details.extend(
+            (
+                StepStarted(step.index),
+                RLMReasoning(truncate_public_text(step.reasoning, max_len=max_chars), step.index),
+                RLMCode(truncate_public_text(step.code, max_len=max_chars), step.index),
+                RLMOutput(truncate_public_text(output, max_len=max_chars), step.index),
+                StepFinished(step.index),
+            )
+        )
     return details
+
+
+def _detail_position(details: Sequence[ExecutionDetail], detail_type: type[object], step: int) -> int | None:
+    return next(
+        (
+            index
+            for index, detail in enumerate(details)
+            if isinstance(detail, detail_type) and getattr(detail, "step", None) == step
+        ),
+        None,
+    )
+
+
+def _reconcile_trajectory(
+    details: list[ExecutionDetail],
+    trajectory: Sequence[TrajectoryStep],
+    *,
+    max_chars: int,
+) -> list[ObservationDetail]:
+    """Make native trajectory the durable source while retaining live timing.
+
+    Existing equal observations stay put. A differing same-step RLM detail is
+    replaced in the durable list and re-emitted with the same stable step ID so
+    live TUI projection upserts it rather than appending a second card.
+    """
+    emissions: list[ObservationDetail] = []
+    for trajectory_step in trajectory:
+        step = trajectory_step.index
+        step_details = _trajectory_details((trajectory_step,), max_chars=max_chars)
+        start = _detail_position(details, StepStarted, step)
+        finish = _detail_position(details, StepFinished, step)
+        if start is None or finish is None or start >= finish:
+            details.extend(step_details)
+            emissions.extend(step_details)
+            continue
+
+        canonical = step_details[1:-1]
+        for target in canonical:
+            target_type = type(target)
+            existing_positions = [
+                index
+                for index in range(start + 1, finish)
+                if isinstance(details[index], target_type) and getattr(details[index], "step", None) == step
+            ]
+            if existing_positions:
+                first = existing_positions[0]
+                if details[first] != target:
+                    details[first] = target
+                    emissions.append(target)
+                for duplicate in reversed(existing_positions[1:]):
+                    del details[duplicate]
+                start = _detail_position(details, StepStarted, step)
+                finish = _detail_position(details, StepFinished, step)
+                assert start is not None and finish is not None
+                continue
+
+            if isinstance(target, RLMReasoning):
+                insertion = start + 1
+            elif isinstance(target, RLMCode):
+                reasoning = _detail_position(details, RLMReasoning, step)
+                insertion = reasoning + 1 if reasoning is not None else start + 1
+            else:
+                insertion = finish
+            details.insert(insertion, target)
+            emissions.append(target)
+            start = _detail_position(details, StepStarted, step)
+            finish = _detail_position(details, StepFinished, step)
+            assert start is not None and finish is not None
+    return emissions
 
 
 def _terminal_status(exc: BaseException) -> TerminalStatus:
@@ -301,14 +367,12 @@ class RLMRunner:
 
                 prediction = task.result()
 
-                seen = {key for item in details if (key := _observation_key(item)) is not None}
-                for item in _trajectory_details(prediction, max_chars=context.options.max_output_chars):
-                    key = _observation_key(item)
-                    if key is not None and key in seen:
-                        continue
-                    if key is not None:
-                        seen.add(key)
-                    details.append(item)
+                trajectory = normalize_prediction_trajectory(prediction)
+                for item in _reconcile_trajectory(
+                    details,
+                    trajectory,
+                    max_chars=context.options.max_output_chars,
+                ):
                     yield recorder.record(item)
                 final_reasoning = getattr(prediction, "final_reasoning", None)
                 if isinstance(final_reasoning, str) and final_reasoning.strip():
