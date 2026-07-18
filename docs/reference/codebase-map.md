@@ -51,7 +51,7 @@ The authoritative route inventory and shapes are in
 | `src/tui/runner.ts` | active Run state, submission, cancellation |
 | `src/tui/projection.ts` | shared live and durable display projection |
 | `src/tui/store.ts` | conversation state and atomic Session hydration |
-| `src/tui/application.ts`, `screen.ts` | pi-tui lifecycle, editor/input, static native-scrollback layout |
+| `src/tui/application.ts`, `screen.ts`, `transcript.ts` | pi-tui lifecycle, editor/input, cached static native-scrollback layout, and mutable Run activity |
 | `src/tui/message-renderer.ts` | complete event, Markdown, result, Artifact, and code presentation |
 | `src/tui/commands.ts`, `command-presenter.ts`, `autocomplete.ts` | slash commands, overlays, status, and completion |
 | `src/generated/openapi.ts` | generated HTTP types owned by `make api-sync` |

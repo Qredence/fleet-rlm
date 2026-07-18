@@ -13,6 +13,7 @@ export class LiveTurnProjector {
   private readonly liveOccurrences = new Map<string, number>();
   private resultId: string | undefined;
   private textId: string | undefined;
+  private streamError: string | null = null;
 
   constructor(private readonly clock: Clock = Date.now) {}
 
@@ -20,12 +21,33 @@ export class LiveTurnProjector {
     switch (chunk.type) {
       case "start":
         this.runId = chunk.messageId;
-        return [];
+        return [
+          {
+            type: "run/start",
+            runId: chunk.messageId,
+            delivery: delivery(chunk.messageMetadata),
+          },
+        ];
       case "start-step":
+        return [{ type: "run/step-start" }];
       case "finish-step":
-      case "finish":
+        return [{ type: "run/step-finish" }];
+      case "finish": {
+        const metadata = data(chunk.messageMetadata);
+        return [
+          {
+            type: "run/finish",
+            finishReason: chunk.finishReason,
+            error: chunk.finishReason === "error" ? this.streamError : null,
+            durationMs: nullableNumber(metadata.durationMs ?? metadata.duration_ms),
+            checkpointVersion: nullableNumber(
+              metadata.checkpointVersion ?? metadata.checkpoint_version,
+            ),
+          },
+        ];
+      }
       case "abort":
-        return [];
+        return [{ type: "run/cancelled", reason: chunk.reason }];
       case "data-structured-result":
         return this.projectResult(chunk);
       case "reasoning-start": {
@@ -145,6 +167,7 @@ export class LiveTurnProjector {
           usage(this.liveId(chunk.type, chunk.id), this.runId, data(chunk.data), this.clock),
         );
       case "error":
+        this.streamError = chunk.errorText;
         return this.save({
           id: this.liveId("error"),
           kind: "error",
@@ -224,6 +247,15 @@ export class LiveTurnProjector {
     this.messages.set(message.id, message);
     return [{ type: "message/upsert", message }];
   }
+}
+
+function delivery(value: unknown): "live" | "replay" | null {
+  const metadata = data(value);
+  return metadata.delivery === "live" || metadata.delivery === "replay" ? metadata.delivery : null;
+}
+
+function nullableNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 export function projectDurableTurns(turns: FleetTurn[], clock: Clock = Date.now): StoreEvent[] {

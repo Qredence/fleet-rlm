@@ -116,4 +116,53 @@ describe("FleetTuiApplication", () => {
     await app.stop();
     await finished;
   });
+
+  it("keeps the editor writable during a Run and routes Ctrl+C to cancellation", async () => {
+    const terminal = new FakeTerminal();
+    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
+    const encoder = new TextEncoder();
+    client.streamTurn = vi.fn(({ signal }) =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(stream) {
+              stream.enqueue(
+                encoder.encode(
+                  'data: {"type":"start","messageId":"run-1","messageMetadata":{"delivery":"live"}}\n\n',
+                ),
+              );
+              signal?.addEventListener("abort", () =>
+                stream.error(new DOMException("aborted", "AbortError")),
+              );
+            },
+          }),
+          { headers: { "x-vercel-ai-ui-message-stream": "v1" } },
+        ),
+      ),
+    );
+    client.requestCancellation = vi.fn().mockResolvedValue({ status: "cancelled" });
+    const app = createFleetTui({
+      terminal,
+      client,
+      session,
+      resumed: false,
+      initialEvents: [],
+      queryColorScheme: false,
+    });
+
+    const finished = app.start();
+    for (const key of "first") terminal.send(key);
+    terminal.send("\r");
+    await vi.waitFor(() => expect(client.streamTurn).toHaveBeenCalled());
+
+    for (const key of "next draft") terminal.send(key);
+    await vi.waitFor(() => expect(terminal.writes.join("")).toContain("next draft"));
+
+    terminal.send("\x03");
+    await vi.waitFor(() => expect(client.requestCancellation).toHaveBeenCalledWith("run-1"));
+    await vi.waitFor(() => expect(terminal.progress.at(-1)).toBe(false));
+
+    terminal.send("\x04");
+    await finished;
+  });
 });

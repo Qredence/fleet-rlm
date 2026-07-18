@@ -60,8 +60,9 @@ describe("RunController", () => {
     streamController?.enqueue(
       encoder.encode(
         [
-          'data: {"type":"start","messageId":"run-streaming","messageMetadata":{}}\n\n',
+          'data: {"type":"start","messageId":"run-streaming","messageMetadata":{"delivery":"live"}}\n\n',
           'data: {"type":"data-status","data":{"phase":"execution","status":"running"},"transient":true}\n\n',
+          'data: {"type":"start-step"}\n\n',
           'data: {"type":"reasoning-start","id":"reasoning-run-streaming-1"}\n\n',
           'data: {"type":"reasoning-delta","id":"reasoning-run-streaming-1","delta":"inspect"}\n\n',
         ].join(""),
@@ -71,8 +72,11 @@ describe("RunController", () => {
     await vi.waitFor(() => {
       expect(store.getState().run).toMatchObject({
         phase: "running",
+        delivery: "live",
         statusPhase: "execution",
         statusDetail: "running",
+        startedSteps: 1,
+        completedSteps: 0,
       });
       expect(store.getState().messages.at(-1)).toMatchObject({
         kind: "reasoning",
@@ -85,6 +89,7 @@ describe("RunController", () => {
         [
           'data: {"type":"data-rlm-code","id":"code-run-streaming-1","data":{"step":1,"code":"print(1)"}}\n\n',
           'data: {"type":"data-rlm-output","id":"output-run-streaming-1","data":{"step":1,"output":"1"}}\n\n',
+          'data: {"type":"finish-step"}\n\n',
         ].join(""),
       ),
     );
@@ -97,16 +102,69 @@ describe("RunController", () => {
           .map((message) => message.kind),
       ).toEqual(["code", "output"]),
     );
+    expect(store.getState().run.completedSteps).toBe(1);
     expect(controller.isRunning()).toBe(true);
 
     streamController?.enqueue(
       encoder.encode(
-        ['data: {"type":"finish","finishReason":"stop"}\n\n', "data: [DONE]\n\n"].join(""),
+        [
+          'data: {"type":"finish","finishReason":"stop","messageMetadata":{"durationMs":1250,"checkpointVersion":4}}\n\n',
+          "data: [DONE]\n\n",
+        ].join(""),
       ),
     );
     streamController?.close();
 
-    await vi.waitFor(() => expect(store.getState().run.phase).toBe("completed"));
+    await vi.waitFor(() =>
+      expect(store.getState().run).toMatchObject({
+        phase: "completed",
+        outcome: "completed",
+        durationMs: 1250,
+        checkpointVersion: 4,
+      }),
+    );
+  });
+
+  it("marks a transport failure after stream open as interrupted without replaying", async () => {
+    const encoder = new TextEncoder();
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(stream) {
+            streamController = stream;
+          },
+        }),
+        { headers: { "x-vercel-ai-ui-message-stream": "v1" } },
+      ),
+    );
+    const { store, controller } = setup();
+
+    controller.start("do not replay me");
+    await vi.waitFor(() => expect(streamController).toBeDefined());
+    streamController?.enqueue(
+      encoder.encode(
+        'data: {"type":"start","messageId":"run-interrupted","messageMetadata":{"delivery":"live"}}\n\n',
+      ),
+    );
+    await vi.waitFor(() => expect(store.getState().run.id).toBe("run-interrupted"));
+    streamController?.error(new Error("connection lost"));
+
+    await vi.waitFor(() =>
+      expect(store.getState().run).toMatchObject({
+        id: "run-interrupted",
+        outcome: "interrupted",
+        error: "connection lost",
+      }),
+    );
+    expect(store.getState().messages.at(-1)).toMatchObject({
+      kind: "error",
+      text: expect.stringContaining("/resume s"),
+    });
+    expect((store.getState().messages.at(-1) as Message & { text: string }).text).toContain(
+      "prompt was not replayed",
+    );
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
   it("projects a completed turn and clears its active controller", async () => {

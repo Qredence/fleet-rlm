@@ -1,0 +1,92 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { ConversationStore, type Message } from "./store.js";
+import { TranscriptComponent } from "./transcript.js";
+
+function message(id: string, text: string): Message {
+  return { id, kind: "text", role: "assistant", text, streaming: false, ts: 1 };
+}
+
+describe("TranscriptComponent", () => {
+  it("renders a caller-controlled Session title as one terminal-safe line", () => {
+    const store = new ConversationStore();
+    store.dispatch({
+      type: "session/init",
+      session: {
+        id: "session-1",
+        title: "Unsafe\nTitle\x1b]52;c;secret\x07",
+        status: "active",
+        resumed: true,
+      },
+    });
+
+    const header = new TranscriptComponent(store).render(100)[1];
+
+    expect(header).toContain("Unsafe Title ]52;c;secret");
+    expect(header).not.toContain("\n");
+    expect(header).not.toContain("\x1b]52");
+    expect(header).not.toContain("\x07");
+  });
+
+  it("reuses unchanged historical rendering and invalidates changed messages by width", () => {
+    const store = new ConversationStore();
+    const render = vi.fn((value: Message, width: number) => [`${value.id}:${width}`]);
+    store.dispatch({
+      type: "session/init",
+      session: { id: "session-1", title: "Session", status: "active", resumed: false },
+    });
+    store.dispatch({ type: "message/upsert", message: message("one", "one") });
+    store.dispatch({ type: "message/upsert", message: message("two", "two") });
+    const transcript = new TranscriptComponent(store, render);
+
+    transcript.render(80);
+    for (let index = 0; index < 300; index += 1) {
+      store.dispatch({ type: "run/status", phase: "execution", detail: `working-${index}` });
+      transcript.render(80);
+    }
+    expect(render).toHaveBeenCalledTimes(2);
+
+    store.dispatch({ type: "message/upsert", message: message("two", "updated") });
+    transcript.render(80);
+    expect(render).toHaveBeenCalledTimes(3);
+
+    transcript.render(100);
+    expect(render).toHaveBeenCalledTimes(5);
+  });
+
+  it("rerenders active streaming text and running tools", () => {
+    const store = new ConversationStore();
+    const render = vi.fn((value: Message) => [value.id]);
+    store.dispatch({
+      type: "message/upsert",
+      message: {
+        id: "text",
+        kind: "text",
+        role: "assistant",
+        text: "live",
+        streaming: true,
+        ts: 1,
+      },
+    });
+    store.dispatch({
+      type: "message/upsert",
+      message: {
+        id: "tool",
+        kind: "tool",
+        runId: "run-1",
+        toolCallId: "call-1",
+        name: "read",
+        input: {},
+        startedAt: 1,
+        status: "running",
+        ts: 1,
+      },
+    });
+    const transcript = new TranscriptComponent(store, render);
+
+    transcript.render(80);
+    transcript.render(80);
+
+    expect(render).toHaveBeenCalledTimes(4);
+  });
+});

@@ -103,12 +103,17 @@ export type Run = {
   phase: Phase;
   statusPhase: string | null;
   statusDetail: string | null;
-  model: string | null;
+  delivery: "live" | "replay" | null;
+  outcome: "completed" | "failed" | "cancelled" | "interrupted" | null;
+  abortReason: string | null;
   startedAt: number | null;
   endedAt: number | null;
   finishReason: string | null;
   error: string | null;
+  durationMs: number | null;
+  checkpointVersion: number | null;
   toolCount: number;
+  startedSteps: number;
   completedSteps: number;
 };
 
@@ -148,12 +153,17 @@ function initialState(): State {
       phase: "idle",
       statusPhase: null,
       statusDetail: null,
-      model: null,
+      delivery: null,
+      outcome: null,
+      abortReason: null,
       startedAt: null,
       endedAt: null,
       finishReason: null,
       error: null,
+      durationMs: null,
+      checkpointVersion: null,
       toolCount: 0,
+      startedSteps: 0,
       completedSteps: 0,
     },
     pendingSkillSelections: [],
@@ -164,11 +174,20 @@ type Event =
   | { type: "session/init"; session: Session }
   | { type: "session/hydrate"; session: Session; events: Event[] }
   | { type: "user/submit"; text: string }
-  | { type: "run/start"; runId: string; model: string | null }
+  | { type: "run/start"; runId: string; delivery: "live" | "replay" | null }
+  | { type: "run/step-start" }
+  | { type: "run/step-finish" }
   | { type: "run/status"; phase: string; detail: string }
-  | { type: "run/finish"; finishReason: string | null; error: string | null }
+  | {
+      type: "run/finish";
+      finishReason: string | null;
+      error: string | null;
+      durationMs: number | null;
+      checkpointVersion: number | null;
+    }
   | { type: "run/cancelling" }
-  | { type: "run/cancelled" }
+  | { type: "run/cancelled"; reason: string }
+  | { type: "run/interrupted"; error: string }
   | { type: "message/upsert"; message: Message }
   | { type: "message/patch"; id: string; patch: Partial<Message> }
   | { type: "skill-selection/pin"; selection: PendingSkillSelection }
@@ -229,11 +248,13 @@ function reduce(state: State, event: Event): State {
   switch (event.type) {
     case "session/init":
       return { ...state, session: event.session };
-    case "session/hydrate":
-      return event.events.reduce<State>(reduce, {
+    case "session/hydrate": {
+      const hydrated = event.events.reduce<State>(reduce, {
         ...initialState(),
         session: event.session,
       });
+      return { ...hydrated, run: initialState().run };
+    }
     case "user/submit": {
       const userMessage: Message = {
         id: newMessageId("user"),
@@ -246,12 +267,7 @@ function reduce(state: State, event: Event): State {
       return {
         ...state,
         messages: [...state.messages, userMessage],
-        run: {
-          ...state.run,
-          phase: "submitting",
-          statusPhase: null,
-          statusDetail: null,
-        },
+        run: { ...initialState().run, phase: "submitting", startedAt: Date.now() },
       };
     }
     case "run/start":
@@ -263,14 +279,29 @@ function reduce(state: State, event: Event): State {
           phase: "running",
           statusPhase: null,
           statusDetail: null,
-          model: event.model ?? state.run.model,
+          delivery: event.delivery,
+          outcome: null,
+          abortReason: null,
           startedAt: Date.now(),
           endedAt: null,
           finishReason: null,
           error: null,
+          durationMs: null,
+          checkpointVersion: null,
           toolCount: 0,
+          startedSteps: 0,
           completedSteps: 0,
         },
+      };
+    case "run/step-start":
+      return {
+        ...state,
+        run: { ...state.run, startedSteps: state.run.startedSteps + 1 },
+      };
+    case "run/step-finish":
+      return {
+        ...state,
+        run: { ...state.run, completedSteps: state.run.completedSteps + 1 },
       };
     case "run/status":
       return {
@@ -287,11 +318,14 @@ function reduce(state: State, event: Event): State {
         run: {
           ...state.run,
           phase: event.error ? "error" : "completed",
+          outcome: event.error ? "failed" : "completed",
           statusPhase: null,
           statusDetail: null,
           endedAt: Date.now(),
           finishReason: event.finishReason,
           error: event.error,
+          durationMs: event.durationMs,
+          checkpointVersion: event.checkpointVersion,
         },
       };
     case "run/cancelling":
@@ -299,16 +333,34 @@ function reduce(state: State, event: Event): State {
     case "run/cancelled":
       return {
         ...state,
-        run: { ...state.run, phase: "idle", statusPhase: null, statusDetail: null },
+        run: {
+          ...state.run,
+          phase: "idle",
+          outcome: "cancelled",
+          abortReason: event.reason,
+          statusPhase: null,
+          statusDetail: null,
+          endedAt: Date.now(),
+        },
+      };
+    case "run/interrupted":
+      return {
+        ...state,
+        run: {
+          ...state.run,
+          phase: "error",
+          outcome: "interrupted",
+          error: event.error,
+          statusPhase: null,
+          statusDetail: null,
+          endedAt: Date.now(),
+        },
       };
     case "message/upsert": {
       const existing = state.messages.findIndex((m) => m.id === event.message.id);
       let run = state.run;
       if (existing < 0 && event.message.kind === "tool") {
         run = { ...run, toolCount: run.toolCount + 1 };
-      }
-      if (existing < 0 && event.message.kind === "output") {
-        run = { ...run, completedSteps: run.completedSteps + 1 };
       }
       if (existing >= 0) {
         const messages = state.messages.slice();
@@ -381,7 +433,7 @@ function reduce(state: State, event: Event): State {
       return {
         ...state,
         messages: [],
-        run: { ...state.run, phase: "idle", statusPhase: null, statusDetail: null },
+        run: initialState().run,
       };
     case "reset":
       return initialState();

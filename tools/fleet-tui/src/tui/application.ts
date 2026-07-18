@@ -1,4 +1,4 @@
-import { Editor, ProcessTerminal, TUI, matchesKey, type Terminal } from "@earendil-works/pi-tui";
+import { Editor, ProcessTerminal, TUI, type Terminal } from "@earendil-works/pi-tui";
 
 import type { FleetApiClient, FleetSession } from "../fleet-api-client.js";
 import { FleetAutocompleteProvider } from "./autocomplete.js";
@@ -8,6 +8,7 @@ import { RunController } from "./runner.js";
 import { FleetScreen, isBusy } from "./screen.js";
 import { ConversationStore, type StoreEvent } from "./store.js";
 import { editorTheme, setTerminalColorScheme } from "./theme.js";
+import { fleetKeybindings } from "./keybindings.js";
 
 export type FleetTuiApplication = {
   start(): Promise<void>;
@@ -33,8 +34,8 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
   private readonly store = new ConversationStore();
   private readonly controller: RunController;
   private readonly editor: Editor;
+  private readonly screen: FleetScreen;
   private unsubscribe?: () => void;
-  private activityTimer?: NodeJS.Timeout;
   private started = false;
   private stopping?: Promise<void>;
   private resolveFinished!: () => void;
@@ -58,7 +59,8 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
       },
       events: options.initialEvents,
     });
-    this.ui.addChild(new FleetScreen(this.store, this.editor, this.terminal));
+    this.screen = new FleetScreen(this.store, this.editor, this.terminal, this.ui);
+    this.ui.addChild(this.screen);
     this.configureEditor();
   }
 
@@ -67,16 +69,20 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
     this.started = true;
     this.unsubscribe = this.store.subscribe(() => this.onStateChange());
     this.ui.addInputListener((data) => {
-      if (matchesKey(data, "ctrl+d")) {
+      if (fleetKeybindings.matches(data, "fleet.exit")) {
         void this.stop();
         return { consume: true };
       }
-      if (matchesKey(data, "ctrl+c")) {
+      if (fleetKeybindings.matches(data, "fleet.cancel")) {
         if (isBusy(this.store.getState().run)) {
           this.controller.cancel();
         } else {
           void this.stop();
         }
+        return { consume: true };
+      }
+      if (fleetKeybindings.matches(data, "fleet.suspend")) {
+        this.suspend();
         return { consume: true };
       }
       return undefined;
@@ -102,7 +108,7 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
         await this.controller.cancelAndWait(1_000);
       }
       this.unsubscribe?.();
-      if (this.activityTimer) clearInterval(this.activityTimer);
+      this.screen.dispose();
       this.terminal.setProgress(false);
       this.ui.stop();
       await this.terminal.drainInput(250, 25).catch(() => undefined);
@@ -145,6 +151,17 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
     };
   }
 
+  private suspend(): void {
+    if (this.options.terminal) return;
+    this.ui.stop();
+    process.once("SIGCONT", () => {
+      this.ui.start();
+      this.ui.setFocus(this.editor);
+      this.ui.requestRender(true);
+    });
+    process.kill(process.pid, "SIGTSTP");
+  }
+
   private commandContext(): CommandContext {
     return {
       store: this.store,
@@ -161,12 +178,6 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
     const busy = isBusy(this.store.getState().run);
     this.editor.disableSubmit = busy;
     this.terminal.setProgress(busy);
-    if (busy && !this.activityTimer) {
-      this.activityTimer = setInterval(() => this.ui.requestRender(), 250);
-    } else if (!busy && this.activityTimer) {
-      clearInterval(this.activityTimer);
-      this.activityTimer = undefined;
-    }
     this.ui.requestRender();
   }
 }

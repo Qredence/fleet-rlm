@@ -27,19 +27,90 @@ describe("ConversationStore", () => {
     }
   });
 
+  it("resets prior Run metrics when a new Turn starts preparing", () => {
+    const store = makeStore();
+    store.dispatch({ type: "run/start", runId: "old", delivery: "replay" });
+    store.dispatch({ type: "run/step-start" });
+    store.dispatch({ type: "run/step-finish" });
+    store.dispatch({
+      type: "run/finish",
+      finishReason: "stop",
+      error: null,
+      durationMs: 10,
+      checkpointVersion: 2,
+    });
+
+    store.dispatch({ type: "user/submit", text: "next" });
+
+    expect(store.getState().run).toMatchObject({
+      id: null,
+      phase: "submitting",
+      delivery: null,
+      outcome: null,
+      startedSteps: 0,
+      completedSteps: 0,
+      durationMs: null,
+      checkpointVersion: null,
+    });
+  });
+
   it("marks run finished with the supplied finish reason", () => {
     const store = makeStore();
-    store.dispatch({ type: "run/start", runId: "r-1", model: "openai/gpt" });
-    store.dispatch({ type: "run/finish", finishReason: "stop", error: null });
+    store.dispatch({ type: "run/start", runId: "r-1", delivery: "live" });
+    store.dispatch({
+      type: "run/finish",
+      finishReason: "stop",
+      error: null,
+      durationMs: 1200,
+      checkpointVersion: 3,
+    });
     const state = store.getState();
     expect(state.run.phase).toBe("completed");
+    expect(state.run.outcome).toBe("completed");
+    expect(state.run.delivery).toBe("live");
     expect(state.run.finishReason).toBe("stop");
     expect(state.run.error).toBeNull();
+    expect(state.run.durationMs).toBe(1200);
+    expect(state.run.checkpointVersion).toBe(3);
+  });
+
+  it("counts steps only from the SSE step lifecycle", () => {
+    const store = makeStore();
+    store.dispatch({ type: "run/start", runId: "r-1", delivery: "live" });
+    store.dispatch({ type: "run/step-start" });
+    store.dispatch({
+      type: "message/upsert",
+      message: { id: "output", kind: "output", runId: "r-1", step: 1, output: "1", ts: 1 },
+    });
+
+    expect(store.getState().run).toMatchObject({ startedSteps: 1, completedSteps: 0 });
+
+    store.dispatch({ type: "run/step-finish" });
+    expect(store.getState().run).toMatchObject({ startedSteps: 1, completedSteps: 1 });
+  });
+
+  it("distinguishes cancellation and transport interruption", () => {
+    const store = makeStore();
+    store.dispatch({ type: "run/start", runId: "r-1", delivery: "replay" });
+    store.dispatch({ type: "run/cancelled", reason: "Cancelled by operator" });
+    expect(store.getState().run).toMatchObject({
+      phase: "idle",
+      outcome: "cancelled",
+      delivery: "replay",
+      abortReason: "Cancelled by operator",
+    });
+
+    store.dispatch({ type: "run/interrupted", error: "Connection lost" });
+    expect(store.getState().run).toMatchObject({
+      phase: "error",
+      outcome: "interrupted",
+      error: "Connection lost",
+    });
   });
 
   it("keeps transient status in Run state and clears it on terminal", () => {
     const store = makeStore();
-    store.dispatch({ type: "run/start", runId: "r-1", model: null });
+    store.dispatch({ type: "run/start", runId: "r-1", delivery: "live" });
     store.dispatch({ type: "run/status", phase: "execution", detail: "running" });
 
     expect(store.getState().run).toMatchObject({
@@ -48,7 +119,13 @@ describe("ConversationStore", () => {
     });
     expect(store.getState().messages).toEqual([]);
 
-    store.dispatch({ type: "run/finish", finishReason: "stop", error: null });
+    store.dispatch({
+      type: "run/finish",
+      finishReason: "stop",
+      error: null,
+      durationMs: null,
+      checkpointVersion: null,
+    });
 
     expect(store.getState().run.statusPhase).toBeNull();
     expect(store.getState().run.statusDetail).toBeNull();
@@ -56,8 +133,14 @@ describe("ConversationStore", () => {
 
   it("flags run as error when finish carries an error", () => {
     const store = makeStore();
-    store.dispatch({ type: "run/start", runId: "r-1", model: null });
-    store.dispatch({ type: "run/finish", finishReason: "error", error: "boom" });
+    store.dispatch({ type: "run/start", runId: "r-1", delivery: "live" });
+    store.dispatch({
+      type: "run/finish",
+      finishReason: "error",
+      error: "boom",
+      durationMs: null,
+      checkpointVersion: null,
+    });
     expect(store.getState().run.phase).toBe("error");
     expect(store.getState().run.error).toBe("boom");
   });
@@ -82,7 +165,7 @@ describe("ConversationStore", () => {
       session: { id: "old", title: "Old", status: "active", resumed: false },
     });
     store.dispatch({ type: "user/submit", text: "old message" });
-    store.dispatch({ type: "run/start", runId: "old-run", model: null });
+    store.dispatch({ type: "run/start", runId: "old-run", delivery: "live" });
     store.dispatch({ type: "run/status", phase: "execution", detail: "running" });
     const message = {
       id: "new:0",
@@ -104,6 +187,77 @@ describe("ConversationStore", () => {
     expect(store.getState().run.phase).toBe("idle");
     expect(store.getState().run.statusPhase).toBeNull();
     expect(store.getState().run.statusDetail).toBeNull();
+  });
+
+  it("does not derive transient Run metrics while hydrating durable messages", () => {
+    const store = makeStore();
+    store.dispatch({
+      type: "session/hydrate",
+      session: { id: "session-1", title: "Session", status: "active", resumed: true },
+      events: [
+        {
+          type: "message/upsert",
+          message: {
+            id: "tool",
+            kind: "tool",
+            runId: "run-1",
+            toolCallId: "call-1",
+            name: "read",
+            input: {},
+            startedAt: 1,
+            endedAt: 2,
+            status: "success",
+            output: "ok",
+            ts: 1,
+          },
+        },
+      ],
+    });
+
+    expect(store.getState().messages).toHaveLength(1);
+    expect(store.getState().run).toMatchObject({ phase: "idle", toolCount: 0, outcome: null });
+  });
+
+  it("clears local messages and Run metadata without changing Session or pending Skills", () => {
+    const store = makeStore();
+    store.dispatch({
+      type: "session/init",
+      session: { id: "session-1", title: "Session", status: "active", resumed: false },
+    });
+    store.dispatch({
+      type: "skill-selection/pin",
+      selection: { id: "skill-1", expectedVersion: "1.0.0", displayName: "Skill" },
+    });
+    store.dispatch({ type: "user/submit", text: "hello" });
+    store.dispatch({ type: "run/start", runId: "run-1", delivery: "replay" });
+    store.dispatch({ type: "run/step-start" });
+    store.dispatch({ type: "run/step-finish" });
+    store.dispatch({
+      type: "run/finish",
+      finishReason: "stop",
+      error: null,
+      durationMs: 20,
+      checkpointVersion: 2,
+    });
+
+    store.dispatch({ type: "clear" });
+
+    expect(store.getState()).toMatchObject({
+      session: { id: "session-1" },
+      messages: [],
+      pendingSkillSelections: [{ id: "skill-1" }],
+      run: {
+        id: null,
+        phase: "idle",
+        delivery: null,
+        outcome: null,
+        startedSteps: 0,
+        completedSteps: 0,
+        toolCount: 0,
+        durationMs: null,
+        checkpointVersion: null,
+      },
+    });
   });
 
   it("pins at most four unique Skills and updates an existing pin in place", () => {
@@ -203,7 +357,7 @@ describe("ConversationStore", () => {
     expect(state.run.toolCount).toBe(1);
   });
 
-  it("retains each operator timeline variant and counts outputs once", () => {
+  it("retains each operator timeline variant without inferring step metrics", () => {
     const store = makeStore();
     const messages = [
       { id: "reason", kind: "reasoning", runId: "r", step: 1, text: "think", ts: 1 },
@@ -229,7 +383,7 @@ describe("ConversationStore", () => {
       "output",
       "result",
     ]);
-    expect(store.getState().run.completedSteps).toBe(1);
+    expect(store.getState().run.completedSteps).toBe(0);
   });
 
   it("replaces a same-ID trajectory correction without increasing output metrics", () => {
@@ -251,7 +405,7 @@ describe("ConversationStore", () => {
     });
 
     expect(store.getState().messages).toMatchObject([{ id: "output-r-1", output: "canonical" }]);
-    expect(store.getState().run.completedSteps).toBe(1);
+    expect(store.getState().run.completedSteps).toBe(0);
   });
 
   it("inserts late trajectory reasoning before its already-streamed step details", () => {

@@ -43,6 +43,59 @@ describe("terminal projection", () => {
     ).toEqual([]);
   });
 
+  it("projects the existing SSE Run lifecycle into explicit store events", () => {
+    const live = new LiveTurnProjector(clock);
+
+    expect(
+      live.push({
+        type: "start",
+        messageId: "run-1",
+        messageMetadata: { delivery: "replay" },
+      }),
+    ).toEqual([{ type: "run/start", runId: "run-1", delivery: "replay" }]);
+    expect(live.push({ type: "start-step" })).toEqual([{ type: "run/step-start" }]);
+    expect(live.push({ type: "finish-step" })).toEqual([{ type: "run/step-finish" }]);
+    expect(
+      live.push({
+        type: "finish",
+        finishReason: "stop",
+        messageMetadata: { durationMs: 1250, checkpointVersion: 7 },
+      }),
+    ).toEqual([
+      {
+        type: "run/finish",
+        finishReason: "stop",
+        error: null,
+        durationMs: 1250,
+        checkpointVersion: 7,
+      },
+    ]);
+  });
+
+  it("preserves backend failure and cancellation terminal detail", () => {
+    const failed = new LiveTurnProjector(clock);
+    failed.push({ type: "start", messageId: "run-1", messageMetadata: {} });
+
+    const errorEvents = failed.push({ type: "error", errorText: "Run failed safely" });
+    expect(errorEvents).toMatchObject([
+      { type: "message/upsert", message: { kind: "error", text: "Run failed safely" } },
+    ]);
+    expect(failed.push({ type: "finish", finishReason: "error" })).toEqual([
+      {
+        type: "run/finish",
+        finishReason: "error",
+        error: "Run failed safely",
+        durationMs: null,
+        checkpointVersion: null,
+      },
+    ]);
+
+    const cancelled = new LiveTurnProjector(clock);
+    expect(cancelled.push({ type: "abort", reason: "Cancelled by operator" })).toEqual([
+      { type: "run/cancelled", reason: "Cancelled by operator" },
+    ]);
+  });
+
   it("renders a default text-only Prediction identically live and after hydration", () => {
     const live = new LiveTurnProjector(clock);
     const liveMessages = finalMessages(

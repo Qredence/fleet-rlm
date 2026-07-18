@@ -66,7 +66,6 @@ export class RunController {
       const session = this.store.getState().session;
       if (!session) throw new Error("no active session");
       const projector = new LiveTurnProjector(Date.now);
-      let streamError: string | null = null;
 
       for await (const chunk of streamFleetTurn({
         client: this.client,
@@ -88,30 +87,34 @@ export class RunController {
         if (this.active !== execution) {
           continue;
         }
-        if (chunk.type === "start") {
-          this.store.dispatch({ type: "run/start", runId: chunk.messageId, model: null });
-        }
         for (const event of projector.push(chunk)) this.store.dispatch(event);
-        if (chunk.type === "error") streamError = chunk.errorText;
-        if (chunk.type === "finish") {
-          this.store.dispatch({
-            type: "run/finish",
-            finishReason: chunk.finishReason,
-            error: chunk.finishReason === "error" ? streamError : null,
-          });
-        } else if (chunk.type === "abort") {
-          this.store.dispatch({ type: "run/cancelled" });
-        }
       }
     } catch (error) {
       if (controller.signal.aborted) {
         await this.ensureCancellation(execution);
-        if (this.active === execution) this.store.dispatch({ type: "run/cancelled" });
+        if (this.active === execution && this.store.getState().run.outcome !== "cancelled") {
+          this.store.dispatch({ type: "run/cancelled", reason: "Cancelled by operator" });
+        }
       } else if (this.active === execution) {
         const message = errorMessage(error);
-        if (!streamOpened) options.onPreStreamFailure?.(text);
-        this.store.dispatch({ type: "run/finish", finishReason: "error", error: message });
-        this.appendError(message);
+        if (!streamOpened) {
+          options.onPreStreamFailure?.(text);
+          this.store.dispatch({
+            type: "run/finish",
+            finishReason: "error",
+            error: message,
+            durationMs: null,
+            checkpointVersion: null,
+          });
+        } else {
+          this.store.dispatch({ type: "run/interrupted", error: message });
+        }
+        const sessionId = this.store.getState().session?.id;
+        const recovery =
+          streamOpened && sessionId
+            ? `\n\nStream interrupted. Reload committed history with /resume ${sessionId}. The prompt was not replayed.`
+            : "";
+        this.appendError(`${message}${recovery}`);
       }
     } finally {
       if (this.active === execution) {

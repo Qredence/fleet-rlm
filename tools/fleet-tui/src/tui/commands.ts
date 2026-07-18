@@ -103,12 +103,15 @@ registerCommand({
 
 registerCommand({
   name: "clear",
-  description: "Clear the visible conversation",
+  description: "Reset the local view without changing durable Session history",
   usage: "/clear",
   handler: (_args, ctx) => {
     ctx.store.dispatch({ type: "clear" });
     if (ctx.store.getState().session) {
-      appendSystem(ctx.store, "Conversation cleared. Session is still active.");
+      appendSystem(
+        ctx.store,
+        "Local view reset. Durable Session history is unchanged and returns on resume.",
+      );
     }
   },
 });
@@ -259,8 +262,8 @@ registerCommand({
     const lines = [
       `Session:    ${state.session?.id ?? "(none)"} (${state.session?.status ?? "—"})`,
       `Run:        ${state.run.id ?? "(none)"}  phase=${state.run.phase}  finish=${state.run.finishReason ?? "—"}`,
-      `Model:      ${state.run.model ?? "—"}`,
-      `Tools:      ${state.run.toolCount}    Steps: ${state.run.completedSteps}`,
+      `Delivery:   ${state.run.delivery ?? "—"}  outcome=${state.run.outcome ?? "—"}`,
+      `Tools:      ${state.run.toolCount}    Steps: ${state.run.completedSteps}/${state.run.startedSteps}`,
       `Skills:     ${formatPendingSkills(state.pendingSkillSelections)}`,
       `Messages:   ${state.messages.length}`,
     ];

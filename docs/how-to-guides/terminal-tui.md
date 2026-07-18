@@ -56,19 +56,32 @@ transcript viewport. Use the terminal's wheel, trackpad, or
 Resize, hydration, and clear may replay the screen and return to the live bottom.
 
 During a Turn, the activity rail shows phase, safe backend detail, elapsed time,
-step/tool counts, and `Ctrl+C` cancellation. The footer shows the current model
-when reported, token usage, completed steps, and tool count. The backend
-currently may leave the model display as `—` when the stream does not identify
-it.
+SSE-derived started/completed step counts, Tool count, and `Ctrl+C`
+cancellation. `PREPARING` means the client is waiting for Fleet's
+prepare-before-headers Turn opening; after the stream starts, the rail uses the
+backend's transient status phase and safe detail. Code and interpreter output
+remain evidence and never infer step completion.
+
+The editor remains writable while a Turn runs, but Enter cannot submit a second
+Turn until the active one settles. The footer labels Session token totals and
+current/latest Turn step, Tool, replay, and outcome values explicitly. A stream
+transport failure after headers is shown as `interrupted`; Fleet never
+resubmits the prompt automatically. Use `/resume <current-session-id>` to reload
+any history that the backend committed after an interruption.
 
 On resume, the store atomically replaces its state with persisted Turn text and
 Fleet trajectory parts. Live and durable data use the same projection rules.
+Transient status, delivery, cancellation reason, and latest Run outcome remain
+operator state and are not inserted into durable transcript messages.
 
 ## Commands and Skills
 
 Use `/help` for the current slash-command list. Important commands include
 `/sessions`, `/resume`, `/status`, `/cancel`, `/clear`, `/skills`, `/skill`, and
 `/exit`.
+
+`/clear` resets only the current local presentation. It does not delete or
+rewrite durable Session History; resuming the Session restores committed Turns.
 
 `/skills` lists discoverable Skill Cards. `/skill <name-or-id>` pins the current
 discoverable version for the next accepted Turn;

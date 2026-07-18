@@ -1,7 +1,8 @@
 import {
+  decodeKittyPrintable,
   SelectList,
-  Text,
   matchesKey,
+  truncateToWidth,
   type Component,
   type Editor,
   type TUI,
@@ -25,28 +26,27 @@ export class PiCommandPresenter implements CommandPresenter {
   };
 
   showHelp(commands: CommandSpec[]): void {
-    const text = new Text(
-      `Fleet commands\n\n${commands.map((command) => `${command.usage}  ${command.description}`).join("\n")}\n\nEscape closes`,
-      1,
-      1,
+    const list = new SelectList(
+      commands.map((command) => ({
+        value: command.usage.split(" ", 1)[0] ?? command.usage,
+        label: command.usage,
+        description: command.description,
+      })),
+      12,
+      selectTheme,
     );
-    let close = (_data: string) => {};
-    const component: Component = {
-      render: (width) => text.render(width),
-      invalidate: () => text.invalidate(),
-      handleInput: (data) => close(data),
-    };
-    const handle = this.ui.showOverlay(component, {
+    const handle = this.ui.showOverlay(list, {
       width: "80%",
       maxHeight: "80%",
       anchor: "center",
     });
-    close = (data: string) => {
-      if (data === "\x1b" || data === "q") {
-        handle.hide();
-        this.restoreFocus();
-      }
+    const finish = (command?: string) => {
+      handle.hide();
+      if (command) this.editor.setText(`${command} `);
+      this.restoreFocus();
     };
+    list.onSelect = (item) => finish(item.value);
+    list.onCancel = () => finish();
   }
 
   async chooseSession(sessions: FleetSession[]): Promise<string | null> {
@@ -112,8 +112,9 @@ export class PiCommandPresenter implements CommandPresenter {
   }
 }
 
-class SkillSelector implements Component {
+export class SkillSelector implements Component {
   private index = 0;
+  private query = "";
   private selected: PendingSkillSelection[];
   constructor(
     private readonly skills: FleetSkillCard[],
@@ -123,24 +124,39 @@ class SkillSelector implements Component {
     this.selected = [...current];
   }
   invalidate(): void {}
-  render(): string[] {
+  render(width: number): string[] {
+    const safeWidth = Math.max(1, width);
+    const filtered = this.filteredSkills();
+    this.index = Math.min(this.index, Math.max(0, filtered.length - 1));
+    const maxVisible = 10;
+    const start = Math.max(0, Math.min(this.index - maxVisible + 1, filtered.length - maxVisible));
+    const visible = filtered.slice(start, start + maxVisible);
     return [
       "Skills for the next Turn (Space toggle · Enter apply · Escape cancel)",
+      `Filter: ${this.query || "(type to search)"}`,
       "",
-      ...this.skills.map((skill, index) => {
+      ...(visible.length > 0
+        ? visible
+        : [{ id: "", name: "No matching Skills", version: "", description: "" }]
+      ).map((skill, offset) => {
+        const index = start + offset;
         const checked = this.selected.some((item) => item.id === skill.id) ? "x" : " ";
-        return `${index === this.index ? ">" : " "} [${checked}] ${skill.name}@${skill.version}  ${skill.description}`;
+        const version = skill.version ? `@${skill.version}` : "";
+        return `${index === this.index ? ">" : " "} [${checked}] ${skill.name}${version}  ${skill.description}`;
       }),
       "",
-      `${this.selected.length}/4 selected`,
-    ];
+      `${this.selected.length}/4 selected · ${filtered.length} shown${filtered.length > maxVisible ? ` · rows ${start + 1}-${Math.min(start + maxVisible, filtered.length)}` : ""}`,
+    ].map((line) => truncateToWidth(line, safeWidth, "…"));
   }
   handleInput(data: string): void {
+    const filtered = this.filteredSkills();
     if (matchesKey(data, "up")) this.index = Math.max(0, this.index - 1);
-    else if (matchesKey(data, "down"))
-      this.index = Math.min(this.skills.length - 1, this.index + 1);
+    else if (matchesKey(data, "down")) this.index = Math.min(filtered.length - 1, this.index + 1);
+    else if (matchesKey(data, "pageUp")) this.index = Math.max(0, this.index - 10);
+    else if (matchesKey(data, "pageDown"))
+      this.index = Math.min(filtered.length - 1, this.index + 10);
     else if (data === " ") {
-      const skill = this.skills[this.index];
+      const skill = filtered[this.index];
       if (!skill) return;
       const exists = this.selected.some((item) => item.id === skill.id);
       if (exists) this.selected = this.selected.filter((item) => item.id !== skill.id);
@@ -150,7 +166,39 @@ class SkillSelector implements Component {
           expectedVersion: skill.version,
           displayName: skill.name,
         });
+    } else if (matchesKey(data, "backspace")) {
+      const graphemes = Array.from(
+        new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(this.query),
+        ({ segment }) => segment,
+      );
+      this.query = graphemes.slice(0, -1).join("");
+      this.index = 0;
     } else if (matchesKey(data, "enter")) this.finish(this.selected);
     else if (matchesKey(data, "escape")) this.finish(null);
+    else {
+      const printable = decodeKittyPrintable(data) ?? (isPrintableInput(data) ? data : undefined);
+      if (printable) {
+        this.query += printable;
+        this.index = 0;
+      }
+    }
   }
+
+  private filteredSkills(): FleetSkillCard[] {
+    const query = this.query.trim().toLocaleLowerCase();
+    if (!query) return this.skills;
+    return this.skills.filter((skill) =>
+      `${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query),
+    );
+  }
+}
+
+function isPrintableInput(value: string): boolean {
+  return (
+    value.length > 0 &&
+    Array.from(value).every((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint >= 0x20 && codePoint !== 0x7f;
+    })
+  );
 }
