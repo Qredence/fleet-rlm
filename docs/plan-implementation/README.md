@@ -1,17 +1,18 @@
-# Implementation Plans
+# Implementation Plan Policy
 
-This directory is the tracked entry point for current implementation plans.
-Completed migration-era dossiers are retained in Git history rather than in the
-active documentation tree.
+No tracked implementation plan is currently active.
 
-Long-lived architecture and operating contracts belong in the active guides:
+Use this directory only for authorized unfinished work whose scope benefits from
+a durable repository plan. Current architecture and operating contracts belong
+in the maintained guides:
 
-- [Current architecture](../architecture.md)
+- [Architecture](../architecture.md)
 - [Codebase map](../reference/codebase-map.md)
 - [Testing strategy](../how-to-guides/testing-strategy.md)
 - [Agent harness](../agent-harness/README.md)
-- [Fleet CLI supervision and Daytona diagnostics](fleet-cli-supervision-daytona-diagnostics.md)
 
-Add a plan here only while it describes authorized, unfinished work. When the
-work is complete, move durable decisions into the appropriate active document
-and remove the obsolete plan.
+When work completes, move lasting decisions into the owning guide or ADR and
+remove the plan. Local exploratory plans and receipts belong under ignored
+`.scratch/<effort>/`; completed local evidence may move to `.scratch/archive/`.
+Neither local surface overrides current code, tests, generated contracts, or
+tracked documentation.

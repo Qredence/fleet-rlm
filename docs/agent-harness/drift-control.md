@@ -1,35 +1,41 @@
 # Drift Control
 
-## Primary Commands
+## Primary commands
 
 ```bash
-# from repo root
 make check
-make check-docs
+make test-deno
 make check-release
-make api-check
+make check-security
+make build-release
+git diff --check
 ```
 
-- `make check` is the backend format, lint, type, test, OpenAPI, and structural
-  gate.
-- `make check-docs` validates active documentation and harness structure.
-- `make check-release` validates backend metadata, packaging, and agent guides.
-- `make api-check` checks the root backend contract.
+- `make check` runs Python lint/format/type checks, the isolated non-live test
+  suites, OpenAPI/TUI type drift, all pi-tui checks, codebase boundaries, and
+  documentation/harness checks.
+- `make test-deno` runs the deterministic real Deno/Pyodide contracts.
+- `make check-release` validates hygiene, package metadata, and `AGENTS.md`.
+- `make check-security` runs the configured dependency audit and Bandit lane.
+- `make build-release` builds and validates the Python distributions.
+- `git diff --check` is a separate required worktree check; it is not part of
+  `make check`.
 
-## Active Documentation
+## Active documentation
 
 Current docs must be reachable from `docs/index.md` or `docs/SUMMARY.md`.
-Superseded plans and removed-backend documentation remain available through Git
-history rather than an excluded in-tree archive.
+`docs/plan-implementation/` contains policy only unless authorized unfinished
+work is explicitly tracked. Completed local plans and receipts may be retained
+under ignored `.scratch/archive/`; they are evidence, not current specification.
 
-## Script and Contract Drift
+## Script and contract drift
 
-Retained helpers must appear in `scripts/README.md` and support `--help`.
-Regenerate the backend contract with:
+Retained helpers must appear in `scripts/README.md` and support `--help` where
+applicable. The OpenAPI generator owns two checked-in artifacts:
 
 ```bash
-make api-sync
-make api-check
+make api-sync   # openapi.yaml + tools/fleet-tui/src/generated/openapi.ts
+make api-check  # verifies both
 ```
 
-Neither command modifies client source.
+Any generated diff must be reviewed as a public contract change.

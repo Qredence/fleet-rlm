@@ -1,95 +1,78 @@
 # Fleet RLM Terminal UI
 
-This is a local Node 22.19+ terminal client for Fleet RLM's existing FastAPI SSE
-API. It uses pi-tui to render the backend's AI SDK UI v1
-stream; it does not run a local model, a Harness agent, or any Vercel Sandbox.
+This is Fleet's maintained local Node 22.19+ client. It uses
+`@earendil-works/pi-tui@0.80.10` to render the backend's AI SDK UI v1 HTTP/SSE
+contract; it does not run a model, Harness agent, or Sandbox.
 
 ## Run
 
-Start the Fleet API in a separate terminal with the local Deno SQLite
-environment. This path needs an LLM key but no Daytona credentials.
+The simplest local path supervises backend and client together:
 
 ```bash
-# from repository root; model names are examples for an OpenAI-compatible endpoint
-FLEET_RUN_ENVIRONMENT=deno \
 FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3' \
-FLEET_LLM_API_KEY='...' \
-uv run fleet-rlm serve-api --port 8000
-
-# in another terminal
-pnpm --dir tools/fleet-tui start
+  uv run fleet deno --port 8000 # LLM key + Deno required
+uv run fleet cli --port 8000    # LLM key + Daytona key + database required
 ```
 
-For real Fleet RLM execution through Daytona and `dspy.RLM`, migrate the
-database, then use the combined backend-and-pi-tui command:
+`fleet cli` verifies that the configured database is at Alembic head. Initialize
+or upgrade it explicitly with `uv run python scripts/db_init.py`; the supervisor
+never migrates automatically. `uv run fleet doctor daytona` performs an opt-in
+disposable provider/mount/interpreter probe.
+
+Run separately against an existing API:
 
 ```bash
-FLEET_DATABASE_URL='postgresql+asyncpg://...' \
-FLEET_DAYTONA_API_KEY='...' \
-FLEET_LLM_API_KEY='...' \
-FLEET_ROOT_MODEL='openai/<model>' \
-FLEET_SUB_MODEL='openai/<model>' \
-uv run alembic upgrade head
-
-FLEET_DATABASE_URL='postgresql+asyncpg://...' \
-FLEET_DAYTONA_API_KEY='...' \
-FLEET_LLM_API_KEY='...' \
-FLEET_ROOT_MODEL='openai/<model>' \
-FLEET_SUB_MODEL='openai/<model>' \
-uv run fleet cli --port 8000
+pnpm --dir tools/fleet-tui install --frozen-lockfile
+pnpm --dir tools/fleet-tui start -- --api-url http://127.0.0.1:8000
 ```
 
-The supervised backend logs to `.fleet_rlm/logs/latest.log` and stops when pi-tui
-exits. Run `uv run fleet doctor daytona` first when validating provider access
-or diagnosing Sandbox creation.
-
-For local Deno/Pyodide execution, configure the LLM settings and run
-`uv run fleet deno --port 8000`; this mode intentionally has no durable
-Artifact promotion.
-
-The command creates a Fleet session and prints its UUID. Resume server-side
-conversation context later with:
+The database is optional for an ephemeral Deno process, but cross-process
+Session resume requires it. Resume a durable Session:
 
 ```bash
 uv run fleet cli -- --session <session-uuid>
+pnpm --dir tools/fleet-tui start -- --session <session-uuid>
 ```
 
-Use `--api-url <url>` to point the client at another dev API. `FLEET_ROOT_MODEL`
-and `FLEET_SUB_MODEL` are the canonical runtime settings; for an OpenAI-compatible
-endpoint they must use the `openai/<model-id>` form. The API uses one
-deterministic local User and Workspace scope.
-`FLEET_TURN_TIMEOUT_SECONDS` controls the Turn Timeout for one live RLM Turn
-and defaults to 900 seconds.
-
-When resuming, the client atomically hydrates the renderer-neutral store with durable user
-and assistant text, sanitized RLM reasoning, tool calls/results, and Fleet
-trajectory data such as RLM code/output, structured results, artifacts, skills,
-and usage.
+`FLEET_API_URL` changes the default API base URL. Backend runtime settings are
+documented in [`../../docs/reference/configuration.md`](../../docs/reference/configuration.md).
 
 ## Operator timeline
 
-pi-tui renders one white-and-gray execution timeline with no semantic color
-dependency. Reasoning, code, interpreter output, tools, errors, Result, and
-usage remain chronological, complete, static, and expanded. The transcript,
-activity, multiline editor, and footer form one flat terminal history. Fleet
-does not capture the mouse, clip old messages, or maintain a viewport. Use the
-terminal's native wheel, trackpad, or `Shift+PageUp/PageDown` scrollback. Plain
-`PageUp/PageDown` remain available to the editor. Resize, hydration, and clear
-may replay the transcript and return to the live bottom.
+pi-tui renders one white-and-gray execution timeline. Text, reasoning, code,
+interpreter output, Tools, Skills, errors, Results, Artifacts, and usage remain
+chronological, complete, static, and expanded. Live and reloaded Turns share one
+projection and renderer-neutral store.
 
-While a Turn is submitting, running, or cancelling, one restrained monochrome
-activity rail above the prompt shows the current phase, backend detail, elapsed
-time, step/tool counts, and cancellation shortcut. Only this rail animates, and
-it uses a stable glyph when terminal animation is unavailable. The quiet status
-line below the prompt shows only model and usage metadata; session and Run IDs
-remain out of the input area.
+Fleet does not capture the mouse, clip old messages, or maintain a transcript
+viewport. Use native terminal scrollback. The activity rail reports phase,
+detail, elapsed time, steps, tools, and cancellation; the footer reports model,
+tokens, steps, and tools. The model displays `—` when the stream does not report
+one.
+
+Use `/help` for commands. `/skills` and `/skill` manage up to four exact Skill
+selections for the next accepted Turn; `/cancel` requests durable Run
+cancellation.
+
+## Artifact download
+
+```bash
+pnpm --dir tools/fleet-tui start -- \
+  artifact <artifact-uuid> --output ./result.bin
+```
+
+Add `--api-url <url>` when needed. The command validates content length and
+SHA-256, fsyncs a temporary file, and atomically renames it. An integrity failure
+removes the partial file.
 
 ## Validate
 
 ```bash
-pnpm --dir tools/fleet-tui install --frozen-lockfile
 pnpm --dir tools/fleet-tui run format:check
 pnpm --dir tools/fleet-tui run lint
 pnpm --dir tools/fleet-tui run typecheck
 pnpm --dir tools/fleet-tui run test
 ```
+
+From the repository root, `make check` runs these checks plus backend, generated
+contract, codebase, and documentation lanes.

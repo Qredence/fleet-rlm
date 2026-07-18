@@ -1,67 +1,61 @@
 # Backend Codebase Map
 
-The canonical Python backend lives entirely under `src/fleet_rlm/`. The former
+The canonical Python backend lives under `src/fleet_rlm/`. The former
 compatibility runtime and parallel foundation package no longer exist.
 
 ## Modules
 
 | Module | Ownership | May depend on |
 | --- | --- | --- |
-| `app.py`, `main.py` | FastAPI/router shell, lifespan selection and cleanup, ASGI entrypoint | composition, API routers |
-| `api/` | HTTP translation, deterministic local scope, dependency aliases, AI SDK UI SSE projection and UIMessage reload | domain interfaces and lifespan-composed modules |
-| `chat/` | Turn orchestration, context construction, commit and terminal ordering; Deno Run Environment, sinks, reduced capabilities, and RLM factory | RLM, sessions, Skills, files |
-| `rlm/` | DSPy signature, fresh-per-Turn RLM construction, RLM Options, events, runner | DSPy and domain values |
-| `daytona/` | Exclusive Daytona SDK boundary, Sandbox/lease/Volume adapters | Daytona SDK, domain values |
-| `sessions/` | Session Catalog, canonical Turn input/history, and versioned Committed Turn aggregate | domain values only |
-| `files/`, `artifacts/` | Attachment staging, private Session Workspace policy/tools, and Artifact Candidate promotion | storage interfaces, safe paths |
-| `skills/` | Agent Skills-compatible bundled catalog, authorization, explicit host capability composition, and progressive body/resource tools | domain values and package resources |
-| `persistence/` | SQLAlchemy models and repository adapters | sessions/files/artifact interfaces |
+| `app.py`, `main.py` | FastAPI factory, handlers/routers, static Skill catalog, lifespan selection, ASGI entrypoint | composition, API routers, Skill catalog |
+| `composition/` | common inventory plus explicit Daytona, Deno, and private testing wiring | domain modules and adapters |
+| `api/` | HTTP translation, local scope, dependency aliases, OpenAPI/SSE projection, UIMessage reload | domain interfaces and composed modules |
+| `chat/` | Turn preparation, coordinator orchestration, lifecycle finalization, Deno environment and sinks | RLM, Sessions, Skills, files |
+| `rlm/` | DSPy Signature, model roles, fresh RLM construction, options, events, runner | DSPy and domain values |
+| `daytona/` | exclusive SDK boundary, Sandbox/lease/Volume/interpreter adapters | Daytona SDK and domain values |
+| `sessions/` | Session catalog, Turn input/history, versioned Committed Turn | domain values |
+| `files/`, `artifacts/` | Attachment staging, Session Workspace tools, Artifact Candidate promotion/read | storage interfaces and safe paths |
+| `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |
+| `persistence/` | SQLAlchemy models and repository adapters | Session/file/Artifact interfaces |
 | `observability/` | sanitized Turn records and exporters | Runtime Events |
-| `cli/` | Daytona/Deno backend-plus-pi-tui supervision, backend-only launchers, and doctor dispatch | canonical ASGI entrypoint, Daytona diagnostics |
+| `cli/` | supervised Daytona/Deno plus pi-tui, backend launchers, doctor dispatch | ASGI entrypoint and Daytona diagnostics |
 
 ## Hard boundaries
 
 - Daytona SDK imports are confined to `fleet_rlm.daytona`.
-- `create_app()` constructs no runtime inventory. FastAPI lifespan installs one
-  complete Deno or Daytona composition and owns rollback and
-  cleanup; routes retrieve it through dependency aliases and do not construct
-  repositories, engines, clients, or stores.
-- `RLMRunner` owns execution but not Turn Commit or Interpreter Lease release;
-  `TurnCoordinator` owns commit, public terminal ordering, and final release.
-- Production schema evolution belongs to the root Alembic baseline. Explicit
-  `create_tables` calls are limited to private tests and Deno SQLite helpers.
-- Public chat transport is the AI SDK UI 7 v1 UIMessage protocol over FastAPI
-  SSE. Runtime Events remain the internal transport-neutral progress model.
-  There is no `/api/v1` compatibility or WebSocket execution surface.
+- `create_app()` may construct only the static Skill catalog/authorizer and empty
+  capability registry in addition to the FastAPI shell. Lifespan owns runtime
+  repositories, engines, LMs, providers, rollback, and cleanup.
+- Routes retrieve runtime modules through dependency aliases. The Skills route
+  may recreate only the static in-memory catalog fallback.
+- `RLMRunner` owns execution, not Turn Commit or resource release.
+  `TurnLifecycle.finish()` owns result/Artifact publication and atomic commit;
+  `TurnCoordinator` owns terminal ordering and final cleanup.
+- Alembic owns live schema evolution. `create_tables` is limited to explicit
+  SQLite test/local helpers.
+- Runtime Events are transport-neutral. `api/sse.py` alone owns the public AI
+  SDK UI v1 SSE projection.
+- `make api-sync` owns both root OpenAPI and generated TUI HTTP types.
 
-## Public backend paths
-
-- `POST /api/sessions/{id}/turns`
-- `/api/sessions` and `/api/sessions/{id}/turns`
-- `/api/attachments`
-- `GET /api/artifacts/{id}`
-- `/api/skills`
-- `PUT /api/runs/{id}/cancellation`
+The authoritative route inventory and shapes are in
+[HTTP API](http-api.md) and `openapi.yaml`.
 
 ## Maintained terminal client
 
 | Module | Ownership |
 | --- | --- |
-| `tools/fleet-tui/src/fleet-turn-stream.ts` | request opening, bounded same-key retry, strict UI SSE lifecycle |
-| `tools/fleet-tui/src/sse.ts` | SSE framing and closed generated `FleetUIMessageChunk` validation |
-| `tools/fleet-tui/src/tui/projection.ts` | shared live-chunk and durable-Turn display projection |
-| `tools/fleet-tui/src/tui/store.ts` | conversation state and atomic Session hydration |
-| `tools/fleet-tui/src/tui/theme.ts` | white-and-gray palette and shared visual hierarchy |
-| `tools/fleet-tui/src/tui/application.ts` | pi-tui lifecycle, editor, input routing, progress, and cleanup |
-| `tools/fleet-tui/src/tui/screen.ts` | flat native-scrollback screen and progressive compact layout |
-| `tools/fleet-tui/src/tui/message-renderer.ts` | complete static event, Markdown, Result, and code presentation |
+| `src/cli-core.ts` | CLI options and verified atomic Artifact download |
+| `src/fleet-api-client.ts` | HTTP requests and response handling |
+| `src/fleet-turn-stream.ts` | request opening, bounded same-key retry, strict stream lifecycle |
+| `src/sse.ts` | SSE framing and closed generated chunk validation |
+| `src/tui/runner.ts` | active Run state, submission, cancellation |
+| `src/tui/projection.ts` | shared live and durable display projection |
+| `src/tui/store.ts` | conversation state and atomic Session hydration |
+| `src/tui/application.ts`, `screen.ts` | pi-tui lifecycle, editor/input, static native-scrollback layout |
+| `src/tui/message-renderer.ts` | complete event, Markdown, result, Artifact, and code presentation |
+| `src/tui/commands.ts`, `command-presenter.ts`, `autocomplete.ts` | slash commands, overlays, status, and completion |
+| `src/generated/openapi.ts` | generated HTTP types owned by `make api-sync` |
 
-The client has no classic renderer. Live and reload use the same display
-semantics, including visible typed structured Result cards. Execution evidence
-is fully expanded and uses native terminal scrollback rather than application
-focus, collapsing, or viewport state. A future graphical client is a separate
-implementation effort.
-
-`fleet cli` and `fleet deno` supervise this client against a selected local
-backend while keeping backend output out of pi-tui. `daytona/diagnostics.py` owns
-the opt-in disposable Sandbox doctor and never composes Fleet domain stores.
+Live and reload use the same display semantics. Evidence is fully expanded and
+uses native terminal scrollback; there is no classic renderer, mouse capture,
+collapsing state, or application transcript viewport.

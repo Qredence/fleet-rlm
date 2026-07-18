@@ -6,13 +6,16 @@ The directory is intentionally gitignored: it is a coordination surface for agen
 ## Conventions
 
 - One effort per directory: `.scratch/<effort>/`.
+- Only direct non-archive children of `.scratch/` are active efforts.
+- Completed plans and evidence move to `.scratch/archive/<period>/`; archived
+  material is noncanonical and must not be linked as current specification.
 - A PRD, when needed, is `.scratch/<effort>/PRD.md`.
 - Ordinary implementation issues are `.scratch/<effort>/issues/<NN>-<slug>.md`, numbered from `01`.
 - Triage state is a `Status:` line near the top of each issue.
 - Comments append under `## Comments`.
 - Settled architecture and workflow decisions are published into the owning
-  current documentation page linked from `docs/index.md`; superseded plans
-  remain available through Git history.
+  current documentation page linked from `docs/index.md`; superseded tracked
+  plans remain in Git history and local evidence may remain in the archive.
 
 ## Wayfinding operations
 

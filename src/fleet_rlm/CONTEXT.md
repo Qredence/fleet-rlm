@@ -72,6 +72,8 @@ _Avoid_: new Run, client-side history fetch as the product name for this path
 **Turn Commit**:
 The durable application of a Run’s terminal outcome to Session History and
 Checkpoint, producing a Committed Turn when the outcome is success.
+`TurnLifecycle.finish()` owns this boundary after typed-result validation and
+Artifact byte promotion.
 _Avoid_: flush, save, persist (as the product outcome name)
 
 **Checkpoint**:
@@ -82,7 +84,7 @@ _Avoid_: git commit, file snapshot
 
 **Chat Turn Command**:
 Validated turn intent after identity resolution: who, which Session, message,
-and optional Attachment references.
+optional Attachment references, and up to four exact Skill selections.
 _Avoid_: raw HTTP body
 
 **Turn Context**:
@@ -179,6 +181,8 @@ _Avoid_: Skill Card, Memory
 Host-registered, executable contribution referenced by a Skill: tools, bounded
 knowledge, typed task contract, serializable input adapters, validators, and
 minimum RLM Options. Skill content cannot define executable host capabilities.
+This is an extension seam; the default production capability registry is empty
+and bundled Skills declare no executable package references.
 _Avoid_: arbitrary Skill code, plugin import, prompt body
 
 **Turn Capability Blueprint**:
@@ -186,7 +190,8 @@ Immutable, host-validated composition for one Turn. Exact client selections may
 preload up to four pinned Skills and their separately registered host
 capabilities before execution. Without selections, visible Cards remain
 available for progressive model invocation but do not activate host
-capabilities. The Sub Model does not gate discovery.
+capabilities. The default bundled catalog activates no host capabilities. The
+Sub Model does not gate discovery.
 _Avoid_: mutable global tool registry, Markdown-defined host capability
 
 **Task Contract**:

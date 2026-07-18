@@ -4,6 +4,27 @@
 - Date: 2026-07-13
 - Owners: Fleet RLM backend
 
+## Implementation update (2026-07-18)
+
+The coordinated Session-first lifecycle, closed Runtime Events, commit-gated
+Artifacts, generated client contract, and single canonical baseline are current.
+Later implementation decisions refine several original clauses:
+
+- Turn input now includes up to four exact version-pinned Skill selections in
+  addition to text and ordered unique Attachment ids.
+- The API uses deterministic process-local User/Workspace scope and accepts no
+  Authorization or synthetic identity headers; the original bearer-auth client
+  clause is superseded.
+- Fleet now uses stock native `dspy.RLM` behind the pinned contract seam without
+  the private RLM subclass/iteration overrides described below.
+- ADR 0002 replaces the environment set with `deno` and `daytona`; ADR 0003
+  replaces the terminal renderer with pi-tui/native scrollback.
+- `create_app()` seeds the static bundled Skill catalog before lifespan; runtime
+  repositories, engines, LMs, and providers remain lifespan-owned.
+
+The text below is retained as the accepted cutover decision and historical
+context. Current behavior is specified by the architecture and reference guides.
+
 ## Context
 
 The current backend exposes a top-level `/api/chat` action while its real unit
@@ -31,7 +52,8 @@ in-place data migration.
 
 - Create a Turn with `POST /api/sessions/{session_id}/turns` and a required
   Session-scoped `Idempotency-Key`.
-- The request is exactly versioned text plus ordered, unique Attachment ids.
+- The request is versioned text plus ordered, unique Attachment ids. Exact Skill
+  selections were added later as noted above.
 - Canonical Attachment endpoints live under `/api/attachments`; `/api/files`
   and generic File language are removed.
 - Committed Artifact metadata remains read-only and gains an authorized,
@@ -117,8 +139,8 @@ The cutover accepts only an empty target database.
 `openapi.yaml` and the pinned generated TypeScript client are regenerated and
 checked together. The maintained TUI uses generated HTTP types, strict SSE
 state, same-key retry only before a response, durable cancellation, cursor
-reload, visible display-only Fleet detail panels, bearer auth, and verified
-atomic Artifact download.
+reload, visible display-only Fleet detail panels, and verified atomic Artifact
+download. The bearer-auth clause is superseded by deterministic local scope.
 
 ## Consequences
 
@@ -171,6 +193,6 @@ Daytona/DSPy lane tied to the exact candidate fingerprint.
 - Metadata-only Artifacts: leaves committed outputs uninspectable.
 - A custom TUI fork: creates a UI subsystem when stable display-only detail
   panels preserve semantics through the maintained renderer.
-  **Superseded only for renderer choice by ADR 0002:** Ink is now the sole
-  maintained terminal renderer; the coordinated Turn and display-only detail
-  semantics remain in force.
+  **Superseded for renderer choice first by ADR 0002 and then by ADR 0003:**
+  pi-tui with static native scrollback is now the sole maintained terminal;
+  coordinated Turn and shared projection semantics remain in force.

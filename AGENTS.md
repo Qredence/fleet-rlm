@@ -5,7 +5,9 @@
 ## Operating Model
 
 - Use closest applicable `AGENTS.md` before editing files; deeper guides override this map.
-- This guide describes the current checkout. `PLANS.md` describes future target changes; do not treat unchecked phase work as implemented.
+- This guide describes the current checkout. Local `PLANS.md` records verified
+  phase outcomes and remaining promotion evidence; current code, tests, generated
+  contracts, and tracked docs remain authoritative.
 - Keep repo docs, generated contracts, and `.codex/` actions aligned with implementation changes.
 - Prefer smallest validation lane that covers the change, then escalate when contracts move.
 - Do not hand-edit generated/synced artifacts; use the commands listed below.
@@ -46,10 +48,14 @@ Use the root and backend contexts listed in `CONTEXT-MAP.md`, plus relevant ADRs
 
 ## Setup
 
+For ordinary local development:
+
 ```bash
 uv sync --all-extras --dev
-zsh .codex/workspace-bootstrap.zsh
 ```
+
+Codex Cloud workspaces use `zsh .codex/workspace-bootstrap.zsh`; the script
+installs locked dependencies and enforces the Cloud branch guard.
 
 ## Run
 
@@ -64,7 +70,7 @@ uv run fleet-rlm serve-api --port 8000
 ## Validation
 
 ```bash
-make format-check && make lint && make typecheck && make test
+make check
 ```
 
 The parallel backend test lane defaults to at most two pytest-xdist workers.
@@ -73,7 +79,8 @@ Override it only on a runner with verified capacity using
 
 ## Generated Artifacts
 
-Do not hand-edit: `openapi.yaml`.
+Do not hand-edit `openapi.yaml` or
+`tools/fleet-tui/src/generated/openapi.ts`.
 
 Use: `make api-sync`, `make api-check`.
 
@@ -86,8 +93,9 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Always use the `zsh` terminal profile for CLI commands; prefer running Python scripts/commands using `uv run` over raw `python3` or `python`.
 - Secure production deployments strictly on Bring-Your-Own-Key (BYOK) model; never leak server-level secrets (like Gemini API keys or Daytona keys) to authenticated users.
 - Do not edit `.plan.md` or any attached implementation plans while executing a task, prioritizing marked-in-progress to-dos sequentially.
-- Prefer preserving Agent Elements design tokens (`--an-max-width`) rather than introducing arbitrary Tailwind classes for chat width adjustments.
-- Run the full validation gate (`make format-check`, `make lint`, `make typecheck`, `make test`, `make api-check`, `make check-docs`, `git diff --check`) before commits when the user or phase completion requires it.
+- Run the full validation gate (`make check`, `make test-deno`,
+  `make check-security`, `make build-release`, `make check-release`, and
+  `git diff --check`) before commits when the user or phase completion requires it.
 - Do not amend commits already pushed to remote; use narrow follow-up commits for fixes discovered after push.
 - Never expose provider credentials through Fleet-RLM API requests; sanitize client-facing prepare/startup errors—never expose raw `str(exc)`, stack traces, credentials, or Daytona/provider internals to API clients.
 - Do not commit `AGENTS.md` unless changes are intentional team workflow guidance; continual-learning workspace-fact deltas may stay uncommitted.
@@ -107,11 +115,24 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
   the legacy top-level chat, `/api/v1`, and WebSocket surfaces are removed.
 - `src/fleet_rlm/` is the canonical RLM-native backend. The parallel foundation package was cut over after exit-bar evidence on `71e79271`; there is no compatibility runtime or dual-serve path.
 - The canonical public Run Environment set is `deno` and `daytona`. Private tests install a credential-free deterministic composition explicitly. Deno is intentional local vanilla `dspy.RLM` (real LM + DSPy default Deno/Pyodide) with Attachment reads and Skills but no durable Artifact promotion; Daytona is the full Fleet path (Sandbox, Workspace Volume Scope, Artifact promotion).
-- Application composition is lifespan-only: `create_app()` builds the shell, `composition/` installs one complete inventory, and routes only retrieve composed modules.
+- `create_app()` installs handlers, routers, and the static in-memory bundled
+  Skill catalog. FastAPI lifespan installs one complete Deno or Daytona runtime
+  inventory through `composition/`; routes retrieve composed runtime modules.
 - The maintained terminal uses pi-tui only. `fleet-turn-stream.ts` owns strict stream lifecycle, `sse.ts` owns frame/chunk validation, `tui/projection.ts` owns live/reload projection, and `tui/store.ts` owns atomic hydration. The monochrome operator timeline renders all evidence statically expanded in native terminal scrollback; Fleet does not capture the mouse or maintain a transcript viewport.
 - Live Daytona MVP proof (`tests/live/backend/`, `scripts/live_daytona_verify.py`) loads repo `.env` via `python-dotenv` with `override=False`; existing process exports still win.
-- Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments and Artifacts use Workspace Volume Scope; Artifact Candidates become public only through Turn Commit.
+- Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments
+  and Artifacts use Workspace Volume Scope; `TurnLifecycle.finish()` promotes
+  Artifact Candidates and owns atomic Turn Commit, while `TurnCoordinator`
+  owns stream settlement, terminal ordering, and cleanup.
 - Settings use only `FLEET_*`. The local BYOK API uses one deterministic process-local User and Workspace scope and accepts no Authorization or synthetic identity headers.
 - Alembic owns the live schema through one fresh canonical baseline. `create_tables` is restricted to explicit SQLite test/offline helpers; run `alembic check` against an upgraded empty database for drift.
-- Backend validation is `make check`; its default test targets mask local live credentials and install the private deterministic composition explicitly. Live promotion uses `tests/live/backend/` with explicit `FLEET_LIVE=1`. Frontend adaptation and generated frontend contracts are separate work.
-- Under DSPy 3.3.Xb (normalized LM API), any `BaseLM` or bounded LM must have its provider explicitly resolved (via prefix or `provider` kwargs). Prefer stock `dspy.LM` with stateless config overrides passed directly to predictors/LM calls (using `dspy.settings.context` if needed) over stateful `copy()` or custom wrappers to ensure thread/session safety. Store config and live defaults as bare model ids (for example `deepseek-v4-flash-free`); `normalize_model_id` adds the `openai/` prefix for OpenAI-compatible bases before constructing `dspy.LM`.
+- Repository validation is `make check`; its default test targets mask local
+  live credentials, install private deterministic composition explicitly, and
+  include the maintained TUI. Live promotion uses `tests/live/backend/` with
+  explicit `FLEET_LIVE=1`. `make api-sync` owns root OpenAPI and generated TUI
+  HTTP types; a future graphical client is separate work.
+- Under DSPy 3.3.Xb, every model passed to `dspy.LM` must resolve a provider.
+  Canonical defaults are `openai/gpt-4o-mini`; bare model ids are accepted for
+  OpenAI-compatible bases and normalized by `normalize_model_id`. Prefer stock
+  `dspy.LM` with stateless call/context overrides over stateful copies or custom
+  LM wrappers.

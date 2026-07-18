@@ -16,7 +16,9 @@ RLM-native backend.
 ## Harness Contract
 
 - `src/fleet_rlm/` is the sole Python backend package.
-- `openapi.yaml` is the backend HTTP contract.
+- `openapi.yaml` is the backend HTTP contract, and
+  `tools/fleet-tui/src/generated/openapi.ts` is its generated client type surface;
+  `make api-sync` owns both.
 - Alembic owns production schema creation.
 - retained scripts are inventoried in `scripts/README.md` and are help-safe.
 - the normal local gate is `make check`.

@@ -5,7 +5,7 @@ src/fleet_rlm/
 ├── api/            # HTTP identity, dependencies, schemas, routes, SSE
 ├── artifacts/      # candidates, validation, persistent/local stores
 ├── chat/           # Turn context and coordination
-├── cli/            # thin server launchers
+├── cli/            # supervised TUI/backend launchers and Daytona doctor
 ├── daytona/        # exclusive Daytona SDK boundary
 ├── files/          # Attachment upload, staging, host tools
 ├── observability/  # sanitized Turn records/exporters
@@ -20,3 +20,6 @@ src/fleet_rlm/
 ```
 
 See [codebase map](codebase-map.md) for dependency boundaries.
+
+The maintained TypeScript client is separate under `tools/fleet-tui/`; its
+generated HTTP types are owned by `make api-sync`.

@@ -12,7 +12,7 @@
 
 - The backend specializes shared product terms with execution and isolation
   invariants; it does not redefine Workspace ownership.
-- A new frontend may later consume the AI SDK UIMessage SSE contract. No
-  frontend implementation is currently part of this repository surface.
+- The maintained pi-tui client consumes the AI SDK UIMessage SSE contract from
+  `tools/fleet-tui/`. A future graphical or Web client is a separate effort.
 - Daytona, DSPy, SQLAlchemy, and FastAPI are infrastructure; domain behavior is
   named in backend terms rather than provider APIs.

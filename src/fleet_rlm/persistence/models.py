@@ -226,7 +226,7 @@ class ArtifactRow(Base):
 
 
 class SkillRow(Base):
-    """Skeleton for Phase 3 Skill registry."""
+    """Retained SQL row; the active bundled runtime catalog is in memory."""
 
     __tablename__ = "fleet_skills"
 

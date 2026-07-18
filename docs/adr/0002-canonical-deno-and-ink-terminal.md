@@ -1,9 +1,22 @@
 # ADR 0002: Canonical Deno and Ink terminal
 
-- Status: Accepted
+- Status: Implemented; terminal-renderer and strict shell-only clauses superseded in part
 - Date: 2026-07-14
 - Owners: Fleet RLM backend and terminal client
 - Supersedes: ADR 0001 environment-count and custom-TUI-renderer clauses only
+
+## Implementation update (2026-07-18)
+
+The `deno`/`daytona` profile decision, explicit no-fallback composition, and
+single live/durable projection path remain current. ADR 0003 supersedes every
+Ink, collapsible-card, and application-managed viewport clause with pi-tui
+0.80.10, static expanded evidence, and native terminal scrollback.
+
+The implementation also permits one narrow pre-lifespan exception:
+`create_app()` seeds the static in-memory bundled Skill catalog, its authorizer,
+and an empty capability registry. Runtime repositories, engines, LMs, provider
+clients, and Run Environment resources remain lifespan-owned. The decision text
+below is retained as historical context.
 
 ## Context
 
@@ -38,8 +51,8 @@ closed when its required runtime or credentials are absent.
 
 ### Lifespan-only composition
 
-`fleet_rlm.app.create_app()` constructs only the FastAPI/router shell and empty
-state. The FastAPI lifespan installs exactly one complete profile inventory,
+`fleet_rlm.app.create_app()` constructs the FastAPI/router shell and static Skill
+catalog state. The FastAPI lifespan installs exactly one complete runtime inventory,
 marks it ready only after successful wiring, and clears it during shutdown or
 failed startup.
 
@@ -91,8 +104,9 @@ density communicate state without semantic color.
   as Daytona feature parity.
 - Normal fast test lanes exclude Deno-runtime tests; a required pinned-Deno CI
   job runs them explicitly.
-- Application resources cannot be constructed at import time or by routes and
-  cannot survive outside the FastAPI lifespan that owns them.
+- Runtime resources cannot be constructed at import time or by routes and cannot
+  survive outside the FastAPI lifespan that owns them. The static Skill catalog
+  exception is described in the implementation update.
 - Terminal transport, projection, and storage each have one owner, so live and
   reload drift is contract-testable without keeping a second renderer.
 - A successful structured submission is visible as a Result card rather than

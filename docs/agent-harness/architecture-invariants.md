@@ -5,81 +5,85 @@ and its matching automated check in the same patch.
 
 ## Backend layers
 
-- `api/` owns HTTP identity, dependency aliases, schemas, routes, and SSE
-  projection. Routes retrieve lifespan-composed modules and do not construct
-  stores, repositories, engines, or provider clients.
-- `chat/` owns Turn context construction, orchestration, Turn Commit, terminal
-  ordering, and final Interpreter Lease release.
-- `rlm/` owns DSPy model roles, signature inputs, fresh-per-Turn RLM creation,
-  RLM Options, Runtime Events, cancellation, and execution.
-- `daytona/` is the exclusive Daytona SDK boundary and owns Sandbox, lease,
-  Volume, interpreter, and provider-error normalization.
+- `api/` owns HTTP identity, dependency aliases, schemas, routes, OpenAPI, and
+  SSE projection. Routes do not construct runtime stores, engines, LMs, or
+  provider clients.
+- `app.create_app()` installs the FastAPI shell and static bundled Skill
+  catalog/authorizer/empty capability registry. Lifespan owns runtime inventory.
+- `composition/` owns complete common, Deno, Daytona, and private testing wiring.
+- `chat/` owns preparation, coordination, Turn Lifecycle, terminal ordering, and
+  cleanup. `TurnLifecycle.finish()` owns Artifact publication and atomic commit;
+  `TurnCoordinator` owns stream settlement and resource release.
+- `rlm/` owns model roles, Signature inputs, fresh native RLM construction,
+  options, Runtime Events, cancellation, and execution.
+- `daytona/` is the exclusive SDK boundary and owns provider-error normalization.
 - `sessions/`, `files/`, `artifacts/`, and `skills/` own domain interfaces and
   deterministic policy. `persistence/` owns SQLAlchemy adapters.
-- Application-lifetime resources are created and disposed by FastAPI lifespan.
-  Package imports remain credential-free and side-effect-free.
+- Imports remain credential-free and side-effect-free.
 
 ## Turn and async boundary
 
-- Construct a fresh `dspy.RLM` and host-tool list per Turn. Daytona constructs
-  a fresh custom `CodeInterpreter`; Deno passes `interpreter=None` so DSPy owns
-  a fresh default Deno/Pyodide interpreter. Interpreters are never shared
-  concurrently.
-- Pass a bounded sandbox-safe `session_context: dict` to the default Fleet
-  Signature and only declared host-bounded inputs to custom Task Contracts.
-  Keep older committed messages behind the Session-scoped
-  `read_session_history` Tool. Include only bounded runtime availability—not a
-  file listing—for the Session Workspace, and invoke the supported
-  `await rlm.acall(**named_signature_inputs)` surface.
-- Attachment ownership validation finishes before SSE begins.
-- Artifact Candidates remain private until byte promotion and transactional Turn
-  Commit succeed.
+- Construct a fresh `dspy.RLM` and host-tool list per Turn. Daytona constructs a
+  fresh custom interpreter; Deno passes `interpreter=None`. Interpreters are
+  never shared across Runs or concurrently.
+- Pass request text, bounded `session_context`, authorized `skill_cards`, and
+  bounded Attachment metadata to the default Fleet Signature. Custom Task
+  Contracts receive only declared host-bounded inputs. Keep older history behind
+  `read_session_history` and call `await rlm.acall(**named_inputs)`.
+- Attachment ownership and Skill selection validation finish before SSE begins.
+- Artifact Candidates remain private until byte promotion and atomic Turn Commit
+  succeed.
 - Success ordering is `artifact.created*` then exactly one `run.completed`.
-  Failure produces exactly one sanitized error terminal and no history advance.
-- `TurnCoordinator` holds the Interpreter Lease through persistence and terminal
-  projection and releases it in `finally`.
+  Failure produces exactly one sanitized terminal and no history advance.
+- Hold an Interpreter Lease through finalization; release it during coordinator
+  cleanup even after cancellation or repeated caller cancellation.
 
-The custom Daytona interpreter bridges blocking provider calls without exposing
-them to FastAPI routes. Do not move provider calls or raw exceptions across the
-`daytona/` boundary.
+Raw provider calls and exceptions never cross the `daytona/` boundary into
+routes or public events.
+
+## Skills and capabilities
+
+- Bundled Skills are versioned instruction/resource packages with progressive
+  loading. They do not implicitly register host executables.
+- The production host capability registry is empty and accepts only trusted
+  host registration. Final Turn tools are explicit `dspy.Tool` objects.
+- HTTP may select up to four exact Skills but may not provide Python, callables,
+  serialized Tools, or arbitrary Task Contracts.
+- Tool event views are host-owned bounded allowlists. No declared view means no
+  public arguments or results.
 
 ## Persistence and storage
 
-- Alembic owns live schema evolution; live startup never calls `create_all`.
-  Explicit SQLite test/offline helpers may call `create_tables`.
+- Alembic owns live schema evolution; live PostgreSQL startup never calls
+  `create_all`. Explicit SQLite test/local helpers may call `create_tables`.
 - Durable Attachment and Artifact bytes live in Workspace Volume Scope.
-  Non-Turn I/O uses short-lived, workspace-labelled Sandboxes that mount only
-  `workspaces/<workspace_id>` and are explicitly deleted in `finally`.
 - Daytona Session Workspace text lives under
-  `sessions/{session_id}/workspace/` inside Workspace Volume Scope. Successful
-  writes are immediate private working state, not Turn-commit candidates; Deno
-  registers no workspace tools. Before returning an Interpreter Lease, Daytona
-  acquisition idempotently creates the canonical shared roots and current
-  Session/Run container directories.
-- Workspace tool events expose relative paths, counts, sizes, and status but
-  never file contents, provider paths, or raw provider failures.
-- Bytes are written before metadata. UUID-unique orphan bytes are acceptable;
-  rows or public success claims without committed metadata are not.
+  `sessions/{session_id}/workspace/`. Writes are immediate private state, not
+  Turn-commit candidates; Deno registers no workspace tools.
+- Daytona acquisition idempotently creates canonical shared, Session, and Run
+  directories and fails closed on mount/provider conflicts.
+- Workspace events expose relative paths, counts, sizes, and status, never file
+  contents, provider paths, or raw failures.
+- Bytes precede metadata. Orphan bytes may be GC-eligible; uncommitted rows or
+  public success claims are forbidden.
 
 ## Configuration and compatibility
 
-- Runtime settings use only the `FLEET_*` surface. Do not add environment,
-  import, schema, route, or command aliases for the deleted backend.
-- There is no `/api/v1`, WebSocket execution, dual-serve, legacy data migration,
+- Runtime settings use only `FLEET_*`; canonical public environments are `deno`
+  and `daytona`.
+- There is no `/api/v1`, WebSocket execution, dual serve, legacy migration,
   runtime-admin, optimization/evaluation API, or public Artifact creation.
-- No frontend source tree or generated frontend contract is currently retained.
-  A future client must integrate through the public AI SDK UI 7 SSE contract.
+- The maintained client is pi-tui. A graphical/Web client is separate future
+  work and must use the public HTTP/SSE contract.
 
 ## Generated artifacts
 
-Do not hand-edit root `openapi.yaml`. Use:
+Do not hand-edit either generated contract:
 
 ```bash
-make api-sync
+make api-sync   # openapi.yaml + tools/fleet-tui/src/generated/openapi.ts
 make api-check
 ```
-
-These commands own the backend contract.
 
 ## Script boundary
 
@@ -88,10 +92,8 @@ and supports `uv run python scripts/<name>.py --help` where applicable.
 
 ## Remediation
 
-When a boundary check fails:
-
 1. Move code back to its owning module.
 2. Prefer an existing domain interface over a new cross-layer import.
-3. If the invariant is obsolete, update this file, root `AGENTS.md`, and the
-   matching harness check together.
+3. If an invariant is obsolete, update this file, root `AGENTS.md`, and its
+   automated check together.
 4. Run `make check-docs` before finishing.

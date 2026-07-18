@@ -1,105 +1,120 @@
-# Backend Testing Strategy
+# Testing Strategy
 
-The cutover gate covers the backend and the maintained `tools/fleet-tui/`
-client. Generated API types are synchronized only through `make api-sync`.
+The primary gate covers the canonical backend, scripts, generated API artifacts,
+documentation/harness, and maintained pi-tui client. Credentialed provider and
+database lanes remain explicit.
 
-## Test Suites
+## Suite inventory
 
 | Suite | Path | Purpose |
 | --- | --- | --- |
-| Unit | `tests/unit/backend/` | domain, adapters, configuration, and route modules |
-| Contract | `tests/contracts/backend/` | API, persistence, packaging, and boundary contracts |
-| Live durability | `tests/live/backend/test_b5_attachment_artifact_durability.py` | Workspace Volume Attachment/Artifact persistence |
-| Live workspace | `tests/live/backend/test_phase7_workspace_durability.py` | Session Workspace persistence across Sandbox replacement |
+| Backend unit | `tests/unit/backend/` | domain, adapters, configuration, routes, runtime modules |
+| Script unit | `tests/unit/scripts/` | supported helper behavior |
+| LiteLLM invariant | `tests/unit/test_litellm_invariant.py` | forbids direct application LiteLLM use |
+| Backend contracts | `tests/contracts/backend/` | API, persistence, packaging, composition, boundary contracts |
+| End to end | `tests/e2e/` | canonical local process and request flows |
+| TUI | `tools/fleet-tui/src/**/*.test.ts` | transport, projection, store, commands, rendering, terminal lifecycle |
+| Deno | named unit/contract tests marked `deno` | real deterministic DSPy Deno/Pyodide contract |
+| Database | tests marked `db` | explicit configured database behavior |
+| Daytona MVP | `tests/live/backend/test_fleet_rlm_daytona_mvp.py` | complete real FastAPI/DSPy/Daytona flow |
+| Attachment/Artifact durability | `tests/live/backend/test_b5_attachment_artifact_durability.py` | Volume persistence and committed content |
+| Session Workspace durability | `tests/live/backend/test_phase7_workspace_durability.py` | private files across Sandbox replacement |
 
-## Local Gate
+## Primary non-live gate
 
 ```bash
-# from repo root
 make check
 ```
 
-The default Make test targets explicitly mask local live `FLEET_*` credentials
-so a developer's `.env` cannot silently switch unit, contract, or end-to-end
-tests into live composition. Database, Deno-runtime, and live-provider lanes
-remain separate. Tests marked `deno` are excluded from the normal fast and
-CircleCI split lanes.
+The default pytest targets mask local live `FLEET_*` credentials so `.env`
+cannot silently select provider composition. They install deterministic private
+composition where required and run with at most two xdist workers by default.
 
-This runs format, Ruff, type, unit/contract tests, backend OpenAPI drift, and
-the codebase boundary check, plus the pinned TUI Biome/TypeScript/Vitest lane.
-The focused commands are:
+`make check` includes:
+
+- Ruff lint and format checks;
+- `ty` for `src/fleet_rlm`;
+- backend/script/LiteLLM/contract/end-to-end tests excluding `deno`, live,
+  benchmark, and database markers;
+- `make api-check` for OpenAPI and generated TUI HTTP types;
+- pi-tui format, lint, type, and Vitest checks;
+- codebase-tree and documentation/harness checks.
+
+`git diff --check` is required separately. Useful focused commands are:
 
 ```bash
-uv run pytest tests/unit/backend tests/contracts/backend -q
-uv run ruff check src/fleet_rlm tests/unit/backend tests/contracts/backend
+uv run pytest tests/unit/backend tests/unit/scripts tests/contracts/backend tests/e2e -q
+uv run ruff check src/fleet_rlm tests scripts
 uv run ty check src/fleet_rlm
-uv run python scripts/openapi_tools.py check
-uv run python scripts/check_harness_engineering.py
-git diff --check
-pnpm --dir tools/fleet-tui install --frozen-lockfile
-pnpm --dir tools/fleet-tui run format:check
-pnpm --dir tools/fleet-tui run lint
-pnpm --dir tools/fleet-tui run typecheck
+make api-check
 pnpm --dir tools/fleet-tui run test
+git diff --check
 ```
 
-The TUI suite observes `FleetTuiApplication` through an injected deterministic terminal. It proves complete static rendering, live/durable ordering, native-scrollback output without mouse-mode sequences, 10,000-row rendering, command behavior, cancellation, and terminal cleanup.
+The TUI suite observes the application through an injected deterministic
+terminal. It covers strict stream state, live/durable ordering, atomic hydration,
+commands and Skill selection, cancellation, complete static rendering,
+10,000-row native scrollback, absence of mouse-mode sequences, and cleanup.
 
-## Deno Gate
-
-Deno-runtime contracts use the `deno` pytest marker and run only in the
-dedicated lane:
+## Deno gate
 
 ```bash
-# from repo root; requires Deno on PATH
 make test-deno
 ```
 
-Progressive Skill changes should first run the focused loader, authorization,
-Turn-input, runtime, SSE, and terminal command/client slices. The required
-regression flow is discovery metadata, `load_skill`, one resource read,
-interpreter execution, `SUBMIT`, and terminal SSE projection. Tests must also
-cover chronological Skill events on later failure, cancellation, and timeout,
-plus declared-output acceptance and rejection without rewriting accepted text.
+This requires Deno on `PATH` and runs without provider network calls. It
+validates DSPy's actual default Deno/Pyodide interpreter, progressive Skill
+loading, bounded inputs, execution, `SUBMIT`, terminal projection, and failure,
+cancellation, and timeout handling.
 
-CircleCI installs exactly Deno 2.9.2 under `$HOME/.deno`, exports
-`$HOME/.deno/bin` on `PATH`, records `deno --version`, and runs
-`make test-deno` as a required workflow job. The contract is deterministic and
-forbids provider network calls; it validates DSPy's real default
-Deno/Pyodide interpreter rather than live model quality.
+CircleCI installs the pinned Deno 2.9.2 runtime and runs this as a required
+workflow job. The normal fast split excludes `deno` markers.
 
-## Database Gate
+## Database gate
 
-Alembic owns production schema creation. Against an empty configured database:
+Alembic owns live schema creation. Against an explicitly configured empty
+database:
 
 ```bash
 uv run alembic upgrade head
 uv run alembic check
 ```
 
-Tests may use explicit helpers to create ephemeral SQLite schemas.
+Tests and Deno local SQLite helpers may create ephemeral schemas explicitly.
 
-## Live Gate
+## Credentialed Daytona gates
 
-Live tests require canonical `FLEET_*` credentials and explicit opt-in.
-The Daytona MVP proof loads repo `.env` via `python-dotenv` (`override=False`)
-and defaults models to bare `deepseek-v4-flash-free` when unset
-(`normalize_model_id` adds the `openai/` provider prefix for `dspy.LM`):
+Live checks require canonical credentials and explicit opt-in:
 
 ```bash
 FLEET_LIVE=1 uv run pytest tests/live/backend/test_fleet_rlm_daytona_mvp.py -q -n 0 --timeout=900
-FLEET_LIVE=1 uv run pytest tests/live/backend/test_b5_attachment_artifact_durability.py -q
-FLEET_LIVE=1 uv run pytest tests/live/backend/test_phase7_workspace_durability.py -q
+FLEET_LIVE=1 uv run pytest tests/live/backend/test_b5_attachment_artifact_durability.py -q -n 0
+FLEET_LIVE=1 uv run pytest tests/live/backend/test_phase7_workspace_durability.py -q -n 0
 ```
 
-No pre-cutover or provider-specific environment aliases are supported.
-
-## Packaging and Smoke
+The complete release-oriented verifier loads `.env` with `override=False`, so
+existing process exports win:
 
 ```bash
-uv build
-uv run python scripts/validate_release.py wheel
-uv run fleet --help
-uv run fleet-rlm --help
-uv run python -c 'from fleet_rlm.main import app; print(app.title)'
+FLEET_LIVE=1 uv run python scripts/live_daytona_verify.py \
+  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json \
+  --root-model <approved-root-model> \
+  --sub-model <approved-sub-model>
 ```
+
+It must record a passing receipt at the exact candidate SHA, verify provider
+cleanup and secret isolation, and be paired with same-SHA CI, local release, and
+human attestations before promotion. Historical receipts do not prove a later
+tip.
+
+## Security, packaging, and release
+
+```bash
+make check-security
+make check-release
+make build-release
+git diff --check
+```
+
+`make build-release` builds the Python distributions and validates wheel content
+and metadata. These lanes do not replace the primary repository gate.

@@ -32,6 +32,10 @@ environment cache after changing setup, maintenance, or environment settings.
 
 ## API Smoke
 
+Configure the selected runtime first. Deno requires an LLM key and Deno on
+`PATH`; Daytona requires LLM and Daytona keys plus a database at Alembic head.
+See [configuration](../reference/configuration.md).
+
 ```bash
 uv run fleet web
 # or
@@ -39,8 +43,8 @@ uv run fleet-rlm serve-api --port 8000
 ```
 
 Verify that the ASGI application imports from `fleet_rlm.main:app` and that
-`openapi.yaml` matches the running backend. The supported routes are documented
-in `docs/reference/http-api.md`.
+`make api-check` confirms both OpenAPI and generated TUI HTTP types. Supported
+routes are documented in `docs/reference/http-api.md`.
 
 ## Live Runtime Evidence
 
@@ -50,7 +54,9 @@ Run live checks only when runtime behavior changes or the exit bar requires it:
 FLEET_LIVE=1 uv run pytest tests/live/backend/test_b5_attachment_artifact_durability.py -q
 ```
 
-Record the exact git tip, test result, and any provider-side cleanup needed.
+For complete MVP evidence, prefer `scripts/live_daytona_verify.py`; use the
+focused live test above for durability changes. Record the exact git tip, test
+result, model ids, and provider cleanup without secrets.
 
 ## Final Report
 
