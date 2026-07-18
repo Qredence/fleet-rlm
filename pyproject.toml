@@ -62,7 +62,7 @@ dependencies = [
     # Web API surface. Pinned exactly to 0.139.0 (latest PyPI release, Jul 1
     # 2026) for reproducible installs; bump deliberately when a newer release is
     # validated against the runtime + test suite.
-    "fastapi[standard]==0.139.0",
+    "fastapi[standard]==0.139.2",
     "joserfc>=1.7.2",
     "uvicorn>=0.47.0,<1",
     # Observability and external services.
