@@ -113,6 +113,7 @@ class RunRow(Base):
             name="ck_fleet_runs_terminal_shape",
         ),
         Index("ix_fleet_runs_session_created", "session_id", "created_at"),
+        Index("ix_fleet_runs_recovery_scan", "status", "claim_heartbeat_at"),
         Index(
             "uq_fleet_runs_live_idempotency",
             "session_id",

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import dspy
+import pytest
 
 from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult
 from fleet_rlm.rlm.tool_observer import observe_tool
@@ -94,6 +95,7 @@ def test_round_trips_text_with_bounded_json_results() -> None:
 
     assert written == {
         "ok": True,
+        "namespace": "session_workspace",
         "path": "notes/decision.md",
         "kind": "file",
         "byte_size": 16,
@@ -103,14 +105,7 @@ def test_round_trips_text_with_bounded_json_results() -> None:
     assert listed["truncated"] is False
     assert listed["entries"][0]["path"] == "notes/decision.md"
     assert stated["entry"]["byte_size"] == 16
-    assert read == {
-        "ok": True,
-        "path": "notes/decision.md",
-        "content": "durable decision",
-        "encoding": "utf-8",
-        "chars": 16,
-        "byte_size": 16,
-    }
+    assert read == "durable decision"
 
 
 def test_workspace_event_views_expose_metadata_without_file_bodies_or_entries() -> None:
@@ -141,49 +136,53 @@ def test_workspace_event_views_expose_metadata_without_file_bodies_or_entries() 
         "overwrite": False,
         "content_chars": 22,
     }
-    assert observed[1].output == {"ok": True, "path": "notes/private.md", "byte_size": 22}
-    assert observed[3].output == {"ok": True, "path": ".", "count": 1, "truncated": False}
-    assert observed[5].output == {
+    assert observed[1].output == {
         "ok": True,
+        "namespace": "session_workspace",
         "path": "notes/private.md",
-        "chars": 22,
         "byte_size": 22,
     }
+    assert observed[3].output == {"ok": True, "path": ".", "count": 1, "truncated": False}
+    assert observed[5].output == {"ok": True, "namespace": "session_workspace"}
     assert "private workspace body" not in str(observed)
     assert "entries" not in str(observed)
 
     observed.clear()
     oversized_path = "x" * 2_000
-    observe_tool(tools["stat_workspace_file"], observed.append, views["stat_workspace_file"])(path=oversized_path)
+    from fleet_rlm.files.workspace_tools import WorkspaceToolError
+
+    with pytest.raises(WorkspaceToolError):
+        observe_tool(tools["stat_workspace_file"], observed.append, views["stat_workspace_file"])(path=oversized_path)
     assert observed[0].input == {}
     assert oversized_path not in str(observed)
 
     observed.clear()
-    observe_tool(tools["stat_workspace_file"], observed.append, views["stat_workspace_file"])(
-        path="/home/daytona/private"
-    )
+    with pytest.raises(WorkspaceToolError):
+        observe_tool(tools["stat_workspace_file"], observed.append, views["stat_workspace_file"])(
+            path="/home/daytona/private"
+        )
     assert observed[0].input == {}
     assert "/home/daytona" not in str(observed)
 
 
-def test_returns_stable_error_codes_without_exception_details() -> None:
+def test_raises_stable_safe_errors_without_exception_details() -> None:
     workspace, tools = _tools()
 
-    assert tools["stat_workspace_file"](path="missing.txt") == {
-        "ok": False,
-        "error": "not_found",
-    }
-    assert tools["read_workspace_text"](path="missing.txt", max_chars=10)["error"] == "not_found"
+    from fleet_rlm.files.workspace_tools import WorkspaceToolError
+
+    with pytest.raises(WorkspaceToolError, match="not found") as missing:
+        tools["stat_workspace_file"](path="missing.txt")
+    assert missing.value.code == "not_found"
+    with pytest.raises(WorkspaceToolError, match="not found"):
+        tools["read_workspace_text"](path="missing.txt", max_chars=10)
 
     workspace.files["large.txt"] = "x" * 20
-    assert tools["read_workspace_text"](path="large.txt", max_chars=10) == {
-        "ok": False,
-        "error": "too_large",
-    }
-    assert tools["write_workspace_text"](path="large.txt", content="new", overwrite=False) == {
-        "ok": False,
-        "error": "conflict",
-    }
+    with pytest.raises(WorkspaceToolError) as large:
+        tools["read_workspace_text"](path="large.txt", max_chars=10)
+    assert large.value.code == "too_large"
+    with pytest.raises(WorkspaceToolError) as conflict:
+        tools["write_workspace_text"](path="large.txt", content="new", overwrite=False)
+    assert conflict.value.code == "conflict"
 
 
 def test_entry_serialization_does_not_mutate_domain_value() -> None:

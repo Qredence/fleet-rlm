@@ -241,6 +241,10 @@ class TurnLifecycleModule:
         if isinstance(resolution, TurnFailure):
             return await self._store.fail(turn, resolution)
         if not resolution.succeeded:
+            await self._rollback(
+                artifact_sink,
+                (candidate.staging_path for candidate in resolution.artifact_candidates),
+            )
             status = resolution.terminal_status
             if status == "completed":
                 raise TurnStateError("contradictory successful outcome state")
@@ -298,6 +302,10 @@ class TurnLifecycleModule:
             if snapshot_path is not None:
                 cleanup_cancelled |= await self._rollback(result_snapshot_sink, (snapshot_path,))
             cleanup_cancelled |= await self._rollback(artifact_sink, reversed(written))
+            cleanup_cancelled |= await self._rollback(
+                artifact_sink,
+                (candidate.staging_path for candidate in candidates),
+            )
             if isinstance(exc, asyncio.CancelledError) or cleanup_cancelled:
                 raise asyncio.CancelledError from None
             if not isinstance(exc, Exception):

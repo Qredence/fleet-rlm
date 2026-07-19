@@ -270,7 +270,7 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
     assert events[-1].detail.code == "execution_failed"
     assert events[-1].detail.message == "Turn output is invalid"
     assert not any(isinstance(event.detail, ArtifactCreated) for event in events)
-    assert sink_operations == []
+    assert sink_operations == ["remove:/staging/failed.txt"]
     assert closes == 1
 
 

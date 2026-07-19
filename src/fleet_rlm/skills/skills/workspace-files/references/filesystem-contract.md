@@ -42,4 +42,6 @@ Workspace, Session, Run, Attachment, and Artifact identities are UUID-shaped opa
 
 Session Workspace tools are append/update-only. Fleet exposes list, stat, read, and write (with `overwrite`); there is no delete Tool. To replace a file, call `write_workspace_text(..., overwrite=True)`.
 
+The Session Workspace is a separate namespace from the Python sandbox filesystem. Use only the bound workspace tools for workspace files; Python file I/O cannot read, verify, or replace them.
+
 REPL variables are per-Run and are not durable. Authorized clients can retrieve committed Artifact bytes through the Artifact content API, but host storage locations and raw sandbox paths must not appear in client-facing answers.

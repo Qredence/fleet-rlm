@@ -13,15 +13,18 @@ Use Fleet's bound tools instead of inventing host paths. The Turn context report
 
 ## Session Workspace
 
-Workspace paths are canonical POSIX-relative paths rooted at `.`. List or inspect before writing, use `overwrite=true` only when replacement is intended, and check each tool's `ok` result. Session Workspace is append/update-only: there is no delete Tool; replace content with `write_workspace_text(..., overwrite=True)`.
+Workspace paths are canonical POSIX-relative paths rooted at `.`. Session Workspace is tool-only: it is not visible to Python `open()`, `os`, or `pathlib`, and a sandbox-local file never satisfies a Session Workspace request. List or inspect before writing, use `overwrite=true` only when replacement is intended, and handle a tool error before trying a different operation. Session Workspace is append/update-only: there is no delete Tool; replace content with `write_workspace_text(..., overwrite=True)`.
 
 ```python
 listing = list_workspace_files(path=".", limit=100)
 current = read_workspace_text(path="notes/analysis.md", max_chars=10000)
 saved = write_workspace_text(path="notes/analysis.md", content=updated_text, overwrite=True)
+assert read_workspace_text(path="notes/analysis.md") == updated_text
 ```
 
 Workspace writes are immediate private Session state. They survive a failed or cancelled Run and are not published as Artifacts.
+
+Never report a workspace operation as successful unless its tool call succeeds and a read through the same Session Workspace tool verifies the requested path and content. Do not retry a deterministic tool error unchanged.
 
 ## Attachments and Artifacts
 

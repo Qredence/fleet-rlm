@@ -6,16 +6,18 @@ import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any
+from typing import Any, TypeAlias
 from uuid import uuid4
 
 import dspy
 
-from fleet_rlm.rlm.events import JsonValue, ObservationObserver, ToolCompleted, ToolFailed, ToolStarted
+from fleet_rlm.rlm.events import JsonValue, ObservationDetail, ToolCompleted, ToolFailed, ToolStarted, WarningEvent
+from fleet_rlm.rlm.tool_guards import TurnToolGuards
 
 ToolInputProjection = Callable[[Mapping[str, Any]], JsonValue]
 ToolOutputProjection = Callable[[Any], JsonValue]
 ToolAfterResult = Callable[[Any], None]
+ToolObserver: TypeAlias = Callable[[ObservationDetail | WarningEvent], None]
 
 
 def _empty_input(_arguments: Mapping[str, Any]) -> JsonValue:
@@ -56,7 +58,10 @@ class ToolEventView:
         except Exception:  # noqa: BLE001 - a projection defect must fail closed
             return {}
 
-    def error(self, *, validation: bool) -> str:
+    def error(self, *, validation: bool, exception: BaseException | None = None) -> str:
+        public_message = getattr(exception, "public_message", None)
+        if isinstance(public_message, str) and public_message:
+            return public_message
         return "Tool arguments are invalid" if validation else "Tool failed"
 
 
@@ -76,11 +81,12 @@ def _validation_tool(source: dspy.Tool) -> dspy.Tool:
 
 def observe_tool(
     tool: dspy.Tool,
-    observer: ObservationObserver,
+    observer: ToolObserver,
     event_view: ToolEventView,
     *,
     after_result: ToolAfterResult | None = None,
     is_authorized: Callable[[], bool] | None = None,
+    guards: TurnToolGuards | None = None,
 ) -> dspy.Tool:
     """Return a fresh Tool whose extracted ``func`` preserves DSPy validation."""
     if not isinstance(tool, dspy.Tool):
@@ -119,9 +125,15 @@ def observe_tool(
                 raise TypeError("async host tools are not supported inside the synchronous interpreter bridge")
             if after_result is not None:
                 after_result(result)
-        except Exception:
-            observer(ToolFailed(call_id, str(source.name), event_view.error(validation=False)))
+        except Exception as exc:
+            if guards is not None:
+                guards.failed(str(source.name), arguments)
+            observer(ToolFailed(call_id, str(source.name), event_view.error(validation=False, exception=exc)))
             raise
+        if guards is not None:
+            warning = guards.completed(str(source.name), arguments, result)
+            if warning is not None:
+                observer(WarningEvent(warning, "tool_no_progress"))
         observer(ToolCompleted(call_id, str(source.name), event_view.output(result)))
         return result
 

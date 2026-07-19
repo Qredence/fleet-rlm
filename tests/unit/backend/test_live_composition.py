@@ -77,6 +77,7 @@ def test_require_daytona_settings_fails_closed_without_deps() -> None:
                 run_environment="daytona",
                 database_url="sqlite+aiosqlite:///:memory:",
                 daytona_api_key=SecretStr("daytona-key"),
+                daytona_snapshot="",
                 llm_api_key=SecretStr("llm-key"),
             )
         )
@@ -137,6 +138,7 @@ def test_deno_environment_fails_closed_without_secrets(monkeypatch) -> None:
 
 def test_deno_lifespan_skips_create_tables_for_postgres(monkeypatch) -> None:
     import fleet_rlm.persistence.database as database
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
 
     called: list[str] = []
 
@@ -144,6 +146,11 @@ def test_deno_lifespan_skips_create_tables_for_postgres(monkeypatch) -> None:
         called.append("create_tables")
 
     monkeypatch.setattr(database, "create_tables", track_tables)
+
+    async def skip_recovery(self, fence=None):
+        del self, fence
+
+    monkeypatch.setattr(SqlAlchemyTurnStateStore, "reconcile_settling", skip_recovery)
     monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/deno")
     app = create_app(
         settings=Settings(
@@ -212,6 +219,28 @@ def test_testing_database_is_created_and_closed_by_lifespan() -> None:
 
     assert app.state.db_engine is None
     assert app.state.session_catalog is None
+
+
+def test_local_startup_reconciles_sql_runs_once(monkeypatch) -> None:
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
+
+    calls: list[object] = []
+
+    async def reconcile(self, fence=None):
+        calls.append(self)
+        assert fence is None
+
+    monkeypatch.setattr(SqlAlchemyTurnStateStore, "reconcile_settling", reconcile)
+    app = create_testing_app(
+        settings=Settings(
+            database_url="sqlite+aiosqlite:///:memory:",
+        )
+    )
+
+    with TestClient(app):
+        pass
+
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("database_url", [None, "sqlite+aiosqlite:///:memory:"])

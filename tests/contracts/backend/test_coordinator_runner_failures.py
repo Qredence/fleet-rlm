@@ -238,9 +238,8 @@ async def test_completed_trajectory_turn_commits_typed_text_and_canonical_detail
         "initialize",
         "reuse",
         "submit",
-        "submit",
     ]
-    assert reasoning[-1].step is None
+    assert reasoning[-1].step == 3
     assert [part.code for part in assistant.committed.parts if isinstance(part, CodePart)] == [
         "values = [1, 2, 3]\n_out = 'initialized'",
         "values.append(4)\n_out = sum(values)",

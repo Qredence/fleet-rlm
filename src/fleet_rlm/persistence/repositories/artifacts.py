@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -11,7 +12,13 @@ from fleet_rlm.artifacts.errors import ArtifactNotFoundError
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
 from fleet_rlm.artifacts.reader import StoredArtifact
 from fleet_rlm.artifacts.safety import parse_kind
-from fleet_rlm.persistence.models import ArtifactRow
+from fleet_rlm.persistence.models import ArtifactRow, RunRow, SessionRow
+
+
+@dataclass(frozen=True, slots=True)
+class CompletedRun:
+    session_id: UUID
+    run_id: UUID
 
 
 class SqlAlchemyArtifactCatalog:
@@ -49,5 +56,42 @@ class SqlAlchemyArtifactCatalog:
             result = await db.execute(select(func.count()).select_from(ArtifactRow))
             return int(result.scalar_one())
 
+    async def list_storage_refs(self, *, workspace_id: UUID) -> frozenset[str]:
+        """Return committed Artifact storage references for one Workspace."""
+        async with self._session_factory() as db:
+            result = await db.execute(
+                select(ArtifactRow.storage_ref).where(
+                    ArtifactRow.workspace_id == workspace_id,
+                    ArtifactRow.storage_ref != "",
+                )
+            )
+            return frozenset(str(value) for value in result.scalars())
 
-__all__ = ["SqlAlchemyArtifactCatalog", "StoredArtifact"]
+    async def list_completed_runs(self, *, workspace_id: UUID) -> frozenset[CompletedRun]:
+        """Return completed Run identities for one Workspace."""
+        async with self._session_factory() as db:
+            result = await db.execute(
+                select(RunRow.session_id, RunRow.id)
+                .join(SessionRow, SessionRow.id == RunRow.session_id)
+                .where(
+                    SessionRow.workspace_id == workspace_id,
+                    RunRow.status == "completed",
+                )
+            )
+            return frozenset(CompletedRun(session_id=session_id, run_id=run_id) for session_id, run_id in result.all())
+
+    async def list_active_runs(self, *, workspace_id: UUID) -> frozenset[CompletedRun]:
+        """Return live Run identities that must not be swept during startup."""
+        async with self._session_factory() as db:
+            result = await db.execute(
+                select(RunRow.session_id, RunRow.id)
+                .join(SessionRow, SessionRow.id == RunRow.session_id)
+                .where(
+                    SessionRow.workspace_id == workspace_id,
+                    RunRow.status.in_(("running", "settling")),
+                )
+            )
+            return frozenset(CompletedRun(session_id=session_id, run_id=run_id) for session_id, run_id in result.all())
+
+
+__all__ = ["CompletedRun", "SqlAlchemyArtifactCatalog", "StoredArtifact"]

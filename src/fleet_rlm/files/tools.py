@@ -72,6 +72,7 @@ class FileToolHost:
         self._paths = volume_paths or VolumePaths.from_mount()
         self._pending_events: list[dict[str, Any]] = []
         self._artifact_candidates: list[ArtifactCandidate] = []
+        self._artifact_staging_paths: list[str] = []
 
     def drain_public_events(self) -> list[dict[str, Any]]:
         """Return and clear ledger entries with ``event_kind`` + safe payload fields."""
@@ -83,6 +84,17 @@ class FileToolHost:
         candidates = tuple(self._artifact_candidates)
         self._artifact_candidates.clear()
         return candidates
+
+    async def aclose(self) -> None:
+        """Remove uncommitted Artifact Candidate bytes owned by this Run."""
+        staging_paths = tuple(self._artifact_staging_paths)
+        self._artifact_candidates.clear()
+        self._artifact_staging_paths.clear()
+        for staging_path in reversed(staging_paths):
+            try:
+                self._volume_fs.remove(staging_path)
+            except Exception:
+                continue
 
     def read_attachment(self, attachment_id: str) -> dict[str, Any]:
         """Return attachment body after reauth. Public event omits content."""
@@ -170,6 +182,7 @@ class FileToolHost:
             return {"ok": False, "error": "validation"}
 
         self._artifact_candidates.append(candidate)
+        self._artifact_staging_paths.append(candidate.staging_path)
         return {
             "ok": True,
             "artifact_candidate_id": str(candidate.id),

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 import dspy
 
@@ -15,20 +15,36 @@ from fleet_rlm.rlm.events import JsonValue
 from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
 
 MAX_WORKSPACE_READ_CHARS = 10_000
+SESSION_WORKSPACE_NAMESPACE = "session_workspace"
+
+
+class WorkspaceToolError(RuntimeError):
+    """Safe, actionable failure returned to generated workspace-tool callers."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.public_message = message
 
 
 def _entry(entry: WorkspaceEntry) -> dict[str, object]:
     return asdict(entry)
 
 
-def _error(exc: BaseException) -> dict[str, object]:
+def _raise_tool_error(exc: BaseException) -> NoReturn:
     if isinstance(exc, FileNotFoundError):
-        return {"ok": False, "error": "not_found"}
+        raise WorkspaceToolError("not_found", "Session Workspace file was not found") from None
     if isinstance(exc, FileExistsError):
-        return {"ok": False, "error": "conflict"}
-    if isinstance(exc, (ValueError, IsADirectoryError, NotADirectoryError)):
-        return {"ok": False, "error": "validation"}
-    return {"ok": False, "error": "unavailable"}
+        raise WorkspaceToolError(
+            "conflict", "Session Workspace file already exists; use overwrite=True to replace it"
+        ) from None
+    if isinstance(exc, IsADirectoryError):
+        raise WorkspaceToolError("is_directory", "Session Workspace path is a directory") from None
+    if isinstance(exc, NotADirectoryError):
+        raise WorkspaceToolError("invalid_path", "Session Workspace path has a non-directory parent") from None
+    if isinstance(exc, ValueError):
+        raise WorkspaceToolError("invalid_path", "Session Workspace request is invalid") from None
+    raise WorkspaceToolError("unavailable", "Session Workspace is unavailable") from None
 
 
 class WorkspaceToolHost:
@@ -45,42 +61,38 @@ class WorkspaceToolHost:
                 listing = self._workspace.list_entries(path, limit=limit)
                 return {
                     "ok": True,
+                    "namespace": SESSION_WORKSPACE_NAMESPACE,
                     "path": path,
                     "count": len(listing.entries),
                     "truncated": listing.truncated,
                     "entries": [_entry(item) for item in listing.entries],
                 }
-            except Exception as exc:  # noqa: BLE001 - tool results never expose internals
-                return _error(exc)
+            except Exception as exc:  # noqa: BLE001 - public error is normalized
+                _raise_tool_error(exc)
 
         def stat_workspace_file(path: str) -> dict[str, object]:
             """Return bounded metadata for one workspace path."""
             try:
                 entry = self._workspace.stat(path)
                 if entry is None:
-                    return {"ok": False, "error": "not_found"}
-                return {"ok": True, "entry": _entry(entry)}
-            except Exception as exc:  # noqa: BLE001 - tool results never expose internals
-                return _error(exc)
+                    raise WorkspaceToolError("not_found", "Session Workspace file was not found")
+                return {"ok": True, "namespace": SESSION_WORKSPACE_NAMESPACE, "entry": _entry(entry)}
+            except WorkspaceToolError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - public error is normalized
+                _raise_tool_error(exc)
 
-        def read_workspace_text(path: str, max_chars: int = MAX_WORKSPACE_READ_CHARS) -> dict[str, object]:
+        def read_workspace_text(path: str, max_chars: int = MAX_WORKSPACE_READ_CHARS) -> str:
             """Read one UTF-8 workspace file without returning more than max_chars."""
             if max_chars < 1 or max_chars > MAX_WORKSPACE_READ_CHARS:
-                return {"ok": False, "error": "validation"}
+                raise WorkspaceToolError("invalid_path", "Session Workspace read bound is invalid")
             try:
                 content = self._workspace.read_text(path, max_bytes=self._max_file_bytes)
-            except Exception as exc:  # noqa: BLE001 - tool results never expose internals
-                return _error(exc)
+            except Exception as exc:  # noqa: BLE001 - public error is normalized
+                _raise_tool_error(exc)
             if len(content) > max_chars:
-                return {"ok": False, "error": "too_large"}
-            return {
-                "ok": True,
-                "path": path,
-                "content": content,
-                "encoding": "utf-8",
-                "chars": len(content),
-                "byte_size": len(content.encode("utf-8")),
-            }
+                raise WorkspaceToolError("too_large", "Session Workspace file exceeds the requested read bound")
+            return content
 
         def write_workspace_text(
             path: str,
@@ -89,13 +101,17 @@ class WorkspaceToolHost:
         ) -> dict[str, object]:
             """Write one UTF-8 file immediately into this Session's durable workspace."""
             if not isinstance(content, str):
-                return {"ok": False, "error": "validation"}
+                raise WorkspaceToolError("invalid_path", "Session Workspace content must be text")
             if len(content.encode("utf-8")) > self._max_file_bytes:
-                return {"ok": False, "error": "too_large"}
+                raise WorkspaceToolError("too_large", "Session Workspace file exceeds the maximum size")
             try:
-                return {"ok": True, **_entry(self._workspace.write_text(path, content, overwrite=overwrite))}
-            except Exception as exc:  # noqa: BLE001 - tool results never expose internals
-                return _error(exc)
+                return {
+                    "ok": True,
+                    "namespace": SESSION_WORKSPACE_NAMESPACE,
+                    **_entry(self._workspace.write_text(path, content, overwrite=overwrite)),
+                }
+            except Exception as exc:  # noqa: BLE001 - public error is normalized
+                _raise_tool_error(exc)
 
         return (
             dspy.Tool(
@@ -182,13 +198,15 @@ class WorkspaceToolHost:
             entry = result.get("entry")
             if isinstance(entry, Mapping):
                 entry_values = cast(Mapping[str, JsonValue], entry)
-                projected.update({
-                    name: bound_event_text(entry_values[name])
-                    if isinstance(entry_values[name], str)
-                    else entry_values[name]
-                    for name in ("path", "byte_size")
-                    if name in entry_values
-                })
+                projected.update(
+                    {
+                        name: bound_event_text(entry_values[name])
+                        if isinstance(entry_values[name], str)
+                        else entry_values[name]
+                        for name in ("path", "byte_size")
+                        if name in entry_values
+                    }
+                )
             return projected
 
         def write_input(arguments: Mapping[str, Any]) -> JsonValue:
@@ -198,24 +216,25 @@ class WorkspaceToolHost:
                 "content_chars": len(str(content or "")),
             }
 
-        return MappingProxyType({
-            "list_workspace_files": ToolEventView(
-                input_projection=lambda arguments: fields(arguments, ("path", "limit"), allow_root=True),
-                output_projection=lambda result: output(result, ("ok", "error", "path", "count", "truncated")),
-            ),
-            "stat_workspace_file": ToolEventView(
-                input_projection=lambda arguments: fields(arguments, ("path",)),
-                output_projection=stat_output,
-            ),
-            "read_workspace_text": ToolEventView(
-                input_projection=lambda arguments: fields(arguments, ("path", "max_chars")),
-                output_projection=lambda result: output(
-                    result,
-                    ("ok", "error", "path", "chars", "byte_size"),
+        return MappingProxyType(
+            {
+                "list_workspace_files": ToolEventView(
+                    input_projection=lambda arguments: fields(arguments, ("path", "limit"), allow_root=True),
+                    output_projection=lambda result: output(result, ("ok", "error", "path", "count", "truncated")),
                 ),
-            ),
-            "write_workspace_text": ToolEventView(
-                input_projection=write_input,
-                output_projection=lambda result: output(result, ("ok", "error", "path", "byte_size")),
-            ),
-        })
+                "stat_workspace_file": ToolEventView(
+                    input_projection=lambda arguments: fields(arguments, ("path",)),
+                    output_projection=stat_output,
+                ),
+                "read_workspace_text": ToolEventView(
+                    input_projection=lambda arguments: fields(arguments, ("path", "max_chars")),
+                    output_projection=lambda result: (
+                        {"ok": True, "namespace": SESSION_WORKSPACE_NAMESPACE} if isinstance(result, str) else {}
+                    ),
+                ),
+                "write_workspace_text": ToolEventView(
+                    input_projection=write_input,
+                    output_projection=lambda result: output(result, ("ok", "namespace", "path", "byte_size")),
+                ),
+            }
+        )

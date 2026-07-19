@@ -6,10 +6,19 @@ against a Sandbox that mounts the Workspace Volume Scope subpath.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
 from fleet_rlm.daytona.paths import UnsafePathError, VolumePaths, as_posix, validate_mount_path
+
+
+@dataclass(frozen=True, slots=True)
+class VolumeFile:
+    """Bounded metadata returned for a regular file in the mounted Volume."""
+
+    path: str
+    modified_at: float
 
 
 class VolumeBlobFs(Protocol):
@@ -22,6 +31,12 @@ class VolumeBlobFs(Protocol):
     def exists(self, logical_path: str) -> bool: ...
 
     def remove(self, logical_path: str) -> None: ...
+
+
+class VolumeTreeFs(VolumeBlobFs, Protocol):
+    """Blob filesystem with explicitly rooted, bounded file enumeration."""
+
+    def list_files(self, logical_root: str, *, max_depth: int, max_files: int) -> tuple[VolumeFile, ...]: ...
 
 
 class HostVolumeMirror:
@@ -80,6 +95,31 @@ class HostVolumeMirror:
     def remove(self, logical_path: str) -> None:
         self.host_path_for(logical_path).unlink(missing_ok=True)
 
+    def list_files(self, logical_root: str, *, max_depth: int, max_files: int) -> tuple[VolumeFile, ...]:
+        if max_depth <= 0:
+            raise ValueError("max_depth must be positive")
+        if max_files <= 0:
+            raise ValueError("max_files must be positive")
+        root = self.host_path_for(logical_root)
+        if not root.is_dir():
+            return ()
+        results: list[VolumeFile] = []
+        base_depth = len(root.parts)
+        for candidate in sorted(root.rglob("*")):
+            if len(results) >= max_files:
+                break
+            if candidate.is_symlink() or not candidate.is_file():
+                continue
+            if len(candidate.parts) - base_depth > max_depth:
+                continue
+            try:
+                candidate.relative_to(self._root)
+            except ValueError as exc:
+                raise UnsafePathError("enumerated path escapes volume root") from exc
+            logical = self._paths.mount_path / candidate.relative_to(self._root)
+            results.append(VolumeFile(str(logical), candidate.stat().st_mtime))
+        return tuple(results)
+
 
 class DaytonaSandboxVolumeFs:
     """Write/read logical mount paths via a live Daytona Sandbox FS API."""
@@ -121,4 +161,52 @@ class DaytonaSandboxVolumeFs:
         return True
 
     def remove(self, logical_path: str) -> None:
-        self._sandbox.fs.delete_file(as_posix(logical_path))
+        try:
+            self._sandbox.fs.delete_file(as_posix(logical_path))
+        except Exception as exc:  # noqa: BLE001 - provider not-found is idempotent
+            if not _is_not_found(exc):
+                raise
+
+    def list_files(self, logical_root: str, *, max_depth: int, max_files: int) -> tuple[VolumeFile, ...]:
+        if max_depth <= 0:
+            raise ValueError("max_depth must be positive")
+        if max_files <= 0:
+            raise ValueError("max_files must be positive")
+        root = as_posix(logical_root)
+        entries = self._sandbox.fs.list_files(root, depth=max_depth)
+        results: list[VolumeFile] = []
+        for entry in entries:
+            path = getattr(entry, "path", None)
+            if not isinstance(path, str) or not _is_under(path, root):
+                continue
+            if bool(getattr(entry, "is_dir", False)):
+                continue
+            modified_at = getattr(entry, "mod_time", None)
+            if hasattr(modified_at, "timestamp"):
+                modified_at = modified_at.timestamp()
+            if not isinstance(modified_at, (int, float)):
+                continue
+            results.append(VolumeFile(path, float(modified_at)))
+            if len(results) >= max_files:
+                break
+        return tuple(results)
+
+
+def _is_under(path: str, root: str) -> bool:
+    try:
+        PurePosixPath(path).relative_to(PurePosixPath(root))
+    except ValueError:
+        return False
+    return True
+
+
+def _is_not_found(exc: BaseException) -> bool:
+    if isinstance(exc, FileNotFoundError):
+        return True
+    if getattr(exc, "status_code", None) == 404:
+        return True
+    response = getattr(exc, "response", None)
+    return response is not None and getattr(response, "status_code", None) == 404
+
+
+__all__ = ["DaytonaSandboxVolumeFs", "HostVolumeMirror", "VolumeBlobFs", "VolumeFile", "VolumeTreeFs"]

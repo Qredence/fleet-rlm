@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -96,6 +97,11 @@ async def test_session_workspace_survives_sandbox_replacement() -> None:
             overwrite=False,
         )
         assert written.byte_size == len(b"durable across replacement")
+        today = datetime.now(UTC).date().isoformat()
+        first_workspace.write_text("date.txt", today, overwrite=True)
+        assert first_workspace.read_text("date.txt", max_bytes=100) == today
+        first_workspace.write_text("date.txt", "verified", overwrite=True)
+        assert first_workspace.read_text("date.txt", max_bytes=100) == "verified"
         await resources.session_manager.release(first_lease)
         first_lease = None
 
@@ -149,6 +155,7 @@ async def test_session_workspace_survives_sandbox_replacement() -> None:
         )
 
         assert second_workspace.read_text("notes/decision.md", max_bytes=1024) == ("durable across replacement")
+        assert second_workspace.read_text("date.txt", max_bytes=100) == "verified"
         entry = second_workspace.stat("notes/decision.md")
         assert entry is not None
         assert entry.byte_size == written.byte_size

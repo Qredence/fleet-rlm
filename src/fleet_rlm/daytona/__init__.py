@@ -15,7 +15,7 @@ from fleet_rlm.daytona.paths import (
     VolumePaths,
 )
 from fleet_rlm.daytona.session_manager import DaytonaSessionManager, LeaseRequest
-from fleet_rlm.daytona.volume_fs import DaytonaSandboxVolumeFs, HostVolumeMirror
+from fleet_rlm.daytona.volume_fs import DaytonaSandboxVolumeFs, HostVolumeMirror, VolumeFile, VolumeTreeFs
 from fleet_rlm.daytona.volumes import DEFAULT_VOLUME_NAME, VolumeConfig
 from fleet_rlm.daytona.workspace_volume import (
     DaytonaWorkspaceVolumeGateway,
@@ -45,7 +45,9 @@ __all__ = [
     "SandboxBinding",
     "UnsafePathError",
     "VolumeConfig",
+    "VolumeFile",
     "VolumePaths",
+    "VolumeTreeFs",
     "build_daytona_client",
     "map_provider_error",
     "sandbox_backend",

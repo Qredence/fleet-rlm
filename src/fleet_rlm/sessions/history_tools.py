@@ -45,17 +45,22 @@ class SessionHistoryToolHost:
                 if bytes_returned + content_bytes > SESSION_HISTORY_RESULT_BYTE_BUDGET:
                     truncated = True
                     break
-                selected.append({
-                    "ordinal": ordinal,
-                    "role": message.role,
-                    "content": message.content,
-                })
+                selected.append(
+                    {
+                        "ordinal": ordinal,
+                        "role": message.role,
+                        "content": message.content,
+                    }
+                )
                 bytes_returned += content_bytes
                 current_offset += 1
+            done = current_offset >= total
             result: dict[str, object] = {
                 "offset": offset,
-                "next_offset": current_offset,
+                "next_offset": None if done else current_offset,
                 "total": total,
+                "has_more": not done,
+                "done": done,
                 "messages": selected,
                 "truncated": truncated,
                 "bytes_returned": bytes_returned,
@@ -92,6 +97,8 @@ class SessionHistoryToolHost:
                     "offset",
                     "next_offset",
                     "total",
+                    "has_more",
+                    "done",
                     "truncated",
                     "bytes_returned",
                     "byte_budget",
@@ -102,9 +109,11 @@ class SessionHistoryToolHost:
             projected["message_count"] = len(messages) if isinstance(messages, list) else 0
             return projected
 
-        return MappingProxyType({
-            "read_session_history": ToolEventView(
-                input_projection=project_input,
-                output_projection=project_output,
-            )
-        })
+        return MappingProxyType(
+            {
+                "read_session_history": ToolEventView(
+                    input_projection=project_input,
+                    output_projection=project_output,
+                )
+            }
+        )

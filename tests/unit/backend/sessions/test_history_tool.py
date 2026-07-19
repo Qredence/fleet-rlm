@@ -8,8 +8,12 @@ from fleet_rlm.rlm.tool_observer import observe_tool
 from fleet_rlm.sessions.history_tools import SESSION_HISTORY_RESULT_BYTE_BUDGET
 
 
-def _budget_fields(*, truncated: bool, bytes_returned: int, skipped_ordinal: int | None = None) -> dict[str, object]:
+def _budget_fields(
+    *, has_more: bool, truncated: bool, bytes_returned: int, skipped_ordinal: int | None = None
+) -> dict[str, object]:
     fields: dict[str, object] = {
+        "has_more": has_more,
+        "done": not has_more,
         "truncated": truncated,
         "bytes_returned": bytes_returned,
         "byte_budget": SESSION_HISTORY_RESULT_BYTE_BUDGET,
@@ -46,25 +50,28 @@ def test_history_tool_pages_canonical_messages_with_stable_ordinals() -> None:
             {"ordinal": 1, "role": "user", "content": messages[0].content},
             {"ordinal": 2, "role": "assistant", "content": messages[1].content},
         ],
-        **_budget_fields(truncated=False, bytes_returned=sum(len(m.content.encode("utf-8")) for m in messages[:2])),
+        **_budget_fields(
+            has_more=True, truncated=False, bytes_returned=sum(len(m.content.encode("utf-8")) for m in messages[:2])
+        ),
     }
-    assert tool(offset=2, limit=2)["messages"] == [
+    second = tool(offset=2, limit=2)
+    assert second["messages"] == [
         {"ordinal": 3, "role": "user", "content": messages[2].content},
         {"ordinal": 4, "role": "assistant", "content": messages[3].content},
     ]
     assert tool(offset=4, limit=20) == {
         "offset": 4,
-        "next_offset": 5,
+        "next_offset": None,
         "total": 5,
         "messages": [{"ordinal": 5, "role": "user", "content": messages[4].content}],
-        **_budget_fields(truncated=False, bytes_returned=len(messages[4].content.encode("utf-8"))),
+        **_budget_fields(has_more=False, truncated=False, bytes_returned=len(messages[4].content.encode("utf-8"))),
     }
     assert tool(offset=9, limit=3) == {
         "offset": 9,
-        "next_offset": 9,
+        "next_offset": None,
         "total": 5,
         "messages": [],
-        **_budget_fields(truncated=False, bytes_returned=0),
+        **_budget_fields(has_more=False, truncated=False, bytes_returned=0),
     }
 
 
@@ -95,7 +102,7 @@ def test_history_tool_stops_mid_page_when_byte_budget_exhausted() -> None:
         {"ordinal": 3, "role": "user", "content": "tail"},
     ]
     assert continuation["truncated"] is False
-    assert continuation["next_offset"] == 3
+    assert continuation["next_offset"] is None
 
 
 def test_history_tool_skips_oversized_message_and_continues() -> None:
@@ -112,20 +119,21 @@ def test_history_tool_skips_oversized_message_and_continues() -> None:
     skipped = tool(offset=0, limit=20)
     assert skipped == {
         "offset": 0,
-        "next_offset": 2,
+        "next_offset": None,
         "total": 2,
         "messages": [{"ordinal": 2, "role": "assistant", "content": "recoverable"}],
         **_budget_fields(
+            has_more=False,
             truncated=True,
             bytes_returned=len("recoverable".encode("utf-8")),
             skipped_ordinal=1,
         ),
     }
 
-    recovered = tool(offset=skipped["next_offset"], limit=20)
+    recovered = tool(offset=2, limit=20)
     assert recovered["messages"] == []
     assert recovered["truncated"] is False
-    assert recovered["next_offset"] == 2
+    assert recovered["next_offset"] is None
     assert "skipped_ordinal" not in recovered
 
 
@@ -143,8 +151,10 @@ def test_history_event_view_exposes_page_metadata_without_message_bodies() -> No
     assert observed[0].input == {"offset": 0, "limit": 1}
     assert observed[1].output == {
         "offset": 0,
-        "next_offset": 1,
+        "next_offset": None,
         "total": 1,
+        "has_more": False,
+        "done": True,
         "truncated": False,
         "bytes_returned": len("private history body".encode("utf-8")),
         "byte_budget": SESSION_HISTORY_RESULT_BYTE_BUDGET,

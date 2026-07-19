@@ -31,3 +31,11 @@ class TurnCancelled(TurnTerminalError):
 class TurnTimeout(TurnTerminalError):
     status = "timeout"
     public_message = "Turn timed out"
+
+
+class TurnNoProgress(TurnTerminalError):
+    public_message = "Turn stopped after repeated tool calls made no progress"
+
+
+class TurnIntegrityFailure(TurnTerminalError):
+    public_message = "Turn failed because a required workspace update was not completed"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from fastapi import FastAPI
@@ -67,11 +68,13 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
     assert_dspy_version()
     require_daytona_settings(settings)
 
+    from fleet_rlm.api.local_scope import LocalScope
     from fleet_rlm.artifacts.daytona_catalog import DaytonaArtifactBlobGateway
     from fleet_rlm.artifacts.reader import ArtifactReader
     from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.daytona.orphan_cleanup import cleanup_orphan_bytes
     from fleet_rlm.daytona.paths import volume_paths_from_settings
     from fleet_rlm.daytona.run_environment import LiveKernelResources, resolve_settings
     from fleet_rlm.daytona.sandbox_spec import sandbox_spec_from_settings
@@ -114,15 +117,27 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
             mount_path=resolved.volume_mount_path,
             sandbox_spec=sandbox_spec,
         )
+        volume_paths = volume_paths_from_settings(resolved)
         attachment_lifecycle = AttachmentModule(
             catalog=SqlAlchemyAttachmentCatalog(session_factory),
             blobs=WorkspaceAttachmentBlobGateway(gateway),
-            paths=DaytonaAttachmentPathPolicy(volume_paths_from_settings(resolved)),
+            paths=DaytonaAttachmentPathPolicy(volume_paths),
             max_bytes=resolved.max_upload_bytes,
         )
+        artifact_catalog = SqlAlchemyArtifactCatalog(session_factory)
         artifact_reader = ArtifactReader(
-            catalog=SqlAlchemyArtifactCatalog(session_factory),
+            catalog=artifact_catalog,
             blobs=DaytonaArtifactBlobGateway(gateway),
+        )
+        local_scope = LocalScope()
+        await cleanup_orphan_bytes(
+            gateway,
+            workspace_id=local_scope.workspace_id,
+            paths=volume_paths,
+            committed_storage_refs=await artifact_catalog.list_storage_refs(workspace_id=local_scope.workspace_id),
+            completed_runs=await artifact_catalog.list_completed_runs(workspace_id=local_scope.workspace_id),
+            active_runs=await artifact_catalog.list_active_runs(workspace_id=local_scope.workspace_id),
+            grace_period=timedelta(hours=1),
         )
         resources.configure_preparation(attachment_lifecycle)
         turn_state = SqlAlchemyTurnStateStore(

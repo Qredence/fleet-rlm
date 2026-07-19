@@ -17,7 +17,11 @@ from fleet_rlm.rlm.dspy_contract import (
     observed_usage,
     prediction_result,
 )
-from fleet_rlm.rlm.errors import TurnCancelled, TurnTerminalError
+from fleet_rlm.rlm.errors import (
+    TurnCancelled,
+    TurnIntegrityFailure,
+    TurnTerminalError,
+)
 from fleet_rlm.rlm.events import (
     AttachmentRead,
     EventRecorder,
@@ -38,6 +42,7 @@ from fleet_rlm.rlm.factory import RLMFactory
 from fleet_rlm.rlm.inputs import build_rlm_input_kwargs, skill_card_metadata
 from fleet_rlm.rlm.outcome import ExecutionDetail, RLMOutcome, TerminalStatus
 from fleet_rlm.rlm.sanitize import truncate_public_text
+from fleet_rlm.rlm.tool_guards import TurnToolGuards
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 from fleet_rlm.skills.capabilities import DEFAULT_TASK_CONTRACT, TurnCapabilityBlueprint
 
@@ -318,6 +323,7 @@ class RLMRunner:
 
                 blueprint = cast(TurnCapabilityBlueprint, context.capabilities.blueprint)
                 relay = _DetailRelay()
+                guards = TurnToolGuards()
                 bind_observer = getattr(context.interpreter, "bind_observer", None)
                 if callable(bind_observer):
                     bind_observer(relay.publish, max_chars=context.options.max_output_chars)
@@ -333,6 +339,7 @@ class RLMRunner:
                         blueprint.tool_event_views.get(str(tool.name), ToolEventView.metadata_only()),
                         after_result=(relay_capability_details if str(tool.name) == "load_skill" else None),
                         is_authorized=lambda: not context.authority.revoked,
+                        guards=guards,
                     )
                     for tool in blueprint.tools
                 )
@@ -403,6 +410,9 @@ class RLMRunner:
 
                 prediction = task.result()
 
+                if guards.integrity.unresolved:
+                    raise TurnIntegrityFailure
+
                 trajectory = normalize_prediction_trajectory(prediction)
                 for item in _reconcile_trajectory(
                     details,
@@ -412,9 +422,16 @@ class RLMRunner:
                     yield recorder.record(item)
                 final_reasoning = getattr(prediction, "final_reasoning", None)
                 if isinstance(final_reasoning, str) and final_reasoning.strip():
-                    item = RLMReasoning(truncate_public_text(final_reasoning, max_len=context.options.max_output_chars))
-                    details.append(item)
-                    yield recorder.record(item)
+                    public_reasoning = truncate_public_text(final_reasoning, max_len=context.options.max_output_chars)
+                    if not any(
+                        isinstance(detail, RLMReasoning)
+                        and truncate_public_text(detail.text, max_len=context.options.max_output_chars)
+                        == public_reasoning
+                        for detail in details
+                    ):
+                        item = RLMReasoning(public_reasoning)
+                        details.append(item)
+                        yield recorder.record(item)
 
                 for item in self._drain_capability_details(context):
                     details.append(item)

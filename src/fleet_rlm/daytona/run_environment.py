@@ -111,7 +111,7 @@ class LivePreparedCapabilities:
         return self._files.drain_artifact_candidates()
 
     async def aclose(self) -> None:
-        return None
+        await self._files.aclose()
 
 
 class _EmptySkillHost:

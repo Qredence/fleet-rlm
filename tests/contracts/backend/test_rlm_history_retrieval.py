@@ -26,10 +26,12 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
     from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
     older_detail = "project codename is cobalt-orchid"
-    history = SessionHistory((
-        HistoryMessage("user", older_detail),
-        *(HistoryMessage("assistant", f"recent-{index}") for index in range(8)),
-    ))
+    history = SessionHistory(
+        (
+            HistoryMessage("user", older_detail),
+            *(HistoryMessage("assistant", f"recent-{index}") for index in range(8)),
+        )
+    )
     session_id = uuid4()
     manifest = build_session_context_manifest(session_id, 4, history)
     assert older_detail not in str(manifest.to_input())
@@ -111,11 +113,13 @@ async def test_native_rlm_continues_history_across_truncated_pages() -> None:
     from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
     chunk = "y" * 150_000
-    history = SessionHistory((
-        HistoryMessage("user", chunk),
-        HistoryMessage("assistant", chunk),
-        HistoryMessage("user", "final-detail"),
-    ))
+    history = SessionHistory(
+        (
+            HistoryMessage("user", chunk),
+            HistoryMessage("assistant", chunk),
+            HistoryMessage("user", "final-detail"),
+        )
+    )
     session_id = uuid4()
     manifest = build_session_context_manifest(session_id, 4, history)
     (history_tool,) = SessionHistoryToolHost(history).as_tools()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -125,7 +126,7 @@ async def test_sql_state_round_trips_canonical_turn_without_result_mirrors() -> 
 
 
 @pytest.mark.asyncio
-async def test_sql_state_replaces_a_stale_claim_with_a_new_audited_run() -> None:
+async def test_sql_state_replaces_a_stale_claim_after_recovery() -> None:
     from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
@@ -159,6 +160,7 @@ async def test_sql_state_replaces_a_stale_claim_with_a_new_audited_run() -> None
             assert row is not None
             row.claim_heartbeat_at = datetime.now(UTC) - timedelta(seconds=31)
 
+        await store.reconcile_settling()
         replacement = await store.begin(BeginTurn(access, session_id, TurnInput("hello"), "key", replacement_id))
         assert isinstance(replacement, ExecuteTurn)
         assert replacement.run_id == replacement_id
@@ -169,5 +171,235 @@ async def test_sql_state_replaces_a_stale_claim_with_a_new_audited_run() -> None
             assert stale.failure_code == "stale_claim"
             assert stale.claim_owner is None
             assert stale.claim_heartbeat_at is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_recovers_stale_running_after_provider_fence() -> None:
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn
+    from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
+    from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
+    try:
+        await create_tables(engine)
+        factory = create_session_factory(engine)
+        access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+        async with factory() as db, db.begin():
+            db.add_all(
+                (
+                    UserRow(id=access.user_id),
+                    WorkspaceRow(id=access.workspace_id),
+                    SessionRow(
+                        id=session_id,
+                        user_id=access.user_id,
+                        workspace_id=access.workspace_id,
+                        title="recovery",
+                    ),
+                )
+            )
+        store = SqlAlchemyTurnStateStore(factory, stale_after_seconds=30)
+        started = await store.begin(BeginTurn(access, session_id, TurnInput("hello"), "key", run_id))
+        assert isinstance(started, ExecuteTurn)
+        async with factory() as db, db.begin():
+            row = await db.get(RunRow, run_id)
+            assert row is not None
+            row.claim_heartbeat_at = datetime.now(UTC) - timedelta(seconds=31)
+
+        fenced: list[object] = []
+
+        async def fence(value):
+            fenced.append(value)
+
+        await store.reconcile_settling(fence)
+
+        async with factory() as db:
+            row = await db.get(RunRow, run_id)
+            assert row is not None
+            assert row.status == "failed"
+            assert row.failure_code == "stale_claim"
+            assert row.claim_owner is None
+            assert row.claim_heartbeat_at is None
+        assert fenced == [session_id]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciliation_fences_a_live_prior_claim_without_waiting_for_staleness() -> None:
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn
+    from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
+    from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
+    try:
+        await create_tables(engine)
+        factory = create_session_factory(engine)
+        access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+        async with factory() as db, db.begin():
+            db.add_all(
+                (
+                    UserRow(id=access.user_id),
+                    WorkspaceRow(id=access.workspace_id),
+                    SessionRow(id=session_id, user_id=access.user_id, workspace_id=access.workspace_id, title="startup"),
+                )
+            )
+        store = SqlAlchemyTurnStateStore(factory, stale_after_seconds=30)
+        assert isinstance(await store.begin(BeginTurn(access, session_id, TurnInput("hello"), "key", run_id)), ExecuteTurn)
+
+        fenced: list[object] = []
+
+        async def fence(value):
+            fenced.append(value)
+
+        await store.reconcile_settling(fence)
+
+        async with factory() as db:
+            row = await db.get(RunRow, run_id)
+            assert row is not None
+            assert row.status == "failed"
+            assert row.claim_owner is None
+        assert fenced == [session_id]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_retries_failed_settling_fence_without_losing_intent() -> None:
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn, TurnFailure
+    from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
+    from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
+    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
+    try:
+        await create_tables(engine)
+        factory = create_session_factory(engine)
+        access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+        async with factory() as db, db.begin():
+            db.add_all(
+                (
+                    UserRow(id=access.user_id),
+                    WorkspaceRow(id=access.workspace_id),
+                    SessionRow(
+                        id=session_id,
+                        user_id=access.user_id,
+                        workspace_id=access.workspace_id,
+                        title="settling recovery",
+                    ),
+                )
+            )
+        store = SqlAlchemyTurnStateStore(factory, stale_after_seconds=30)
+        started = await store.begin(BeginTurn(access, session_id, TurnInput("hello"), "key", run_id))
+        assert isinstance(started, ExecuteTurn)
+        await store.settle(
+            started,
+            TurnFailure("timeout", "timeout", "Turn timed out", empty_rlm_usage()),
+        )
+        async with factory() as db, db.begin():
+            row = await db.get(RunRow, run_id)
+            assert row is not None
+            owner = row.claim_owner
+            row.claim_heartbeat_at = datetime.now(UTC) - timedelta(seconds=31)
+
+        async def fail_fence(_session_id):
+            raise RuntimeError("provider unavailable")
+
+        for attempts in range(1, 5):
+            await store.reconcile_settling(fail_fence)
+            async with factory() as db:
+                row = await db.get(RunRow, run_id)
+                assert row is not None
+                assert row.status == "settling"
+                assert row.claim_owner == owner
+                assert row.recovery_metadata_json == {
+                    "cleanup": "pending",
+                    "recovery": {"attempts": attempts, "last_error": "provider_fence_failed"},
+                }
+
+        async with factory() as db:
+            row = await db.get(RunRow, run_id)
+            assert row is not None
+            assert row.status == "settling"
+            assert row.terminal_intent == "timeout"
+            assert row.claim_owner == owner
+            assert row.recovery_metadata_json == {
+                "cleanup": "pending",
+                "recovery": {"attempts": 4, "last_error": "provider_fence_failed"},
+            }
+
+        async def succeed_fence(_session_id):
+            return None
+
+        await store.reconcile_settling(succeed_fence)
+        async with factory() as db:
+            row = await db.get(RunRow, run_id)
+            assert row is not None
+            assert row.status == "timeout"
+            assert row.claim_owner is None
+            assert row.terminal_intent == "timeout"
+            assert row.recovery_metadata_json is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_recovery_workers_fence_a_run_once() -> None:
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn
+    from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
+    from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
+    try:
+        await create_tables(engine)
+        factory = create_session_factory(engine)
+        access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+        async with factory() as db, db.begin():
+            db.add_all(
+                (
+                    UserRow(id=access.user_id),
+                    WorkspaceRow(id=access.workspace_id),
+                    SessionRow(
+                        id=session_id,
+                        user_id=access.user_id,
+                        workspace_id=access.workspace_id,
+                        title="concurrent recovery",
+                    ),
+                )
+            )
+        store = SqlAlchemyTurnStateStore(factory, stale_after_seconds=30)
+        started = await store.begin(BeginTurn(access, session_id, TurnInput("hello"), "key", run_id))
+        assert isinstance(started, ExecuteTurn)
+        async with factory() as db, db.begin():
+            row = await db.get(RunRow, run_id)
+            assert row is not None
+            row.claim_heartbeat_at = datetime.now(UTC) - timedelta(seconds=31)
+
+        fenced = 0
+
+        async def fence(_session_id):
+            nonlocal fenced
+            fenced += 1
+            await asyncio.sleep(0)
+
+        await asyncio.gather(
+            store.reconcile_settling(fence),
+            store.reconcile_settling(fence),
+        )
+
+        assert fenced == 1
+        async with factory() as db:
+            row = await db.get(RunRow, run_id)
+            assert row is not None
+            assert row.status == "failed"
     finally:
         await engine.dispose()

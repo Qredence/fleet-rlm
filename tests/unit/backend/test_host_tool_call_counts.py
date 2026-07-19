@@ -6,6 +6,7 @@ from hashlib import sha256
 from uuid import uuid4
 
 import dspy
+import pytest
 
 
 def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path) -> None:
@@ -156,3 +157,38 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
     assert "private-candidate" not in serialized
     assert "Inspect the authorized input" not in serialized
     assert "private skill resource body" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes(tmp_path) -> None:
+    from fleet_rlm.daytona.paths import VolumePaths
+    from fleet_rlm.daytona.run_environment import LivePreparedCapabilities
+    from fleet_rlm.daytona.volume_fs import HostVolumeMirror
+    from fleet_rlm.files.tools import FileToolHost
+    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
+
+    user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
+    paths = VolumePaths.from_mount("/mnt/fleet")
+    volume = HostVolumeMirror(tmp_path, volume_paths=paths)
+    files = FileToolHost(
+        attachments=(),
+        staged_attachments=(),
+        volume_fs=volume,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        session_id=session_id,
+        run_id=run_id,
+        volume_paths=paths,
+    )
+
+    assert files.create_artifact("text", "uncommitted")["ok"] is True
+    candidate = files.drain_artifact_candidates()[0]
+
+    class Skills:
+        def drain_public_events(self) -> list[dict[str, str]]:
+            return []
+
+    capabilities = LivePreparedCapabilities(TurnCapabilityBlueprint(), files=files, skills=Skills())
+    await capabilities.aclose()
+
+    assert not volume.exists(candidate.staging_path)

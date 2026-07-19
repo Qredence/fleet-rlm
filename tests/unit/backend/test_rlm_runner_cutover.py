@@ -110,6 +110,70 @@ def test_trajectory_reconciliation_replaces_live_details_without_duplicates() ->
 
 
 @pytest.mark.asyncio
+async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalized_trajectory() -> None:
+    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.events import RLMReasoning
+    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.rlm.sanitize import truncate_public_text
+    from fleet_rlm.sessions.models import TurnAccess
+    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
+
+    repeated = "reasoning requiring public truncation"
+
+    class Capabilities:
+        blueprint = TurnCapabilityBlueprint()
+
+        def drain_public_details(self):
+            return ()
+
+        def drain_artifact_candidates(self):
+            return ()
+
+    class Factory:
+        def create(self, **_kwargs):
+            class Program:
+                async def acall(self, **_call_kwargs):
+                    return dspy.Prediction(
+                        answer="done",
+                        final_reasoning=repeated,
+                        trajectory=[
+                            {"reasoning": "first distinct reason", "code": "", "output": ""},
+                            {"reasoning": repeated, "code": "", "output": ""},
+                        ],
+                    )
+
+            return Program()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        "answer",
+        SessionContextManifest(uuid4(), 0, 0, ()),
+        SimpleNamespace(root_lm=object(), sub_lm=object()),
+        RLMOptions(max_output_chars=16),
+        asyncio.get_running_loop().time() + 10,
+        None,
+        (),
+        Capabilities(),
+        not_cancelled,
+        (),
+    )
+
+    events = [event async for event in RLMRunner(factory=Factory()).stream(context)]
+
+    assert [event.detail.text for event in events if isinstance(event.detail, RLMReasoning)] == [
+        truncate_public_text("first distinct reason", max_len=16),
+        truncate_public_text(repeated, max_len=16),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

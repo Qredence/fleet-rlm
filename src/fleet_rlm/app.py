@@ -73,7 +73,7 @@ async def _local_db_lifespan(
         handles = install_fn(app, settings_obj, session_factory=session_factory)
         turn_state = getattr(app.state, "turn_state_store", None)
         reconcile = getattr(turn_state, "reconcile_settling", None)
-        if callable(reconcile) and (not settings_obj.database_url or is_sqlite_url(settings_obj.database_url)):
+        if callable(reconcile):
             await reconcile()
         yield
     finally:

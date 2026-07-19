@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import dspy
 
@@ -36,7 +36,7 @@ from fleet_rlm.rlm.dspy_interpreter_contract import (
 )
 from fleet_rlm.rlm.events import ObservationObserver, RLMCode, RLMOutput, StepFinished, StepStarted
 from fleet_rlm.rlm.sanitize import truncate_public_text
-from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
+from fleet_rlm.rlm.tool_observer import ToolEventView, ToolObserver, observe_tool
 
 
 class InterpreterBackend(Protocol):
@@ -188,7 +188,7 @@ class DaytonaCodeInterpreter:
         for name, view in views.items():
             fn = tools.get(name)
             if fn is not None:
-                tools[name] = observe_tool(dspy.Tool(fn, name=name), self._observer, view).func
+                tools[name] = observe_tool(dspy.Tool(fn, name=name), cast(ToolObserver, self._observer), view).func
         return tools
 
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:

@@ -352,6 +352,7 @@ async def test_commit_failure_removes_snapshot_and_promoted_artifact_exactly() -
         "commit",
         f"snapshot.remove:{snapshot.path}",
         f"artifact.remove:{candidate.durable_path}",
+        f"artifact.remove:{candidate.staging_path}",
         "fail",
     ]
 
@@ -404,3 +405,76 @@ async def test_non_success_never_writes_result_snapshot(status: str) -> None:
     )
 
     assert isinstance(receipt, FailedRunReceipt)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["failed", "cancelled", "timeout"])
+async def test_non_success_removes_run_local_artifact_candidate_bytes(status: str) -> None:
+    from fleet_rlm.artifacts.models import ArtifactCandidate
+    from fleet_rlm.chat.turn_lifecycle import (
+        ExecuteTurn,
+        FailedRunReceipt,
+        TurnLifecycleModule,
+        _TurnClaimToken,
+    )
+    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+
+    access, run_id, session_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+    data = b"uncommitted"
+    candidate = ArtifactCandidate(
+        uuid4(),
+        access.user_id,
+        access.workspace_id,
+        session_id,
+        run_id,
+        "text",
+        None,
+        "text/plain",
+        len(data),
+        sha256(data).hexdigest(),
+        "/runs/current/artifact-candidate.txt",
+        "/artifacts/never-published.txt",
+    )
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ExecuteTurn(
+        run_id,
+        session_id,
+        access,
+        TurnInput("hello"),
+        SessionHistory(),
+        not_cancelled,
+        _TurnClaimToken(uuid4()),
+    )
+
+    class Store:
+        async def fail(self, claimed, failure):
+            return FailedRunReceipt(
+                claimed.run_id,
+                failure.terminal_status,
+                failure.failure_code,
+                failure.public_message,
+                True,
+            )
+
+    class Sink:
+        values = {candidate.staging_path: data}
+        removals: list[str] = []
+
+        async def remove(self, location):
+            self.removals.append(location)
+            self.values.pop(location, None)
+
+    sink = Sink()
+    receipt = await TurnLifecycleModule(Store(), max_artifact_bytes=100).finish(
+        turn,
+        RLMOutcome(status, artifact_candidates=(candidate,)),
+        artifact_sink=sink,
+    )
+
+    assert isinstance(receipt, FailedRunReceipt)
+    assert sink.values == {}
+    assert sink.removals == [candidate.staging_path]

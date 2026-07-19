@@ -167,3 +167,80 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
     with pytest.raises(TurnPreparationTimeout, match="timed out"):
         await module.prepare(turn)
     assert released is True
+
+
+@pytest.mark.asyncio
+async def test_preparation_failure_removes_staged_run_bytes_but_not_session_workspace() -> None:
+    from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
+    from fleet_rlm.chat.turn_preparation import RunEnvironment, TurnPreparationModule
+    from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+
+    access, run_id, session_id, attachment_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4(), uuid4()
+    staged_path = f"/sessions/{session_id}/runs/{run_id}/attachments/{attachment_id}.txt"
+    workspace_path = f"/sessions/{session_id}/workspace/notes.txt"
+    values = {staged_path: b"uploaded input", workspace_path: b"immediate workspace state"}
+
+    class Sink:
+        async def remove_private(self, location):
+            values.pop(location, None)
+
+    class Environments:
+        async def acquire(self, turn, *, deadline):
+            del turn, deadline
+
+            async def release():
+                return None
+
+            sink = Sink()
+            return RunEnvironment(None, sink, sink, release)
+
+    class Attachments:
+        async def prepare_run(self, access, ids, run, sink):
+            del access, ids, run, sink
+            return PreparedAttachments(
+                (
+                    AttachmentRef(
+                        attachment_id,
+                        "input.txt",
+                        "text/plain",
+                        len(values[staged_path]),
+                        "0" * 64,
+                    ),
+                ),
+                (StagedAttachment(attachment_id, staged_path),),
+            )
+
+    class FailingCapabilities:
+        async def prepare(self, turn, environment, attachments, *, deadline):
+            del turn, environment, attachments, deadline
+            raise RuntimeError("private capability failure")
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ExecuteTurn(
+        run_id,
+        session_id,
+        access,
+        TurnInput("prepare", (attachment_id,)),
+        SessionHistory(),
+        not_cancelled,
+        _TurnClaimToken(uuid4()),
+    )
+    module = TurnPreparationModule(
+        models=RLMModelBundle(object(), object()),
+        options=RLMOptions(),
+        turn_timeout_seconds=900,
+        attachments=Attachments(),
+        environments=Environments(),
+        capabilities=FailingCapabilities(),
+    )
+
+    with pytest.raises(RuntimeError, match="private capability failure"):
+        await module.prepare(turn)
+
+    assert staged_path not in values
+    assert values == {workspace_path: b"immediate workspace state"}

@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal, cast
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.artifacts.models import ArtifactRef
@@ -380,6 +380,8 @@ class InMemoryTurnStateStore:
 class SqlAlchemyTurnStateStore:
     """Transaction-backed authoritative Turn lifecycle state."""
 
+    _RECOVERY_BATCH_SIZE = 100
+
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
@@ -402,28 +404,6 @@ class SqlAlchemyTurnStateStore:
             )
             if session is None or session.status != "active":
                 raise TurnNotFoundError("Turn not found")
-            active_run = await db.scalar(
-                select(RunRow)
-                .where(RunRow.session_id == request.session_id, RunRow.status.in_(("running", "settling")))
-                .with_for_update()
-            )
-            cutoff = datetime.now(UTC) - timedelta(seconds=self._stale_after)
-            heartbeat_at = active_run.claim_heartbeat_at if active_run is not None else None
-            if heartbeat_at is not None and heartbeat_at.tzinfo is None:
-                heartbeat_at = heartbeat_at.replace(tzinfo=UTC)
-            if (
-                active_run is not None
-                and active_run.status == "running"
-                and heartbeat_at is not None
-                and heartbeat_at < cutoff
-            ):
-                active_run.status = "failed"
-                active_run.failure_code = "stale_claim"
-                active_run.failure_public_message = "Turn failed"
-                active_run.finished_at = datetime.now(UTC)
-                active_run.claim_owner = None
-                active_run.claim_heartbeat_at = None
-                await db.flush()
             prior = await db.scalar(
                 select(RunRow)
                 .where(
@@ -723,17 +703,82 @@ class SqlAlchemyTurnStateStore:
         self,
         fence: Callable[[UUID], Awaitable[None]] | None = None,
     ) -> None:
-        """Fence provider state, then release claims left by a prior process."""
+        """Recover stale provider claims left by a prior process.
+
+        Recovery first claims each stale row with a conditional update, then
+        fences provider state outside the database transaction. A failed fence
+        leaves the row non-terminal and eligible for a later retry.
+        """
         async with self._sessions() as db:
-            pending = list((await db.scalars(select(RunRow).where(RunRow.status == "settling"))).all())
+            pending = list(
+                (
+                    await db.scalars(
+                        select(RunRow)
+                        .where(
+                            RunRow.status.in_(("running", "settling")),
+                            RunRow.claim_owner.is_not(None),
+                            RunRow.claim_heartbeat_at.is_not(None),
+                        )
+                        .order_by(RunRow.claim_heartbeat_at, RunRow.created_at)
+                        .limit(self._RECOVERY_BATCH_SIZE)
+                    )
+                ).all()
+            )
         for pending_run in pending:
-            if fence is not None:
-                await fence(pending_run.session_id)
+            owner = pending_run.claim_owner
+            heartbeat = pending_run.claim_heartbeat_at
+            if owner is None or heartbeat is None:
+                continue
+            recovery_owner = f"recovery:{uuid4()}"
+            async with self._sessions() as db, db.begin():
+                await db.execute(
+                    update(RunRow)
+                    .where(
+                        RunRow.id == pending_run.id,
+                        RunRow.status == pending_run.status,
+                        RunRow.claim_owner == owner,
+                        RunRow.claim_heartbeat_at == heartbeat,
+                    )
+                    .values(claim_owner=recovery_owner)
+                )
+                claimed_id = await db.scalar(
+                    select(RunRow.id).where(
+                        RunRow.id == pending_run.id,
+                        RunRow.claim_owner == recovery_owner,
+                    )
+                )
+                if claimed_id is None:
+                    continue
+            try:
+                if fence is not None:
+                    await fence(pending_run.session_id)
+            except Exception:  # noqa: BLE001 - one provider failure must not stop recovery
+                async with self._sessions() as db, db.begin():
+                    run = await db.get(RunRow, pending_run.id, with_for_update=True)
+                    if run is not None and run.status == pending_run.status and run.claim_owner == recovery_owner:
+                        metadata = dict(run.recovery_metadata_json or {})
+                        recovery = dict(metadata.get("recovery") or {})
+                        prior_attempts = recovery.get("attempts", 0)
+                        if not isinstance(prior_attempts, int) or isinstance(prior_attempts, bool):
+                            prior_attempts = 0
+                        recovery["attempts"] = max(0, prior_attempts) + 1
+                        recovery["last_error"] = "provider_fence_failed"
+                        metadata["recovery"] = recovery
+                        run.recovery_metadata_json = metadata
+                        run.claim_owner = owner
+                continue
             async with self._sessions() as db, db.begin():
                 run = await db.get(RunRow, pending_run.id, with_for_update=True)
-                if run is None or run.status != "settling" or run.terminal_intent is None:
+                if run is None or run.status != pending_run.status or run.claim_owner != recovery_owner:
                     continue
-                run.status = _decode_failure_status(run.terminal_intent)
+                if run.status == "running":
+                    run.status = "failed"
+                    run.failure_code = "stale_claim"
+                    run.failure_public_message = "Turn failed"
+                elif run.terminal_intent is None:
+                    continue
+                else:
+                    run.status = _decode_failure_status(run.terminal_intent)
                 run.finished_at = datetime.now(UTC)
                 run.claim_owner = None
                 run.claim_heartbeat_at = None

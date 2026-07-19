@@ -11,7 +11,7 @@ import pytest
 
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY, WorkspaceEntry, WorkspaceListResult
-from fleet_rlm.files.workspace_tools import WorkspaceToolHost
+from fleet_rlm.files.workspace_tools import WorkspaceToolError, WorkspaceToolHost
 from fleet_rlm.rlm.context import RLMExecutionContext
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.errors import TurnCancelled
@@ -94,7 +94,21 @@ class WorkspaceFlowFactory:
                 if request == "read":
                     assert interpreter.variables == {}
                     result = tools["read_workspace_text"](path="notes/decision.md", max_chars=100)
-                    return dspy.Prediction(answer=result["content"], trajectory=[])
+                    return dspy.Prediction(answer=result, trajectory=[])
+                if request in {"unresolved", "repaired"}:
+                    tools["write_workspace_text"](path="notes/target.md", content="old", overwrite=False)
+                    try:
+                        tools["write_workspace_text"](path="notes/target.md", content="new", overwrite=False)
+                    except WorkspaceToolError:
+                        pass
+                    if request == "repaired":
+                        tools["write_workspace_text"](path="notes/target.md", content="new", overwrite=True)
+                    tools["read_workspace_text"](path="notes/target.md", max_chars=100)
+                    return dspy.Prediction(answer="submitted", trajectory=[])
+                if request == "loop":
+                    for _ in range(3):
+                        tools["list_workspace_files"](path=".", limit=1)
+                    return dspy.Prediction(answer="submitted", trajectory=[])
                 result = tools["write_workspace_text"](
                     path=f"notes/{request}.md",
                     content=f"{request} durable",
@@ -164,4 +178,26 @@ async def test_successful_workspace_write_survives_failed_or_cancelled_turn(
     read_tool = {str(tool.name): tool for tool in WorkspaceToolHost(workspace, max_file_bytes=1024).as_tools()}[
         "read_workspace_text"
     ]
-    assert read_tool(path=f"notes/{turn_kind}.md", max_chars=100)["content"] == (f"{turn_kind} durable")
+    assert read_tool(path=f"notes/{turn_kind}.md", max_chars=100) == (f"{turn_kind} durable")
+
+
+@pytest.mark.asyncio
+async def test_failed_workspace_mutation_blocks_submit_until_same_path_is_repaired() -> None:
+    workspace = MemoryWorkspace()
+
+    unresolved = await _run(WorkspaceFlowFactory(), workspace, "unresolved")
+    assert unresolved is not None
+    assert unresolved.terminal_status == "failed"
+    assert unresolved.public_error_message == "Turn failed because a required workspace update was not completed"
+
+    repaired = await _run(WorkspaceFlowFactory(), MemoryWorkspace(), "repaired")
+    assert repaired is not None and repaired.succeeded
+
+
+@pytest.mark.asyncio
+async def test_three_identical_tool_results_fail_the_turn_for_no_progress() -> None:
+    outcome = await _run(WorkspaceFlowFactory(), MemoryWorkspace(), "loop")
+
+    assert outcome is not None
+    assert outcome.terminal_status == "failed"
+    assert outcome.public_error_message == "Turn stopped after repeated tool calls made no progress"
