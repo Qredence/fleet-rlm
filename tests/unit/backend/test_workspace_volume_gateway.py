@@ -7,7 +7,10 @@ import pytest
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.paths import UnsafePathError
+from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec
 from fleet_rlm.daytona.workspace_volume import DaytonaWorkspaceVolumeGateway
+
+_SPEC = DaytonaSandboxSpec("fleet-test-v1")
 
 
 class _FakeFs:
@@ -68,6 +71,7 @@ async def test_gateway_mounts_only_workspace_scope_and_deletes_io_sandbox() -> N
         client,
         volume_name="shared",
         mount_path="/home/daytona/fleet",
+        sandbox_spec=_SPEC,
     )
 
     await gateway.write_bytes(workspace_id, "/home/daytona/fleet/attachments/a.bin", b"payload")
@@ -90,6 +94,7 @@ async def test_gateway_deletes_io_sandbox_when_file_operation_fails() -> None:
         client,
         volume_name="shared",
         mount_path="/home/daytona/fleet",
+        sandbox_spec=_SPEC,
     )
 
     with pytest.raises(DaytonaAdapterError) as caught:
@@ -106,6 +111,7 @@ async def test_gateway_rejects_paths_outside_the_mounted_workspace_scope() -> No
         client,
         volume_name="shared",
         mount_path="/home/daytona/fleet",
+        sandbox_spec=_SPEC,
     )
 
     with pytest.raises(UnsafePathError):
@@ -122,6 +128,7 @@ async def test_gateway_logs_safe_cleanup_failure_and_relies_on_ephemeral_backsto
         client,
         volume_name="shared",
         mount_path="/home/daytona/fleet",
+        sandbox_spec=_SPEC,
     )
 
     with caplog.at_level("WARNING"):

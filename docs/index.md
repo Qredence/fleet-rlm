@@ -13,8 +13,9 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 5. [Terminal UI](how-to-guides/terminal-tui.md)
 6. [Testing strategy](how-to-guides/testing-strategy.md)
 7. [DSPy RLM and Daytona integration](how-to-guides/dspy-integration.md)
-8. [Agent harness](agent-harness/README.md)
-9. [Architecture decisions](adr/README.md)
+8. [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
+9. [Agent harness](agent-harness/README.md)
+10. [Architecture decisions](adr/README.md)
 
 ## Reference
 

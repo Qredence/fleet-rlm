@@ -10,6 +10,7 @@
 * [Runtime Execution Flow](explanation/agent-runtime-execution-flow.md)
 * [Testing Strategy](how-to-guides/testing-strategy.md)
 * [DSPy RLM and Daytona Integration](how-to-guides/dspy-integration.md)
+* [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
 * [Terminal UI](how-to-guides/terminal-tui.md)
 * [Reference](reference/index.md)
   * [Configuration](reference/configuration.md)

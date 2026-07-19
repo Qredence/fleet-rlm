@@ -66,6 +66,17 @@ def test_require_daytona_settings_fails_closed_without_deps() -> None:
                 run_environment="daytona",
                 database_url="sqlite+aiosqlite:///:memory:",
                 daytona_api_key=SecretStr(""),
+                daytona_snapshot="fleet-test-v1",
+                llm_api_key=SecretStr("llm-key"),
+            )
+        )
+    with pytest.raises(CompositionError, match="DAYTONA_SNAPSHOT"):
+        require_daytona_settings(
+            Settings(
+                _env_file=None,
+                run_environment="daytona",
+                database_url="sqlite+aiosqlite:///:memory:",
+                daytona_api_key=SecretStr("daytona-key"),
                 llm_api_key=SecretStr("llm-key"),
             )
         )
@@ -75,6 +86,7 @@ def test_require_daytona_settings_fails_closed_without_deps() -> None:
                 run_environment="daytona",
                 database_url="sqlite+aiosqlite:///:memory:",
                 daytona_api_key=SecretStr("daytona-key"),
+                daytona_snapshot="fleet-test-v1",
                 llm_api_key=SecretStr(""),
             )
         )
@@ -84,6 +96,7 @@ def test_require_daytona_settings_fails_closed_without_deps() -> None:
                 run_environment="daytona",
                 database_url="",
                 daytona_api_key=SecretStr("daytona-key"),
+                daytona_snapshot="fleet-test-v1",
                 llm_api_key=SecretStr("llm-key"),
             )
         )

@@ -164,7 +164,11 @@ def _live_settings(tmp_path: Path) -> Settings:
     _load_repo_env()
     if os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"}:
         pytest.skip("Set FLEET_LIVE=1 for the complete Daytona MVP proof")
-    missing = [name for name in ("FLEET_DAYTONA_API_KEY", "FLEET_LLM_API_KEY") if not os.environ.get(name)]
+    missing = [
+        name
+        for name in ("FLEET_DAYTONA_API_KEY", "FLEET_LLM_API_KEY", "FLEET_DAYTONA_SNAPSHOT")
+        if not os.environ.get(name)
+    ]
     if missing:
         pytest.fail("Live Daytona MVP proof missing required credentials: " + ", ".join(missing))
     # Prefer verify-script / shell overrides; otherwise pin the approved free DeepSeek id.

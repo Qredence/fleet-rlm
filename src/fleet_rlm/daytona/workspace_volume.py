@@ -12,6 +12,7 @@ from daytona import AsyncDaytona, CreateSandboxFromSnapshotParams, DaytonaConfig
 
 from fleet_rlm.daytona.errors import is_sandbox_not_found, map_provider_error
 from fleet_rlm.daytona.paths import UnsafePathError, VolumePaths, validate_mount_path
+from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec
 from fleet_rlm.daytona.volume_fs import HostVolumeMirror
 from fleet_rlm.daytona.volumes import require_scoped_volume_subpath, workspace_volume_subpath
 
@@ -38,12 +39,12 @@ class DaytonaWorkspaceVolumeGateway:
         *,
         volume_name: str,
         mount_path: str,
-        snapshot: str | None = None,
+        sandbox_spec: DaytonaSandboxSpec,
     ) -> None:
         self._client = client
         self._volume_name = volume_name
         self._mount_path = mount_path
-        self._snapshot = snapshot
+        self._sandbox_spec = sandbox_spec
 
     async def write_bytes(self, workspace_id: UUID, logical_path: str, data: bytes) -> None:
         path = self._validate_logical_path(logical_path)
@@ -129,7 +130,8 @@ class DaytonaWorkspaceVolumeGateway:
         params = CreateSandboxFromSnapshotParams(
             name=f"fleet-clean-io-{workspace_id.hex[:8]}-{uuid4().hex[:8]}",
             language="python",
-            snapshot=self._snapshot,
+            os_user="daytona",
+            snapshot=self._sandbox_spec.snapshot,
             labels={
                 "fleet-package": "fleet_rlm",
                 "purpose": "workspace-volume-io",
@@ -212,14 +214,14 @@ def create_daytona_workspace_volume_gateway(
     api_key: str,
     volume_name: str,
     mount_path: str,
-    snapshot: str | None = None,
+    sandbox_spec: DaytonaSandboxSpec,
 ) -> DaytonaWorkspaceVolumeGateway:
     """Construct the SDK client behind the package import boundary."""
     return DaytonaWorkspaceVolumeGateway(
         AsyncDaytona(DaytonaConfig(api_key=api_key)),
         volume_name=volume_name,
         mount_path=mount_path,
-        snapshot=snapshot,
+        sandbox_spec=sandbox_spec,
     )
 
 

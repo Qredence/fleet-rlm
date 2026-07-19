@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError, is_sandbox_not_found, map_provider_error
+from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec
 from fleet_rlm.daytona.volumes import require_scoped_volume_subpath
 
 _VOLUME_READY_RETRY_DELAYS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
@@ -49,8 +50,9 @@ def _volume_state(volume: Any) -> str | None:
 class LiveDaytonaPlatform:
     """SandboxPlatform over a Daytona SDK client."""
 
-    def __init__(self, client: Any) -> None:
+    def __init__(self, client: Any, sandbox_spec: DaytonaSandboxSpec) -> None:
         self._client = client
+        self._sandbox_spec = sandbox_spec
 
     def get(self, sandbox_id: str) -> Any | None:
         """Return sandbox or ``None`` only for explicit not-found.
@@ -90,7 +92,9 @@ class LiveDaytonaPlatform:
                 )
             ]
         params = CreateSandboxFromSnapshotParams(
+            snapshot=self._sandbox_spec.snapshot,
             language="python",
+            os_user="daytona",
             labels=labels or {},
             volumes=volumes,
             ephemeral=ephemeral,

@@ -82,11 +82,13 @@ def _have_daytona() -> bool:
     return bool(os.environ.get("FLEET_DAYTONA_API_KEY"))
 
 
-def _skip_unless_live() -> None:
+def _skip_unless_live(settings: Settings) -> None:
     if not _live_enabled():
         pytest.skip("Set FLEET_LIVE=1 for live B5 durability tests")
     if not _have_daytona():
         pytest.skip("FLEET_DAYTONA_API_KEY not configured")
+    if not settings.daytona_snapshot:
+        pytest.skip("FLEET_DAYTONA_SNAPSHOT not configured")
 
 
 def _git_commit() -> str:
@@ -114,11 +116,12 @@ def _write_evidence(name: str, payload: dict[str, Any]) -> Path:
 @pytest.mark.asyncio
 @pytest.mark.timeout(600)
 async def test_live_b5_stage_readable_and_artifact_survives_replace(tmp_path: Path) -> None:
-    _skip_unless_live()
+    settings = Settings(run_environment="daytona")
+    _skip_unless_live(settings)
 
     user_id, workspace_id = uuid4(), uuid4()
     session_id, run_id = uuid4(), uuid4()
-    resources = LiveKernelResources(Settings(run_environment="daytona"))
+    resources = LiveKernelResources(settings)
     sandbox_ids: list[str] = []
     volume_id: str | None = None
 
@@ -137,6 +140,7 @@ async def test_live_b5_stage_readable_and_artifact_survives_replace(tmp_path: Pa
 
         sandbox = resources.platform.get(lease.sandbox_id)
         assert sandbox is not None
+        assert getattr(sandbox, "snapshot", None) == settings.daytona_snapshot
         volume_fs = DaytonaSandboxVolumeFs(sandbox)
 
         attachment_module = AttachmentModule(
@@ -203,6 +207,9 @@ async def test_live_b5_stage_readable_and_artifact_survives_replace(tmp_path: Pa
         resources.track_sandbox(new_binding.sandbox_id)
         if new_binding.sandbox_id:
             sandbox_ids.append(new_binding.sandbox_id)
+            replacement_sandbox = resources.platform.get(new_binding.sandbox_id)
+            assert replacement_sandbox is not None
+            assert getattr(replacement_sandbox, "snapshot", None) == settings.daytona_snapshot
 
         lease2 = await resources.session_manager.acquire(
             LeaseRequest(
@@ -217,6 +224,7 @@ async def test_live_b5_stage_readable_and_artifact_survives_replace(tmp_path: Pa
 
         sandbox2 = resources.platform.get(lease2.sandbox_id)
         assert sandbox2 is not None
+        assert getattr(sandbox2, "snapshot", None) == settings.daytona_snapshot
         volume_fs2 = DaytonaSandboxVolumeFs(sandbox2)
         remounted = volume_fs2.read_bytes(durable)
         assert remounted == ARTIFACT_TEXT.encode("utf-8")

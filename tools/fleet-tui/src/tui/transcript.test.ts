@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ConversationStore, type Message } from "./store.js";
+import { setTerminalColorScheme } from "./theme.js";
 import { TranscriptComponent } from "./transcript.js";
 
 function message(id: string, text: string): Message {
@@ -8,6 +9,21 @@ function message(id: string, text: string): Message {
 }
 
 describe("TranscriptComponent", () => {
+  it("keeps Fleet identity while applying the pi accent hierarchy", () => {
+    setTerminalColorScheme("dark");
+    const store = new ConversationStore();
+    store.dispatch({
+      type: "session/init",
+      session: { id: "session-1", title: "Session", status: "active", resumed: false },
+    });
+
+    const header = new TranscriptComponent(store).render(80);
+
+    expect(header[0]).toContain("FLEET");
+    expect(header[0]).toContain("\x1b[38;");
+    expect(header[1]).toContain("Session · new · active");
+  });
+
   it("renders a caller-controlled Session title as one terminal-safe line", () => {
     const store = new ConversationStore();
     store.dispatch({
@@ -52,6 +68,21 @@ describe("TranscriptComponent", () => {
 
     transcript.render(100);
     expect(render).toHaveBeenCalledTimes(5);
+  });
+
+  it("invalidates cached message colors after a terminal scheme change", () => {
+    const store = new ConversationStore();
+    store.dispatch({ type: "message/upsert", message: message("one", "styled") });
+    const transcript = new TranscriptComponent(store);
+    setTerminalColorScheme("dark");
+    const dark = transcript.render(80).join("\n");
+
+    setTerminalColorScheme("light");
+    transcript.invalidate();
+    const light = transcript.render(80).join("\n");
+
+    expect(light).not.toBe(dark);
+    expect(light).toContain("styled");
   });
 
   it("rerenders active streaming text and running tools", () => {

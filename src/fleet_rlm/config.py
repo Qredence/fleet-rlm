@@ -11,6 +11,8 @@ from typing import Literal
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from fleet_rlm.snapshot_contract import validate_snapshot_name
+
 
 class Settings(BaseSettings):
     """Fleet RLM process settings (``FLEET_*``)."""
@@ -24,6 +26,7 @@ class Settings(BaseSettings):
 
     app_name: str = Field(default="fleet-rlm")
     daytona_api_key: SecretStr | None = Field(default=None)
+    daytona_snapshot: str | None = Field(default=None)
     llm_api_key: SecretStr | None = Field(default=None)
     llm_base_url: str | None = Field(
         default=None,
@@ -99,3 +102,18 @@ class Settings(BaseSettings):
         if not (text.startswith("http://") or text.startswith("https://")):
             return None
         return text.rstrip("/")
+
+    @field_validator("daytona_snapshot", mode="before")
+    @classmethod
+    def _sanitize_daytona_snapshot(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            return validate_snapshot_name(text)
+        except ValueError as exc:
+            raise ValueError(
+                "FLEET_DAYTONA_SNAPSHOT must be immutable and end in -v<positive integer>"
+            ) from exc

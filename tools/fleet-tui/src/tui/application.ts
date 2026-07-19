@@ -44,6 +44,7 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
   });
 
   constructor(private readonly options: FleetTuiOptions) {
+    setTerminalColorScheme("dark");
     this.terminal = options.terminal ?? new ProcessTerminal();
     this.ui = new TUI(this.terminal);
     this.controller = new RunController(this.store, options.client);
@@ -93,7 +94,7 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
     if (this.options.queryColorScheme !== false) {
       void this.ui.queryTerminalColorScheme({ timeoutMs: 150 }).then((scheme) => {
         if (!scheme) return;
-        setTerminalColorScheme(scheme);
+        if (!setTerminalColorScheme(scheme)) return;
         this.ui.invalidate();
         this.ui.requestRender(true);
       });

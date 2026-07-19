@@ -1,10 +1,117 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { renderMessage } from "./message-renderer.js";
 import type { Message } from "./store.js";
+import { setTerminalColorScheme } from "./theme.js";
 
 describe("renderMessage", () => {
+  beforeEach(() => setTerminalColorScheme("dark"));
+
+  it("uses the pi user surface and leaves assistant prose unboxed", () => {
+    const user: Message = {
+      id: "user",
+      kind: "text",
+      role: "user",
+      text: "Inspect this",
+      streaming: false,
+      ts: 1,
+    };
+    const assistant: Message = {
+      id: "assistant",
+      kind: "text",
+      role: "assistant",
+      text: "Working on it",
+      streaming: false,
+      ts: 2,
+    };
+
+    const userLines = renderMessage(user, 32);
+    const assistantLines = renderMessage(assistant, 32);
+
+    expect(userLines.every((line) => visibleWidth(line) === 32)).toBe(true);
+    expect(userLines.join("\n")).toContain("\x1b[48;");
+    expect(userLines.join("\n")).toContain("Inspect this");
+    expect(assistantLines.join("\n")).not.toContain("\x1b[48;");
+    expect(assistantLines.join("\n")).not.toContain("FLEET");
+    expect(assistantLines.join("\n")).toContain("Working on it");
+  });
+
+  it("pads and wraps ANSI-styled Unicode surfaces by terminal cell width", () => {
+    const user: Message = {
+      id: "unicode-user",
+      kind: "text",
+      role: "user",
+      text: "界😀e\u0301 interface",
+      streaming: false,
+      ts: 1,
+    };
+    const tool: Message = {
+      id: "unicode-tool",
+      kind: "tool",
+      runId: "run",
+      toolCallId: "call",
+      name: "調査😀",
+      input: { query: "界e\u0301" },
+      output: "完了✅",
+      startedAt: 0,
+      endedAt: 1,
+      status: "success",
+      ts: 2,
+    };
+
+    for (const line of [...renderMessage(user, 18), ...renderMessage(tool, 18)]) {
+      expect(visibleWidth(line)).toBe(18);
+    }
+  });
+
+  it("uses distinct pi surfaces for pending, successful, and failed Tools", () => {
+    const base = {
+      id: "tool",
+      kind: "tool" as const,
+      runId: "run",
+      toolCallId: "call",
+      name: "inspect",
+      input: {},
+      startedAt: 0,
+      ts: 1,
+    };
+    const running = renderMessage({ ...base, status: "running" }, 48).join("\n");
+    const success = renderMessage({ ...base, status: "success", endedAt: 1 }, 48).join("\n");
+    const failed = renderMessage(
+      { ...base, status: "error", error: "failed safely", endedAt: 1 },
+      48,
+    ).join("\n");
+    const backgrounds = [running, success, failed].map((output) => firstAnsi(output, "48"));
+    expect(backgrounds.every(Boolean)).toBe(true);
+    expect(new Set(backgrounds).size).toBe(3);
+    expect(failed).toContain("failed safely");
+  });
+
+  it("uses semantic warning and error colors without hiding their diagnostics", () => {
+    const warning = renderMessage(
+      {
+        id: "warning",
+        kind: "warning",
+        runId: "run",
+        code: "retry",
+        message: "Try again",
+        ts: 1,
+      },
+      40,
+    ).join("\n");
+    const error = renderMessage(
+      { id: "error", kind: "error", text: "Connection failed", ts: 2 },
+      40,
+    ).join("\n");
+
+    expect(warning).toContain("\x1b[38;");
+    expect(warning).toContain("Try again");
+    expect(error).toContain("\x1b[38;");
+    expect(error).toContain("Connection failed");
+    expect(firstAnsi(warning, "38")).not.toBe(firstAnsi(error, "38"));
+  });
+
   it("renders static complete execution evidence within the terminal width", () => {
     const messages: Message[] = [
       {
@@ -37,12 +144,13 @@ describe("renderMessage", () => {
     ];
 
     const output = messages.flatMap((message) => renderMessage(message, 52));
+    const visible = stripAnsi(output.join("\n"));
 
-    expect(output.join("\n")).toContain("REASONING");
-    expect(output.join("\n")).toContain("print('candidate')");
-    expect(output.join("\n")).toContain("second line");
-    expect(output.join("\n")).toContain("RESULT");
-    expect(output.join("\n")).toContain("7");
+    expect(visible).toContain("REASONING");
+    expect(visible).toContain("print('candidate')");
+    expect(visible).toContain("second line");
+    expect(visible).toContain("RESULT");
+    expect(visible).toContain("7");
     expect(output.every((line) => visibleWidth(line) <= 52)).toBe(true);
   });
 
@@ -115,3 +223,11 @@ describe("renderMessage", () => {
     expect(loadedOutput).not.toContain("system");
   });
 });
+
+function stripAnsi(value: string): string {
+  return value.replaceAll(new RegExp(`${String.fromCharCode(27)}\\[[\\d;]*m`, "g"), "");
+}
+
+function firstAnsi(value: string, layer: "38" | "48"): string | undefined {
+  return value.match(new RegExp(`${String.fromCharCode(27)}\\[${layer};[^m]+m`))?.[0];
+}

@@ -9,7 +9,7 @@ import {
 
 import { formatDuration, formatTokens } from "./format.js";
 import type { ConversationStore, Run } from "./store.js";
-import { ansi } from "./theme.js";
+import { theme } from "./theme.js";
 import { TranscriptComponent } from "./transcript.js";
 
 export class FleetScreen extends Container {
@@ -48,12 +48,12 @@ class ActivityComponent implements Component {
     const phase = run.phase === "cancelling" ? run.phase : run.statusPhase?.trim() || localPhase;
     const elapsed = run.startedAt ? formatDuration(Date.now() - run.startedAt) : "0:00";
     const detail = run.statusDetail?.trim();
-    const primary = `${ansi.white}… ${phase.replaceAll(/[_-]+/g, " ").toUpperCase()}${ansi.reset}${detail ? `  ${dim(detail)}` : ""} · ${elapsed}`;
+    const primary = `${theme.fg("accent", `… ${phase.replaceAll(/[_-]+/g, " ").toUpperCase()}`)}${detail ? `  ${theme.fg("muted", detail)}` : ""} ${dim(`· ${elapsed}`)}`;
     const secondary = `${run.completedSteps}/${run.startedSteps} steps complete · ${run.toolCount} ${run.toolCount === 1 ? "tool" : "tools"} · Ctrl+C cancel`;
     return [
       "",
-      truncateToWidth(`${ansi.gray}│${ansi.reset} ${primary}`, width, ""),
-      truncateToWidth(`${ansi.gray}│${ansi.reset} ${dim(secondary)}`, width, ""),
+      truncateToWidth(`${theme.fg("borderAccent", "│")} ${primary}`, width, ""),
+      truncateToWidth(`${theme.fg("borderMuted", "│")} ${dim(secondary)}`, width, ""),
     ];
   }
 
@@ -89,7 +89,9 @@ class FooterComponent implements Component {
           ),
         ];
     const run = state.run;
-    const outcome = run.outcome ? `  ${dim("outcome")} ${run.outcome}` : "";
+    const outcome = run.outcome
+      ? `  ${dim("outcome")} ${theme.fg(outcomeColor(run.outcome), run.outcome)}`
+      : "";
     const replay = run.delivery === "replay" ? " · replay" : "";
     lines.push(
       truncateToWidth(
@@ -107,5 +109,11 @@ export function isBusy(run: Run): boolean {
 }
 
 function dim(value: string): string {
-  return `${ansi.dim}${value}${ansi.dimOff}`;
+  return theme.fg("dim", value);
+}
+
+function outcomeColor(outcome: NonNullable<Run["outcome"]>): "success" | "warning" | "error" {
+  if (outcome === "completed") return "success";
+  if (outcome === "cancelled") return "warning";
+  return "error";
 }

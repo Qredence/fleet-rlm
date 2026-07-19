@@ -17,7 +17,8 @@
   },
   "dependencies": {
     "@earendil-works/pi-tui": "0.80.10",
-    "ai": "7.0.22"
+    "ai": "7.0.22",
+    "highlight.js": "10.7.3"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.2",

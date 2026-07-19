@@ -22,6 +22,7 @@ describe("SkillSelector", () => {
     const initial = selector.render(48);
     expect(initial.length).toBeLessThanOrEqual(15);
     expect(initial.every((line) => visibleWidth(line) <= 48)).toBe(true);
+    expect(initial.join("\n")).toContain("\x1b[");
 
     for (const key of "context") selector.handleInput(key);
     const filtered = selector.render(48).join("\n");
@@ -36,6 +37,26 @@ describe("SkillSelector", () => {
     selector.handleInput("e\u0301");
     selector.handleInput("\u007f");
 
-    expect(selector.render(48)[1]).toBe("Filter: x");
+    expect(stripAnsi(selector.render(48)[1] ?? "")).toBe("Filter: x");
+  });
+
+  it("keeps CJK, emoji, and combining marks within a narrow overlay", () => {
+    const selector = new SkillSelector(
+      [
+        {
+          ...skills[0]!,
+          name: "調査😀e\u0301",
+          description: "界面を確認する✅",
+        },
+      ],
+      [],
+      vi.fn(),
+    );
+
+    expect(selector.render(20).every((line) => visibleWidth(line) <= 20)).toBe(true);
   });
 });
+
+function stripAnsi(value: string): string {
+  return value.replaceAll(new RegExp(`${String.fromCharCode(27)}\\[[\\d;]*m`, "g"), "");
+}

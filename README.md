@@ -57,7 +57,9 @@ applies migrations automatically.
 export FLEET_RUN_ENVIRONMENT=daytona
 export FLEET_DATABASE_URL='postgresql+asyncpg://...'
 export FLEET_DAYTONA_API_KEY='...'
+export FLEET_DAYTONA_SNAPSHOT=fleet-rlm-python313-v2
 export FLEET_LLM_API_KEY='...'
+uv run python scripts/daytona_snapshot.py check --name "$FLEET_DAYTONA_SNAPSHOT"
 uv run python scripts/db_init.py
 uv run fleet-rlm serve-api --port 8000
 ```

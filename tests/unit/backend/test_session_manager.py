@@ -14,8 +14,11 @@ from fleet_rlm.daytona.admission import DaytonaAdmission
 from fleet_rlm.daytona.bindings import InMemoryBindingStore, SandboxBinding
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
 from fleet_rlm.daytona.lifecycle import LifecycleCapabilityError
+from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec
 from fleet_rlm.daytona.session_manager import DaytonaSessionManager, LeaseRequest
 from fleet_rlm.daytona.volumes import VolumeConfig
+
+_SPEC = DaytonaSandboxSpec("fleet-test-v1")
 
 
 class _FakeVolume:
@@ -72,6 +75,7 @@ class _FakeSandbox:
         mount_path: str | None = None,
         volume_subpath: str | None = None,
         labels: dict[str, str] | None = None,
+        snapshot: str = _SPEC.snapshot,
     ) -> None:
         self.id = sandbox_id
         self.state = state
@@ -81,6 +85,7 @@ class _FakeSandbox:
         self.mount_path = mount_path
         self.volume_subpath = volume_subpath
         self.labels = labels or {}
+        self.snapshot = snapshot
         self.fs = _FakeFilesystem(mount_path)
         self.volumes = (
             [
@@ -271,6 +276,7 @@ def _manager(
         volume_config=VolumeConfig(),
         bindings=store,
         admission=admission,
+        sandbox_spec=_SPEC,
     )
     return mgr, plat, store, volumes
 
@@ -560,6 +566,21 @@ async def test_acquire_reuses_running_sandbox() -> None:
 
 
 @pytest.mark.asyncio
+async def test_acquire_replaces_sandbox_with_mismatched_snapshot() -> None:
+    mgr, plat, _store, _volumes = _manager()
+    req = _request()
+    first = await _acquire(mgr, req)
+    await mgr.release(first)
+    plat.sandboxes[first.sandbox_id].snapshot = "fleet-test-v2"
+
+    replacement = await _acquire(mgr, req)
+
+    assert replacement.sandbox_id != first.sandbox_id
+    assert replacement.volume_id == first.volume_id
+    assert replacement.volume_subpath == first.volume_subpath
+
+
+@pytest.mark.asyncio
 async def test_stop_start_lifecycle() -> None:
     mgr, plat, _store, _volumes = _manager()
     req = _request()
@@ -600,6 +621,7 @@ async def test_pause_raises_when_unsupported() -> None:
         volume_client=_FakeVolumeClient(),
         volume_config=VolumeConfig(),
         bindings=InMemoryBindingStore(),
+        sandbox_spec=_SPEC,
     )
     with pytest.raises(LifecycleCapabilityError):
         await mgr.pause("lim-1")

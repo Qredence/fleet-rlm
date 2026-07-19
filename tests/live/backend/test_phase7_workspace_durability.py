@@ -23,6 +23,8 @@ def _skip_unless_live(settings: Settings) -> None:
         pytest.skip("Set FLEET_LIVE=1 for live Phase 7 durability tests")
     if settings.daytona_api_key is None:
         pytest.skip("FLEET_DAYTONA_API_KEY not configured")
+    if not settings.daytona_snapshot:
+        pytest.skip("FLEET_DAYTONA_SNAPSHOT not configured")
 
 
 def _assert_complete_layout(sandbox: object, *, mount: str, session_id: object, run_id: object) -> None:
@@ -74,6 +76,7 @@ async def test_session_workspace_survives_sandbox_replacement() -> None:
         resources.track_sandbox(first_lease.sandbox_id)
         first_sandbox = resources.platform.get(first_lease.sandbox_id)
         assert first_sandbox is not None
+        assert getattr(first_sandbox, "snapshot", None) == settings.daytona_snapshot
         paths = volume_paths_from_settings(settings)
         _assert_complete_layout(
             first_sandbox,
@@ -115,6 +118,9 @@ async def test_session_workspace_survives_sandbox_replacement() -> None:
         assert replacement.sandbox_id is not None
         assert replacement.sandbox_id != old_sandbox_id
         resources.track_sandbox(replacement.sandbox_id)
+        replacement_sandbox = resources.platform.get(replacement.sandbox_id)
+        assert replacement_sandbox is not None
+        assert getattr(replacement_sandbox, "snapshot", None) == settings.daytona_snapshot
 
         second_lease = await resources.session_manager.acquire(
             LeaseRequest(
@@ -128,6 +134,7 @@ async def test_session_workspace_survives_sandbox_replacement() -> None:
         resources.track_sandbox(second_lease.sandbox_id)
         second_sandbox = resources.platform.get(second_lease.sandbox_id)
         assert second_sandbox is not None
+        assert getattr(second_sandbox, "snapshot", None) == settings.daytona_snapshot
         _assert_complete_layout(
             second_sandbox,
             mount=str(paths.mount_path),

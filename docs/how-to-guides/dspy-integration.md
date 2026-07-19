@@ -31,6 +31,7 @@ repository or pass them through Fleet API requests.
 
 ```bash
 export FLEET_LIVE=1
+export FLEET_DAYTONA_SNAPSHOT=fleet-rlm-python313-v2
 # Credentials may come from the process environment or repo `.env`
 # (loaded via python-dotenv; existing exports win).
 uv run python scripts/live_daytona_verify.py \
@@ -38,6 +39,8 @@ uv run python scripts/live_daytona_verify.py \
   --root-model deepseek-v4-flash-free \
   --sub-model deepseek-v4-flash-free
 ```
+
+Provision the immutable Snapshot first with the [Daytona Snapshot guide](daytona-snapshot.md).
 
 The verifier requires a clean tracked tree on a non-`main` branch, invokes the
 single live pytest scenario once, and performs no automatic retry. The model

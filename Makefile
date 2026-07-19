@@ -1,9 +1,10 @@
-PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/unit/scripts tests/contracts/backend tests/e2e scripts/openapi_tools.py scripts/db_init.py scripts/live_daytona_verify.py migrations
+PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/unit/scripts tests/contracts/backend tests/e2e scripts/openapi_tools.py scripts/db_init.py scripts/live_daytona_verify.py scripts/daytona_snapshot.py migrations
 PYTEST_FAST_MARKERS = not deno and not live_llm and not live_daytona and not benchmark and not db
 PYTEST := uv run --no-sync pytest
 PYTEST_ISOLATED := env \
 	FLEET_RUN_ENVIRONMENT=daytona \
 	FLEET_DAYTONA_API_KEY= \
+	FLEET_DAYTONA_SNAPSHOT= \
 	FLEET_LLM_API_KEY= \
 	FLEET_LLM_BASE_URL= \
 	FLEET_DATABASE_URL= \

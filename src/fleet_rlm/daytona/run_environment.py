@@ -27,6 +27,7 @@ from fleet_rlm.daytona.bindings import BindingStore, InMemoryBindingStore
 from fleet_rlm.daytona.client import build_daytona_client
 from fleet_rlm.daytona.paths import VolumePaths, volume_paths_from_settings
 from fleet_rlm.daytona.platform import LiveDaytonaPlatform, LiveDaytonaVolumeClient
+from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec, sandbox_spec_from_settings
 from fleet_rlm.daytona.session_manager import DaytonaLeaseAcquisitionTimeout, DaytonaSessionManager, LeaseRequest
 from fleet_rlm.daytona.volumes import volume_config_from_settings
 from fleet_rlm.files.models import (
@@ -435,10 +436,12 @@ class LiveKernelResources:
         bindings: Any | None = None,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
         engine: AsyncEngine | None = None,
+        sandbox_spec: DaytonaSandboxSpec | None = None,
     ) -> None:
         self.settings = resolve_settings(settings)
+        self.sandbox_spec = sandbox_spec or sandbox_spec_from_settings(self.settings)
         self.client = build_daytona_client(self.settings)
-        self.platform = LiveDaytonaPlatform(self.client)
+        self.platform = LiveDaytonaPlatform(self.client, self.sandbox_spec)
         self.volume_client = LiveDaytonaVolumeClient(self.client)
         self.volume_config = volume_config_from_settings(self.settings)
         self._engine = engine
@@ -458,6 +461,7 @@ class LiveKernelResources:
             volume_config=self.volume_config,
             bindings=self.bindings,
             admission=self.daytona_admission,
+            sandbox_spec=self.sandbox_spec,
         )
         self.models = build_model_bundle(self.settings)
         self._sandbox_ids: list[str] = []

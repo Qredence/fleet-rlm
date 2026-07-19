@@ -17,6 +17,7 @@ from fleet_rlm.daytona.client import build_daytona_client
 from fleet_rlm.daytona.errors import DaytonaAdapterError, classify_provider_error
 from fleet_rlm.daytona.interpreter import sandbox_backend
 from fleet_rlm.daytona.platform import LiveDaytonaPlatform, LiveDaytonaVolumeClient
+from fleet_rlm.daytona.sandbox_spec import sandbox_spec_from_settings, verify_sandbox_spec
 from fleet_rlm.daytona.session_manager import ExpectedWorkspaceMount, verify_sandbox_workspace_mount
 from fleet_rlm.daytona.volumes import (
     volume_config_from_settings,
@@ -88,7 +89,8 @@ class _ProductionDaytonaDoctorDependencies:
 
     def __init__(self, settings: Settings) -> None:
         self._client = build_daytona_client(settings)
-        self._platform = LiveDaytonaPlatform(self._client)
+        self._sandbox_spec = sandbox_spec_from_settings(settings)
+        self._platform = LiveDaytonaPlatform(self._client, self._sandbox_spec)
         self._volume_client = LiveDaytonaVolumeClient(self._client)
         self._volume_config = volume_config_from_settings(settings)
 
@@ -141,12 +143,20 @@ class _ProductionDaytonaDoctorDependencies:
                 cause_type="WorkspaceMountMismatch",
             )
         verify_sandbox_workspace_mount(sandbox, expected_mount)
+        verify_sandbox_spec(sandbox, self._sandbox_spec)
 
     async def execute(self, sandbox: Any) -> str:
         backend = sandbox_backend(sandbox)
         run_error: BaseException | None = None
         try:
-            result = await asyncio.to_thread(backend.run, "print('fleet-doctor-ok')")
+            result = await asyncio.to_thread(
+                backend.run,
+                "import os, sys\n"
+                "assert sys.version_info[:3] == (3, 13, 13)\n"
+                "assert os.geteuid() != 0\n"
+                "assert os.getcwd() == '/home/daytona'\n"
+                "print('fleet-doctor-ok')",
+            )
             stdout = getattr(result, "stdout", result)
             error = getattr(result, "error", None)
             if error:
@@ -257,6 +267,7 @@ def _settings_failure(settings: Settings) -> Exception | None:
         return ValueError("required settings are missing")
     try:
         volume_config_from_settings(settings)
+        sandbox_spec_from_settings(settings)
     except (TypeError, ValueError) as exc:
         return exc
     return None

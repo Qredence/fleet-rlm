@@ -17,6 +17,9 @@ from fleet_rlm.daytona.errors import (
 )
 from fleet_rlm.daytona.lifecycle import normalize_state
 from fleet_rlm.daytona.platform import LiveDaytonaPlatform, LiveDaytonaVolumeClient
+from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec
+
+_SPEC = DaytonaSandboxSpec("fleet-test-v1")
 
 
 class DaytonaNotFoundError(Exception):
@@ -106,14 +109,14 @@ def test_sanitize_provider_message_redacts_secrets_and_private_paths() -> None:
 def test_live_platform_get_none_only_on_not_found() -> None:
     client = MagicMock()
     client.get.side_effect = DaytonaNotFoundError()
-    platform = LiveDaytonaPlatform(client)
+    platform = LiveDaytonaPlatform(client, _SPEC)
     assert platform.get("sb-missing") is None
 
 
 def test_live_platform_get_raises_on_auth_error() -> None:
     client = MagicMock()
     client.get.side_effect = _AuthError()
-    platform = LiveDaytonaPlatform(client)
+    platform = LiveDaytonaPlatform(client, _SPEC)
     with pytest.raises(ProviderRequestError):
         platform.get("sb-1")
 
@@ -150,7 +153,7 @@ def test_live_platform_delete_resolves_id_for_daytona_0_192_contract() -> None:
     sandbox = SimpleNamespace(id="sb-1")
     client.get.return_value = sandbox
 
-    LiveDaytonaPlatform(client).delete("sb-1")
+    LiveDaytonaPlatform(client, _SPEC).delete("sb-1")
 
     client.get.assert_called_once_with("sb-1")
     client.delete.assert_called_once_with(sandbox)
@@ -174,7 +177,7 @@ def test_live_platform_create_defaults_ephemeral_false(monkeypatch: pytest.Monke
 
     client = MagicMock()
     client.create.side_effect = lambda params: SimpleNamespace(id="sb-new", params=params)
-    platform = LiveDaytonaPlatform(client)
+    platform = LiveDaytonaPlatform(client, _SPEC)
     platform.create(
         volume_id="vol-1",
         mount_path="/home/daytona/fleet",
@@ -189,7 +192,7 @@ def test_live_platform_create_matches_daytona_0_192_payload_contract() -> None:
     """Pin the scoped mount payload consumed by Daytona SDK 0.192.0."""
     client = MagicMock()
     client.create.side_effect = lambda params: SimpleNamespace(id="sb-new", params=params)
-    platform = LiveDaytonaPlatform(client)
+    platform = LiveDaytonaPlatform(client, _SPEC)
 
     platform.create(
         volume_id="vol-1",
@@ -201,6 +204,8 @@ def test_live_platform_create_matches_daytona_0_192_payload_contract() -> None:
 
     params = client.create.call_args.args[0]
     assert params.ephemeral is True
+    assert params.snapshot == _SPEC.snapshot
+    assert params.os_user == "daytona"
     assert params.labels == {"purpose": "fleet-daytona-doctor"}
     assert len(params.volumes) == 1
     assert params.volumes[0].to_dict() == {

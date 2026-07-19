@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { FleetApiClient } from "../fleet-api-client.js";
 import { createFleetTui } from "./application.js";
 import type { StoreEvent } from "./store.js";
+import { getTerminalColorScheme, setTerminalColorScheme } from "./theme.js";
 
 class FakeTerminal implements Terminal {
   columns = 80;
@@ -53,6 +54,32 @@ const session = {
 };
 
 describe("FleetTuiApplication", () => {
+  it("starts dark and rerenders when the terminal reports the light scheme", async () => {
+    setTerminalColorScheme("light");
+    const terminal = new FakeTerminal();
+    const app = createFleetTui({
+      terminal,
+      client: new FleetApiClient({ baseUrl: "http://fleet.test" }),
+      session,
+      resumed: false,
+      initialEvents: [],
+    });
+
+    const finished = app.start();
+    expect(getTerminalColorScheme()).toBe("dark");
+    await vi.waitFor(() => expect(terminal.writes).toContain("\x1b[?996n"));
+    const writesBeforeSchemeChange = terminal.writes.length;
+
+    terminal.send("\x1b[?997;2n");
+
+    await vi.waitFor(() => expect(getTerminalColorScheme()).toBe("light"));
+    await vi.waitFor(() =>
+      expect(terminal.writes.length).toBeGreaterThan(writesBeforeSchemeChange),
+    );
+    await app.stop();
+    await finished;
+  });
+
   it("renders one flat native-scrollback transcript and restores terminal state on exit", async () => {
     const terminal = new FakeTerminal();
     const initialEvents: StoreEvent[] = [

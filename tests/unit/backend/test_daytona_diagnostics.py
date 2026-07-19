@@ -15,7 +15,7 @@ class FakeDoctorDependencies:
         self.fail_at = fail_at
         self.error = error or RuntimeError("provider api_key=top-secret path=/home/private")
         self.calls: list[str] = []
-        self.sandbox = SimpleNamespace(id="sandbox-doctor", labels={}, volumes=[])
+        self.sandbox = SimpleNamespace(id="sandbox-doctor", snapshot="fleet-test-v1", labels={}, volumes=[])
         self.created: dict[str, Any] | None = None
 
     def _record(self, operation: str) -> None:
@@ -65,6 +65,7 @@ class FakeDoctorDependencies:
 def doctor_settings() -> Settings:
     return Settings(
         daytona_api_key="test-daytona-key",
+        daytona_snapshot="fleet-test-v1",
         database_url="sqlite+aiosqlite:///:memory:",
     )
 

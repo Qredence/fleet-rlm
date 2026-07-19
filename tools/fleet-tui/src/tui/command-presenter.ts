@@ -11,7 +11,7 @@ import {
 import type { FleetSession, FleetSkillCard } from "../fleet-api-client.js";
 import type { CommandPresenter, CommandSpec } from "./commands.js";
 import type { ConversationStore, PendingSkillSelection } from "./store.js";
-import { selectTheme } from "./theme.js";
+import { selectTheme, theme } from "./theme.js";
 
 /** Renderer-neutral command contract backed by pi-tui overlays. */
 export class PiCommandPresenter implements CommandPresenter {
@@ -132,8 +132,11 @@ export class SkillSelector implements Component {
     const start = Math.max(0, Math.min(this.index - maxVisible + 1, filtered.length - maxVisible));
     const visible = filtered.slice(start, start + maxVisible);
     return [
-      "Skills for the next Turn (Space toggle · Enter apply · Escape cancel)",
-      `Filter: ${this.query || "(type to search)"}`,
+      theme.fg(
+        "accent",
+        theme.bold("Skills for the next Turn (Space toggle · Enter apply · Escape cancel)"),
+      ),
+      `${theme.fg("muted", "Filter:")} ${this.query || theme.fg("dim", "(type to search)")}`,
       "",
       ...(visible.length > 0
         ? visible
@@ -142,10 +145,14 @@ export class SkillSelector implements Component {
         const index = start + offset;
         const checked = this.selected.some((item) => item.id === skill.id) ? "x" : " ";
         const version = skill.version ? `@${skill.version}` : "";
-        return `${index === this.index ? ">" : " "} [${checked}] ${skill.name}${version}  ${skill.description}`;
+        const label = `[${checked}] ${skill.name}${version}`;
+        const selected = index === this.index;
+        return `${selected ? selectTheme.selectedPrefix(">") : " "} ${selected ? selectTheme.selectedText(label) : label}  ${selectTheme.description(skill.description)}`;
       }),
       "",
-      `${this.selected.length}/4 selected · ${filtered.length} shown${filtered.length > maxVisible ? ` · rows ${start + 1}-${Math.min(start + maxVisible, filtered.length)}` : ""}`,
+      selectTheme.scrollInfo(
+        `${this.selected.length}/4 selected · ${filtered.length} shown${filtered.length > maxVisible ? ` · rows ${start + 1}-${Math.min(start + maxVisible, filtered.length)}` : ""}`,
+      ),
     ].map((line) => truncateToWidth(line, safeWidth, "…"));
   }
   handleInput(data: string): void {

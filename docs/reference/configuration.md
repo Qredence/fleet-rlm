@@ -10,7 +10,7 @@ use masked `SecretStr` values.
 | Profile | Required | Optional persistence |
 | --- | --- | --- |
 | `deno` | `FLEET_LLM_API_KEY`; Deno executable on `PATH` | `FLEET_DATABASE_URL`; SQLite is the normal local choice |
-| `daytona` | `FLEET_LLM_API_KEY`, `FLEET_DAYTONA_API_KEY`, `FLEET_DATABASE_URL` at Alembic head | none |
+| `daytona` | `FLEET_LLM_API_KEY`, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_SNAPSHOT`, `FLEET_DATABASE_URL` at Alembic head | none |
 
 Profiles are explicit and do not fall back to each other. Daytona startup never
 applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
@@ -23,6 +23,7 @@ applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
 | `FLEET_RUN_ENVIRONMENT` | `daytona` | Public profile: `daytona` or `deno` |
 | `FLEET_DATABASE_URL` | unset | Async SQLAlchemy URL |
 | `FLEET_DAYTONA_API_KEY` | unset | Daytona provider credential; required only for Daytona |
+| `FLEET_DAYTONA_SNAPSHOT` | unset | Required immutable Fleet Daytona Snapshot name, for example `fleet-rlm-python313-v2` |
 | `FLEET_LLM_API_KEY` | unset | Credential passed to both DSPy model roles |
 | `FLEET_LLM_BASE_URL` | unset | Optional HTTP(S) OpenAI-compatible base URL |
 | `FLEET_LLM_MAX_TOKENS` | unset | Optional output-token limit for both model roles; minimum 1 |

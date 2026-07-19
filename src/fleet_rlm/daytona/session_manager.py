@@ -27,6 +27,7 @@ from fleet_rlm.daytona.lifecycle import (
     call_if_supported,
     sandbox_state,
 )
+from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec, verify_sandbox_spec
 from fleet_rlm.daytona.volume_layout import ensure_volume_layout
 from fleet_rlm.daytona.volumes import (
     VolumeClient,
@@ -180,12 +181,14 @@ class DaytonaSessionManager:
         volume_config: VolumeConfig,
         bindings: BindingStoreLike,
         admission: DaytonaAdmission | None = None,
+        sandbox_spec: DaytonaSandboxSpec,
     ) -> None:
         self._platform = platform
         self._volume_client = volume_client
         self._volume_config = volume_config
         self._bindings = bindings
         self._admission = admission or DaytonaAdmission()
+        self._sandbox_spec = sandbox_spec
 
     def _expected_mount(self, *, volume_id: str, workspace_id: UUID) -> ExpectedWorkspaceMount:
         require_non_zero_workspace_id(workspace_id)
@@ -321,6 +324,7 @@ class DaytonaSessionManager:
         if sandbox is not None:
             try:
                 verify_sandbox_workspace_mount(sandbox, expected)
+                verify_sandbox_spec(sandbox, self._sandbox_spec)
                 state = sandbox_state(sandbox)
                 sandbox = await self._ensure_running(
                     sandbox,
@@ -329,10 +333,11 @@ class DaytonaSessionManager:
                     mount_path=expected.mount_path,
                 )
                 verify_sandbox_workspace_mount(sandbox, expected)
+                verify_sandbox_spec(sandbox, self._sandbox_spec)
             except ProviderRequestError:
                 raise
             except DaytonaAdapterError as exc:
-                if exc.cause_type != "SandboxUnrecoverable":
+                if exc.cause_type not in {"SandboxUnrecoverable", "SandboxSnapshotMismatch"}:
                     raise
                 if binding is not None:
                     binding = await self.replace(
@@ -382,6 +387,7 @@ class DaytonaSessionManager:
 
         try:
             verify_sandbox_workspace_mount(sandbox, expected)
+            verify_sandbox_spec(sandbox, self._sandbox_spec)
             await asyncio.to_thread(
                 ensure_volume_layout,
                 sandbox,
@@ -531,6 +537,7 @@ class DaytonaSessionManager:
             request=request,
         )
         verify_sandbox_workspace_mount(sandbox, expected)
+        verify_sandbox_spec(sandbox, self._sandbox_spec)
         new_binding = SandboxBinding(
             session_id=binding.session_id,
             sandbox_id=_sandbox_id(sandbox),

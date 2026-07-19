@@ -14,6 +14,9 @@ importers:
       ai:
         specifier: 7.0.22
         version: 7.0.22(zod@4.4.3)
+      highlight.js:
+        specifier: 10.7.3
+        version: 10.7.3
     devDependencies:
       '@biomejs/biome':
         specifier: 2.4.2
@@ -564,6 +567,9 @@ packages:
   get-east-asian-width@1.6.0:
     resolution: {integrity: sha512-QRbvDIbx6YklUe6RxeTeleMR0yv3cYH6PsPZHcnVn7xv7zO1BHN8r0XETu8n6Ye3Q+ahtSarc3WgtNWmehIBfA==}
     engines: {node: '>=18'}
+
+  highlight.js@10.7.3:
+    resolution: {integrity: sha512-tzcUFauisWKNHaRkN4Wjl/ZA07gENAjFl3J/c480dprkGTg5EQstgaNFqBfUqCq54kZRIEcreTsAgF/m2quD7A==}
 
   https-proxy-agent@7.0.6:
     resolution: {integrity: sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==}
@@ -1179,6 +1185,8 @@ snapshots:
     optional: true
 
   get-east-asian-width@1.6.0: {}
+
+  highlight.js@10.7.3: {}
 
   https-proxy-agent@7.0.6(supports-color@10.2.2):
     dependencies:

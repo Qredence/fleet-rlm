@@ -44,12 +44,21 @@ pnpm --dir tools/fleet-tui start -- --api-url http://127.0.0.1:8000
 
 ## Timeline and interaction
 
-The screen is a flat achromatic operator timeline. User/assistant text,
+The screen uses pi coding-agent's built-in visual language. It starts with the
+dark palette and switches to the matching light palette when the terminal
+reports that preference. User prompts use a distinct message surface, assistant
+prose remains unboxed, Markdown and code use semantic highlighting, and Tool
+surfaces distinguish pending, successful, and failed execution. Accent,
+success, warning, error, muted, and border colors carry meaning rather than
+decoration.
+
+Fleet identity and runtime evidence remain unchanged: user/assistant text,
 sanitized reasoning, generated code, interpreter output, Tools, Skills,
 Attachments, warnings, recoverable errors, Artifacts, typed results, and usage
-remain chronological, complete, static, and expanded.
+stay chronological, complete, static, and expanded. The theme is automatic;
+there is no theme command or persisted theme setting.
 
-Transcript, activity, editor, and footer form native terminal history. Fleet
+Transcript, activity, editor, and footer still form native terminal history. Fleet
 does not capture the mouse, pin the prompt, clip old evidence, or maintain a
 transcript viewport. Use the terminal's wheel, trackpad, or
 `Shift+PageUp/PageDown` scrollback; plain `PageUp/PageDown` remain editor keys.

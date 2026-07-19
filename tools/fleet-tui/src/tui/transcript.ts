@@ -2,7 +2,7 @@ import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
 
 import { renderMessage } from "./message-renderer.js";
 import type { ConversationStore, Message } from "./store.js";
-import { ansi } from "./theme.js";
+import { theme } from "./theme.js";
 
 type MessageRenderer = (message: Message, width: number) => string[];
 
@@ -28,7 +28,7 @@ export class TranscriptComponent implements Component {
     const safeWidth = Math.max(1, width);
     const state = this.store.getState();
     const session = state.session;
-    const lines = [bold("FLEET")];
+    const lines = [theme.fg("accent", theme.bold("FLEET"))];
     lines.push(
       dim(
         truncateToWidth(
@@ -82,12 +82,8 @@ export class TranscriptComponent implements Component {
   }
 }
 
-function bold(value: string): string {
-  return `${ansi.bold}${ansi.white}${value}${ansi.reset}`;
-}
-
 function dim(value: string): string {
-  return `${ansi.dim}${value}${ansi.dimOff}`;
+  return theme.fg("dim", value);
 }
 
 function terminalSafeLine(value: string): string {

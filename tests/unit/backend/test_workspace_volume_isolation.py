@@ -11,6 +11,7 @@ import pytest
 from fleet_rlm.daytona.bindings import InMemoryBindingStore, SandboxBinding
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.platform import LiveDaytonaPlatform
+from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec
 from fleet_rlm.daytona.session_manager import (
     DaytonaSessionManager,
     ExpectedWorkspaceMount,
@@ -23,6 +24,8 @@ from fleet_rlm.daytona.volumes import (
     volume_mount_spec,
     workspace_volume_subpath,
 )
+
+_SPEC = DaytonaSandboxSpec("fleet-test-v1")
 
 
 class _FakeVolume:
@@ -69,6 +72,7 @@ class _FakeSandbox:
         self.mount_path = mount_path
         self.volume_subpath = volume_subpath
         self.labels = labels
+        self.snapshot = _SPEC.snapshot
         self.fs = _FakeFilesystem(mount_path)
         self.volumes = [
             {
@@ -134,6 +138,7 @@ def _manager() -> tuple[DaytonaSessionManager, _FakePlatform, InMemoryBindingSto
         volume_client=_FakeVolumeClient(),
         volume_config=VolumeConfig(),
         bindings=store,
+        sandbox_spec=_SPEC,
     )
     return mgr, plat, store
 
@@ -163,7 +168,7 @@ def test_live_platform_rejects_unscoped_volume_mount() -> None:
         def create(self, params: Any) -> Any:
             raise AssertionError("must not create unscoped sandbox")
 
-    platform = LiveDaytonaPlatform(_Client())
+    platform = LiveDaytonaPlatform(_Client(), _SPEC)
     with pytest.raises(ValueError, match="without workspace subpath"):
         platform.create(
             volume_id="vol-1",

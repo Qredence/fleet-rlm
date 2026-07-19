@@ -10,8 +10,9 @@
 | `check_agents_md_freshness.py` | Validate agent-guide reachability |
 | `validate_release.py` | Validate package metadata and wheel contents |
 | `live_daytona_verify.py` | Run the opt-in Daytona MVP proof and validate its bounded JSON receipt |
+| `daytona_snapshot.py` | Explicitly create or check the immutable Fleet Daytona Snapshot |
 | `codex_feedback_loop.py` | Run the local Codex feedback-loop probes |
 | `deployment_observability.py` | Inspect deployment observability inputs |
 
-Legacy WebSocket, optimization, evaluation, snapshot, MLflow, and compatibility
+Legacy WebSocket, optimization, evaluation, MLflow, and compatibility
 runtime scripts were retired with the backend hard cutover.

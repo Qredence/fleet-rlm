@@ -18,6 +18,8 @@ def require_daytona_settings(settings: Settings) -> None:
     missing: list[str] = []
     if settings.daytona_api_key is None or not settings.daytona_api_key.get_secret_value().strip():
         missing.append("FLEET_DAYTONA_API_KEY")
+    if not (settings.daytona_snapshot or "").strip():
+        missing.append("FLEET_DAYTONA_SNAPSHOT")
     if settings.llm_api_key is None or not settings.llm_api_key.get_secret_value().strip():
         missing.append("FLEET_LLM_API_KEY")
     if not (settings.database_url or "").strip():
@@ -70,6 +72,7 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
     from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
     from fleet_rlm.daytona.paths import volume_paths_from_settings
     from fleet_rlm.daytona.run_environment import LiveKernelResources, resolve_settings
+    from fleet_rlm.daytona.sandbox_spec import sandbox_spec_from_settings
     from fleet_rlm.daytona.workspace_volume import create_daytona_workspace_volume_gateway
     from fleet_rlm.files.lifecycle import AttachmentModule
     from fleet_rlm.files.local_catalog import WorkspaceAttachmentBlobGateway
@@ -87,18 +90,22 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
 
     resolved = resolve_settings(settings)
     require_daytona_settings(resolved)
+    sandbox_spec = sandbox_spec_from_settings(resolved)
     engine = create_async_engine_from_url(resolved.database_url or "")
     resources: Any | None = None
     gateway: Any | None = None
     try:
         session_factory = create_session_factory(engine)
-        resources = LiveKernelResources(resolved, session_factory=session_factory, engine=engine)
+        resources = LiveKernelResources(
+            resolved, session_factory=session_factory, engine=engine, sandbox_spec=sandbox_spec
+        )
         if resolved.daytona_api_key is None:
             raise CompositionError("Daytona composition missing required settings: FLEET_DAYTONA_API_KEY")
         gateway = create_daytona_workspace_volume_gateway(
             api_key=resolved.daytona_api_key.get_secret_value(),
             volume_name=resolved.volume_name,
             mount_path=resolved.volume_mount_path,
+            sandbox_spec=sandbox_spec,
         )
         attachment_lifecycle = AttachmentModule(
             catalog=SqlAlchemyAttachmentCatalog(session_factory),
