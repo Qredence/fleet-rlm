@@ -15,6 +15,12 @@ class WorkspaceEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkspaceListResult:
+    entries: tuple[WorkspaceEntry, ...]
+    truncated: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class WorkspaceCapabilityMetadata:
     available: bool
     root: str
@@ -42,7 +48,7 @@ DENO_WORKSPACE_CAPABILITY = WorkspaceCapabilityMetadata(
 
 
 class SessionWorkspaceFS(Protocol):
-    def list_entries(self, path: str, *, limit: int = 100) -> tuple[WorkspaceEntry, ...]: ...
+    def list_entries(self, path: str, *, limit: int = 100) -> WorkspaceListResult: ...
 
     def stat(self, path: str) -> WorkspaceEntry | None: ...
 

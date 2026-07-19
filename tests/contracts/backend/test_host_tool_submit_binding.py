@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dspy.primitives.code_interpreter import FinalOutput
-
 from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 from fleet_rlm.daytona.submit import extract_final_payload, remote_submit_setup_code
+from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
+from fleet_rlm.rlm.dspy_interpreter_contract import FinalOutput
+from fleet_rlm.rlm.signature import FleetRLMSignature
 
 
 def test_interpreter_declares_rlm_injection_surface() -> None:
@@ -33,3 +34,16 @@ def test_final_output_type_is_dspy_final_output() -> None:
     interp.start()
     result = interp.execute('SUBMIT(answer="ok")')
     assert type(result) is FinalOutput
+
+
+def test_stock_rlm_resets_tools_registered_on_inject() -> None:
+    """Installed DSPy must clear _tools_registered on each inject cycle."""
+    interp = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interp._tools_registered = True  # noqa: SLF001 - simulate prior reinjection cycle
+    rlm = build_native_rlm(
+        signature=FleetRLMSignature,
+        options=RLMOptions(max_iterations=1),
+        interpreter=interp,
+    )
+    rlm._inject_execution_context(interp, {})  # noqa: SLF001 - pinned DSPy inject contract
+    assert interp._tools_registered is False  # noqa: SLF001 - Fleet reinjects when flag is false

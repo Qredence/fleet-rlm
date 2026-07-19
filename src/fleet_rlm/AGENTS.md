@@ -15,17 +15,19 @@ them for backend work. Current code and tests outrank the local phase record in
   in-memory bundled Skill catalog. Lifespan composition installs and disposes
   one complete Deno, Daytona, or explicitly injected private-test inventory.
 - Keep Daytona SDK imports inside `daytona/`.
-- Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Daytona
-  supplies a fresh custom interpreter; Deno passes `interpreter=None` so DSPy
-  creates its default Deno/Pyodide interpreter. Call only the supported
+- Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Inject and
+  `FinalOutput` protocol knowledge lives in `rlm.dspy_interpreter_contract`.
+  Daytona supplies a fresh custom interpreter; Deno passes `interpreter=None` so
+  DSPy creates its default Deno/Pyodide interpreter. Call only the supported
   `await rlm.acall(**named_inputs)` surface.
 - The default Signature receives request text, bounded `session_context`,
   authorized `skill_cards`, and bounded Attachment metadata. Older committed
   messages remain behind the Session-scoped `read_session_history` Tool.
   Custom Task Contracts receive only their declared host-bounded inputs.
 - Runtime-specific Session Workspace availability is bounded inside context;
-  Daytona registers four text workspace Tools and Deno advertises the feature
-  as unavailable.
+  Daytona registers four text workspace Tools (list, stat, read, write with
+  overwrite) and Deno advertises the feature as unavailable. Session Workspace
+  is append/update-only; there is no delete Tool.
 - Compose zero to four exact authorized Skill selections. Skill instructions and
   resources load progressively. The production host `CapabilityRegistry` is an
   empty extension seam; bundled Skills do not register executable capabilities.
@@ -49,7 +51,8 @@ them for backend work. Current code and tests outrank the local phase record in
   sink, and the derivative is not an Artifact or API resource.
 - Session Workspace files are immediate private state under
   `sessions/{session_id}/workspace/`. They survive failed Runs and Sandbox
-  replacement independently of Turn Commit.
+  replacement independently of Turn Commit. Updates replace existing files via
+  `write_workspace_text(..., overwrite=True)`; deletion is not exposed as a Tool.
 - Alembic owns live schema evolution. `create_tables` is test/local SQLite only.
 - Do not add `/api/v1`, WebSocket, legacy-backend, auth, or environment aliases.
 

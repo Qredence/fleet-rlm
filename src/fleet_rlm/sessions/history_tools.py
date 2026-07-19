@@ -13,6 +13,8 @@ from fleet_rlm.rlm.events import JsonValue
 from fleet_rlm.rlm.tool_observer import ToolEventView
 from fleet_rlm.sessions.models import SessionHistory
 
+SESSION_HISTORY_RESULT_BYTE_BUDGET = 262_144
+
 
 @dataclass(frozen=True, slots=True)
 class SessionHistoryToolHost:
@@ -25,20 +27,43 @@ class SessionHistoryToolHost:
             """Read a bounded page of canonical committed Session messages."""
             if offset < 0 or limit < 1 or limit > 20:
                 raise ValueError("Session history request is invalid")
-            page = self.history.messages[offset : offset + limit]
-            return {
+            total = len(self.history.messages)
+            selected: list[dict[str, object]] = []
+            bytes_returned = 0
+            truncated = False
+            skipped_ordinal: int | None = None
+            current_offset = offset
+            while len(selected) < limit and current_offset < total:
+                message = self.history.messages[current_offset]
+                ordinal = current_offset + 1
+                content_bytes = len(message.content.encode("utf-8"))
+                if content_bytes > SESSION_HISTORY_RESULT_BYTE_BUDGET:
+                    skipped_ordinal = ordinal
+                    truncated = True
+                    current_offset += 1
+                    continue
+                if bytes_returned + content_bytes > SESSION_HISTORY_RESULT_BYTE_BUDGET:
+                    truncated = True
+                    break
+                selected.append({
+                    "ordinal": ordinal,
+                    "role": message.role,
+                    "content": message.content,
+                })
+                bytes_returned += content_bytes
+                current_offset += 1
+            result: dict[str, object] = {
                 "offset": offset,
-                "next_offset": offset + len(page),
-                "total": len(self.history.messages),
-                "messages": [
-                    {
-                        "ordinal": offset + index + 1,
-                        "role": message.role,
-                        "content": message.content,
-                    }
-                    for index, message in enumerate(page)
-                ],
+                "next_offset": current_offset,
+                "total": total,
+                "messages": selected,
+                "truncated": truncated,
+                "bytes_returned": bytes_returned,
+                "byte_budget": SESSION_HISTORY_RESULT_BYTE_BUDGET,
             }
+            if skipped_ordinal is not None:
+                result["skipped_ordinal"] = skipped_ordinal
+            return result
 
         return (
             dspy.Tool(
@@ -62,16 +87,24 @@ class SessionHistoryToolHost:
             messages = result.get("messages")
             values = cast(Mapping[str, JsonValue], result)
             projected: dict[str, JsonValue] = {
-                key: values[key] for key in ("offset", "next_offset", "total") if key in values
+                key: values[key]
+                for key in (
+                    "offset",
+                    "next_offset",
+                    "total",
+                    "truncated",
+                    "bytes_returned",
+                    "byte_budget",
+                    "skipped_ordinal",
+                )
+                if key in values
             }
             projected["message_count"] = len(messages) if isinstance(messages, list) else 0
             return projected
 
-        return MappingProxyType(
-            {
-                "read_session_history": ToolEventView(
-                    input_projection=project_input,
-                    output_projection=project_output,
-                )
-            }
-        )
+        return MappingProxyType({
+            "read_session_history": ToolEventView(
+                input_projection=project_input,
+                output_projection=project_output,
+            )
+        })

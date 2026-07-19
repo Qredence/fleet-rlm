@@ -2,18 +2,32 @@
 
 from __future__ import annotations
 
+import base64
 import json
+from collections.abc import Mapping
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, cast
 
-from fleet_rlm.files.workspace_models import WorkspaceEntry
+from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult
 from fleet_rlm.files.workspace_validation import normalize_workspace_path
 
 
-def _is_not_found(exc: BaseException) -> bool:
-    if isinstance(exc, FileNotFoundError):
-        return True
-    return getattr(exc, "status_code", None) == 404
+def _entry_from_payload(raw: Mapping[str, object]) -> WorkspaceEntry:
+    byte_size = raw.get("byte_size")
+    modified_at = raw.get("modified_at")
+    parsed_byte_size: int | None
+    if byte_size is None:
+        parsed_byte_size = None
+    elif isinstance(byte_size, int):
+        parsed_byte_size = byte_size
+    else:
+        parsed_byte_size = int(str(byte_size))
+    return WorkspaceEntry(
+        path=str(raw["path"]),
+        kind="directory" if raw.get("kind") == "directory" else "file",
+        byte_size=parsed_byte_size,
+        modified_at=str(modified_at) if modified_at else None,
+    )
 
 
 class DaytonaSessionWorkspaceFS:
@@ -51,55 +65,65 @@ class DaytonaSessionWorkspaceFS:
     def root(self) -> str:
         return self._root
 
-    def list_entries(self, path: str, *, limit: int = 100) -> tuple[WorkspaceEntry, ...]:
+    def list_entries(self, path: str, *, limit: int = 100) -> WorkspaceListResult:
         relative = normalize_workspace_path(path, allow_root=True)
         if limit < 1 or limit > 100:
             raise ValueError("workspace list limit must be between 1 and 100")
-        self._guard(relative, allow_missing=relative == ".")
-        absolute = self._absolute(relative)
-        info = self._info(absolute)
-        if info is None:
-            if relative == ".":
-                return ()
-            raise FileNotFoundError(relative)
-        if not bool(getattr(info, "is_dir", False)):
-            raise NotADirectoryError(relative)
-        values = self._sandbox.fs.list_files(absolute, depth=1)
-        entries = [self._entry_from_info(item, parent=relative) for item in values]
-        return tuple(sorted(entries, key=lambda item: item.path)[:limit])
+        payload = self._atomic_run(
+            operation="list",
+            relative=relative,
+            allow_missing=relative == ".",
+            max_bytes=0,
+            limit=limit,
+            overwrite=False,
+            content_b64="",
+        )
+        raw_entries = payload.get("entries")
+        entries: list[WorkspaceEntry] = []
+        if isinstance(raw_entries, list):
+            for item in raw_entries:
+                if isinstance(item, dict):
+                    entries.append(_entry_from_payload(cast(Mapping[str, object], item)))
+        return WorkspaceListResult(entries=tuple(entries), truncated=bool(payload.get("truncated")))
 
     def stat(self, path: str) -> WorkspaceEntry | None:
         relative = normalize_workspace_path(path, allow_root=True)
-        self._guard(relative, allow_missing=True)
-        info = self._info(self._absolute(relative))
-        if info is None:
+        payload = self._atomic_run(
+            operation="stat",
+            relative=relative,
+            allow_missing=True,
+            max_bytes=0,
+            limit=0,
+            overwrite=False,
+            content_b64="",
+        )
+        if payload.get("entry") is None:
             if relative == ".":
                 return WorkspaceEntry(".", "directory", None, None)
             return None
-        return self._entry_from_info(info, exact=relative)
+        entry = payload["entry"]
+        if not isinstance(entry, dict):
+            raise RuntimeError("workspace stat returned invalid entry")
+        return _entry_from_payload(cast(Mapping[str, object], entry))
 
     def read_text(self, path: str, *, max_bytes: int) -> str:
         relative = normalize_workspace_path(path)
         bound = min(self._max_file_bytes, int(max_bytes))
         if bound < 1:
             raise ValueError("workspace read bound must be positive")
-        self._guard(relative, allow_missing=False)
-        absolute = self._absolute(relative)
-        info = self._info(absolute)
-        if info is None:
-            raise FileNotFoundError(relative)
-        if bool(getattr(info, "is_dir", False)):
-            raise IsADirectoryError(relative)
-        if int(getattr(info, "size", 0)) > bound:
-            raise ValueError("workspace file exceeds read bound")
-        raw = self._sandbox.fs.download_file(absolute)
-        data = raw if isinstance(raw, bytes) else bytes(raw)
-        if len(data) > bound:
-            raise ValueError("workspace file exceeds read bound")
-        try:
-            return data.decode("utf-8", errors="strict")
-        except UnicodeDecodeError as exc:
-            raise ValueError("workspace file is not valid UTF-8") from exc
+        payload = self._atomic_run(
+            operation="read",
+            relative=relative,
+            allow_missing=False,
+            max_bytes=bound,
+            limit=0,
+            overwrite=False,
+            content_b64="",
+        )
+        content = payload.get("content")
+        if not isinstance(content, str):
+            raise RuntimeError("workspace read returned invalid content")
+        return content
 
     def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
         relative = normalize_workspace_path(path)
@@ -108,111 +132,166 @@ class DaytonaSessionWorkspaceFS:
         data = content.encode("utf-8")
         if len(data) > self._max_file_bytes:
             raise ValueError("workspace file exceeds maximum size")
-        self._guard(relative, allow_missing=True)
-        absolute = self._absolute(relative)
-        current = self._info(absolute)
-        if current is not None:
-            if bool(getattr(current, "is_dir", False)):
-                raise IsADirectoryError(relative)
-            if not overwrite:
-                raise FileExistsError(relative)
-        self._ensure_parents(relative)
-        self._guard(relative, allow_missing=True)
-        self._sandbox.fs.upload_file(data, absolute)
-        info = self._info(absolute)
-        if info is None:
-            raise RuntimeError("workspace write did not create a file")
-        return self._entry_from_info(info, exact=relative)
+        payload = self._atomic_run(
+            operation="write",
+            relative=relative,
+            allow_missing=True,
+            max_bytes=self._max_file_bytes,
+            limit=0,
+            overwrite=overwrite,
+            content_b64=base64.b64encode(data).decode("ascii"),
+        )
+        entry = payload.get("entry")
+        if not isinstance(entry, dict):
+            raise RuntimeError("workspace write returned invalid entry")
+        return _entry_from_payload(cast(Mapping[str, object], entry))
 
     def _absolute(self, relative: str) -> str:
         return self._root if relative == "." else str(PurePosixPath(self._root) / relative)
 
-    def _info(self, absolute: str) -> Any | None:
-        try:
-            return self._sandbox.fs.get_file_info(absolute)
-        except Exception as exc:  # noqa: BLE001 - SDK file-not-found is typed at runtime
-            if _is_not_found(exc):
-                return None
-            raise
-
-    def _ensure_parents(self, relative: str) -> None:
-        root_info = self._info(self._root)
-        if root_info is None:
-            self._sandbox.fs.create_folder(self._root, "700")
-        elif not bool(getattr(root_info, "is_dir", False)):
-            raise NotADirectoryError(".")
-        current = PurePosixPath(self._root)
-        for part in PurePosixPath(relative).parent.parts:
-            if part == ".":
-                continue
-            current /= part
-            absolute = str(current)
-            info = self._info(absolute)
-            if info is None:
-                self._sandbox.fs.create_folder(absolute, "700")
-            elif not bool(getattr(info, "is_dir", False)):
-                raise NotADirectoryError(str(current.relative_to(self._root)))
-
-    def _entry_from_info(
+    def _atomic_run(
         self,
-        info: Any,
         *,
-        exact: str | None = None,
-        parent: str | None = None,
-    ) -> WorkspaceEntry:
-        if exact is not None:
-            relative = exact
-        else:
-            name = str(getattr(info, "name", ""))
-            relative = name if parent in {None, "."} else f"{parent}/{name}"
-            relative = normalize_workspace_path(relative)
-        is_dir = bool(getattr(info, "is_dir", False))
-        modified_at = getattr(info, "modified_at", None) or getattr(info, "mod_time", None)
-        return WorkspaceEntry(
-            path=relative,
-            kind="directory" if is_dir else "file",
-            byte_size=None if is_dir else int(getattr(info, "size", 0)),
-            modified_at=str(modified_at) if modified_at else None,
-        )
-
-    def _guard(self, relative: str, *, allow_missing: bool) -> None:
+        operation: str,
+        relative: str,
+        allow_missing: bool,
+        max_bytes: int,
+        limit: int,
+        overwrite: bool,
+        content_b64: str,
+    ) -> dict[str, object]:
         target = self._absolute(relative)
-        code = "\n".join(
-            (
-                "import json, os, stat",
-                f"volume_root = {self._volume_root!r}",
-                f"root = {self._root!r}",
-                f"target = {target!r}",
-                f"allow_missing = {allow_missing!r}",
-                "safe = True",
-                "reason = None",
-                "try:",
-                "    volume_real = os.path.realpath(volume_root)",
-                "    target_real = os.path.realpath(target)",
-                "    if os.path.commonpath([volume_root, root]) != volume_root:",
-                "        safe, reason = False, 'root_escape'",
-                "    elif os.path.commonpath([root, target]) != root:",
-                "        safe, reason = False, 'root_escape'",
-                "    elif os.path.commonpath([volume_real, target_real]) != volume_real:",
-                "        safe, reason = False, 'root_escape'",
-                "    else:",
-                "        current = volume_root",
-                "        relative_parts = os.path.relpath(target, volume_root).split(os.sep)",
-                "        for part in ([] if relative_parts == ['.'] else relative_parts):",
-                "            current = os.path.join(current, part)",
-                "            if not os.path.lexists(current):",
-                "                if allow_missing:",
-                "                    break",
-                "                safe, reason = False, 'missing'",
-                "                break",
-                "            if stat.S_ISLNK(os.lstat(current).st_mode):",
-                "                safe, reason = False, 'symlink'",
-                "                break",
-                "except Exception:",
-                "    safe, reason = False, 'validation_failed'",
-                "print(json.dumps({'safe': safe, 'reason': reason}))",
-            )
-        )
+        code = "\n".join((
+            "import base64, heapq, json, os, stat, time",
+            f"volume_root = {self._volume_root!r}",
+            f"root = {self._root!r}",
+            f"target = {target!r}",
+            f"relative = {relative!r}",
+            f"allow_missing = {allow_missing!r}",
+            f"operation = {operation!r}",
+            f"max_bytes = {int(max_bytes)!r}",
+            f"limit = {int(limit)!r}",
+            f"overwrite = {overwrite!r}",
+            f"content_b64 = {content_b64!r}",
+            "def respond(payload):",
+            "    print(json.dumps(payload))",
+            "    raise SystemExit(0)",
+            "def fail(error, **extra):",
+            "    respond({'ok': False, 'error': error, **extra})",
+            "def guard_path(path, *, allow_missing_path):",
+            "    volume_real = os.path.realpath(volume_root)",
+            "    target_real = os.path.realpath(path)",
+            "    if os.path.commonpath([volume_root, root]) != volume_root:",
+            "        fail('unsafe')",
+            "    if os.path.commonpath([root, path]) != root:",
+            "        fail('unsafe')",
+            "    if os.path.commonpath([volume_real, target_real]) != volume_real:",
+            "        fail('unsafe')",
+            "    current = volume_root",
+            "    relative_parts = os.path.relpath(path, volume_root).split(os.sep)",
+            "    for part in ([] if relative_parts == ['.'] else relative_parts):",
+            "        current = os.path.join(current, part)",
+            "        if not os.path.lexists(current):",
+            "            if allow_missing_path:",
+            "                return",
+            "            fail('not_found')",
+            "        if stat.S_ISLNK(os.lstat(current).st_mode):",
+            "            fail('unsafe')",
+            "def ensure_parents(path):",
+            "    parent = os.path.dirname(path)",
+            "    if parent and parent != path:",
+            "        os.makedirs(parent, mode=0o700, exist_ok=True)",
+            "        guard_path(parent, allow_missing_path=False)",
+            "def entry_for(path):",
+            "    info = os.stat(path, follow_symlinks=False)",
+            "    modified_at = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(info.st_mtime))",
+            "    if stat.S_ISDIR(info.st_mode):",
+            "        return {'path': relative if path == target else os.path.relpath(path, root), 'kind': 'directory', 'byte_size': None, 'modified_at': modified_at}",
+            "    return {'path': relative, 'kind': 'file', 'byte_size': info.st_size, 'modified_at': modified_at}",
+            "try:",
+            "    guard_path(target, allow_missing_path=allow_missing)",
+            "    if operation == 'list':",
+            "        if not os.path.lexists(target):",
+            "            if relative == '.':",
+            "                respond({'ok': True, 'entries': [], 'truncated': False})",
+            "            fail('not_found')",
+            "        if stat.S_ISLNK(os.lstat(target).st_mode):",
+            "            fail('unsafe')",
+            "        if not stat.S_ISDIR(os.stat(target, follow_symlinks=False).st_mode):",
+            "            fail('not_directory')",
+            "        entries = []",
+            "        with os.scandir(target) as scanner:",
+            "            candidates = heapq.nsmallest(limit + 1, scanner, key=lambda item: item.name)",
+            "        truncated = len(candidates) > limit",
+            "        for item in candidates[:limit]:",
+            "            child_relative = item.name if relative == '.' else f'{relative}/{item.name}'",
+            "            child_stat = item.stat(follow_symlinks=False)",
+            "            modified_at = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(child_stat.st_mtime))",
+            "            if stat.S_ISDIR(child_stat.st_mode):",
+            "                entries.append({'path': child_relative, 'kind': 'directory', 'byte_size': None, 'modified_at': modified_at})",
+            "            else:",
+            "                entries.append({'path': child_relative, 'kind': 'file', 'byte_size': child_stat.st_size, 'modified_at': modified_at})",
+            "        respond({'ok': True, 'entries': entries, 'truncated': truncated})",
+            "    if operation == 'stat':",
+            "        if not os.path.lexists(target):",
+            "            respond({'ok': True, 'entry': None})",
+            "        if stat.S_ISLNK(os.lstat(target).st_mode):",
+            "            fail('unsafe')",
+            "        respond({'ok': True, 'entry': entry_for(target)})",
+            "    if operation == 'read':",
+            "        if not os.path.lexists(target):",
+            "            fail('not_found')",
+            "        if stat.S_ISDIR(os.stat(target, follow_symlinks=False).st_mode):",
+            "            fail('is_directory')",
+            "        flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0)",
+            "        fd = os.open(target, flags)",
+            "        try:",
+            "            data = os.read(fd, max_bytes + 1)",
+            "        finally:",
+            "            os.close(fd)",
+            "        if len(data) > max_bytes:",
+            "            fail('read_bound')",
+            "        try:",
+            "            content = data.decode('utf-8')",
+            "        except UnicodeDecodeError:",
+            "            fail('invalid_utf8')",
+            "        respond({'ok': True, 'content': content})",
+            "    if operation == 'write':",
+            "        ensure_parents(target)",
+            "        guard_path(target, allow_missing_path=True)",
+            "        payload = base64.b64decode(content_b64.encode('ascii'))",
+            "        if len(payload) > max_bytes:",
+            "            fail('too_large')",
+            "        if os.path.lexists(target):",
+            "            if stat.S_ISDIR(os.stat(target, follow_symlinks=False).st_mode):",
+            "                fail('is_directory')",
+            "            if not overwrite:",
+            "                fail('conflict')",
+            "            flags = os.O_WRONLY | getattr(os, 'O_NOFOLLOW', 0)",
+            "            fd = os.open(target, flags)",
+            "            try:",
+            "                os.ftruncate(fd, 0)",
+            "                os.write(fd, payload)",
+            "            finally:",
+            "                os.close(fd)",
+            "        else:",
+            "            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0)",
+            "            fd = os.open(target, flags, 0o600)",
+            "            try:",
+            "                os.write(fd, payload)",
+            "            finally:",
+            "                os.close(fd)",
+            "        respond({'ok': True, 'entry': entry_for(target)})",
+            "    fail('unsupported')",
+            "except FileNotFoundError:",
+            "    fail('not_found')",
+            "except FileExistsError:",
+            "    fail('conflict')",
+            "except IsADirectoryError:",
+            "    fail('is_directory')",
+            "except OSError:",
+            "    fail('unsafe')",
+        ))
         response = self._sandbox.process.code_run(code)
         if int(getattr(response, "exit_code", 1)) != 0:
             raise ValueError("workspace path is unsafe")
@@ -220,7 +299,21 @@ class DaytonaSessionWorkspaceFS:
             payload = json.loads(str(getattr(response, "result", "")))
         except (TypeError, ValueError) as exc:
             raise ValueError("workspace path is unsafe") from exc
-        if payload.get("safe") is not True:
-            if payload.get("reason") == "missing" and not allow_missing:
+        if payload.get("ok") is not True:
+            error = payload.get("error")
+            if error == "not_found":
                 raise FileNotFoundError(relative)
+            if error == "conflict":
+                raise FileExistsError(relative)
+            if error == "is_directory":
+                raise IsADirectoryError(relative)
+            if error == "not_directory":
+                raise NotADirectoryError(relative)
+            if error == "read_bound":
+                raise ValueError("workspace file exceeds read bound")
+            if error == "too_large":
+                raise ValueError("workspace file exceeds maximum size")
+            if error == "invalid_utf8":
+                raise ValueError("workspace file is not valid UTF-8")
             raise ValueError("workspace path is unsafe")
+        return payload

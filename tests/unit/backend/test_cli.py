@@ -129,7 +129,19 @@ def test_fleet_runtime_command_selects_environment_and_supervises_pi_tui(
         lambda **kwargs: calls.append(kwargs),
     )
 
-    fleet_main([command, "--host", "0.0.0.0", "--port", "8123", "--", "--session", "session-id"])
+    fleet_main(
+        [
+            command,
+            "--host",
+            "0.0.0.0",
+            "--allow-non-loopback-bind",
+            "--port",
+            "8123",
+            "--",
+            "--session",
+            "session-id",
+        ]
+    )
 
     assert os.environ["FLEET_RUN_ENVIRONMENT"] == "deno"
     assert calls == [

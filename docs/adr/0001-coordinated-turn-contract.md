@@ -109,14 +109,16 @@ length and SHA-256 before response.
 
 ### DSPy boundary
 
-DSPy remains pinned to `3.3.0b1` behind one local compatibility adapter. Fleet
-uses public `dspy.RLM` construction and `acall`, `dspy.context`, typed
-Signatures, Tools/callables, `SandboxSerializable`, and stock `dspy.LM`.
+DSPy remains pinned to `3.3.0b1` behind local compatibility adapters in
+`rlm/`. Fleet uses public `dspy.RLM` construction and `acall`, `dspy.context`,
+typed Signatures, Tools/callables, `SandboxSerializable`, and stock `dspy.LM`.
 
-Exactly two private overrides remain: `_aexecute_iteration` for nonblocking
-iteration detail and `_make_llm_tools` for bounded built-in Sub Model tools.
-The private `_strip_code_fences` helper is the only private helper import.
-Fingerprint and differential contract tests gate all three seams. Fleet does
+`rlm.dspy_contract` owns version assertion, native construction, Prediction
+extraction, trajectory normalization, and usage. `rlm.dspy_interpreter_contract`
+owns the pinned inject extras beyond public `CodeInterpreter` (`output_fields`,
+`_tools_registered` reinjection semantics, and `FinalOutput`). Concrete
+interpreters remain under `fleet_rlm.daytona`; they call the interpreter
+contract helpers rather than importing `dspy.primitives` directly. Fleet does
 not fork RLM, subclass `BaseLM`, or call LiteLLM directly.
 
 ### Environments, persistence, and generated contracts

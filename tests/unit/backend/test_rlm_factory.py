@@ -142,3 +142,33 @@ def test_dspy_contract_is_only_native_dspy_rlm_call_site_in_rlm_package() -> Non
             if isinstance(func, ast.Name) and func.id == "RLM":
                 offenders.append(path.name)
     assert offenders == [], f"dspy.RLM constructed outside dspy_contract: {offenders}"
+
+
+def test_dspy_primitives_imports_are_confined_to_interpreter_contract() -> None:
+    """Static guard: only dspy_interpreter_contract.py may import dspy.primitives."""
+    import ast
+    from pathlib import Path
+
+    src_root = Path(__file__).resolve().parents[3] / "src" / "fleet_rlm"
+    allowed = {"rlm/dspy_interpreter_contract.py"}
+    offenders: list[str] = []
+    for path in sorted(src_root.rglob("*.py")):
+        rel = path.relative_to(src_root).as_posix()
+        if rel in allowed:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if node.module and node.module.startswith("dspy.primitives"):
+                    offenders.append(rel)
+                    break
+                if node.module == "dspy" and any(alias.name == "primitives" for alias in node.names):
+                    offenders.append(rel)
+                    break
+            if isinstance(node, ast.Import):
+                if any(
+                    alias.name == "dspy.primitives" or alias.name.startswith("dspy.primitives.") for alias in node.names
+                ):
+                    offenders.append(rel)
+                    break
+    assert offenders == [], f"dspy.primitives imported outside interpreter contract: {offenders}"

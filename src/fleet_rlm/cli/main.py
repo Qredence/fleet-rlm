@@ -8,6 +8,8 @@ import os
 from collections.abc import Sequence
 from typing import Any
 
+from fleet_rlm.cli.bind_safety import UnsafeBindError, require_safe_bind_host
+
 
 def _add_serve_command(
     subcommands: Any,
@@ -21,6 +23,14 @@ def _add_serve_command(
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--reload", action="store_true")
+    serve.add_argument(
+        "--allow-non-loopback-bind",
+        action="store_true",
+        help=(
+            "allow binding to a non-loopback address; Fleet has no caller "
+            "authentication and will expose the local API on the network"
+        ),
+    )
     if supervise_tui:
         serve.add_argument("tui_args", nargs=argparse.REMAINDER)
     serve.set_defaults(run_environment=run_environment, supervise_tui=supervise_tui)
@@ -66,6 +76,14 @@ def _run(parser: argparse.ArgumentParser, argv: Sequence[str] | None = None) -> 
     if args.command == "doctor":
         _run_doctor(parser, args.doctor_provider)
         return
+
+    try:
+        require_safe_bind_host(
+            args.host,
+            allow_non_loopback=bool(args.allow_non_loopback_bind),
+        )
+    except UnsafeBindError as exc:
+        parser.exit(1, f"fleet: error: {exc}\n")
     if args.supervise_tui:
         from fleet_rlm.cli.supervisor import SupervisorError, supervise
 

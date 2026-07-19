@@ -42,12 +42,13 @@ class WorkspaceToolHost:
         def list_workspace_files(path: str = ".", limit: int = 100) -> dict[str, object]:
             """List immediate entries in this Session's durable workspace."""
             try:
-                entries = self._workspace.list_entries(path, limit=limit)
+                listing = self._workspace.list_entries(path, limit=limit)
                 return {
                     "ok": True,
                     "path": path,
-                    "count": len(entries),
-                    "entries": [_entry(item) for item in entries],
+                    "count": len(listing.entries),
+                    "truncated": listing.truncated,
+                    "entries": [_entry(item) for item in listing.entries],
                 }
             except Exception as exc:  # noqa: BLE001 - tool results never expose internals
                 return _error(exc)
@@ -181,15 +182,13 @@ class WorkspaceToolHost:
             entry = result.get("entry")
             if isinstance(entry, Mapping):
                 entry_values = cast(Mapping[str, JsonValue], entry)
-                projected.update(
-                    {
-                        name: bound_event_text(entry_values[name])
-                        if isinstance(entry_values[name], str)
-                        else entry_values[name]
-                        for name in ("path", "byte_size")
-                        if name in entry_values
-                    }
-                )
+                projected.update({
+                    name: bound_event_text(entry_values[name])
+                    if isinstance(entry_values[name], str)
+                    else entry_values[name]
+                    for name in ("path", "byte_size")
+                    if name in entry_values
+                })
             return projected
 
         def write_input(arguments: Mapping[str, Any]) -> JsonValue:
@@ -199,26 +198,24 @@ class WorkspaceToolHost:
                 "content_chars": len(str(content or "")),
             }
 
-        return MappingProxyType(
-            {
-                "list_workspace_files": ToolEventView(
-                    input_projection=lambda arguments: fields(arguments, ("path", "limit"), allow_root=True),
-                    output_projection=lambda result: output(result, ("ok", "error", "path", "count")),
+        return MappingProxyType({
+            "list_workspace_files": ToolEventView(
+                input_projection=lambda arguments: fields(arguments, ("path", "limit"), allow_root=True),
+                output_projection=lambda result: output(result, ("ok", "error", "path", "count", "truncated")),
+            ),
+            "stat_workspace_file": ToolEventView(
+                input_projection=lambda arguments: fields(arguments, ("path",)),
+                output_projection=stat_output,
+            ),
+            "read_workspace_text": ToolEventView(
+                input_projection=lambda arguments: fields(arguments, ("path", "max_chars")),
+                output_projection=lambda result: output(
+                    result,
+                    ("ok", "error", "path", "chars", "byte_size"),
                 ),
-                "stat_workspace_file": ToolEventView(
-                    input_projection=lambda arguments: fields(arguments, ("path",)),
-                    output_projection=stat_output,
-                ),
-                "read_workspace_text": ToolEventView(
-                    input_projection=lambda arguments: fields(arguments, ("path", "max_chars")),
-                    output_projection=lambda result: output(
-                        result,
-                        ("ok", "error", "path", "chars", "byte_size"),
-                    ),
-                ),
-                "write_workspace_text": ToolEventView(
-                    input_projection=write_input,
-                    output_projection=lambda result: output(result, ("ok", "error", "path", "byte_size")),
-                ),
-            }
-        )
+            ),
+            "write_workspace_text": ToolEventView(
+                input_projection=write_input,
+                output_projection=lambda result: output(result, ("ok", "error", "path", "byte_size")),
+            ),
+        })

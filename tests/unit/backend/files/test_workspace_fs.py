@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from contextlib import redirect_stdout
 from io import StringIO
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -13,94 +12,40 @@ import pytest
 from fleet_rlm.files.workspace_models import WorkspaceEntry
 
 
-class FakeFs:
-    def __init__(self, root: str, *, root_exists: bool = True) -> None:
-        self.directories = {root} if root_exists else set()
-        self.files: dict[str, bytes] = {}
-
-    def get_file_info(self, path: str):
-        if path in self.directories:
-            return SimpleNamespace(
-                path=path,
-                name=PurePosixPath(path).name,
-                is_dir=True,
-                size=0,
-                modified_at="2026-07-16T12:00:00Z",
-            )
-        if path in self.files:
-            return SimpleNamespace(
-                path=path,
-                name=PurePosixPath(path).name,
-                is_dir=False,
-                size=len(self.files[path]),
-                modified_at="2026-07-16T12:00:00Z",
-            )
-        raise FileNotFoundError(path)
-
-    def list_files(self, path: str, depth: int | None = None):
-        assert depth == 1
-        prefix = f"{path.rstrip('/')}/"
-        children = []
-        for candidate in sorted(self.directories | set(self.files)):
-            if candidate == path or not candidate.startswith(prefix):
-                continue
-            relative = candidate[len(prefix) :]
-            if "/" not in relative:
-                children.append(self.get_file_info(candidate))
-        return list(reversed(children))
-
-    def create_folder(self, path: str, mode: str) -> None:
-        assert mode == "700"
-        current = PurePosixPath("/")
-        for part in PurePosixPath(path).parts[1:]:
-            current /= part
-            self.directories.add(str(current))
-
-    def upload_file(self, content: bytes, path: str) -> None:
-        if str(PurePosixPath(path).parent) not in self.directories:
-            raise FileNotFoundError(path)
-        self.files[path] = bytes(content)
-
-    def download_file(self, path: str) -> bytes:
-        if path not in self.files:
-            raise FileNotFoundError(path)
-        return self.files[path]
-
-
-class FakeProcess:
+class LocalProcess:
     def __init__(self) -> None:
-        self.safe = True
         self.calls: list[str] = []
 
     def code_run(self, code: str):
         self.calls.append(code)
-        payload = {"safe": self.safe, "reason": None if self.safe else "symlink"}
-        return SimpleNamespace(exit_code=0, result=json.dumps(payload))
-
-
-class LocalProcess:
-    def code_run(self, code: str):
         output = StringIO()
         with redirect_stdout(output):
-            exec(code, {})  # noqa: S102 - executes only adapter-generated guard code in this test
+            try:
+                exec(code, {})  # noqa: S102 - executes only adapter-generated guard code in this test
+            except SystemExit:
+                pass
         return SimpleNamespace(exit_code=0, result=output.getvalue().strip())
 
 
-def _workspace(*, max_file_bytes: int = 32, root_exists: bool = True):
+def _workspace(tmp_path: Path, *, max_file_bytes: int = 32, root_exists: bool = True):
     from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
 
-    volume_root = "/home/daytona/fleet"
-    root = "/home/daytona/fleet/sessions/session/workspace"
-    sandbox = SimpleNamespace(fs=FakeFs(root, root_exists=root_exists), process=FakeProcess())
-    return (
-        DaytonaSessionWorkspaceFS(
-            sandbox,
-            volume_root=volume_root,
-            root=root,
-            max_file_bytes=max_file_bytes,
-        ),
+    volume_root = tmp_path / "volume"
+    session_parent = volume_root / "sessions" / "session"
+    root = session_parent / "workspace"
+    if root_exists:
+        root.mkdir(parents=True)
+    else:
+        session_parent.mkdir(parents=True)
+    process = LocalProcess()
+    sandbox = SimpleNamespace(process=process)
+    workspace = DaytonaSessionWorkspaceFS(
         sandbox,
+        volume_root=str(volume_root),
+        root=str(root),
+        max_file_bytes=max_file_bytes,
     )
+    return workspace, sandbox, root, process
 
 
 def test_rejects_workspace_root_outside_trusted_volume() -> None:
@@ -115,24 +60,38 @@ def test_rejects_workspace_root_outside_trusted_volume() -> None:
         )
 
 
-def test_lists_immediate_entries_deterministically_with_limit() -> None:
-    workspace, sandbox = _workspace()
-    sandbox.fs.directories.add(f"{workspace.root}/notes")
-    sandbox.fs.files[f"{workspace.root}/z.txt"] = b"z"
-    sandbox.fs.files[f"{workspace.root}/a.txt"] = b"a"
-    sandbox.fs.files[f"{workspace.root}/notes/nested.txt"] = b"nested"
+def test_lists_immediate_entries_deterministically_with_limit(tmp_path: Path) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    (root / "notes").mkdir()
+    (root / "z.txt").write_text("z", encoding="utf-8")
+    (root / "a.txt").write_text("a", encoding="utf-8")
+    (root / "notes" / "nested.txt").write_text("nested", encoding="utf-8")
 
-    entries = workspace.list_entries(".", limit=2)
+    result = workspace.list_entries(".", limit=2)
 
-    assert [(entry.path, entry.kind, entry.byte_size) for entry in entries] == [
+    assert [(entry.path, entry.kind, entry.byte_size) for entry in result.entries] == [
         ("a.txt", "file", 1),
         ("notes", "directory", None),
     ]
+    assert result.truncated is True
 
 
-def test_stat_returns_relative_metadata_or_none() -> None:
-    workspace, sandbox = _workspace()
-    sandbox.fs.files[f"{workspace.root}/note.txt"] = b"hello"
+def test_list_marks_truncated_when_directory_exceeds_limit(tmp_path: Path) -> None:
+    workspace, _sandbox, root, process = _workspace(tmp_path)
+    for index in range(5):
+        (root / f"file-{index}.txt").write_text("x", encoding="utf-8")
+
+    result = workspace.list_entries(".", limit=3)
+
+    assert len(result.entries) == 3
+    assert result.truncated is True
+    assert len(process.calls) == 1
+    assert "heapq.nsmallest" in process.calls[0]
+
+
+def test_stat_returns_relative_metadata_or_none(tmp_path: Path) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    (root / "note.txt").write_text("hello", encoding="utf-8")
 
     entry = workspace.stat("note.txt")
 
@@ -140,12 +99,12 @@ def test_stat_returns_relative_metadata_or_none() -> None:
     assert entry.path == "note.txt"
     assert entry.kind == "file"
     assert entry.byte_size == 5
-    assert entry.modified_at == "2026-07-16T12:00:00Z"
+    assert entry.modified_at is not None
     assert workspace.stat("missing.txt") is None
 
 
-def test_write_creates_parents_and_honors_overwrite() -> None:
-    workspace, sandbox = _workspace()
+def test_write_creates_parents_and_honors_overwrite(tmp_path: Path) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
 
     created = workspace.write_text("notes/decision.md", "first", overwrite=False)
 
@@ -156,31 +115,33 @@ def test_write_creates_parents_and_honors_overwrite() -> None:
         workspace.write_text("notes/decision.md", "second", overwrite=False)
     replaced = workspace.write_text("notes/decision.md", "second", overwrite=True)
     assert replaced.byte_size == 6
-    assert sandbox.fs.files[f"{workspace.root}/notes/decision.md"] == b"second"
+    assert (root / "notes" / "decision.md").read_text(encoding="utf-8") == "second"
 
 
-def test_first_write_creates_missing_workspace_root() -> None:
-    workspace, sandbox = _workspace(root_exists=False)
+def test_first_write_creates_missing_workspace_root(tmp_path: Path) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path, root_exists=False)
 
     workspace.write_text("notes/decision.md", "first", overwrite=False)
 
-    assert workspace.root in sandbox.fs.directories
-    assert sandbox.fs.files[f"{workspace.root}/notes/decision.md"] == b"first"
+    assert root.exists()
+    assert (root / "notes" / "decision.md").read_text(encoding="utf-8") == "first"
 
 
-def test_first_root_level_write_creates_missing_workspace_root() -> None:
-    workspace, sandbox = _workspace(root_exists=False)
+def test_first_root_level_write_creates_missing_workspace_root(tmp_path: Path) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path, root_exists=False)
 
     workspace.write_text("decision.md", "first", overwrite=False)
 
-    assert workspace.root in sandbox.fs.directories
-    assert sandbox.fs.files[f"{workspace.root}/decision.md"] == b"first"
+    assert root.exists()
+    assert (root / "decision.md").read_text(encoding="utf-8") == "first"
 
 
-def test_missing_workspace_root_behaves_as_an_empty_virtual_directory() -> None:
-    workspace, _sandbox = _workspace(root_exists=False)
+def test_missing_workspace_root_behaves_as_an_empty_virtual_directory(tmp_path: Path) -> None:
+    workspace, _sandbox, _root, _process = _workspace(tmp_path, root_exists=False)
 
-    assert workspace.list_entries(".") == ()
+    listing = workspace.list_entries(".")
+    assert listing.entries == ()
+    assert listing.truncated is False
     assert workspace.stat(".") == WorkspaceEntry(".", "directory", None, None)
 
 
@@ -191,36 +152,38 @@ def test_real_guard_allows_a_missing_virtual_workspace_root(tmp_path: Path) -> N
     volume_root.mkdir()
     root = volume_root / "sessions" / "session" / "workspace"
     workspace = DaytonaSessionWorkspaceFS(
-        SimpleNamespace(fs=FakeFs(str(root), root_exists=False), process=LocalProcess()),
+        SimpleNamespace(process=LocalProcess()),
         volume_root=str(volume_root),
         root=str(root),
         max_file_bytes=32,
     )
 
-    assert workspace.list_entries(".") == ()
+    listing = workspace.list_entries(".")
+    assert listing.entries == ()
+    assert listing.truncated is False
     assert workspace.stat(".") == WorkspaceEntry(".", "directory", None, None)
 
 
-def test_enforces_write_and_read_byte_bounds_and_strict_utf8() -> None:
-    workspace, sandbox = _workspace(max_file_bytes=4)
+def test_enforces_write_and_read_byte_bounds_and_strict_utf8(tmp_path: Path) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path, max_file_bytes=4)
 
     with pytest.raises(ValueError, match="size"):
         workspace.write_text("large.txt", "12345", overwrite=False)
 
-    path = f"{workspace.root}/invalid.txt"
-    sandbox.fs.files[path] = b"\xff"
+    path = root / "invalid.txt"
+    path.write_bytes(b"\xff")
     with pytest.raises(ValueError, match="UTF-8"):
         workspace.read_text("invalid.txt", max_bytes=4)
 
-    sandbox.fs.files[path] = b"12345"
+    path.write_bytes(b"12345")
     with pytest.raises(ValueError, match="read bound"):
         workspace.read_text("invalid.txt", max_bytes=4)
 
 
-def test_rejects_directories_as_text_and_files_as_list_roots() -> None:
-    workspace, sandbox = _workspace()
-    sandbox.fs.directories.add(f"{workspace.root}/notes")
-    sandbox.fs.files[f"{workspace.root}/note.txt"] = b"hello"
+def test_rejects_directories_as_text_and_files_as_list_roots(tmp_path: Path) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    (root / "notes").mkdir()
+    (root / "note.txt").write_text("hello", encoding="utf-8")
 
     with pytest.raises(IsADirectoryError):
         workspace.read_text("notes", max_bytes=32)
@@ -228,16 +191,32 @@ def test_rejects_directories_as_text_and_files_as_list_roots() -> None:
         workspace.list_entries("note.txt")
 
 
-def test_provider_guard_blocks_symlink_or_root_escape_before_io() -> None:
-    workspace, sandbox = _workspace()
-    sandbox.process.safe = False
+def test_atomic_write_rejects_symlink_target_before_io(tmp_path: Path) -> None:
+    workspace, _sandbox, root, process = _workspace(tmp_path)
+    secret = root / "secret.txt"
+    secret.write_text("private", encoding="utf-8")
+    alias = root / "notes"
+    alias.symlink_to(secret)
 
     with pytest.raises(ValueError, match="unsafe"):
         workspace.write_text("notes/decision.md", "private", overwrite=False)
 
-    assert sandbox.fs.files == {}
-    assert "realpath" in sandbox.process.calls[0]
-    assert "lstat" in sandbox.process.calls[0]
+    assert not (root / "notes" / "decision.md").exists()
+    assert len(process.calls) == 1
+    assert "O_NOFOLLOW" in process.calls[0] or "os.open" in process.calls[0]
+
+
+def test_atomic_read_uses_single_code_run_and_rejects_symlink_target(tmp_path: Path) -> None:
+    workspace, _sandbox, root, process = _workspace(tmp_path)
+    secret = root / "secret.txt"
+    secret.write_text("private", encoding="utf-8")
+    alias = root / "note.txt"
+    alias.symlink_to(secret)
+
+    with pytest.raises(ValueError, match="unsafe"):
+        workspace.read_text("note.txt", max_bytes=32)
+
+    assert len(process.calls) == 1
 
 
 @pytest.mark.parametrize("link_kind", ["session_ancestor", "workspace_root", "descendant", "target"])
@@ -279,7 +258,7 @@ def test_provider_guard_rejects_symlinks_below_the_trusted_volume(
         (root / "decision.md").symlink_to(target)
         relative = "decision.md"
     workspace = DaytonaSessionWorkspaceFS(
-        SimpleNamespace(fs=SimpleNamespace(), process=LocalProcess()),
+        SimpleNamespace(process=LocalProcess()),
         volume_root=str(volume_root),
         root=str(root),
         max_file_bytes=32,
