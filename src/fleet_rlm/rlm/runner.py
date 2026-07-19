@@ -332,6 +332,7 @@ class RLMRunner:
                         relay.publish,
                         blueprint.tool_event_views.get(str(tool.name), ToolEventView.metadata_only()),
                         after_result=(relay_capability_details if str(tool.name) == "load_skill" else None),
+                        is_authorized=lambda: not context.authority.revoked,
                     )
                     for tool in blueprint.tools
                 )

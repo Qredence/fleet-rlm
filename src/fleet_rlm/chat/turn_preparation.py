@@ -217,6 +217,7 @@ class TurnPreparationModule:
             capabilities=capabilities,
             cancellation_requested=turn.cancellation_requested,
             preparation_notices=tuple(getattr(capabilities, "preparation_notices", ())),
+            authority=turn.authority,
         )
         return PreparedTurn(
             execution,

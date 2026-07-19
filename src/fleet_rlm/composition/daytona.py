@@ -134,6 +134,7 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
             turn_state,
             max_artifact_bytes=resolved.max_artifact_bytes,
             heartbeat_seconds=resolved.run_heartbeat_seconds,
+            stale_after_seconds=resolved.run_stale_after_seconds,
         )
         await turn_state.reconcile_settling(resources.session_manager.fence_session)
         coordinator = TurnCoordinator(
@@ -142,6 +143,7 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
             runner=RLMRunner(factory=RLMFactory()),
             turn_timeout_seconds=resolved.turn_timeout_seconds,
             cleanup=cleanup,
+            claim_loss_fence=resources.session_manager.fence_session,
         )
         _ = LoggingTurnExporter()
         return DaytonaCompositionHandles(

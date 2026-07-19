@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from fleet_rlm.artifacts.models import ArtifactCandidate
+from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.files.models import PreparedAttachment
 from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -64,3 +65,4 @@ class RLMExecutionContext:
     capabilities: PreparedCapabilities
     cancellation_requested: AsyncCancellationProbe
     preparation_notices: tuple[PreparationNotice, ...]
+    authority: RunAuthority = field(default_factory=RunAuthority)

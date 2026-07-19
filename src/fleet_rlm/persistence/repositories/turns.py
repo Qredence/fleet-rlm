@@ -301,9 +301,29 @@ class InMemoryTurnStateStore:
                 run.run_id, intent.terminal_status, intent.failure_code, intent.public_message, False
             )
 
+    async def revoke_claim(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
+        async with self._lock:
+            run = self._runs.get(turn.run_id)
+            if run is None or run.access != turn.access or run.session_id != turn.session_id:
+                raise TurnNotFoundError("Turn not found")
+            if run.status == "completed":
+                raise TurnStateError("a committed Run cannot be revoked")
+            if run.status == "failed" and run.failure_code == "stale_claim":
+                return FailedRunReceipt(run.run_id, "failed", "stale_claim", "Turn failed", True)
+            if run.status == "running":
+                run.status = "settling"
+                run.failure_code = "stale_claim"
+                run.terminal_intent = failure
+            elif run.status != "settling":
+                raise TurnStateError("a terminal Run cannot be revoked")
+            intent = run.terminal_intent or failure
+            return FailedRunReceipt(run.run_id, "failed", "stale_claim", intent.public_message, False)
+
     async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt:
         async with self._lock:
             run = self._runs.get(turn.run_id)
+            if run is not None and run.status == "failed" and run.failure_code == "stale_claim":
+                return FailedRunReceipt(run.run_id, "failed", "stale_claim", "Turn failed", True)
             if run is None or run.claim != turn._claim or run.status != "settling" or run.terminal_intent is None:
                 raise TurnStateError("Turn is not settling under this claim")
             intent = run.terminal_intent
@@ -609,9 +629,31 @@ class SqlAlchemyTurnStateStore:
                 False,
             )
 
+    async def revoke_claim(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
+        async with self._sessions() as db, db.begin():
+            run = await db.get(RunRow, turn.run_id, with_for_update=True)
+            if run is None or run.session_id != turn.session_id:
+                raise TurnNotFoundError("Turn not found")
+            if run.status == "completed":
+                raise TurnStateError("a committed Run cannot be revoked")
+            if run.status == "failed" and run.failure_code == "stale_claim":
+                return FailedRunReceipt(run.id, "failed", "stale_claim", "Turn failed", True)
+            if run.status == "running":
+                run.status = "settling"
+                run.failure_code = "stale_claim"
+                run.failure_public_message = failure.public_message
+                run.failure_usage_json = dict(failure.usage)
+                run.terminal_intent = "failed"
+                run.recovery_metadata_json = {"cleanup": "pending"}
+            elif run.status != "settling":
+                raise TurnStateError("a terminal Run cannot be revoked")
+            return FailedRunReceipt(run.id, "failed", "stale_claim", "Turn failed", False)
+
     async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt:
         async with self._sessions() as db, db.begin():
             run = await db.get(RunRow, turn.run_id, with_for_update=True)
+            if run is not None and run.status == "failed" and run.failure_code == "stale_claim":
+                return FailedRunReceipt(run.id, "failed", "stale_claim", "Turn failed", True)
             if (
                 run is None
                 or run.session_id != turn.session_id

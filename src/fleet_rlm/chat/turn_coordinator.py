@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
 from typing import Protocol, Self
 from uuid import UUID
 
@@ -20,6 +21,7 @@ from fleet_rlm.chat.turn_lifecycle import (
     TurnFailure,
     TurnLifecycle,
     TurnLifecycleUnavailable,
+    TurnStateError,
 )
 from fleet_rlm.chat.turn_preparation import (
     PreparedTurn,
@@ -53,6 +55,12 @@ class TurnEventStream(AsyncIterator[RuntimeEvent], Protocol):
 
 class TurnRunner(Protocol):
     def stream(self, context: RLMExecutionContext) -> TurnEventStream: ...
+
+
+@dataclass(slots=True)
+class _ClaimHeartbeat:
+    task: asyncio.Task[None]
+    lost: asyncio.Event
 
 
 async def _shield_cleanup(awaitable) -> None:
@@ -114,6 +122,7 @@ class TurnCoordinator:
         projector: CommittedTurnEventProjector | None = None,
         turn_timeout_seconds: int | float = 1800,
         cleanup: TurnCleanupSupervisor | None = None,
+        claim_loss_fence: Callable[[UUID], Awaitable[None]] | None = None,
     ) -> None:
         self._lifecycle = lifecycle
         self._preparation = preparation
@@ -121,6 +130,7 @@ class TurnCoordinator:
         self._projector = projector or CommittedTurnEventProjector()
         self._turn_timeout_seconds = float(turn_timeout_seconds)
         self._cleanup = cleanup or TurnCleanupSupervisor()
+        self._claim_loss_fence = claim_loss_fence
 
     async def open(self, command: OpenTurnCommand) -> OpenedTurnStream:
         """Complete claim and preparation before a transport sends headers."""
@@ -145,14 +155,35 @@ class TurnCoordinator:
         if isinstance(start, ReplayTurn):
             return OpenedTurnStream(start.run_id, self._replay(start))
 
+        heartbeat = self._start_heartbeat(start)
+
         try:
             parameters = inspect.signature(self._preparation.prepare).parameters
+            if "deadline" in parameters:
+                preparation = self._preparation.prepare(start, deadline=deadline)
+            else:  # Compatibility for narrow test/private adapters.
+                preparation = self._preparation.prepare(start)
+            preparation_task = asyncio.create_task(preparation)
+            heartbeat_lost = asyncio.create_task(heartbeat.lost.wait()) if heartbeat is not None else None
+            waiters = {preparation_task}
+            if heartbeat_lost is not None:
+                waiters.add(heartbeat_lost)
             async with asyncio.timeout_at(deadline):
-                if "deadline" in parameters:
-                    prepared = await self._preparation.prepare(start, deadline=deadline)
-                else:  # Compatibility for narrow test/private adapters.
-                    prepared = await self._preparation.prepare(start)
+                done, _ = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+            if heartbeat_lost is not None and heartbeat_lost in done:
+                assert heartbeat is not None
+                if not heartbeat.lost.is_set():
+                    raise AssertionError("heartbeat loss waiter completed without claim loss")
+                preparation_task.cancel()
+                await asyncio.gather(preparation_task, return_exceptions=True)
+                self._submit_claim_loss_cleanup(start, heartbeat)
+                raise TurnLifecycleUnavailable("Turn claim is no longer available")
+            prepared = preparation_task.result()
+            if heartbeat_lost is not None:
+                heartbeat_lost.cancel()
+                await asyncio.gather(heartbeat_lost, return_exceptions=True)
         except TurnPreparationCancelled:
+            await self._stop_heartbeat(heartbeat)
             await _shield_cleanup(
                 self._lifecycle.finish(
                     start,
@@ -161,6 +192,7 @@ class TurnCoordinator:
             )
             raise
         except (TurnPreparationTimeout, TimeoutError) as exc:
+            await self._stop_heartbeat(heartbeat)
             await _shield_cleanup(
                 self._lifecycle.finish(
                     start,
@@ -171,6 +203,9 @@ class TurnCoordinator:
                 raise
             raise TurnPreparationTimeout("Turn preparation timed out") from None
         except Exception:
+            if start.authority.revoked:
+                raise
+            await self._stop_heartbeat(heartbeat)
             await _shield_cleanup(
                 self._lifecycle.finish(
                     start,
@@ -183,7 +218,7 @@ class TurnCoordinator:
                 )
             )
             raise
-        return OpenedTurnStream(start.run_id, self._execute(start, prepared))
+        return OpenedTurnStream(start.run_id, self._execute(start, prepared, heartbeat))
 
     async def _replay(self, start: ReplayTurn) -> AsyncGenerator[RuntimeEvent]:
         recorder = EventRecorder(start.run_id, start.session_id)
@@ -197,27 +232,43 @@ class TurnCoordinator:
         self,
         turn: ExecuteTurn,
         prepared: PreparedTurn,
+        heartbeat: _ClaimHeartbeat | None,
     ) -> AsyncGenerator[RuntimeEvent]:
         stream: TurnEventStream | None = None
         settled = False
         recorder = EventRecorder(turn.run_id, turn.session_id)
-        heartbeat_task: asyncio.Task[None] | None = None
         cleanup_handed_off = False
         finalization_task: asyncio.Task[CommittedTurnReceipt | FailedRunReceipt] | None = None
-        heartbeat = getattr(self._lifecycle, "heartbeat", None)
-        if callable(heartbeat):
-            interval = max(1, int(getattr(self._lifecycle, "heartbeat_seconds", 10)))
-
-            async def maintain_claim() -> None:
-                while True:
-                    await asyncio.sleep(interval)
-                    await heartbeat(turn)
-
-            heartbeat_task = asyncio.create_task(maintain_claim())
         try:
             stream = self._runner.stream(prepared.execution)
             last_sequence = 0
-            async for event in stream:
+            while True:
+                next_event = asyncio.ensure_future(anext(stream))
+                heartbeat_lost = asyncio.create_task(heartbeat.lost.wait()) if heartbeat is not None else None
+                waiters = {next_event}
+                if heartbeat_lost is not None:
+                    waiters.add(heartbeat_lost)
+                done, _ = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+                if heartbeat_lost is not None and heartbeat_lost in done:
+                    assert heartbeat is not None
+                    if not heartbeat.lost.is_set():
+                        raise AssertionError("heartbeat loss waiter completed without claim loss")
+                    next_event.cancel()
+                    await asyncio.gather(next_event, return_exceptions=True)
+                    cleanup_handed_off = True
+                    await self._revoke_claim(turn, empty_rlm_usage())
+                    self._submit_cleanup(turn, stream, prepared, heartbeat, claim_lost=True)
+                    heartbeat = None
+                    settled = True
+                    yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
+                    return
+                if heartbeat_lost is not None:
+                    heartbeat_lost.cancel()
+                    await asyncio.gather(heartbeat_lost, return_exceptions=True)
+                try:
+                    event = next_event.result()
+                except StopAsyncIteration:
+                    break
                 if isinstance(event.detail, TERMINAL_DETAIL_TYPES):
                     raise RuntimeError("runner emitted a terminal Runtime Event")
                 last_sequence = event.sequence
@@ -239,8 +290,8 @@ class TurnCoordinator:
                     ),
                 )
                 cleanup_handed_off = True
-                self._submit_cleanup(turn, stream, prepared, heartbeat_task)
-                heartbeat_task = None
+                self._submit_cleanup(turn, stream, prepared, heartbeat)
+                heartbeat = None
                 await asyncio.sleep(0)
             else:
                 finalization_task = asyncio.create_task(
@@ -259,17 +310,43 @@ class TurnCoordinator:
                     )
                 )
                 remaining = max(0.0, execution_deadline - asyncio.get_running_loop().time())
-                done, _ = await asyncio.wait((finalization_task,), timeout=remaining)
+                heartbeat_lost = asyncio.create_task(heartbeat.lost.wait()) if heartbeat is not None else None
+                waiters = {finalization_task}
+                if heartbeat_lost is not None:
+                    waiters.add(heartbeat_lost)
+                done, _ = await asyncio.wait(waiters, timeout=remaining, return_when=asyncio.FIRST_COMPLETED)
                 if finalization_task in done:
+                    if heartbeat_lost is not None:
+                        heartbeat_lost.cancel()
+                        await asyncio.gather(heartbeat_lost, return_exceptions=True)
                     receipt = finalization_task.result()
+                elif heartbeat_lost is not None and heartbeat_lost in done:
+                    assert heartbeat is not None
+                    await self._revoke_claim(turn, outcome.usage)
+                    cleanup_handed_off = True
+                    self._submit_cleanup(
+                        turn,
+                        stream,
+                        prepared,
+                        heartbeat,
+                        finalization_task,
+                        claim_lost=True,
+                    )
+                    heartbeat = None
+                    settled = True
+                    yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
+                    return
                 else:
+                    if heartbeat_lost is not None:
+                        heartbeat_lost.cancel()
+                        await asyncio.gather(heartbeat_lost, return_exceptions=True)
                     receipt = await self._lifecycle.settle(
                         turn,
                         TurnFailure("timeout", "timeout", "Turn timed out", outcome.usage),
                     )
                     cleanup_handed_off = True
-                    self._submit_cleanup(turn, stream, prepared, heartbeat_task, finalization_task)
-                    heartbeat_task = None
+                    self._submit_cleanup(turn, stream, prepared, heartbeat, finalization_task)
+                    heartbeat = None
                     await asyncio.sleep(0)
             settled = True
             if isinstance(receipt, CommittedTurnReceipt):
@@ -290,8 +367,8 @@ class TurnCoordinator:
                         )
                     )
                     cleanup_handed_off = True
-                    self._submit_cleanup(turn, stream, prepared, heartbeat_task, finalization_task)
-                    heartbeat_task = None
+                    self._submit_cleanup(turn, stream, prepared, heartbeat, finalization_task)
+                    heartbeat = None
                     await asyncio.sleep(0)
                 except Exception:
                     pass
@@ -312,9 +389,7 @@ class TurnCoordinator:
                 except Exception:
                     yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
         finally:
-            if heartbeat_task is not None:
-                heartbeat_task.cancel()
-                await asyncio.gather(heartbeat_task, return_exceptions=True)
+            await self._stop_heartbeat(heartbeat)
             if not cleanup_handed_off:
                 await _shield_cleanup(prepared.aclose())
 
@@ -323,8 +398,10 @@ class TurnCoordinator:
         turn: ExecuteTurn,
         stream: TurnEventStream | None,
         prepared: PreparedTurn,
-        heartbeat_task: asyncio.Task[None] | None,
+        heartbeat: _ClaimHeartbeat | None,
         finalization_task: asyncio.Task[CommittedTurnReceipt | FailedRunReceipt] | None = None,
+        *,
+        claim_lost: bool = False,
     ) -> None:
         async def cleanup() -> None:
             try:
@@ -333,6 +410,8 @@ class TurnCoordinator:
                         await stream.aclose()
                     except BaseException:
                         pass
+                    if claim_lost and self._claim_loss_fence is not None:
+                        await self._claim_loss_fence(turn.session_id)
                     wait_owned = getattr(stream, "wait_owned", None)
                     if callable(wait_owned):
                         await wait_owned()
@@ -344,8 +423,67 @@ class TurnCoordinator:
                 await prepared.aclose()
                 await self._lifecycle.complete_settling(turn)
             finally:
-                if heartbeat_task is not None:
-                    heartbeat_task.cancel()
-                    await asyncio.gather(heartbeat_task, return_exceptions=True)
+                await self._stop_heartbeat(heartbeat)
 
         self._cleanup.submit(cleanup())
+
+    def _start_heartbeat(self, turn: ExecuteTurn) -> _ClaimHeartbeat | None:
+        renew = getattr(self._lifecycle, "heartbeat", None)
+        if not callable(renew):
+            return None
+        interval = max(0.01, float(getattr(self._lifecycle, "heartbeat_seconds", 10)))
+        stale_after = max(interval * 3, float(getattr(self._lifecycle, "stale_after_seconds", 60)))
+        lost = asyncio.Event()
+
+        async def maintain_claim() -> None:
+            loop = asyncio.get_running_loop()
+            last_success = loop.time()
+            next_attempt = last_success + interval
+            authority_deadline = last_success + stale_after - interval
+            while True:
+                await asyncio.sleep(max(0.0, next_attempt - loop.time()))
+                try:
+                    await renew(turn)
+                except (TurnLifecycleUnavailable, TurnStateError):
+                    turn.authority.revoke()
+                    lost.set()
+                    return
+                except Exception:  # transient persistence failure
+                    now = loop.time()
+                    if now >= authority_deadline:
+                        turn.authority.revoke()
+                        lost.set()
+                        return
+                    next_attempt = min(authority_deadline, now + min(interval, 1.0))
+                else:
+                    last_success = loop.time()
+                    authority_deadline = last_success + stale_after - interval
+                    next_attempt = last_success + interval
+
+        return _ClaimHeartbeat(asyncio.create_task(maintain_claim(), name="fleet-turn-heartbeat"), lost)
+
+    @staticmethod
+    async def _stop_heartbeat(heartbeat: _ClaimHeartbeat | None) -> None:
+        if heartbeat is None:
+            return
+        heartbeat.task.cancel()
+        await asyncio.gather(heartbeat.task, return_exceptions=True)
+
+    def _submit_claim_loss_cleanup(self, turn: ExecuteTurn, heartbeat: _ClaimHeartbeat) -> None:
+        async def cleanup() -> None:
+            try:
+                await self._revoke_claim(turn, empty_rlm_usage())
+                if self._claim_loss_fence is not None:
+                    await self._claim_loss_fence(turn.session_id)
+                await self._lifecycle.complete_settling(turn)
+            finally:
+                await self._stop_heartbeat(heartbeat)
+
+        self._cleanup.submit(cleanup())
+
+    async def _revoke_claim(self, turn: ExecuteTurn, usage) -> FailedRunReceipt:
+        revoke = getattr(self._lifecycle, "revoke_claim", None)
+        failure = TurnFailure("failed", "stale_claim", "Turn failed", usage)
+        if callable(revoke):
+            return await revoke(turn, failure)
+        return await self._lifecycle.settle(turn, failure)

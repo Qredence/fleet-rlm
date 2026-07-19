@@ -285,6 +285,19 @@ class DaytonaSessionManager:
     async def _quarantine(self, lease: InterpreterLease, request: LeaseRequest) -> None:
         """Confirm the old Sandbox is stopped before its ownership is released."""
 
+        await self._bindings.upsert(
+            SandboxBinding(
+                session_id=request.session_id,
+                sandbox_id=lease.sandbox_id,
+                workspace_id=request.workspace_id,
+                volume_id=lease.volume_id,
+                volume_subpath=lease.volume_subpath or workspace_volume_subpath(request.workspace_id),
+                mount_path=lease.mount_path,
+                provider_state="fencing",
+                last_verified_at=datetime.now(UTC),
+            )
+        )
+
         def stop_target(target: Any, *, platform_call: bool) -> None:
             try:
                 if platform_call:
@@ -333,6 +346,18 @@ class DaytonaSessionManager:
         binding = await self._bindings.get(session_id)
         if binding is None or not binding.sandbox_id:
             return
+        await self._bindings.upsert(
+            SandboxBinding(
+                session_id=binding.session_id,
+                sandbox_id=binding.sandbox_id,
+                workspace_id=binding.workspace_id,
+                volume_id=binding.volume_id,
+                volume_subpath=binding.volume_subpath,
+                mount_path=binding.mount_path,
+                provider_state="fencing",
+                last_verified_at=datetime.now(UTC),
+            )
+        )
         stop = getattr(self._platform, "stop", None)
         if callable(stop):
             try:
@@ -390,6 +415,12 @@ class DaytonaSessionManager:
         volume_id = await self._resolve_volume_id()
         expected = self._expected_mount(volume_id=volume_id, workspace_id=request.workspace_id)
         binding = await self._bindings.get(session_id)
+
+        if binding is not None and binding.provider_state == "fencing":
+            raise DaytonaAdapterError(
+                message="sandbox execution fence is not confirmed",
+                cause_type="SandboxFenceUnconfirmed",
+            )
 
         sandbox: Any | None = None
         if (

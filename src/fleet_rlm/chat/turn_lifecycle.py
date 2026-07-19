@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Literal, Protocol, TypeAlias, TypeVar
 from uuid import UUID
 
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate, ArtifactRef
 from fleet_rlm.artifacts.promotion import ArtifactPromotion, PromotedArtifact, RunArtifactSink
+from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.chat.turn_detail_policy import commit_success
 from fleet_rlm.result_snapshot import ResultSnapshotSink, encode_result_snapshot
 from fleet_rlm.rlm.context import AsyncCancellationProbe
@@ -95,6 +96,7 @@ class ExecuteTurn:
     history: SessionHistory
     cancellation_requested: AsyncCancellationProbe
     _claim: _TurnClaimToken
+    authority: RunAuthority = field(default_factory=RunAuthority, compare=False, repr=False)
 
     @property
     def checkpoint_version(self) -> int:
@@ -174,6 +176,8 @@ class _TurnStateStore(Protocol):
 
     async def settle(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt: ...
 
+    async def revoke_claim(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt: ...
+
     async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt: ...
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult: ...
@@ -199,6 +203,8 @@ class TurnLifecycle(Protocol):
 
     async def settle(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt: ...
 
+    async def revoke_claim(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt: ...
+
     async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt: ...
 
 
@@ -211,11 +217,13 @@ class TurnLifecycleModule:
         *,
         max_artifact_bytes: int,
         heartbeat_seconds: int = 10,
+        stale_after_seconds: int = 60,
     ) -> None:
         self._store = store
         self._promotion = ArtifactPromotion(max_bytes=max_artifact_bytes)
         self._max_artifact_bytes = max_artifact_bytes
         self.heartbeat_seconds = heartbeat_seconds
+        self.stale_after_seconds = stale_after_seconds
 
     async def begin(self, request: BeginTurn) -> TurnStart:
         return await self._store.begin(request)
@@ -228,6 +236,8 @@ class TurnLifecycleModule:
         artifact_sink: RunArtifactSink | None = None,
         result_snapshot_sink: ResultSnapshotSink | None = None,
     ) -> TurnFinalization:
+        if turn.authority.revoked:
+            raise TurnLifecycleUnavailable("Turn claim is no longer available")
         if isinstance(resolution, TurnFailure):
             return await self._store.fail(turn, resolution)
         if not resolution.succeeded:
@@ -315,6 +325,13 @@ class TurnLifecycleModule:
         if not callable(settle):
             return await self._store.fail(turn, failure)
         return await settle(turn, failure)
+
+    async def revoke_claim(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
+        """Idempotently classify a Run whose durable claim authority was lost."""
+        revoke = getattr(self._store, "revoke_claim", None)
+        if callable(revoke):
+            return await revoke(turn, failure)
+        return await self.settle(turn, failure)
 
     async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt:
         """Release a retained claim only after owned cleanup has completed."""

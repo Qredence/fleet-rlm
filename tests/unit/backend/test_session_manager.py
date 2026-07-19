@@ -189,6 +189,18 @@ class _FakePlatform:
         self.sandboxes.pop(sandbox_id, None)
 
 
+class _FailingStopPlatform(_FakePlatform):
+    def get(self, sandbox_id: str) -> _FakeSandbox | None:
+        sandbox = super().get(sandbox_id)
+        if sandbox is not None:
+
+            def fail_stop() -> None:
+                raise RuntimeError("provider stop failed")
+
+            sandbox.stop = fail_stop  # type: ignore[method-assign]
+        return sandbox
+
+
 class _CountingBackend:
     def __init__(self) -> None:
         self.close_calls = 0
@@ -419,6 +431,68 @@ async def test_reacquire_repairs_stopped_sandbox_after_restart() -> None:
     assert second.sandbox_id == first.sandbox_id
     assert sandbox.state == "running"
     assert attachments_path in sandbox.fs.directories
+
+
+@pytest.mark.asyncio
+async def test_fenced_sandbox_is_quarantined_and_replaced_with_volume_scope_preserved() -> None:
+    mgr, _plat, store, _volumes = _manager()
+    request = LeaseRequest(
+        session_id=uuid4(),
+        user_id=uuid4(),
+        workspace_id=uuid4(),
+        run_id=uuid4(),
+    )
+    first = await _acquire(mgr, request)
+
+    await mgr.fence_session(request.session_id)
+    await mgr.release(first)
+    quarantined = await store.get(request.session_id)
+    assert quarantined is not None
+    assert quarantined.provider_state == "quarantined"
+
+    replacement = await _acquire(
+        mgr,
+        LeaseRequest(
+            session_id=request.session_id,
+            user_id=request.user_id,
+            workspace_id=request.workspace_id,
+            run_id=uuid4(),
+        ),
+    )
+    assert replacement.sandbox_id != first.sandbox_id
+    assert replacement.volume_id == first.volume_id
+    assert replacement.volume_subpath == first.volume_subpath
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_fence_keeps_session_unavailable() -> None:
+    mgr, _plat, store, _volumes = _manager(_FailingStopPlatform())
+    request = LeaseRequest(
+        session_id=uuid4(),
+        user_id=uuid4(),
+        workspace_id=uuid4(),
+        run_id=uuid4(),
+    )
+    first = await _acquire(mgr, request)
+
+    with pytest.raises(RuntimeError, match="provider stop failed"):
+        await mgr.fence_session(request.session_id)
+    await mgr.release(first)
+
+    fencing = await store.get(request.session_id)
+    assert fencing is not None
+    assert fencing.provider_state == "fencing"
+    with pytest.raises(DaytonaAdapterError) as exc_info:
+        await _acquire(
+            mgr,
+            LeaseRequest(
+                session_id=request.session_id,
+                user_id=request.user_id,
+                workspace_id=request.workspace_id,
+                run_id=uuid4(),
+            ),
+        )
+    assert exc_info.value.cause_type == "SandboxFenceUnconfirmed"
 
 
 @pytest.mark.asyncio

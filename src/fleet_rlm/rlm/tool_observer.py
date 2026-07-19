@@ -80,6 +80,7 @@ def observe_tool(
     event_view: ToolEventView,
     *,
     after_result: ToolAfterResult | None = None,
+    is_authorized: Callable[[], bool] | None = None,
 ) -> dspy.Tool:
     """Return a fresh Tool whose extracted ``func`` preserves DSPy validation."""
     if not isinstance(tool, dspy.Tool):
@@ -91,6 +92,9 @@ def observe_tool(
     @wraps(source.func)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
         call_id = str(uuid4())
+        if is_authorized is not None and not is_authorized():
+            observer(ToolFailed(call_id, str(source.name), event_view.error(validation=False)))
+            raise RuntimeError("Turn is no longer authorized")
         try:
             bound = signature.bind(*args, **kwargs)
             bound.apply_defaults()

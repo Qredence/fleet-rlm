@@ -53,6 +53,7 @@ def test_execution_context_has_only_prepared_runner_inputs() -> None:
         "capabilities",
         "cancellation_requested",
         "preparation_notices",
+        "authority",
     }
     with pytest.raises(FrozenInstanceError):
         context.request = "changed"  # type: ignore[misc]

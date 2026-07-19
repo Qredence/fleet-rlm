@@ -166,6 +166,7 @@ def install_local_inventory(
         turn_state,
         max_artifact_bytes=settings.max_artifact_bytes,
         heartbeat_seconds=settings.run_heartbeat_seconds,
+        stale_after_seconds=settings.run_stale_after_seconds,
     )
     cleanup = TurnCleanupSupervisor(max_jobs=8)
     coordinator = TurnCoordinator(
@@ -174,6 +175,7 @@ def install_local_inventory(
         runner=RLMRunner(factory=rlm_factory),
         turn_timeout_seconds=settings.turn_timeout_seconds,
         cleanup=cleanup,
+        claim_loss_fence=None,
     )
     handles = LocalCompositionHandles(
         turn_coordinator=coordinator,
