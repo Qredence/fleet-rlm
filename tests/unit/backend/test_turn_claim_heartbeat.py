@@ -360,6 +360,8 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
             return Stream()
 
     async def fence(_session_id):
+        run = authoritative._runs[run_id]  # noqa: SLF001 - ordering acceptance evidence
+        assert (run.status, run.failure_code) == ("settling", "stale_claim")
         release_commit.set()
 
     cleanup = TurnCleanupSupervisor()
