@@ -152,6 +152,7 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
 
     class Preparation:
         async def prepare(self, _turn):
+            await asyncio.sleep(0.08)
             return Prepared()
 
     class Stream:
@@ -166,7 +167,7 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
         async def __anext__(self):
             if not self._sent:
                 self._sent = True
-                await asyncio.sleep(0.035)
+                await asyncio.sleep(0.08)
                 return EventRecorder(run_id, session.id).record(RunStarted(delivery="live"))
             raise StopAsyncIteration
 
@@ -183,7 +184,7 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
             Store(),
             max_artifact_bytes=100,
             heartbeat_seconds=0.01,
-            stale_after_seconds=0.06,
+            stale_after_seconds=0.03,
         ),
         preparation=Preparation(),
         runner=Runner(),
@@ -200,6 +201,192 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
     assert attempts >= 2
     assert isinstance(events[-1].detail, RunCompleted)
     await cleanup.shutdown(drain_seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_deno_repeated_transient_failures_revoke_without_provider_fence() -> None:
+    from fleet_rlm.chat.commands import OpenTurnCommand
+    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    authoritative = InMemoryTurnStateStore()
+    access = TurnAccess(uuid4(), uuid4())
+    session = await InMemorySessionCatalog(authoritative).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="heartbeat deadline",
+    )
+
+    class Store:
+        begin = authoritative.begin
+        commit = authoritative.commit
+        fail = authoritative.fail
+        settle = authoritative.settle
+        revoke_claim = authoritative.revoke_claim
+        complete_settling = authoritative.complete_settling
+        request_cancel = authoritative.request_cancel
+
+        async def heartbeat(self, _turn):
+            raise ConnectionError("database unavailable")
+
+    run_id = uuid4()
+
+    class Prepared:
+        execution = SimpleNamespace(run_id=run_id, session_id=session.id)
+        artifact_sink = None
+        result_snapshot_sink = None
+
+        async def aclose(self):
+            return None
+
+    class Preparation:
+        async def prepare(self, _turn):
+            return Prepared()
+
+    class Stream:
+        outcome = None
+
+        def __init__(self):
+            self._sent = False
+
+        async def __anext__(self):
+            if not self._sent:
+                self._sent = True
+                return EventRecorder(run_id, session.id).record(RunStarted(delivery="live"))
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+        async def aclose(self):
+            return None
+
+    class Runner:
+        def stream(self, _execution):
+            return Stream()
+
+    cleanup = TurnCleanupSupervisor()
+    coordinator = TurnCoordinator(
+        lifecycle=TurnLifecycleModule(
+            Store(),
+            max_artifact_bytes=100,
+            heartbeat_seconds=0.01,
+            stale_after_seconds=0.04,
+        ),
+        preparation=Preparation(),
+        runner=Runner(),
+        cleanup=cleanup,
+    )
+    started = asyncio.get_running_loop().time()
+    events = [
+        event
+        async for event in await coordinator.open(
+            OpenTurnCommand(access, session.id, TurnInput("hello"), "deadline", run_id)
+        )
+    ]
+
+    assert isinstance(events[-1].detail, RunFailed)
+    assert events[-1].detail.code == "unavailable"
+    assert asyncio.get_running_loop().time() - started < 0.04
+    await cleanup.shutdown(drain_seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
+    from fleet_rlm.chat.commands import OpenTurnCommand
+    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+    from fleet_rlm.chat.turn_coordinator import TurnCoordinator
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule, TurnStateError
+    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.rlm.dspy_contract import PredictionResult
+    from fleet_rlm.rlm.events import RunFailed
+    from fleet_rlm.rlm.outcome import RLMOutcome
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    authoritative = InMemoryTurnStateStore()
+    access = TurnAccess(uuid4(), uuid4())
+    session = await InMemorySessionCatalog(authoritative).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="finalization race",
+    )
+    release_commit = asyncio.Event()
+
+    class Store:
+        begin = authoritative.begin
+        fail = authoritative.fail
+        settle = authoritative.settle
+        revoke_claim = authoritative.revoke_claim
+        complete_settling = authoritative.complete_settling
+        request_cancel = authoritative.request_cancel
+
+        async def heartbeat(self, _turn):
+            raise TurnStateError("Turn claim is invalid")
+
+        async def commit(self, turn, committed, artifacts):
+            await release_commit.wait()
+            return await authoritative.commit(turn, committed, artifacts)
+
+    run_id = uuid4()
+
+    class Prepared:
+        execution = SimpleNamespace(run_id=run_id, session_id=session.id)
+        artifact_sink = None
+        result_snapshot_sink = None
+
+        async def aclose(self):
+            return None
+
+    class Preparation:
+        async def prepare(self, _turn):
+            return Prepared()
+
+    class Stream:
+        outcome = RLMOutcome(
+            "completed",
+            PredictionResult("stale", {"answer": "stale"}, "fleet.default", "1"),
+        )
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+        async def aclose(self):
+            return None
+
+    class Runner:
+        def stream(self, _execution):
+            return Stream()
+
+    async def fence(_session_id):
+        release_commit.set()
+
+    cleanup = TurnCleanupSupervisor()
+    coordinator = TurnCoordinator(
+        lifecycle=TurnLifecycleModule(
+            Store(),
+            max_artifact_bytes=100,
+            heartbeat_seconds=0.01,
+            stale_after_seconds=0.04,
+        ),
+        preparation=Preparation(),
+        runner=Runner(),
+        cleanup=cleanup,
+        claim_loss_fence=fence,
+    )
+    events = [
+        event
+        async for event in await coordinator.open(
+            OpenTurnCommand(access, session.id, TurnInput("hello"), "race", run_id)
+        )
+    ]
+    assert isinstance(events[-1].detail, RunFailed)
+    assert events[-1].detail.code == "unavailable"
+    await cleanup.shutdown(drain_seconds=1)
+    assert await authoritative.turn_records(session.id, access) == ()
+    old_run = authoritative._runs[run_id]  # noqa: SLF001 - persistence-state acceptance evidence
+    assert (old_run.status, old_run.failure_code) == ("failed", "stale_claim")
 
 
 @pytest.mark.asyncio

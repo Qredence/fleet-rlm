@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
-from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
+from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailable
 from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionPermit
 from fleet_rlm.daytona.bindings import SandboxBinding
 from fleet_rlm.daytona.errors import (
@@ -339,7 +339,11 @@ class DaytonaSessionManager:
             )
         )
         if lease.created_sandbox:
-            await asyncio.to_thread(self._platform.delete, lease.sandbox_id)
+            deletion = asyncio.to_thread(self._platform.delete, lease.sandbox_id)
+            try:
+                self._cleanup.submit(deletion)
+            except TurnCleanupUnavailable:
+                deletion.close()
 
     async def fence_session(self, session_id: UUID) -> None:
         """Fence a Sandbox retained by a settling Run during startup recovery."""

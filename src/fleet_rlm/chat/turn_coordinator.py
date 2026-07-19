@@ -256,8 +256,14 @@ class TurnCoordinator:
                     next_event.cancel()
                     await asyncio.gather(next_event, return_exceptions=True)
                     cleanup_handed_off = True
-                    await self._revoke_claim(turn, empty_rlm_usage())
-                    self._submit_cleanup(turn, stream, prepared, heartbeat, claim_lost=True)
+                    self._submit_cleanup(
+                        turn,
+                        stream,
+                        prepared,
+                        heartbeat,
+                        claim_lost=True,
+                        claim_loss_usage=empty_rlm_usage(),
+                    )
                     heartbeat = None
                     settled = True
                     yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
@@ -315,14 +321,8 @@ class TurnCoordinator:
                 if heartbeat_lost is not None:
                     waiters.add(heartbeat_lost)
                 done, _ = await asyncio.wait(waiters, timeout=remaining, return_when=asyncio.FIRST_COMPLETED)
-                if finalization_task in done:
-                    if heartbeat_lost is not None:
-                        heartbeat_lost.cancel()
-                        await asyncio.gather(heartbeat_lost, return_exceptions=True)
-                    receipt = finalization_task.result()
-                elif heartbeat_lost is not None and heartbeat_lost in done:
+                if heartbeat_lost is not None and heartbeat_lost in done:
                     assert heartbeat is not None
-                    await self._revoke_claim(turn, outcome.usage)
                     cleanup_handed_off = True
                     self._submit_cleanup(
                         turn,
@@ -331,11 +331,17 @@ class TurnCoordinator:
                         heartbeat,
                         finalization_task,
                         claim_lost=True,
+                        claim_loss_usage=outcome.usage,
                     )
                     heartbeat = None
                     settled = True
                     yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
                     return
+                if finalization_task in done:
+                    if heartbeat_lost is not None:
+                        heartbeat_lost.cancel()
+                        await asyncio.gather(heartbeat_lost, return_exceptions=True)
+                    receipt = finalization_task.result()
                 else:
                     if heartbeat_lost is not None:
                         heartbeat_lost.cancel()
@@ -402,6 +408,7 @@ class TurnCoordinator:
         finalization_task: asyncio.Task[CommittedTurnReceipt | FailedRunReceipt] | None = None,
         *,
         claim_lost: bool = False,
+        claim_loss_usage=None,
     ) -> None:
         async def cleanup() -> None:
             try:
@@ -412,6 +419,8 @@ class TurnCoordinator:
                         pass
                     if claim_lost and self._claim_loss_fence is not None:
                         await self._claim_loss_fence(turn.session_id)
+                    if claim_lost:
+                        await self._revoke_claim(turn, claim_loss_usage or empty_rlm_usage())
                     wait_owned = getattr(stream, "wait_owned", None)
                     if callable(wait_owned):
                         await wait_owned()
@@ -443,7 +452,8 @@ class TurnCoordinator:
             while True:
                 await asyncio.sleep(max(0.0, next_attempt - loop.time()))
                 try:
-                    await renew(turn)
+                    async with asyncio.timeout_at(authority_deadline):
+                        await renew(turn)
                 except (TurnLifecycleUnavailable, TurnStateError):
                     turn.authority.revoke()
                     lost.set()
@@ -472,9 +482,9 @@ class TurnCoordinator:
     def _submit_claim_loss_cleanup(self, turn: ExecuteTurn, heartbeat: _ClaimHeartbeat) -> None:
         async def cleanup() -> None:
             try:
-                await self._revoke_claim(turn, empty_rlm_usage())
                 if self._claim_loss_fence is not None:
                     await self._claim_loss_fence(turn.session_id)
+                await self._revoke_claim(turn, empty_rlm_usage())
                 await self._lifecycle.complete_settling(turn)
             finally:
                 await self._stop_heartbeat(heartbeat)

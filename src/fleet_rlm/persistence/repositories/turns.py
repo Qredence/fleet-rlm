@@ -195,6 +195,8 @@ class InMemoryTurnStateStore:
         artifacts: tuple[PromotedArtifact, ...],
     ) -> CommittedTurnReceipt:
         async with self._lock:
+            if turn.authority.revoked:
+                raise TurnStateError("Turn claim is invalid")
             run, session = self._claimed(turn)
             session.history.extend(
                 (
@@ -486,6 +488,8 @@ class SqlAlchemyTurnStateStore:
         artifacts: tuple[PromotedArtifact, ...],
     ) -> CommittedTurnReceipt:
         async with self._sessions() as db, db.begin():
+            if turn.authority.revoked:
+                raise TurnStateError("Turn claim is invalid")
             run = await db.get(RunRow, turn.run_id, with_for_update=True)
             if run is None or run.session_id != turn.session_id:
                 raise TurnNotFoundError("Turn not found")
@@ -560,6 +564,8 @@ class SqlAlchemyTurnStateStore:
             run.finished_at = datetime.now(UTC)
             run.claim_owner = None
             run.claim_heartbeat_at = None
+            if turn.authority.revoked:
+                raise TurnStateError("Turn claim is invalid")
             return CommittedTurnReceipt(
                 turn.run_id,
                 session.checkpoint_version,
