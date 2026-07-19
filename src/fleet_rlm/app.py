@@ -70,9 +70,16 @@ async def _local_db_lifespan(
             session_factory = create_session_factory(engine)
             if is_sqlite_url(settings_obj.database_url):
                 await create_tables(engine)
-        install_fn(app, settings_obj, session_factory=session_factory)
+        handles = install_fn(app, settings_obj, session_factory=session_factory)
+        turn_state = getattr(app.state, "turn_state_store", None)
+        reconcile = getattr(turn_state, "reconcile_settling", None)
+        if callable(reconcile) and (not settings_obj.database_url or is_sqlite_url(settings_obj.database_url)):
+            await reconcile()
         yield
     finally:
+        cleanup = getattr(locals().get("handles", None), "turn_cleanup_supervisor", None)
+        if cleanup is not None:
+            await cleanup.shutdown(drain_seconds=30)
         clear_composition_state(app)
         try:
             if engine is not None:

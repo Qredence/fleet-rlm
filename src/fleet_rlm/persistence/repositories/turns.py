@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Literal, cast
@@ -53,8 +54,9 @@ class _RunState:
     input_fingerprint: str
     input: TurnInput
     claim: _TurnClaimToken
-    status: Literal["running", "completed", "failed", "cancelled", "timeout"]
+    status: Literal["running", "settling", "completed", "failed", "cancelled", "timeout"]
     failure_code: FailureCode | None = None
+    terminal_intent: TurnFailure | None = None
     cancel_requested: bool = False
     committed: CommittedTurn | None = None
     checkpoint_version: int | None = None
@@ -140,7 +142,7 @@ class InMemoryTurnStateStore:
                 prior = self._runs[prior_id]
                 if prior.input_fingerprint not in request.input.acceptable_fingerprints:
                     raise TurnIdempotencyMismatchError("idempotency key is bound to different input")
-                if prior.status == "running":
+                if prior.status in {"running", "settling"}:
                     raise TurnInProgressError("Turn is already running")
                 if prior.status == "completed":
                     if prior.committed is None or prior.checkpoint_version is None:
@@ -151,7 +153,10 @@ class InMemoryTurnStateStore:
                         prior.committed,
                         prior.checkpoint_version,
                     )
-            if any(run.session_id == request.session_id and run.status == "running" for run in self._runs.values()):
+            if any(
+                run.session_id == request.session_id and run.status in {"running", "settling"}
+                for run in self._runs.values()
+            ):
                 raise TurnInProgressError("Session already has a running Turn")
 
             claim = _TurnClaimToken(uuid4(), session.checkpoint_version)
@@ -256,10 +261,56 @@ class InMemoryTurnStateStore:
                 run.status = failure.terminal_status
                 run.failure_code = failure.failure_code
                 status = failure.terminal_status
+            elif run.status == "settling" and run.terminal_intent is not None:
+                intent = run.terminal_intent
+                return FailedRunReceipt(
+                    run.run_id,
+                    intent.terminal_status,
+                    intent.failure_code,
+                    intent.public_message,
+                    False,
+                )
             else:
                 status = _decode_failure_status(run.status)
             code = _decode_failure_code(run.failure_code, status=status)
             return FailedRunReceipt(run.run_id, status, code, failure.public_message, True)
+
+    async def settle(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
+        async with self._lock:
+            run = self._runs.get(turn.run_id)
+            if run is None or run.access != turn.access or run.session_id != turn.session_id:
+                raise TurnNotFoundError("Turn not found")
+            if run.claim != turn._claim:
+                raise TurnStateError("Turn claim is invalid")
+            if run.status == "completed":
+                raise TurnStateError("a committed Run cannot be settled")
+            if run.status == "running":
+                run.status = "settling"
+                run.failure_code = failure.failure_code
+                run.terminal_intent = failure
+            elif run.status != "settling":
+                return FailedRunReceipt(
+                    run.run_id,
+                    _decode_failure_status(run.status),
+                    _decode_failure_code(run.failure_code, status=_decode_failure_status(run.status)),
+                    failure.public_message,
+                    True,
+                )
+            intent = run.terminal_intent or failure
+            return FailedRunReceipt(
+                run.run_id, intent.terminal_status, intent.failure_code, intent.public_message, False
+            )
+
+    async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt:
+        async with self._lock:
+            run = self._runs.get(turn.run_id)
+            if run is None or run.claim != turn._claim or run.status != "settling" or run.terminal_intent is None:
+                raise TurnStateError("Turn is not settling under this claim")
+            intent = run.terminal_intent
+            run.status = intent.terminal_status
+            return FailedRunReceipt(
+                run.run_id, intent.terminal_status, intent.failure_code, intent.public_message, True
+            )
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         async with self._lock:
@@ -275,7 +326,9 @@ class InMemoryTurnStateStore:
 
     async def heartbeat(self, turn: ExecuteTurn) -> None:
         async with self._lock:
-            self._claimed(turn)
+            run = self._runs.get(turn.run_id)
+            if run is None or run.claim != turn._claim or run.status not in {"running", "settling"}:
+                raise TurnStateError("Turn claim is invalid")
 
     def _claimed(self, turn: ExecuteTurn) -> tuple[_RunState, _SessionState]:
         run = self._runs.get(turn.run_id)
@@ -285,6 +338,21 @@ class InMemoryTurnStateStore:
         if run.status != "running" or run.claim != turn._claim:
             raise TurnStateError("Turn is not held by this claim")
         return run, session
+
+    async def reconcile_settling(
+        self,
+        fence: Callable[[UUID], Awaitable[None]] | None = None,
+    ) -> None:
+        """In-memory workers cannot survive the process that owned them."""
+        async with self._lock:
+            pending = [run for run in self._runs.values() if run.status == "settling"]
+        for pending_run in pending:
+            if fence is not None:
+                await fence(pending_run.session_id)
+            async with self._lock:
+                run = self._runs.get(pending_run.run_id)
+                if run is not None and run.status == "settling" and run.terminal_intent is not None:
+                    run.status = run.terminal_intent.terminal_status
 
 
 class SqlAlchemyTurnStateStore:
@@ -314,14 +382,19 @@ class SqlAlchemyTurnStateStore:
                 raise TurnNotFoundError("Turn not found")
             active_run = await db.scalar(
                 select(RunRow)
-                .where(RunRow.session_id == request.session_id, RunRow.status == "running")
+                .where(RunRow.session_id == request.session_id, RunRow.status.in_(("running", "settling")))
                 .with_for_update()
             )
             cutoff = datetime.now(UTC) - timedelta(seconds=self._stale_after)
             heartbeat_at = active_run.claim_heartbeat_at if active_run is not None else None
             if heartbeat_at is not None and heartbeat_at.tzinfo is None:
                 heartbeat_at = heartbeat_at.replace(tzinfo=UTC)
-            if active_run is not None and heartbeat_at is not None and heartbeat_at < cutoff:
+            if (
+                active_run is not None
+                and active_run.status == "running"
+                and heartbeat_at is not None
+                and heartbeat_at < cutoff
+            ):
                 active_run.status = "failed"
                 active_run.failure_code = "stale_claim"
                 active_run.failure_public_message = "Turn failed"
@@ -334,7 +407,7 @@ class SqlAlchemyTurnStateStore:
                 .where(
                     RunRow.session_id == request.session_id,
                     RunRow.idempotency_key == request.idempotency_key,
-                    RunRow.status.in_(("running", "completed")),
+                    RunRow.status.in_(("running", "settling", "completed")),
                 )
                 .order_by(RunRow.created_at.desc())
                 .limit(1)
@@ -342,13 +415,13 @@ class SqlAlchemyTurnStateStore:
             if prior is not None:
                 if prior.input_fingerprint not in request.input.acceptable_fingerprints:
                     raise TurnIdempotencyMismatchError("idempotency key is bound to different input")
-                if prior.status == "running":
+                if prior.status in {"running", "settling"}:
                     raise TurnInProgressError("Turn is already running")
                 return await self._replay(db, prior)
             active = await db.scalar(
                 select(RunRow.id).where(
                     RunRow.session_id == request.session_id,
-                    RunRow.status == "running",
+                    RunRow.status.in_(("running", "settling")),
                 )
             )
             if active is not None:
@@ -492,10 +565,74 @@ class SqlAlchemyTurnStateStore:
                 run.claim_owner = None
                 run.claim_heartbeat_at = None
                 status = failure.terminal_status
+            elif run.status == "settling" and run.terminal_intent is not None:
+                status = _decode_failure_status(run.terminal_intent)
+                return FailedRunReceipt(
+                    run.id,
+                    status,
+                    _decode_failure_code(run.failure_code, status=status),
+                    run.failure_public_message or failure.public_message,
+                    False,
+                )
             else:
                 status = _decode_failure_status(run.status)
             code = _decode_failure_code(run.failure_code, status=status)
             return FailedRunReceipt(run.id, status, code, failure.public_message, True)
+
+    async def settle(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
+        async with self._sessions() as db, db.begin():
+            run = await db.get(RunRow, turn.run_id, with_for_update=True)
+            if run is None or run.session_id != turn.session_id:
+                raise TurnNotFoundError("Turn not found")
+            if run.claim_owner != str(turn._claim.value):
+                raise TurnStateError("Turn claim is invalid")
+            if run.status == "completed":
+                raise TurnStateError("a committed Run cannot be settled")
+            if run.status == "running":
+                run.status = "settling"
+                run.failure_code = failure.failure_code
+                run.failure_public_message = failure.public_message
+                run.failure_usage_json = dict(failure.usage)
+                run.terminal_intent = failure.terminal_status
+                run.recovery_metadata_json = {"cleanup": "pending"}
+            elif run.status != "settling":
+                status = _decode_failure_status(run.status)
+                return FailedRunReceipt(
+                    run.id, status, _decode_failure_code(run.failure_code, status=status), failure.public_message, True
+                )
+            status = _decode_failure_status(run.terminal_intent or failure.terminal_status)
+            return FailedRunReceipt(
+                run.id,
+                status,
+                _decode_failure_code(run.failure_code, status=status),
+                run.failure_public_message or failure.public_message,
+                False,
+            )
+
+    async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt:
+        async with self._sessions() as db, db.begin():
+            run = await db.get(RunRow, turn.run_id, with_for_update=True)
+            if (
+                run is None
+                or run.session_id != turn.session_id
+                or run.status != "settling"
+                or run.claim_owner != str(turn._claim.value)
+                or run.terminal_intent is None
+            ):
+                raise TurnStateError("Turn is not settling under this claim")
+            status = _decode_failure_status(run.terminal_intent)
+            run.status = status
+            run.finished_at = datetime.now(UTC)
+            run.claim_owner = None
+            run.claim_heartbeat_at = None
+            run.recovery_metadata_json = None
+            return FailedRunReceipt(
+                run.id,
+                status,
+                _decode_failure_code(run.failure_code, status=status),
+                run.failure_public_message or "Turn failed",
+                True,
+            )
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         async with self._sessions() as db, db.begin():
@@ -524,7 +661,7 @@ class SqlAlchemyTurnStateStore:
             if (
                 run is None
                 or run.session_id != turn.session_id
-                or run.status != "running"
+                or run.status not in {"running", "settling"}
                 or run.claim_owner != str(turn._claim.value)
             ):
                 raise TurnStateError("Turn claim is invalid")
@@ -533,6 +670,26 @@ class SqlAlchemyTurnStateStore:
     async def _replay(self, db: AsyncSession, run: RunRow) -> ReplayTurn:
         receipt = await self._receipt(db, run)
         return ReplayTurn(run.id, run.session_id, receipt.committed_turn, receipt.checkpoint_version)
+
+    async def reconcile_settling(
+        self,
+        fence: Callable[[UUID], Awaitable[None]] | None = None,
+    ) -> None:
+        """Fence provider state, then release claims left by a prior process."""
+        async with self._sessions() as db:
+            pending = list((await db.scalars(select(RunRow).where(RunRow.status == "settling"))).all())
+        for pending_run in pending:
+            if fence is not None:
+                await fence(pending_run.session_id)
+            async with self._sessions() as db, db.begin():
+                run = await db.get(RunRow, pending_run.id, with_for_update=True)
+                if run is None or run.status != "settling" or run.terminal_intent is None:
+                    continue
+                run.status = _decode_failure_status(run.terminal_intent)
+                run.finished_at = datetime.now(UTC)
+                run.claim_owner = None
+                run.claim_heartbeat_at = None
+                run.recovery_metadata_json = None
 
     async def _receipt(self, db: AsyncSession, run: RunRow) -> CommittedTurnReceipt:
         row = await db.scalar(select(TurnRow).where(TurnRow.run_id == run.id, TurnRow.role == "assistant"))

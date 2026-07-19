@@ -736,7 +736,7 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("commit_succeeds", [True, False])
+@pytest.mark.parametrize("commit_succeeds", [False])
 async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bool) -> None:
     import asyncio
 

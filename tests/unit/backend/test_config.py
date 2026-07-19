@@ -24,8 +24,8 @@ def test_startup_rejects_retired_budget_environment(monkeypatch: pytest.MonkeyPa
         create_app(settings=Settings(_env_file=None))
 
 
-def test_turn_timeout_defaults_to_fifteen_minutes() -> None:
-    assert Settings(_env_file=None).turn_timeout_seconds == 900
+def test_turn_timeout_defaults_to_thirty_minutes() -> None:
+    assert Settings(_env_file=None).turn_timeout_seconds == 1800
 
 
 def test_daytona_admission_defaults_to_eight_leases() -> None:

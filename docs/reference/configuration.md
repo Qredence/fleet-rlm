@@ -34,7 +34,7 @@ applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
 | `FLEET_VOLUME_MOUNT_PATH` | `/home/daytona/fleet` | Absolute Sandbox mount path |
 | `FLEET_MAX_UPLOAD_BYTES` | `10485760` | Maximum Attachment upload bytes |
 | `FLEET_MAX_ARTIFACT_BYTES` | `10485760` | Maximum Artifact Candidate bytes |
-| `FLEET_TURN_TIMEOUT_SECONDS` | `900` | Wall-clock timeout for one Turn |
+| `FLEET_TURN_TIMEOUT_SECONDS` | `1800` | Wall-clock timeout for one Turn |
 | `FLEET_MAX_ACTIVE_DAYTONA_LEASES` | `8` | Process-wide acquiring/active lease bound; range 1–8 |
 | `FLEET_RLM_MAX_ITERATIONS` | `20` | Native RLM iteration bound |
 | `FLEET_RLM_MAX_LLM_CALLS` | `50` | Native/observed LM call bound |

@@ -1,0 +1,58 @@
+"""Detached Turn cleanup ownership and durable settling contracts."""
+
+from __future__ import annotations
+
+import asyncio
+from uuid import uuid4
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_cleanup_supervisor_is_bounded_and_drains_owned_work() -> None:
+    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailable
+
+    release = asyncio.Event()
+    supervisor = TurnCleanupSupervisor(max_jobs=1)
+
+    async def cleanup() -> None:
+        await release.wait()
+
+    supervisor.submit(cleanup())
+    assert supervisor.active_jobs == 1
+    with pytest.raises(TurnCleanupUnavailable):
+        supervisor.require_capacity()
+
+    release.set()
+    await supervisor.shutdown(drain_seconds=1)
+    assert supervisor.active_jobs == 0
+
+
+@pytest.mark.asyncio
+async def test_settling_revokes_commit_and_blocks_replacement_until_cleanup() -> None:
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, TurnFailure, TurnInProgressError, TurnStateError
+    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    access = TurnAccess(uuid4(), uuid4())
+    store = InMemoryTurnStateStore()
+    session = await InMemorySessionCatalog(store).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="settling",
+    )
+    turn = await store.begin(BeginTurn(access, session.id, TurnInput("one"), "one", uuid4()))
+    failure = TurnFailure("timeout", "timeout", "Turn timed out", empty_rlm_usage())
+    receipt = await store.settle(turn, failure)
+    assert receipt.durable is False
+
+    with pytest.raises(TurnStateError):
+        await store.commit(turn, None, ())  # type: ignore[arg-type]
+    with pytest.raises(TurnInProgressError):
+        await store.begin(BeginTurn(access, session.id, TurnInput("two"), "two", uuid4()))
+
+    terminal = await store.complete_settling(turn)
+    assert terminal.durable is True
+    assert terminal.terminal_status == "timeout"
+    await store.begin(BeginTurn(access, session.id, TurnInput("two"), "two", uuid4()))

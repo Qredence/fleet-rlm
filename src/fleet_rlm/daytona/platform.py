@@ -109,5 +109,6 @@ class LiveDaytonaPlatform:
     def start(self, sandbox_id: str) -> None:
         self._client.start(sandbox_id)
 
-    def stop(self, sandbox_id: str) -> None:
-        self._client.stop(sandbox_id)
+    def stop(self, sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None:
+        sandbox = self._client.get(sandbox_id)
+        sandbox.stop(timeout=timeout, force=force)

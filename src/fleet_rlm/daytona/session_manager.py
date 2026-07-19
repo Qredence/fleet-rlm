@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
+from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
 from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionPermit
 from fleet_rlm.daytona.bindings import SandboxBinding
 from fleet_rlm.daytona.errors import (
@@ -81,6 +82,8 @@ class SandboxPlatform(Protocol):
     ) -> Any: ...
 
     def delete(self, sandbox_id: str) -> None: ...
+
+    def stop(self, sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None: ...
 
 
 def _sandbox_id(sandbox: Any) -> str:
@@ -182,6 +185,7 @@ class DaytonaSessionManager:
         bindings: BindingStoreLike,
         admission: DaytonaAdmission | None = None,
         sandbox_spec: DaytonaSandboxSpec,
+        cleanup: TurnCleanupSupervisor | None = None,
     ) -> None:
         self._platform = platform
         self._volume_client = volume_client
@@ -189,6 +193,7 @@ class DaytonaSessionManager:
         self._bindings = bindings
         self._admission = admission or DaytonaAdmission()
         self._sandbox_spec = sandbox_spec
+        self._cleanup = cleanup or TurnCleanupSupervisor()
 
     def _expected_mount(self, *, volume_id: str, workspace_id: UUID) -> ExpectedWorkspaceMount:
         require_non_zero_workspace_id(workspace_id)
@@ -219,42 +224,14 @@ class DaytonaSessionManager:
             except TimeoutError:
                 if acquisition.done():
                     raise
-                try:
-                    lease = await self._settle_provider_acquisition(acquisition)
-                except BaseException:
-                    try:
-                        permit.release()
-                    finally:
-                        permit = None
-                        get_active_lease_registry().release(session_id, run_id)
-                        claim_held = False
-                else:
-                    self._bind_lease_ownership(lease, permit, session_id=session_id, run_id=run_id)
-                    try:
-                        lease.release()
-                    finally:
-                        permit = None
-                        claim_held = False
+                self._adopt_late_acquisition(acquisition, permit, request, run_id)
+                permit = None
+                claim_held = False
                 raise DaytonaLeaseAcquisitionTimeout("Daytona lease acquisition timed out") from None
             except asyncio.CancelledError:
-                try:
-                    lease = await self._settle_provider_acquisition(acquisition)
-                except BaseException:
-                    try:
-                        permit.release()
-                    finally:
-                        permit = None
-                        get_active_lease_registry().release(session_id, run_id)
-                        claim_held = False
-                else:
-                    self._bind_lease_ownership(lease, permit, session_id=session_id, run_id=run_id)
-                    try:
-                        lease.release()
-                    except Exception:
-                        pass
-                    finally:
-                        permit = None
-                        claim_held = False
+                self._adopt_late_acquisition(acquisition, permit, request, run_id)
+                permit = None
+                claim_held = False
                 raise
 
             self._bind_lease_ownership(lease, permit, session_id=session_id, run_id=run_id)
@@ -279,6 +256,115 @@ class DaytonaSessionManager:
             except asyncio.CancelledError:
                 continue
         return acquisition.result()
+
+    def _adopt_late_acquisition(
+        self,
+        acquisition: asyncio.Task[InterpreterLease],
+        permit: DaytonaAdmissionPermit,
+        request: LeaseRequest,
+        run_id: UUID,
+    ) -> None:
+        from fleet_rlm.daytona.active_leases import get_active_lease_registry
+
+        async def cleanup() -> None:
+            try:
+                lease = await self._settle_provider_acquisition(acquisition)
+            except BaseException:
+                permit.release()
+                get_active_lease_registry().release(request.session_id, run_id)
+                return
+            try:
+                lease.release()
+                await self._quarantine(lease, request)
+            finally:
+                permit.release()
+                get_active_lease_registry().release(request.session_id, run_id)
+
+        self._cleanup.submit(cleanup())
+
+    async def _quarantine(self, lease: InterpreterLease, request: LeaseRequest) -> None:
+        """Confirm the old Sandbox is stopped before its ownership is released."""
+
+        def stop_target(target: Any, *, platform_call: bool) -> None:
+            try:
+                if platform_call:
+                    target(lease.sandbox_id, timeout=60, force=True)
+                else:
+                    target(timeout=60, force=True)
+            except TypeError:
+                # Narrow fake/legacy adapters have no force parameters. The
+                # production Daytona Sandbox surface is verified separately.
+                if platform_call:
+                    target(lease.sandbox_id)
+                else:
+                    target()
+
+        stop = getattr(self._platform, "stop", None)
+        if callable(stop):
+            await asyncio.wait_for(
+                asyncio.to_thread(stop_target, stop, platform_call=True),
+                timeout=60,
+            )
+        else:
+            sandbox = await asyncio.to_thread(self._platform.get, lease.sandbox_id)
+            if sandbox is None:
+                return
+            await asyncio.wait_for(
+                asyncio.to_thread(stop_target, sandbox.stop, platform_call=False),
+                timeout=60,
+            )
+        await self._bindings.upsert(
+            SandboxBinding(
+                session_id=request.session_id,
+                sandbox_id=lease.sandbox_id,
+                workspace_id=request.workspace_id,
+                volume_id=lease.volume_id,
+                volume_subpath=lease.volume_subpath or workspace_volume_subpath(request.workspace_id),
+                mount_path=lease.mount_path,
+                provider_state="quarantined",
+                last_verified_at=datetime.now(UTC),
+            )
+        )
+        if lease.created_sandbox:
+            await asyncio.to_thread(self._platform.delete, lease.sandbox_id)
+
+    async def fence_session(self, session_id: UUID) -> None:
+        """Fence a Sandbox retained by a settling Run during startup recovery."""
+        binding = await self._bindings.get(session_id)
+        if binding is None or not binding.sandbox_id:
+            return
+        stop = getattr(self._platform, "stop", None)
+        if callable(stop):
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(stop, binding.sandbox_id, timeout=60, force=True),
+                    timeout=60,
+                )
+            except TypeError:
+                await asyncio.wait_for(asyncio.to_thread(stop, binding.sandbox_id), timeout=60)
+        else:
+            sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id)
+            if sandbox is None:
+                return
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(sandbox.stop, timeout=60, force=True),
+                    timeout=60,
+                )
+            except TypeError:
+                await asyncio.wait_for(asyncio.to_thread(sandbox.stop), timeout=60)
+        await self._bindings.upsert(
+            SandboxBinding(
+                session_id=binding.session_id,
+                sandbox_id=binding.sandbox_id,
+                workspace_id=binding.workspace_id,
+                volume_id=binding.volume_id,
+                volume_subpath=binding.volume_subpath,
+                mount_path=binding.mount_path,
+                provider_state="quarantined",
+                last_verified_at=datetime.now(UTC),
+            )
+        )
 
     @staticmethod
     def _bind_lease_ownership(
@@ -306,7 +392,11 @@ class DaytonaSessionManager:
         binding = await self._bindings.get(session_id)
 
         sandbox: Any | None = None
-        if binding is not None and binding.sandbox_id:
+        if (
+            binding is not None
+            and binding.sandbox_id
+            and binding.provider_state not in {"quarantined", "unrecoverable"}
+        ):
             if not binding_matches_expected(binding, expected):
                 raise DaytonaAdapterError(
                     message="sandbox binding does not match workspace scope",
@@ -430,6 +520,7 @@ class DaytonaSessionManager:
             session_id=str(session_id),
             run_id=str(run_id),
             delete_sandbox=None,
+            created_sandbox=created_sandbox,
         )
 
     async def release(self, lease: InterpreterLease) -> None:

@@ -101,6 +101,7 @@ class _Harness:
         self.run_id = uuid4()
         self.cleanup_calls = 0
         self.program_started = threading.Event()
+        self.cleanup_supervisor = None
 
     async def start(self) -> None:
         await self.store.add_session(self.session_id, self.access)
@@ -154,6 +155,7 @@ class _Harness:
             preparation=self,
             runner=RLMRunner(factory=_Factory(self.mode, self.program_started)),
         )
+        self.cleanup_supervisor = coordinator._cleanup  # noqa: SLF001 - acceptance observes process ownership
         opened = await coordinator.open(
             OpenTurnCommand(
                 self.access,
@@ -191,6 +193,8 @@ async def test_real_runner_failure_modes_have_one_ordered_terminal(
     harness = _Harness(mode)
 
     events = await harness.collect()
+    if harness.cleanup_supervisor is not None:
+        await harness.cleanup_supervisor.shutdown(drain_seconds=1)
 
     _assert_stream_invariants(events, terminal_type)
     if mode == "malformed_trajectory":
@@ -210,6 +214,8 @@ async def test_true_caller_cancellation_still_propagates_after_runner_starts() -
 
     with pytest.raises(asyncio.CancelledError):
         await task
+    if harness.cleanup_supervisor is not None:
+        await harness.cleanup_supervisor.shutdown(drain_seconds=1)
     assert harness.cleanup_calls == 1
     assert await harness.store.turn_records(harness.session_id, harness.access) == ()
 

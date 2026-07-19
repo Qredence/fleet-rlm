@@ -24,6 +24,7 @@ COMPOSITION_STATE_FIELDS = (
     "session_catalog",
     "session_manager",
     "turn_coordinator",
+    "turn_cleanup_supervisor",
     "turn_lifecycle",
     "turn_state_store",
     "workspace_volume_gateway",
@@ -41,6 +42,7 @@ class LocalCompositionHandles:
     workspace_volume_mirror: Any
     session_catalog: Any
     turn_lifecycle: Any
+    turn_cleanup_supervisor: Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +142,7 @@ def install_local_inventory(
 ) -> LocalCompositionHandles:
     """Attach the shared in-memory/SQL inventory for one local runtime."""
     assert_dspy_version()
+    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
     from fleet_rlm.persistence.repositories import (
@@ -164,10 +167,13 @@ def install_local_inventory(
         max_artifact_bytes=settings.max_artifact_bytes,
         heartbeat_seconds=settings.run_heartbeat_seconds,
     )
+    cleanup = TurnCleanupSupervisor(max_jobs=8)
     coordinator = TurnCoordinator(
         lifecycle=lifecycle,
         preparation=preparation,
         runner=RLMRunner(factory=rlm_factory),
+        turn_timeout_seconds=settings.turn_timeout_seconds,
+        cleanup=cleanup,
     )
     handles = LocalCompositionHandles(
         turn_coordinator=coordinator,
@@ -176,9 +182,11 @@ def install_local_inventory(
         workspace_volume_mirror=workspace_volume_mirror,
         session_catalog=session_catalog,
         turn_lifecycle=lifecycle,
+        turn_cleanup_supervisor=cleanup,
     )
     app.state.turn_coordinator = coordinator
     app.state.turn_lifecycle = lifecycle
+    app.state.turn_cleanup_supervisor = cleanup
     app.state.turn_state_store = turn_state
     app.state.session_catalog = session_catalog
     app.state.attachment_lifecycle = attachment_lifecycle

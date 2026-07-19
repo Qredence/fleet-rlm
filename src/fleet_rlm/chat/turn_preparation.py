@@ -84,7 +84,7 @@ class PreparedTurn:
 
 
 class TurnPreparation(Protocol):
-    async def prepare(self, turn: ExecuteTurn) -> PreparedTurn: ...
+    async def prepare(self, turn: ExecuteTurn, *, deadline: float | None = None) -> PreparedTurn: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,9 +141,9 @@ class TurnPreparationModule:
         self._environments = environments
         self._capabilities = capabilities
 
-    async def prepare(self, turn: ExecuteTurn) -> PreparedTurn:
+    async def prepare(self, turn: ExecuteTurn, *, deadline: float | None = None) -> PreparedTurn:
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + self._turn_timeout_seconds
+        deadline = deadline if deadline is not None else loop.time() + self._turn_timeout_seconds
         if await turn.cancellation_requested():
             raise TurnPreparationCancelled("Turn cancelled")
 

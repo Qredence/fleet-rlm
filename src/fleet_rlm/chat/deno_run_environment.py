@@ -316,7 +316,7 @@ class DenoTurnPreparation:
         *,
         attachments: AttachmentLifecycle,
         options: RLMOptions | None = None,
-        turn_timeout_seconds: int = 900,
+        turn_timeout_seconds: int = 1800,
         root_lm: dspy.LM,
         sub_lm: dspy.LM,
         skill_registry: InMemorySkillRegistry,
@@ -340,8 +340,8 @@ class DenoTurnPreparation:
             ),
         )
 
-    async def prepare(self, turn: ExecuteTurn) -> PreparedTurn:
-        return await self._module.prepare(turn)
+    async def prepare(self, turn: ExecuteTurn, *, deadline: float | None = None) -> PreparedTurn:
+        return await self._module.prepare(turn, deadline=deadline)
 
 
 __all__ = [

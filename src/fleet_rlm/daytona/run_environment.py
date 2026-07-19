@@ -437,6 +437,7 @@ class LiveKernelResources:
         session_factory: async_sessionmaker[AsyncSession] | None = None,
         engine: AsyncEngine | None = None,
         sandbox_spec: DaytonaSandboxSpec | None = None,
+        cleanup: Any | None = None,
     ) -> None:
         self.settings = resolve_settings(settings)
         self.sandbox_spec = sandbox_spec or sandbox_spec_from_settings(self.settings)
@@ -462,6 +463,7 @@ class LiveKernelResources:
             bindings=self.bindings,
             admission=self.daytona_admission,
             sandbox_spec=self.sandbox_spec,
+            cleanup=cleanup,
         )
         self.models = build_model_bundle(self.settings)
         self._sandbox_ids: list[str] = []
@@ -504,7 +506,7 @@ class LiveKernelResources:
             settings,
         )
 
-    async def prepare(self, turn: ExecuteTurn) -> PreparedTurn:
+    async def prepare(self, turn: ExecuteTurn, *, deadline: float | None = None) -> PreparedTurn:
         """Acquire exactly one live Interpreter Lease before stream construction."""
         preparation = getattr(self, "_preparation", None)
         if preparation is None:
@@ -521,7 +523,7 @@ class LiveKernelResources:
                 environments=_DaytonaEnvironmentProvider(self),
                 capabilities=_LiveCapabilityPreparer(self),
             )
-        return await preparation.prepare(turn)
+        return await preparation.prepare(turn, deadline=deadline)
 
     def configure_preparation(self, attachment_lifecycle: Any) -> None:
         options = RLMOptions(

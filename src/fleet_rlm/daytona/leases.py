@@ -21,6 +21,7 @@ class InterpreterLease:
     run_id: str | None = None
     volume_subpath: str | None = None
     delete_sandbox: Callable[[str], None] | None = None
+    created_sandbox: bool = False
     _released: bool = field(default=False, init=False, repr=False)
     _on_release: Callable[[], None] | None = field(default=None, init=False, repr=False)
 

@@ -37,6 +37,7 @@ class DaytonaCompositionHandles:
     attachment_lifecycle: Any
     artifact_reader: Any
     workspace_volume_gateway: Any
+    turn_cleanup_supervisor: Any = None
 
 
 async def _dispose_components(
@@ -68,6 +69,7 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
 
     from fleet_rlm.artifacts.daytona_catalog import DaytonaArtifactBlobGateway
     from fleet_rlm.artifacts.reader import ArtifactReader
+    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
     from fleet_rlm.daytona.paths import volume_paths_from_settings
@@ -96,8 +98,13 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
     gateway: Any | None = None
     try:
         session_factory = create_session_factory(engine)
+        cleanup = TurnCleanupSupervisor(max_jobs=8)
         resources = LiveKernelResources(
-            resolved, session_factory=session_factory, engine=engine, sandbox_spec=sandbox_spec
+            resolved,
+            session_factory=session_factory,
+            engine=engine,
+            sandbox_spec=sandbox_spec,
+            cleanup=cleanup,
         )
         if resolved.daytona_api_key is None:
             raise CompositionError("Daytona composition missing required settings: FLEET_DAYTONA_API_KEY")
@@ -128,10 +135,13 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
             max_artifact_bytes=resolved.max_artifact_bytes,
             heartbeat_seconds=resolved.run_heartbeat_seconds,
         )
+        await turn_state.reconcile_settling(resources.session_manager.fence_session)
         coordinator = TurnCoordinator(
             lifecycle=lifecycle,
             preparation=resources,
             runner=RLMRunner(factory=RLMFactory()),
+            turn_timeout_seconds=resolved.turn_timeout_seconds,
+            cleanup=cleanup,
         )
         _ = LoggingTurnExporter()
         return DaytonaCompositionHandles(
@@ -142,6 +152,7 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
             attachment_lifecycle=attachment_lifecycle,
             artifact_reader=artifact_reader,
             workspace_volume_gateway=gateway,
+            turn_cleanup_supervisor=cleanup,
         )
     except Exception:
         if resources is None:
@@ -166,6 +177,7 @@ async def install_daytona_composition(
         app.state.session_catalog = handles.session_catalog
         app.state.turn_lifecycle = handles.turn_lifecycle
         app.state.turn_coordinator = handles.turn_coordinator
+        app.state.turn_cleanup_supervisor = handles.turn_cleanup_supervisor
         app.state.attachment_lifecycle = handles.attachment_lifecycle
         app.state.artifact_reader = handles.artifact_reader
         app.state.workspace_volume_gateway = handles.workspace_volume_gateway
@@ -185,6 +197,9 @@ async def install_daytona_composition(
 async def dispose_daytona_composition(app: FastAPI) -> None:
     """Best-effort shutdown of Daytona resources."""
     try:
+        cleanup = getattr(app.state, "turn_cleanup_supervisor", None)
+        if cleanup is not None:
+            await cleanup.shutdown(drain_seconds=30)
         await _dispose_components(
             resources=getattr(app.state, "run_environment_resources", None),
             gateway=getattr(app.state, "workspace_volume_gateway", None),

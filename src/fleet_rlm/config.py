@@ -68,7 +68,7 @@ class Settings(BaseSettings):
         description="Maximum artifact body size in bytes",
     )
     turn_timeout_seconds: int = Field(
-        default=900,
+        default=1800,
         gt=0,
         description="Turn Timeout in wall-clock seconds for one RLM Turn",
     )

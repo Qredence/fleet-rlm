@@ -172,6 +172,10 @@ class _TurnStateStore(Protocol):
 
     async def fail(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt: ...
 
+    async def settle(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt: ...
+
+    async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt: ...
+
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult: ...
 
     async def heartbeat(self, turn: ExecuteTurn) -> None: ...
@@ -192,6 +196,10 @@ class TurnLifecycle(Protocol):
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult: ...
 
     async def heartbeat(self, turn: ExecuteTurn) -> None: ...
+
+    async def settle(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt: ...
+
+    async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt: ...
 
 
 class TurnLifecycleModule:
@@ -300,6 +308,20 @@ class TurnLifecycleModule:
 
     async def heartbeat(self, turn: ExecuteTurn) -> None:
         await self._store.heartbeat(turn)
+
+    async def settle(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
+        """Revoke commit authority while retaining the durable claim for cleanup."""
+        settle = getattr(self._store, "settle", None)
+        if not callable(settle):
+            return await self._store.fail(turn, failure)
+        return await settle(turn, failure)
+
+    async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt:
+        """Release a retained claim only after owned cleanup has completed."""
+        complete = getattr(self._store, "complete_settling", None)
+        if not callable(complete):
+            raise TurnStateError("Turn store does not support detached cleanup")
+        return await complete(turn)
 
     async def _read_candidates(
         self,

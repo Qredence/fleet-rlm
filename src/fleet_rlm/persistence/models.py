@@ -97,13 +97,15 @@ class RunRow(Base):
     __tablename__ = "fleet_runs"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('running', 'completed', 'failed', 'cancelled', 'timeout')",
+            "status IN ('running', 'settling', 'completed', 'failed', 'cancelled', 'timeout')",
             name="ck_fleet_runs_status",
         ),
         CheckConstraint("length(input_fingerprint) = 64", name="ck_fleet_runs_fingerprint"),
         CheckConstraint(
             "(status = 'running' AND claim_owner IS NOT NULL AND claim_heartbeat_at IS NOT NULL "
             "AND commit_checkpoint_version IS NULL AND failure_code IS NULL) OR "
+            "(status = 'settling' AND claim_owner IS NOT NULL AND claim_heartbeat_at IS NOT NULL "
+            "AND commit_checkpoint_version IS NULL AND failure_code IS NOT NULL AND terminal_intent IS NOT NULL) OR "
             "(status = 'completed' AND claim_owner IS NULL AND commit_checkpoint_version IS NOT NULL "
             "AND failure_code IS NULL) OR "
             "(status IN ('failed', 'cancelled', 'timeout') "
@@ -116,15 +118,15 @@ class RunRow(Base):
             "session_id",
             "idempotency_key",
             unique=True,
-            sqlite_where=sa_text("status IN ('running', 'completed')"),
-            postgresql_where=sa_text("status IN ('running', 'completed')"),
+            sqlite_where=sa_text("status IN ('running', 'settling', 'completed')"),
+            postgresql_where=sa_text("status IN ('running', 'settling', 'completed')"),
         ),
         Index(
             "uq_fleet_runs_one_running",
             "session_id",
             unique=True,
-            sqlite_where=sa_text("status = 'running'"),
-            postgresql_where=sa_text("status = 'running'"),
+            sqlite_where=sa_text("status IN ('running', 'settling')"),
+            postgresql_where=sa_text("status IN ('running', 'settling')"),
         ),
     )
 
@@ -143,6 +145,8 @@ class RunRow(Base):
     failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     failure_public_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     failure_usage_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    terminal_intent: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    recovery_metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

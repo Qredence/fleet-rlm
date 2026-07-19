@@ -683,7 +683,7 @@ async def test_eight_provider_acquisitions_hold_admission_and_ninth_waits() -> N
 
 
 @pytest.mark.asyncio
-async def test_cancellation_during_provider_create_settles_before_releasing_ownership() -> None:
+async def test_cancellation_during_provider_create_transfers_owned_cleanup() -> None:
     platform = _BlockingCreatePlatform(expected_entries=1)
     admission = DaytonaAdmission(max_active_leases=1)
     mgr, _plat, _store, _volumes = _manager(platform=platform, admission=admission)
@@ -695,25 +695,24 @@ async def test_cancellation_during_provider_create_settles_before_releasing_owne
     cancelled.cancel()
     replacement = asyncio.create_task(mgr.acquire(_request(), deadline=deadline))
     await asyncio.sleep(0)
-    assert not cancelled.done()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled
     assert not replacement.done()
     assert platform.entered == 1
 
     platform.release_creates.set()
-    with pytest.raises(asyncio.CancelledError):
-        await cancelled
     replacement_lease = await asyncio.wait_for(replacement, timeout=2)
 
     from fleet_rlm.daytona.active_leases import get_active_lease_registry
 
     assert get_active_lease_registry().holder(cancelled_request.session_id) is None
     assert platform.backends[0].close_calls == 1
-    assert platform.deleted == []
+    assert platform.deleted == ["sb-1"]
     await mgr.release(replacement_lease)
 
 
 @pytest.mark.asyncio
-async def test_provider_acquisition_deadline_settles_late_lease_before_releasing_ownership() -> None:
+async def test_provider_acquisition_deadline_returns_before_late_owned_cleanup() -> None:
     from fleet_rlm.daytona.active_leases import get_active_lease_registry
     from fleet_rlm.daytona.session_manager import DaytonaLeaseAcquisitionTimeout
 
@@ -725,12 +724,12 @@ async def test_provider_acquisition_deadline_settles_late_lease_before_releasing
     assert await asyncio.to_thread(platform.all_entered.wait, 2)
     await asyncio.sleep(0.1)
 
-    assert not acquisition.done(), "late provider work must settle before ownership is released"
+    with pytest.raises(DaytonaLeaseAcquisitionTimeout):
+        await acquisition
     assert get_active_lease_registry().holder(request.session_id) is not None
 
     platform.release_creates.set()
-    with pytest.raises(DaytonaLeaseAcquisitionTimeout):
-        await acquisition
+    await mgr._cleanup.shutdown(drain_seconds=2)  # noqa: SLF001 - prove retained cleanup ownership
     assert get_active_lease_registry().holder(request.session_id) is None
     assert platform.backends[0].close_calls == 1
 

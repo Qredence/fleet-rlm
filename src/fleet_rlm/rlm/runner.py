@@ -55,14 +55,42 @@ class RLMFactoryLike(Protocol):
     ) -> Any: ...
 
 
+class _WorkerOwnership:
+    def __init__(self) -> None:
+        self.task: asyncio.Task[Any] | None = None
+
+    async def wait(self) -> None:
+        task = self.task
+        if task is None:
+            return
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except BaseException:
+                break
+        if task.done() and not task.cancelled():
+            try:
+                task.exception()
+            except BaseException:
+                pass
+
+
 class TurnEventStream:
     """Async observation iterator with its measured outcome after completion."""
 
-    def __init__(self, agen: AsyncIterator[RuntimeEvent], outcome_factory: Callable[[], RLMOutcome]) -> None:
+    def __init__(
+        self,
+        agen: AsyncIterator[RuntimeEvent],
+        outcome_factory: Callable[[], RLMOutcome],
+        ownership: _WorkerOwnership,
+    ) -> None:
         self._agen = agen.__aiter__()
         self._outcome_factory = outcome_factory
         self._outcome: RLMOutcome | None = None
         self._finished = False
+        self._ownership = ownership
 
     @property
     def outcome(self) -> RLMOutcome | None:
@@ -84,6 +112,10 @@ class TurnEventStream:
             if close is not None:
                 await close()
             self._finish()
+
+    async def wait_owned(self) -> None:
+        """Wait for a detached non-cancellable worker under process ownership."""
+        await self._ownership.wait()
 
     def _finish(self) -> None:
         if not self._finished:
@@ -265,6 +297,7 @@ class RLMRunner:
 
     def stream(self, context: RLMExecutionContext) -> TurnEventStream:
         outcome: list[RLMOutcome] = []
+        ownership = _WorkerOwnership()
 
         async def generate() -> AsyncIterator[RuntimeEvent]:
             recorder = EventRecorder(context.run_id, context.session_id)
@@ -310,6 +343,7 @@ class RLMRunner:
                     signature=blueprint.signature,
                 )
                 task = asyncio.create_task(self._execute_rlm_in_worker(rlm, context, blueprint))
+                ownership.task = task
                 pending: asyncio.Task[ExecutionDetail] | None = None
                 intended_stop: BaseException | None = None
                 caller_cancelled = False
@@ -337,13 +371,14 @@ class RLMRunner:
                         for item in self._drain_capability_details(context):
                             details.append(item)
                             yield recorder.record(item)
-                except asyncio.CancelledError:
+                except (GeneratorExit, asyncio.CancelledError):
                     caller_cancelled = True
                 finally:
                     if pending is not None and not pending.done():
                         pending.cancel()
                         caller_cancelled |= await _settle_worker(pending)
-                    caller_cancelled |= await _settle_worker(task)
+                    if intended_stop is None and not caller_cancelled:
+                        caller_cancelled |= await _settle_worker(task)
 
                 for item in self._drain_capability_details(context):
                     details.append(item)
@@ -431,7 +466,7 @@ class RLMRunner:
                 if not outcome:
                     outcome.append(RLMOutcome(terminal_status="failed", public_error_message="Turn failed"))
 
-        return TurnEventStream(generate(), lambda: outcome[-1])
+        return TurnEventStream(generate(), lambda: outcome[-1], ownership)
 
     async def _execute_rlm(
         self,

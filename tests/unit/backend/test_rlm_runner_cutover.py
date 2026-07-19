@@ -274,7 +274,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
 
 
 @pytest.mark.asyncio
-async def test_runner_settles_blocking_worker_before_internal_cancellation_finishes() -> None:
+async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import RLMExecutionContext
     from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -335,16 +335,16 @@ async def test_runner_settles_blocking_worker_before_internal_cancellation_finis
 
     cancel_requested = True
     await asyncio.sleep(0.3)
-    assert not consume.done(), "the lease-owning stream must wait for the actual worker"
-
-    release.set()
-    await asyncio.wait_for(consume, timeout=2)
+    assert consume.done(), "caller delivery must not wait for the non-cancellable worker"
     assert stream.outcome is not None
     assert stream.outcome.terminal_status == "cancelled"
 
+    release.set()
+    await asyncio.wait_for(stream.wait_owned(), timeout=2)
+
 
 @pytest.mark.asyncio
-async def test_runner_settles_blocking_worker_through_repeated_caller_cancellation() -> None:
+async def test_runner_transfers_blocking_worker_after_caller_cancellation() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import RLMExecutionContext
     from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -405,11 +405,11 @@ async def test_runner_settles_blocking_worker_through_repeated_caller_cancellati
     await asyncio.sleep(0.05)
     consume.cancel()
     await asyncio.sleep(0.05)
-    assert not consume.done()
+    with pytest.raises(asyncio.CancelledError):
+        await consume
 
     release.set()
-    with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(consume, timeout=2)
+    await asyncio.wait_for(stream.wait_owned(), timeout=2)
 
 
 @pytest.mark.asyncio
