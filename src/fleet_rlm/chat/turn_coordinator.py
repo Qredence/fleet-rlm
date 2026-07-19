@@ -412,15 +412,15 @@ class TurnCoordinator:
     ) -> None:
         async def cleanup() -> None:
             try:
+                if claim_lost:
+                    await self._revoke_claim(turn, claim_loss_usage or empty_rlm_usage())
+                    if self._claim_loss_fence is not None:
+                        await self._claim_loss_fence(turn.session_id)
                 if stream is not None:
                     try:
                         await stream.aclose()
                     except BaseException:
                         pass
-                    if claim_lost:
-                        await self._revoke_claim(turn, claim_loss_usage or empty_rlm_usage())
-                    if claim_lost and self._claim_loss_fence is not None:
-                        await self._claim_loss_fence(turn.session_id)
                     wait_owned = getattr(stream, "wait_owned", None)
                     if callable(wait_owned):
                         await wait_owned()

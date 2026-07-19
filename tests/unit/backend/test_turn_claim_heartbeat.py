@@ -353,7 +353,9 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
             raise StopAsyncIteration
 
         async def aclose(self):
-            return None
+            run = authoritative._runs[run_id]  # noqa: SLF001 - ordering acceptance evidence
+            assert (run.status, run.failure_code) == ("settling", "stale_claim")
+            assert release_commit.is_set()
 
     class Runner:
         def stream(self, _execution):
