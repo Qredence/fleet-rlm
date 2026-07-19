@@ -3,13 +3,16 @@
 ## Commands
 
 ```bash
-uv run fleet cli [--host 127.0.0.1] [--port 8000] [--reload] [-- <pi-tui args>]
-uv run fleet deno [--host 127.0.0.1] [--port 8000] [--reload] [-- <pi-tui args>]
+uv run fleet cli [--host 127.0.0.1] [--port 8000] [--reload] [--allow-non-loopback-bind] [-- <pi-tui args>]
+uv run fleet deno [--host 127.0.0.1] [--port 8000] [--reload] [--allow-non-loopback-bind] [-- <pi-tui args>]
 uv run fleet doctor daytona
-uv run fleet web [--host 127.0.0.1] [--port 8000] [--reload]
-uv run fleet-rlm serve-api [--host 127.0.0.1] [--port 8000] [--reload]
+uv run fleet web [--host 127.0.0.1] [--port 8000] [--reload] [--allow-non-loopback-bind]
+uv run fleet-rlm serve-api [--host 127.0.0.1] [--port 8000] [--reload] [--allow-non-loopback-bind]
 ```
 
+Fleet has no caller authentication. Launchers default to `127.0.0.1` and reject
+non-loopback hosts (`0.0.0.0`, LAN addresses, hostnames other than `localhost`)
+unless `--allow-non-loopback-bind` is supplied deliberately.
 `fleet cli` forces Daytona; `fleet deno` forces Deno. Each starts the backend in
 its own process group, waits up to 30 seconds for readiness, and runs pi-tui in
 the foreground. Node 22.19+, pnpm, the installed TUI workspace, and an unused
