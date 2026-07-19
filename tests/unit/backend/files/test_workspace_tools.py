@@ -6,7 +6,7 @@ from dataclasses import replace
 
 import dspy
 
-from fleet_rlm.files.workspace_models import WorkspaceEntry
+from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult
 from fleet_rlm.rlm.tool_observer import observe_tool
 
 
@@ -14,11 +14,15 @@ class FakeWorkspace:
     def __init__(self) -> None:
         self.files: dict[str, str] = {}
 
-    def list_entries(self, path: str, *, limit: int = 100) -> tuple[WorkspaceEntry, ...]:
+    def list_entries(self, path: str, *, limit: int = 100) -> WorkspaceListResult:
         del path
-        return tuple(
-            WorkspaceEntry(name, "file", len(content.encode()), "2026-07-16T12:00:00Z")
-            for name, content in sorted(self.files.items())[:limit]
+        items = sorted(self.files.items())
+        return WorkspaceListResult(
+            entries=tuple(
+                WorkspaceEntry(name, "file", len(content.encode()), "2026-07-16T12:00:00Z")
+                for name, content in items[:limit]
+            ),
+            truncated=len(items) > limit,
         )
 
     def stat(self, path: str) -> WorkspaceEntry | None:
@@ -96,6 +100,7 @@ def test_round_trips_text_with_bounded_json_results() -> None:
         "modified_at": "2026-07-16T12:00:00Z",
     }
     assert listed["count"] == 1
+    assert listed["truncated"] is False
     assert listed["entries"][0]["path"] == "notes/decision.md"
     assert stated["entry"]["byte_size"] == 16
     assert read == {
@@ -137,7 +142,7 @@ def test_workspace_event_views_expose_metadata_without_file_bodies_or_entries() 
         "content_chars": 22,
     }
     assert observed[1].output == {"ok": True, "path": "notes/private.md", "byte_size": 22}
-    assert observed[3].output == {"ok": True, "path": ".", "count": 1}
+    assert observed[3].output == {"ok": True, "path": ".", "count": 1, "truncated": False}
     assert observed[5].output == {
         "ok": True,
         "path": "notes/private.md",
@@ -184,7 +189,7 @@ def test_returns_stable_error_codes_without_exception_details() -> None:
 def test_entry_serialization_does_not_mutate_domain_value() -> None:
     entry = WorkspaceEntry("notes", "directory", None, None)
     workspace, tools = _tools()
-    workspace.list_entries = lambda _path, limit=100: (entry,)  # type: ignore[method-assign]
+    workspace.list_entries = lambda _path, limit=100: WorkspaceListResult((entry,), truncated=False)  # type: ignore[method-assign]
 
     result = tools["list_workspace_files"](path=".", limit=1)
 

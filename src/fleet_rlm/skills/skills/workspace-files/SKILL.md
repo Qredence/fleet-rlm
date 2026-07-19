@@ -13,7 +13,7 @@ Use Fleet's bound tools instead of inventing host paths. The Turn context report
 
 ## Session Workspace
 
-Workspace paths are canonical POSIX-relative paths rooted at `.`. List or inspect before writing, use `overwrite=true` only when replacement is intended, and check each tool's `ok` result.
+Workspace paths are canonical POSIX-relative paths rooted at `.`. List or inspect before writing, use `overwrite=true` only when replacement is intended, and check each tool's `ok` result. Session Workspace is append/update-only: there is no delete Tool; replace content with `write_workspace_text(..., overwrite=True)`.
 
 ```python
 listing = list_workspace_files(path=".", limit=100)

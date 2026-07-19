@@ -10,7 +10,7 @@ import dspy
 import pytest
 
 from fleet_rlm.chat.session_context import SessionContextManifest
-from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY, WorkspaceEntry
+from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY, WorkspaceEntry, WorkspaceListResult
 from fleet_rlm.files.workspace_tools import WorkspaceToolHost
 from fleet_rlm.rlm.context import RLMExecutionContext
 from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -25,11 +25,12 @@ class MemoryWorkspace:
         self.session_id = uuid4()
         self.files: dict[str, str] = {}
 
-    def list_entries(self, path: str, *, limit: int = 100) -> tuple[WorkspaceEntry, ...]:
+    def list_entries(self, path: str, *, limit: int = 100) -> WorkspaceListResult:
         del path
-        return tuple(
-            WorkspaceEntry(name, "file", len(content.encode()), None)
-            for name, content in sorted(self.files.items())[:limit]
+        items = sorted(self.files.items())
+        return WorkspaceListResult(
+            entries=tuple(WorkspaceEntry(name, "file", len(content.encode()), None) for name, content in items[:limit]),
+            truncated=len(items) > limit,
         )
 
     def stat(self, path: str) -> WorkspaceEntry | None:

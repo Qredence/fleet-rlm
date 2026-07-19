@@ -40,4 +40,6 @@ Session and Run directory names are UUID-shaped. The containers exist at acquisi
 
 Workspace, Session, Run, Attachment, and Artifact identities are UUID-shaped opaque values. The workspace tools accept relative paths such as `notes/analysis.md`. Do not pass absolute paths, backslashes, empty segments, `.` or `..` components, repeated slashes, trailing slashes, or the reserved `.fleet` component. Use `.` only as the root argument to `list_workspace_files`.
 
+Session Workspace tools are append/update-only. Fleet exposes list, stat, read, and write (with `overwrite`); there is no delete Tool. To replace a file, call `write_workspace_text(..., overwrite=True)`.
+
 REPL variables are per-Run and are not durable. Authorized clients can retrieve committed Artifact bytes through the Artifact content API, but host storage locations and raw sandbox paths must not appear in client-facing answers.
