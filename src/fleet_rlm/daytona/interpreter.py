@@ -16,7 +16,6 @@ from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
 import dspy
-from dspy.primitives.code_interpreter import FinalOutput
 
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
@@ -26,6 +25,15 @@ from fleet_rlm.daytona.errors import (
 from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.in_process import BackendExecutionResult, InProcessInterpreterBackend
 from fleet_rlm.daytona.submit import extract_final_payload
+from fleet_rlm.rlm.dspy_interpreter_contract import (
+    PUBLIC_FINAL_OUTPUT_LABEL,
+    copy_output_fields,
+    initial_tools_registered,
+    is_final_output,
+    mark_tools_registered,
+    needs_tool_reinjection,
+    wrap_final_output,
+)
 from fleet_rlm.rlm.events import ObservationObserver, RLMCode, RLMOutput, StepFinished, StepStarted
 from fleet_rlm.rlm.sanitize import truncate_public_text
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
@@ -116,8 +124,8 @@ class DaytonaCodeInterpreter:
         self._backend = backend
         self._tools: dict[str, Callable[..., Any]] = dict(tools or {})
         self._bound_tools: dict[str, Callable[..., Any]] = {}
-        self.output_fields: list[dict[str, Any]] | None = list(output_fields) if output_fields is not None else None
-        self._tools_registered = False
+        self.output_fields: list[dict[str, Any]] | None = copy_output_fields(output_fields)
+        self._tools_registered = initial_tools_registered()
         self._started = False
         self._shutdown = False
         self._http_broker: DaytonaHttpToolBroker | None = None
@@ -150,8 +158,8 @@ class DaytonaCodeInterpreter:
             return
 
     def _public_output(self, result: Any) -> str:
-        if isinstance(result, FinalOutput):
-            return "FINAL submitted"
+        if is_final_output(result):
+            return PUBLIC_FINAL_OUTPUT_LABEL
         if isinstance(result, _RepairFeedback):
             return "Execution error"
         return truncate_public_text(str(result or ""), max_len=self._observation_max_chars)
@@ -239,21 +247,22 @@ class DaytonaCodeInterpreter:
         if isinstance(backend, InProcessInterpreterBackend):
             backend.bind_host_tools(tools)
             backend.ensure_submit(self.output_fields)
-            self._tools_registered = True
+            self._tools_registered = mark_tools_registered()
             return
         if not isinstance(backend, _SandboxCodeInterpreterBackend):
-            self._tools_registered = True
+            self._tools_registered = mark_tools_registered()
             return
-        # dspy.RLM sets `_tools_registered = False` before each inject so fresh
-        # llm_query callables bind; skip only when already registered this cycle.
-        if self._tools_registered and self._http_broker is not None:
+        if not needs_tool_reinjection(
+            tools_registered=self._tools_registered,
+            http_broker_ready=self._http_broker is not None,
+        ):
             return
         if self._http_broker is None:
             self._http_broker = DaytonaHttpToolBroker(sandbox=backend.sandbox)
             self._http_broker.ensure_started()
         self._http_broker.register_tools(tools)
         backend.run(self._http_broker.submit_setup_code(self.output_fields))
-        self._tools_registered = True
+        self._tools_registered = mark_tools_registered()
 
     def _execute_with_http_broker(
         self,
@@ -290,11 +299,11 @@ class DaytonaCodeInterpreter:
             if raw.error:
                 return _RepairFeedback(f"[Error] {sanitize_provider_message(raw.error)}")
             if raw.final is not None:
-                return FinalOutput(raw.final)
+                return wrap_final_output(raw.final)
             return raw.stdout
         final = extract_final_payload(str(raw))
         if final is not None:
-            return FinalOutput(final)
+            return wrap_final_output(final)
         return raw
 
 

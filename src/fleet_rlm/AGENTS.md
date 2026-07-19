@@ -15,9 +15,10 @@ them for backend work. Current code and tests outrank the local phase record in
   in-memory bundled Skill catalog. Lifespan composition installs and disposes
   one complete Deno, Daytona, or explicitly injected private-test inventory.
 - Keep Daytona SDK imports inside `daytona/`.
-- Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Daytona
-  supplies a fresh custom interpreter; Deno passes `interpreter=None` so DSPy
-  creates its default Deno/Pyodide interpreter. Call only the supported
+- Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Inject and
+  `FinalOutput` protocol knowledge lives in `rlm.dspy_interpreter_contract`.
+  Daytona supplies a fresh custom interpreter; Deno passes `interpreter=None` so
+  DSPy creates its default Deno/Pyodide interpreter. Call only the supported
   `await rlm.acall(**named_inputs)` surface.
 - The default Signature receives request text, bounded `session_context`,
   authorized `skill_cards`, and bounded Attachment metadata. Older committed

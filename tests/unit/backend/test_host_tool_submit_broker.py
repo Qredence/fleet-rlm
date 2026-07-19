@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from dspy.primitives.code_interpreter import FinalOutput
+
+from fleet_rlm.rlm.dspy_interpreter_contract import FinalOutput
 
 
 class _RecordingTool:
