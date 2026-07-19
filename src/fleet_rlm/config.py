@@ -114,6 +114,4 @@ class Settings(BaseSettings):
         try:
             return validate_snapshot_name(text)
         except ValueError as exc:
-            raise ValueError(
-                "FLEET_DAYTONA_SNAPSHOT must be immutable and end in -v<positive integer>"
-            ) from exc
+            raise ValueError("FLEET_DAYTONA_SNAPSHOT must be immutable and end in -v<positive integer>") from exc

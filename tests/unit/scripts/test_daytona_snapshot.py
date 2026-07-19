@@ -49,9 +49,7 @@ def test_check_rejects_snapshot_built_from_a_different_image() -> None:
     snapshot = _snapshot(spec, dockerfile="FROM python:3.13.13-slim-bookworm\n")
 
     with pytest.raises(RuntimeError, match="image metadata"):
-        daytona_snapshot.check_snapshot(
-            SimpleNamespace(snapshot=SimpleNamespace(get=lambda _name: snapshot)), spec
-        )
+        daytona_snapshot.check_snapshot(SimpleNamespace(snapshot=SimpleNamespace(get=lambda _name: snapshot)), spec)
 
 
 def test_create_is_idempotent_without_overwriting_existing_snapshot() -> None:
