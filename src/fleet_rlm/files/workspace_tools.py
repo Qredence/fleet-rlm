@@ -32,6 +32,11 @@ def _entry(entry: WorkspaceEntry) -> dict[str, object]:
 
 
 def _raise_tool_error(exc: BaseException) -> NoReturn:
+    if getattr(exc, "code", None) == "unsupported_storage":
+        raise WorkspaceToolError(
+            "unsupported_storage",
+            "Session Workspace storage does not support this mutation",
+        ) from None
     if isinstance(exc, FileNotFoundError):
         raise WorkspaceToolError("not_found", "Session Workspace file was not found") from None
     if isinstance(exc, FileExistsError):
@@ -105,11 +110,15 @@ class WorkspaceToolHost:
             if len(content.encode("utf-8")) > self._max_file_bytes:
                 raise WorkspaceToolError("too_large", "Session Workspace file exceeds the maximum size")
             try:
-                return {
+                result = {
                     "ok": True,
                     "namespace": SESSION_WORKSPACE_NAMESPACE,
                     **_entry(self._workspace.write_text(path, content, overwrite=overwrite)),
                 }
+                warning = getattr(self._workspace, "last_cleanup_warning", None)
+                if isinstance(warning, Mapping):
+                    result["warnings"] = [{"code": "cleanup_failed", **dict(warning)}]
+                return result
             except Exception as exc:  # noqa: BLE001 - public error is normalized
                 _raise_tool_error(exc)
 
@@ -234,7 +243,10 @@ class WorkspaceToolHost:
                 ),
                 "write_workspace_text": ToolEventView(
                     input_projection=write_input,
-                    output_projection=lambda result: output(result, ("ok", "namespace", "path", "byte_size")),
+                    output_projection=lambda result: output(
+                        result,
+                        ("ok", "namespace", "path", "byte_size", "warnings"),
+                    ),
                 ),
             }
         )

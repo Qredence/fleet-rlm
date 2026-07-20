@@ -25,6 +25,7 @@ from fleet_rlm.daytona.errors import (
 from fleet_rlm.daytona.http_broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.in_process import BackendExecutionResult, InProcessInterpreterBackend
 from fleet_rlm.daytona.submit import extract_final_payload
+from fleet_rlm.files.workspace_tools import WorkspaceToolError
 from fleet_rlm.rlm.dspy_interpreter_contract import (
     PUBLIC_FINAL_OUTPUT_LABEL,
     copy_output_fields,
@@ -282,6 +283,12 @@ class DaytonaCodeInterpreter:
                 raise DaytonaAdapterError(message=msg, cause_type="UnknownToolError")
             try:
                 return fn(*args, **kwargs)
+            except WorkspaceToolError as exc:
+                return {
+                    "ok": False,
+                    "error": exc.code,
+                    "message": exc.public_message,
+                }
             except Exception as exc:  # noqa: BLE001 - sanitize tool failures
                 raise DaytonaAdapterError(
                     message=sanitize_provider_message(str(exc)),

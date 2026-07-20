@@ -42,7 +42,7 @@ from fleet_rlm.rlm.factory import RLMFactory
 from fleet_rlm.rlm.inputs import build_rlm_input_kwargs, skill_card_metadata
 from fleet_rlm.rlm.outcome import ExecutionDetail, RLMOutcome, TerminalStatus
 from fleet_rlm.rlm.sanitize import truncate_public_text
-from fleet_rlm.rlm.tool_guards import TurnToolGuards
+from fleet_rlm.rlm.tool_guards import TurnToolGuards, workspace_obligations
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 from fleet_rlm.skills.capabilities import DEFAULT_TASK_CONTRACT, TurnCapabilityBlueprint
 
@@ -323,7 +323,7 @@ class RLMRunner:
 
                 blueprint = cast(TurnCapabilityBlueprint, context.capabilities.blueprint)
                 relay = _DetailRelay()
-                guards = TurnToolGuards()
+                guards = TurnToolGuards(required_targets=workspace_obligations(context.request))
                 bind_observer = getattr(context.interpreter, "bind_observer", None)
                 if callable(bind_observer):
                     bind_observer(relay.publish, max_chars=context.options.max_output_chars)

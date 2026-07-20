@@ -185,6 +185,23 @@ def test_raises_stable_safe_errors_without_exception_details() -> None:
     assert conflict.value.code == "conflict"
 
 
+def test_workspace_storage_failure_has_structured_host_error() -> None:
+    workspace, tools = _tools()
+    from fleet_rlm.daytona.workspace_fs import WorkspaceStorageError
+    from fleet_rlm.files.workspace_tools import WorkspaceToolError
+
+    def unavailable(*_args: object, **_kwargs: object) -> WorkspaceEntry:
+        raise WorkspaceStorageError(1)
+
+    workspace.write_text = unavailable  # type: ignore[method-assign]
+
+    with pytest.raises(WorkspaceToolError) as failure:
+        tools["write_workspace_text"](path="date.txt", content="2026-07-20", overwrite=False)
+
+    assert failure.value.code == "unsupported_storage"
+    assert "errno" not in failure.value.public_message
+
+
 def test_entry_serialization_does_not_mutate_domain_value() -> None:
     entry = WorkspaceEntry("notes", "directory", None, None)
     workspace, tools = _tools()

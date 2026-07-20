@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -51,6 +52,74 @@ def _assert_complete_layout(sandbox: object, *, mount: str, session_id: object, 
     for path in required:
         info = filesystem.get_file_info(path)
         assert info.is_dir, path
+
+
+def _link_diagnostic(sandbox: object, *, volume_root: str, workspace_root: str) -> dict[str, object]:
+    code = "\n".join(
+        (
+            "import errno, json, os",
+            f"root = {workspace_root!r}",
+            "parent_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)",
+            "temporary = '.fleet-link-diagnostic'",
+            f"result = {{'volume_root': {volume_root!r}, 'workspace_root': root}}",
+            "try:",
+            "    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent_fd)",
+            "    os.write(fd, b'probe')",
+            "    os.fsync(fd)",
+            "    os.close(fd)",
+            "    try:",
+            "        os.link(temporary, '.fleet-link-diagnostic-target', src_dir_fd=parent_fd, dst_dir_fd=parent_fd, follow_symlinks=False)",
+            "        result['link'] = {'ok': True}",
+            "    except OSError as exc:",
+            "        result['link'] = {'ok': False, 'errno': exc.errno, 'name': errno.errorcode.get(exc.errno)}",
+            "finally:",
+            "    for name in (temporary, '.fleet-link-diagnostic-target'):",
+            "        try:",
+            "            os.unlink(name, dir_fd=parent_fd)",
+            "        except FileNotFoundError:",
+            "            pass",
+            "    os.close(parent_fd)",
+            "print(json.dumps(result))",
+        )
+    )
+    response = getattr(sandbox, "process").code_run(code)
+    return json.loads(str(getattr(response, "result", "")))
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(600)
+async def test_daytona_workspace_link_errno_diagnostic() -> None:
+    settings = Settings(run_environment="daytona")
+    _skip_unless_live(settings)
+    resources = LiveKernelResources(settings)
+    lease = None
+    session_id = uuid4()
+    try:
+        lease = await resources.session_manager.acquire(
+            LeaseRequest(
+                session_id=session_id,
+                user_id=uuid4(),
+                workspace_id=uuid4(),
+                run_id=uuid4(),
+            ),
+            deadline=asyncio.get_running_loop().time() + 600,
+        )
+        resources.track_sandbox(lease.sandbox_id)
+        sandbox = resources.platform.get(lease.sandbox_id)
+        assert sandbox is not None
+        paths = volume_paths_from_settings(settings)
+        diagnostic = _link_diagnostic(
+            sandbox,
+            volume_root=str(paths.mount_path),
+            workspace_root=str(paths.session_workspace_dir(session_id)),
+        )
+        print(json.dumps({key: diagnostic.get(key) for key in ("volume_root", "workspace_root", "link")}))
+        assert diagnostic["link"] == {"ok": False, "errno": 1, "name": "EPERM"}
+    finally:
+        if lease is not None:
+            await resources.session_manager.release(lease)
+        resources.cleanup()
+        await resources.adispose_engine()
 
 
 @pytest.mark.asyncio
@@ -156,6 +225,8 @@ async def test_session_workspace_survives_sandbox_replacement() -> None:
 
         assert second_workspace.read_text("notes/decision.md", max_bytes=1024) == ("durable across replacement")
         assert second_workspace.read_text("date.txt", max_bytes=100) == "verified"
+        final_listing = second_workspace.list_entries(".")
+        assert {entry.path for entry in final_listing.entries} == {"date.txt", "notes"}
         entry = second_workspace.stat("notes/decision.md")
         assert entry is not None
         assert entry.byte_size == written.byte_size

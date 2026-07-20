@@ -95,13 +95,13 @@ class WorkspaceFlowFactory:
                     assert interpreter.variables == {}
                     result = tools["read_workspace_text"](path="notes/decision.md", max_chars=100)
                     return dspy.Prediction(answer=result, trajectory=[])
-                if request in {"unresolved", "repaired"}:
+                if request.startswith(("unresolved", "repaired")):
                     tools["write_workspace_text"](path="notes/target.md", content="old", overwrite=False)
                     try:
                         tools["write_workspace_text"](path="notes/target.md", content="new", overwrite=False)
                     except WorkspaceToolError:
                         pass
-                    if request == "repaired":
+                    if request.startswith("repaired"):
                         tools["write_workspace_text"](path="notes/target.md", content="new", overwrite=True)
                     tools["read_workspace_text"](path="notes/target.md", max_chars=100)
                     return dspy.Prediction(answer="submitted", trajectory=[])
@@ -130,11 +130,12 @@ async def _run(
     async def not_cancelled() -> bool:
         return False
 
+    task_request = f"{request} notes/target.md" if request in {"unresolved", "repaired"} else request
     context = RLMExecutionContext(
         run_id=uuid4(),
         session_id=workspace.session_id,
         access=TurnAccess(uuid4(), uuid4()),
-        request=request,
+        request=task_request,
         session_context=SessionContextManifest(uuid4(), 0, 0, ()),
         models=SimpleNamespace(root_lm=object(), sub_lm=object()),
         options=RLMOptions(),

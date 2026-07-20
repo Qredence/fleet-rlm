@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import json
 from collections.abc import Mapping
 from pathlib import PurePosixPath
@@ -10,6 +11,19 @@ from typing import Any, cast
 
 from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult
 from fleet_rlm.files.workspace_validation import normalize_workspace_path
+
+# Captured from a real Daytona-mounted Volume on 2026-07-20: ``os.link``
+# returns EPERM for the temporary-file publication attempt.  This allowlist is
+# consulted only around that one link operation; EPERM from any other I/O
+# operation remains a hard failure.
+_UNSUPPORTED_LINK_ERRNOS = frozenset({errno.EPERM})
+
+
+class WorkspaceStorageError(OSError):
+    """Mounted-volume mutation failure that is not a client path error."""
+
+    code = "unsupported_storage"
+    public_message = "Session Workspace storage does not support this mutation"
 
 
 def _entry_from_payload(raw: Mapping[str, object]) -> WorkspaceEntry:
@@ -28,6 +42,14 @@ def _entry_from_payload(raw: Mapping[str, object]) -> WorkspaceEntry:
         byte_size=parsed_byte_size,
         modified_at=str(modified_at) if modified_at else None,
     )
+
+
+def _is_relative_to(path: PurePosixPath, root: PurePosixPath) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 class DaytonaSessionWorkspaceFS:
@@ -56,14 +78,25 @@ class DaytonaSessionWorkspaceFS:
             root_path.relative_to(volume_path)
         except ValueError as exc:
             raise ValueError("workspace root must be under trusted volume") from exc
+        if root_path == volume_path:
+            raise ValueError("workspace root must be distinct from trusted volume")
+        for reserved in ("attachments", "artifacts"):
+            reserved_path = volume_path / reserved
+            if root_path == reserved_path or _is_relative_to(root_path, reserved_path):
+                raise ValueError("workspace root must not use attachment or artifact storage")
         self._sandbox = sandbox
         self._volume_root = str(volume_path)
         self._root = str(root_path)
         self._max_file_bytes = int(max_file_bytes)
+        self._last_cleanup_warning: dict[str, object] | None = None
 
     @property
     def root(self) -> str:
         return self._root
+
+    @property
+    def last_cleanup_warning(self) -> dict[str, object] | None:
+        return self._last_cleanup_warning
 
     def list_entries(self, path: str, *, limit: int = 100) -> WorkspaceListResult:
         relative = normalize_workspace_path(path, allow_root=True)
@@ -141,6 +174,8 @@ class DaytonaSessionWorkspaceFS:
             overwrite=overwrite,
             content_b64=base64.b64encode(data).decode("ascii"),
         )
+        warning = payload.get("cleanup_warning")
+        self._last_cleanup_warning = cast(dict[str, object], warning) if isinstance(warning, dict) else None
         entry = payload.get("entry")
         if not isinstance(entry, dict):
             raise RuntimeError("workspace write returned invalid entry")
@@ -159,7 +194,7 @@ class DaytonaSessionWorkspaceFS:
     ) -> dict[str, object]:
         code = "\n".join(
             (
-                "import base64, json, os, stat, time",
+                "import base64, errno, json, os, stat, time",
                 f"volume_root = {self._volume_root!r}",
                 f"root = {self._root!r}",
                 f"relative = {relative!r}",
@@ -176,6 +211,10 @@ class DaytonaSessionWorkspaceFS:
                 "    respond({'ok': False, 'error': error, **extra})",
                 "class UnsafePath(Exception):",
                 "    pass",
+                "class StorageError(Exception):",
+                "    def __init__(self, errno_value):",
+                "        super().__init__(errno_value)",
+                "        self.errno = errno_value",
                 "def open_directory(path, *, dir_fd=None, create=False):",
                 "    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, 'O_NOFOLLOW', 0)",
                 "    try:",
@@ -247,49 +286,123 @@ class DaytonaSessionWorkspaceFS:
                 "def write_all(fd, payload):",
                 "    offset = 0",
                 "    while offset < len(payload):",
-                "        offset += os.write(fd, payload[offset:])",
-                "def write_new(parent_fd, name, payload):",
+                "        try:",
+                "            written = os.write(fd, payload[offset:])",
+                "        except InterruptedError:",
+                "            continue",
+                "        if written <= 0:",
+                "            raise OSError('short write')",
+                "        offset += written",
+                "def fsync_directory(parent_fd):",
+                "    try:",
+                "        os.fsync(parent_fd)",
+                "    except OSError as exc:",
+                "        raise StorageError(exc.errno) from exc",
+                "def replace_existing(parent_fd, name, payload):",
+                "    temporary = f'.fleet-write-{os.getpid()}-{time.time_ns()}'",
                 "    fd = None",
-                "    created = False",
+                "    temporary_removed = False",
+                "    cleanup_errno = None",
+                "    try:",
+                "        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0)",
+                "        fd = os.open(temporary, flags, 0o600, dir_fd=parent_fd)",
+                "        write_all(fd, payload)",
+                "        os.fsync(fd)",
+                "        os.close(fd)",
+                "        fd = None",
+                "        os.replace(temporary, name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)",
+                "        temporary_removed = True",
+                "        try:",
+                "            fsync_directory(parent_fd)",
+                "        except StorageError as exc:",
+                "            cleanup_errno = exc.errno",
+                "        return os.stat(name, dir_fd=parent_fd, follow_symlinks=False), cleanup_errno",
+                "    except (FileNotFoundError, FileExistsError):",
+                "        raise",
+                "    except OSError as exc:",
+                "        raise StorageError(exc.errno) from exc",
+                "    finally:",
+                "        if fd is not None:",
+                "            os.close(fd)",
+                "        if not temporary_removed:",
+                "            try:",
+                "                os.unlink(temporary, dir_fd=parent_fd)",
+                "            except OSError:",
+                "                pass",
+                "def write_new_direct(parent_fd, name, payload):",
+                "    fd = None",
+                "    created_stat = None",
+                "    def cleanup_created():",
+                "        if created_stat is None:",
+                "            return",
+                "        try:",
+                "            current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)",
+                "            if (current.st_dev, current.st_ino) == (created_stat.st_dev, created_stat.st_ino):",
+                "                os.unlink(name, dir_fd=parent_fd)",
+                "        except OSError:",
+                "            pass",
                 "    try:",
                 "        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0)",
                 "        fd = os.open(name, flags, 0o600, dir_fd=parent_fd)",
-                "        created = True",
+                "        created_stat = os.fstat(fd)",
                 "        write_all(fd, payload)",
                 "        os.fsync(fd)",
+                "        fsync_directory(parent_fd)",
                 "        return os.fstat(fd)",
+                "    except FileExistsError:",
+                "        raise",
+                "    except OSError as exc:",
+                "        cleanup_created()",
+                "        raise StorageError(exc.errno) from exc",
                 "    except BaseException:",
-                "        if created:",
-                "            try:",
-                "                os.unlink(name, dir_fd=parent_fd)",
-                "            except OSError:",
-                "                pass",
+                "        cleanup_created()",
                 "        raise",
                 "    finally:",
                 "        if fd is not None:",
                 "            os.close(fd)",
-                "def replace_atomically(parent_fd, name, payload):",
+                "def publish_new(parent_fd, name, payload):",
                 "    temporary = f'.fleet-write-{os.getpid()}-{time.time_ns()}'",
                 "    fd = None",
+                "    temporary_removed = False",
+                "    cleanup_errno = None",
                 "    try:",
                 "        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600, dir_fd=parent_fd)",
                 "        write_all(fd, payload)",
                 "        os.fsync(fd)",
                 "        os.close(fd)",
                 "        fd = None",
-                "        os.replace(temporary, name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)",
                 "        try:",
-                "            os.fsync(parent_fd)",
-                "        except OSError:",
+                "            os.link(temporary, name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd, follow_symlinks=False)",
                 "            pass",
-                "        return os.stat(name, dir_fd=parent_fd, follow_symlinks=False)",
+                "        except OSError as exc:",
+                "            if exc.errno == errno.EEXIST:",
+                "                raise FileExistsError(name) from exc",
+                f"            if exc.errno not in {sorted(_UNSUPPORTED_LINK_ERRNOS)!r}:",
+                "                raise StorageError(exc.errno) from exc",
+                "            direct_stat = write_new_direct(parent_fd, name, payload)",
+                "            try:",
+                "                os.unlink(temporary, dir_fd=parent_fd)",
+                "                temporary_removed = True",
+                "            except OSError as cleanup_exc:",
+                "                cleanup_errno = cleanup_exc.errno",
+                "            return direct_stat, cleanup_errno",
+                "        fsync_directory(parent_fd)",
+                "        try:",
+                "            os.unlink(temporary, dir_fd=parent_fd)",
+                "            temporary_removed = True",
+                "        except OSError as exc:",
+                "            cleanup_errno = exc.errno",
+                "        return os.stat(name, dir_fd=parent_fd, follow_symlinks=False), cleanup_errno",
                 "    finally:",
                 "        if fd is not None:",
                 "            os.close(fd)",
-                "        try:",
-                "            os.unlink(temporary, dir_fd=parent_fd)",
-                "        except FileNotFoundError:",
-                "            pass",
+                "        if not temporary_removed:",
+                "            try:",
+                "                os.unlink(temporary, dir_fd=parent_fd)",
+                "            except OSError:",
+                "                pass",
+                "            else:",
+                "                temporary_removed = True",
                 "try:",
                 "    try:",
                 "        base_fds, root_fd = open_chain(create=operation == 'write')",
@@ -378,12 +491,18 @@ class DaytonaSessionWorkspaceFS:
                 "                    fail('is_directory')",
                 "                if not overwrite:",
                 "                    fail('conflict')",
-                "                written_stat = replace_atomically(parent_fd, relative_parts[-1], payload)",
+                "                written_stat = replace_existing(parent_fd, relative_parts[-1], payload)",
                 "            else:",
-                "                written_stat = write_new(parent_fd, relative_parts[-1], payload)",
+                "                written_stat = publish_new(parent_fd, relative_parts[-1], payload)",
                 "        finally:",
                 "            close_all(parent_fds)",
-                "        respond({'ok': True, 'entry': entry_for(written_stat, relative)})",
+                "        cleanup_errno = None",
+                "        if type(written_stat) is tuple and len(written_stat) == 2:",
+                "            written_stat, cleanup_errno = written_stat",
+                "        response = {'ok': True, 'entry': entry_for(written_stat, relative)}",
+                "        if cleanup_errno is not None:",
+                "            response['cleanup_warning'] = {'errno': cleanup_errno}",
+                "        respond(response)",
                 "    fail('unsupported')",
                 "except FileNotFoundError:",
                 "    fail('not_found')",
@@ -395,6 +514,8 @@ class DaytonaSessionWorkspaceFS:
                 "    fail('not_directory')",
                 "except UnsafePath:",
                 "    fail('unsafe')",
+                "except StorageError as exc:",
+                "    fail('unsupported_storage', errno=exc.errno)",
                 "except OSError:",
                 "    fail('unsafe')",
                 "finally:",
@@ -424,5 +545,7 @@ class DaytonaSessionWorkspaceFS:
                 raise ValueError("workspace file exceeds maximum size")
             if error == "invalid_utf8":
                 raise ValueError("workspace file is not valid UTF-8")
+            if error == "unsupported_storage":
+                raise WorkspaceStorageError(str(payload.get("errno") or "unknown"))
             raise ValueError("workspace path is unsafe")
         return payload

@@ -62,6 +62,19 @@ def test_rejects_workspace_root_outside_trusted_volume() -> None:
         )
 
 
+@pytest.mark.parametrize("reserved", ["attachments", "artifacts"])
+def test_rejects_workspace_root_aliasing_managed_storage(reserved: str) -> None:
+    from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
+
+    with pytest.raises(ValueError, match="attachment or artifact"):
+        DaytonaSessionWorkspaceFS(
+            SimpleNamespace(),
+            volume_root="/home/daytona/fleet",
+            root=f"/home/daytona/fleet/{reserved}/session-file",
+            max_file_bytes=32,
+        )
+
+
 def test_lists_immediate_entries_sorted_when_observation_window_is_complete(tmp_path: Path) -> None:
     workspace, _sandbox, root, _process = _workspace(tmp_path)
     (root / "notes").mkdir()
@@ -147,16 +160,34 @@ def test_write_creates_parents_and_honors_overwrite(tmp_path: Path) -> None:
     assert (root / "notes" / "decision.md").read_text(encoding="utf-8") == "second"
 
 
-def test_write_succeeds_when_volume_rejects_directory_fsync(
+def test_workspace_mutation_leaves_attachment_and_artifact_siblings_untouched(tmp_path: Path) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    volume_root = root.parents[2]
+    attachments = volume_root / "attachments"
+    artifacts = volume_root / "artifacts"
+    attachments.mkdir()
+    artifacts.mkdir()
+    (attachments / "input.txt").write_text("input", encoding="utf-8")
+    (artifacts / "published.txt").write_text("published", encoding="utf-8")
+
+    workspace.write_text("date.txt", "2026-07-20", overwrite=False)
+
+    assert (root / "date.txt").read_text(encoding="utf-8") == "2026-07-20"
+    assert (attachments / "input.txt").read_text(encoding="utf-8") == "input"
+    assert (artifacts / "published.txt").read_text(encoding="utf-8") == "published"
+
+
+def test_overwrite_reports_parent_directory_fsync_warning_after_publication(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     workspace, _sandbox, root, _process = _workspace(tmp_path)
+    (root / "date.txt").write_text("previous", encoding="utf-8")
     original_fsync = os.fsync
 
     def volume_fsync(fd: int) -> None:
         if os.path.isdir(f"/dev/fd/{fd}"):
-            raise OSError("directory fsync unsupported")
+            raise OSError(errno.EPERM, "directory fsync unsupported")
         original_fsync(fd)
 
     monkeypatch.setattr(os, "fsync", volume_fsync)
@@ -164,6 +195,35 @@ def test_write_succeeds_when_volume_rejects_directory_fsync(
     workspace.write_text("date.txt", "2026-07-19", overwrite=True)
 
     assert (root / "date.txt").read_text(encoding="utf-8") == "2026-07-19"
+    assert workspace.last_cleanup_warning == {"errno": errno.EPERM}
+
+
+def test_failed_overwrite_preserves_previous_contents(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    target = root / "date.txt"
+    target.write_text("previous", encoding="utf-8")
+    original_fsync = os.fsync
+    fsync_calls = 0
+
+    def fail_staged_file_fsync(fd: int) -> None:
+        nonlocal fsync_calls
+        fsync_calls += 1
+        if fsync_calls == 1:
+            raise OSError(errno.EIO, "simulated staged-write failure")
+        original_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_staged_file_fsync)
+
+    from fleet_rlm.daytona.workspace_fs import WorkspaceStorageError
+
+    with pytest.raises(WorkspaceStorageError):
+        workspace.write_text("date.txt", "replacement", overwrite=True)
+
+    assert target.read_text(encoding="utf-8") == "previous"
+    assert not list(root.glob(".fleet-write-*"))
 
 
 def test_first_write_succeeds_when_volume_rejects_hard_links(
@@ -173,13 +233,158 @@ def test_first_write_succeeds_when_volume_rejects_hard_links(
     workspace, _sandbox, root, _process = _workspace(tmp_path)
 
     def unsupported_link(*_args: object, **_kwargs: object) -> None:
-        raise OSError(errno.EOPNOTSUPP, "hard links unsupported")
+        raise OSError(errno.EPERM, "hard links unsupported")
 
     monkeypatch.setattr(os, "link", unsupported_link)
 
     workspace.write_text("date.txt", "2026-07-19", overwrite=False)
 
     assert (root / "date.txt").read_text(encoding="utf-8") == "2026-07-19"
+
+
+@pytest.mark.parametrize("error_number", [errno.EACCES, errno.EXDEV, errno.ENOSPC, errno.EIO])
+def test_unrelated_link_errors_do_not_trigger_exclusive_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error_number: int,
+) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+
+    def rejected_link(*_args: object, **_kwargs: object) -> None:
+        raise OSError(error_number, "link rejected")
+
+    monkeypatch.setattr(os, "link", rejected_link)
+
+    from fleet_rlm.daytona.workspace_fs import WorkspaceStorageError
+
+    with pytest.raises(WorkspaceStorageError):
+        workspace.write_text("date.txt", "2026-07-19", overwrite=False)
+    assert not (root / "date.txt").exists()
+    assert not list(root.glob(".fleet-write-*"))
+
+
+def test_link_conflict_race_preserves_file_exists_error_and_cleans_temp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+
+    def conflicting_link(*_args: object, **_kwargs: object) -> None:
+        raise OSError(errno.EEXIST, "destination appeared during publication")
+
+    monkeypatch.setattr(os, "link", conflicting_link)
+
+    with pytest.raises(FileExistsError):
+        workspace.write_text("date.txt", "2026-07-19", overwrite=False)
+    assert not (root / "date.txt").exists()
+    assert not list(root.glob(".fleet-write-*"))
+
+
+def test_hard_link_publication_path_is_retained_on_capable_filesystem(tmp_path: Path) -> None:
+    workspace, _sandbox, root, process = _workspace(tmp_path)
+
+    workspace.write_text("date.txt", "2026-07-19", overwrite=False)
+
+    assert (root / "date.txt").read_text(encoding="utf-8") == "2026-07-19"
+    assert "os.link(" in process.calls[0]
+
+
+def test_partial_write_and_eintr_cleanup_destination(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    original_write = os.write
+    state = {"interrupted": False}
+
+    def partial_write(fd: int, data: bytes) -> int:
+        if not state["interrupted"]:
+            state["interrupted"] = True
+            raise InterruptedError
+        return original_write(fd, data[:1])
+
+    monkeypatch.setattr(os, "write", partial_write)
+    workspace.write_text("date.txt", "partial", overwrite=False)
+
+    assert (root / "date.txt").read_text(encoding="utf-8") == "partial"
+    assert not list(root.glob(".fleet-write-*"))
+
+
+def test_partial_failure_fsync_cleans_destination_and_temporary_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    original_fsync = os.fsync
+    fsync_calls = 0
+
+    def fail_direct_file_fsync(fd: int) -> None:
+        nonlocal fsync_calls
+        fsync_calls += 1
+        if fsync_calls == 2:
+            raise OSError(errno.EIO, "simulated direct-create failure")
+        original_fsync(fd)
+
+    monkeypatch.setattr(
+        os,
+        "link",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(errno.EPERM, "hard links unsupported")),
+    )
+    monkeypatch.setattr(os, "fsync", fail_direct_file_fsync)
+
+    from fleet_rlm.daytona.workspace_fs import WorkspaceStorageError
+
+    with pytest.raises(WorkspaceStorageError):
+        workspace.write_text("date.txt", "partial", overwrite=False)
+
+    assert not (root / "date.txt").exists()
+    assert not list(root.glob(".fleet-write-*"))
+
+
+def test_partial_failure_does_not_remove_replacement_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    original_fsync = os.fsync
+    fsync_calls = 0
+    original_stat = os.stat
+    replaced = False
+    stat_calls: list[tuple[object, dict[str, object]]] = []
+
+    def fail_direct_file_fsync(fd: int) -> None:
+        nonlocal fsync_calls
+        fsync_calls += 1
+        if fsync_calls == 2:
+            raise OSError(errno.EIO, "simulated direct-create failure")
+        original_fsync(fd)
+
+    def replace_before_cleanup(path: str | bytes, *args: object, **kwargs: object) -> os.stat_result:
+        nonlocal replaced
+        stat_calls.append((path, kwargs))
+        result = original_stat(path, *args, **kwargs)
+        if not replaced and path == "date.txt" and kwargs.get("dir_fd") is not None:
+            replacement = root / "replacement.txt"
+            replacement.write_text("safe", encoding="utf-8")
+            (root / "date.txt").unlink()
+            replacement.rename(root / "date.txt")
+            replaced = True
+            result = original_stat(path, *args, **kwargs)
+        return result
+
+    monkeypatch.setattr(
+        os,
+        "link",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(errno.EPERM, "hard links unsupported")),
+    )
+    monkeypatch.setattr(os, "fsync", fail_direct_file_fsync)
+    monkeypatch.setattr(os, "stat", replace_before_cleanup)
+
+    from fleet_rlm.daytona.workspace_fs import WorkspaceStorageError
+
+    with pytest.raises(WorkspaceStorageError):
+        workspace.write_text("date.txt", "partial", overwrite=False)
+
+    assert replaced, (fsync_calls, stat_calls)
+    assert (root / "date.txt").read_text(encoding="utf-8") == "safe"
+    assert not list(root.glob(".fleet-write-*"))
 
 
 def test_first_write_creates_missing_workspace_root(tmp_path: Path) -> None:

@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import dspy
 
+from fleet_rlm.rlm.errors import TurnNoProgress
 from fleet_rlm.rlm.events import JsonValue, ObservationDetail, ToolCompleted, ToolFailed, ToolStarted, WarningEvent
 from fleet_rlm.rlm.tool_guards import TurnToolGuards
 
@@ -134,6 +135,7 @@ def observe_tool(
             warning = guards.completed(str(source.name), arguments, result)
             if warning is not None:
                 observer(WarningEvent(warning, "tool_no_progress"))
+                raise TurnNoProgress
         observer(ToolCompleted(call_id, str(source.name), event_view.output(result)))
         return result
 
