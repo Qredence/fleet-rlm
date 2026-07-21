@@ -316,7 +316,7 @@ async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_o
     from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult
 
     class FakeWorkspace:
-        last_cleanup_warning = None
+        last_warnings: tuple[dict[str, object], ...] = ()
 
         def __init__(self) -> None:
             self.values: dict[str, str] = {}

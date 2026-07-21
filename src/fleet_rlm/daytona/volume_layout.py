@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from importlib.resources import files as resource_files
+from importlib.resources.abc import Traversable
+from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError, map_provider_error
-from fleet_rlm.daytona.paths import VolumePaths
+from fleet_rlm.daytona.paths import VolumePaths, resolve_under_root
 
 _DIRECTORY_MODE = "700"
 
@@ -81,6 +84,7 @@ def ensure_volume_layout(
         fs,
         required_volume_directories(paths, session_id=session_id, run_id=run_id),
     )
+    _ensure_skill_tree(fs, paths.skills_root())
 
 
 def ensure_shared_volume_layout(sandbox: Any, paths: VolumePaths) -> None:
@@ -88,6 +92,7 @@ def ensure_shared_volume_layout(sandbox: Any, paths: VolumePaths) -> None:
     fs = _sandbox_filesystem(sandbox)
     _require_directory(fs, str(paths.mount_path), create=False)
     _ensure_directories(fs, shared_volume_directories(paths))
+    _ensure_skill_tree(fs, paths.skills_root())
 
 
 def ensure_session_volume_layout(sandbox: Any, paths: VolumePaths, *, session_id: UUID) -> None:
@@ -123,6 +128,86 @@ def _sandbox_filesystem(sandbox: Any) -> Any:
 def _ensure_directories(fs: Any, directories: Iterable[str]) -> None:
     for directory in directories:
         _require_directory(fs, directory, create=True)
+
+
+def _ensure_skill_tree(fs: Any, destination_root: PurePosixPath) -> None:
+    """Materialize the installed Skill package in the mounted Volume.
+
+    The host-side Skill catalog remains the public registry, while this copy
+    makes the same package resources available to Daytona code through the
+    durable Workspace Volume.  Package resources are used instead of a host
+    source path so this works from both a checkout and an installed wheel.
+    """
+    try:
+        source_root = resource_files("fleet_rlm.skills")
+        for relative_parts, data in _iter_resource_files(source_root):
+            _ensure_skill_parent_directories(fs, destination_root, relative_parts[:-1])
+            destination = str(resolve_under_root(destination_root, *relative_parts))
+            existing = _file_info(fs, destination)
+            if existing is not None and bool(getattr(existing, "is_dir", False)):
+                raise DaytonaAdapterError(
+                    message="Workspace Volume Skill asset conflicts with a directory",
+                    cause_type="SkillTreeConflict",
+                )
+            try:
+                fs.upload_file(data, destination)
+            except Exception as exc:  # noqa: BLE001 - SDK exception types vary
+                raise map_provider_error(exc) from exc
+            uploaded = _file_info(fs, destination)
+            if uploaded is None or bool(getattr(uploaded, "is_dir", False)):
+                raise DaytonaAdapterError(
+                    message="Workspace Volume Skill asset was not uploaded",
+                    cause_type="SkillTreeUploadFailed",
+                )
+    except DaytonaAdapterError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - package resource implementations vary
+        raise DaytonaAdapterError(
+            message="Bundled Skill resources are unavailable",
+            cause_type="SkillTreeUnavailable",
+        ) from exc
+
+
+def _iter_resource_files(
+    resource: Traversable,
+    relative_parts: tuple[str, ...] = (),
+) -> Iterable[tuple[tuple[str, ...], bytes]]:
+    for child in sorted(resource.iterdir(), key=lambda item: item.name):
+        name = child.name
+        if name == "__pycache__" or name.endswith(".pyc"):
+            continue
+        if not name or name in {".", ".."} or "/" in name or "\\" in name or "\x00" in name:
+            raise DaytonaAdapterError(
+                message="Bundled Skill resource has an unsafe name",
+                cause_type="SkillTreeUnsafePath",
+            )
+        child_parts = (*relative_parts, name)
+        if child.is_dir():
+            yield from _iter_resource_files(child, child_parts)
+        elif child.is_file():
+            try:
+                yield child_parts, child.read_bytes()
+            except Exception as exc:  # noqa: BLE001 - resource implementations vary
+                raise DaytonaAdapterError(
+                    message="Bundled Skill resource could not be read",
+                    cause_type="SkillTreeUnavailable",
+                ) from exc
+        else:
+            raise DaytonaAdapterError(
+                message="Bundled Skill resource has an unsupported entry",
+                cause_type="SkillTreeInvalid",
+            )
+
+
+def _ensure_skill_parent_directories(
+    fs: Any,
+    destination_root: PurePosixPath,
+    relative_parts: tuple[str, ...],
+) -> None:
+    current = destination_root
+    for part in relative_parts:
+        current = resolve_under_root(current, part)
+        _require_directory(fs, str(current), create=True)
 
 
 def _require_directory(fs: Any, path: str, *, create: bool) -> None:

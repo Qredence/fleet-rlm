@@ -52,6 +52,14 @@ def _assert_complete_layout(sandbox: object, *, mount: str, session_id: object, 
     for path in required:
         info = filesystem.get_file_info(path)
         assert info.is_dir, path
+    for path in (
+        f"{mount}/skills/__init__.py",
+        f"{mount}/skills/catalog.py",
+        f"{mount}/skills/bundled/workspace-files/SKILL.md",
+        f"{mount}/skills/bundled/long-context/references/chunking-strategies.md",
+    ):
+        info = filesystem.get_file_info(path)
+        assert not info.is_dir, path
 
 
 def _link_diagnostic(sandbox: object, *, volume_root: str, workspace_root: str) -> dict[str, object]:
@@ -168,6 +176,7 @@ async def test_session_workspace_survives_sandbox_replacement() -> None:
         assert written.byte_size == len(b"durable across replacement")
         today = datetime.now(UTC).date().isoformat()
         first_workspace.write_text("date.txt", today, overwrite=True)
+        assert first_workspace.read_text("date.txt", max_bytes=100) == today
         assert first_workspace.read_text("date.txt", max_bytes=100) == today
         first_workspace.write_text("date.txt", "verified", overwrite=True)
         assert first_workspace.read_text("date.txt", max_bytes=100) == "verified"

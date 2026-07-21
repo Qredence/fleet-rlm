@@ -51,8 +51,10 @@ class MemoryWorkspace:
 
 class Capabilities:
     def __init__(self, workspace: MemoryWorkspace) -> None:
+        workspace_host = WorkspaceToolHost(workspace, max_file_bytes=1024)
         self.spec = RLMExecutionSpec(
-            tools=WorkspaceToolHost(workspace, max_file_bytes=1024).as_tools(),
+            tools=workspace_host.as_tools(),
+            tool_event_views=workspace_host.event_views(),
             workspace=DAYTONA_WORKSPACE_CAPABILITY,
         )
 
@@ -94,6 +96,24 @@ class WorkspaceFlowFactory:
                     assert interpreter.variables == {}
                     result = tools["read_workspace_text"](path="notes/decision.md", max_chars=100)
                     return dspy.Prediction(answer=result, trajectory=[])
+                if request.startswith("roundtrip"):
+                    today = "2026-07-21"
+                    tools["write_workspace_text"](
+                        path="workspace/date.txt",
+                        content=today,
+                        overwrite=True,
+                    )
+                    first = tools["read_workspace_text"](path="workspace/date.txt", max_chars=100)
+                    second = tools["read_workspace_text"](path="workspace/date.txt", max_chars=100)
+                    assert first == second == today
+                    tools["write_workspace_text"](
+                        path="workspace/date.txt",
+                        content="verified",
+                        overwrite=True,
+                    )
+                    final = tools["read_workspace_text"](path="workspace/date.txt", max_chars=100)
+                    assert final == "verified"
+                    return dspy.Prediction(answer=final, trajectory=[])
                 if request.startswith(("unresolved", "repaired")):
                     tools["write_workspace_text"](path="notes/target.md", content="old", overwrite=False)
                     try:
@@ -129,7 +149,12 @@ async def _run(
     async def not_cancelled() -> bool:
         return False
 
-    task_request = f"{request} notes/target.md" if request in {"unresolved", "repaired"} else request
+    if request in {"unresolved", "repaired"}:
+        task_request = f"{request} notes/target.md"
+    elif request == "roundtrip":
+        task_request = "roundtrip workspace/date.txt"
+    else:
+        task_request = request
     context = RLMExecutionContext(
         run_id=uuid4(),
         session_id=workspace.session_id,
@@ -201,3 +226,12 @@ async def test_three_identical_tool_results_fail_the_turn_for_no_progress() -> N
     assert outcome is not None
     assert outcome.terminal_status == "failed"
     assert outcome.public_error_message == "Turn stopped after repeated tool calls made no progress"
+
+
+@pytest.mark.asyncio
+async def test_workspace_date_roundtrip_allows_repeated_reads_and_overwrite() -> None:
+    outcome = await _run(WorkspaceFlowFactory(), MemoryWorkspace(), "roundtrip")
+
+    assert outcome is not None and outcome.succeeded
+    assert outcome.prediction is not None
+    assert outcome.prediction.display_text == "verified"

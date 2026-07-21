@@ -39,21 +39,30 @@ class _FakeVolumeClient:
 
 
 class _FakeFileInfo:
-    is_dir = True
+    def __init__(self, *, is_dir: bool) -> None:
+        self.is_dir = is_dir
 
 
 class _FakeFilesystem:
     def __init__(self, mount_path: str) -> None:
         self.directories = {mount_path}
+        self.files: set[str] = set()
 
     def get_file_info(self, path: str) -> _FakeFileInfo:
+        if path in self.directories:
+            return _FakeFileInfo(is_dir=True)
+        if path in self.files:
+            return _FakeFileInfo(is_dir=False)
         if path not in self.directories:
             raise FileNotFoundError(path)
-        return _FakeFileInfo()
 
     def create_folder(self, path: str, mode: str) -> None:
         del mode
         self.directories.add(path)
+
+    def upload_file(self, data: bytes, path: str) -> None:
+        del data
+        self.files.add(path)
 
 
 class _FakeSandbox:

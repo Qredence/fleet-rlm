@@ -47,6 +47,7 @@ class _FakeFilesystem:
     def __init__(self, mount_path: str | None) -> None:
         self.directories = {mount_path} if mount_path else set()
         self.files: set[str] = set()
+        self.uploaded: dict[str, bytes] = {}
         self.created: list[tuple[str, str]] = []
         self.info_failures: dict[str, BaseException] = {}
 
@@ -63,6 +64,10 @@ class _FakeFilesystem:
     def create_folder(self, path: str, mode: str) -> None:
         self.directories.add(path)
         self.created.append((path, mode))
+
+    def upload_file(self, data: bytes, path: str) -> None:
+        self.files.add(path)
+        self.uploaded[path] = bytes(data)
 
 
 class _FakeSandbox:
@@ -339,7 +344,7 @@ async def test_acquire_provisions_complete_workspace_volume_layout() -> None:
     root = "/home/daytona/fleet"
     session = f"{root}/sessions/{session_id}"
     run = f"{session}/runs/{run_id}"
-    assert sandbox.fs.directories == {
+    expected_layout = {
         root,
         f"{root}/skills",
         f"{root}/memory",
@@ -356,11 +361,16 @@ async def test_acquire_provisions_complete_workspace_volume_layout() -> None:
         f"{run}/artifacts",
         f"{run}/attachments",
     }
+    assert expected_layout <= sandbox.fs.directories
     assert {path for path, _mode in sandbox.fs.created} == sandbox.fs.directories - {root}
     assert {mode for _path, mode in sandbox.fs.created} == {"700"}
     created_paths = [path for path, _mode in sandbox.fs.created]
     assert created_paths.index(session) < created_paths.index(f"{session}/workspace")
     assert created_paths.index(run) < created_paths.index(f"{run}/attachments")
+    assert sandbox.fs.uploaded["/home/daytona/fleet/skills/__init__.py"]
+    assert sandbox.fs.uploaded["/home/daytona/fleet/skills/catalog.py"]
+    assert sandbox.fs.uploaded["/home/daytona/fleet/skills/bundled/workspace-files/SKILL.md"]
+    assert sandbox.fs.uploaded["/home/daytona/fleet/skills/bundled/long-context/references/chunking-strategies.md"]
 
 
 @pytest.mark.asyncio

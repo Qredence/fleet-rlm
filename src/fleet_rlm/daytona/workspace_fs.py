@@ -17,6 +17,23 @@ from fleet_rlm.files.workspace_validation import normalize_workspace_path
 # consulted only around that one link operation; EPERM from any other I/O
 # operation remains a hard failure.
 _UNSUPPORTED_LINK_ERRNOS = frozenset({errno.EPERM})
+# Daytona-mounted Volumes may also report ENOSYS when replacement is not
+# implemented by the provider filesystem.  Keep this allowlist scoped to the
+# atomic replacement operation; ENOSYS from any other I/O remains a hard error.
+# The adapter runs on macOS during local development but emits code for the
+# Linux Daytona Sandbox.  Bake both host errno constants (for local unit tests)
+# and explicit Linux numbers: ENOSYS=38, EOPNOTSUPP/ENOTSUP=95.
+_UNSUPPORTED_REPLACE_ERRNOS = frozenset(
+    {
+        errno.EPERM,
+        errno.EXDEV,
+        errno.EOPNOTSUPP,
+        getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+        errno.ENOSYS,
+        38,
+        95,
+    }
+)
 
 
 class WorkspaceStorageError(OSError):
@@ -88,15 +105,15 @@ class DaytonaSessionWorkspaceFS:
         self._volume_root = str(volume_path)
         self._root = str(root_path)
         self._max_file_bytes = int(max_file_bytes)
-        self._last_cleanup_warning: dict[str, object] | None = None
+        self._last_warnings: tuple[dict[str, object], ...] = ()
 
     @property
     def root(self) -> str:
         return self._root
 
     @property
-    def last_cleanup_warning(self) -> dict[str, object] | None:
-        return self._last_cleanup_warning
+    def last_warnings(self) -> tuple[dict[str, object], ...]:
+        return self._last_warnings
 
     def list_entries(self, path: str, *, limit: int = 100) -> WorkspaceListResult:
         relative = normalize_workspace_path(path, allow_root=True)
@@ -174,8 +191,12 @@ class DaytonaSessionWorkspaceFS:
             overwrite=overwrite,
             content_b64=base64.b64encode(data).decode("ascii"),
         )
-        warning = payload.get("cleanup_warning")
-        self._last_cleanup_warning = cast(dict[str, object], warning) if isinstance(warning, dict) else None
+        raw_warnings = payload.get("warnings")
+        self._last_warnings = (
+            tuple(cast(dict[str, object], item) for item in raw_warnings if isinstance(item, dict))
+            if isinstance(raw_warnings, list)
+            else ()
+        )
         entry = payload.get("entry")
         if not isinstance(entry, dict):
             raise RuntimeError("workspace write returned invalid entry")
@@ -212,6 +233,10 @@ class DaytonaSessionWorkspaceFS:
                 "class UnsafePath(Exception):",
                 "    pass",
                 "class StorageError(Exception):",
+                "    def __init__(self, errno_value):",
+                "        super().__init__(errno_value)",
+                "        self.errno = errno_value",
+                "class ReplacementUnsupported(Exception):",
                 "    def __init__(self, errno_value):",
                 "        super().__init__(errno_value)",
                 "        self.errno = errno_value",
@@ -320,6 +345,8 @@ class DaytonaSessionWorkspaceFS:
                 "    except (FileNotFoundError, FileExistsError):",
                 "        raise",
                 "    except OSError as exc:",
+                f"        if exc.errno in {sorted(_UNSUPPORTED_REPLACE_ERRNOS)!r}:",
+                "            raise ReplacementUnsupported(exc.errno) from exc",
                 "        raise StorageError(exc.errno) from exc",
                 "    finally:",
                 "        if fd is not None:",
@@ -403,6 +430,53 @@ class DaytonaSessionWorkspaceFS:
                 "                pass",
                 "            else:",
                 "                temporary_removed = True",
+                "def read_existing(parent_fd, name, max_bytes):",
+                "    fd = None",
+                "    try:",
+                "        fd = os.open(name, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0), dir_fd=parent_fd)",
+                "        data = os.read(fd, max_bytes + 1)",
+                "        if len(data) > max_bytes:",
+                "            raise StorageError(errno.EFBIG)",
+                "        return data",
+                "    except OSError as exc:",
+                "        if isinstance(exc, StorageError):",
+                "            raise",
+                "        raise StorageError(exc.errno) from exc",
+                "    finally:",
+                "        if fd is not None:",
+                "            os.close(fd)",
+                "def overwrite_existing_direct(parent_fd, name, payload, previous):",
+                "    fd = None",
+                "    cleanup_errno = None",
+                "    try:",
+                "        fd = os.open(name, os.O_WRONLY | os.O_TRUNC | getattr(os, 'O_NOFOLLOW', 0), dir_fd=parent_fd)",
+                "        write_all(fd, payload)",
+                "    except OSError as exc:",
+                "        if fd is not None:",
+                "            os.close(fd)",
+                "            fd = None",
+                "        try:",
+                "            restore_fd = os.open(name, os.O_WRONLY | os.O_TRUNC | getattr(os, 'O_NOFOLLOW', 0), dir_fd=parent_fd)",
+                "            try:",
+                "                write_all(restore_fd, previous)",
+                "                os.fsync(restore_fd)",
+                "            finally:",
+                "                os.close(restore_fd)",
+                "        except OSError as restore_exc:",
+                "            raise StorageError(restore_exc.errno) from restore_exc",
+                "        raise StorageError(exc.errno) from exc",
+                "    try:",
+                "        os.fsync(fd)",
+                "    except OSError as exc:",
+                "        cleanup_errno = exc.errno",
+                "    finally:",
+                "        if fd is not None:",
+                "            os.close(fd)",
+                "    try:",
+                "        fsync_directory(parent_fd)",
+                "    except StorageError as exc:",
+                "        cleanup_errno = exc.errno",
+                "    return os.stat(name, dir_fd=parent_fd, follow_symlinks=False), cleanup_errno",
                 "try:",
                 "    try:",
                 "        base_fds, root_fd = open_chain(create=operation == 'write')",
@@ -478,6 +552,8 @@ class DaytonaSessionWorkspaceFS:
                 "        payload = base64.b64decode(content_b64.encode('ascii'))",
                 "        if len(payload) > max_bytes:",
                 "            fail('too_large')",
+                "        fallback_overwrite = False",
+                "        warnings = []",
                 "        parent_fds, parent_fd = open_parent(root_fd, relative_parts[:-1], create=True)",
                 "        try:",
                 "            try:",
@@ -491,17 +567,26 @@ class DaytonaSessionWorkspaceFS:
                 "                    fail('is_directory')",
                 "                if not overwrite:",
                 "                    fail('conflict')",
-                "                written_stat = replace_existing(parent_fd, relative_parts[-1], payload)",
+                "                try:",
+                "                    written_stat = replace_existing(parent_fd, relative_parts[-1], payload)",
+                "                except ReplacementUnsupported:",
+                "                    previous = read_existing(parent_fd, relative_parts[-1], max_bytes)",
+                "                    written_stat = overwrite_existing_direct(parent_fd, relative_parts[-1], payload, previous)",
+                "                    fallback_overwrite = True",
                 "            else:",
                 "                written_stat = publish_new(parent_fd, relative_parts[-1], payload)",
                 "        finally:",
                 "            close_all(parent_fds)",
                 "        cleanup_errno = None",
+                "        if fallback_overwrite:",
+                "            warnings.append({'code': 'non_atomic_overwrite'})",
                 "        if type(written_stat) is tuple and len(written_stat) == 2:",
                 "            written_stat, cleanup_errno = written_stat",
                 "        response = {'ok': True, 'entry': entry_for(written_stat, relative)}",
                 "        if cleanup_errno is not None:",
-                "            response['cleanup_warning'] = {'errno': cleanup_errno}",
+                "            warnings.append({'code': 'cleanup_failed', 'errno': cleanup_errno})",
+                "        if warnings:",
+                "            response['warnings'] = warnings",
                 "        respond(response)",
                 "    fail('unsupported')",
                 "except FileNotFoundError:",

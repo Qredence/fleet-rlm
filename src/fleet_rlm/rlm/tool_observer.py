@@ -42,6 +42,7 @@ class ToolEventView:
 
     input_projection: ToolInputProjection = _empty_input
     output_projection: ToolOutputProjection = _empty_output
+    allow_repeated_identical: bool = False
 
     @classmethod
     def metadata_only(cls) -> ToolEventView:
@@ -135,7 +136,8 @@ def observe_tool(
             warning = guards.completed(str(source.name), arguments, result)
             if warning is not None:
                 observer(WarningEvent(warning, "tool_no_progress"))
-                raise TurnNoProgress
+                if not event_view.allow_repeated_identical:
+                    raise TurnNoProgress
         observer(ToolCompleted(call_id, str(source.name), event_view.output(result)))
         return result
 

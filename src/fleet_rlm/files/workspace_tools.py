@@ -115,9 +115,9 @@ class WorkspaceToolHost:
                     "namespace": SESSION_WORKSPACE_NAMESPACE,
                     **_entry(self._workspace.write_text(path, content, overwrite=overwrite)),
                 }
-                warning = getattr(self._workspace, "last_cleanup_warning", None)
-                if isinstance(warning, Mapping):
-                    result["warnings"] = [{"code": "cleanup_failed", **dict(warning)}]
+                warnings = getattr(self._workspace, "last_warnings", None)
+                if isinstance(warnings, tuple) and warnings:
+                    result["warnings"] = [dict(item) for item in warnings if isinstance(item, Mapping)]
                 return result
             except Exception as exc:  # noqa: BLE001 - public error is normalized
                 _raise_tool_error(exc)
@@ -240,6 +240,7 @@ class WorkspaceToolHost:
                     output_projection=lambda result: (
                         {"ok": True, "namespace": SESSION_WORKSPACE_NAMESPACE} if isinstance(result, str) else {}
                     ),
+                    allow_repeated_identical=True,
                 ),
                 "write_workspace_text": ToolEventView(
                     input_projection=write_input,

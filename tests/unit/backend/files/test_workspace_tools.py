@@ -8,6 +8,8 @@ import dspy
 import pytest
 
 from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult
+from fleet_rlm.rlm.events import ToolFailed, WarningEvent
+from fleet_rlm.rlm.tool_guards import TurnToolGuards
 from fleet_rlm.rlm.tool_observer import observe_tool
 
 
@@ -163,6 +165,23 @@ def test_workspace_event_views_expose_metadata_without_file_bodies_or_entries() 
         )
     assert observed[0].input == {}
     assert "/home/daytona" not in str(observed)
+
+
+def test_repeated_workspace_reads_are_idempotent_but_still_observed() -> None:
+    workspace, tools = _tools()
+    workspace.files["date.txt"] = "2026-07-21"
+    from fleet_rlm.files.workspace_tools import WorkspaceToolHost
+
+    host = WorkspaceToolHost(workspace, max_file_bytes=32)
+    view = host.event_views()["read_workspace_text"]
+    observed: list[object] = []
+    guards = TurnToolGuards()
+    read = observe_tool(tools["read_workspace_text"], observed.append, view, guards=guards)
+
+    assert read(path="date.txt", max_chars=32) == "2026-07-21"
+    assert read(path="date.txt", max_chars=32) == "2026-07-21"
+    assert sum(isinstance(item, WarningEvent) for item in observed) == 1
+    assert not any(isinstance(item, ToolFailed) for item in observed)
 
 
 def test_raises_stable_safe_errors_without_exception_details() -> None:

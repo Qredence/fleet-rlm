@@ -160,6 +160,84 @@ def test_write_creates_parents_and_honors_overwrite(tmp_path: Path) -> None:
     assert (root / "notes" / "decision.md").read_text(encoding="utf-8") == "second"
 
 
+@pytest.mark.parametrize("replace_errno", [errno.EPERM, errno.ENOSYS, 38, 95])
+def test_overwrite_falls_back_when_volume_rejects_atomic_replace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    replace_errno: int,
+) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    target = root / "date.txt"
+    target.write_text("previous", encoding="utf-8")
+
+    def unsupported_replace(*_args: object, **_kwargs: object) -> None:
+        raise OSError(replace_errno, "rename unsupported")
+
+    monkeypatch.setattr(os, "replace", unsupported_replace)
+
+    workspace.write_text("date.txt", "verified", overwrite=True)
+
+    assert target.read_text(encoding="utf-8") == "verified"
+    assert workspace.last_warnings == ({"code": "non_atomic_overwrite"},)
+    assert not list(root.glob(".fleet-write-*"))
+
+
+def test_fallback_overwrite_restores_previous_contents_after_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    target = root / "date.txt"
+    target.write_text("previous", encoding="utf-8")
+
+    monkeypatch.setattr(
+        os,
+        "replace",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(errno.EXDEV, "rename unsupported")),
+    )
+    original_write = os.write
+    write_calls = 0
+
+    def fail_first_write(fd: int, data: bytes) -> int:
+        nonlocal write_calls
+        write_calls += 1
+        if write_calls == 2:
+            raise OSError(errno.EIO, "simulated overwrite failure")
+        return original_write(fd, data)
+
+    monkeypatch.setattr(os, "write", fail_first_write)
+
+    from fleet_rlm.daytona.workspace_fs import WorkspaceStorageError
+
+    with pytest.raises(WorkspaceStorageError):
+        workspace.write_text("date.txt", "replacement", overwrite=True)
+
+    assert target.read_text(encoding="utf-8") == "previous"
+    assert write_calls == 3
+    assert not list(root.glob(".fleet-write-*"))
+
+
+def test_unrelated_atomic_replace_error_remains_unsupported_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    target = root / "date.txt"
+    target.write_text("previous", encoding="utf-8")
+    monkeypatch.setattr(
+        os,
+        "replace",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(errno.EIO, "rename failed")),
+    )
+
+    from fleet_rlm.daytona.workspace_fs import WorkspaceStorageError
+
+    with pytest.raises(WorkspaceStorageError):
+        workspace.write_text("date.txt", "replacement", overwrite=True)
+
+    assert target.read_text(encoding="utf-8") == "previous"
+
+
 def test_workspace_mutation_leaves_attachment_and_artifact_siblings_untouched(tmp_path: Path) -> None:
     workspace, _sandbox, root, _process = _workspace(tmp_path)
     volume_root = root.parents[2]
@@ -195,7 +273,46 @@ def test_overwrite_reports_parent_directory_fsync_warning_after_publication(
     workspace.write_text("date.txt", "2026-07-19", overwrite=True)
 
     assert (root / "date.txt").read_text(encoding="utf-8") == "2026-07-19"
-    assert workspace.last_cleanup_warning == {"errno": errno.EPERM}
+    assert workspace.last_warnings == ({"code": "cleanup_failed", "errno": errno.EPERM},)
+
+
+def test_fallback_overwrite_keeps_new_content_when_file_fsync_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    target = root / "date.txt"
+    target.write_text("previous", encoding="utf-8")
+    monkeypatch.setattr(
+        os,
+        "replace",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(errno.EXDEV, "rename unsupported")),
+    )
+    original_fsync = os.fsync
+    file_fsync_calls = 0
+
+    def selective_fsync(fd: int) -> None:
+        nonlocal file_fsync_calls
+        if os.path.isdir(f"/dev/fd/{fd}"):
+            original_fsync(fd)
+            return
+        file_fsync_calls += 1
+        if file_fsync_calls == 1:
+            original_fsync(fd)
+            return
+        raise OSError(errno.EPERM, "file fsync unsupported")
+
+    monkeypatch.setattr(os, "fsync", selective_fsync)
+
+    workspace.write_text("date.txt", "verified", overwrite=True)
+
+    assert target.read_text(encoding="utf-8") == "verified"
+    assert workspace.last_warnings == (
+        {"code": "non_atomic_overwrite"},
+        {"code": "cleanup_failed", "errno": errno.EPERM},
+    )
+    assert file_fsync_calls >= 2
+    assert not list(root.glob(".fleet-write-*"))
 
 
 def test_failed_overwrite_preserves_previous_contents(
