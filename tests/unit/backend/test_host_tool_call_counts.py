@@ -15,23 +15,21 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
     from fleet_rlm.files.models import AttachmentRef, StagedAttachment
     from fleet_rlm.files.tools import FileToolHost
     from fleet_rlm.rlm.tool_observer import observe_tool
-    from fleet_rlm.skills.authorize import SkillAuthorizer
-    from fleet_rlm.skills.registry import InMemorySkillRegistry
+    from fleet_rlm.skills.catalog import SkillCatalog
+    from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillResource
     from fleet_rlm.skills.tools import SkillToolHost
 
     user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
-    registry = InMemorySkillRegistry()
-    skill = registry.register(
-        name="repeatable",
-        description="repeatable authorized Skill",
-        instructions="Inspect the authorized input.",
-        resource_bodies={"references/private.md": "private skill resource body"},
+    skill = SkillDefinition(
+        SkillCard(uuid4(), "repeatable", "repeatable authorized Skill", "1.0.0", True),
+        "Inspect the authorized input.",
+        {
+            "references/private.md": SkillResource(
+                "references/private.md", "text/markdown", "private skill resource body"
+            )
+        },
     )
-    skill_host = SkillToolHost(
-        SkillAuthorizer(registry),
-        user_id=user_id,
-        workspace_id=workspace_id,
-    )
+    skill_host = SkillToolHost(SkillCatalog((skill,)))
 
     paths = VolumePaths.from_mount("/mnt/fleet")
     volume = HostVolumeMirror(tmp_path, volume_paths=paths)
@@ -59,7 +57,7 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
         volume_paths=paths,
     )
 
-    skill_results = [skill_host.load_skill(str(skill.id)) for _ in range(20)]
+    skill_results = [skill_host.load_skill(str(skill.card.id)) for _ in range(20)]
     attachment_results = [file_host.read_attachment(str(attachment_id)) for _ in range(20)]
     artifact_results = [file_host.create_artifact("text", f"result {index}") for index in range(20)]
 
@@ -127,25 +125,25 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
         title="Report",
     )
     observe_tool(skill_tools["load_skill"], observed.append, skill_host.event_views()["load_skill"])(
-        skill_id=str(skill.id)
+        skill_id=str(skill.card.id)
     )
     observe_tool(
         skill_tools["read_skill_resource"],
         observed.append,
         skill_host.event_views()["read_skill_resource"],
-    )(skill_id=str(skill.id), resource_path="references/private.md")
+    )(skill_id=str(skill.card.id), resource_path="references/private.md")
 
     assert observed[1].output["filename"] == "input.txt"
     assert observed[3].output == {"ok": True, "kind": "text", "title": "Report", "byte_size": 21}
     assert observed[5].output == {
         "ok": True,
-        "skill_id": str(skill.id),
+        "skill_id": str(skill.card.id),
         "name": "repeatable",
         "version": "1.0.0",
     }
     assert observed[7].output == {
         "ok": True,
-        "skill_id": str(skill.id),
+        "skill_id": str(skill.card.id),
         "path": "references/private.md",
         "encoding": "utf-8",
         "media_type": "text/markdown",
@@ -165,7 +163,7 @@ async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes
     from fleet_rlm.daytona.run_environment import LivePreparedCapabilities
     from fleet_rlm.daytona.volume_fs import HostVolumeMirror
     from fleet_rlm.files.tools import FileToolHost
-    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
+    from fleet_rlm.rlm.context import RLMExecutionSpec
 
     user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
     paths = VolumePaths.from_mount("/mnt/fleet")
@@ -188,7 +186,7 @@ async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes
         def drain_public_events(self) -> list[dict[str, str]]:
             return []
 
-    capabilities = LivePreparedCapabilities(TurnCapabilityBlueprint(), files=files, skills=Skills())
+    capabilities = LivePreparedCapabilities(RLMExecutionSpec(), files=files, skills=Skills())
     await capabilities.aclose()
 
     assert not volume.exists(candidate.staging_path)

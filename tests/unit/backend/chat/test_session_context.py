@@ -15,11 +15,11 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
     from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
     from fleet_rlm.chat.turn_preparation import RunEnvironment, TurnPreparationModule
     from fleet_rlm.files.models import PreparedAttachments
+    from fleet_rlm.rlm.context import RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
-    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
     session_id = uuid4()
     messages = tuple(
@@ -54,7 +54,7 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
             return PreparedAttachments((), ())
 
     class Capabilities:
-        blueprint = TurnCapabilityBlueprint()
+        spec = RLMExecutionSpec()
 
         def drain_public_details(self):
             return ()

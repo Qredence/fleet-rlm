@@ -14,7 +14,7 @@ from fleet_rlm.api.routes.turns import router
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.rlm.events import RuntimeEvent
-from fleet_rlm.skills.authorize import InvalidSkillSelectionError
+from fleet_rlm.skills.errors import InvalidSkillSelectionError
 
 
 class _EmptyOpenedTurn:

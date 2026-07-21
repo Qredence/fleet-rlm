@@ -12,12 +12,11 @@ import pytest
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY, WorkspaceEntry, WorkspaceListResult
 from fleet_rlm.files.workspace_tools import WorkspaceToolError, WorkspaceToolHost
-from fleet_rlm.rlm.context import RLMExecutionContext
+from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.errors import TurnCancelled
 from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.models import TurnAccess
-from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
 
 class MemoryWorkspace:
@@ -52,7 +51,7 @@ class MemoryWorkspace:
 
 class Capabilities:
     def __init__(self, workspace: MemoryWorkspace) -> None:
-        self.blueprint = TurnCapabilityBlueprint(
+        self.spec = RLMExecutionSpec(
             tools=WorkspaceToolHost(workspace, max_file_bytes=1024).as_tools(),
             workspace=DAYTONA_WORKSPACE_CAPABILITY,
         )

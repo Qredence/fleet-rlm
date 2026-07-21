@@ -20,13 +20,11 @@ def skill_card_metadata(card: SkillCard | Any) -> dict[str, Any]:
         "id": _id_str(getattr(card, "id", "")),
         "name": str(getattr(card, "name", "")),
         "description": str(getattr(card, "description", "")),
-        "scope": str(getattr(card, "scope", "")),
+        "scope": "system",
         "version": str(getattr(card, "version", "")),
-        "trust": str(getattr(card, "trust", "")),
-        "affordances": list(getattr(card, "affordances", ()) or ()),
+        "trust": "system",
+        "affordances": [],
         "resources_available": bool(getattr(card, "resources_available", False)),
-        "capability_refs": list(getattr(card, "capability_refs", ()) or ()),
-        "task_contract_ref": getattr(card, "task_contract_ref", None),
     }
 
 

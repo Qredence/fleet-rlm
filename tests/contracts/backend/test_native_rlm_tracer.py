@@ -12,6 +12,7 @@ import pytest
 
 from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+from fleet_rlm.rlm.context import RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import (
     RLMCode,
@@ -27,7 +28,6 @@ from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 from fleet_rlm.sessions.models import TurnAccess
-from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
 
 class _StatefulActionPredictor:
@@ -330,7 +330,7 @@ async def test_runner_completes_native_repair_and_extract_as_prediction_result(f
     from fleet_rlm.rlm.context import RLMExecutionContext
 
     class Capabilities:
-        blueprint = TurnCapabilityBlueprint()
+        spec = RLMExecutionSpec()
 
         def drain_public_details(self):
             return ()

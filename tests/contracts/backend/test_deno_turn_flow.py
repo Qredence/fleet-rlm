@@ -22,7 +22,7 @@ from fleet_rlm.rlm.factory import RLMFactory
 from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.committed_turn import ArtifactPart
 from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
-from fleet_rlm.skills.registry import InMemorySkillRegistry
+from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
 pytestmark = pytest.mark.deno
 
@@ -85,7 +85,7 @@ async def test_deno_turn_commits_once_without_artifact_or_live_dependencies(monk
             options=RLMOptions(max_iterations=1),
             root_lm=forbidden_lm,
             sub_lm=forbidden_lm,
-            skill_registry=InMemorySkillRegistry(),
+            skill_catalog=build_bundled_skill_catalog(),
         ),
         runner=RLMRunner(factory=_DeterministicNativeRLMFactory()),
     )

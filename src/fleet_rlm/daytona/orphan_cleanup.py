@@ -68,9 +68,11 @@ async def cleanup_orphan_bytes(
         if item.modified_at > cutoff:
             skipped_fresh += 1
             continue
-        if _is_committed_artifact(item.path, paths, kept_storage_refs) or _is_active_run_file(
-            item.path, paths, kept_active_runs
-        ) or _is_completed_snapshot(item.path, paths, kept_completed_runs):
+        if (
+            _is_committed_artifact(item.path, paths, kept_storage_refs)
+            or _is_active_run_file(item.path, paths, kept_active_runs)
+            or _is_completed_snapshot(item.path, paths, kept_completed_runs)
+        ):
             retained += 1
             continue
         if _is_artifact_candidate(item.path, paths) or _is_run_scoped_file(item.path, paths):

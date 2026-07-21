@@ -13,7 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
@@ -32,10 +32,7 @@ from fleet_rlm.daytona.bindings import SandboxBinding
 from fleet_rlm.daytona.paths import volume_paths_from_settings
 from fleet_rlm.daytona.volume_fs import DaytonaSandboxVolumeFs
 from fleet_rlm.rlm.tool_observer import ToolEventView
-from fleet_rlm.skills.capabilities import (
-    CapabilityRLMRequirements,
-    TaskContract,
-)
+from fleet_rlm.skills.catalog import stable_skill_id
 from tests.live.backend._database import upgrade_to_head
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(900)]
@@ -56,8 +53,10 @@ class LiveDaytonaMVPResult(dspy.Signature):
     """Return the bounded typed result for the live Daytona proof."""
 
     request: str = dspy.InputField()
-    scenario: str = dspy.InputField()
-    summary: str = dspy.OutputField()
+    session_context: dict = dspy.InputField()
+    skill_cards: list[dict] = dspy.InputField()
+    attachments: list[dict] = dspy.InputField()
+    answer: str = dspy.OutputField()
     findings: list[dict[str, str]] = dspy.OutputField()
 
 
@@ -73,7 +72,7 @@ Write `notes/findings.md` with results and `verification["checksum"]` via
 `write_workspace_text(path="notes/findings.md", content=content, overwrite=False)`;
 require `workspace_result["ok"]`; print `SECOND_ITERATION_READY`. 3) Set
 non-empty string-only `summary`/`findings`; call exactly
-`SUBMIT(summary=summary, findings=findings)` with keywords. No fallback.
+`SUBMIT(answer=summary, findings=findings)` with keywords. No fallback.
 """.strip()
 
 _SECOND_SCENARIO = """
@@ -84,14 +83,28 @@ Require dictionary key `workspace_result["ok"]`; call exactly once
 `reload_verification = verify_workspace_reload(workspace_content=workspace_result["content"], accumulator_present=accumulator_present)`;
 require `reload_verification["ok"]`, set `workspace_checksum`, and print
 `RELOAD_ITERATION_READY`. 2) Set non-empty string-only `summary` and `findings`,
-then call exactly `SUBMIT(summary=summary, findings=findings)` with keywords.
+then call exactly `SUBMIT(answer=summary, findings=findings)` with keywords.
 """.strip()
 
 
-async def _task_inputs(context: Any) -> dict[str, str]:
-    request = str(context.request)
-    scenario = _SECOND_SCENARIO if request.startswith("SECOND") else _FIRST_SCENARIO
-    return {"request": request, "scenario": scenario}
+@dataclass(slots=True)
+class _ProofCapabilityPreparer:
+    delegate: Any
+    tools: tuple[dspy.Tool, ...]
+    event_views: MappingProxyType[str, ToolEventView]
+
+    async def prepare(self, turn: Any, environment: Any, attachments: Any, *, deadline: float) -> Any:
+        prepared = await self.delegate.prepare(turn, environment, attachments, deadline=deadline)
+        scenario = _SECOND_SCENARIO if str(turn.input.text).startswith("SECOND") else _FIRST_SCENARIO
+        prepared.spec = replace(
+            prepared.spec,
+            signature=LiveDaytonaMVPResult.with_instructions(scenario),
+            output_schema_id=_CONTRACT_ID,
+            output_schema_version="1",
+            tools=(*prepared.spec.tools, *self.tools),
+            tool_event_views={**prepared.spec.tool_event_views, **self.event_views},
+        )
+        return prepared
 
 
 @dataclass(slots=True)
@@ -545,71 +558,51 @@ def test_complete_daytona_mvp_through_fastapi(
         name="verify_workspace_reload",
         desc="Verify a fresh interpreter read the durable Session Workspace content.",
     )
-    task_contract = TaskContract(
-        id=_CONTRACT_ID,
-        schema_version="1",
-        signature=LiveDaytonaMVPResult,
-        input_mapper=_task_inputs,
-        text_field="summary",
-    )
-    app.state.capability_registry.register(
-        _CAPABILITY_ID,
-        tools=(token_tool, semantic_tool, reload_tool),
-        tool_event_views=MappingProxyType(
-            {
-                "issue_iteration_token": ToolEventView(
-                    output_projection=lambda _result: {"issued": True},
-                ),
-                "verify_semantic_work": ToolEventView(
-                    input_projection=lambda values: {
-                        "iteration_token_type": type(values.get("iteration_token")).__name__,
-                        "single_result_type": type(values.get("single_result")).__name__,
-                        "batch_results_type": type(values.get("batch_results")).__name__,
-                        "batch_result_item_types": sorted(
-                            {type(value).__name__ for value in values.get("batch_results", ())}
-                        )
-                        if isinstance(values.get("batch_results"), (list, tuple))
-                        else [],
-                        "batch_count": len(values["batch_results"])
-                        if isinstance(values.get("batch_results"), (list, tuple))
-                        else 0,
-                        "accumulator_type": type(values.get("accumulator")).__name__,
-                        "accumulator_item_types": sorted(
-                            {type(value).__name__ for value in values.get("accumulator", ())}
-                        )
-                        if isinstance(values.get("accumulator"), (list, tuple))
-                        else [],
-                        "accumulator_count": len(values["accumulator"])
-                        if isinstance(values.get("accumulator"), (list, tuple))
-                        else 0,
-                    },
-                    output_projection=lambda result: {
-                        "ok": bool(result.get("ok")),
-                        "batch_count": int(result.get("batch_count", 0)),
-                        "checksum": str(result.get("checksum", "")),
-                    },
-                ),
-                "verify_workspace_reload": ToolEventView(
-                    input_projection=lambda values: {
-                        "content_chars": len(str(values.get("workspace_content", ""))),
-                        "accumulator_present": bool(values.get("accumulator_present")),
-                    },
-                    output_projection=lambda result: {
-                        "ok": bool(result.get("ok")),
-                        "checksum": str(result.get("checksum", "")),
-                    },
-                ),
-            }
-        ),
-        task_contract=task_contract,
-        rlm_requirements=CapabilityRLMRequirements(min_iterations=5, min_llm_calls=4),
-    )
-    skill = app.state.skill_registry.register(
-        name="live-daytona-mvp-proof",
-        description="Host-owned capability for the opt-in Daytona MVP proof.",
-        instructions="Follow the host-provided live proof scenario exactly.",
-        capability_refs=(_CAPABILITY_ID,),
-        task_contract_ref=_CAPABILITY_ID,
+    skill = app.state.skill_catalog.require(stable_skill_id("long-context"))
+    proof_tools = (token_tool, semantic_tool, reload_tool)
+    proof_views = MappingProxyType(
+        {
+            "issue_iteration_token": ToolEventView(
+                output_projection=lambda _result: {"issued": True},
+            ),
+            "verify_semantic_work": ToolEventView(
+                input_projection=lambda values: {
+                    "iteration_token_type": type(values.get("iteration_token")).__name__,
+                    "single_result_type": type(values.get("single_result")).__name__,
+                    "batch_results_type": type(values.get("batch_results")).__name__,
+                    "batch_result_item_types": sorted(
+                        {type(value).__name__ for value in values.get("batch_results", ())}
+                    )
+                    if isinstance(values.get("batch_results"), (list, tuple))
+                    else [],
+                    "batch_count": len(values["batch_results"])
+                    if isinstance(values.get("batch_results"), (list, tuple))
+                    else 0,
+                    "accumulator_type": type(values.get("accumulator")).__name__,
+                    "accumulator_item_types": sorted({type(value).__name__ for value in values.get("accumulator", ())})
+                    if isinstance(values.get("accumulator"), (list, tuple))
+                    else [],
+                    "accumulator_count": len(values["accumulator"])
+                    if isinstance(values.get("accumulator"), (list, tuple))
+                    else 0,
+                },
+                output_projection=lambda result: {
+                    "ok": bool(result.get("ok")),
+                    "batch_count": int(result.get("batch_count", 0)),
+                    "checksum": str(result.get("checksum", "")),
+                },
+            ),
+            "verify_workspace_reload": ToolEventView(
+                input_projection=lambda values: {
+                    "content_chars": len(str(values.get("workspace_content", ""))),
+                    "accumulator_present": bool(values.get("accumulator_present")),
+                },
+                output_projection=lambda result: {
+                    "ok": bool(result.get("ok")),
+                    "checksum": str(result.get("checksum", "")),
+                },
+            ),
+        }
     )
 
     secret_values = tuple(
@@ -623,6 +616,11 @@ def test_complete_daytona_mvp_through_fastapi(
     try:
         with TestClient(app) as client:
             resources = app.state.run_environment_resources
+            resources._preparation._capabilities = _ProofCapabilityPreparer(  # noqa: SLF001
+                resources._preparation._capabilities,
+                proof_tools,
+                proof_views,  # noqa: SLF001
+            )
             portal = client.portal
             assert portal is not None
             try:
@@ -635,14 +633,14 @@ def test_complete_daytona_mvp_through_fastapi(
                     f"/api/sessions/{session_id}/turns",
                     json={
                         "text": "FIRST: execute the complete recursive Daytona MVP proof.",
-                        "skill_selections": [{"id": str(skill.id), "expected_version": skill.version}],
+                        "skill_selections": [{"id": str(skill.card.id), "expected_version": skill.card.version}],
                     },
                     headers={"Idempotency-Key": f"live-mvp-first-{uuid4()}"},
                 )
                 assert first.status_code == 200
                 first_run_id = UUID(first.headers["x-fleet-run-id"])
                 first_chunks, first_done = _sse_chunks(first)
-                _assert_skill_lifecycle(first_chunks, skill_id=skill.id, version=skill.version)
+                _assert_skill_lifecycle(first_chunks, skill_id=skill.card.id, version=skill.card.version)
                 assert first_done == 1
                 assert sum(chunk["type"] == "start" for chunk in first_chunks) == 1
                 assert sum(chunk["type"] == "finish" for chunk in first_chunks) == 1
@@ -744,14 +742,14 @@ def test_complete_daytona_mvp_through_fastapi(
                     f"/api/sessions/{session_id}/turns",
                     json={
                         "text": "SECOND: verify fresh interpreter state and durable workspace reload.",
-                        "skill_selections": [{"id": str(skill.id), "expected_version": skill.version}],
+                        "skill_selections": [{"id": str(skill.card.id), "expected_version": skill.card.version}],
                     },
                     headers={"Idempotency-Key": f"live-mvp-second-{uuid4()}"},
                 )
                 assert second.status_code == 200
                 second_run_id = UUID(second.headers["x-fleet-run-id"])
                 second_chunks, second_done = _sse_chunks(second)
-                _assert_skill_lifecycle(second_chunks, skill_id=skill.id, version=skill.version)
+                _assert_skill_lifecycle(second_chunks, skill_id=skill.card.id, version=skill.card.version)
                 assert second_done == 1
                 assert sum(chunk["type"] == "start" for chunk in second_chunks) == 1
                 assert sum(chunk["type"] == "finish" for chunk in second_chunks) == 1

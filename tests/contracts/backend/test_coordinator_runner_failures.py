@@ -17,7 +17,7 @@ from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, TurnLifecycleModule
 from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 from fleet_rlm.persistence.repositories import InMemoryTurnStateStore
-from fleet_rlm.rlm.context import RLMExecutionContext
+from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import (
     TERMINAL_DETAIL_TYPES,
@@ -31,14 +31,13 @@ from fleet_rlm.rlm.events import (
 from fleet_rlm.rlm.factory import RLMFactory
 from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
-from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
 FailureMode = Literal["invalid_output", "malformed_trajectory", "internal_cancel", "timeout"]
 HarnessMode = FailureMode | Literal["caller_cancel", "native_success"]
 
 
 class _Capabilities:
-    blueprint = TurnCapabilityBlueprint()
+    spec = RLMExecutionSpec()
 
     def drain_public_details(self):
         return ()

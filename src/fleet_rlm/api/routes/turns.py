@@ -25,7 +25,7 @@ from fleet_rlm.chat.turn_lifecycle import (
 from fleet_rlm.chat.turn_preparation import TurnPreparationTimeout, TurnPreparationUnavailable
 from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
-from fleet_rlm.skills.authorize import InvalidSkillSelectionError
+from fleet_rlm.skills.errors import InvalidSkillSelectionError
 from fleet_rlm.skills.models import SkillSelectionRef
 
 router = APIRouter(tags=["turns"])

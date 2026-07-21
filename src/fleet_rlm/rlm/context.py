@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Literal, Protocol
 from uuid import UUID
+
+import dspy
 
 from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.files.models import PreparedAttachment
+from fleet_rlm.files.workspace_models import DENO_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
+from fleet_rlm.rlm.signature import FleetRLMSignature
+from fleet_rlm.rlm.tool_observer import ToolEventView
 from fleet_rlm.sessions.models import TurnAccess
+from fleet_rlm.skills.models import SkillCard
 
 AsyncCancellationProbe = Callable[[], Awaitable[bool]]
 
@@ -36,7 +43,7 @@ class PreparedCapabilities(Protocol):
     """Already authorized and composed host capabilities for one Run."""
 
     @property
-    def blueprint(self) -> Any: ...
+    def spec(self) -> RLMExecutionSpec: ...
 
     def drain_public_details(self) -> tuple[Any, ...]: ...
 
@@ -46,6 +53,22 @@ class PreparedCapabilities(Protocol):
     def drain_artifact_candidates(self) -> tuple[ArtifactCandidate, ...]: ...
 
     async def aclose(self) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RLMExecutionSpec:
+    """Host-composed execution inputs independent of Skill extension machinery."""
+
+    skill_cards: tuple[SkillCard, ...] = ()
+    signature: type[dspy.Signature] = FleetRLMSignature
+    output_schema_id: str = "fleet.default"
+    output_schema_version: str = "1"
+    tools: tuple[dspy.Tool, ...] = ()
+    tool_event_views: Mapping[str, ToolEventView] = field(default_factory=dict)
+    workspace: WorkspaceCapabilityMetadata = DENO_WORKSPACE_CAPABILITY
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "tool_event_views", MappingProxyType(dict(self.tool_event_views)))
 
 
 @dataclass(frozen=True, slots=True)

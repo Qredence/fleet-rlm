@@ -246,11 +246,15 @@ async def test_startup_reconciliation_fences_a_live_prior_claim_without_waiting_
                 (
                     UserRow(id=access.user_id),
                     WorkspaceRow(id=access.workspace_id),
-                    SessionRow(id=session_id, user_id=access.user_id, workspace_id=access.workspace_id, title="startup"),
+                    SessionRow(
+                        id=session_id, user_id=access.user_id, workspace_id=access.workspace_id, title="startup"
+                    ),
                 )
             )
         store = SqlAlchemyTurnStateStore(factory, stale_after_seconds=30)
-        assert isinstance(await store.begin(BeginTurn(access, session_id, TurnInput("hello"), "key", run_id)), ExecuteTurn)
+        assert isinstance(
+            await store.begin(BeginTurn(access, session_id, TurnInput("hello"), "key", run_id)), ExecuteTurn
+        )
 
         fenced: list[object] = []
 

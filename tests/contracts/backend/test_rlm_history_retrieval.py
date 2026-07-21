@@ -17,13 +17,12 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
     from fleet_rlm.chat.session_context import build_session_context_manifest
     from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
-    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.factory import RLMFactory
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess
-    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
     older_detail = "project codename is cobalt-orchid"
     history = SessionHistory(
@@ -38,7 +37,7 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
     (history_tool,) = SessionHistoryToolHost(history).as_tools()
 
     class Capabilities:
-        blueprint = TurnCapabilityBlueprint(tools=(history_tool,))
+        spec = RLMExecutionSpec(tools=(history_tool,))
 
         def drain_public_details(self):
             return ()
@@ -104,13 +103,12 @@ async def test_native_rlm_continues_history_across_truncated_pages() -> None:
     from fleet_rlm.chat.session_context import build_session_context_manifest
     from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
-    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.factory import RLMFactory
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess
-    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
     chunk = "y" * 150_000
     history = SessionHistory(
@@ -130,7 +128,7 @@ async def test_native_rlm_continues_history_across_truncated_pages() -> None:
     assert second_page["messages"][-1]["content"] == "final-detail"
 
     class Capabilities:
-        blueprint = TurnCapabilityBlueprint(tools=(history_tool,))
+        spec = RLMExecutionSpec(tools=(history_tool,))
 
         def drain_public_details(self):
             return ()

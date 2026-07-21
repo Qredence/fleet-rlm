@@ -1,4 +1,4 @@
-"""GET /api/skills — authorized SkillCards only (no instruction bodies)."""
+"""Bounded bundled Skill Card discovery."""
 
 from __future__ import annotations
 
@@ -7,42 +7,21 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from fleet_rlm.api.local_scope import LocalScope, get_local_scope
 from fleet_rlm.api.schemas import SkillCardResponse
-from fleet_rlm.skills.authorize import SkillAuthorizer
-from fleet_rlm.skills.errors import SkillNotFoundError
+from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.skills.models import SkillCard
-from fleet_rlm.skills.ranking import rank_authorized_cards
-from fleet_rlm.skills.registry import InMemorySkillRegistry, UnavailableSkillRegistry
 
 router = APIRouter(tags=["skills"])
 
 
-def get_skill_registry(request: Request) -> InMemorySkillRegistry:
-    registry = getattr(request.app.state, "skill_registry", None)
-    if registry is not None:
-        return registry
-    from fleet_rlm.skills.loader import seed_bundled_skills
-
-    registry = InMemorySkillRegistry()
-    try:
-        seed_bundled_skills(registry)
-    except Exception:  # noqa: BLE001 - catalog discovery is intentionally optional
-        registry = UnavailableSkillRegistry()
-    request.app.state.skill_registry = registry
-    return registry
+def get_skill_catalog(request: Request) -> SkillCatalog:
+    catalog = getattr(request.app.state, "skill_catalog", None)
+    if not isinstance(catalog, SkillCatalog):
+        raise RuntimeError("bundled Skill catalog is unavailable")
+    return catalog
 
 
-def get_skill_authorizer(
-    request: Request,
-    registry: Annotated[InMemorySkillRegistry, Depends(get_skill_registry)],
-) -> SkillAuthorizer:
-    authorizer = getattr(request.app.state, "skill_authorizer", None)
-    if authorizer is not None:
-        return authorizer
-    authorizer = SkillAuthorizer(registry)
-    request.app.state.skill_authorizer = authorizer
-    return authorizer
+SkillCatalogDep = Annotated[SkillCatalog, Depends(get_skill_catalog)]
 
 
 def _to_response(card: SkillCard) -> SkillCardResponse:
@@ -50,45 +29,39 @@ def _to_response(card: SkillCard) -> SkillCardResponse:
         id=card.id,
         name=card.name,
         description=card.description,
-        scope=card.scope,
+        scope="system",
         version=card.version,
-        trust=card.trust,
-        affordances=list(card.affordances),
+        trust="system",
+        affordances=[],
         resources_available=card.resources_available,
     )
 
 
+def _rank(cards: tuple[SkillCard, ...], query: str | None) -> tuple[SkillCard, ...]:
+    needle = (query or "").strip().lower()
+    if not needle:
+        return cards
+    terms = tuple(dict.fromkeys(needle.split()))
+
+    def key(card: SkillCard) -> tuple[int, str, str]:
+        haystack = f"{card.name} {card.description}".lower()
+        return (-sum(term in haystack for term in terms), card.name, str(card.id))
+
+    return tuple(sorted(cards, key=key))
+
+
 @router.get("/api/skills", response_model=list[SkillCardResponse], operation_id="list_skills")
-async def list_skills(
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
-    authorizer: Annotated[SkillAuthorizer, Depends(get_skill_authorizer)],
-    q: str | None = Query(default=None, description="Optional ranking query"),
+def list_skills(
+    catalog: SkillCatalogDep,
+    q: Annotated[str | None, Query(description="Optional ranking query")] = None,
 ) -> list[SkillCardResponse]:
     """List SkillCards authorized for the caller (metadata only)."""
-    cards = authorizer.list_cards(
-        user_id=identity.user_id,
-        workspace_id=identity.workspace_id,
-    )
-    ranked = rank_authorized_cards(cards, q)
-    return [_to_response(c) for c in ranked]
+    return [_to_response(card) for card in _rank(catalog.cards(), q)]
 
 
-@router.get(
-    "/api/skills/{skill_id}",
-    response_model=SkillCardResponse,
-    operation_id="get_skill",
-)
-async def get_skill(
-    skill_id: UUID,
-    identity: Annotated[LocalScope, Depends(get_local_scope)],
-    authorizer: Annotated[SkillAuthorizer, Depends(get_skill_authorizer)],
-) -> SkillCardResponse:
-    try:
-        card = authorizer.authorize(
-            skill_id,
-            user_id=identity.user_id,
-            workspace_id=identity.workspace_id,
-        )
-    except SkillNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="skill not found") from exc
-    return _to_response(card)
+@router.get("/api/skills/{skill_id}", response_model=SkillCardResponse, operation_id="get_skill")
+def get_skill(skill_id: UUID, catalog: SkillCatalogDep) -> SkillCardResponse:
+    skill = catalog.get(skill_id)
+    if skill is None:
+        raise HTTPException(status_code=404, detail="skill not found")
+    return _to_response(skill.card)

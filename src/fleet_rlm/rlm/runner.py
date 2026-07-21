@@ -9,7 +9,7 @@ from typing import Any, Protocol, Self, cast
 
 import dspy
 
-from fleet_rlm.rlm.context import RLMExecutionContext
+from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import (
     PredictionOutputError,
     TrajectoryStep,
@@ -39,12 +39,11 @@ from fleet_rlm.rlm.events import (
     WarningEvent,
 )
 from fleet_rlm.rlm.factory import RLMFactory
-from fleet_rlm.rlm.inputs import build_rlm_input_kwargs, skill_card_metadata
+from fleet_rlm.rlm.inputs import build_rlm_input_kwargs
 from fleet_rlm.rlm.outcome import ExecutionDetail, RLMOutcome, TerminalStatus
 from fleet_rlm.rlm.sanitize import truncate_public_text
 from fleet_rlm.rlm.tool_guards import TurnToolGuards, workspace_obligations
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
-from fleet_rlm.skills.capabilities import DEFAULT_TASK_CONTRACT, TurnCapabilityBlueprint
 
 
 class RLMFactoryLike(Protocol):
@@ -321,7 +320,7 @@ class RLMRunner:
                 if await context.cancellation_requested():
                     raise TurnCancelled
 
-                blueprint = cast(TurnCapabilityBlueprint, context.capabilities.blueprint)
+                spec = context.capabilities.spec
                 relay = _DetailRelay()
                 guards = TurnToolGuards(required_targets=workspace_obligations(context.request))
                 bind_observer = getattr(context.interpreter, "bind_observer", None)
@@ -336,21 +335,21 @@ class RLMRunner:
                     observe_tool(
                         tool,
                         relay.publish,
-                        blueprint.tool_event_views.get(str(tool.name), ToolEventView.metadata_only()),
+                        spec.tool_event_views.get(str(tool.name), ToolEventView.metadata_only()),
                         after_result=(relay_capability_details if str(tool.name) == "load_skill" else None),
                         is_authorized=lambda: not context.authority.revoked,
                         guards=guards,
                     )
-                    for tool in blueprint.tools
+                    for tool in spec.tools
                 )
                 rlm = self._factory.create(
                     models=context.models,
                     options=context.options,
                     interpreter=context.interpreter,
                     tools=observed_tools or None,
-                    signature=blueprint.signature,
+                    signature=spec.signature,
                 )
-                task = asyncio.create_task(self._execute_rlm_in_worker(rlm, context, blueprint))
+                task = asyncio.create_task(self._execute_rlm_in_worker(rlm, context, spec))
                 ownership.task = task
                 pending: asyncio.Task[ExecutionDetail] | None = None
                 intended_stop: BaseException | None = None
@@ -441,14 +440,11 @@ class RLMRunner:
                 usage = observed_usage(prediction, duration_ms=duration_ms)
                 result = prediction_result(
                     prediction,
-                    blueprint.task_contract or DEFAULT_TASK_CONTRACT,
+                    spec.signature,
+                    schema_id=spec.output_schema_id,
+                    schema_version=spec.output_schema_version,
                     max_output_chars=context.options.max_output_chars,
                 )
-                for validator in blueprint.validators:
-                    try:
-                        validator(result.outputs)
-                    except Exception:
-                        raise PredictionOutputError from None
                 outcome.append(
                     RLMOutcome(
                         terminal_status="completed",
@@ -490,26 +486,15 @@ class RLMRunner:
         self,
         rlm: Any,
         context: RLMExecutionContext,
-        blueprint: TurnCapabilityBlueprint,
+        spec: RLMExecutionSpec,
     ) -> Any:
-        if blueprint.task_contract is not None:
-            kwargs = dict(blueprint.input_values)
-            fields = getattr(blueprint.signature, "fields", {})
-            if "skill_cards" in fields:
-                kwargs["skill_cards"] = [skill_card_metadata(card) for card in blueprint.skill_cards]
-            if blueprint.knowledge and "capability_knowledge" in fields:
-                kwargs["capability_knowledge"] = list(blueprint.knowledge)
-        else:
-            kwargs = build_rlm_input_kwargs(
-                request=context.request,
-                session_context=context.session_context,
-                skill_cards=blueprint.skill_cards,
-                attachments=context.attachments,
-                workspace=blueprint.workspace,
-            )
-            if blueprint.knowledge:
-                kwargs["capability_knowledge"] = list(blueprint.knowledge)
-            kwargs.update(blueprint.input_values)
+        kwargs = build_rlm_input_kwargs(
+            request=context.request,
+            session_context=context.session_context,
+            skill_cards=spec.skill_cards,
+            attachments=context.attachments,
+            workspace=spec.workspace,
+        )
         with dspy.context(lm=context.models.root_lm, track_usage=True):
             return await rlm.acall(**kwargs)
 
@@ -517,10 +502,10 @@ class RLMRunner:
         self,
         rlm: Any,
         context: RLMExecutionContext,
-        blueprint: TurnCapabilityBlueprint,
+        spec: RLMExecutionSpec,
     ) -> Any:
         def run() -> Any:
-            return asyncio.run(self._execute_rlm(rlm, context, blueprint))
+            return asyncio.run(self._execute_rlm(rlm, context, spec))
 
         return await asyncio.to_thread(run)
 

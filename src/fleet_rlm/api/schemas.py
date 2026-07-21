@@ -8,7 +8,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from fleet_rlm.artifacts.models import ArtifactKind
-from fleet_rlm.skills.models import SkillScope, SkillTrust
+
+SkillScope = Literal["system", "workspace"]
+SkillTrust = Literal["system", "workspace", "untrusted"]
 
 
 class SkillSelectionRequest(BaseModel):

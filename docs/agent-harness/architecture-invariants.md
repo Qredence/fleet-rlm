@@ -41,14 +41,13 @@ and its matching automated check in the same patch.
 Raw provider calls and exceptions never cross the `daytona/` boundary into
 routes or public events.
 
-## Skills and capabilities
+## Skills and host tools
 
 - Bundled Skills are versioned instruction/resource packages with progressive
-  loading. They do not implicitly register host executables.
-- The production host capability registry is empty and accepts only trusted
-  host registration. Final Turn tools are explicit `dspy.Tool` objects.
+  loading. They never register host executables.
+- Runtime composition owns the explicit `dspy.Tool` objects for each Turn.
 - HTTP may select up to four exact Skills but may not provide Python, callables,
-  serialized Tools, or arbitrary Task Contracts.
+  serialized Tools, or Signatures.
 - Tool event views are host-owned bounded allowlists. No declared view means no
   public arguments or results.
 

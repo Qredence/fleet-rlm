@@ -177,28 +177,12 @@ Agent Skills-compatible directory containing `SKILL.md` plus optional bounded
 invoked; each supporting resource loads only after a subsequent explicit read.
 _Avoid_: Skill Card, Memory
 
-**Capability Package**:
-Host-registered, executable contribution referenced by a Skill: tools, bounded
-knowledge, typed task contract, serializable input adapters, validators, and
-minimum RLM Options. Skill content cannot define executable host capabilities.
-This is an extension seam; the default production capability registry is empty
-and bundled Skills declare no executable package references.
-_Avoid_: arbitrary Skill code, plugin import, prompt body
-
-**Turn Capability Blueprint**:
-Immutable, host-validated composition for one Turn. Exact client selections may
-preload up to four pinned Skills and their separately registered host
-capabilities before execution. Without selections, visible Cards remain
-available for progressive model invocation but do not activate host
-capabilities. The default bundled catalog activates no host capabilities. The
-Sub Model does not gate discovery.
-_Avoid_: mutable global tool registry, Markdown-defined host capability
-
-**Task Contract**:
-Host-registered typed DSPy Signature plus input mapper, structured-result
-serializer, schema identity/version, and validator. At most one selected
-primary Skill owns the Task Contract for a Turn.
-_Avoid_: unvalidated model JSON, HTTP-provided Python type
+**RLM Execution Spec**:
+Immutable host-composed inputs for one Turn: bounded Skill Cards, one validated
+Signature, output schema identity, explicit host Tools and event views, and
+runtime-specific Workspace metadata. Exact selections may preload up to four
+pinned Skills; at most one selected Skill may provide the Signature.
+_Avoid_: mutable registries, Markdown-defined tools, HTTP-provided Python
 
 **Serializable Input**:
 Host-constructed `dspy.SandboxSerializable` value derived from an authorized

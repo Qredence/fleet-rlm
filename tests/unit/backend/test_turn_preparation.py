@@ -13,10 +13,10 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
     from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
     from fleet_rlm.chat.turn_preparation import RunEnvironment, TurnPreparationModule
     from fleet_rlm.files.models import PreparedAttachments
+    from fleet_rlm.rlm.context import RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
-    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
     operations: list[str] = []
 
@@ -44,7 +44,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
             return PreparedAttachments((), ())
 
     class Capabilities:
-        blueprint = TurnCapabilityBlueprint()
+        spec = RLMExecutionSpec()
 
         def drain_public_details(self):
             return ()

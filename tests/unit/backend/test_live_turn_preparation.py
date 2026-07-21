@@ -20,10 +20,10 @@ from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("with_skill_registry", [False, True])
+@pytest.mark.parametrize("with_skill_catalog", [False, True])
 async def test_live_preparation_stages_attachment_and_cleans_it(
     monkeypatch,
-    with_skill_registry: bool,
+    with_skill_catalog: bool,
 ) -> None:
     data = b"attachment body"
     attachment_id = uuid4()
@@ -73,13 +73,12 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     resources.platform = SimpleNamespace(get=lambda _sandbox_id: object())
     resources.models = RLMModelBundle(object(), object())
     resources._sandbox_ids = []
-    if with_skill_registry:
-        from fleet_rlm.skills.registry import InMemorySkillRegistry
+    if with_skill_catalog:
+        from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
-        resources.skill_registry = InMemorySkillRegistry()
+        resources.skill_catalog = build_bundled_skill_catalog()
     else:
-        resources.skill_registry = None
-    resources.capability_registry = None
+        resources.skill_catalog = None
     resources.attachment_store = AttachmentStore()
 
     async def not_cancelled() -> bool:
@@ -107,14 +106,13 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         "stat_workspace_file",
         "write_workspace_text",
     }
-    if with_skill_registry:
+    if with_skill_catalog:
         expected_tools.update({"load_skill", "read_skill_resource"})
     assert {
-        str(getattr(tool, "name", getattr(tool, "__name__", "")))
-        for tool in prepared.execution.capabilities.blueprint.tools
+        str(getattr(tool, "name", getattr(tool, "__name__", ""))) for tool in prepared.execution.capabilities.spec.tools
     } == expected_tools
-    assert prepared.execution.capabilities.blueprint.workspace.available is True
-    assert prepared.execution.capabilities.blueprint.workspace.root == "."
+    assert prepared.execution.capabilities.spec.workspace.available is True
+    assert prepared.execution.capabilities.spec.workspace.root == "."
     assert prepared.result_snapshot_sink is prepared.artifact_sink
     assert prepared.result_snapshot_sink.result_path(turn.session_id, turn.run_id).endswith(
         f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"
@@ -165,8 +163,7 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
     resources.models = RLMModelBundle(object(), object())
     resources.attachment_lifecycle = None
     resources.attachment_store = None
-    resources.skill_registry = None
-    resources.capability_registry = None
+    resources.skill_catalog = None
 
     async def not_cancelled() -> bool:
         return False

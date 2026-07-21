@@ -20,19 +20,13 @@ from fleet_rlm.chat.turn_preparation import (
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.models import PreparedAttachments
 from fleet_rlm.files.workspace_models import DENO_WORKSPACE_CAPABILITY
-from fleet_rlm.rlm.context import PreparationNotice
+from fleet_rlm.rlm.context import PreparationNotice, RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import AttachmentRead, SkillActivated, SkillLoaded
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
-from fleet_rlm.skills.authorize import SkillAuthorizer
-from fleet_rlm.skills.capabilities import (
-    CapabilityRegistry,
-    CapabilityResolutionContext,
-    CapabilityResolver,
-    TurnCapabilityBlueprint,
-)
-from fleet_rlm.skills.registry import InMemorySkillRegistry
+from fleet_rlm.skills.catalog import SkillCatalog
+from fleet_rlm.skills.resolver import resolve_selected_skills, resolved_schema, resolved_signature
 
 
 class DenoRunSink:
@@ -79,13 +73,13 @@ class DenoPreparedCapabilities:
 
     def __init__(
         self,
-        blueprint: TurnCapabilityBlueprint,
+        spec: RLMExecutionSpec,
         *,
         files: Any,
         skills: Any,
         preparation_notices: tuple[PreparationNotice, ...] = (),
     ) -> None:
-        self.blueprint = blueprint
+        self.spec = spec
         self._files = files
         self._skills = skills
         self.preparation_notices = preparation_notices
@@ -140,23 +134,17 @@ class _DenoVolumeFsAdapter:
 
 
 class _DenoCapabilityPreparer:
-    """Prepares host-mediated tools for the Deno interpreter path.
-
-    Uses the same CapabilityResolver as the Daytona path, but injects tool
-    callables directly (no HTTP broker, no Daytona SDK).
-    """
+    """Prepare catalog-bound host tools for the Deno interpreter path."""
 
     def __init__(
         self,
         *,
-        skill_registry: InMemorySkillRegistry,
-        capability_registry: CapabilityRegistry | None = None,
+        skill_catalog: SkillCatalog,
         models: RLMModelBundle,
         options: RLMOptions,
         max_artifact_bytes: int,
     ) -> None:
-        self._skill_registry = skill_registry
-        self._capability_registry = capability_registry or CapabilityRegistry()
+        self._skill_catalog = skill_catalog
         self._models = models
         self._options = options
         self._max_artifact_bytes = max_artifact_bytes
@@ -194,32 +182,14 @@ class _DenoCapabilityPreparer:
         history_host = SessionHistoryToolHost(turn.history)
         history_tools = history_host.as_tools()
 
-        authorizer = SkillAuthorizer(self._skill_registry)
         selections = tuple(turn.input.skill_selections)
-        try:
-            if getattr(self._skill_registry, "unavailable", False):
-                raise RuntimeError("skills unavailable")
-            cards = authorizer.list_cards(
-                user_id=turn.access.user_id,
-                workspace_id=turn.access.workspace_id,
-            )
-            selected_records = (
-                authorizer.authorize_explicit_many(
-                    selections,
-                    user_id=turn.access.user_id,
-                    workspace_id=turn.access.workspace_id,
-                )
-                if selections
-                else ()
-            )
-        except Exception as exc:
-            from fleet_rlm.skills.authorize import InvalidSkillSelectionError
+        if getattr(self._skill_catalog, "unavailable", False):
+            from fleet_rlm.skills.errors import InvalidSkillSelectionError
 
             if selections:
-                if isinstance(exc, InvalidSkillSelectionError):
-                    raise
                 raise InvalidSkillSelectionError() from None
-            blueprint = TurnCapabilityBlueprint(
+            spec = RLMExecutionSpec(
+                skill_cards=(),
                 tools=(*file_tools, *history_tools),
                 tool_event_views={
                     name: view
@@ -229,21 +199,20 @@ class _DenoCapabilityPreparer:
                 workspace=DENO_WORKSPACE_CAPABILITY,
             )
             return DenoPreparedCapabilities(
-                blueprint,
+                spec,
                 files=file_host,
                 skills=_EmptySkillHost(),
                 preparation_notices=(PreparationNotice("skills_unavailable", "Skills are unavailable"),),
             )
+        resolved = resolve_selected_skills(self._skill_catalog, selections)
 
         if await turn.cancellation_requested():
             raise TurnPreparationCancelled("Turn cancelled")
         if asyncio.get_running_loop().time() >= deadline:
             raise TurnPreparationTimeout("Turn preparation timed out")
-        allowed_ids = frozenset(record.id for record in selected_records) if selections else None
+        allowed_ids = frozenset(skill.card.id for skill in resolved.selected) if selections else None
         skill_host = SkillToolHost(
-            authorizer,
-            user_id=turn.access.user_id,
-            workspace_id=turn.access.workspace_id,
+            self._skill_catalog,
             allowed_skill_ids=allowed_ids,
         )
 
@@ -257,34 +226,19 @@ class _DenoCapabilityPreparer:
             }.items()
             if name != "create_artifact"
         }
-        try:
-            blueprint = await CapabilityResolver(self._capability_registry).resolve(
-                CapabilityResolutionContext(
-                    request=turn.input.text,
-                    history=[{"role": item.role, "content": item.content} for item in turn.history.messages],
-                    models=self._models,
-                    options=self._options,
-                    skill_cards=cards,
-                    selected_skills=selected_records,
-                    attachments=attachments.refs,
-                    tools=tools,
-                    tool_event_views=tool_event_views,
-                    workspace=DENO_WORKSPACE_CAPABILITY,
-                    deadline=deadline,
-                )
-            )
-        except TimeoutError as exc:
-            raise TurnPreparationTimeout("Turn preparation timed out") from exc
-        except Exception:
-            from fleet_rlm.skills.authorize import InvalidSkillSelectionError
-
-            if selections:
-                raise InvalidSkillSelectionError() from None
-            raise
-        for record in selected_records:
-            skill_host.mark_preloaded(record)
-
-        return DenoPreparedCapabilities(blueprint, files=file_host, skills=skill_host)
+        schema_id, schema_version = resolved_schema(resolved)
+        spec = RLMExecutionSpec(
+            skill_cards=resolved.cards,
+            signature=resolved_signature(resolved),
+            output_schema_id=schema_id,
+            output_schema_version=schema_version,
+            tools=tools,
+            tool_event_views=tool_event_views,
+            workspace=DENO_WORKSPACE_CAPABILITY,
+        )
+        for skill in resolved.selected:
+            skill_host.mark_preloaded(skill)
+        return DenoPreparedCapabilities(spec, files=file_host, skills=skill_host)
 
 
 class _EmptySkillHost:
@@ -319,8 +273,7 @@ class DenoTurnPreparation:
         turn_timeout_seconds: int = 1800,
         root_lm: dspy.LM,
         sub_lm: dspy.LM,
-        skill_registry: InMemorySkillRegistry,
-        capability_registry: CapabilityRegistry | None = None,
+        skill_catalog: SkillCatalog,
         max_artifact_bytes: int = 10 * 1024 * 1024,
     ) -> None:
         selected_options = options or RLMOptions()
@@ -332,8 +285,7 @@ class DenoTurnPreparation:
             attachments=attachments,
             environments=DenoRunEnvironmentProvider(),
             capabilities=_DenoCapabilityPreparer(
-                skill_registry=skill_registry,
-                capability_registry=capability_registry,
+                skill_catalog=skill_catalog,
                 models=models,
                 options=selected_options,
                 max_artifact_bytes=max_artifact_bytes,

@@ -1,4 +1,4 @@
-"""Skill registry and authorization errors."""
+"""Skill catalog and selection errors."""
 
 from __future__ import annotations
 
@@ -12,8 +12,15 @@ class SkillNotFoundError(SkillError):
 
 
 class SkillValidationError(SkillError):
-    """Rejected registration or skill metadata."""
+    """Rejected bundled Skill metadata."""
 
 
 class SkillPathError(SkillValidationError):
     """Invalid skill-relative resource path."""
+
+
+class InvalidSkillSelectionError(SkillValidationError):
+    """Generic exact-selection failure safe for API translation."""
+
+    def __init__(self) -> None:
+        super().__init__("invalid skill selection")

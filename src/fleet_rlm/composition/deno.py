@@ -17,7 +17,6 @@ from fleet_rlm.composition.common import (
     rlm_options,
 )
 from fleet_rlm.config import Settings
-from fleet_rlm.skills.registry import InMemorySkillRegistry
 
 
 def require_deno_settings(settings: Settings) -> None:
@@ -86,8 +85,7 @@ def install_deno_composition(
             turn_timeout_seconds=settings.turn_timeout_seconds,
             root_lm=root_lm,
             sub_lm=sub_lm,
-            skill_registry=getattr(app.state, "skill_registry", None) or InMemorySkillRegistry(),
-            capability_registry=getattr(app.state, "capability_registry", None),
+            skill_catalog=app.state.skill_catalog,
             max_artifact_bytes=settings.max_artifact_bytes,
         ),
         rlm_factory=RLMFactory(),

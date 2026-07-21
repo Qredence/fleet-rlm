@@ -30,16 +30,14 @@ across RLM iterations. Every later Run receives a fresh context. Replacing a
 Daytona Sandbox remounts the Workspace Volume Scope but does not preserve Python
 globals.
 
-The default Signature receives request text, bounded `session_context`,
-authorized `skill_cards`, and bounded Attachment metadata. Full committed
-history remains host-side behind `read_session_history`. Custom Task Contracts
-receive only their declared host-bounded inputs.
+Every Signature receives request text, bounded `session_context`, bounded
+`skill_cards`, and bounded Attachment metadata. Full committed history remains
+host-side behind `read_session_history`.
 
 ## Composition and ownership
 
 - `app.create_app()` creates the FastAPI application, installs handlers and
-  routers, and seeds the static in-memory bundled Skill catalog plus its
-  authorizer and empty host capability registry.
+  routers, and eagerly constructs the immutable bundled Skill catalog.
 - FastAPI lifespan validates settings and installs exactly one complete Deno,
   Daytona, or explicitly injected private-test runtime inventory. It owns
   startup rollback and shutdown.
@@ -58,18 +56,18 @@ receive only their declared host-bounded inputs.
 - `persistence/` implements domain repository interfaces; Alembic owns the live
   schema.
 
-## Skills and capabilities
+## Skills
 
 The bundled catalog contains `long-context` and `workspace-files`. Skill
 disclosure is progressive: bounded Cards are available at startup, a full
 `SKILL.md` loads only when invoked or exactly preselected, and declared resources
 load only after the Skill body.
 
-Instruction Skills and executable host capabilities are different surfaces.
-Skill Markdown and resources cannot register host tools. The production
-`CapabilityRegistry` is empty; future trusted packages may register explicit
-`dspy.Tool` objects during host composition. HTTP requests provide only Skill
-identity/version selections.
+Skill Markdown and resources cannot register host tools. Runtime composition
+owns the fixed core tools plus exactly `load_skill` and
+`read_skill_resource`. HTTP requests provide only Skill identity/version
+selections. Selection is resolved synchronously against the immutable catalog;
+at most one selected Skill may provide a validated DSPy Signature.
 
 Host tool event views expose bounded allowlisted metadata. A Tool without a
 declared view exposes identity, name, status, and a fixed failure message only.

@@ -143,7 +143,9 @@ describe("ConversationStore", () => {
     });
     expect(store.getState().run.phase).toBe("error");
     expect(store.getState().run.outcome).toBe("failed");
-    expect(store.getState().run.error).toBe("Turn failed because a required workspace update was not completed");
+    expect(store.getState().run.error).toBe(
+      "Turn failed because a required workspace update was not completed",
+    );
   });
 
   it("clears messages but keeps session", () => {

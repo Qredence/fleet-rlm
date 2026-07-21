@@ -33,7 +33,12 @@ REQUIRED_WHEEL_FILES = {
     "fleet_rlm/daytona/workspace_volume.py",
     "fleet_rlm/persistence/models.py",
     "fleet_rlm/rlm/runner.py",
-    "fleet_rlm/skills/skills/workspace-files/assets/skill-marker.pdf",
+    "fleet_rlm/skills/bundled/long-context/SKILL.md",
+    "fleet_rlm/skills/bundled/long-context/references/chunking-strategies.md",
+    "fleet_rlm/skills/bundled/long-context/scripts/rank_chunks.py",
+    "fleet_rlm/skills/bundled/long-context/scripts/semantic_chunk.py",
+    "fleet_rlm/skills/bundled/workspace-files/SKILL.md",
+    "fleet_rlm/skills/bundled/workspace-files/references/filesystem-contract.md",
 }
 
 
@@ -99,7 +104,11 @@ def wheel(args: argparse.Namespace) -> int:
     with zipfile.ZipFile(wheel_path) as archive:
         files = {name for name in archive.namelist() if not name.endswith("/")}
     missing = sorted(REQUIRED_WHEEL_FILES - files)
-    forbidden = sorted(name for name in files if name.startswith(("frontend/", "fleet_rlm/ui/")))
+    forbidden = sorted(
+        name
+        for name in files
+        if name.startswith(("frontend/", "fleet_rlm/ui/", "fleet_rlm/skills/skills/")) or name.endswith(".pdf")
+    )
     if missing or forbidden:
         if missing:
             print("ERROR: wheel missing:\n" + "\n".join(missing), file=sys.stderr)

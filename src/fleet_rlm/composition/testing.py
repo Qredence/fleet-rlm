@@ -25,9 +25,11 @@ from fleet_rlm.composition.common import (
 from fleet_rlm.config import Settings
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.models import PreparedAttachments
+from fleet_rlm.files.workspace_models import DENO_WORKSPACE_CAPABILITY
+from fleet_rlm.rlm.context import RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
+from fleet_rlm.rlm.signature import FleetRLMSignature
 
 
 class TestingLM:
@@ -79,7 +81,7 @@ class TestingRunEnvironmentProvider(RunEnvironmentProvider):
 
 
 class TestingPreparedCapabilities:
-    blueprint = TurnCapabilityBlueprint()
+    spec = RLMExecutionSpec((), FleetRLMSignature, "fleet.default", "1", (), {}, DENO_WORKSPACE_CAPABILITY)
     preparation_notices: tuple[()] = ()
 
     def drain_public_details(self) -> tuple[()]:

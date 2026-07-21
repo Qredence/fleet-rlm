@@ -167,17 +167,7 @@ def create_app(
     app.include_router(skills_router)
     app.include_router(runs_router)
 
-    from fleet_rlm.skills.authorize import SkillAuthorizer
-    from fleet_rlm.skills.capabilities import CapabilityRegistry
-    from fleet_rlm.skills.loader import seed_bundled_skills
-    from fleet_rlm.skills.registry import InMemorySkillRegistry, UnavailableSkillRegistry
+    from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
-    skill_registry = InMemorySkillRegistry()
-    try:
-        seed_bundled_skills(skill_registry)
-    except Exception:  # noqa: BLE001 - each Turn projects catalog unavailability safely
-        skill_registry = UnavailableSkillRegistry()
-    app.state.skill_registry = skill_registry
-    app.state.skill_authorizer = SkillAuthorizer(skill_registry)
-    app.state.capability_registry = CapabilityRegistry()
+    app.state.skill_catalog = build_bundled_skill_catalog()
     return app

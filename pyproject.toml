@@ -133,23 +133,16 @@ namespaces = false
 [tool.setuptools.package-data]
 "fleet_rlm" = [
     "py.typed",
-    "skills/skills/README.md",
-    "skills/skills/**/SKILL.md",
-    "skills/skills/**/*.md",
-    "skills/skills/**/*.py",
-    "skills/skills/**/*.txt",
-    "skills/skills/**/*.json",
-    "skills/skills/**/*.yaml",
-    "skills/skills/**/*.yml",
-    "skills/skills/**/*.toml",
-    "skills/skills/**/*.csv",
-    "skills/skills/**/*.png",
-    "skills/skills/**/*.jpg",
-    "skills/skills/**/*.jpeg",
-    "skills/skills/**/*.gif",
-    "skills/skills/**/*.webp",
-    "skills/skills/**/*.svg",
-    "skills/skills/**/*.pdf",
+    "skills/bundled/README.md",
+    "skills/bundled/**/SKILL.md",
+    "skills/bundled/**/*.md",
+    "skills/bundled/**/*.py",
+    "skills/bundled/**/*.txt",
+    "skills/bundled/**/*.json",
+    "skills/bundled/**/*.yaml",
+    "skills/bundled/**/*.yml",
+    "skills/bundled/**/*.toml",
+    "skills/bundled/**/*.csv",
 ]
 
 [tool.pytest.ini_options]

@@ -112,18 +112,17 @@ def test_trajectory_reconciliation_replaces_live_details_without_duplicates() ->
 @pytest.mark.asyncio
 async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalized_trajectory() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.events import RLMReasoning
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.rlm.sanitize import truncate_public_text
     from fleet_rlm.sessions.models import TurnAccess
-    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
     repeated = "reasoning requiring public truncation"
 
     class Capabilities:
-        blueprint = TurnCapabilityBlueprint()
+        spec = RLMExecutionSpec()
 
         def drain_public_details(self):
             return ()
@@ -179,16 +178,15 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
 ) -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.files.workspace_models import WorkspaceCapabilityMetadata
-    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
-    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
     from fleet_rlm.skills.models import SkillCard
 
     class Capabilities:
-        blueprint = TurnCapabilityBlueprint(
+        spec = RLMExecutionSpec(
             workspace=WorkspaceCapabilityMetadata(True, ".", "Use durable workspace tools."),
         )
 
@@ -222,10 +220,8 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
                             "scope": "system",
                             "version": "2.0.0",
                             "trust": "system",
-                            "affordances": ["load", "resources"],
+                            "affordances": [],
                             "resources_available": True,
-                            "capability_refs": [],
-                            "task_contract_ref": None,
                         }
                     ]
                     assert call_kwargs["session_context"]["workspace"] == {
@@ -295,16 +291,13 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         (),
     )
     stream = RLMRunner(factory=factory).stream(context)
-    Capabilities.blueprint = TurnCapabilityBlueprint(
+    Capabilities.spec = RLMExecutionSpec(
         skill_cards=(
             SkillCard(
                 skill_id,
                 "long-context",
                 "Analyze long inputs",
-                "system",
                 "2.0.0",
-                "system",
-                ("load", "resources"),
                 True,
             ),
         ),
@@ -340,18 +333,17 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
 @pytest.mark.asyncio
 async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
-    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
     entered = threading.Event()
     release = threading.Event()
     cancel_requested = False
 
     class Capabilities:
-        blueprint = TurnCapabilityBlueprint()
+        spec = RLMExecutionSpec()
 
         def drain_public_details(self):
             return ()
@@ -410,17 +402,16 @@ async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup()
 @pytest.mark.asyncio
 async def test_runner_transfers_blocking_worker_after_caller_cancellation() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
-    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
     entered = threading.Event()
     release = threading.Event()
 
     class Capabilities:
-        blueprint = TurnCapabilityBlueprint()
+        spec = RLMExecutionSpec()
 
         def drain_public_details(self):
             return ()
@@ -479,14 +470,13 @@ async def test_runner_transfers_blocking_worker_after_caller_cancellation() -> N
 @pytest.mark.asyncio
 async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
-    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
     class Capabilities:
-        blueprint = TurnCapabilityBlueprint()
+        spec = RLMExecutionSpec()
 
         def drain_public_details(self):
             return ()
@@ -546,15 +536,14 @@ async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() ->
 @pytest.mark.asyncio
 async def test_runner_emits_preloaded_skill_events_before_later_output_failure() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
-    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
     class Capabilities:
-        blueprint = TurnCapabilityBlueprint()
+        spec = RLMExecutionSpec()
 
         def __init__(self) -> None:
             self.details = [
@@ -613,15 +602,14 @@ async def test_runner_emits_preloaded_skill_events_before_later_output_failure()
 @pytest.mark.parametrize("terminal_status", ["cancelled", "timeout"])
 async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(terminal_status: str) -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
-    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
 
     class Capabilities:
-        blueprint = TurnCapabilityBlueprint()
+        spec = RLMExecutionSpec()
 
         def __init__(self) -> None:
             self.details = [
@@ -681,34 +669,32 @@ async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(term
 async def test_runner_loads_two_skills_reads_python_resource_and_completes_submit() -> None:
     from fleet_rlm.chat.deno_run_environment import DenoPreparedCapabilities
     from fleet_rlm.chat.session_context import SessionContextManifest
-    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.runner import RLMRunner
     from fleet_rlm.sessions.models import TurnAccess
-    from fleet_rlm.skills.authorize import SkillAuthorizer
-    from fleet_rlm.skills.capabilities import TurnCapabilityBlueprint
-    from fleet_rlm.skills.registry import InMemorySkillRegistry
+    from fleet_rlm.skills.catalog import SkillCatalog
+    from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillResource
     from fleet_rlm.skills.tools import SkillToolHost
 
     user_id, workspace_id = uuid4(), uuid4()
-    registry = InMemorySkillRegistry()
-    first = registry.register(
-        name="first-skill",
-        description="First progressive Skill.",
-        instructions="Load the helper script.",
-        resource_bodies={
-            "scripts/helper.py": "def produce_answer():\n    return 'progressive completion'\n",
+    first = SkillDefinition(
+        SkillCard(uuid4(), "first-skill", "First progressive Skill.", "1.0.0", True),
+        "Load the helper script.",
+        {
+            "scripts/helper.py": SkillResource(
+                "scripts/helper.py", "text/x-python", "def produce_answer():\n    return 'progressive completion'\n"
+            )
         },
     )
-    second = registry.register(
-        name="second-skill",
-        description="Second progressive Skill.",
-        instructions="Confirm the answer.",
+    second = SkillDefinition(
+        SkillCard(uuid4(), "second-skill", "Second progressive Skill.", "1.0.0", False),
+        "Confirm the answer.",
     )
-    authorizer = SkillAuthorizer(registry)
-    skill_host = SkillToolHost(authorizer, user_id=user_id, workspace_id=workspace_id)
-    blueprint = TurnCapabilityBlueprint(
-        skill_cards=authorizer.list_cards(user_id=user_id, workspace_id=workspace_id),
+    catalog = SkillCatalog((first, second))
+    skill_host = SkillToolHost(catalog)
+    spec = RLMExecutionSpec(
+        skill_cards=catalog.cards(),
         tools=skill_host.as_tools(),
         tool_event_views=skill_host.event_views(),
     )
@@ -717,7 +703,7 @@ async def test_runner_loads_two_skills_reads_python_resource_and_completes_submi
         def drain_public_events(self):
             return []
 
-    capabilities = DenoPreparedCapabilities(blueprint, files=Files(), skills=skill_host)
+    capabilities = DenoPreparedCapabilities(spec, files=Files(), skills=skill_host)
 
     class Factory:
         def create(self, **kwargs):
@@ -726,10 +712,10 @@ async def test_runner_loads_two_skills_reads_python_resource_and_completes_submi
             class Program:
                 async def acall(self, **call_kwargs):
                     assert len(call_kwargs["skill_cards"]) == 2
-                    assert tools["load_skill"](skill_id=str(first.id))["ok"] is True
-                    assert tools["load_skill"](skill_id=str(second.id))["ok"] is True
+                    assert tools["load_skill"](skill_id=str(first.card.id))["ok"] is True
+                    assert tools["load_skill"](skill_id=str(second.card.id))["ok"] is True
                     resource = tools["read_skill_resource"](
-                        skill_id=str(first.id),
+                        skill_id=str(first.card.id),
                         resource_path="scripts/helper.py",
                     )
                     namespace: dict[str, object] = {}

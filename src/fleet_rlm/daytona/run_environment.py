@@ -42,17 +42,13 @@ from fleet_rlm.persistence.database import (
     create_session_factory,
     create_tables,
 )
-from fleet_rlm.rlm.context import PreparationNotice
+from fleet_rlm.rlm.context import PreparationNotice, RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import AttachmentRead, SkillActivated, SkillLoaded
 from fleet_rlm.rlm.lm_factory import build_model_bundle
 from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
-from fleet_rlm.skills.capabilities import (
-    CapabilityRegistry,
-    CapabilityResolutionContext,
-    CapabilityResolver,
-    TurnCapabilityBlueprint,
-)
+from fleet_rlm.skills.catalog import SkillCatalog
+from fleet_rlm.skills.resolver import resolve_selected_skills, resolved_schema, resolved_signature
 
 
 async def _settle_owned_thread(task: asyncio.Task[Any]) -> bool:
@@ -82,13 +78,13 @@ class LivePreparedCapabilities:
 
     def __init__(
         self,
-        blueprint: TurnCapabilityBlueprint,
+        spec: RLMExecutionSpec,
         *,
         files: Any,
         skills: Any,
         preparation_notices: tuple[PreparationNotice, ...] = (),
     ) -> None:
-        self.blueprint = blueprint
+        self.spec = spec
         self._files = files
         self._skills = skills
         self.preparation_notices = preparation_notices
@@ -286,7 +282,6 @@ class _LiveCapabilityPreparer:
         from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
         from fleet_rlm.files.tools import FileToolHost
         from fleet_rlm.files.workspace_tools import WorkspaceToolHost
-        from fleet_rlm.skills.authorize import SkillAuthorizer
         from fleet_rlm.skills.tools import SkillToolHost
 
         sink = environment.attachment_sink
@@ -321,13 +316,17 @@ class _LiveCapabilityPreparer:
             **workspace_host.event_views(),
             **history_host.event_views(),
         }
-        if self.resources.skill_registry is None:
+        if self.resources.skill_catalog is None:
             if turn.input.skill_selections:
-                from fleet_rlm.skills.authorize import InvalidSkillSelectionError
+                from fleet_rlm.skills.errors import InvalidSkillSelectionError
 
                 raise InvalidSkillSelectionError()
             return LivePreparedCapabilities(
-                TurnCapabilityBlueprint(
+                RLMExecutionSpec(
+                    skill_cards=(),
+                    signature=resolved_signature(resolve_selected_skills(SkillCatalog(()), ())),
+                    output_schema_id="fleet.default",
+                    output_schema_version="1",
                     tools=(*file_tools, *workspace_tools, *history_tools),
                     tool_event_views=base_views,
                     workspace=DAYTONA_WORKSPACE_CAPABILITY,
@@ -335,30 +334,15 @@ class _LiveCapabilityPreparer:
                 files=file_host,
                 skills=_EmptySkillHost(),
             )
-        authorizer = SkillAuthorizer(self.resources.skill_registry)
         selections = tuple(turn.input.skill_selections)
-        try:
-            if getattr(self.resources.skill_registry, "unavailable", False):
-                raise RuntimeError("skills unavailable")
-            cards = authorizer.list_cards(user_id=turn.access.user_id, workspace_id=turn.access.workspace_id)
-            selected_records = (
-                authorizer.authorize_explicit_many(
-                    selections,
-                    user_id=turn.access.user_id,
-                    workspace_id=turn.access.workspace_id,
-                )
-                if selections
-                else ()
-            )
-        except Exception as exc:
-            from fleet_rlm.skills.authorize import InvalidSkillSelectionError
+        if getattr(self.resources.skill_catalog, "unavailable", False):
+            from fleet_rlm.skills.errors import InvalidSkillSelectionError
 
             if selections:
-                if isinstance(exc, InvalidSkillSelectionError):
-                    raise
                 raise InvalidSkillSelectionError() from None
             return LivePreparedCapabilities(
-                TurnCapabilityBlueprint(
+                RLMExecutionSpec(
+                    skill_cards=(),
                     tools=(*file_tools, *workspace_tools, *history_tools),
                     tool_event_views=base_views,
                     workspace=DAYTONA_WORKSPACE_CAPABILITY,
@@ -367,15 +351,14 @@ class _LiveCapabilityPreparer:
                 skills=_EmptySkillHost(),
                 preparation_notices=(PreparationNotice("skills_unavailable", "Skills are unavailable"),),
             )
+        resolved = resolve_selected_skills(self.resources.skill_catalog, selections)
         if await turn.cancellation_requested():
             raise TurnPreparationCancelled("Turn cancelled")
         if asyncio.get_running_loop().time() >= deadline:
             raise TurnPreparationTimeout("Turn preparation timed out")
         skill_host = SkillToolHost(
-            authorizer,
-            user_id=turn.access.user_id,
-            workspace_id=turn.access.workspace_id,
-            allowed_skill_ids=(frozenset(record.id for record in selected_records) if selections else None),
+            self.resources.skill_catalog,
+            allowed_skill_ids=(frozenset(skill.card.id for skill in resolved.selected) if selections else None),
         )
         tools = (
             *file_tools,
@@ -384,37 +367,19 @@ class _LiveCapabilityPreparer:
             *skill_host.as_tools(),
         )
         tool_event_views = {**base_views, **skill_host.event_views()}
-        try:
-            blueprint = await CapabilityResolver(self.resources.capability_registry or CapabilityRegistry()).resolve(
-                CapabilityResolutionContext(
-                    request=turn.input.text,
-                    history=[{"role": item.role, "content": item.content} for item in turn.history.messages],
-                    models=self.resources.models,
-                    options=RLMOptions(
-                        max_iterations=self.resources.settings.rlm_max_iterations,
-                        max_llm_calls=self.resources.settings.rlm_max_llm_calls,
-                        max_output_chars=self.resources.settings.rlm_max_output_chars,
-                    ),
-                    skill_cards=cards,
-                    selected_skills=selected_records,
-                    attachments=attachments.refs,
-                    tools=tools,
-                    tool_event_views=tool_event_views,
-                    workspace=DAYTONA_WORKSPACE_CAPABILITY,
-                    deadline=deadline,
-                )
-            )
-        except TimeoutError as exc:
-            raise TurnPreparationTimeout("Turn preparation timed out") from exc
-        except Exception:
-            from fleet_rlm.skills.authorize import InvalidSkillSelectionError
-
-            if selections:
-                raise InvalidSkillSelectionError() from None
-            raise
-        for record in selected_records:
-            skill_host.mark_preloaded(record)
-        return LivePreparedCapabilities(blueprint, files=file_host, skills=skill_host)
+        schema_id, schema_version = resolved_schema(resolved)
+        spec = RLMExecutionSpec(
+            skill_cards=resolved.cards,
+            signature=resolved_signature(resolved),
+            output_schema_id=schema_id,
+            output_schema_version=schema_version,
+            tools=tools,
+            tool_event_views=tool_event_views,
+            workspace=DAYTONA_WORKSPACE_CAPABILITY,
+        )
+        for skill in resolved.selected:
+            skill_host.mark_preloaded(skill)
+        return LivePreparedCapabilities(spec, files=file_host, skills=skill_host)
 
 
 def resolve_settings(settings: Settings | None = None) -> Settings:
@@ -467,9 +432,8 @@ class LiveKernelResources:
         )
         self.models = build_model_bundle(self.settings)
         self._sandbox_ids: list[str] = []
-        # Optional capability hosts (wired by live proofs / app composition)
-        self.skill_registry: Any | None = None
-        self.capability_registry: Any | None = None
+        # Host-owned adapters wired by application composition.
+        self.skill_catalog: SkillCatalog | None = None
         self.attachment_store: Any | None = None
         self.artifact_store: Any | None = None
         self.attachment_lifecycle: Any | None = None

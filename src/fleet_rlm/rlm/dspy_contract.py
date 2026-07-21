@@ -7,7 +7,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, TypeAlias, TypedDict, cast
+from typing import Any, TypeAlias, TypedDict, cast
 
 import dspy
 from pydantic import TypeAdapter
@@ -15,9 +15,6 @@ from pydantic_core import PydanticSerializationError
 
 from fleet_rlm.rlm.errors import RLMConfigError
 from fleet_rlm.rlm.sanitize import validate_declared_public_value
-
-if TYPE_CHECKING:
-    from fleet_rlm.skills.capabilities import TaskContract
 
 DSPY_VERSION = "3.3.0b1"
 
@@ -126,14 +123,16 @@ def _plain_json(value: JsonValue) -> object:
 
 def prediction_result(
     prediction: Any,
-    contract: TaskContract,
+    signature: type[dspy.Signature],
     *,
+    schema_id: str = "fleet.default",
+    schema_version: str = "1",
     max_output_chars: int = 10_000,
 ) -> PredictionResult:
     """Encode all declared outputs through their annotations, then strict JSON."""
     outputs: dict[str, JsonValue] = {}
     try:
-        for name, field in contract.signature.output_fields.items():
+        for name, field in signature.output_fields.items():
             raw = getattr(prediction, name)
             adapter = TypeAdapter(field.rebuild_annotation())
             validated = adapter.validate_python(raw)
@@ -141,10 +140,10 @@ def prediction_result(
             outputs[name] = _strict_json(encoded)
     except (AttributeError, TypeError, ValueError, PydanticSerializationError):
         raise PredictionOutputError from None
-    display = outputs.get(contract.text_field)
+    display = outputs.get("answer")
     if not isinstance(display, str) or not display.strip():
         raise PredictionOutputError
-    result = PredictionResult(display, outputs, contract.id, contract.schema_version)
+    result = PredictionResult(display, outputs, schema_id, schema_version)
     plain_outputs = _plain_json(result.outputs)
     encoded = json.dumps(plain_outputs, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     if len(encoded) > max_output_chars:
@@ -153,11 +152,6 @@ def prediction_result(
         validate_declared_public_value(result.outputs)
     except ValueError:
         raise PredictionOutputError from None
-    if contract.validator is not None:
-        try:
-            contract.validator(result.outputs)
-        except Exception:
-            raise PredictionOutputError from None
     return result
 
 

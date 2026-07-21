@@ -20,20 +20,17 @@ them for backend work. Current code and tests outrank the local phase record in
   Daytona supplies a fresh custom interpreter; Deno passes `interpreter=None` so
   DSPy creates its default Deno/Pyodide interpreter. Call only the supported
   `await rlm.acall(**named_inputs)` surface.
-- The default Signature receives request text, bounded `session_context`,
-  authorized `skill_cards`, and bounded Attachment metadata. Older committed
-  messages remain behind the Session-scoped `read_session_history` Tool.
-  Custom Task Contracts receive only their declared host-bounded inputs.
+- Every Signature receives request text, bounded `session_context`, bounded
+  `skill_cards`, and bounded Attachment metadata. Older committed messages
+  remain behind the Session-scoped `read_session_history` Tool.
 - Runtime-specific Session Workspace availability is bounded inside context;
   Daytona registers four text workspace Tools (list, stat, read, write with
   overwrite) and Deno advertises the feature as unavailable. Session Workspace
   is append/update-only; there is no delete Tool.
-- Compose zero to four exact authorized Skill selections. Skill instructions and
-  resources load progressively. The production host `CapabilityRegistry` is an
-  empty extension seam; bundled Skills do not register executable capabilities.
-- The registry may accept a plain callable only at registration and normalizes
-  it immediately. Turn blueprints, runners, and factories contain explicit
-  `dspy.Tool` objects. HTTP never supplies executable Python or serialized tools.
+- Resolve zero to four exact Skill selections against the immutable bundled
+  catalog. Skill instructions and resources load progressively; bundled Skills
+  never register executable tools. Runtime execution uses a typed
+  `RLMExecutionSpec` containing explicit host-owned `dspy.Tool` objects.
 - Keep Runtime Events transport-neutral. `api/sse.py` alone projects the public
   AI SDK UI v1 stream. Observe live code/output at the interpreter boundary and
   host-tool activity through fresh wrapped Tools; use the completed native

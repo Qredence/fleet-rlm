@@ -1,16 +1,18 @@
-"""Skill domain types for bounded progressive disclosure."""
+"""Immutable bundled Skill domain types."""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Literal
+from pathlib import PurePosixPath
+from types import MappingProxyType
+from typing import Mapping
 from uuid import UUID
 
-SkillScope = Literal["system", "workspace"]
-SkillTrust = Literal["system", "workspace", "untrusted"]
-SkillVisibility = Literal["visible", "hidden"]
-SkillResourceEncoding = Literal["utf-8", "base64"]
+import dspy
+
+_SAFE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_SAFE_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,79 +28,95 @@ class SkillSelectionRef:
         version = self.expected_version
         if (
             not isinstance(version, str)
-            or not version
-            or len(version) > 64
             or version != version.strip()
             or not version.isprintable()
-            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}", version) is None
+            or _SAFE_VERSION.fullmatch(version) is None
         ):
             raise ValueError("invalid expected skill version")
 
 
 @dataclass(frozen=True, slots=True)
-class SkillResourceDescriptor:
-    """Safe resource metadata disclosed with a loaded Skill."""
+class SkillCard:
+    """Bounded discovery metadata without instructions or resource bodies."""
 
-    path: str
-    media_type: str
-    byte_size: int
-    encoding: SkillResourceEncoding
+    id: UUID
+    name: str
+    description: str
+    version: str
+    resources_available: bool
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.id, UUID):
+            raise ValueError("skill id must be a UUID")
+        if not isinstance(self.name, str) or len(self.name) > 64 or _SAFE_NAME.fullmatch(self.name) is None:
+            raise ValueError("invalid skill name")
+        if (
+            not isinstance(self.description, str)
+            or not self.description.strip()
+            or len(self.description) > 512
+            or not self.description.isprintable()
+        ):
+            raise ValueError("skill description is required")
+        if (
+            not isinstance(self.version, str)
+            or self.version != self.version.strip()
+            or not self.version.isprintable()
+            or _SAFE_VERSION.fullmatch(self.version) is None
+        ):
+            raise ValueError("invalid skill version")
+        if not isinstance(self.resources_available, bool):
+            raise ValueError("skill resource flag must be boolean")
 
 
 @dataclass(frozen=True, slots=True)
 class SkillResource:
-    """Host-only immutable resource bytes plus their bounded descriptor."""
+    """One explicitly declared UTF-8 Skill resource."""
 
-    descriptor: SkillResourceDescriptor
-    body: bytes = field(repr=False)
+    path: str
+    media_type: str
+    content: str = field(repr=False)
 
-    @property
-    def path(self) -> str:
-        return self.descriptor.path
-
-
-@dataclass(frozen=True, slots=True)
-class SkillCard:
-    """Bounded discovery metadata — never includes full instructions."""
-
-    id: UUID
-    name: str
-    description: str
-    scope: SkillScope
-    version: str
-    trust: SkillTrust
-    affordances: tuple[str, ...]
-    resources_available: bool
-    capability_refs: tuple[str, ...] = field(default_factory=tuple)
-    task_contract_ref: str | None = None
+    def __post_init__(self) -> None:
+        path = PurePosixPath(self.path)
+        if (
+            not self.path
+            or path.is_absolute()
+            or ".." in path.parts
+            or str(path) != self.path
+            or self.path.startswith("./")
+        ):
+            raise ValueError("invalid skill resource path")
+        if not self.media_type.strip():
+            raise ValueError("skill resource media type is required")
+        if not isinstance(self.content, str):
+            raise TypeError("skill resource content must be UTF-8 text")
 
 
 @dataclass(frozen=True, slots=True)
-class SkillRecord:
-    """Host-only Agent Skill definition (bodies stay off public cards/events)."""
+class SkillDefinition:
+    """Trusted bundled Skill definition retained only by the host."""
 
-    id: UUID
-    name: str
-    description: str
-    scope: SkillScope
-    version: str
-    trust: SkillTrust
-    visibility: SkillVisibility
-    workspace_id: UUID | None
-    affordances: tuple[str, ...]
-    resources_available: bool
-    instructions: str
-    skill_markdown: str
-    license: str | None = None
-    compatibility: str | None = None
-    metadata: tuple[tuple[str, str], ...] = field(default_factory=tuple)
-    allowed_tools: tuple[str, ...] = field(default_factory=tuple)
-    capability_refs: tuple[str, ...] = field(default_factory=tuple)
-    task_contract_ref: str | None = None
-    resources: tuple[SkillResource, ...] = field(default_factory=tuple, repr=False)
+    card: SkillCard
+    instructions: str = field(repr=False)
+    resources: Mapping[str, SkillResource] = field(default_factory=lambda: MappingProxyType({}), repr=False)
+    signature: type[dspy.Signature] | None = None
 
-    def resource_map(self) -> dict[str, SkillResource]:
-        return {resource.path: resource for resource in self.resources}
+    def __post_init__(self) -> None:
+        if not isinstance(self.instructions, str) or not self.instructions.strip():
+            raise ValueError("skill instructions are required")
+        values = dict(self.resources)
+        if any(path != resource.path for path, resource in values.items()):
+            raise ValueError("skill resource key does not match its path")
+        object.__setattr__(self, "resources", MappingProxyType(values))
+        if self.card.resources_available != bool(values):
+            raise ValueError("skill card resource flag does not match resources")
 
-    def resource_manifest(self) -> tuple[SkillResourceDescriptor, ...]:
-        return tuple(resource.descriptor for resource in self.resources)
+
+@dataclass(frozen=True, slots=True)
+class ResolvedSkills:
+    """Deterministic result of exact Skill selection."""
+
+    cards: tuple[SkillCard, ...]
+    selected: tuple[SkillDefinition, ...]
+    instructions: tuple[str, ...]
+    signature: type[dspy.Signature] | None

@@ -43,7 +43,7 @@ tmp/
 **/.tmp*/
 
 # Plans and notes
-/PLANS.md
+
 @plan/
 .scratch/
 TASKS.md

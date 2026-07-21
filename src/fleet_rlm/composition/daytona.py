@@ -10,6 +10,7 @@ from fastapi import FastAPI
 
 from fleet_rlm.composition.common import CompositionError, clear_composition_state
 from fleet_rlm.config import Settings
+from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
 
 def require_daytona_settings(settings: Settings) -> None:
@@ -186,8 +187,8 @@ async def install_daytona_composition(
     """Attach an already-migrated Daytona inventory to app state."""
     handles = await build_daytona_composition(settings)
     try:
-        handles.resources.skill_registry = getattr(app.state, "skill_registry", None)
-        handles.resources.capability_registry = getattr(app.state, "capability_registry", None)
+        catalog = getattr(app.state, "skill_catalog", None)
+        handles.resources.skill_catalog = catalog or build_bundled_skill_catalog()
         app.state.composition_ready = True
         app.state.run_environment_resources = handles.resources
         app.state.db_engine = handles.resources._engine  # noqa: SLF001

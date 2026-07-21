@@ -162,7 +162,9 @@ def test_installed_versions_are_read_from_the_detached_candidate_worktree(
     ) -> subprocess.CompletedProcess[str]:
         del check, capture_output, text
         calls.append((command, cwd, env))
-        return subprocess.CompletedProcess(command, 0, stdout='{"python":"3.13.13","dspy":"3.3.0b1","daytona":"0.197.0"}')
+        return subprocess.CompletedProcess(
+            command, 0, stdout='{"python":"3.13.13","dspy":"3.3.0b1","daytona":"0.197.0"}'
+        )
 
     monkeypatch.setattr(verifier.subprocess, "run", run)
     environment = {"FLEET_LIVE": "1"}

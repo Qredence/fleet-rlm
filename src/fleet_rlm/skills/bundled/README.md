@@ -9,8 +9,9 @@ Fleet ships two runtime Skills:
 
 The catalog follows three disclosure levels:
 
-1. A Turn starts with authorized visible names and descriptions.
+1. A Turn starts with bounded system Skill Cards.
 2. `load_skill` returns the selected `SKILL.md` only when invoked.
-3. `read_skill_resource` returns an allowed `scripts/`, `references/`, or `assets/` file only after that Skill is loaded.
+3. `read_skill_resource` returns one explicitly manifested UTF-8 resource only
+   after that Skill is loaded.
 
 Bundled Skills contain model-facing product workflows only. Repository maintenance, operator diagnostics, browser development, and Skill authoring guidance belong in the development agent catalog and canonical documentation.
