@@ -43,6 +43,8 @@ host-side behind `read_session_history`.
   startup rollback and shutdown.
 - `composition/common.py`, `deno.py`, `daytona.py`, and `testing.py` own runtime
   wiring. A locally owned database engine creates tables only for SQLite.
+  Import `fleet_rlm.composition.testing` directly in tests; it is not re-exported
+  from `composition` and is never installed by lifespan.
 - Routes retrieve composed runtime modules through `api/dependencies.py`; the
   Skills discovery route may recreate only its static in-memory catalog fallback.
 - `TurnPreparationModule` owns ordered validation, environment acquisition,

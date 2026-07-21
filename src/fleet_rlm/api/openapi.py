@@ -10,74 +10,62 @@ from fastapi.openapi.utils import get_openapi
 from fleet_rlm.api.errors import ErrorResponse
 from fleet_rlm.api.sse import FLEET_UI_CHUNK_TYPES
 
+_CHUNK_FIELD_TYPES: dict[str, dict[str, Any]] = {
+    "id": {"type": "string"},
+    "messageId": {"type": "string", "format": "uuid"},
+    "messageMetadata": {"type": "object", "additionalProperties": True},
+    "delta": {"type": "string"},
+    "toolCallId": {"type": "string"},
+    "toolName": {"type": "string"},
+    "input": {},
+    "output": {},
+    "errorText": {"type": "string"},
+    "reason": {"type": "string"},
+    "finishReason": {"type": "string", "enum": ["stop", "error"]},
+    "data": {},
+    "dynamic": {"type": "boolean"},
+    "providerExecuted": {"type": "boolean"},
+    "transient": {"type": "boolean"},
+}
+
+_CHUNK_FIELD_SPECS: dict[str, tuple[tuple[str, ...], list[str]]] = {
+    "start": (("messageId", "messageMetadata"), ["type", "messageId", "messageMetadata"]),
+    "reasoning-start": (("id",), ["type", "id"]),
+    "reasoning-end": (("id",), ["type", "id"]),
+    "reasoning-delta": (("id", "delta"), ["type", "id", "delta"]),
+    "text-start": (("id",), ["type", "id"]),
+    "text-end": (("id",), ["type", "id"]),
+    "text-delta": (("id", "delta"), ["type", "id", "delta"]),
+    "tool-input-available": (
+        ("toolCallId", "toolName", "input", "dynamic", "providerExecuted"),
+        ["type", "toolCallId", "toolName", "input"],
+    ),
+    "tool-output-available": (
+        ("toolCallId", "output", "dynamic", "providerExecuted"),
+        ["type", "toolCallId", "output"],
+    ),
+    "tool-output-error": (
+        ("toolCallId", "errorText", "dynamic", "providerExecuted"),
+        ["type", "toolCallId", "errorText"],
+    ),
+    "finish": (("finishReason", "messageMetadata"), ["type", "finishReason"]),
+    "abort": (("reason",), ["type", "reason"]),
+    "error": (("errorText",), ["type", "errorText"]),
+}
+
+
+def _chunk_field_spec(chunk_type: str) -> tuple[tuple[str, ...], list[str]]:
+    if chunk_type in _CHUNK_FIELD_SPECS:
+        return _CHUNK_FIELD_SPECS[chunk_type]
+    if chunk_type.startswith("data-"):
+        return (("id", "data", "transient"), ["type", "data"])
+    return ((), ["type"])
+
 
 def _chunk_schema(chunk_type: str) -> dict[str, Any]:
+    fields, required = _chunk_field_spec(chunk_type)
     properties: dict[str, Any] = {"type": {"type": "string", "const": chunk_type}}
-    required = ["type"]
-    field_types: dict[str, dict[str, Any]] = {
-        "id": {"type": "string"},
-        "messageId": {"type": "string", "format": "uuid"},
-        "messageMetadata": {"type": "object", "additionalProperties": True},
-        "delta": {"type": "string"},
-        "toolCallId": {"type": "string"},
-        "toolName": {"type": "string"},
-        "input": {},
-        "output": {},
-        "errorText": {"type": "string"},
-        "reason": {"type": "string"},
-        "finishReason": {"type": "string", "enum": ["stop", "error"]},
-        "data": {},
-        "dynamic": {"type": "boolean"},
-        "providerExecuted": {"type": "boolean"},
-        "transient": {"type": "boolean"},
-    }
-    fields: tuple[str, ...]
-    if chunk_type == "start":
-        fields, required = ("messageId", "messageMetadata"), ["type", "messageId", "messageMetadata"]
-    elif chunk_type in {"reasoning-start", "reasoning-end", "text-start", "text-end"}:
-        fields, required = ("id",), ["type", "id"]
-    elif chunk_type in {"reasoning-delta", "text-delta"}:
-        fields, required = ("id", "delta"), ["type", "id", "delta"]
-    elif chunk_type.startswith("data-"):
-        fields, required = ("id", "data", "transient"), ["type", "data"]
-    elif chunk_type == "tool-input-available":
-        fields, required = (
-            (
-                "toolCallId",
-                "toolName",
-                "input",
-                "dynamic",
-                "providerExecuted",
-            ),
-            ["type", "toolCallId", "toolName", "input"],
-        )
-    elif chunk_type == "tool-output-available":
-        fields, required = (
-            ("toolCallId", "output", "dynamic", "providerExecuted"),
-            [
-                "type",
-                "toolCallId",
-                "output",
-            ],
-        )
-    elif chunk_type == "tool-output-error":
-        fields, required = (
-            ("toolCallId", "errorText", "dynamic", "providerExecuted"),
-            [
-                "type",
-                "toolCallId",
-                "errorText",
-            ],
-        )
-    elif chunk_type == "finish":
-        fields, required = ("finishReason", "messageMetadata"), ["type", "finishReason"]
-    elif chunk_type == "abort":
-        fields, required = ("reason",), ["type", "reason"]
-    elif chunk_type == "error":
-        fields, required = ("errorText",), ["type", "errorText"]
-    else:
-        fields = ()
-    properties.update({field: field_types[field] for field in fields})
+    properties.update({field: _CHUNK_FIELD_TYPES[field] for field in fields})
     return {
         "type": "object",
         "properties": properties,

@@ -1,4 +1,9 @@
-"""Explicit runtime compositions for Daytona, Deno, and private tests."""
+"""Explicit runtime compositions for Daytona, Deno, and private tests.
+
+Public runtime profiles are ``deno`` and ``daytona`` (re-exported below).
+``composition.testing`` is test-only: import ``fleet_rlm.composition.testing``
+directly in tests; it is never installed by lifespan and is not re-exported here.
+"""
 
 from fleet_rlm.composition.common import (
     CompositionError,
