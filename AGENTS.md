@@ -121,9 +121,15 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - The maintained terminal uses pi-tui only. `fleet-turn-stream.ts` owns strict stream lifecycle, `sse.ts` owns frame/chunk validation, `tui/projection.ts` owns live/reload projection, and `tui/store.ts` owns atomic hydration. The monochrome operator timeline renders all evidence statically expanded in native terminal scrollback; Fleet does not capture the mouse or maintain a transcript viewport.
 - Live Daytona MVP proof (`tests/live/backend/`, `scripts/live_daytona_verify.py`) loads repo `.env` via `python-dotenv` with `override=False`; existing process exports still win.
 - Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments
-  and Artifacts use Workspace Volume Scope; `TurnLifecycle.finish()` promotes
-  Artifact Candidates and owns atomic Turn Commit, while `TurnCoordinator`
-  owns stream settlement, terminal ordering, and cleanup.
+  and Artifacts use Workspace Volume Scope; Session Workspace is
+  append/update-only (list/stat/read/write with overwrite; no delete Tool).
+  `TurnLifecycle.finish()` promotes Artifact Candidates and owns atomic Turn
+  Commit, while `TurnCoordinator` owns stream settlement, terminal ordering,
+  and cleanup.
+- `read_session_history` enforces a fixed 256 KiB UTF-8 aggregate byte budget on
+  returned message bodies (host constant, not a `FLEET_*` setting), using
+  whole-message omission with `truncated` / `bytes_returned` / `byte_budget` /
+  `skipped_ordinal` continuation metadata.
 - Settings use only `FLEET_*`. The local BYOK API uses one deterministic process-local User and Workspace scope and accepts no Authorization or synthetic identity headers.
 - Alembic owns the live schema through one fresh canonical baseline. `create_tables` is restricted to explicit SQLite test/offline helpers; run `alembic check` against an upgraded empty database for drift.
 - Repository validation is `make check`; its default test targets mask local
@@ -135,4 +141,5 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
   Canonical defaults are `openai/gpt-4o-mini`; bare model ids are accepted for
   OpenAI-compatible bases and normalized by `normalize_model_id`. Prefer stock
   `dspy.LM` with stateless call/context overrides over stateful copies or custom
-  LM wrappers.
+  LM wrappers. DSPy private-protocol knowledge stays behind `rlm.dspy_contract`
+  (construction/usage) and `rlm.dspy_interpreter_contract` (inject/`FinalOutput`).
