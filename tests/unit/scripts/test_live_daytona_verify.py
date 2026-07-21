@@ -22,7 +22,7 @@ def _success_receipt(sha: str) -> dict[str, object]:
             "versions": {
                 "python": "3.13.13",
                 "dspy": "3.3.0b1",
-                "daytona": "0.197.0",
+                "daytona": "0.199.0",
             },
             "lockfile_sha256": "d" * 64,
         },
@@ -101,14 +101,12 @@ def test_help_is_credential_free(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_model_overrides_must_be_paired(tmp_path: Path) -> None:
     assert (
-        verifier.main(
-            [
-                "--output",
-                str(tmp_path / "receipt.json"),
-                "--root-model",
-                "openai/root",
-            ]
-        )
+        verifier.main([
+            "--output",
+            str(tmp_path / "receipt.json"),
+            "--root-model",
+            "openai/root",
+        ])
         == verifier.EXIT_PRECONDITION
     )
 
@@ -163,7 +161,7 @@ def test_installed_versions_are_read_from_the_detached_candidate_worktree(
         del check, capture_output, text
         calls.append((command, cwd, env))
         return subprocess.CompletedProcess(
-            command, 0, stdout='{"python":"3.13.13","dspy":"3.3.0b1","daytona":"0.197.0"}'
+            command, 0, stdout='{"python":"3.13.13","dspy":"3.3.0b1","daytona":"0.199.0"}'
         )
 
     monkeypatch.setattr(verifier.subprocess, "run", run)
@@ -172,7 +170,7 @@ def test_installed_versions_are_read_from_the_detached_candidate_worktree(
     assert verifier._installed_versions(tmp_path, environment) == {
         "python": "3.13.13",
         "dspy": "3.3.0b1",
-        "daytona": "0.197.0",
+        "daytona": "0.199.0",
     }
     assert calls[0][1] == tmp_path
     assert calls[0][2] is environment
@@ -329,7 +327,7 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
         lambda *_args: {
             "python": "3.13.13",
             "dspy": "3.3.0b1",
-            "daytona": "0.197.0",
+            "daytona": "0.199.0",
         },
     )
 
@@ -349,17 +347,15 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
             evidence_path = worktree / ".scratch/clean-backend-refoundation/assets"
             evidence_path.mkdir(parents=True)
             (evidence_path / "live-b5-attachment-artifact-durability-evidence.json").write_text(
-                json.dumps(
-                    {
-                        "gate": "B5",
-                        "staged_readable": True,
-                        "artifact_id": "artifact-1",
-                        "artifact_checksum": "a" * 64,
-                        "artifact_survived_replace": True,
-                        "sandbox_ids": ["sandbox-1", "sandbox-2"],
-                        "volume_id": "volume-1",
-                    }
-                ),
+                json.dumps({
+                    "gate": "B5",
+                    "staged_readable": True,
+                    "artifact_id": "artifact-1",
+                    "artifact_checksum": "a" * 64,
+                    "artifact_survived_replace": True,
+                    "sandbox_ids": ["sandbox-1", "sandbox-2"],
+                    "volume_id": "volume-1",
+                }),
                 encoding="utf-8",
             )
         else:
@@ -370,18 +366,16 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
     monkeypatch.setattr(verifier.subprocess, "run", run_once)
 
     assert (
-        verifier.main(
-            [
-                "--output",
-                str(output),
-                "--timeout-seconds",
-                "840",
-                "--root-model",
-                verifier._LIVE_MODEL,
-                "--sub-model",
-                verifier._LIVE_MODEL,
-            ]
-        )
+        verifier.main([
+            "--output",
+            str(output),
+            "--timeout-seconds",
+            "840",
+            "--root-model",
+            verifier._LIVE_MODEL,
+            "--sub-model",
+            verifier._LIVE_MODEL,
+        ])
         == 0
     )
     lane_calls = [call for call in calls if call[0][1:3] == ["run", "pytest"]]

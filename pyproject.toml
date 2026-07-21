@@ -31,7 +31,7 @@ dependencies = [
     # on RLM internals that are private API.
     "dspy==3.3.0b1",
     # Sandboxed execution.
-    "daytona==0.197.0",
+    "daytona==0.199.0",
     # Persistence and migrations.
     "aiosqlite>=0.20.0",
     "alembic>=1.18.5,<2",
