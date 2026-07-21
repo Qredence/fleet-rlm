@@ -1,9 +1,10 @@
 # Bundled runtime Skills
 
-Fleet ships four runtime Skills:
+Fleet ships five runtime Skills:
 
 | Skill | Version | Trigger |
 |---|---:|---|
+| `dspy-rlm` | 1.0.0 | Analyze, explain, or implement `dspy.RLM` (Recursive LM / REPL; not RAG). |
 | `long-context` | 2.0.0 | Large-variable exploration, evidence synthesis, and exact retrieval. |
 | `workspace-files` | 1.0.0 | Durable Session files, authorized Attachments, and Artifact creation. |
 | `data-analysis` | 1.0.0 | Verified descriptive statistics, trends, and qualified anomalies. |

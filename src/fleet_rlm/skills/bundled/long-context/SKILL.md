@@ -19,7 +19,7 @@ Keep large inputs in variable space. Explore them with bounded Python operations
 4. Call `llm_query` or `llm_query_batched` only on self-contained excerpts that include the question and their source offsets.
 5. Reconcile candidates against definitions, scope, dates, exceptions, amendments, cross-references, and precedence rules relevant to the task.
 6. Recover complete operative language from the original variable, then re-slice it to verify quotes, offsets, qualifiers, and conclusions.
-7. Call `SUBMIT(...)` once with exactly the requested output fields. If the evidence is absent, ambiguous, or insufficient, state that instead of forcing the requested count.
+7. Call `SUBMIT(...)` once with exactly the requested output fields. If the evidence is absent, ambiguous, or insufficient, state that instead of forcing the requested count. Do not `SUBMIT` an entire large `llm_query` or `llm_query_batched` blob; keep declared answers within the Turn output character budget.
 
 Treat sub-model output as a candidate, never as source evidence. Respect the Turn's call and output budgets; reduce excerpts before making another call.
 

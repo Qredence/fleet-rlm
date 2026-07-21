@@ -7,13 +7,13 @@ import pytest
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillSelectionRef
-from fleet_rlm.skills.resolver import resolve_selected_skills
+from fleet_rlm.skills.resolver import resolve_selected_skills, resolved_signature
 from fleet_rlm.skills.signatures import DataAnalysisSignature
 
 
 def test_resolver_accepts_exact_ordered_selection() -> None:
     catalog = build_bundled_skill_catalog()
-    cards = catalog.cards()
+    cards = tuple(card for card in catalog.cards() if card.name != "dspy-rlm")
     resolved = resolve_selected_skills(
         catalog,
         tuple(SkillSelectionRef(card.id, card.version) for card in reversed(cards)),
@@ -53,3 +53,15 @@ def test_resolver_rejects_two_signature_skills() -> None:
     selections = tuple(SkillSelectionRef(skill.card.id, "1") for skill in definitions)
     with pytest.raises(InvalidSkillSelectionError):
         resolve_selected_skills(catalog, selections)
+
+
+def test_dspy_rlm_selection_preserves_selected_signature_outputs() -> None:
+    catalog = build_bundled_skill_catalog()
+    selections = tuple(
+        SkillSelectionRef(catalog.require(catalog.cards()[index].id).card.id, catalog.cards()[index].version)
+        for index in (0, 1)
+    )
+    resolved = resolve_selected_skills(catalog, selections)
+
+    signature = resolved_signature(resolved)
+    assert signature.output_fields.keys() == DataAnalysisSignature.output_fields.keys()

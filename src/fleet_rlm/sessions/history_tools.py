@@ -74,7 +74,10 @@ class SessionHistoryToolHost:
             dspy.Tool(
                 read_session_history,
                 name="read_session_history",
-                desc="Read a bounded page of older committed messages from this Session.",
+                desc=(
+                    'Read a bounded page dictionary of older committed messages. Iterate result["messages"]; '
+                    "each message contains role and content."
+                ),
                 args={
                     "offset": {"type": "integer", "minimum": 0},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 20},

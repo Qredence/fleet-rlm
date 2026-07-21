@@ -278,7 +278,7 @@ def _terminal_status(exc: BaseException) -> TerminalStatus:
 
 def _public_failure_message(exc: BaseException) -> str:
     if isinstance(exc, PredictionOutputError):
-        return PredictionOutputError.public_message
+        return str(type(exc).public_message)
     if isinstance(exc, TurnTerminalError):
         return str(type(exc).public_message)
     return "Turn failed"

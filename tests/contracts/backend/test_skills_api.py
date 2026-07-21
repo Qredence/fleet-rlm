@@ -41,11 +41,12 @@ def test_bundled_skill_cards_are_bounded_metadata_only() -> None:
     cards = response.json()
     assert {card["name"] for card in cards} == {
         "data-analysis",
+        "dspy-rlm",
         "long-context",
         "report-builder",
         "workspace-files",
     }
-    assert len(cards) == 4
+    assert len(cards) == 5
     for card in cards:
         UUID(card["id"])
         assert set(card) == _CARD_FIELDS
@@ -56,8 +57,10 @@ def test_bundled_skill_cards_are_bounded_metadata_only() -> None:
     serialized = json.dumps(cards).lower()
     assert "# long-context analysis" not in serialized
     assert "# workspace files" not in serialized
+    assert "# dspy rlm" not in serialized
     assert "chunking-strategies.md" not in serialized
     assert "filesystem-contract.md" not in serialized
+    assert "rlm-contract.md" not in serialized
     assert "statistical convention" not in serialized
     assert "read-back content" not in serialized
 

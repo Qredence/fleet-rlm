@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from hashlib import sha256
@@ -19,6 +20,8 @@ from fleet_rlm.rlm.dspy_contract import RLMUsage
 from fleet_rlm.rlm.outcome import RLMOutcome
 from fleet_rlm.sessions.committed_turn import CommittedTurn
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+
+logger = logging.getLogger(__name__)
 
 
 class TurnLifecycleError(RuntimeError):
@@ -269,14 +272,18 @@ class TurnLifecycleModule:
 
         written: list[str] = []
         snapshot_path: str | None = None
+        stage = "read_candidates"
         try:
             validated = await self._read_candidates(candidates, artifact_sink)
+            stage = "publish_artifacts"
             promoted = await self._publish(candidates, validated, artifact_sink, written)
+            stage = "build_committed_turn"
             committed = commit_success(resolution, tuple(item.ref for item in promoted))
             if result_snapshot_sink is not None:
                 prediction = resolution.prediction
                 if prediction is None:
                     raise TurnStateError("successful outcome requires a prediction")
+                stage = "encode_result_snapshot"
                 snapshot_path = result_snapshot_sink.result_path(turn.session_id, turn.run_id)
                 snapshot = encode_result_snapshot(
                     turn.session_id,
@@ -284,12 +291,14 @@ class TurnLifecycleModule:
                     prediction,
                     resolution.usage,
                 )
+                stage = "write_result_snapshot"
                 snapshot_write, write_cancelled = await _settle_owned(
                     result_snapshot_sink.write(snapshot_path, snapshot)
                 )
                 snapshot_write.result()
                 if write_cancelled:
                     raise asyncio.CancelledError
+            stage = "commit_turn"
             commit_task, commit_cancelled = await _settle_owned(self._store.commit(turn, committed, promoted))
             try:
                 receipt = commit_task.result()
@@ -310,6 +319,12 @@ class TurnLifecycleModule:
                 raise asyncio.CancelledError from None
             if not isinstance(exc, Exception):
                 raise
+            logger.exception(
+                "Turn finalization failed stage=%s session_id=%s run_id=%s",
+                stage,
+                turn.session_id,
+                turn.run_id,
+            )
             failure = TurnFailure(
                 "failed",
                 "commit_failed",

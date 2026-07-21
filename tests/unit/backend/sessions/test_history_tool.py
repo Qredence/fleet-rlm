@@ -41,6 +41,10 @@ def test_history_tool_pages_canonical_messages_with_stable_ordinals() -> None:
         "offset": {"type": "integer", "minimum": 0},
         "limit": {"type": "integer", "minimum": 1, "maximum": 20},
     }
+    assert "page dictionary" in tool.desc
+    assert 'result["messages"]' in tool.desc
+    assert "role" in tool.desc
+    assert "content" in tool.desc
     first_page = tool(offset=0, limit=2)
     assert first_page == {
         "offset": 0,

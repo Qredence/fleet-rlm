@@ -22,9 +22,19 @@ saved = write_workspace_text(path="notes/analysis.md", content=updated_text, ove
 assert read_workspace_text(path="notes/analysis.md") == updated_text
 ```
 
+`read_workspace_text` accepts `max_chars` from 1 through 10,000 and rejects a
+file longer than the requested bound; it never truncates or returns a prefix.
+For content of at most 10,000 characters, verify exact read-back equality. For
+larger content, require a successful write receipt and call
+`stat_workspace_file` on the same path. Treat the write as metadata confirmation
+only when both `saved["byte_size"]` and `stated["entry"]["byte_size"]` equal
+`len(content.encode("utf-8"))`; do not claim byte-for-byte read verification.
+
 Workspace writes are immediate private Session state. They survive a failed or cancelled Run and are not published as Artifacts.
 
-Never report a workspace operation as successful unless its tool call succeeds and a read through the same Session Workspace tool verifies the requested path and content. Do not retry a deterministic tool error unchanged.
+Never report a workspace operation as successful unless its tool call succeeds
+and the applicable exact-read or large-file metadata confirmation completes. Do
+not retry a deterministic tool error unchanged.
 
 ## Attachments and Artifacts
 

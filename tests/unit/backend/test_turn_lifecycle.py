@@ -243,7 +243,7 @@ async def test_daytona_success_writes_snapshot_before_commit_and_retains_it() ->
 
 
 @pytest.mark.asyncio
-async def test_commit_failure_removes_snapshot_and_promoted_artifact_exactly() -> None:
+async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failure_opaque(caplog) -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.chat.turn_lifecycle import (
         ExecuteTurn,
@@ -344,6 +344,16 @@ async def test_commit_failure_removes_snapshot_and_promoted_artifact_exactly() -
     )
 
     assert isinstance(receipt, FailedRunReceipt)
+    assert receipt.failure_code == "commit_failed"
+    assert receipt.public_message == "Turn could not be committed"
+    record = next(record for record in caplog.records if record.message.startswith("Turn finalization failed"))
+    assert record.levelname == "ERROR"
+    assert "stage=commit_turn" in record.message
+    assert f"session_id={session_id}" in record.message
+    assert f"run_id={run_id}" in record.message
+    assert record.exc_info is not None
+    assert record.exc_info[0] is RuntimeError
+    assert "database unavailable" not in receipt.public_message
     assert candidate.durable_path not in artifacts.values
     assert snapshot.values == {}
     assert operations == [

@@ -141,7 +141,10 @@ class WorkspaceToolHost:
             dspy.Tool(
                 read_workspace_text,
                 name="read_workspace_text",
-                desc="Read bounded UTF-8 text from this Session's durable workspace.",
+                desc=(
+                    "Read UTF-8 workspace text with max_chars in 1..10000. If the file is longer than the "
+                    "requested bound, raises too_large; it does not truncate or return a prefix."
+                ),
                 args={
                     "path": {"type": "string"},
                     "max_chars": {

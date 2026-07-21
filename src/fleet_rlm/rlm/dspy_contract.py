@@ -42,6 +42,12 @@ class PredictionOutputError(ValueError):
         super().__init__(self.public_message)
 
 
+class PredictionOutputTooLargeError(PredictionOutputError):
+    """Declared Prediction JSON exceeds the Turn commit character budget."""
+
+    public_message = "Turn output is too large"
+
+
 @dataclass(frozen=True, slots=True)
 class TrajectoryStep:
     """One strictly normalized native DSPy REPL interaction."""
@@ -149,7 +155,7 @@ def prediction_result(
     plain_outputs = _plain_json(result.outputs)
     encoded = json.dumps(plain_outputs, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     if len(encoded) > max_output_chars:
-        raise PredictionOutputError
+        raise PredictionOutputTooLargeError
     try:
         validate_declared_public_value(result.outputs)
     except ValueError:

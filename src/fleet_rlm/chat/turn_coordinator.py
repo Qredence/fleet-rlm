@@ -104,9 +104,12 @@ def _terminal(recorder: EventRecorder, receipt: CommittedTurnReceipt | FailedRun
     if receipt.failure_code == "commit_failed":
         return recorder.record(RunFailed(code="commit_failed", message="Turn could not be committed"))
     message = receipt.public_message.strip() if receipt.public_message else ""
-    public_message: RunFailedMessage = (
-        "Turn output is invalid" if message == "Turn output is invalid" else "Turn failed"
-    )
+    if message == "Turn output is too large":
+        public_message: RunFailedMessage = "Turn output is too large"
+    elif message == "Turn output is invalid":
+        public_message = "Turn output is invalid"
+    else:
+        public_message = "Turn failed"
     return recorder.record(RunFailed(code="execution_failed", message=public_message))
 
 

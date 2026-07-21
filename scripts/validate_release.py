@@ -34,6 +34,8 @@ REQUIRED_WHEEL_FILES = {
     "fleet_rlm/persistence/models.py",
     "fleet_rlm/rlm/runner.py",
     "fleet_rlm/skills/bundled/data-analysis/SKILL.md",
+    "fleet_rlm/skills/bundled/dspy-rlm/SKILL.md",
+    "fleet_rlm/skills/bundled/dspy-rlm/references/rlm-contract.md",
     "fleet_rlm/skills/bundled/long-context/SKILL.md",
     "fleet_rlm/skills/bundled/long-context/references/chunking-strategies.md",
     "fleet_rlm/skills/bundled/long-context/scripts/rank_chunks.py",

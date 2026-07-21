@@ -23,13 +23,22 @@ Create the requested report from verified source data.
    `write_workspace_text(path=..., content=..., overwrite=False)`. Require
    `ok: true`; use `overwrite=True` only when replacing an intentionally chosen
    existing file.
-5. Read the same path with `read_workspace_text(path=...)`. Verify the returned
-   string byte-for-byte where practical, including required headings and
-   requested values, before reporting success.
+5. If the report is at most 10,000 characters, read the same path with
+   `read_workspace_text(path=..., max_chars=10000)` and verify exact equality
+   before reporting success. The read tool rejects longer files; it never
+   truncates or returns a prefix.
 6. Create an Artifact only when the user asks for a downloadable public output
    and `create_artifact` is available. Require `ok: true`; its result is a
    private Artifact Candidate, not proof of public publication until Turn
    Commit succeeds.
-7. Submit only after verification succeeds, using exactly the fields accepted
+7. For a report longer than 10,000 characters, write it once, then call
+   `stat_workspace_file` on the same path. Treat this as metadata confirmation
+   only when both the write receipt's `byte_size` and
+   `stat_result["entry"]["byte_size"]` equal
+   `len(content.encode("utf-8"))`; do not claim byte-for-byte read verification.
+   Optionally call `create_artifact` when the user wants a downloadable output.
+   Then `SUBMIT` only a short summary that references the relative workspace
+   path. Never stuff an oversized report into `answer`.
+8. Submit only after verification succeeds, using exactly the fields accepted
    by the current `SUBMIT` binding. Never report host paths, provider details,
    or an unpublished Artifact as public output.

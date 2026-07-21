@@ -76,6 +76,9 @@ def test_exposes_exact_typed_tool_contracts() -> None:
         "minimum": 1,
         "maximum": 10_000,
     }
+    assert "1..10000" in tools["read_workspace_text"].desc
+    assert "too_large" in tools["read_workspace_text"].desc
+    assert "does not truncate or return a prefix" in tools["read_workspace_text"].desc
     assert tools["write_workspace_text"].args == {
         "path": {"type": "string"},
         "content": {"type": "string"},

@@ -28,6 +28,12 @@ class _BundledSpec:
 
 _BUNDLED_SPECS = (
     _BundledSpec(
+        "dspy-rlm",
+        "Use when analyzing, explaining, or implementing dspy.RLM (Recursive Language Model / REPL code agent). Not for RAG or dspy.Retrieve.",
+        "1.0.0",
+        (("references/rlm-contract.md", "text/markdown"),),
+    ),
+    _BundledSpec(
         "long-context",
         "Use bounded retrieval to analyze large documents, transcripts, code, or datasets.",
         "2.0.0",

@@ -16,6 +16,7 @@ JsonValue: TypeAlias = JsonScalar | tuple["JsonValue", ...] | Mapping[str, "Json
 RunFailedMessage: TypeAlias = Literal[
     "Turn failed",
     "Turn output is invalid",
+    "Turn output is too large",
     "Turn could not be prepared",
     "Turn could not be committed",
 ]

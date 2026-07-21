@@ -16,6 +16,7 @@ def test_bundled_catalog_is_fixed_sorted_and_version_stable() -> None:
     catalog = build_bundled_skill_catalog()
     assert [(card.name, card.version) for card in catalog.cards()] == [
         ("data-analysis", "1.0.0"),
+        ("dspy-rlm", "1.0.0"),
         ("long-context", "2.0.0"),
         ("report-builder", "1.0.0"),
         ("workspace-files", "1.0.0"),
@@ -27,12 +28,45 @@ def test_bundled_catalog_is_fixed_sorted_and_version_stable() -> None:
     assert catalog.require(stable_skill_id("report-builder")).signature is None
 
 
+def test_dspy_rlm_skill_defines_recursive_not_retrieval_language_model() -> None:
+    catalog = build_bundled_skill_catalog()
+    skill = catalog.require(stable_skill_id("dspy-rlm"))
+    assert "Recursive Language Model" in skill.instructions
+    assert "Never call it a Retrieval Language Model" in skill.instructions
+    resource = skill.resources["references/rlm-contract.md"]
+    assert "Recursive Language Model" in resource.content
+    assert "Retrieval Language Model" in resource.content
+    assert "dspy.Retrieve" in resource.content
+    assert "Turn output is too large" in resource.content
+    assert "active Fleet Signature" in resource.content
+    assert "every required output field" in resource.content
+    assert "`max_iterations`" in resource.content
+    assert "| `max_iters` |" not in resource.content
+    assert '["skill_markdown"]' in skill.instructions
+    assert '["content"]' in skill.instructions
+    assert "not" in resource.content.lower()
+
+
+def test_workspace_skills_distinguish_exact_readback_from_large_file_metadata_confirmation() -> None:
+    catalog = build_bundled_skill_catalog()
+    workspace = catalog.require(stable_skill_id("workspace-files")).instructions
+    report_builder = catalog.require(stable_skill_id("report-builder")).instructions
+
+    for instructions in (workspace, report_builder):
+        assert "10,000 characters" in instructions
+        assert 'len(content.encode("utf-8"))' in instructions
+        assert "metadata confirmation" in instructions
+        assert "prefix read" not in instructions
+
+
 def test_catalog_contains_only_explicit_utf8_resources() -> None:
     catalog = build_bundled_skill_catalog()
+    dspy_rlm = catalog.require(stable_skill_id("dspy-rlm"))
     long_context = catalog.require(stable_skill_id("long-context"))
     workspace = catalog.require(stable_skill_id("workspace-files"))
     data_analysis = catalog.require(stable_skill_id("data-analysis"))
     report_builder = catalog.require(stable_skill_id("report-builder"))
+    assert tuple(dspy_rlm.resources) == ("references/rlm-contract.md",)
     assert tuple(long_context.resources) == (
         "scripts/semantic_chunk.py",
         "scripts/rank_chunks.py",
@@ -41,10 +75,10 @@ def test_catalog_contains_only_explicit_utf8_resources() -> None:
     assert tuple(workspace.resources) == ("references/filesystem-contract.md",)
     assert all(
         isinstance(resource.content, str)
-        for skill in (long_context, workspace)
+        for skill in (dspy_rlm, long_context, workspace)
         for resource in skill.resources.values()
     )
-    assert not any(path.endswith(".pdf") for skill in (long_context, workspace) for path in skill.resources)
+    assert not any(path.endswith(".pdf") for skill in (dspy_rlm, long_context, workspace) for path in skill.resources)
     assert data_analysis.resources == {}
     assert report_builder.resources == {}
 

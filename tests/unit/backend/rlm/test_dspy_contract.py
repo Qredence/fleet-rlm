@@ -48,13 +48,17 @@ def test_prediction_result_rejects_invalid_display_or_json(answer: object, paylo
 
 
 def test_prediction_result_rejects_oversized_or_publicly_unsafe_outputs_without_mutation() -> None:
-    from fleet_rlm.rlm.dspy_contract import PredictionOutputError, prediction_result
+    from fleet_rlm.rlm.dspy_contract import (
+        PredictionOutputError,
+        PredictionOutputTooLargeError,
+        prediction_result,
+    )
 
     class Report(dspy.Signature):
         answer: str = dspy.OutputField()
         metadata: dict[str, str] = dspy.OutputField()
 
-    with pytest.raises(PredictionOutputError, match="Turn output is invalid"):
+    with pytest.raises(PredictionOutputTooLargeError, match="Turn output is too large"):
         prediction_result(
             dspy.Prediction(answer="x" * 100, metadata={}),
             Report,

@@ -90,12 +90,10 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
     class Stream:
         def __init__(self, execution):
             recorder = EventRecorder(execution.run_id, execution.session_id)
-            self._events = iter(
-                (
-                    recorder.record(RunStarted(delivery="live")),
-                    recorder.record(Status("execution", "running")),
-                )
-            )
+            self._events = iter((
+                recorder.record(RunStarted(delivery="live")),
+                recorder.record(Status("execution", "running")),
+            ))
             self.outcome = RLMOutcome(
                 terminal_status="completed",
                 prediction=PredictionResult(
@@ -274,6 +272,27 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
     assert closes == 1
 
 
+def test_terminal_maps_turn_output_too_large_public_message() -> None:
+    from uuid import uuid4
+
+    from fleet_rlm.chat.turn_coordinator import _terminal
+    from fleet_rlm.chat.turn_lifecycle import FailedRunReceipt
+    from fleet_rlm.rlm.events import EventRecorder, RunFailed
+
+    event = _terminal(
+        EventRecorder(uuid4(), uuid4()),
+        FailedRunReceipt(
+            run_id=uuid4(),
+            terminal_status="failed",
+            failure_code="execution_failed",
+            public_message="Turn output is too large",
+            durable=False,
+        ),
+    )
+    assert isinstance(event.detail, RunFailed)
+    assert event.detail.message == "Turn output is too large"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("status", "terminal_type"),
@@ -355,12 +374,10 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
     class Stream:
         def __init__(self):
             recorder = EventRecorder(run_id, session.id)
-            self._events = iter(
-                (
-                    recorder.record(RunStarted(delivery="live")),
-                    recorder.record(Status("execution", "running")),
-                )
-            )
+            self._events = iter((
+                recorder.record(RunStarted(delivery="live")),
+                recorder.record(Status("execution", "running")),
+            ))
             self.outcome = RLMOutcome(
                 status,  # type: ignore[arg-type]
                 artifact_candidates=(candidate,),
@@ -519,18 +536,16 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
         await create_tables(engine)
         factory = create_session_factory(engine)
         async with factory() as db, db.begin():
-            db.add_all(
-                (
-                    UserRow(id=access.user_id),
-                    WorkspaceRow(id=access.workspace_id),
-                    SessionRow(
-                        id=session_id,
-                        user_id=access.user_id,
-                        workspace_id=access.workspace_id,
-                        title="SQL coordinator",
-                    ),
-                )
-            )
+            db.add_all((
+                UserRow(id=access.user_id),
+                WorkspaceRow(id=access.workspace_id),
+                SessionRow(
+                    id=session_id,
+                    user_id=access.user_id,
+                    workspace_id=access.workspace_id,
+                    title="SQL coordinator",
+                ),
+            ))
 
         class Prepared:
             execution = SimpleNamespace(run_id=run_id, session_id=session_id)
@@ -908,12 +923,10 @@ async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_orde
     class Stream:
         def __init__(self):
             recorder = EventRecorder(run_id, session.id)
-            self._events = iter(
-                (
-                    recorder.record(RunStarted(delivery="live")),
-                    recorder.record(Status("execution", "running")),
-                )
-            )
+            self._events = iter((
+                recorder.record(RunStarted(delivery="live")),
+                recorder.record(Status("execution", "running")),
+            ))
             self.outcome = None
 
         def __aiter__(self):

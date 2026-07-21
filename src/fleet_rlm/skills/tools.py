@@ -138,11 +138,21 @@ class SkillToolHost:
 
     def as_tools(self) -> tuple[dspy.Tool, dspy.Tool]:
         return (
-            dspy.Tool(self.load_skill, name="load_skill", desc="Load an authorized Skill progressively."),
+            dspy.Tool(
+                self.load_skill,
+                name="load_skill",
+                desc=(
+                    "Load an authorized Skill progressively. Returns a dictionary with ok, skill_markdown, "
+                    "and resources on success, or error on failure."
+                ),
+            ),
             dspy.Tool(
                 self.read_skill_resource,
                 name="read_skill_resource",
-                desc="Read one resource from a previously loaded Skill.",
+                desc=(
+                    "Read one resource from a previously loaded Skill. Returns a dictionary with ok, content, "
+                    "and resource metadata on success, or error on failure."
+                ),
             ),
         )
 

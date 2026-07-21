@@ -587,6 +587,71 @@ async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() ->
 
 
 @pytest.mark.asyncio
+async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> None:
+    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.sessions.models import TurnAccess
+
+    class Capabilities:
+        spec = RLMExecutionSpec()
+
+        def drain_public_details(self):
+            return ()
+
+        def drain_artifact_candidates(self):
+            return ()
+
+        async def aclose(self):
+            return None
+
+    class Factory:
+        def create(self, **_kwargs):
+            class Program:
+                async def acall(self, **_call_kwargs):
+                    prediction = dspy.Prediction(
+                        answer="x" * 200,
+                        trajectory=[
+                            {
+                                "reasoning": "submit long",
+                                "code": "SUBMIT(answer=answer)",
+                                "output": "FINAL submitted",
+                            },
+                        ],
+                    )
+                    prediction.set_lm_usage({"root": {"prompt_tokens": 2, "completion_tokens": 1}})
+                    return prediction
+
+            return Program()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        "answer",
+        SessionContextManifest(uuid4(), 0, 0, ()),
+        SimpleNamespace(root_lm=object(), sub_lm=object()),
+        RLMOptions(max_output_chars=32),
+        asyncio.get_running_loop().time() + 10,
+        None,
+        (),
+        Capabilities(),
+        not_cancelled,
+        (),
+    )
+    stream = RLMRunner(factory=Factory()).stream(context)
+    _ = [event async for event in stream]
+
+    assert stream.outcome is not None
+    assert not stream.outcome.succeeded
+    assert stream.outcome.public_error_message == "Turn output is too large"
+
+
+@pytest.mark.asyncio
 async def test_runner_emits_preloaded_skill_events_before_later_output_failure() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
