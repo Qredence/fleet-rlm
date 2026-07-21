@@ -73,7 +73,8 @@ mount, and interpreter probe before diagnosing a Turn.
 - `/api/sessions` — Session CRUD and ordered committed Turn history.
 - `/api/attachments` — durable Attachment upload and metadata lookup.
 - `/api/artifacts/{artifact_id}` — committed metadata and verified content.
-- `/api/skills` — authorized Skill Card discovery.
+- `/api/skills` — bounded system Skill Card discovery for the four bundled
+  Skills.
 - `PUT /api/runs/{run_id}/cancellation` — durable Run cancellation.
 
 There is no `/api/v1`, WebSocket execution, optimization/evaluation API,

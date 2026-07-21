@@ -33,12 +33,14 @@ REQUIRED_WHEEL_FILES = {
     "fleet_rlm/daytona/workspace_volume.py",
     "fleet_rlm/persistence/models.py",
     "fleet_rlm/rlm/runner.py",
+    "fleet_rlm/skills/bundled/data-analysis/SKILL.md",
     "fleet_rlm/skills/bundled/long-context/SKILL.md",
     "fleet_rlm/skills/bundled/long-context/references/chunking-strategies.md",
     "fleet_rlm/skills/bundled/long-context/scripts/rank_chunks.py",
     "fleet_rlm/skills/bundled/long-context/scripts/semantic_chunk.py",
     "fleet_rlm/skills/bundled/workspace-files/SKILL.md",
     "fleet_rlm/skills/bundled/workspace-files/references/filesystem-contract.md",
+    "fleet_rlm/skills/bundled/report-builder/SKILL.md",
 }
 
 

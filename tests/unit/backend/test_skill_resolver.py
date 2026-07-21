@@ -18,7 +18,12 @@ def test_resolver_accepts_exact_ordered_selection() -> None:
         catalog,
         tuple(SkillSelectionRef(card.id, card.version) for card in reversed(cards)),
     )
-    assert [skill.card.name for skill in resolved.selected] == ["workspace-files", "long-context"]
+    assert [skill.card.name for skill in resolved.selected] == [
+        "workspace-files",
+        "report-builder",
+        "long-context",
+        "data-analysis",
+    ]
     assert resolved.instructions == tuple(skill.instructions for skill in resolved.selected)
 
 

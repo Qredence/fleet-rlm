@@ -12,7 +12,7 @@ import dspy
 
 from fleet_rlm.skills.errors import SkillNotFoundError
 from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillResource
-from fleet_rlm.skills.signatures import validate_skill_signature
+from fleet_rlm.skills.signatures import DataAnalysisSignature, validate_skill_signature
 
 _BUNDLED_SKILL_NAMESPACE = UUID("6f1e0c2a-9b3d-4e5f-8a1b-2c3d4e5f6071")
 
@@ -42,6 +42,17 @@ _BUNDLED_SPECS = (
         "Use durable Session Workspace, Attachment, and Artifact tools correctly.",
         "1.0.0",
         (("references/filesystem-contract.md", "text/markdown"),),
+    ),
+    _BundledSpec(
+        "data-analysis",
+        "Compute and verify descriptive statistics, trends, and qualified anomalies.",
+        "1.0.0",
+        signature=DataAnalysisSignature,
+    ),
+    _BundledSpec(
+        "report-builder",
+        "Create, save, read back, and verify reports from trusted source data.",
+        "1.0.0",
     ),
 )
 

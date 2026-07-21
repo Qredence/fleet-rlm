@@ -24,7 +24,8 @@ def test_tools_are_exactly_two_and_resources_require_load() -> None:
 
 def test_preload_restricts_catalog_and_events_are_metadata_only() -> None:
     catalog = build_bundled_skill_catalog()
-    selected, other = (catalog.require(card.id) for card in catalog.cards())
+    selected = catalog.require(stable_skill_id("long-context"))
+    other = catalog.require(stable_skill_id("workspace-files"))
     host = SkillToolHost(catalog, allowed_skill_ids=frozenset({selected.card.id}))
     host.mark_preloaded(selected)
     assert host.load_skill(str(other.card.id)) == {"ok": False, "error": "skill_not_found"}

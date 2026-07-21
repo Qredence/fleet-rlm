@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from hashlib import sha256
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
@@ -17,7 +18,7 @@ from fleet_rlm.api.routes.turns import router as turns_router
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
-from fleet_rlm.files.models import PreparedAttachments
+from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import EventRecorder, RuntimeEvent
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
@@ -66,7 +67,11 @@ def _catalog() -> SkillCatalog:
     return build_bundled_skill_catalog()
 
 
-def _turn(*, selections: tuple[SkillSelectionRef, ...] = ()) -> ExecuteTurn:
+def _turn(
+    *,
+    selections: tuple[SkillSelectionRef, ...] = (),
+    attachment_ids: tuple[UUID, ...] = (),
+) -> ExecuteTurn:
     async def not_cancelled() -> bool:
         return False
 
@@ -74,7 +79,7 @@ def _turn(*, selections: tuple[SkillSelectionRef, ...] = ()) -> ExecuteTurn:
         uuid4(),
         uuid4(),
         TurnAccess(uuid4(), uuid4()),
-        TurnInput("analyze the supplied material", (), selections),
+        TurnInput("analyze the supplied material", attachment_ids, selections),
         SessionHistory(()),
         not_cancelled,
         _TurnClaimToken(uuid4()),
@@ -154,6 +159,7 @@ async def test_deno_progressive_tools_preload_exact_selection_and_keep_events_me
     ).prepare(turn, environment, PreparedAttachments((), ()), deadline=float("inf"))
 
     tools = {str(tool.name): tool for tool in prepared.spec.tools}
+    assert len(prepared.spec.skill_cards) == 4
     assert {"load_skill", "read_skill_resource"} <= tools.keys()
     assert tools["load_skill"](skill_id=str(other.card.id))["error"] == "skill_not_found"
     loaded = tools["load_skill"](skill_id=str(selected.card.id), expected_version=selected.card.version)
@@ -206,3 +212,173 @@ async def test_progressive_resource_requires_load_and_daytona_preparation_is_pro
     tool_names = {str(tool.name) for tool in prepared.spec.tools}
     assert {"load_skill", "read_skill_resource"} <= tool_names
     assert prepared.spec.workspace.available is True
+
+
+@pytest.mark.asyncio
+async def test_data_analysis_signature_and_report_builder_selection_use_host_tools_only() -> None:
+    from fleet_rlm.chat.deno_run_environment import DenoRunEnvironmentProvider, _DenoCapabilityPreparer
+
+    catalog = _catalog()
+    csv = b"value,group\n1,a\n2,a\n"
+    attachment_id = uuid4()
+    attachment = AttachmentRef(attachment_id, "data.csv", "text/csv", len(csv), sha256(csv).hexdigest())
+    staged = StagedAttachment(attachment_id, "/attachments/data.csv")
+    data_analysis = catalog.require(stable_skill_id("data-analysis"))
+    report_builder = catalog.require(stable_skill_id("report-builder"))
+    turn = _turn(
+        attachment_ids=(attachment_id,),
+        selections=(
+            SkillSelectionRef(data_analysis.card.id, data_analysis.card.version),
+            SkillSelectionRef(report_builder.card.id, report_builder.card.version),
+        ),
+    )
+    environment = await DenoRunEnvironmentProvider().acquire(turn, deadline=float("inf"))
+    environment.attachment_sink.values[staged.sandbox_path] = csv
+    prepared = await _DenoCapabilityPreparer(
+        skill_catalog=catalog,
+        models=RLMModelBundle(MagicMock(), MagicMock()),
+        options=RLMOptions(),
+        max_artifact_bytes=1024,
+    ).prepare(turn, environment, PreparedAttachments((attachment,), (staged,)), deadline=float("inf"))
+
+    assert prepared.spec.output_schema_id == "skill.data-analysis"
+    assert prepared.spec.output_schema_version == "1.0.0"
+    assert prepared.spec.signature.output_fields["answer"].annotation is str
+    assert set(prepared.spec.signature.output_fields) == {"answer", "findings", "metrics", "anomalies"}
+    assert {str(tool.name) for tool in prepared.spec.tools} == {
+        "read_attachment",
+        "read_session_history",
+        "load_skill",
+        "read_skill_resource",
+    }
+    attachment_result = next(tool for tool in prepared.spec.tools if str(tool.name) == "read_attachment")(
+        attachment_id=str(attachment_id)
+    )
+    assert attachment_result["ok"] is True
+    assert attachment_result["content"] == csv.decode()
+    lifecycle = prepared.drain_public_details()
+    assert [detail.kind for detail in lifecycle] == [
+        "attachment.read",
+        "skill.activated",
+        "skill.loaded",
+        "skill.activated",
+        "skill.loaded",
+    ]
+    assert {detail.name for detail in lifecycle if detail.kind == "skill.activated"} == {
+        "data-analysis",
+        "report-builder",
+    }
+    assert prepared.spec.workspace.available is False
+
+    from fleet_rlm.api.sse import AISDKUIProjector
+
+    recorder = EventRecorder(turn.run_id, turn.session_id)
+    skill_details = [detail for detail in lifecycle if detail.kind.startswith("skill.")]
+    serialized = json.dumps(
+        [chunk for detail in skill_details for chunk in AISDKUIProjector().project(recorder.record(detail))]
+    )
+    assert data_analysis.instructions not in serialized
+    assert report_builder.instructions not in serialized
+    assert "content" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_deterministic_composition_runs_data_analysis_signature() -> None:
+    from fleet_rlm.composition.testing import DeterministicTurnPreparation, TestingRLMFactory
+    from fleet_rlm.rlm.runner import RLMRunner
+
+    class NoAttachments:
+        async def prepare_run(self, access, attachment_ids, run, sink) -> PreparedAttachments:
+            del access, attachment_ids, run, sink
+            return PreparedAttachments((), ())
+
+    catalog = _catalog()
+    selected = catalog.require(stable_skill_id("data-analysis"))
+    prepared = await DeterministicTurnPreparation(
+        attachments=NoAttachments(),
+        skill_catalog=catalog,
+    ).prepare(_turn(selections=(SkillSelectionRef(selected.card.id, selected.card.version),)))
+    stream = RLMRunner(factory=TestingRLMFactory()).stream(prepared.execution)
+    _ = [event async for event in stream]
+
+    assert stream.outcome is not None and stream.outcome.succeeded
+    assert stream.outcome.prediction is not None
+    assert stream.outcome.prediction.schema_id == "skill.data-analysis"
+    assert stream.outcome.prediction.schema_version == "1.0.0"
+    assert set(stream.outcome.prediction.outputs) == {"answer", "findings", "metrics", "anomalies"}
+    await prepared.aclose()
+
+
+@pytest.mark.asyncio
+async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_owned(monkeypatch) -> None:
+    from fleet_rlm.config import Settings
+    from fleet_rlm.daytona.run_environment import LiveKernelResources, _LiveCapabilityPreparer
+    from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult
+
+    class FakeWorkspace:
+        last_cleanup_warning = None
+
+        def __init__(self) -> None:
+            self.values: dict[str, str] = {}
+
+        def list_entries(self, path: str, *, limit: int = 100) -> WorkspaceListResult:
+            del limit
+            return WorkspaceListResult(
+                tuple(WorkspaceEntry(name, "file", len(value), None) for name, value in self.values.items()), False
+            )
+
+        def stat(self, path: str) -> WorkspaceEntry | None:
+            value = self.values.get(path)
+            return None if value is None else WorkspaceEntry(path, "file", len(value), None)
+
+        def read_text(self, path: str, *, max_bytes: int) -> str:
+            value = self.values[path]
+            if len(value.encode()) > max_bytes:
+                raise ValueError("too large")
+            return value
+
+        def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
+            if path in self.values and not overwrite:
+                raise FileExistsError(path)
+            self.values[path] = content
+            return WorkspaceEntry(path, "file", len(content.encode()), None)
+
+    fake_workspace = FakeWorkspace()
+    monkeypatch.setattr(
+        "fleet_rlm.daytona.workspace_fs.DaytonaSessionWorkspaceFS",
+        lambda *args, **kwargs: fake_workspace,
+    )
+    catalog = _catalog()
+    report_builder = catalog.require(stable_skill_id("report-builder"))
+    workspace_files = catalog.require(stable_skill_id("workspace-files"))
+    turn = _turn(
+        selections=(
+            SkillSelectionRef(report_builder.card.id, report_builder.card.version),
+            SkillSelectionRef(workspace_files.card.id, workspace_files.card.version),
+        )
+    )
+    resources = object.__new__(LiveKernelResources)
+    resources.settings = Settings(_env_file=None, run_environment="daytona")
+    resources.models = RLMModelBundle(MagicMock(), MagicMock())
+    resources.skill_catalog = catalog
+    environment = SimpleNamespace(attachment_sink=SimpleNamespace(volume_fs=SimpleNamespace(sandbox=object())))
+    prepared = await _LiveCapabilityPreparer(resources).prepare(
+        turn,
+        environment,
+        PreparedAttachments((), ()),
+        deadline=float("inf"),
+    )
+
+    tools = {str(tool.name): tool for tool in prepared.spec.tools}
+    assert {"load_skill", "read_skill_resource"} <= tools.keys()
+    assert {name for name in tools if name in {"load_skill", "read_skill_resource"}} == {
+        "load_skill",
+        "read_skill_resource",
+    }
+    assert tools["load_skill"](skill_id=str(stable_skill_id("long-context")))["error"] == "skill_not_found"
+    assert tools["write_workspace_text"](path="report.md", content="# Report")["ok"] is True
+    assert tools["read_workspace_text"](path="report.md") == "# Report"
+    assert {detail.name for detail in prepared.drain_public_details() if detail.kind == "skill.activated"} == {
+        "report-builder",
+        "workspace-files",
+    }

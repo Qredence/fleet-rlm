@@ -6,8 +6,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import dspy
 from fastapi import FastAPI
 
+from fleet_rlm.chat.deno_run_environment import DenoPreparedCapabilities, _DenoCapabilityPreparer
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
 from fleet_rlm.chat.turn_preparation import (
     PreparedTurn,
@@ -25,11 +27,10 @@ from fleet_rlm.composition.common import (
 from fleet_rlm.config import Settings
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.models import PreparedAttachments
-from fleet_rlm.files.workspace_models import DENO_WORKSPACE_CAPABILITY
-from fleet_rlm.rlm.context import RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.rlm.signature import FleetRLMSignature
+from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog
 
 
 class TestingLM:
@@ -80,21 +81,17 @@ class TestingRunEnvironmentProvider(RunEnvironmentProvider):
         return RunEnvironment(TestingInterpreter(), sink, sink, release)
 
 
-class TestingPreparedCapabilities:
-    spec = RLMExecutionSpec((), FleetRLMSignature, "fleet.default", "1", (), {}, DENO_WORKSPACE_CAPABILITY)
-    preparation_notices: tuple[()] = ()
-
-    def drain_public_details(self) -> tuple[()]:
-        return ()
-
-    def drain_artifact_candidates(self) -> tuple[()]:
-        return ()
-
-    async def aclose(self) -> None:
-        return None
-
-
 class TestingCapabilityPreparer:
+    def __init__(
+        self, *, skill_catalog: SkillCatalog, models: RLMModelBundle, options: RLMOptions, max_artifact_bytes: int
+    ) -> None:
+        self._delegate = _DenoCapabilityPreparer(
+            skill_catalog=skill_catalog,
+            models=models,
+            options=options,
+            max_artifact_bytes=max_artifact_bytes,
+        )
+
     async def prepare(
         self,
         turn: ExecuteTurn,
@@ -102,23 +99,31 @@ class TestingCapabilityPreparer:
         attachments: PreparedAttachments,
         *,
         deadline: float,
-    ) -> TestingPreparedCapabilities:
-        del turn, environment, attachments, deadline
-        return TestingPreparedCapabilities()
+    ) -> DenoPreparedCapabilities:
+        return await self._delegate.prepare(turn, environment, attachments, deadline=deadline)
 
 
 class _TestingRLM:
+    def __init__(self, signature: type[dspy.Signature]) -> None:
+        self._signature = signature
+
     async def acall(self, **kwargs: Any) -> SimpleNamespace:
         request = str(kwargs.get("request") or "").strip()
-        return SimpleNamespace(answer=request)
+        values: dict[str, Any] = {"answer": request}
+        for name in self._signature.output_fields:
+            if name == "answer":
+                continue
+            if name in {"findings", "anomalies", "metrics"}:
+                values[name] = []
+        return SimpleNamespace(**values, trajectory=[])
 
 
 class TestingRLMFactory:
     """Deterministic RLM substitute that never calls a provider."""
 
     def create(self, **kwargs: Any) -> _TestingRLM:
-        del kwargs
-        return _TestingRLM()
+        signature = kwargs.get("signature", FleetRLMSignature)
+        return _TestingRLM(signature)
 
 
 class DeterministicTurnPreparation:
@@ -126,16 +131,25 @@ class DeterministicTurnPreparation:
         self,
         *,
         attachments: AttachmentLifecycle,
+        skill_catalog: SkillCatalog | None = None,
         options: RLMOptions | None = None,
+        max_artifact_bytes: int = 10_000_000,
         turn_timeout_seconds: int = 1800,
     ) -> None:
+        resolved_options = options or RLMOptions()
+        models = RLMModelBundle(TestingLM("testing/root"), TestingLM("testing/sub"))
         self._module = TurnPreparationModule(
-            models=RLMModelBundle(TestingLM("testing/root"), TestingLM("testing/sub")),
-            options=options or RLMOptions(),
+            models=models,
+            options=resolved_options,
             turn_timeout_seconds=turn_timeout_seconds,
             attachments=attachments,
             environments=TestingRunEnvironmentProvider(),
-            capabilities=TestingCapabilityPreparer(),
+            capabilities=TestingCapabilityPreparer(
+                skill_catalog=skill_catalog or build_bundled_skill_catalog(),
+                models=models,
+                options=resolved_options,
+                max_artifact_bytes=max_artifact_bytes,
+            ),
         )
 
     async def prepare(self, turn: ExecuteTurn, *, deadline: float | None = None) -> PreparedTurn:
@@ -180,7 +194,9 @@ def install_testing_composition(
         artifact_reader=storage.artifact_reader,
         preparation=DeterministicTurnPreparation(
             attachments=storage.attachment_lifecycle,
+            skill_catalog=app.state.skill_catalog,
             options=rlm_options(settings),
+            max_artifact_bytes=settings.max_artifact_bytes,
             turn_timeout_seconds=settings.turn_timeout_seconds,
         ),
         rlm_factory=TestingRLMFactory(),

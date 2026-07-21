@@ -1,6 +1,6 @@
-"""Bundled agent skills for fleet_rlm.
+"""Bundled agent Skills for fleet_rlm.
 
-Each skill is a directory containing a ``SKILL.md`` (required, with YAML
-frontmatter) plus optional ``references/`` and ``scripts/`` subdirectories.
-Load them through the fixed ``fleet_rlm.skills.catalog`` manifest.
+Each Skill is a directory containing a complete UTF-8 ``SKILL.md`` plus
+optional explicitly manifested resources. Load them through the fixed
+``fleet_rlm.skills.catalog`` manifest.
 """

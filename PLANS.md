@@ -20,7 +20,7 @@
 - Support only UTF-8 `SKILL.md` and explicitly declared UTF-8 resources.
 - Do not support binary Skill assets, executable Skill scripts, workspace-scoped Skills, hidden Skills, trust tiers, dynamic registration, arbitrary capability references, input adapters, output validators, knowledge registries, or RLM requirement negotiation.
 - Keep exactly two host-mediated Skill tools: `load_skill` and `read_skill_resource`.
-- Keep at most four bundled Skills in the initial catalog.
+- Ship exactly four bundled Skills in the PyPI 0.7.0 catalog.
 - Core tools such as workspace, Attachment, Artifact, and Session History tools remain bound by the runtime profile; Skill files cannot register executable host behavior.
 - Explicit Skill selections remain version-pinned and limited to four unique Skills per Turn.
 - At most one selected Skill may provide a custom Signature.
@@ -86,6 +86,10 @@ src/fleet_rlm/
 │       │   ├── SKILL.md
 │       │   └── references/
 │       │       └── filesystem-contract.md
+│       ├── data-analysis/
+│       │   └── SKILL.md
+│       └── report-builder/
+│           └── SKILL.md
 │
 ├── app.py
 ├── api/
@@ -441,17 +445,27 @@ and no registry/capability framework.
 
 # Phase 5: Add only the two justified new Skills
 
+The final PyPI 0.7.0 bundled catalog contains exactly four trusted system
+Skills: `data-analysis@1.0.0`, `long-context@2.0.0`, `report-builder@1.0.0`,
+and `workspace-files@1.0.0`. Existing IDs and versions remain unchanged.
+`data-analysis` is the only bundled custom Signature; `report-builder` is
+instruction-only. Neither Skill contributes executable tools.
+
 ### Task 8: Add `data-analysis`
 
 **Files:**
+- Modify: `src/fleet_rlm/skills/catalog.py` (static manifest and stable IDs)
 - Create: `src/fleet_rlm/skills/bundled/data-analysis/SKILL.md`
+- Modify: `tests/unit/backend/test_skill_catalog.py`
+- Modify: `tests/contracts/backend/test_skills_api.py`
 - Modify: `tests/contracts/backend/test_skill_turn_contract.py`
+- Modify: `scripts/validate_release.py` (required wheel files)
 
 **Interfaces:**
 - Consumes: Python REPL, `DataAnalysisSignature`
 - Produces: verified descriptive analysis workflow
 
-- [ ] **Step 1: Write the Skill body**
+- [x] **Step 1: Write the Skill body**
 
 ```markdown
 # Data analysis
@@ -468,7 +482,7 @@ For anomaly claims:
 Before submitting, verify all reported counts, extrema, sums, means, medians, and dispersion values with Python.
 ```
 
-- [ ] **Step 2: Add a contract test based on the observed CSV workflow**
+- [x] **Step 2: Add a contract test based on the observed CSV workflow**
 
 The test must assert that a selected `data-analysis` Skill:
 
@@ -477,32 +491,29 @@ The test must assert that a selected `data-analysis` Skill:
 - preserves `answer` as the required public text output;
 - does not add executable tools.
 
-- [ ] **Step 3: Run the contract test**
+- [x] **Step 3: Run the contract test**
 
 ```bash
 uv run pytest tests/contracts/backend/test_skill_turn_contract.py -v -k data_analysis
 ```
 
-Expected: PASS.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add src/fleet_rlm/skills/bundled/data-analysis/SKILL.md tests/contracts/backend/test_skill_turn_contract.py
-git commit -m "feat(skills): add the typed data-analysis workflow"
-```
+Expected: PASS. Catalog, API, package, and Turn assertions project the
+four-Skill product contract while keeping bodies and resources private.
 
 ### Task 9: Add `report-builder`
 
 **Files:**
+- Modify: `src/fleet_rlm/skills/catalog.py` (static manifest)
 - Create: `src/fleet_rlm/skills/bundled/report-builder/SKILL.md`
+- Modify: `tests/unit/backend/test_skill_catalog.py`
+- Modify: `tests/contracts/backend/test_skills_api.py`
 - Modify: `tests/contracts/backend/test_skill_turn_contract.py`
 
 **Interfaces:**
 - Consumes: runtime-bound workspace and Artifact tools when available
 - Produces: write-read-verify report workflow
 
-- [ ] **Step 1: Write the Skill body**
+- [x] **Step 1: Write the Skill body**
 
 ```markdown
 # Report builder
@@ -519,7 +530,7 @@ Create the requested report from verified source data.
 8. Submit only after verification succeeds.
 ```
 
-- [ ] **Step 2: Add a contract test**
+- [x] **Step 2: Add a contract test**
 
 The test must assert that `report-builder`:
 
@@ -528,22 +539,18 @@ The test must assert that `report-builder`:
 - does not register workspace or Artifact tools;
 - can be selected together with `data-analysis` without a Signature conflict.
 
-- [ ] **Step 3: Run the contract test**
+- [x] **Step 3: Run the contract test**
 
 ```bash
 uv run pytest tests/contracts/backend/test_skill_turn_contract.py -v -k report_builder
 ```
 
-Expected: PASS.
+Expected: PASS. The two new Skills can be selected together, with the single
+Signature rule and exactly two host-owned Skill tools preserved.
 
-- [ ] **Step 4: Commit**
-
-```bash
-git add src/fleet_rlm/skills/bundled/report-builder/SKILL.md tests/contracts/backend/test_skill_turn_contract.py
-git commit -m "feat(skills): add the report-builder workflow"
-```
-
-**Phase 5 exit gate:** The catalog contains four focused Skills and no speculative additions.
+**Phase 5 exit gate:** The static catalog contains exactly four focused Skills;
+the catalog, API, Turn, Deno, package, and Signature tests pass. This remains
+one coherent uncommitted cutover; no intermediate commit is required.
 
 ---
 
@@ -559,13 +566,13 @@ those changes.
 - Modify only user and maintainer documentation that changes when Phase 5 adds
   `data-analysis` and `report-builder`.
 
-- [ ] Describe the fixed four-Skill catalog after Phase 5 lands.
-- [ ] Document that cards are bounded metadata, bodies and explicit UTF-8
+- [x] Describe the fixed four-Skill catalog after Phase 5 lands.
+- [x] Document that cards are bounded metadata, bodies and explicit UTF-8
   resources load progressively, selections are ID/version pinned, and at most
   one selected Skill may supply a validated Signature.
-- [ ] Keep executable tools host-owned and remove any newly stale two-Skill
+- [x] Keep executable tools host-owned and remove any newly stale two-Skill
   release wording.
-- [ ] Run `make check-docs`, `make api-check`, and `git diff --check`.
+- [x] Run `make check-docs`, `make api-check`, and `git diff --check`.
 
 **Phase 6 exit gate:** Documentation matches the Phase 5 four-Skill catalog
 without reopening the catalog, tool, application-wiring, or runtime architecture.
@@ -581,27 +588,37 @@ without reopening the catalog, tool, application-wiring, or runtime architecture
 - Consumes: final implementation
 - Produces: exact-SHA verification evidence
 
-- [ ] **Step 1: Run the full offline suite**
+- [x] **Step 1: Run the full offline suite**
 
 ```bash
 make check
 make test-deno
+make api-sync
 make api-check
+make check-docs
+make check-security
+make build-release
+make check-release
 git diff --check
 ```
 
 Expected: all commands PASS.
 
-- [ ] **Step 2: Run focused package import and wheel checks**
+- [x] **Step 2: Run focused package import and wheel checks**
 
 ```bash
 uv build
-python - <<'PY'
+uv run python - <<'PY'
 from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
 catalog = build_bundled_skill_catalog()
 print([(card.name, card.version) for card in catalog.cards()])
-assert len(catalog.cards()) == 4
+assert [(card.name, card.version) for card in catalog.cards()] == [
+    ("data-analysis", "1.0.0"),
+    ("long-context", "2.0.0"),
+    ("report-builder", "1.0.0"),
+    ("workspace-files", "1.0.0"),
+]
 PY
 ```
 
@@ -614,34 +631,33 @@ report-builder
 workspace-files
 ```
 
-- [ ] **Step 3: Run a Deno Turn with progressive loading**
+- [x] **Step 3: Run the provider-free Deno preparation contract**
 
 Verify:
 
 1. all four cards appear in bounded Turn input metadata;
 2. `load_skill` returns one selected `SKILL.md`;
 3. `read_skill_resource` rejects an unloaded Skill resource;
-4. a selected `data-analysis` Turn uses `DataAnalysisSignature`;
+4. a selected `data-analysis` preparation uses its typed output schema;
 5. no Skill adds a host tool;
-6. the Turn completes through native `dspy.RLM`.
+6. the deterministic testing composition preserves the same catalog-bound
+   selection, preload, Signature, and two-tool behavior.
 
-- [ ] **Step 4: Run a Daytona report workflow**
+- [x] **Step 4: Run the injected Daytona preparation contract**
 
-Use `report-builder` plus `workspace-files` to:
-
-1. create a Markdown report;
-2. write it with `write_workspace_text`;
-3. read it through `read_workspace_text`;
-4. verify required headings;
-5. complete without Python-local filesystem fallback.
+Use injected provider-free resources to verify the runtime-specific core tools,
+Workspace metadata, catalog-bound Skill tools, and progressive preloading.
+Select `report-builder` with `workspace-files` and verify Workspace write/read
+operations remain runtime-owned while an unselected Skill remains unavailable.
+Credentialed provider execution remains a separate opt-in live gate.
 
 Expected: PASS.
 
-- [ ] **Step 5: Verify complexity reduction**
+- [x] **Step 5: Verify complexity reduction**
 
 ```bash
 find src/fleet_rlm/skills -maxdepth 1 -name '*.py' -print | sort
-rg -n 'os\.walk|yaml|base64|mimetypes|CapabilityRegistry|TaskContract|InputAdapter|OutputValidator' src/fleet_rlm/skills
+rg -n 'os\.walk|yaml|base64|mimetypes|CapabilityRegistry|TaskContract|InputAdapter|OutputValidator' src/fleet_rlm/skills -g '*.py'
 ```
 
 Expected:
@@ -660,7 +676,7 @@ git rev-parse HEAD
 
 Attach the SHA and validation command outputs to the review or release evidence.
 
-**Phase 7 exit gate:** The simplified Skills system passes offline, Deno, and Daytona workflows and demonstrates the intended code deletion and contract reduction.
+**Phase 7 exit gate:** The simplified Skills system passes offline and provider-free Deno/Daytona preparation workflows. Live Daytona remains pending until an opt-in credentialed exact-tip receipt exists.
 
 ---
 

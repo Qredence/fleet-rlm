@@ -39,8 +39,13 @@ def test_bundled_skill_cards_are_bounded_metadata_only() -> None:
 
     assert response.status_code == 200
     cards = response.json()
-    assert {card["name"] for card in cards} == {"long-context", "workspace-files"}
-    assert 1 <= len(cards) <= 4
+    assert {card["name"] for card in cards} == {
+        "data-analysis",
+        "long-context",
+        "report-builder",
+        "workspace-files",
+    }
+    assert len(cards) == 4
     for card in cards:
         UUID(card["id"])
         assert set(card) == _CARD_FIELDS
@@ -53,6 +58,8 @@ def test_bundled_skill_cards_are_bounded_metadata_only() -> None:
     assert "# workspace files" not in serialized
     assert "chunking-strategies.md" not in serialized
     assert "filesystem-contract.md" not in serialized
+    assert "statistical convention" not in serialized
+    assert "read-back content" not in serialized
 
 
 def test_get_skill_is_metadata_only_and_missing_id_is_generic() -> None:

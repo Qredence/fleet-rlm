@@ -58,10 +58,12 @@ host-side behind `read_session_history`.
 
 ## Skills
 
-The bundled catalog contains `long-context` and `workspace-files`. Skill
-disclosure is progressive: bounded Cards are available at startup, a full
-`SKILL.md` loads only when invoked or exactly preselected, and declared resources
-load only after the Skill body.
+The bundled catalog contains `long-context`, `workspace-files`,
+`data-analysis`, and `report-builder`. Skill disclosure is progressive: bounded
+Cards are available at startup, a full `SKILL.md` loads only when invoked or
+exactly preselected, and declared resources load only after the Skill body.
+`data-analysis` is the only bundled Skill that supplies a custom validated DSPy
+Signature; `report-builder` is instruction-only.
 
 Skill Markdown and resources cannot register host tools. Runtime composition
 owns the fixed core tools plus exactly `load_skill` and

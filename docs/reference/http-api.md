@@ -13,8 +13,8 @@ The generated source of truth is [`openapi.yaml`](../../openapi.yaml).
 | `GET` | `/api/attachments/{attachment_id}` | Read owned Attachment metadata |
 | `GET` | `/api/artifacts/{artifact_id}` | Read committed Artifact metadata |
 | `GET` | `/api/artifacts/{artifact_id}/content` | Download verified committed Artifact bytes |
-| `GET` | `/api/skills` | List authorized Skill Cards |
-| `GET` | `/api/skills/{skill_id}` | Read one authorized Skill Card |
+| `GET` | `/api/skills` | List bounded system Skill Cards |
+| `GET` | `/api/skills/{skill_id}` | Read one bounded system Skill Card |
 | `PUT` | `/api/runs/{run_id}/cancellation` | Request cancellation of an owned Run |
 
 The API uses one deterministic local User and Workspace scope. It accepts no

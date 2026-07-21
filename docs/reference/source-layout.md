@@ -12,7 +12,7 @@ src/fleet_rlm/
 ├── persistence/    # SQLAlchemy models and repository adapters
 ├── rlm/            # DSPy signature, models, runner, Runtime Events
 ├── sessions/       # Session/Turn domain and repository interfaces
-├── skills/         # bundled Skills, cards, authorization, tools
+├── skills/         # immutable bundled catalog, Signatures, and host tools
 ├── app.py          # FastAPI factory and lifespan
 ├── composition/    # Daytona, Deno, shared, and private testing inventories
 ├── config.py       # FLEET_* settings
