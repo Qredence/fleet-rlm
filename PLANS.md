@@ -1,719 +1,743 @@
-# Fleet RLM Skills Simplification Implementation Plan
+# Fleet RLM Role-First Daytona Volume Layout Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace `src/fleet_rlm/skills/` with a small, fixed, DSPy-native bundled Skill system that supports discovery, exact selection, progressive instruction/resource loading, and at most one optional typed DSPy Signature per Turn—without a general plugin or capability framework.
+**Goal:** Replace the deeply Session/Run-shaped Daytona Volume tree with a small role-first layout that is easy to browse while preserving durable Attachments, Artifacts, Session Workspace files, reserved memory, and recovery-safe staging.
 
-**Architecture:** Fleet ships a fixed catalog of trusted bundled Skills. A Skill may contribute concise instructions, explicitly listed UTF-8 resources, and optionally one DSPy Signature that preserves Fleet's standard inputs and required `answer: str` output. Runtime tools remain host-owned and are never registered by Skill Markdown. The existing native `dspy.RLM` remains the execution Module; this plan adds no parallel agent loop and no custom Skill Module abstraction.
+**Architecture:** One Daytona Volume subpath remains mounted per Fleet workspace. The database owns relationships such as which Session or Run created an object; the Volume organizes bytes by their semantic role. Only unavoidable temporary durable state uses a hidden `.internal/staging/<run-id>/` path. No new memory subsystem, filesystem browser, migration framework, or shared cross-Session workspace is introduced.
 
-**Tech Stack:** Python 3.11-3.13, DSPy 3.3.0b1, FastAPI 0.139.0, Pydantic v2, pytest.
+**Tech Stack:** Python 3.11-3.13, DSPy 3.3.0b1, Daytona 0.199.0, FastAPI 0.139.0, SQLAlchemy async, pytest.
 
 ## Global Constraints
 
-- Scope this plan to `src/fleet_rlm/skills/` and the minimal integration points required to consume it.
-- Keep `dspy==3.3.0b1` pinned.
-- Keep native `dspy.RLM` as the only recursive execution Module.
-- Use DSPy Signatures only for stable typed task output shapes.
-- Do not introduce a custom Skill execution Module, router model, plugin loader, or capability registry.
-- Bundled Skills are trusted package resources, not user-uploaded extensions.
-- Support only system-visible bundled Skills in this plan.
-- Support only UTF-8 `SKILL.md` and explicitly declared UTF-8 resources.
-- Do not support binary Skill assets, executable Skill scripts, workspace-scoped Skills, hidden Skills, trust tiers, dynamic registration, arbitrary capability references, input adapters, output validators, knowledge registries, or RLM requirement negotiation.
-- Keep exactly two host-mediated Skill tools: `load_skill` and `read_skill_resource`.
-- Ship exactly four bundled Skills in the PyPI 0.7.0 catalog.
-- Core tools such as workspace, Attachment, Artifact, and Session History tools remain bound by the runtime profile; Skill files cannot register executable host behavior.
-- Explicit Skill selections remain version-pinned and limited to four unique Skills per Turn.
-- At most one selected Skill may provide a custom Signature.
-- Every custom Signature must preserve Fleet's standard inputs and define a required `answer: str` output.
-- Every task must leave the backend runnable and independently testable.
+- Focus only on the Daytona Volume layout and its direct path consumers.
+- Keep `dspy==3.3.0b1`, `daytona==0.199.0`, and `fastapi[standard]==0.139.0` pinned.
+- Keep one mounted Daytona Volume subpath per Fleet workspace.
+- Keep Attachments immutable and Artifacts commit-gated.
+- Keep Session Workspace files isolated by Session.
+- Keep the database authoritative for ownership, Session/Run relationships, status, metadata, and committed Turn results.
+- Do not write automatic per-Run `result.json` snapshots.
+- Do not copy the Python Skills package into the mounted Volume.
+- Do not add a memory engine; preserve only an empty reserved `memory/` root.
+- Do not add dual-write or permanent legacy-path compatibility.
+- For `dev-0.7`, use a new or disposable Volume for validation. Existing legacy Volume migration is a separate operational task.
+- Do not introduce a public Volume browser or expose absolute provider paths through the API.
+- Keep Run-specific paths only under hidden implementation storage.
+- Every phase must leave the backend runnable and independently testable.
 
 ---
 
-## Why this change
+## Why Change the Current Layout
 
-The current Skills implementation supports a broad future extension platform:
+The current tree encodes the same Session and Run relationships in both the database and filesystem:
 
-- registry mutation;
-- multiple scopes, trust states, and visibility states;
-- generic authorization;
-- recursive directory discovery;
-- YAML metadata parsing;
-- binary assets and MIME inference;
-- capability references;
-- task-contract references;
-- tools, event views, input adapters, validators, knowledge, and RLM minimum requirements;
-- dynamic composition into a large Turn blueprint.
+```text
+/home/daytona/fleet/
+├── attachments/
+├── artifacts/
+├── memory/
+└── sessions/
+    └── <session-id>/
+        ├── workspace/
+        ├── exports/
+        ├── staging/
+        └── runs/
+            └── <run-id>/
+                ├── attachments/
+                ├── artifacts/
+                └── staging/
+```
 
-Fleet currently ships only a very small bundled catalog. The runtime does not need a general plugin platform yet. The simplified design keeps the product behavior that is useful now and removes machinery whose only purpose is hypothetical extensibility.
+This causes four problems:
 
-## Product behavior preserved
+1. A human must traverse opaque UUIDs before learning what kind of data a file represents.
+2. Attachment and Artifact roles appear both globally and inside Run directories.
+3. Durable user data and temporary implementation state look equally important.
+4. The filesystem duplicates relationships already stored in `fleet_runs`, `fleet_turns`, `fleet_attachments`, and `fleet_artifacts`.
 
-The refactor must preserve these behaviors:
-
-1. The API can list bounded Skill Cards.
-2. A Turn starts with all bundled Skill Cards as metadata.
-3. The model can call `load_skill` to receive one authorized `SKILL.md`.
-4. The model can call `read_skill_resource` after loading that Skill.
-5. The API may explicitly select up to four exact Skill ID/version pairs.
-6. Explicitly selected Skills are preloaded before RLM execution.
-7. Skill instruction bodies and resource contents do not appear in public cards or tool-event projections.
-8. Skill Markdown cannot create tools or bypass host authorization.
+The target layout answers “what kind of data is this?” at the first path segment.
 
 ---
 
-## Target repository tree
+## Target Durable Volume Layout
+
+```text
+/home/daytona/fleet/
+├── attachments/
+│   └── <attachment-id>/
+│       └── blob
+│
+├── artifacts/
+│   └── <artifact-id>/
+│       └── blob
+│
+├── workspace/
+│   └── <session-id>/
+│       └── <user-managed files and directories>
+│
+├── memory/
+│   └── .keep
+│
+└── .internal/
+    └── staging/
+        └── <run-id>/
+            ├── attachments/
+            └── artifacts/
+```
+
+### Explicitly removed from the durable layout
+
+```text
+skills/
+sessions/
+sessions/<session-id>/exports/
+sessions/<session-id>/staging/
+sessions/<session-id>/runs/
+result.json
+attachment meta.json
+artifact meta.json
+```
+
+Attachment and Artifact metadata stay in the database. Skill instructions remain host-owned and load through the existing Skill tools. JSON exports are created only as explicit Artifacts or Workspace files.
+
+---
+
+## Storage Ownership Contract
+
+| Data | Canonical durable location | Relationship owner | Lifetime |
+|---|---|---|---|
+| Attachment bytes | `attachments/<attachment-id>/blob` | Database Attachment row | Until Attachment deletion |
+| Artifact bytes | `artifacts/<artifact-id>/blob` | Database Artifact row | Until Artifact deletion |
+| User-managed Session files | `workspace/<session-id>/...` | Session + Workspace database ownership | Across Runs and Sandbox replacement |
+| Future curated memory | `memory/...` | Future memory contract | Not implemented in this plan |
+| Run Attachment copies | `.internal/staging/<run-id>/attachments/...` | Active Run | Removed after Run cleanup |
+| Artifact candidates | `.internal/staging/<run-id>/artifacts/...` | Active Run | Promoted or removed at finalization |
+| Session/Run result and trajectory | Database committed Turn | Database | Across deployments |
+
+The database explains what an object belongs to. The Volume stores the object bytes according to their role.
+
+---
+
+## Target Repository Changes
 
 ```text
 src/fleet_rlm/
-├── skills/
-│   ├── __init__.py
-│   ├── errors.py
-│   ├── models.py
-│   ├── catalog.py
-│   ├── resolver.py
-│   ├── tools.py
-│   ├── signatures.py
-│   └── bundled/
-│       ├── README.md
-│       ├── long-context/
-│       │   ├── SKILL.md
-│       │   ├── scripts/
-│       │   │   ├── semantic_chunk.py
-│       │   │   └── rank_chunks.py
-│       │   └── references/
-│       │       └── chunking-strategies.md
-│       └── workspace-files/
-│       │   ├── SKILL.md
-│       │   └── references/
-│       │       └── filesystem-contract.md
-│       ├── data-analysis/
-│       │   └── SKILL.md
-│       └── report-builder/
-│           └── SKILL.md
-│
-├── app.py
-├── api/
-│   ├── dependencies.py
-│   └── routes/skills.py
-├── chat/
-│   └── turn_preparation.py
 ├── daytona/
-│   └── run_environment.py
-└── rlm/
-    ├── factory.py
-    ├── inputs.py
-    └── signature.py
+│   ├── paths.py                 # role-first path facade
+│   ├── volume_layout.py         # create only required role roots
+│   ├── orphan_cleanup.py        # scan artifacts + hidden staging
+│   └── run_environment.py       # use new staging and workspace paths
+├── files/
+│   ├── paths.py                 # Attachment canonical + staging paths
+│   ├── lifecycle.py             # unchanged semantics, new path policy
+│   ├── local_catalog.py         # no Daytona layout logic
+│   └── workspace_tools.py       # unchanged public tool contract
+├── artifacts/
+│   ├── promotion.py             # use hidden staging and role-first durable path
+│   └── daytona_catalog.py       # read database storage_ref
+├── composition/
+│   └── daytona.py               # new cleanup roots and no Skill tree materialization
+└── persistence/
+    └── repositories/
+        ├── attachments.py       # storage_ref remains opaque
+        └── artifacts.py         # storage_ref remains opaque
 
 tests/
 ├── unit/backend/
-│   ├── test_skill_catalog.py
-│   ├── test_skill_resolver.py
-│   ├── test_skill_tools.py
-│   └── test_skill_signatures.py
-└── contracts/backend/
-    ├── test_skill_turn_contract.py
-    └── test_skills_api.py
+│   ├── test_daytona_paths.py
+│   ├── test_daytona_volume_layout.py
+│   ├── test_attachment_paths.py
+│   ├── test_artifact_promotion.py
+│   └── test_orphan_cleanup.py
+├── contracts/backend/
+│   └── test_daytona_storage_contract.py
+└── live/backend/
+    └── test_b5_attachment_artifact_durability.py
 ```
-
-## Files removed after migration
-
-```text
-src/fleet_rlm/skills/authorize.py
-src/fleet_rlm/skills/cards.py
-src/fleet_rlm/skills/capabilities.py
-src/fleet_rlm/skills/loader.py
-src/fleet_rlm/skills/paths.py
-src/fleet_rlm/skills/ranking.py
-src/fleet_rlm/skills/registry.py
-src/fleet_rlm/skills/skills/
-```
-
-These files are removed atomically in Phase 4 after their callers migrate and
-the replacement contract tests pass.
 
 ---
 
-## Target dependency flow
+## Task 1: Define the Role-First Path Contract
 
-```text
-FastAPI app
-  -> build_bundled_skill_catalog()
-      -> immutable SkillCatalog
+**Files:**
+- Modify: `src/fleet_rlm/daytona/paths.py`
+- Modify: `src/fleet_rlm/files/paths.py`
+- Test: `tests/unit/backend/test_daytona_paths.py`
+- Test: `tests/unit/backend/test_attachment_paths.py`
 
-Turn preparation
-  -> catalog.cards()
-  -> resolve_selected_skills(catalog, selections)
-  -> SkillToolHost(catalog)
-  -> ResolvedSkills(instructions, signature)
+**Interfaces:**
+- Consumes: validated workspace-scoped mount path and UUID identifiers.
+- Produces: one immutable `VolumePaths` facade with role-first paths.
 
-RLM factory
-  -> native dspy.RLM(
-         signature=resolved.signature or FleetRLMSignature,
-         tools=runtime_tools + skill_tools,
-     )
-```
-
-There is no `CapabilityRegistry`, `CapabilityResolver`, `TaskContract`, or Skill-defined tool registration in the target design.
-
----
-
-## Target public interfaces
-
-### Minimal models
-
-```python
-from dataclasses import dataclass
-from types import MappingProxyType
-from typing import Mapping
-from uuid import UUID
-
-import dspy
-
-
-@dataclass(frozen=True, slots=True)
-class SkillSelectionRef:
-    id: UUID
-    expected_version: str
-
-
-@dataclass(frozen=True, slots=True)
-class SkillCard:
-    id: UUID
-    name: str
-    description: str
-    version: str
-    resources_available: bool
-
-
-@dataclass(frozen=True, slots=True)
-class SkillResource:
-    path: str
-    media_type: str
-    content: str
-
-
-@dataclass(frozen=True, slots=True)
-class SkillDefinition:
-    card: SkillCard
-    instructions: str
-    resources: Mapping[str, SkillResource] = MappingProxyType({})
-    signature: type[dspy.Signature] | None = None
-```
-
-### Immutable catalog
-
-```python
-class SkillCatalog:
-    def cards(self) -> tuple[SkillCard, ...]: ...
-    def get(self, skill_id: UUID) -> SkillDefinition | None: ...
-    def require(self, skill_id: UUID) -> SkillDefinition: ...
-```
-
-### Selection result
+### Target `VolumePaths` API
 
 ```python
 @dataclass(frozen=True, slots=True)
-class ResolvedSkills:
-    cards: tuple[SkillCard, ...]
-    selected: tuple[SkillDefinition, ...]
-    instructions: tuple[str, ...]
-    signature: type[dspy.Signature] | None
-```
+class VolumePaths:
+    mount_path: PurePosixPath
 
-### Resolver
+    def attachments_root(self) -> PurePosixPath: ...
+    def attachment_dir(self, attachment_id: str | UUID) -> PurePosixPath: ...
+    def attachment_blob_path(self, attachment_id: str | UUID) -> PurePosixPath: ...
 
-```python
-def resolve_selected_skills(
-    catalog: SkillCatalog,
-    selections: tuple[SkillSelectionRef, ...],
-    *,
-    max_selections: int = 4,
-) -> ResolvedSkills: ...
-```
+    def artifacts_root(self) -> PurePosixPath: ...
+    def artifact_dir(self, artifact_id: str | UUID) -> PurePosixPath: ...
+    def artifact_blob_path(self, artifact_id: str | UUID) -> PurePosixPath: ...
 
-Resolver rules:
+    def workspace_root(self) -> PurePosixPath: ...
+    def session_workspace_dir(self, session_id: str | UUID) -> PurePosixPath: ...
 
-- reject more than four selections;
-- reject duplicate IDs;
-- reject unknown IDs;
-- reject version mismatches;
-- reject selection sets containing more than one custom Signature;
-- return all cards for discovery and selected definitions for preload;
-- perform no model call and no async work.
+    def memory_root(self) -> PurePosixPath: ...
 
-### Skill tools
-
-```python
-class SkillToolHost:
-    def __init__(self, catalog: SkillCatalog, *, max_loaded_skills: int = 4) -> None: ...
-    def mark_preloaded(self, skill: SkillDefinition) -> None: ...
-    def load_skill(self, skill_id: str, expected_version: str | None = None) -> dict: ...
-    def read_skill_resource(
+    def internal_root(self) -> PurePosixPath: ...
+    def staging_root(self) -> PurePosixPath: ...
+    def run_staging_dir(self, run_id: str | UUID) -> PurePosixPath: ...
+    def run_attachment_staging_dir(self, run_id: str | UUID) -> PurePosixPath: ...
+    def run_artifact_staging_dir(self, run_id: str | UUID) -> PurePosixPath: ...
+    def run_attachment_file(
         self,
-        skill_id: str,
-        resource_path: str,
-        expected_version: str | None = None,
-    ) -> dict: ...
-    def as_tools(self) -> tuple[dspy.Tool, dspy.Tool]: ...
+        run_id: str | UUID,
+        attachment_id: str | UUID,
+        filename: str,
+    ) -> PurePosixPath: ...
 ```
 
-### DSPy Signature rule
-
-```python
-class DataAnalysisSignature(dspy.Signature):
-    """Analyze supplied data with deterministic verification and report concise findings."""
-
-    request: str = dspy.InputField()
-    session_context: dict = dspy.InputField()
-    skill_cards: list[dict] = dspy.InputField()
-    attachments: list[dict] = dspy.InputField()
-
-    answer: str = dspy.OutputField(desc="User-facing analysis")
-    findings: list[str] = dspy.OutputField(desc="Verified key findings")
-    metrics: list[dict] = dspy.OutputField(desc="Named computed metrics")
-    anomalies: list[str] = dspy.OutputField(desc="Qualified anomalies or an empty list")
-```
-
-`answer` remains the canonical public text field. The other fields are typed Prediction data; they do not require a new Skill serializer framework.
-
----
-
-# Phase 0: Baseline and repair the characterization plan
-
-### Task 0: Reconcile the plan with the live Skills seams
-
-**Evidence:**
-- Branch/tip: `dev-0.7` at `d09366ebb2ec322f767ce688535da094ed5cb0df`
-- Pre-existing working tree: modified `.gitignore`; untracked local `PLANS.md`
-- Bundled catalog: `long-context` and `workspace-files`
-- Public seams: Skills HTTP routes, Turn request/preparation, host Skill tools, and Runtime Event/SSE projection
-- Focused baseline: 28 passing tests across Skills cards/tools, Turn selections, and Deno preparation
-
-- [x] **Step 1: Inspect the current branch, dirty tree, bundled catalog, API routes, and Deno/Daytona preparation**
-- [x] **Step 2: Run the focused existing Skills suite**
-- [x] **Step 3: Replace future-only fixtures and paths with current public seams**
-- [x] **Step 4: Keep target-only behavior in its later TDD phase; Phase 1 has no xfails**
-- [x] **Step 5: Preserve the user-owned `.gitignore` and local `PLANS.md` state**
-
-**Phase 0 exit gate:** The plan names only existing public seams, separates current behavior from future design, and requires no expected failures.
-
----
-
-# Phase 1: Characterize the behavior to preserve
-
-### Task 1: Add focused Skills contract tests
-
-**Files:**
-- Create: `tests/contracts/backend/test_skill_turn_contract.py`
-- Create: `tests/contracts/backend/test_skills_api.py`
-- Modify: no production files
-
-**Interfaces:**
-- Consumes: current Skills API and Turn preparation behavior
-- Produces: behavioral tests that remain valid after simplification
-
-- [x] **Step 1: Characterize the bundled Skills HTTP contract**
-
-Exercise `create_app()` through `TestClient`: list/get return the two bounded bundled cards, ranking only reorders results, missing IDs return a generic 404, and no instruction, resource, or executable body appears.
-
-- [x] **Step 2: Characterize the exact Turn-selection contract**
-
-Exercise `CreateTurnRequest` and the Turn route: accept zero to four unique version-pinned selections, reject duplicates/overflow, and translate unknown IDs or version mismatches to the existing generic pre-stream response without reflecting supplied version text.
-
-- [x] **Step 3: Characterize Deno and Daytona preparation and progressive loading**
-
-Use in-memory Deno preparation and injected Daytona fakes only. Both profiles expose the two host-owned Skill tools; explicit selections preload and restrict later loading; resources require a prior load; public tool and Skill lifecycle projections remain metadata-only.
-
-- [x] **Step 4: Run the characterization tests against the unchanged production implementation**
-
-Run:
-
-```bash
-uv run pytest \
-  tests/contracts/backend/test_skill_turn_contract.py \
-  tests/contracts/backend/test_skills_api.py -v
-```
-
-Receipt: 7 passed with no xfail or skip; the complete `tests/contracts/backend` lane also passed. Target-only Signature behavior begins in its later TDD phase.
-
-- [x] **Step 5: Preserve the requested uncommitted scope**
-
-No files were staged or committed. The pre-existing `.gitignore` modification and local `PLANS.md` remain user-owned.
-
-**Phase 1 exit gate:** Current user-visible behavior is characterized by passing tests without changing production code or generated contracts.
-
----
-
-# Phase 2–4: Immutable Skills cutover for PyPI 0.7.0
-
-**Compatibility boundary:** `v0.6.2` is the latest released package and has no
-current Skills package. The unreleased `0.7.0` Python interfaces are cut over
-atomically without a compatibility shim. Existing deterministic selections remain
-valid: `long-context@2.0.0` and `workspace-files@1.0.0` retain their IDs
-and versions. `data-analysis` and `report-builder` remain Phase 5 work.
-
-### Phase 2: Minimal immutable domain and catalog
-
-**Files:**
-- Edit: `src/fleet_rlm/skills/models.py`
-- Add: `src/fleet_rlm/skills/catalog.py`
-- Add: `src/fleet_rlm/skills/signatures.py`
-- Move: `src/fleet_rlm/skills/skills/` to `src/fleet_rlm/skills/bundled/`
-- Edit: `pyproject.toml`, `scripts/validate_release.py`
-
-- [x] Replace broad records with frozen `SkillCard`, text-only
-  `SkillResource`, `SkillDefinition`, and `ResolvedSkills` while
-  retaining validated `SkillSelectionRef`.
-- [x] Validate safe names and versions, nonblank instructions, canonical
-  POSIX-relative paths, text content, and immutable resource mappings.
-- [x] Build one deterministic immutable catalog from a static two-Skill manifest
-  and `importlib.resources`; read full UTF-8 `SKILL.md` bodies without
-  runtime frontmatter parsing, scanning, MIME inference, or binary decoding.
-- [x] Preserve stable IDs and versions for exactly `long-context@2.0.0`
-  (three explicit resources) and `workspace-files@1.0.0` (one resource).
-- [x] Remove the PDF marker and binary package-data patterns.
-- [x] Add `validate_skill_signature()` and the future
-  `DataAnalysisSignature` contract without installing it in the catalog.
-
-**Phase 2 exit gate:** Fleet has an eagerly validated immutable two-Skill catalog;
-malformed trusted package content prevents application creation.
-
-### Phase 3: Pure selection and neutral execution
-
-**Files:**
-- Add: `src/fleet_rlm/skills/resolver.py`
-- Edit: `src/fleet_rlm/rlm/context.py`
-- Edit: `src/fleet_rlm/rlm/dspy_contract.py`
-
-- [x] Resolve zero to four exact selections synchronously, preserving input
-  order and rejecting duplicates, overflow, unknown IDs, version mismatches,
-  and more than one Signature-providing Skill with one generic error.
-- [x] Replace capability blueprints with typed `RLMExecutionSpec` containing
-  only cards, Signature, schema identity, host tools/event views, and Workspace
-  metadata.
-- [x] Use `FleetRLMSignature` with `fleet.default@1` by default; apply
-  selected instruction bodies with `Signature.with_instructions(...)`.
-- [x] Validate Prediction outputs directly from the selected Signature and
-  explicit schema metadata. Every accepted Signature has the four standard
-  inputs and required `answer: str` output.
-
-**Phase 3 exit gate:** Selection is pure and deterministic, and the optional
-validated Signature is the only Skill-specific DSPy execution extension.
-
-### Phase 4: Atomic application and runtime cutover
-
-**Files:**
-- Edit: `src/fleet_rlm/skills/tools.py`, `skills/__init__.py`
-- Edit: `src/fleet_rlm/app.py`, `api/routes/skills.py`,
-  `api/schemas.py`
-- Edit: Deno, Daytona, testing composition, Runner, inputs, and affected tests
-- Delete: `authorize.py`, `cards.py`, `capabilities.py`,
-  `loader.py`, `paths.py`, `registry.py`, and `ranking.py`
-
-- [x] Bind `SkillToolHost` directly to the catalog while retaining exactly
-  `load_skill` and `read_skill_resource`, preload state, four-load bound,
-  load-before-resource enforcement, and metadata-only event views.
-- [x] Install one fail-fast immutable catalog in `create_app()` and expose it
-  through an annotated FastAPI dependency. Preserve the eight-field HTTP card,
-  ranking behavior, generic 404, and generic invalid-selection envelope.
-- [x] Compose runtime-specific core tools plus the two Skill tools directly into
-  `RLMExecutionSpec` for Deno and injected Daytona resources without changing
-  provider SDK calls or lifecycle ownership.
-- [x] Make Runner pass the selected Signature to native `dspy.RLM`, always
-  build standard Fleet inputs, and validate using the selected schema identity.
-- [x] Replace composition registry state with one `skill_catalog` and retain
-  explicit unavailable-catalog degradation only for private tests.
-- [x] Remove the obsolete registry/capability framework after migrating all
-  production callers; do not add adapters, task contracts, knowledge injection,
-  capability-defined tools, or requirement negotiation.
-- [x] Complete the focused, backend, Deno, generated-contract, docs, security,
-  release-package, and full `make check` receipts below.
-
-Validation receipt: 81 focused tests passed; the complete unit/backend contract
-lane passed; `make test-deno`, `make api-sync`, `make api-check`,
-`make check-docs`, `make check-security`, `make build-release`,
-`make check-release`, `make check`, and `git diff --check` passed. Live Daytona
-tests were collection-checked only; no provider, credential, Sandbox, Volume, or
-network operation ran.
-
-No intermediate commit is part of this cutover. The checkout remains uncommitted
-unless a separate request authorizes Git publication.
-
-**Phase 4 exit gate:** The complete backend runs through one immutable two-Skill
-catalog, one pure resolver, one optional Signature seam, native `dspy.RLM`,
-and no registry/capability framework.
-
-# Phase 5: Add only the two justified new Skills
-
-The final PyPI 0.7.0 bundled catalog contains exactly four trusted system
-Skills: `data-analysis@1.0.0`, `long-context@2.0.0`, `report-builder@1.0.0`,
-and `workspace-files@1.0.0`. Existing IDs and versions remain unchanged.
-`data-analysis` is the only bundled custom Signature; `report-builder` is
-instruction-only. Neither Skill contributes executable tools.
-
-### Task 8: Add `data-analysis`
-
-**Files:**
-- Modify: `src/fleet_rlm/skills/catalog.py` (static manifest and stable IDs)
-- Create: `src/fleet_rlm/skills/bundled/data-analysis/SKILL.md`
-- Modify: `tests/unit/backend/test_skill_catalog.py`
-- Modify: `tests/contracts/backend/test_skills_api.py`
-- Modify: `tests/contracts/backend/test_skill_turn_contract.py`
-- Modify: `scripts/validate_release.py` (required wheel files)
-
-**Interfaces:**
-- Consumes: Python REPL, `DataAnalysisSignature`
-- Produces: verified descriptive analysis workflow
-
-- [x] **Step 1: Write the Skill body**
-
-```markdown
-# Data analysis
-
-Use Python for deterministic calculations. Inspect schema and missing values before computing results. Report the requested metrics, state the statistical convention used, and verify the final numbers from the original data.
-
-For anomaly claims:
-
-1. State the rule used.
-2. Report the relevant comparison value.
-3. Do not call a point anomalous when it does not cross the rule.
-4. For very small samples, qualify the conclusion and prefer descriptive language.
-
-Before submitting, verify all reported counts, extrema, sums, means, medians, and dispersion values with Python.
-```
-
-- [x] **Step 2: Add a contract test based on the observed CSV workflow**
-
-The test must assert that a selected `data-analysis` Skill:
-
-- resolves `DataAnalysisSignature`;
-- preloads its instructions;
-- preserves `answer` as the required public text output;
-- does not add executable tools.
-
-- [x] **Step 3: Run the contract test**
-
-```bash
-uv run pytest tests/contracts/backend/test_skill_turn_contract.py -v -k data_analysis
-```
-
-Expected: PASS. Catalog, API, package, and Turn assertions project the
-four-Skill product contract while keeping bodies and resources private.
-
-### Task 9: Add `report-builder`
-
-**Files:**
-- Modify: `src/fleet_rlm/skills/catalog.py` (static manifest)
-- Create: `src/fleet_rlm/skills/bundled/report-builder/SKILL.md`
-- Modify: `tests/unit/backend/test_skill_catalog.py`
-- Modify: `tests/contracts/backend/test_skills_api.py`
-- Modify: `tests/contracts/backend/test_skill_turn_contract.py`
-
-**Interfaces:**
-- Consumes: runtime-bound workspace and Artifact tools when available
-- Produces: write-read-verify report workflow
-
-- [x] **Step 1: Write the Skill body**
-
-```markdown
-# Report builder
-
-Create the requested report from verified source data.
-
-1. Build the complete report in memory.
-2. Check that every required section and requested value is present.
-3. Save it with the bound Session Workspace tool when a workspace path is requested.
-4. Read the same path through the same Workspace tool.
-5. Verify the read-back content, required headings, and requested values.
-6. Create an Artifact only when the user asks for a downloadable public output.
-7. Never treat Python-local files as Session Workspace files.
-8. Submit only after verification succeeds.
-```
-
-- [x] **Step 2: Add a contract test**
-
-The test must assert that `report-builder`:
-
-- is instruction-only;
-- does not define a custom Signature;
-- does not register workspace or Artifact tools;
-- can be selected together with `data-analysis` without a Signature conflict.
-
-- [x] **Step 3: Run the contract test**
-
-```bash
-uv run pytest tests/contracts/backend/test_skill_turn_contract.py -v -k report_builder
-```
-
-Expected: PASS. The two new Skills can be selected together, with the single
-Signature rule and exactly two host-owned Skill tools preserved.
-
-**Phase 5 exit gate:** The static catalog contains exactly four focused Skills;
-the catalog, API, Turn, Deno, package, and Signature tests pass. This remains
-one coherent uncommitted cutover; no intermediate commit is required.
-
----
-
-# Phase 6: Documentation follow-through after the Phase 5 catalog expansion
-
-Phase 4 already removes the registry/capability framework, updates application
-wiring, and establishes the immutable runtime contract. Phase 6 must not repeat
-those changes.
-
-### Task 10: Document the final four-Skill product catalog
-
-**Files:**
-- Modify only user and maintainer documentation that changes when Phase 5 adds
-  `data-analysis` and `report-builder`.
-
-- [x] Describe the fixed four-Skill catalog after Phase 5 lands.
-- [x] Document that cards are bounded metadata, bodies and explicit UTF-8
-  resources load progressively, selections are ID/version pinned, and at most
-  one selected Skill may supply a validated Signature.
-- [x] Keep executable tools host-owned and remove any newly stale two-Skill
-  release wording.
-- [x] Run `make check-docs`, `make api-check`, and `git diff --check`.
-
-**Phase 6 exit gate:** Documentation matches the Phase 5 four-Skill catalog
-without reopening the catalog, tool, application-wiring, or runtime architecture.
-
-# Phase 7: Full validation and measurable acceptance
-
-### Task 12: Run the release-quality validation matrix
-
-**Files:**
-- Modify only if a validation failure identifies a defect within this plan's scope
-
-**Interfaces:**
-- Consumes: final implementation
-- Produces: exact-SHA verification evidence
-
-- [x] **Step 1: Run the full offline suite**
-
-```bash
-make check
-make test-deno
-make api-sync
-make api-check
-make check-docs
-make check-security
-make build-release
-make check-release
-git diff --check
-```
-
-Expected: all commands PASS.
-
-- [x] **Step 2: Run focused package import and wheel checks**
-
-```bash
-uv build
-uv run python - <<'PY'
-from fleet_rlm.skills.catalog import build_bundled_skill_catalog
-
-catalog = build_bundled_skill_catalog()
-print([(card.name, card.version) for card in catalog.cards()])
-assert [(card.name, card.version) for card in catalog.cards()] == [
-    ("data-analysis", "1.0.0"),
-    ("long-context", "2.0.0"),
-    ("report-builder", "1.0.0"),
-    ("workspace-files", "1.0.0"),
-]
-PY
-```
-
-Expected output contains exactly:
+Remove these methods:
 
 ```text
-data-analysis
-long-context
-report-builder
-workspace-files
+skills_root
+sessions_root
+session_dir
+session_exports_dir
+session_staging_dir
+session_runs_dir
+run_dir
+run_artifacts_dir
+run_attachments_dir
+run_result_path
+attachment_meta_path
+artifact_meta_path
 ```
 
-- [x] **Step 3: Run the provider-free Deno preparation contract**
+- [ ] **Step 1: Write failing role-first path tests**
 
-Verify:
+```python
+def test_volume_paths_are_role_first() -> None:
+    paths = VolumePaths.from_mount("/home/daytona/fleet")
+    session_id = UUID("11111111-1111-1111-1111-111111111111")
+    run_id = UUID("22222222-2222-2222-2222-222222222222")
+    attachment_id = UUID("33333333-3333-3333-3333-333333333333")
+    artifact_id = UUID("44444444-4444-4444-4444-444444444444")
 
-1. all four cards appear in bounded Turn input metadata;
-2. `load_skill` returns one selected `SKILL.md`;
-3. `read_skill_resource` rejects an unloaded Skill resource;
-4. a selected `data-analysis` preparation uses its typed output schema;
-5. no Skill adds a host tool;
-6. the deterministic testing composition preserves the same catalog-bound
-   selection, preload, Signature, and two-tool behavior.
+    assert str(paths.attachment_blob_path(attachment_id)) == (
+        "/home/daytona/fleet/attachments/33333333-3333-3333-3333-333333333333/blob"
+    )
+    assert str(paths.artifact_blob_path(artifact_id)) == (
+        "/home/daytona/fleet/artifacts/44444444-4444-4444-4444-444444444444/blob"
+    )
+    assert str(paths.session_workspace_dir(session_id)) == (
+        "/home/daytona/fleet/workspace/11111111-1111-1111-1111-111111111111"
+    )
+    assert str(paths.run_staging_dir(run_id)) == (
+        "/home/daytona/fleet/.internal/staging/22222222-2222-2222-2222-222222222222"
+    )
+```
 
-- [x] **Step 4: Run the injected Daytona preparation contract**
+- [ ] **Step 2: Run the tests and verify they fail against the legacy API**
 
-Use injected provider-free resources to verify the runtime-specific core tools,
-Workspace metadata, catalog-bound Skill tools, and progressive preloading.
-Select `report-builder` with `workspace-files` and verify Workspace write/read
-operations remain runtime-owned while an unselected Skill remains unavailable.
-Credentialed provider execution remains a separate opt-in live gate.
+```bash
+uv run pytest tests/unit/backend/test_daytona_paths.py tests/unit/backend/test_attachment_paths.py -q
+```
+
+Expected: failures because `workspace_root()`, `internal_root()`, and the new Run-only staging methods do not exist.
+
+- [ ] **Step 3: Implement the minimal role-first `VolumePaths` facade**
+
+Use `resolve_under_root()` and `validate_path_id()` for every UUID segment. Validate `filename` exactly as the current Attachment path implementation does.
+
+- [ ] **Step 4: Update `DaytonaAttachmentPathPolicy`**
+
+```python
+@dataclass(frozen=True, slots=True)
+class DaytonaAttachmentPathPolicy:
+    paths: VolumePaths
+
+    def attachment_blob(self, attachment_id: UUID) -> str:
+        return as_posix(self.paths.attachment_blob_path(attachment_id))
+
+    def run_attachment(self, run: AttachmentRun, attachment_id: UUID, filename: str) -> str:
+        return as_posix(
+            self.paths.run_attachment_file(
+                run.run_id,
+                attachment_id,
+                filename,
+            )
+        )
+```
+
+`session_id` remains in `AttachmentRun` for authorization and domain identity but no longer appears in the staging path.
+
+- [ ] **Step 5: Run focused tests**
+
+```bash
+uv run pytest tests/unit/backend/test_daytona_paths.py tests/unit/backend/test_attachment_paths.py -q
+```
 
 Expected: PASS.
 
-- [x] **Step 5: Verify complexity reduction**
+- [ ] **Step 6: Commit**
 
 ```bash
-find src/fleet_rlm/skills -maxdepth 1 -name '*.py' -print | sort
-rg -n 'os\.walk|yaml|base64|mimetypes|CapabilityRegistry|TaskContract|InputAdapter|OutputValidator' src/fleet_rlm/skills -g '*.py'
+git add src/fleet_rlm/daytona/paths.py src/fleet_rlm/files/paths.py tests/unit/backend/test_daytona_paths.py tests/unit/backend/test_attachment_paths.py
+git commit -m "refactor(daytona): define role-first volume paths"
 ```
-
-Expected:
-
-- only `__init__.py`, `errors.py`, `models.py`, `catalog.py`, `resolver.py`, `tools.py`, and `signatures.py` exist at package root;
-- the `rg` command returns no matches;
-- exactly two Skill tools exist;
-- exactly four bundled Skills exist;
-- at most one custom Signature can resolve per Turn.
-
-- [ ] **Step 6: Record the exact candidate SHA**
-
-```bash
-git rev-parse HEAD
-```
-
-Attach the SHA and validation command outputs to the review or release evidence.
-
-**Phase 7 exit gate:** The simplified Skills system passes offline and provider-free Deno/Daytona preparation workflows. Live Daytona remains pending until an opt-in credentialed exact-tip receipt exists.
 
 ---
 
-## Final acceptance criteria
+## Task 2: Simplify Acquire-Time Volume Provisioning
 
-The plan is complete only when all statements below are true:
+**Files:**
+- Modify: `src/fleet_rlm/daytona/volume_layout.py`
+- Modify: `src/fleet_rlm/daytona/session_manager.py`
+- Test: `tests/unit/backend/test_daytona_volume_layout.py`
 
-- `src/fleet_rlm/skills/` contains seven small Python modules and one `bundled/` directory.
-- The runtime catalog contains exactly four trusted system Skills.
-- The catalog is immutable after startup.
-- No runtime directory scanning or YAML frontmatter parsing occurs.
-- No Skill binary assets or base64 resource responses exist.
-- No Skill scope, trust, visibility, authorizer, mutable registry, capability registry, task-contract registry, adapters, validators, knowledge registry, or RLM requirement negotiation exists.
-- Explicit selections remain unique, version-pinned, and limited to four.
-- Progressive loading remains available through exactly two host tools.
-- Skills cannot register host tools.
-- Native `dspy.RLM` remains the execution Module.
-- Custom task shape is expressed only through a validated DSPy Signature with Fleet's standard inputs and required `answer: str`.
-- `data-analysis` is the only initial Skill with a custom Signature.
-- `data-analysis` and `report-builder` may be selected together.
-- FastAPI lists only bounded cards.
-- Skill bodies and resource content never appear in cards or public tool-event projections.
-- All focused tests, `make check`, `make test-deno`, `make api-check`, and `git diff --check` pass.
+**Interfaces:**
+- Consumes: `VolumePaths`, `session_id`, and `run_id`.
+- Produces: the smallest required directory set for one Run.
 
-## Explicitly deferred
+### Required directory contract
 
-The following require a future product spec and are not extension points to preserve preemptively:
+```python
+def shared_volume_directories(paths: VolumePaths) -> tuple[str, ...]:
+    return (
+        str(paths.attachments_root()),
+        str(paths.artifacts_root()),
+        str(paths.workspace_root()),
+        str(paths.memory_root()),
+        str(paths.internal_root()),
+        str(paths.staging_root()),
+    )
 
-- user-created or uploaded Skills;
-- workspace-scoped Skills;
-- untrusted Skills;
-- remote Skill registries;
-- Skill marketplace support;
-- hot reload;
-- binary Skill assets;
-- Skill-defined executable plugins;
-- multiple custom Signatures in one Turn;
-- model-based Skill routing;
-- optimizer/GEPA compilation of Skill programs;
-- persistent Skill analytics or ranking.
+
+def session_volume_directories(paths: VolumePaths, *, session_id: UUID) -> tuple[str, ...]:
+    return (str(paths.session_workspace_dir(session_id)),)
+
+
+def run_volume_directories(paths: VolumePaths, *, run_id: UUID) -> tuple[str, ...]:
+    return (
+        str(paths.run_staging_dir(run_id)),
+        str(paths.run_attachment_staging_dir(run_id)),
+        str(paths.run_artifact_staging_dir(run_id)),
+    )
+```
+
+- [ ] **Step 1: Write a failing exact-directory test**
+
+```python
+def test_required_volume_directories_are_small_and_role_first() -> None:
+    paths = VolumePaths.from_mount("/home/daytona/fleet")
+    session_id = UUID("11111111-1111-1111-1111-111111111111")
+    run_id = UUID("22222222-2222-2222-2222-222222222222")
+
+    assert required_volume_directories(paths, session_id=session_id, run_id=run_id) == (
+        "/home/daytona/fleet/attachments",
+        "/home/daytona/fleet/artifacts",
+        "/home/daytona/fleet/workspace",
+        "/home/daytona/fleet/memory",
+        "/home/daytona/fleet/.internal",
+        "/home/daytona/fleet/.internal/staging",
+        "/home/daytona/fleet/workspace/11111111-1111-1111-1111-111111111111",
+        "/home/daytona/fleet/.internal/staging/22222222-2222-2222-2222-222222222222",
+        "/home/daytona/fleet/.internal/staging/22222222-2222-2222-2222-222222222222/attachments",
+        "/home/daytona/fleet/.internal/staging/22222222-2222-2222-2222-222222222222/artifacts",
+    )
+```
+
+- [ ] **Step 2: Run the test and verify the legacy Session tree appears**
+
+```bash
+uv run pytest tests/unit/backend/test_daytona_volume_layout.py -q
+```
+
+Expected: FAIL because the current implementation creates `skills/`, `sessions/`, `exports/`, and Run-scoped public directories.
+
+- [ ] **Step 3: Replace the legacy directory functions**
+
+Update `required_volume_directories()`, `shared_volume_directories()`, `session_volume_directories()`, and `run_volume_directories()` to match the target contract.
+
+- [ ] **Step 4: Remove Skill package materialization**
+
+Delete:
+
+```text
+_ensure_skill_tree
+_iter_resource_files
+_ensure_skill_parent_directories
+```
+
+Remove their imports and all calls from `ensure_volume_layout()` and `ensure_shared_volume_layout()`. Bundled Skills remain available through `SkillCatalog`, `load_skill`, and `read_skill_resource`.
+
+- [ ] **Step 5: Update `session_manager.py` callers**
+
+Pass `run_id` without `session_id` to `run_volume_directories()` while retaining `session_id` for `session_volume_directories()`.
+
+- [ ] **Step 6: Run focused tests**
+
+```bash
+uv run pytest tests/unit/backend/test_daytona_volume_layout.py tests/unit/backend/test_daytona_session_manager.py -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/fleet_rlm/daytona/volume_layout.py src/fleet_rlm/daytona/session_manager.py tests/unit/backend/test_daytona_volume_layout.py tests/unit/backend/test_daytona_session_manager.py
+git commit -m "refactor(daytona): simplify mounted volume layout"
+```
+
+---
+
+## Task 3: Migrate Attachment and Artifact Storage Consumers
+
+**Files:**
+- Modify: `src/fleet_rlm/daytona/run_environment.py`
+- Modify: `src/fleet_rlm/files/lifecycle.py`
+- Modify: `src/fleet_rlm/files/paths.py`
+- Modify: `src/fleet_rlm/artifacts/promotion.py`
+- Modify: `src/fleet_rlm/artifacts/daytona_catalog.py`
+- Test: `tests/unit/backend/test_attachment_paths.py`
+- Test: `tests/unit/backend/test_artifact_promotion.py`
+- Test: `tests/contracts/backend/test_daytona_storage_contract.py`
+
+**Interfaces:**
+- Consumes: role-first canonical paths and hidden Run staging paths.
+- Produces: unchanged public Attachment and Artifact behavior with simpler storage references.
+
+- [ ] **Step 1: Write a failing Attachment storage contract test**
+
+```python
+async def test_attachment_uses_canonical_blob_and_hidden_run_staging(...) -> None:
+    uploaded = await attachment_module.upload(...)
+    prepared = await attachment_module.prepare_run(...)
+
+    assert uploaded.storage_ref.startswith("/home/daytona/fleet/attachments/")
+    assert "/sessions/" not in uploaded.storage_ref
+    assert prepared.staged[0].sandbox_path.startswith("/home/daytona/fleet/.internal/staging/")
+    assert "/attachments/" in prepared.staged[0].sandbox_path
+```
+
+- [ ] **Step 2: Write a failing Artifact promotion contract test**
+
+```python
+async def test_artifact_candidate_promotes_from_hidden_staging_to_role_root(...) -> None:
+    candidate = await create_candidate(...)
+    promoted = await promote(candidate)
+
+    assert candidate.staging_path.startswith("/home/daytona/fleet/.internal/staging/")
+    assert promoted.storage_ref.startswith("/home/daytona/fleet/artifacts/")
+    assert "/sessions/" not in promoted.storage_ref
+```
+
+- [ ] **Step 3: Run the tests and verify legacy paths fail assertions**
+
+```bash
+uv run pytest tests/unit/backend/test_attachment_paths.py tests/unit/backend/test_artifact_promotion.py tests/contracts/backend/test_daytona_storage_contract.py -q
+```
+
+Expected: FAIL on paths containing `sessions/<session-id>/runs/<run-id>`.
+
+- [ ] **Step 4: Update Daytona Run preparation**
+
+In `run_environment.py`:
+
+- keep canonical Attachment reads at `attachments/<attachment-id>/blob`;
+- stage selected Attachment bytes under `.internal/staging/<run-id>/attachments/<attachment-id>/<filename>`;
+- keep Artifact candidates under `.internal/staging/<run-id>/artifacts/`;
+- preserve current integrity checks and cleanup ownership.
+
+- [ ] **Step 5: Keep database storage references opaque**
+
+Do not derive Session or Run ownership by parsing storage paths. Continue using database fields for `workspace_id`, `session_id`, and `run_id` authorization.
+
+- [ ] **Step 6: Run focused tests**
+
+```bash
+uv run pytest tests/unit/backend/test_attachment_paths.py tests/unit/backend/test_artifact_promotion.py tests/contracts/backend/test_daytona_storage_contract.py -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/fleet_rlm/daytona/run_environment.py src/fleet_rlm/files/lifecycle.py src/fleet_rlm/files/paths.py src/fleet_rlm/artifacts/promotion.py src/fleet_rlm/artifacts/daytona_catalog.py tests/unit/backend/test_attachment_paths.py tests/unit/backend/test_artifact_promotion.py tests/contracts/backend/test_daytona_storage_contract.py
+git commit -m "refactor(storage): use role-first attachment and artifact paths"
+```
+
+---
+
+## Task 4: Move Session Workspace to `workspace/<session-id>`
+
+**Files:**
+- Modify: `src/fleet_rlm/daytona/run_environment.py`
+- Modify: `src/fleet_rlm/daytona/workspace_fs.py`
+- Modify: `src/fleet_rlm/files/workspace_tools.py`
+- Test: `tests/unit/backend/test_daytona_session_workspace_fs.py`
+- Test: `tests/live/backend/test_b5_attachment_artifact_durability.py`
+
+**Interfaces:**
+- Consumes: `VolumePaths.session_workspace_dir(session_id)`.
+- Produces: the same Workspace tool contract over the flatter durable location.
+
+- [ ] **Step 1: Update the Workspace root assertion**
+
+```python
+def test_workspace_root_is_role_first() -> None:
+    paths = VolumePaths.from_mount("/home/daytona/fleet")
+    session_id = UUID("11111111-1111-1111-1111-111111111111")
+    assert str(paths.session_workspace_dir(session_id)) == (
+        "/home/daytona/fleet/workspace/11111111-1111-1111-1111-111111111111"
+    )
+```
+
+- [ ] **Step 2: Keep the public Workspace tools unchanged**
+
+The following names and return contracts do not change:
+
+```text
+list_workspace_files
+stat_workspace_file
+read_workspace_text
+write_workspace_text
+```
+
+- [ ] **Step 3: Update Workspace construction in `run_environment.py`**
+
+Construct `DaytonaSessionWorkspaceFS` with the new Session root while keeping the trusted Volume root `/home/daytona/fleet`.
+
+- [ ] **Step 4: Update the live durability layout assertions**
+
+The live test must require:
+
+```text
+/home/daytona/fleet/workspace/<session-id>
+/home/daytona/fleet/.internal/staging/<run-id>
+```
+
+It must reject the presence of:
+
+```text
+/home/daytona/fleet/sessions
+/home/daytona/fleet/skills
+```
+
+- [ ] **Step 5: Run Workspace tests**
+
+```bash
+uv run pytest tests/unit/backend/test_daytona_session_workspace_fs.py -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/fleet_rlm/daytona/run_environment.py src/fleet_rlm/daytona/workspace_fs.py src/fleet_rlm/files/workspace_tools.py tests/unit/backend/test_daytona_session_workspace_fs.py tests/live/backend/test_b5_attachment_artifact_durability.py
+git commit -m "refactor(workspace): flatten durable session workspace paths"
+```
+
+---
+
+## Task 5: Simplify Orphan Cleanup and Run Finalization
+
+**Files:**
+- Modify: `src/fleet_rlm/daytona/orphan_cleanup.py`
+- Modify: `src/fleet_rlm/composition/daytona.py`
+- Modify: `src/fleet_rlm/chat/turn_cleanup.py`
+- Test: `tests/unit/backend/test_orphan_cleanup.py`
+
+**Interfaces:**
+- Consumes: committed Artifact storage refs and active Run IDs.
+- Produces: bounded cleanup limited to role-first Artifacts and hidden staging.
+
+### Target cleanup roots
+
+```text
+artifacts/
+.internal/staging/
+```
+
+Do not scan `workspace/`, `attachments/`, or `memory/` during orphan cleanup.
+
+- [ ] **Step 1: Write a failing bounded cleanup test**
+
+```python
+async def test_cleanup_scans_only_artifacts_and_hidden_staging(...) -> None:
+    report = await cleanup_orphan_bytes(...)
+
+    assert gateway.listed_roots == (
+        "/home/daytona/fleet/artifacts",
+        "/home/daytona/fleet/.internal/staging",
+    )
+```
+
+- [ ] **Step 2: Define keep rules**
+
+- retain every committed Artifact path supplied by the database;
+- retain every file beneath `.internal/staging/<active-run-id>/`;
+- remove stale uncommitted Artifact blobs;
+- remove stale staging files for inactive Runs after the configured grace period;
+- never inspect or remove Workspace, Attachment, or memory files.
+
+- [ ] **Step 3: Remove legacy Session-tree parsing**
+
+Delete helpers that parse:
+
+```text
+sessions/<session-id>/runs/<run-id>/...
+```
+
+Replace them with Run ID extraction relative to `.internal/staging/`.
+
+- [ ] **Step 4: Reconcile stale Runs before cleanup**
+
+In `composition/daytona.py`, construct the Turn state store and reconcile stale settling Runs before querying active Run IDs and invoking orphan cleanup.
+
+- [ ] **Step 5: Run cleanup tests**
+
+```bash
+uv run pytest tests/unit/backend/test_orphan_cleanup.py -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/fleet_rlm/daytona/orphan_cleanup.py src/fleet_rlm/composition/daytona.py src/fleet_rlm/chat/turn_cleanup.py tests/unit/backend/test_orphan_cleanup.py
+git commit -m "refactor(daytona): bound cleanup to role-first storage"
+```
+
+---
+
+## Task 6: Remove Legacy Layout References and Document the Contract
+
+**Files:**
+- Modify: `README.md`
+- Modify: `docs/architecture.md`
+- Modify: `docs/reference/codebase-map.md`
+- Modify: `docs/how-to-guides/dspy-integration.md`
+- Modify: `src/fleet_rlm/CONTEXT.md`
+- Modify: `tests/contracts/backend/test_daytona_storage_contract.py`
+
+**Interfaces:**
+- Consumes: completed role-first implementation.
+- Produces: one documented and enforced Volume contract.
+
+- [ ] **Step 1: Add a contract test that rejects legacy production paths**
+
+```python
+def test_production_source_has_no_legacy_volume_layout_references() -> None:
+    forbidden = (
+        "session_exports_dir",
+        "session_staging_dir",
+        "session_runs_dir",
+        "run_result_path",
+        "skills_root",
+    )
+    source = "\n".join(path.read_text() for path in Path("src/fleet_rlm").rglob("*.py"))
+    for value in forbidden:
+        assert value not in source
+```
+
+- [ ] **Step 2: Run a repository search**
+
+```bash
+rg -n 'sessions/.+runs|session_exports_dir|session_staging_dir|session_runs_dir|run_result_path|skills_root|result\.json' src tests docs README.md
+```
+
+Expected: no production references. Historical migration notes are not added in this plan.
+
+- [ ] **Step 3: Document the final layout**
+
+Use this exact tree:
+
+```text
+/home/daytona/fleet/
+├── attachments/<attachment-id>/blob
+├── artifacts/<artifact-id>/blob
+├── workspace/<session-id>/...
+├── memory/.keep
+└── .internal/staging/<run-id>/{attachments,artifacts}/...
+```
+
+Document that:
+
+- the mounted subpath already supplies Fleet workspace isolation;
+- database rows own all Session, Run, user, and workspace relationships;
+- `.internal/` is not user-facing;
+- `memory/` is reserved and has no automatic behavior;
+- ordinary RLM scratch work should move to the Sandbox-local project directory in the separate Daytona capabilities plan.
+
+- [ ] **Step 4: Run the full offline validation**
+
+```bash
+uv run pytest tests/unit/backend -q
+uv run pytest tests/contracts/backend -q
+make check
+make api-check
+git diff --check
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Run the opt-in durability test when credentials are available**
+
+```bash
+FLEET_LIVE=1 uv run pytest tests/live/backend/test_b5_attachment_artifact_durability.py -q -n 0 --timeout=600
+```
+
+Expected: the same Workspace and canonical Attachment bytes survive Sandbox replacement, committed Artifacts remain readable, and hidden Run staging is cleaned.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add README.md docs src/fleet_rlm/CONTEXT.md tests/contracts/backend/test_daytona_storage_contract.py
+git commit -m "docs(daytona): define role-first durable storage contract"
+```
+
+---
+
+## Final Acceptance Criteria
+
+The implementation is complete only when all statements are true:
+
+- The mounted Daytona Volume is organized by semantic role.
+- There is no public durable `sessions/` or `runs/` hierarchy.
+- Attachment bytes use `attachments/<attachment-id>/blob`.
+- Artifact bytes use `artifacts/<artifact-id>/blob`.
+- Session Workspace files use `workspace/<session-id>/...`.
+- Run-specific durable state exists only under `.internal/staging/<run-id>/`.
+- No automatic `result.json` is written.
+- No Python Skills package is copied into the Volume.
+- Attachment and Artifact metadata remain database-owned.
+- Workspace, Attachments, Artifacts, and reserved memory survive Sandbox replacement through the mounted Volume.
+- Python interpreter variables remain Run-local and are not treated as durable state.
+- Orphan cleanup never scans or deletes Workspace, Attachment, or memory files.
+- All focused unit, contract, API, and formatting checks pass.
+
+## Explicitly Deferred
+
+The following are intentionally outside this plan:
+
+- a curated memory implementation;
+- a shared cross-Session Workspace;
+- a public Volume browser;
+- automatic migration of legacy Volumes;
+- compatibility dual-read or dual-write;
+- remote repository cloning;
+- Sandbox-local project helpers;
+- codebase-analysis and long-document-Q&A Skills;
+- vector indexes;
+- distributed workers or queues.

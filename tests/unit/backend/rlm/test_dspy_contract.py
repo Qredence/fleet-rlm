@@ -186,8 +186,10 @@ def test_build_native_rlm_preserves_exact_public_constructor_inputs() -> None:
     first = build_native_rlm(**kwargs)
     second = build_native_rlm(**kwargs)
 
-    assert type(first) is dspy.RLM
+    assert isinstance(first, dspy.RLM)
+    assert type(first).__name__ == "ObservedRLM"
     assert first is not second
+    assert first.verbose is True
     assert first.signature is TaskSignature
     assert first.max_iterations == 7
     assert first.max_llm_calls == 11
@@ -195,6 +197,54 @@ def test_build_native_rlm_preserves_exact_public_constructor_inputs() -> None:
     assert first.sub_lm is sub_lm
     assert first._interpreter is interpreter  # noqa: SLF001 - pinned DSPy contract
     assert set(first.tools) == {"_lookup"}
+    assert hasattr(first, "bind_observer")
+
+
+@pytest.mark.asyncio
+async def test_observed_rlm_publishes_reasoning_before_execute_without_interpreter() -> None:
+    from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
+    from fleet_rlm.rlm.events import RLMReasoning
+
+    class TaskSignature(dspy.Signature):
+        request: str = dspy.InputField()
+        answer: str = dspy.OutputField()
+
+    class Action:
+        async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+            return dspy.Prediction(
+                reasoning="Decide the answer directly.",
+                code="SUBMIT(answer='ok')",
+            )
+
+    class Interpreter:
+        tools: dict[str, object] = {}
+
+        def start(self) -> None:
+            return None
+
+        def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
+            from fleet_rlm.rlm.dspy_interpreter_contract import wrap_final_output
+
+            return wrap_final_output({"answer": "ok"})
+
+        def shutdown(self) -> None:
+            return None
+
+    observed: list[object] = []
+    rlm = build_native_rlm(
+        signature=TaskSignature,
+        options=RLMOptions(max_iterations=1),
+        interpreter=Interpreter(),
+    )
+    rlm.bind_observer(observed.append, max_chars=64)
+    rlm.generate_action = Action()
+
+    prediction = await rlm.acall(request="go")
+
+    assert prediction.answer == "ok"
+    assert [type(item) for item in observed] == [RLMReasoning]
+    assert observed[0].text == "Decide the answer directly."
+    assert observed[0].step == 1
 
 
 def test_composition_version_guard_rejects_any_unpinned_dspy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -208,13 +258,11 @@ def test_composition_version_guard_rejects_any_unpinned_dspy(monkeypatch: pytest
 def test_rlm_usage_contract_accepts_only_the_exact_observed_shape() -> None:
     from fleet_rlm.rlm.dspy_contract import validate_rlm_usage
 
-    usage = validate_rlm_usage(
-        {
-            "iterations": 2,
-            "observed_lm_usage": {"root": {"prompt_tokens": 4, "cached": False}},
-            "duration_ms": 12,
-        }
-    )
+    usage = validate_rlm_usage({
+        "iterations": 2,
+        "observed_lm_usage": {"root": {"prompt_tokens": 4, "cached": False}},
+        "duration_ms": 12,
+    })
     assert usage == {
         "iterations": 2,
         "observed_lm_usage": {"root": {"prompt_tokens": 4, "cached": False}},
@@ -254,13 +302,11 @@ def test_observed_usage_never_exposes_call_or_retry_counters(forbidden: str) -> 
 
     assert observed_usage(Prediction(), duration_ms=1)["observed_lm_usage"] == {"root": {"prompt_tokens": 4}}
     with pytest.raises(ValueError):
-        validate_rlm_usage(
-            {
-                "iterations": 0,
-                "observed_lm_usage": {"root": {forbidden: 99}},
-                "duration_ms": 1,
-            }
-        )
+        validate_rlm_usage({
+            "iterations": 0,
+            "observed_lm_usage": {"root": {forbidden: 99}},
+            "duration_ms": 1,
+        })
 
 
 @pytest.mark.parametrize(

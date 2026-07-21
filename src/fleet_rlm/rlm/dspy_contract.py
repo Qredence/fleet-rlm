@@ -10,16 +10,18 @@ from types import MappingProxyType
 from typing import Any, TypeAlias, TypedDict, cast
 
 import dspy
+from dspy.predict.rlm import _strip_code_fences, logger
 from pydantic import TypeAdapter
 from pydantic_core import PydanticSerializationError
 
 from fleet_rlm.rlm.errors import RLMConfigError
-from fleet_rlm.rlm.sanitize import validate_declared_public_value
+from fleet_rlm.rlm.sanitize import truncate_public_text, validate_declared_public_value
 
 DSPY_VERSION = "3.3.0b1"
 
 JsonValue: TypeAlias = None | bool | int | float | str | tuple["JsonValue", ...] | Mapping[str, "JsonValue"]
 ObservedUsageValue: TypeAlias = None | bool | int | float | str | dict[str, JsonValue]
+ReasoningObserver: TypeAlias = Any
 
 
 class RLMUsage(TypedDict):
@@ -166,42 +168,38 @@ def _nonnegative_integer(value: object, *, field: str) -> int:
     return value
 
 
-_SAFE_USAGE_KEYS = frozenset(
-    {
-        "prompt_tokens",
-        "completion_tokens",
-        "total_tokens",
-        "input_tokens",
-        "output_tokens",
-        "reasoning_tokens",
-        "cached_tokens",
-        "cache_read_input_tokens",
-        "cache_creation_input_tokens",
-        "cache_read_tokens",
-        "cache_creation_tokens",
-        "cost",
-        "input_cost",
-        "output_cost",
-        "cached",
-        "prompt_tokens_details",
-        "completion_tokens_details",
-        "input_tokens_details",
-        "output_tokens_details",
-    }
-)
-_SAFE_USAGE_DETAIL_KEYS = frozenset(
-    {
-        "audio_tokens",
-        "cached_tokens",
-        "reasoning_tokens",
-        "accepted_prediction_tokens",
-        "rejected_prediction_tokens",
-        "text_tokens",
-        "image_tokens",
-        "cache_read_input_tokens",
-        "cache_creation_input_tokens",
-    }
-)
+_SAFE_USAGE_KEYS = frozenset({
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "input_tokens",
+    "output_tokens",
+    "reasoning_tokens",
+    "cached_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_tokens",
+    "cache_creation_tokens",
+    "cost",
+    "input_cost",
+    "output_cost",
+    "cached",
+    "prompt_tokens_details",
+    "completion_tokens_details",
+    "input_tokens_details",
+    "output_tokens_details",
+})
+_SAFE_USAGE_DETAIL_KEYS = frozenset({
+    "audio_tokens",
+    "cached_tokens",
+    "reasoning_tokens",
+    "accepted_prediction_tokens",
+    "rejected_prediction_tokens",
+    "text_tokens",
+    "image_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+})
 
 
 def _observed_scalar(value: object, *, path: str) -> JsonValue:
@@ -293,6 +291,97 @@ class RLMOptions:
                 raise RLMConfigError(f"{name} must be a positive integer, got {value!r}")
 
 
+_NativeRLM = cast(type[Any], dspy.RLM)
+
+
+class ObservedRLM(_NativeRLM):
+    """Native ``dspy.RLM`` with optional live ``RLMReasoning`` observation."""
+
+    def bind_observer(self, observer: ReasoningObserver | None, *, max_chars: int = 10_000) -> None:
+        """Bind one run-local reasoning observer without changing RLM semantics."""
+        self._fleet_observer = observer
+        self._fleet_observation_max_chars = max(1, int(max_chars))
+
+    def _observe_reasoning(self, prediction: Any, iteration: int) -> None:
+        observer = getattr(self, "_fleet_observer", None)
+        if observer is None:
+            return
+        reasoning = getattr(prediction, "reasoning", None)
+        if not isinstance(reasoning, str) or not reasoning.strip():
+            return
+        try:
+            # Circular-import boundary: events imports usage validators from this module.
+            from fleet_rlm.rlm.events import RLMReasoning
+
+            observer(
+                RLMReasoning(
+                    truncate_public_text(reasoning, max_len=self._fleet_observation_max_chars),
+                    iteration + 1,
+                )
+            )
+        except Exception:  # noqa: BLE001 - observation must never alter execution
+            return
+
+    def _execute_iteration(
+        self,
+        repl: Any,
+        variables: Any,
+        history: Any,
+        iteration: int,
+        input_args: dict[str, Any],
+        output_field_names: list[str],
+    ) -> Any:
+        variables_info = [variable.format() for variable in variables]
+        action = self.generate_action(
+            variables_info=variables_info,
+            repl_history=history,
+            iteration=f"{iteration + 1}/{self.max_iterations}",
+        )
+        self._observe_reasoning(action, iteration)
+        if self.verbose:
+            logger.info(
+                f"RLM iteration {iteration + 1}/{self.max_iterations}\n"
+                f"Reasoning: {action.reasoning}\nCode:\n{action.code}"
+            )
+        try:
+            code = _strip_code_fences(action.code)
+        except SyntaxError as exc:
+            code = action.code
+            result = f"[Error] {exc}"
+            return self._process_execution_result(action, code, result, history, output_field_names)
+        result = self._execute_code(repl, code, input_args)
+        return self._process_execution_result(action, code, result, history, output_field_names)
+
+    async def _aexecute_iteration(
+        self,
+        repl: Any,
+        variables: Any,
+        history: Any,
+        iteration: int,
+        input_args: dict[str, Any],
+        output_field_names: list[str],
+    ) -> Any:
+        variables_info = [variable.format() for variable in variables]
+        pred = await self.generate_action.acall(
+            variables_info=variables_info,
+            repl_history=history,
+            iteration=f"{iteration + 1}/{self.max_iterations}",
+        )
+        self._observe_reasoning(pred, iteration)
+        if self.verbose:
+            logger.info(
+                f"RLM iteration {iteration + 1}/{self.max_iterations}\nReasoning: {pred.reasoning}\nCode:\n{pred.code}"
+            )
+        try:
+            code = _strip_code_fences(pred.code)
+        except SyntaxError as exc:
+            code = pred.code
+            result = f"[Error] {exc}"
+            return self._process_execution_result(pred, code, result, history, output_field_names)
+        result = self._execute_code(repl, code, input_args)
+        return self._process_execution_result(pred, code, result, history, output_field_names)
+
+
 def build_native_rlm(
     *,
     signature: type[dspy.Signature] | str,
@@ -300,10 +389,10 @@ def build_native_rlm(
     tools: Sequence[dspy.Tool] | None = None,
     sub_lm: dspy.LM | None = None,
     interpreter: Any = None,
-    verbose: bool = False,
-) -> dspy.RLM:  # ty: ignore[invalid-type-form] - DSPy @experimental obscures the class type
+    verbose: bool = True,
+) -> ObservedRLM:
     """Build one fresh RLM using only the pinned public constructor spelling."""
-    return dspy.RLM(
+    return ObservedRLM(
         signature,
         max_iterations=options.max_iterations,
         max_llm_calls=options.max_llm_calls,
@@ -334,10 +423,8 @@ def observed_usage(prediction: Any, *, duration_ms: int) -> RLMUsage:
             observed_lm_usage = _safe_observed_usage(raw_usage, filter_unknown=True)
         except ValueError:
             pass
-    return validate_rlm_usage(
-        {
-            "iterations": iterations,
-            "observed_lm_usage": observed_lm_usage,
-            "duration_ms": duration_ms,
-        }
-    )
+    return validate_rlm_usage({
+        "iterations": iterations,
+        "observed_lm_usage": observed_lm_usage,
+        "duration_ms": duration_ms,
+    })

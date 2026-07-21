@@ -103,6 +103,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - Prefer wire-protocol-named Literal unions (`openai_responses`, `openai_chat_completion`, `anthropic_messages`) over vendor-flavored or `_compatible`-suffixed provider-type enums, and keep LLM profiles flat (profile name, provider type, base endpoint, API key) rather than over-abstracting.
 - Cite ONLY DSPy (installed 3.3.0b1 source + dspy.ai docs) as the reference contract for LLM/runtime design; do NOT cite the `/daytona` or `daytona-signature` skill as authority for DSPy/RLM decisions. For Daytona sandbox/interpreter and FastAPI API work, use the `/daytona` and `/fastapi` skills for provider/framework best practices.
 - When asked for a plan, make it code-tree-explicit: exact file paths, line ranges, and ADD/REMOVE/EDIT tables describing what to clean, remove, edit, or add — not generic prose. When grilling or collecting decisions, prefer AskUser/AskQuestion over long inline multi-question dumps when that tool is available.
+- Prefer live per-iteration RLM reasoning on the existing SSE/`RLMReasoning` → TUI path; treat `dspy.RLM(verbose=…)` as host-logger-only and insufficient for operator-visible streaming.
 
 ## Learned Workspace Facts
 
@@ -118,11 +119,13 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - `create_app()` installs handlers, routers, and the static in-memory bundled
   Skill catalog. FastAPI lifespan installs one complete Deno or Daytona runtime
   inventory through `composition/`; routes retrieve composed runtime modules.
-- The maintained terminal uses pi-tui only. `fleet-turn-stream.ts` owns strict stream lifecycle, `sse.ts` owns frame/chunk validation, `tui/projection.ts` owns live/reload projection, and `tui/store.ts` owns atomic hydration. The monochrome operator timeline renders all evidence statically expanded in native terminal scrollback; Fleet does not capture the mouse or maintain a transcript viewport.
+- The maintained terminal uses pi-tui only. `fleet-turn-stream.ts` owns strict stream lifecycle, `sse.ts` owns frame/chunk validation, `tui/projection.ts` owns live/reload projection, and `tui/store.ts` owns atomic hydration. The monochrome operator timeline renders all evidence statically expanded in native terminal scrollback; Fleet does not capture the mouse or maintain a transcript viewport. Live mid-turn evidence is tools plus Daytona interpreter code/output; `RLMReasoning` is usually filled after `rlm.acall` from the native trajectory; `dspy.RLM(verbose=…)` is host-logger-only and does not feed RuntimeEvents.
 - Live Daytona MVP proof (`tests/live/backend/`, `scripts/live_daytona_verify.py`) loads repo `.env` via `python-dotenv` with `override=False`; existing process exports still win.
 - Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments
   and Artifacts use Workspace Volume Scope; Session Workspace is
   append/update-only (list/stat/read/write with overwrite; no delete Tool).
+  Volume backends that reject atomic `os.replace` use a non-atomic overwrite
+  fallback (keep new content if only file `fsync` fails).
   `TurnLifecycle.finish()` promotes Artifact Candidates and owns atomic Turn
   Commit, while `TurnCoordinator` owns stream settlement, terminal ordering,
   and cleanup.

@@ -109,6 +109,59 @@ def test_trajectory_reconciliation_replaces_live_details_without_duplicates() ->
     )
 
 
+def test_trajectory_reconciliation_keeps_live_reasoning_emitted_before_step_started() -> None:
+    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
+    from fleet_rlm.rlm.runner import _reconcile_trajectory
+
+    details = [
+        RLMReasoning("native reasoning", 1),
+        StepStarted(1),
+        RLMCode("native code", 1),
+        RLMOutput("native output", 1),
+        StepFinished(1),
+    ]
+
+    assert (
+        _reconcile_trajectory(
+            details,
+            (TrajectoryStep(1, "native reasoning", "native code", "native output"),),
+            max_chars=100,
+        )
+        == []
+    )
+    assert details == [
+        RLMReasoning("native reasoning", 1),
+        StepStarted(1),
+        RLMCode("native code", 1),
+        RLMOutput("native output", 1),
+        StepFinished(1),
+    ]
+
+
+def test_trajectory_reconciliation_updates_pre_step_live_reasoning_when_canonical_differs() -> None:
+    from fleet_rlm.rlm.dspy_contract import TrajectoryStep
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted
+    from fleet_rlm.rlm.runner import _reconcile_trajectory
+
+    details = [
+        RLMReasoning("stale reasoning", 1),
+        StepStarted(1),
+        RLMCode("native code", 1),
+        RLMOutput("native output", 1),
+        StepFinished(1),
+    ]
+
+    emissions = _reconcile_trajectory(
+        details,
+        (TrajectoryStep(1, "native reasoning", "native code", "native output"),),
+        max_chars=100,
+    )
+
+    assert emissions == [RLMReasoning("native reasoning", 1)]
+    assert details[0] == RLMReasoning("native reasoning", 1)
+
+
 @pytest.mark.asyncio
 async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalized_trajectory() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest

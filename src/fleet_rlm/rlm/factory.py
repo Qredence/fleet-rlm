@@ -25,7 +25,7 @@ class RLMFactory:
         interpreter: Any,
         tools: Sequence[dspy.Tool] | None = None,
         signature: type[dspy.Signature] | str | None = None,
-        verbose: bool = False,
+        verbose: bool = True,
     ) -> Any:
         """Return a new ``dspy.RLM`` instance. Never reuses a previous module."""
         resolved_signature: type[dspy.Signature] | str = signature if signature is not None else FleetRLMSignature

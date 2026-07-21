@@ -55,7 +55,7 @@ class RLMFactoryLike(Protocol):
         interpreter: Any,
         tools: Sequence[dspy.Tool] | None = None,
         signature: Any = None,
-        verbose: bool = False,
+        verbose: bool = True,
     ) -> Any: ...
 
 
@@ -180,15 +180,13 @@ def _trajectory_details(steps: Sequence[TrajectoryStep], *, max_chars: int) -> l
         output = step.output
         if output.startswith("FINAL:"):
             output = "FINAL submitted"
-        details.extend(
-            (
-                StepStarted(step.index),
-                RLMReasoning(truncate_public_text(step.reasoning, max_len=max_chars), step.index),
-                RLMCode(truncate_public_text(step.code, max_len=max_chars), step.index),
-                RLMOutput(truncate_public_text(output, max_len=max_chars), step.index),
-                StepFinished(step.index),
-            )
-        )
+        details.extend((
+            StepStarted(step.index),
+            RLMReasoning(truncate_public_text(step.reasoning, max_len=max_chars), step.index),
+            RLMCode(truncate_public_text(step.code, max_len=max_chars), step.index),
+            RLMOutput(truncate_public_text(output, max_len=max_chars), step.index),
+            StepFinished(step.index),
+        ))
     return details
 
 
@@ -247,6 +245,13 @@ def _reconcile_trajectory(
                 continue
 
             if isinstance(target, RLMReasoning):
+                # Live observation may publish reasoning before interpreter StepStarted.
+                outside = _detail_position(details, RLMReasoning, step)
+                if outside is not None:
+                    if details[outside] != target:
+                        details[outside] = target
+                        emissions.append(target)
+                    continue
                 insertion = start + 1
             elif isinstance(target, RLMCode):
                 reasoning = _detail_position(details, RLMReasoning, step)
@@ -349,6 +354,9 @@ class RLMRunner:
                     tools=observed_tools or None,
                     signature=spec.signature,
                 )
+                bind_rlm_observer = getattr(rlm, "bind_observer", None)
+                if callable(bind_rlm_observer):
+                    bind_rlm_observer(relay.publish, max_chars=context.options.max_output_chars)
                 task = asyncio.create_task(self._execute_rlm_in_worker(rlm, context, spec))
                 ownership.task = task
                 pending: asyncio.Task[ExecutionDetail] | None = None

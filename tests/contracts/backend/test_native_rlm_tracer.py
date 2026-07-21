@@ -17,6 +17,7 @@ from fleet_rlm.rlm.dspy_contract import RLMOptions
 from fleet_rlm.rlm.events import (
     RLMCode,
     RLMOutput,
+    RLMReasoning,
     StepFinished,
     StepStarted,
     ToolCompleted,
@@ -171,27 +172,35 @@ async def test_native_rlm_preserves_state_tools_submit_prediction_and_trajectory
         tools=(observe_tool(dspy.Tool(helper), observed.append, ToolEventView.metadata_only()),),
         signature="request -> answer",
     )
+    rlm.bind_observer(observed.append, max_chars=1_000)
     rlm.generate_action = _StatefulActionPredictor()
 
     prediction = await rlm.acall(request="run the deterministic contract")
 
-    assert type(rlm) is dspy.RLM
+    assert isinstance(rlm, dspy.RLM)
+    assert rlm.verbose is True
     assert isinstance(prediction, dspy.Prediction)
     assert prediction.answer == "done:a"
     assert len(prediction.trajectory) == 2
     assert prediction.trajectory[0]["output"] == "done:a"
     assert prediction.trajectory[1]["output"].startswith("FINAL:")
     assert [type(item) for item in observed] == [
+        RLMReasoning,
         StepStarted,
         RLMCode,
         ToolStarted,
         ToolCompleted,
         RLMOutput,
         StepFinished,
+        RLMReasoning,
         StepStarted,
         RLMCode,
         RLMOutput,
         StepFinished,
+    ]
+    assert [item.text for item in observed if isinstance(item, RLMReasoning)] == [
+        "Call the registered helper and retain the result.",
+        "Submit the retained result.",
     ]
 
 
@@ -368,10 +377,13 @@ async def test_runner_completes_native_repair_and_extract_as_prediction_result(f
         (),
     )
     stream = RLMRunner(factory=NativeFactory()).stream(context)
-    _events = [event async for event in stream]
+    events = [event async for event in stream]
 
     assert stream.outcome is not None
     assert stream.outcome.succeeded
     assert stream.outcome.prediction is not None
     assert stream.outcome.prediction.display_text == ("extracted" if fallback else "repaired")
     assert stream.outcome.prediction.outputs == {"answer": "extracted" if fallback else "repaired"}
+    reasoning_events = [event for event in events if isinstance(event.detail, RLMReasoning)]
+    assert reasoning_events
+    assert all(event.detail.text.strip() for event in reasoning_events)
