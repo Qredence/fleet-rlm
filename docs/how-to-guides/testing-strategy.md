@@ -16,9 +16,8 @@ database lanes remain explicit.
 | TUI | `tools/fleet-tui/src/**/*.test.ts` | transport, projection, store, commands, rendering, terminal lifecycle |
 | Deno | named unit/contract tests marked `deno` | real deterministic DSPy Deno/Pyodide contract |
 | Database | tests marked `db` | explicit configured database behavior |
-| Daytona MVP | `tests/live/backend/test_fleet_rlm_daytona_mvp.py` | complete real FastAPI/DSPy/Daytona flow |
-| Attachment/Artifact durability | `tests/live/backend/test_b5_attachment_artifact_durability.py` | Volume persistence and committed content |
-| Session Workspace durability | `tests/live/backend/test_phase7_workspace_durability.py` | private files across Sandbox replacement |
+| Daytona MVP | `tests/live/backend/test_fleet_rlm_daytona_mvp.py` | complete real FastAPI/DSPy/Daytona flow, including Session Workspace durability across Sandbox replacement |
+| Attachment/Artifact durability | `tests/live/backend/test_attachment_artifact_durability.py` | Volume persistence and committed content |
 
 ## Primary non-live gate
 
@@ -88,8 +87,7 @@ Live checks require canonical credentials and explicit opt-in:
 
 ```bash
 FLEET_LIVE=1 uv run pytest tests/live/backend/test_fleet_rlm_daytona_mvp.py -q -n 0 --timeout=900
-FLEET_LIVE=1 uv run pytest tests/live/backend/test_b5_attachment_artifact_durability.py -q -n 0
-FLEET_LIVE=1 uv run pytest tests/live/backend/test_phase7_workspace_durability.py -q -n 0
+FLEET_LIVE=1 uv run pytest tests/live/backend/test_attachment_artifact_durability.py -q -n 0
 ```
 
 The complete release-oriented verifier loads `.env` with `override=False`, so

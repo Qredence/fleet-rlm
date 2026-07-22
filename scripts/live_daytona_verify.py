@@ -23,7 +23,7 @@ _REQUIRED_ENV = ("FLEET_DAYTONA_API_KEY", "FLEET_LLM_API_KEY")
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _LIVE_MODEL = "deepseek-v4-flash-free"
 _APPROVED_MODELS = frozenset({_LIVE_MODEL, f"openai/{_LIVE_MODEL}"})
-_DURABILITY_TEST = "tests/live/backend/test_b5_attachment_artifact_durability.py"
+_DURABILITY_TEST = "tests/live/backend/test_attachment_artifact_durability.py"
 _SUCCESS_FIELDS = frozenset(
     {
         "schema",

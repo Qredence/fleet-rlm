@@ -136,7 +136,7 @@ def test_lane_commands_are_ordered_and_exact() -> None:
         "uv",
         "run",
         "pytest",
-        "tests/live/backend/test_b5_attachment_artifact_durability.py",
+        "tests/live/backend/test_attachment_artifact_durability.py",
         "-q",
         "-n",
         "0",
@@ -265,7 +265,7 @@ def test_first_lane_failure_skips_second_and_preserves_untracked_sentinel(
 
     assert verifier.main(["--output", str(output)]) == verifier.EXIT_PROOF
     assert len(commands) == 1
-    assert "test_b5_attachment_artifact_durability.py" in commands[0][3]
+    assert "test_attachment_artifact_durability.py" in commands[0][3]
     assert removed == [worktree]
     assert sentinel.read_text(encoding="utf-8") == "preserve me"
 
@@ -345,7 +345,7 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
     ) -> subprocess.CompletedProcess[str]:
         del check, stdout, stderr
         calls.append((command, cwd, env, timeout))
-        if "test_b5_attachment" in command[3]:
+        if "test_attachment_artifact_durability" in command[3]:
             evidence_path = worktree / ".scratch/clean-backend-refoundation/assets"
             evidence_path.mkdir(parents=True)
             (evidence_path / "live-b5-attachment-artifact-durability-evidence.json").write_text(

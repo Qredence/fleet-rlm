@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, fields
+from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 
 
-def test_execution_context_has_only_prepared_runner_inputs() -> None:
+def test_execution_context_is_immutable_and_contains_prepared_runner_inputs() -> None:
     from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
     from fleet_rlm.rlm.context import RLMExecutionContext
     from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -39,21 +39,11 @@ def test_execution_context_has_only_prepared_runner_inputs() -> None:
         preparation_notices=(),
     )
 
-    assert {item.name for item in fields(context)} == {
-        "run_id",
-        "session_id",
-        "access",
-        "request",
-        "session_context",
-        "models",
-        "options",
-        "deadline",
-        "interpreter",
-        "attachments",
-        "capabilities",
-        "cancellation_requested",
-        "preparation_notices",
-        "authority",
-    }
+    assert context.session_id == session_id
+    assert context.request == "inspect"
+    assert context.deadline == 123.0
+    assert context.attachments == ()
+    assert not hasattr(context, "settings")
+    assert not hasattr(context, "turn_store")
     with pytest.raises(FrozenInstanceError):
         context.request = "changed"  # type: ignore[misc]

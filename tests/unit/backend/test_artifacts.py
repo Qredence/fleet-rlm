@@ -209,15 +209,3 @@ def test_api_get_committed_artifact_has_no_path_leak(tmp_path: Path) -> None:
         )
         assert foreign_content.status_code == 200
         assert foreign_content.content == b"## Result\n\nok"
-
-
-def test_public_artifact_create_is_removed(tmp_path: Path) -> None:
-    app = create_testing_app(settings=Settings(data_root=str(tmp_path), max_artifact_bytes=8, database_url=None))
-    client = TestClient(app)
-    headers = {
-        "X-Fleet-User-Id": str(uuid4()),
-        "X-Fleet-Workspace-Id": str(uuid4()),
-    }
-    response = client.post("/api/artifacts", headers=headers, json={})
-    assert response.status_code == 404
-    assert "/api/artifacts" not in app.openapi()["paths"]

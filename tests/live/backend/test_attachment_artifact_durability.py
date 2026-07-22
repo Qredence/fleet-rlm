@@ -1,4 +1,4 @@
-"""Opt-in live B5 proof: staged Attachment + Artifact under Workspace Volume Scope.
+"""Opt-in live proof: staged Attachment + Artifact under Workspace Volume Scope.
 
 Gate: FLEET_LIVE=1
 
@@ -115,7 +115,7 @@ def _write_evidence(name: str, payload: dict[str, Any]) -> Path:
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(600)
-async def test_live_b5_stage_readable_and_artifact_survives_replace(tmp_path: Path) -> None:
+async def test_staged_attachment_is_readable_and_artifact_survives_replacement(tmp_path: Path) -> None:
     settings = Settings(run_environment="daytona")
     _skip_unless_live(settings)
 
