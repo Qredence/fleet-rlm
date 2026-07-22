@@ -27,6 +27,14 @@ class SupervisorError(RuntimeError):
     """A user-actionable local process supervision failure."""
 
 
+# Daytona lifespan creates ephemeral Volume I/O sandboxes during orphan cleanup;
+# cold provider create/delete routinely exceeds a 30s local readiness budget.
+_READY_TIMEOUT_SECONDS = {
+    "daytona": 90.0,
+    "deno": 30.0,
+}
+
+
 def _validate_prerequisites(repo_root: Path) -> tuple[Path, str]:
     workspace = repo_root / "tools" / "fleet-tui"
     if (
@@ -211,7 +219,7 @@ def supervise(
                     backend,
                     api_url=api_url,
                     log_path=log_path,
-                    timeout=30.0,
+                    timeout=_READY_TIMEOUT_SECONDS.get(run_environment, 30.0),
                     shutdown_requested=lambda: received_signal is not None,
                 )
                 if received_signal is None:

@@ -523,3 +523,35 @@ def test_supervisor_reports_readiness_timeout_with_log_path(
 
     assert str(tmp_path / ".fleet_rlm" / "logs") in str(error.value)
     assert backend.wait_timeouts == [5.0]
+
+
+def test_supervisor_uses_longer_daytona_readiness_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _tui_workspace(tmp_path)
+    monkeypatch.setattr(supervisor.shutil, "which", lambda command: f"/usr/bin/{command}")
+    monkeypatch.setattr(
+        supervisor.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
+    )
+    backend = _Process(pid=9)
+    monkeypatch.setattr(supervisor.subprocess, "Popen", lambda *_args, **_kwargs: backend)
+    # deadline = 100 + 90; second monotonic sample exceeds it without a ready probe.
+    clock = iter((100.0, 191.0))
+    monkeypatch.setattr(supervisor.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(supervisor.os, "killpg", lambda *_args: None)
+    monkeypatch.setattr(supervisor, "_validate_daytona_database", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(supervisor.SupervisorError, match="not ready within 90s") as error:
+        supervisor.supervise(
+            host="127.0.0.1",
+            port=8126,
+            reload=False,
+            run_environment="daytona",
+            repo_root=tmp_path,
+        )
+
+    assert str(tmp_path / ".fleet_rlm" / "logs") in str(error.value)
+    assert backend.wait_timeouts == [5.0]
