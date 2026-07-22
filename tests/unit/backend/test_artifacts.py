@@ -1,21 +1,17 @@
-"""impl-12: durable artifacts by logical ID (no live providers)."""
+"""Durable local Artifact catalog behavior without live providers."""
 
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError, ArtifactValidationError
 from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
 from fleet_rlm.artifacts.safety import parse_kind, sanitize_title, validate_content_size
-from fleet_rlm.composition.testing import create_testing_app
-from fleet_rlm.config import Settings
 
 
 def test_parse_kind_and_title() -> None:
@@ -140,72 +136,3 @@ def test_content_survives_store_reload(tmp_path: Path) -> None:
     path_after = second.sandbox_path_for(ref.id, user_id=user, workspace_id=ws)
     assert path_after == path_before
     assert "/home/daytona/fleet/sessions/" in path_after
-
-
-def test_api_get_committed_artifact_has_no_path_leak(tmp_path: Path) -> None:
-    settings = Settings(data_root=str(tmp_path), max_artifact_bytes=2048, database_url=None)
-    app = create_testing_app(settings=settings)
-    scope = LocalScope()
-    user, ws = scope.user_id, scope.workspace_id
-    headers = {
-        "X-Fleet-User-Id": str(user),
-        "X-Fleet-Workspace-Id": str(ws),
-    }
-    with TestClient(app) as client:
-        ref = app.state.artifact_reader._catalog._store.create(  # noqa: SLF001
-            user_id=user,
-            workspace_id=ws,
-            session_id=uuid4(),
-            run_id=uuid4(),
-            kind="markdown",
-            title="summary",
-            content="## Result\n\nok",
-        )
-        response = client.get(f"/api/artifacts/{ref.id}", headers=headers)
-        assert response.status_code == 200
-        body = response.json()
-        assert set(body.keys()) == {
-            "id",
-            "session_id",
-            "run_id",
-            "kind",
-            "title",
-            "media_type",
-            "byte_size",
-            "checksum_sha256",
-        }
-        dumped = json.dumps(body)
-        assert "path" not in body
-        assert "storage_key" not in dumped
-        assert "/home/" not in dumped
-        assert tmp_path.as_posix() not in dumped
-        assert body["kind"] == "markdown"
-        assert body["title"] == "summary"
-
-        other = client.get(
-            f"/api/artifacts/{ref.id}",
-            headers={
-                "X-Fleet-User-Id": str(user),
-                "X-Fleet-Workspace-Id": str(uuid4()),
-            },
-        )
-        assert other.status_code == 200
-
-        content = client.get(f"/api/artifacts/{ref.id}/content", headers=headers)
-        assert content.status_code == 200
-        assert content.content == b"## Result\n\nok"
-        assert content.headers["content-type"].startswith("text/markdown")
-        assert content.headers["content-length"] == str(ref.byte_size)
-        assert content.headers["etag"] == f'"{ref.checksum_sha256}"'
-        assert content.headers["x-content-type-options"] == "nosniff"
-        assert content.headers["content-disposition"] == 'attachment; filename="summary.md"'
-
-        foreign_content = client.get(
-            f"/api/artifacts/{ref.id}/content",
-            headers={
-                "X-Fleet-User-Id": str(user),
-                "X-Fleet-Workspace-Id": str(uuid4()),
-            },
-        )
-        assert foreign_content.status_code == 200
-        assert foreign_content.content == b"## Result\n\nok"

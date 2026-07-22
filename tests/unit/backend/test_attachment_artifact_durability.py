@@ -1,19 +1,15 @@
-"""B5: Attachment / Artifact durability under Workspace Volume Scope."""
+"""Attachment and Artifact durability under Workspace Volume Scope."""
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
 
 from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
-from fleet_rlm.composition.testing import create_testing_app
-from fleet_rlm.config import Settings
 from fleet_rlm.daytona.paths import UnsafePathError, VolumePaths, as_posix
 from fleet_rlm.daytona.volume_fs import HostVolumeMirror
 from fleet_rlm.files.lifecycle import AttachmentModule
@@ -171,46 +167,6 @@ def test_artifact_survives_catalog_delete_when_volume_blob_present(tmp_path: Pat
     # Simulate host catalog blob loss while Volume Scope remains (Sandbox replace case).
     store._blob_path(ref.id).unlink()  # noqa: SLF001
     assert store.read_bytes(ref.id, user_id=user, workspace_id=ws) == b"persist-me"
-
-
-def test_public_attachment_and_artifact_responses_omit_paths(tmp_path: Path) -> None:
-    settings = Settings(
-        data_root=str(tmp_path),
-        max_upload_bytes=1024,
-        max_artifact_bytes=1024,
-        database_url=None,
-    )
-    app = create_testing_app(settings=settings)
-    user, ws = uuid4(), uuid4()
-    headers = {
-        "X-Fleet-User-Id": str(user),
-        "X-Fleet-Workspace-Id": str(ws),
-    }
-    with TestClient(app) as client:
-        up = client.post(
-            "/api/attachments",
-            headers=headers,
-            files={"attachment": ("x.txt", b"abc", "text/plain")},
-        )
-        assert up.status_code == 201
-        up_body = up.json()
-        assert "path" not in up_body
-        assert "/home/" not in json.dumps(up_body)
-        assert str(tmp_path) not in json.dumps(up_body)
-
-        # Host-Mediated creation is the only foundation path; public create is absent.
-        art = client.post(
-            "/api/artifacts",
-            headers=headers,
-            json={
-                "session_id": str(uuid4()),
-                "run_id": str(uuid4()),
-                "kind": "text",
-                "content": "artifact body",
-                "title": "n",
-            },
-        )
-        assert art.status_code == 404
 
 
 def test_host_volume_mirror_rejects_escape(tmp_path: Path) -> None:

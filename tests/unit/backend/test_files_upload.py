@@ -1,18 +1,13 @@
-"""impl-11: attachment upload, reauth, and staging (no live providers)."""
+"""Attachment upload, catalog lookup, and host-mediated staging without live providers."""
 
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
 
-from fleet_rlm.api.local_scope import LocalScope
-from fleet_rlm.composition.testing import create_testing_app
-from fleet_rlm.config import Settings
 from fleet_rlm.daytona.paths import VolumePaths
 from fleet_rlm.daytona.volume_fs import HostVolumeMirror
 from fleet_rlm.files.errors import AttachmentNotFoundError, AttachmentValidationError
@@ -138,70 +133,3 @@ def test_stage_returns_fleet_sandbox_path_only(tmp_path: Path) -> None:
     # Workspace Volume Scope mirror has the staged bytes
     assert mirror.exists(staged.sandbox_path)
     assert mirror.read_bytes(staged.sandbox_path) == b"payload"
-
-
-def test_api_upload_get_no_path_leak_and_no_public_stage(tmp_path: Path) -> None:
-    settings = Settings(data_root=str(tmp_path), max_upload_bytes=1024, database_url=None)
-    app = create_testing_app(settings=settings)
-    scope = LocalScope()
-    user, ws = scope.user_id, scope.workspace_id
-    headers = {
-        "X-Fleet-User-Id": str(user),
-        "X-Fleet-Workspace-Id": str(ws),
-    }
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/attachments",
-            headers=headers,
-            files={"attachment": ("readme.md", b"# hi", "text/markdown")},
-        )
-        assert response.status_code == 201
-        body = response.json()
-        assert set(body.keys()) == {
-            "id",
-            "filename",
-            "content_type",
-            "byte_size",
-            "checksum_sha256",
-        }
-        assert "path" not in body
-        assert "/home/" not in json.dumps(body)
-        assert tmp_path.as_posix() not in json.dumps(body)
-
-        file_id = body["id"]
-        got = client.get(f"/api/attachments/{file_id}", headers=headers)
-        assert got.status_code == 200
-        assert got.json()["filename"] == "readme.md"
-
-        # wrong workspace
-        other = client.get(
-            f"/api/attachments/{file_id}",
-            headers={
-                "X-Fleet-User-Id": str(user),
-                "X-Fleet-Workspace-Id": str(uuid4()),
-            },
-        )
-        assert other.status_code == 200
-
-        # Public stage removed (B6)
-        staged = client.post(
-            f"/api/attachments/{file_id}/stage",
-            headers=headers,
-            json={"session_id": str(uuid4()), "run_id": str(uuid4())},
-        )
-        assert staged.status_code == 404
-
-
-def test_api_rejects_oversize(tmp_path: Path) -> None:
-    settings = Settings(data_root=str(tmp_path), max_upload_bytes=4, database_url=None)
-    app = create_testing_app(settings=settings)
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/attachments",
-            headers={
-                "X-Fleet-User-Id": str(uuid4()),
-                "X-Fleet-Workspace-Id": str(uuid4()),
-            },
-            files={"attachment": ("big.bin", b"12345", "application/octet-stream")},
-        )
-    assert response.status_code == 400

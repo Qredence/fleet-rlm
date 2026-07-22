@@ -1,4 +1,4 @@
-"""QRE-81 public runtime-profile contracts."""
+"""Public Run Environment profile contracts."""
 
 from __future__ import annotations
 

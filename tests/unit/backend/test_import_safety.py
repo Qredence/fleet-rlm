@@ -1,4 +1,4 @@
-"""K-001: import-safe package and secret-excluding settings."""
+"""Import-safe package construction and secret-excluding settings."""
 
 from __future__ import annotations
 

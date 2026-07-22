@@ -1,4 +1,4 @@
-"""K-003: Daytona SDK import boundary for fleet_rlm."""
+"""Daytona SDK import and lazy-client construction contracts."""
 
 from __future__ import annotations
 

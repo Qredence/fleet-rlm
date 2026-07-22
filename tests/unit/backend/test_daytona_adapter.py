@@ -1,4 +1,4 @@
-"""K-003: Daytona adapter unit tests (offline, injectable backend)."""
+"""Daytona adapter behavior with an offline injectable backend."""
 
 from __future__ import annotations
 
