@@ -527,6 +527,7 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunCompleted, RunStarted
     from fleet_rlm.rlm.outcome import RLMOutcome
     from fleet_rlm.sessions.catalog import SequenceCursor
+    from fleet_rlm.sessions.committed_turn import TextPart, UsagePart
     from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput, UserTurnRecord
 
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
@@ -622,6 +623,7 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
         assert records[0].input.text == "hello"
         assert isinstance(records[1], AssistantTurnRecord)
         assert records[1].committed.text == "sql"
+        assert tuple(type(part) for part in records[1].committed.parts) == (UsagePart, TextPart)
     finally:
         await engine.dispose()
 

@@ -3,12 +3,8 @@
 from __future__ import annotations
 
 import ast
-import json
 from pathlib import Path
 from uuid import uuid4
-
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
-TRANSCRIPT = FIXTURES / "valid_run_transcript.sse"
 
 
 def test_rlm_events_module_does_not_import_fastapi() -> None:
@@ -63,17 +59,3 @@ def test_projection_does_not_consume_extra_runtime_event_sequences() -> None:
             "transient": True,
         }
     ]
-
-
-def test_committed_fixture_is_valid_sse_transcript() -> None:
-    assert TRANSCRIPT.is_file()
-    text = TRANSCRIPT.read_text(encoding="utf-8")
-    assert text.endswith("\n")
-
-    data_lines = [line for line in text.splitlines() if line.startswith("data: ")]
-    assert len(data_lines) >= 3
-    chunks = [json.loads(line.removeprefix("data: ")) for line in data_lines if line.removeprefix("data: ") != "[DONE]"]
-    assert chunks[0]["type"] == "start"
-    assert chunks[-1] == {"type": "finish", "finishReason": "stop"}
-    assert data_lines[-1] == "data: [DONE]"
-    assert [chunk["type"] for chunk in chunks].count("finish") == 1

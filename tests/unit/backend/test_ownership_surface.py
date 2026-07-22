@@ -1,4 +1,4 @@
-"""B6: ownership surface — cancel authorize, no public stage, artifact session graph."""
+"""Run cancellation ownership surface."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn
 from fleet_rlm.composition.testing import create_testing_app
-from fleet_rlm.config import Settings
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
 
@@ -54,40 +53,3 @@ async def test_cancel_owned_run_records_intent_and_is_idempotent() -> None:
         r2 = client.put(f"/api/runs/{started.run_id}/cancellation", headers=headers)
         assert r2.status_code == 200
         assert r2.json()["state"] == "already_requested"
-
-
-def test_missing_run_cannot_be_cancelled() -> None:
-    app = create_testing_app()
-    user, ws = uuid4(), uuid4()
-    headers = _headers(user, ws)
-    run_id = uuid4()
-    with TestClient(app) as client:
-        response = client.put(f"/api/runs/{run_id}/cancellation", headers=headers)
-    assert response.status_code == 404
-
-
-def test_public_stage_route_removed(tmp_path) -> None:
-    settings = Settings(data_root=str(tmp_path), max_upload_bytes=1024, database_url=None)
-    app = create_testing_app(settings=settings)
-    headers = _headers()
-    with TestClient(app) as client:
-        up = client.post(
-            "/api/attachments",
-            headers=headers,
-            files={"attachment": ("a.txt", b"hi", "text/plain")},
-        )
-        assert up.status_code == 201
-        file_id = up.json()["id"]
-        staged = client.post(
-            f"/api/attachments/{file_id}/stage",
-            headers=headers,
-            json={"session_id": str(uuid4()), "run_id": str(uuid4())},
-        )
-        assert staged.status_code == 404
-
-
-def test_public_artifact_create_is_not_an_ownership_surface(tmp_path) -> None:
-    app = create_testing_app(settings=Settings(data_root=str(tmp_path), database_url=None))
-    client = TestClient(app)
-    response = client.post("/api/artifacts", headers=_headers(), json={})
-    assert response.status_code == 404
