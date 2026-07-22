@@ -101,12 +101,14 @@ def test_help_is_credential_free(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_model_overrides_must_be_paired(tmp_path: Path) -> None:
     assert (
-        verifier.main([
-            "--output",
-            str(tmp_path / "receipt.json"),
-            "--root-model",
-            "openai/root",
-        ])
+        verifier.main(
+            [
+                "--output",
+                str(tmp_path / "receipt.json"),
+                "--root-model",
+                "openai/root",
+            ]
+        )
         == verifier.EXIT_PRECONDITION
     )
 
@@ -347,15 +349,17 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
             evidence_path = worktree / ".scratch/clean-backend-refoundation/assets"
             evidence_path.mkdir(parents=True)
             (evidence_path / "live-b5-attachment-artifact-durability-evidence.json").write_text(
-                json.dumps({
-                    "gate": "B5",
-                    "staged_readable": True,
-                    "artifact_id": "artifact-1",
-                    "artifact_checksum": "a" * 64,
-                    "artifact_survived_replace": True,
-                    "sandbox_ids": ["sandbox-1", "sandbox-2"],
-                    "volume_id": "volume-1",
-                }),
+                json.dumps(
+                    {
+                        "gate": "B5",
+                        "staged_readable": True,
+                        "artifact_id": "artifact-1",
+                        "artifact_checksum": "a" * 64,
+                        "artifact_survived_replace": True,
+                        "sandbox_ids": ["sandbox-1", "sandbox-2"],
+                        "volume_id": "volume-1",
+                    }
+                ),
                 encoding="utf-8",
             )
         else:
@@ -366,16 +370,18 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
     monkeypatch.setattr(verifier.subprocess, "run", run_once)
 
     assert (
-        verifier.main([
-            "--output",
-            str(output),
-            "--timeout-seconds",
-            "840",
-            "--root-model",
-            verifier._LIVE_MODEL,
-            "--sub-model",
-            verifier._LIVE_MODEL,
-        ])
+        verifier.main(
+            [
+                "--output",
+                str(output),
+                "--timeout-seconds",
+                "840",
+                "--root-model",
+                verifier._LIVE_MODEL,
+                "--sub-model",
+                verifier._LIVE_MODEL,
+            ]
+        )
         == 0
     )
     lane_calls = [call for call in calls if call[0][1:3] == ["run", "pytest"]]

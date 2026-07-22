@@ -15,7 +15,6 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 7. [DSPy RLM and Daytona integration](how-to-guides/dspy-integration.md)
 8. [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
 9. [Agent harness](agent-harness/README.md)
-10. [Architecture decisions](adr/README.md)
 
 ## Reference
 
@@ -25,9 +24,7 @@ FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 - [Codebase map](reference/codebase-map.md)
 - [Source layout](reference/source-layout.md)
 - [Database](reference/database.md)
-- [Runtime execution flow](explanation/agent-runtime-execution-flow.md)
 - [Implementation-plan policy](plan-implementation/README.md)
-- [Coordinated Session-first Turn decision](adr/0001-coordinated-turn-contract.md)
 
 ## Source of truth
 

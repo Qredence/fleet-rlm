@@ -262,11 +262,13 @@ def test_composition_version_guard_rejects_any_unpinned_dspy(monkeypatch: pytest
 def test_rlm_usage_contract_accepts_only_the_exact_observed_shape() -> None:
     from fleet_rlm.rlm.dspy_contract import validate_rlm_usage
 
-    usage = validate_rlm_usage({
-        "iterations": 2,
-        "observed_lm_usage": {"root": {"prompt_tokens": 4, "cached": False}},
-        "duration_ms": 12,
-    })
+    usage = validate_rlm_usage(
+        {
+            "iterations": 2,
+            "observed_lm_usage": {"root": {"prompt_tokens": 4, "cached": False}},
+            "duration_ms": 12,
+        }
+    )
     assert usage == {
         "iterations": 2,
         "observed_lm_usage": {"root": {"prompt_tokens": 4, "cached": False}},
@@ -306,11 +308,13 @@ def test_observed_usage_never_exposes_call_or_retry_counters(forbidden: str) -> 
 
     assert observed_usage(Prediction(), duration_ms=1)["observed_lm_usage"] == {"root": {"prompt_tokens": 4}}
     with pytest.raises(ValueError):
-        validate_rlm_usage({
-            "iterations": 0,
-            "observed_lm_usage": {"root": {forbidden: 99}},
-            "duration_ms": 1,
-        })
+        validate_rlm_usage(
+            {
+                "iterations": 0,
+                "observed_lm_usage": {"root": {forbidden: 99}},
+                "duration_ms": 1,
+            }
+        )
 
 
 @pytest.mark.parametrize(

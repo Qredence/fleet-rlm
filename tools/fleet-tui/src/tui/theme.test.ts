@@ -1,3 +1,4 @@
+import { getCapabilities } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -104,9 +105,10 @@ describe("Fleet pi theme", () => {
   });
 
   it("matches upstream SelectList and Editor styling", () => {
-    const accent = createFleetTheme("dark", "256color").fg("accent", "selected");
-    const muted = createFleetTheme("dark", "256color").fg("muted", "detail");
-    const border = createFleetTheme("dark", "256color").fg("borderMuted", "│");
+    const mode = getCapabilities().trueColor ? "truecolor" : "256color";
+    const accent = createFleetTheme("dark", mode).fg("accent", "selected");
+    const muted = createFleetTheme("dark", mode).fg("muted", "detail");
+    const border = createFleetTheme("dark", mode).fg("borderMuted", "│");
     setTerminalColorScheme("dark");
 
     expect(selectTheme.selectedText("selected")).toBe(accent);

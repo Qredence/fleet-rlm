@@ -19,9 +19,7 @@ clients cannot provide models, Signatures, or executable capabilities.
 - Session Workspace files are immediate private Volume state. They survive
   later Runs and Sandbox replacement; interpreter globals do not.
 
-See [backend architecture](../architecture.md) for ownership and
-[runtime execution flow](../explanation/agent-runtime-execution-flow.md) for
-Turn commit ordering.
+See [backend architecture](../architecture.md) for ownership and Turn commit ordering.
 
 ## Run the complete Daytona proof
 

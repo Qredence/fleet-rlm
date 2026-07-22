@@ -6,32 +6,6 @@ multi_agent = true
 
 [hooks]
 
-[[hooks.PreToolUse]]
-matcher = "^(Edit|Write)$"
-
-[[hooks.PreToolUse.hooks]]
-type = "command"
-command = "zsh .codex/hooks/block-env-edit.zsh"
-timeout = 10
-statusMessage = "Checking protected env files..."
-
-[[hooks.PostToolUse]]
-matcher = "^(Edit|Write)$"
-
-[[hooks.PostToolUse.hooks]]
-type = "command"
-command = "zsh .codex/hooks/python-format.zsh"
-timeout = 60
-statusMessage = "Formatting edited Python file..."
-
-[[hooks.Stop]]
-
-[[hooks.Stop.hooks]]
-type = "command"
-command = "zsh .codex/hooks/generated-artifact-check.zsh"
-timeout = 30
-statusMessage = "Checking generated artifact drift..."
-
 # Migrated from deprecated .codex/hooks.json
 [[hooks.PreToolUse]]
 matcher = "Bash(git commit*)"

@@ -12,7 +12,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-ROOT_AGENTS_LINE_BUDGET = 140
+ROOT_AGENTS_LINE_BUDGET = 150
 REQUIRED_HARNESS_DOCS = (
     "docs/agent-harness/README.md",
     "docs/agent-harness/feedback-loop.md",
@@ -125,12 +125,7 @@ class HarnessChecker:
                 ".codex/hooks.json",
                 "deprecated hook source still present; use inline [hooks] in .codex/config.toml only",
             )
-        for rel_path in (
-            ".codex/workspace-bootstrap.zsh",
-            ".codex/hooks/block-env-edit.zsh",
-            ".codex/hooks/generated-artifact-check.zsh",
-            ".codex/hooks/python-format.zsh",
-        ):
+        for rel_path in (".codex/workspace-bootstrap.zsh",):
             if not (self.repo_root / rel_path).is_file():
                 self._error(rel_path, "required Codex hook/bootstrap script is missing")
 

@@ -324,7 +324,12 @@ class TurnCoordinator:
                 if heartbeat_lost is not None:
                     waiters.add(heartbeat_lost)
                 done, _ = await asyncio.wait(waiters, timeout=remaining, return_when=asyncio.FIRST_COMPLETED)
-                if heartbeat_lost is not None and heartbeat_lost in done:
+                if finalization_task in done:
+                    if heartbeat_lost is not None:
+                        heartbeat_lost.cancel()
+                        await asyncio.gather(heartbeat_lost, return_exceptions=True)
+                    receipt = finalization_task.result()
+                elif heartbeat_lost is not None and heartbeat_lost in done:
                     assert heartbeat is not None
                     cleanup_handed_off = True
                     self._submit_cleanup(
@@ -340,11 +345,6 @@ class TurnCoordinator:
                     settled = True
                     yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
                     return
-                if finalization_task in done:
-                    if heartbeat_lost is not None:
-                        heartbeat_lost.cancel()
-                        await asyncio.gather(heartbeat_lost, return_exceptions=True)
-                    receipt = finalization_task.result()
                 else:
                     if heartbeat_lost is not None:
                         heartbeat_lost.cancel()

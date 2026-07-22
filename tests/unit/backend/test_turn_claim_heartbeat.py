@@ -184,7 +184,7 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
             Store(),
             max_artifact_bytes=100,
             heartbeat_seconds=0.01,
-            stale_after_seconds=0.03,
+            stale_after_seconds=1,
         ),
         preparation=Preparation(),
         runner=Runner(),

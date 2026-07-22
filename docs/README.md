@@ -28,7 +28,6 @@ See [configuration](reference/configuration.md) for profile prerequisites.
 
 - [Documentation home](index.md)
 - [Architecture](architecture.md)
-- [Architecture decisions](adr/README.md)
 - [Configuration](reference/configuration.md)
 - [HTTP API](reference/http-api.md)
 - [CLI](reference/cli.md)

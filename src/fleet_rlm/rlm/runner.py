@@ -180,13 +180,15 @@ def _trajectory_details(steps: Sequence[TrajectoryStep], *, max_chars: int) -> l
         output = step.output
         if output.startswith("FINAL:"):
             output = "FINAL submitted"
-        details.extend((
-            StepStarted(step.index),
-            RLMReasoning(truncate_public_text(step.reasoning, max_len=max_chars), step.index),
-            RLMCode(truncate_public_text(step.code, max_len=max_chars), step.index),
-            RLMOutput(truncate_public_text(output, max_len=max_chars), step.index),
-            StepFinished(step.index),
-        ))
+        details.extend(
+            (
+                StepStarted(step.index),
+                RLMReasoning(truncate_public_text(step.reasoning, max_len=max_chars), step.index),
+                RLMCode(truncate_public_text(step.code, max_len=max_chars), step.index),
+                RLMOutput(truncate_public_text(output, max_len=max_chars), step.index),
+                StepFinished(step.index),
+            )
+        )
     return details
 
 

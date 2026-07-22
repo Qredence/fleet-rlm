@@ -89,31 +89,37 @@ def _turn(
 def test_turn_request_accepts_zero_to_four_unique_exact_skill_selections() -> None:
     assert CreateTurnRequest.model_validate({"text": "inspect"}).skill_selections == []
     ids = tuple(UUID(int=index) for index in range(1, 5))
-    request = CreateTurnRequest.model_validate({
-        "text": "inspect",
-        "skill_selections": [
-            {"id": str(skill_id), "expected_version": f"{index}.0.0"} for index, skill_id in enumerate(ids, start=1)
-        ],
-    })
+    request = CreateTurnRequest.model_validate(
+        {
+            "text": "inspect",
+            "skill_selections": [
+                {"id": str(skill_id), "expected_version": f"{index}.0.0"} for index, skill_id in enumerate(ids, start=1)
+            ],
+        }
+    )
     assert [(item.id, item.expected_version) for item in request.skill_selections] == [
         (skill_id, f"{index}.0.0") for index, skill_id in enumerate(ids, start=1)
     ]
 
     with pytest.raises(ValueError):
-        CreateTurnRequest.model_validate({
-            "text": "inspect",
-            "skill_selections": [
-                {"id": str(skill_id), "expected_version": "1.0.0"} for skill_id in (*ids, UUID(int=5))
-            ],
-        })
+        CreateTurnRequest.model_validate(
+            {
+                "text": "inspect",
+                "skill_selections": [
+                    {"id": str(skill_id), "expected_version": "1.0.0"} for skill_id in (*ids, UUID(int=5))
+                ],
+            }
+        )
     with pytest.raises(ValueError):
-        CreateTurnRequest.model_validate({
-            "text": "inspect",
-            "skill_selections": [
-                {"id": str(ids[0]), "expected_version": "1.0.0"},
-                {"id": str(ids[0]), "expected_version": "2.0.0"},
-            ],
-        })
+        CreateTurnRequest.model_validate(
+            {
+                "text": "inspect",
+                "skill_selections": [
+                    {"id": str(ids[0]), "expected_version": "1.0.0"},
+                    {"id": str(ids[0]), "expected_version": "2.0.0"},
+                ],
+            }
+        )
 
 
 def test_invalid_exact_selection_is_generic_before_stream_headers() -> None:
@@ -268,9 +274,9 @@ async def test_data_analysis_signature_and_report_builder_selection_use_host_too
 
     recorder = EventRecorder(turn.run_id, turn.session_id)
     skill_details = [detail for detail in lifecycle if detail.kind.startswith("skill.")]
-    serialized = json.dumps([
-        chunk for detail in skill_details for chunk in AISDKUIProjector().project(recorder.record(detail))
-    ])
+    serialized = json.dumps(
+        [chunk for detail in skill_details for chunk in AISDKUIProjector().project(recorder.record(detail))]
+    )
     assert data_analysis.instructions not in serialized
     assert report_builder.instructions not in serialized
     assert "content" not in serialized
