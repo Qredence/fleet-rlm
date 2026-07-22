@@ -65,13 +65,6 @@ def test_dspy_rlm_accepts_file_tool_names_and_fresh_custom_interpreters() -> Non
     assert second._interpreter is second_interpreter  # noqa: SLF001 - installed DSPy contract
 
 
-def test_rlm_package_has_no_private_observable_override() -> None:
-    from pathlib import Path
-
-    package = Path(__file__).resolve().parents[3] / "src" / "fleet_rlm" / "rlm"
-    assert not (package / "observable.py").exists()
-
-
 @pytest.mark.asyncio
 async def test_pinned_async_rlm_creates_fresh_native_history_and_honors_output_bound() -> None:
     from dspy.primitives.repl_types import REPLHistory

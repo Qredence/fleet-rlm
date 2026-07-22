@@ -325,7 +325,6 @@ def test_main_exports_single_app_factory() -> None:
     from fleet_rlm import main as main_mod
 
     assert callable(main_mod.create_app)
-    assert not hasattr(main_mod, "create_live_app")
     assert main_mod.app is not None
 
 

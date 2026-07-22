@@ -28,7 +28,7 @@ def test_turn_input_preserves_text_and_has_a_stable_versioned_fingerprint() -> N
     assert value.fingerprint == "3764042e0539d2a63f558174332d98d06908f971df2ac7dbbd8faf76b04670ef"
 
 
-def test_turn_input_codec_writes_v2_and_decodes_v1_without_skill_selections() -> None:
+def test_turn_input_codec_reads_v1_rows_from_the_canonical_baseline() -> None:
     from fleet_rlm.sessions.models import TurnInput, TurnInputCodec
 
     skill_id = UUID("00000000-0000-0000-0000-000000000002")
@@ -56,7 +56,7 @@ def test_turn_input_fingerprint_includes_version_pinned_skill_selections() -> No
     assert len({without_skill.fingerprint, with_v1.fingerprint, with_v2.fingerprint}) == 3
 
 
-def test_empty_v2_input_accepts_a_legacy_v1_idempotency_fingerprint() -> None:
+def test_empty_v2_input_replays_v1_canonical_baseline_fingerprint() -> None:
     from fleet_rlm.sessions.models import TurnInput
 
     value = TurnInput("inspect")

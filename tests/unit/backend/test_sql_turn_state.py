@@ -9,16 +9,6 @@ from uuid import uuid4
 import pytest
 
 
-def test_legacy_budget_exhausted_status_decodes_only_as_failed() -> None:
-    from fleet_rlm.chat.turn_lifecycle import TurnStateError
-    from fleet_rlm.persistence.repositories.turns import _decode_failure_status
-
-    assert _decode_failure_status("budget_exhausted") == "failed"
-    assert _decode_failure_status("cancelled") == "cancelled"
-    with pytest.raises(TurnStateError):
-        _decode_failure_status("unknown-retired-status")
-
-
 def test_stale_claim_is_a_canonical_typed_failure_code() -> None:
     from fleet_rlm.persistence.repositories.turns import _decode_failure_code
 

@@ -11,9 +11,3 @@ def test_rlm_options_reject_nonpositive_values(field: str) -> None:
 
     with pytest.raises(ValueError, match=field):
         RLMOptions(**{field: 0})
-
-
-def test_budget_ledger_module_is_removed() -> None:
-    from pathlib import Path
-
-    assert not (Path(__file__).parents[3] / "src/fleet_rlm/rlm/budgets.py").exists()

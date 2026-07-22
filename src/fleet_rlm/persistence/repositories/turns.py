@@ -73,9 +73,6 @@ class _SessionState:
 
 
 def _decode_failure_status(value: str) -> Literal["failed", "cancelled", "timeout"]:
-    """Decode the sole retired durable status without restoring it publicly."""
-    if value == "budget_exhausted":
-        return "failed"
     if value in {"failed", "cancelled", "timeout"}:
         return cast(Literal["failed", "cancelled", "timeout"], value)
     raise TurnStateError("persisted Run has an invalid failure status")

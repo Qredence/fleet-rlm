@@ -19,14 +19,6 @@ from fleet_rlm.composition.daytona import (
 )
 from fleet_rlm.composition.deno import install_deno_composition, require_deno_settings
 
-LiveCompositionError = CompositionError
-LiveCompositionHandles = DaytonaCompositionHandles
-build_live_composition = build_daytona_composition
-dispose_live_composition = dispose_daytona_composition
-install_live_composition = install_daytona_composition
-require_live_settings = require_daytona_settings
-_clear_composition_state = clear_composition_state
-
 __all__ = [
     "CompositionError",
     "DaytonaCompositionHandles",
@@ -38,11 +30,4 @@ __all__ = [
     "install_deno_composition",
     "require_daytona_settings",
     "require_deno_settings",
-    "LiveCompositionError",
-    "LiveCompositionHandles",
-    "build_live_composition",
-    "dispose_live_composition",
-    "install_live_composition",
-    "require_live_settings",
-    "_clear_composition_state",
 ]

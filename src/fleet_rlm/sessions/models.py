@@ -76,11 +76,11 @@ class TurnInput:
 
     @property
     def acceptable_fingerprints(self) -> frozenset[str]:
-        """Return current and compatible legacy idempotency fingerprints.
+        """Return fingerprints accepted for durable baseline replay.
 
-        A v1 row did not persist Skill selections.  An otherwise identical v2
-        request with no selections must therefore replay that row rather than
-        incorrectly reporting an idempotency conflict.
+        The canonical database baseline originally wrote v1 inputs without
+        Skill selections. An otherwise identical v2 request with no selections
+        must replay that supported row rather than report an idempotency conflict.
         """
         values = {self.fingerprint}
         if not self.skill_selections:
