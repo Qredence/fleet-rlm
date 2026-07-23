@@ -70,7 +70,11 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
     assert len(file_host.drain_artifact_candidates()) == 20
     assert all(type(tool) is dspy.Tool for tool in (*skill_host.as_tools(), *file_host.as_tools()))
     assert set(skill_host.event_views()) == {"load_skill", "read_skill_resource"}
-    assert set(file_host.event_views()) == {"read_attachment", "create_artifact"}
+    assert set(file_host.event_views()) == {
+        "read_attachment",
+        "create_artifact",
+        "publish_workspace_artifact",
+    }
 
     file_tools = {str(tool.name): tool for tool in file_host.as_tools()}
     skill_tools = {str(tool.name): tool for tool in skill_host.as_tools()}
@@ -190,3 +194,43 @@ async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes
     await capabilities.aclose()
 
     assert not volume.exists(candidate.staging_path)
+
+
+def test_workspace_artifact_publication_reads_source_and_stages_only_a_candidate(tmp_path) -> None:
+    from fleet_rlm.daytona.paths import VolumePaths
+    from fleet_rlm.daytona.volume_fs import HostVolumeMirror
+    from fleet_rlm.files.tools import FileToolHost
+
+    user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
+    paths = VolumePaths.from_mount("/mnt/fleet")
+    volume = HostVolumeMirror(tmp_path, volume_paths=paths)
+    source = paths.session_workspace_dir(session_id) / "report.md"
+    body = b"# Durable report\n"
+    volume.write_bytes(str(source), body)
+    host = FileToolHost(
+        attachments=(),
+        staged_attachments=(),
+        volume_fs=volume,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        session_id=session_id,
+        run_id=run_id,
+        max_artifact_bytes=1024,
+        volume_paths=paths,
+    )
+
+    result = host.publish_workspace_artifact(
+        "report.md",
+        "markdown",
+        title="Report",
+        expected_sha256=sha256(body).hexdigest(),
+    )
+    candidate = host.drain_artifact_candidates()[0]
+
+    assert result["ok"] is True
+    assert volume.read_bytes(str(source)) == body
+    assert volume.read_bytes(candidate.staging_path) == body
+    assert host.publish_workspace_artifact("report.md", "markdown", expected_sha256="0" * 64) == {
+        "ok": False,
+        "error": "checksum_mismatch",
+    }

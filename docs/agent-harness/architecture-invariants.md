@@ -60,8 +60,10 @@ routes or public events.
   `create_all`. Explicit SQLite test/local helpers may call `create_tables`.
 - Durable Attachment and Artifact bytes live in Workspace Volume Scope.
 - Daytona Session Workspace text lives under
-  `sessions/{session_id}/workspace/`. Writes are immediate private state, not
-  Turn-commit candidates; Deno registers no workspace tools.
+  `sessions/{session_id}/workspace/`. Paged reads, bounded immediate-child
+  listings, append, and replacement writes are immediate private state, not
+  Turn-commit candidates; direct Workspace Artifact publication only stages a
+  private candidate, and Deno registers no workspace tools.
 - Daytona acquisition idempotently creates canonical shared, Session, and Run
   directories and fails closed on mount/provider conflicts.
 - Workspace events expose relative paths, counts, sizes, and status, never file

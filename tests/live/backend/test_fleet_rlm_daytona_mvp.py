@@ -68,9 +68,12 @@ _FIRST_SCENARIO = """
 Reject `[ERROR]`; extend with `[single_result, *batch_results]`. Call once, no
 casts/copies/positional args:
 `verification = verify_semantic_work(iteration_token=iteration_token, single_result=single_result, batch_results=batch_results, accumulator=accumulator)`.
-Write `notes/findings.md` with results and `verification["checksum"]` via
-`write_workspace_text(path="notes/findings.md", content=content, overwrite=False)`;
-require `workspace_result["ok"]`; print `SECOND_ITERATION_READY`. 3) Set
+Append `notes/findings.md` with results and `verification["checksum"]` via
+`append_workspace_text(path="notes/findings.md", content=content)`; require
+`workspace_result["ok"]`. Publish the existing Workspace document without
+resending its body via `publish_workspace_artifact(path="notes/findings.md",
+kind="markdown", title="Findings")`; require `artifact_result["ok"]`; print
+`SECOND_ITERATION_READY`. 3) Set
 non-empty string-only `summary`/`findings`; call exactly
 `SUBMIT(answer=summary, findings=findings)` with keywords. No fallback.
 """.strip()
@@ -671,7 +674,8 @@ def test_complete_daytona_mvp_through_fastapi(
                 tool_names = [chunk["toolName"] for chunk in first_chunks if chunk["type"] == "tool-input-available"]
                 assert tool_names.count("issue_iteration_token") == 1
                 assert tool_names.count("verify_semantic_work") == 1
-                assert "write_workspace_text" in tool_names
+                assert "append_workspace_text" in tool_names
+                assert "publish_workspace_artifact" in tool_names
                 assert ledger.token_calls == 1
                 assert len(ledger.semantic_calls) == 1
                 structured_chunks = [chunk for chunk in first_chunks if chunk["type"] == "data-structured-result"]

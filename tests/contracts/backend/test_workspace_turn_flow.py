@@ -10,7 +10,12 @@ import dspy
 import pytest
 
 from fleet_rlm.chat.session_context import SessionContextManifest
-from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY, WorkspaceEntry, WorkspaceListResult
+from fleet_rlm.files.workspace_models import (
+    DAYTONA_WORKSPACE_CAPABILITY,
+    WorkspaceEntry,
+    WorkspaceListResult,
+    WorkspaceTextPage,
+)
 from fleet_rlm.files.workspace_tools import WorkspaceToolError, WorkspaceToolHost
 from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -24,29 +29,44 @@ class MemoryWorkspace:
         self.session_id = uuid4()
         self.files: dict[str, str] = {}
 
-    def list_entries(self, path: str, *, limit: int = 100) -> WorkspaceListResult:
+    def list_entries(self, path: str, *, limit: int = 100, after: str | None = None) -> WorkspaceListResult:
         del path
-        items = sorted(self.files.items())
+        items = [(name, content) for name, content in sorted(self.files.items()) if after is None or name > after]
+        selected = items[:limit]
         return WorkspaceListResult(
-            entries=tuple(WorkspaceEntry(name, "file", len(content.encode()), None) for name, content in items[:limit]),
+            entries=tuple(WorkspaceEntry(name, "file", len(content.encode()), None) for name, content in selected),
             truncated=len(items) > limit,
+            next_cursor=selected[-1][0] if len(items) > limit else None,
         )
 
     def stat(self, path: str) -> WorkspaceEntry | None:
         content = self.files.get(path)
         return None if content is None else WorkspaceEntry(path, "file", len(content.encode()), None)
 
-    def read_text(self, path: str, *, max_bytes: int) -> str:
+    def read_text_page(
+        self,
+        path: str,
+        *,
+        cursor: str | None,
+        max_chars: int,
+        max_bytes: int,
+    ) -> WorkspaceTextPage:
         content = self.files[path]
         if len(content.encode()) > max_bytes:
             raise ValueError("workspace file exceeds read bound")
-        return content
+        if cursor is not None:
+            raise ValueError("workspace cursor is invalid")
+        return WorkspaceTextPage(content[:max_chars], None, len(content.encode()), len(content) <= max_chars)
 
     def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
         if path in self.files and not overwrite:
             raise FileExistsError(path)
         self.files[path] = content
         return WorkspaceEntry(path, "file", len(content.encode()), None)
+
+    def append_text(self, path: str, content: str) -> WorkspaceEntry:
+        self.files[path] = self.files.get(path, "") + content
+        return WorkspaceEntry(path, "file", len(self.files[path].encode()), None)
 
 
 class Capabilities:
@@ -95,7 +115,7 @@ class WorkspaceFlowFactory:
                 if request == "read":
                     assert interpreter.variables == {}
                     result = tools["read_workspace_text"](path="notes/decision.md", max_chars=100)
-                    return dspy.Prediction(answer=result, trajectory=[])
+                    return dspy.Prediction(answer=result["content"], trajectory=[])
                 if request.startswith("roundtrip"):
                     today = "2026-07-21"
                     tools["write_workspace_text"](
@@ -105,15 +125,15 @@ class WorkspaceFlowFactory:
                     )
                     first = tools["read_workspace_text"](path="workspace/date.txt", max_chars=100)
                     second = tools["read_workspace_text"](path="workspace/date.txt", max_chars=100)
-                    assert first == second == today
+                    assert first["content"] == second["content"] == today
                     tools["write_workspace_text"](
                         path="workspace/date.txt",
                         content="verified",
                         overwrite=True,
                     )
                     final = tools["read_workspace_text"](path="workspace/date.txt", max_chars=100)
-                    assert final == "verified"
-                    return dspy.Prediction(answer=final, trajectory=[])
+                    assert final["content"] == "verified"
+                    return dspy.Prediction(answer=final["content"], trajectory=[])
                 if request.startswith(("unresolved", "repaired")):
                     tools["write_workspace_text"](path="notes/target.md", content="old", overwrite=False)
                     try:
@@ -203,7 +223,7 @@ async def test_successful_workspace_write_survives_failed_or_cancelled_turn(
     read_tool = {str(tool.name): tool for tool in WorkspaceToolHost(workspace, max_file_bytes=1024).as_tools()}[
         "read_workspace_text"
     ]
-    assert read_tool(path=f"notes/{turn_kind}.md", max_chars=100) == (f"{turn_kind} durable")
+    assert read_tool(path=f"notes/{turn_kind}.md", max_chars=100)["content"] == (f"{turn_kind} durable")
 
 
 @pytest.mark.asyncio

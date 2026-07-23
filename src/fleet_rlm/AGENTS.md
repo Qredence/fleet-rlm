@@ -24,9 +24,10 @@ them for backend work. Current code and tests outrank the local phase record in
   `skill_cards`, and bounded Attachment metadata. Older committed messages
   remain behind the Session-scoped `read_session_history` Tool.
 - Runtime-specific Session Workspace availability is bounded inside context;
-  Daytona registers four text workspace Tools (list, stat, read, write with
-  overwrite) and Deno advertises the feature as unavailable. Session Workspace
-  is append/update-only; there is no delete Tool.
+  Daytona registers list/stat/paged-read/write/append workspace Tools plus
+  direct Workspace Artifact Candidate publication, while Deno advertises the
+  feature as unavailable. Session Workspace is append/update-only; there is no
+  delete Tool.
 - Resolve zero to four exact Skill selections against the immutable bundled
   catalog. Skill instructions and resources load progressively; bundled Skills
   never register executable tools. Runtime execution uses a typed
@@ -51,8 +52,11 @@ them for backend work. Current code and tests outrank the local phase record in
   sink, and the derivative is not an Artifact or API resource.
 - Session Workspace files are immediate private state under
   `sessions/{session_id}/workspace/`. They survive failed Runs and Sandbox
-  replacement independently of Turn Commit. Updates replace existing files via
-  `write_workspace_text(..., overwrite=True)`; deletion is not exposed as a Tool.
+  replacement independently of Turn Commit. Use paged reads for large files,
+  `append_workspace_text` for incremental output, and
+  `write_workspace_text(..., overwrite=True)` for replacement. Direct
+  Workspace Artifact publication stages bytes privately; deletion is not
+  exposed as a Tool.
 - Alembic owns live schema evolution. `create_tables` is test/local SQLite only.
 - Do not add `/api/v1`, WebSocket, legacy-backend, auth, or environment aliases.
 

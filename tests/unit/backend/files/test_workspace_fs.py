@@ -125,6 +125,117 @@ def test_lists_immediate_entries_sorted_when_observation_window_is_complete(tmp_
     assert result.truncated is False
 
 
+def test_pages_utf8_text_from_a_direct_cursor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace, _sandbox, root, process = _workspace(tmp_path)
+    (root / "notes.txt").write_text("éabcd", encoding="utf-8")
+    offsets: list[int] = []
+    original_lseek = os.lseek
+
+    def recording_lseek(fd: int, offset: int, whence: int) -> int:
+        offsets.append(offset)
+        return original_lseek(fd, offset, whence)
+
+    monkeypatch.setattr(os, "lseek", recording_lseek)
+
+    first = workspace.read_text_page("notes.txt", cursor=None, max_chars=2, max_bytes=32)
+    second = workspace.read_text_page("notes.txt", cursor=first.next_cursor, max_chars=2, max_bytes=32)
+    third = workspace.read_text_page("notes.txt", cursor=second.next_cursor, max_chars=2, max_bytes=32)
+
+    assert first.content == "éa"
+    assert second.content == "bc"
+    assert third.content == "d"
+    assert first.byte_size == second.byte_size == third.byte_size == 6
+    assert first.eof is False
+    assert second.eof is False
+    assert second.next_cursor is not None
+    assert third.eof is True
+    assert any("os.lseek(fd, read_offset" in call for call in process.calls)
+    assert offsets == [0, 3, 5]
+
+
+def test_page_boundary_never_splits_a_multibyte_character(tmp_path: Path) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    (root / "unicode.txt").write_text("aaaaa😀b", encoding="utf-8")
+
+    pages: list[str] = []
+    cursor = None
+    while True:
+        page = workspace.read_text_page("unicode.txt", cursor=cursor, max_chars=1, max_bytes=32)
+        pages.append(page.content)
+        if page.eof:
+            break
+        cursor = page.next_cursor
+
+    assert "".join(pages) == "aaaaa😀b"
+    assert all(len(page) <= 1 for page in pages)
+
+
+@pytest.mark.parametrize(
+    "cursor_mutation",
+    [
+        lambda token: token[:-1] + "!",
+        lambda token: token.replace("", "x", 1),
+    ],
+)
+def test_rejects_invalid_or_path_bound_text_cursors(
+    tmp_path: Path,
+    cursor_mutation,
+) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    (root / "notes.txt").write_text("hello", encoding="utf-8")
+    (root / "other.txt").write_text("hello", encoding="utf-8")
+    first = workspace.read_text_page("notes.txt", cursor=None, max_chars=1, max_bytes=32)
+    assert first.next_cursor is not None
+
+    with pytest.raises(ValueError, match="cursor"):
+        workspace.read_text_page("notes.txt", cursor=cursor_mutation(first.next_cursor), max_chars=1, max_bytes=32)
+    with pytest.raises(ValueError, match="cursor"):
+        workspace.read_text_page("other.txt", cursor=first.next_cursor, max_chars=1, max_bytes=32)
+
+
+def test_list_pages_are_lexicographic_even_when_provider_order_is_not(tmp_path: Path) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    for name in ("z.txt", "a.txt", "m.txt", "b.txt"):
+        (root / name).write_text(name, encoding="utf-8")
+
+    first = workspace.list_entries(".", limit=2)
+    second = workspace.list_entries(".", limit=2, after=first.next_cursor)
+
+    assert [entry.path for entry in first.entries] == ["a.txt", "b.txt"]
+    assert first.next_cursor == "b.txt"
+    assert [entry.path for entry in second.entries] == ["m.txt", "z.txt"]
+    assert second.next_cursor is None
+
+    with pytest.raises(ValueError, match="cursor"):
+        workspace.list_entries("notes", limit=2, after="other.txt")
+
+
+def test_append_creates_and_extends_without_replacing(tmp_path: Path) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path, max_file_bytes=8)
+
+    created = workspace.append_text("notes.txt", "é")
+    appended = workspace.append_text("notes.txt", "ab")
+
+    assert created.byte_size == 2
+    assert appended.byte_size == 4
+    assert (root / "notes.txt").read_text(encoding="utf-8") == "éab"
+
+    with pytest.raises(ValueError, match="size"):
+        workspace.append_text("notes.txt", "12345")
+
+
+def test_append_rejects_symlink_targets(tmp_path: Path) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
+    secret = root / "secret.txt"
+    secret.write_text("private", encoding="utf-8")
+    alias = root / "alias.txt"
+    alias.symlink_to(secret)
+
+    with pytest.raises(ValueError, match="unsafe"):
+        workspace.append_text("alias.txt", "x")
+    assert secret.read_text(encoding="utf-8") == "private"
+
+
 def test_list_observes_only_one_entry_beyond_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     workspace, _sandbox, root, process = _workspace(tmp_path)
     for index in range(5):
@@ -161,7 +272,7 @@ def test_list_observes_only_one_entry_beyond_limit(tmp_path: Path, monkeypatch: 
     assert len(result.entries) == 3
     assert result.truncated is True
     assert len(process.calls) == 1
-    assert observed == 4
+    assert observed == 6
 
 
 def test_stat_returns_relative_metadata_or_none(tmp_path: Path) -> None:

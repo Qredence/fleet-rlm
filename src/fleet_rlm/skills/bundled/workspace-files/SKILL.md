@@ -4,7 +4,7 @@ description: Use when a Turn must inspect, create, or update durable Session fil
 compatibility: Durable Session Workspace writes and Artifact promotion require the Daytona run environment.
 metadata:
   version: "1.0.0"
-allowed-tools: list_workspace_files stat_workspace_file read_workspace_text write_workspace_text read_attachment create_artifact
+allowed-tools: list_workspace_files stat_workspace_file read_workspace_text write_workspace_text append_workspace_text publish_workspace_artifact read_attachment create_artifact
 ---
 
 # Workspace files
@@ -17,24 +17,34 @@ Workspace paths are canonical POSIX-relative paths rooted at `.`. Session Worksp
 
 ```python
 listing = list_workspace_files(path=".", limit=100)
-current = read_workspace_text(path="notes/analysis.md", max_chars=10000)
+page = read_workspace_text(path="notes/analysis.md", max_chars=10000)
 saved = write_workspace_text(path="notes/analysis.md", content=updated_text, overwrite=True)
-assert read_workspace_text(path="notes/analysis.md") == updated_text
+assert page["ok"] is True
 ```
 
-`read_workspace_text` accepts `max_chars` from 1 through 10,000 and rejects a
-file longer than the requested bound; it never truncates or returns a prefix.
-For content of at most 10,000 characters, verify exact read-back equality. For
-larger content, require a successful write receipt and call
-`stat_workspace_file` on the same path. Treat the write as metadata confirmation
-only when both `saved["byte_size"]` and `stated["entry"]["byte_size"]` equal
-`len(content.encode("utf-8"))`; do not claim byte-for-byte read verification.
+`read_workspace_text` accepts `max_chars` from 1 through 10,000 characters and returns one
+UTF-8 page with `content`, `byte_size`, `next_cursor`, and `eof`. Continue with
+the opaque `next_cursor` until `eof` for large documents; never invent or edit a
+cursor. `list_workspace_files` is immediate-child and can continue with its
+`next_cursor`. Keep only the requested page in memory.
+
+For exact write-size confirmation, compare metadata with
+`len(content.encode("utf-8"))` rather than character count.
+
+Use `append_workspace_text` for incremental generation. It writes only the new
+content, enforces the Workspace size bound, and returns bounded metadata. Use
+`write_workspace_text(..., overwrite=True)` when replacement is intended.
+
+For an existing Workspace document that should be downloadable, call
+`publish_workspace_artifact` with its relative path and kind. The host copies
+the validated bytes into a private Artifact Candidate; do not resend the body
+through `create_artifact`. Turn Commit remains the only publication boundary.
 
 Workspace writes are immediate private Session state. They survive a failed or cancelled Run and are not published as Artifacts.
 
 Never report a workspace operation as successful unless its tool call succeeds
-and the applicable exact-read or large-file metadata confirmation completes. Do
-not retry a deterministic tool error unchanged.
+and the applicable page iteration, append receipt, or metadata confirmation
+completes. Do not retry a deterministic tool error unchanged.
 
 ## Attachments and Artifacts
 
@@ -46,7 +56,10 @@ source = read_attachment(attachment_id=attachment_id)
 
 The result contains UTF-8 text or base64-encoded binary content; check its `encoding` field before using the body.
 
-To return a downloadable result, call `create_artifact` with `text`, `markdown`, or `json` content. This stages an Artifact Candidate; only a successful Turn Commit publishes it. A successful tool result is not proof that publication completed.
+To return a new downloadable result, call `create_artifact` with `text`,
+`markdown`, or `json` content. This stages an Artifact Candidate; only a
+successful Turn Commit publishes it. A successful tool result is not proof
+that publication completed.
 
 ```python
 candidate = create_artifact(kind="markdown", content=report, title="Analysis")

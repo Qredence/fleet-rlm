@@ -106,6 +106,8 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     assert data in volume.values()
     expected_tools = {
         "create_artifact",
+        "publish_workspace_artifact",
+        "append_workspace_text",
         "list_workspace_files",
         "read_attachment",
         "read_workspace_text",

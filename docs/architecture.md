@@ -122,8 +122,12 @@ the Turn. Failed metadata commits may leave GC-eligible orphan bytes, never
 public rows.
 
 Session Workspace files are immediate private state under the Session Volume
-path. They survive failed Runs and Sandbox replacement independently of the
-commit-gated result snapshot and Artifact lifecycle.
+path. Daytona exposes bounded list/read pagination, append-only text mutation,
+and whole-file replacement. Existing Workspace documents can be staged as
+private Artifact Candidates without resending their bodies; Turn Commit remains
+the only publication boundary. Workspace files survive failed Runs and Sandbox
+replacement independently of the commit-gated result snapshot and Artifact
+lifecycle.
 
 ## Compatibility and status
 

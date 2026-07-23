@@ -178,7 +178,11 @@ class _DenoCapabilityPreparer:
             max_artifact_bytes=self._max_artifact_bytes,
             volume_paths=None,
         )
-        file_tools = tuple(tool for tool in file_host.as_tools() if str(tool.name) != "create_artifact")
+        file_tools = tuple(
+            tool
+            for tool in file_host.as_tools()
+            if str(tool.name) not in {"create_artifact", "publish_workspace_artifact"}
+        )
         history_host = SessionHistoryToolHost(turn.history)
         history_tools = history_host.as_tools()
 
@@ -194,7 +198,7 @@ class _DenoCapabilityPreparer:
                 tool_event_views={
                     name: view
                     for name, view in {**file_host.event_views(), **history_host.event_views()}.items()
-                    if name != "create_artifact"
+                    if name not in {"create_artifact", "publish_workspace_artifact"}
                 },
                 workspace=DENO_WORKSPACE_CAPABILITY,
             )
@@ -224,7 +228,7 @@ class _DenoCapabilityPreparer:
                 **history_host.event_views(),
                 **skill_host.event_views(),
             }.items()
-            if name != "create_artifact"
+            if name not in {"create_artifact", "publish_workspace_artifact"}
         }
         schema_id, schema_version = resolved_schema(resolved)
         spec = RLMExecutionSpec(

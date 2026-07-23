@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any, cast
@@ -11,7 +12,8 @@ from uuid import UUID, uuid4
 
 import dspy
 
-from fleet_rlm.artifacts.models import KIND_EXTENSIONS, ArtifactCandidate
+from fleet_rlm.artifacts.errors import ArtifactValidationError
+from fleet_rlm.artifacts.models import KIND_EXTENSIONS, ArtifactCandidate, ArtifactKind
 from fleet_rlm.artifacts.safety import (
     encode_content,
     media_type_for,
@@ -22,6 +24,7 @@ from fleet_rlm.artifacts.safety import (
 from fleet_rlm.daytona.paths import VolumePaths, as_posix
 from fleet_rlm.daytona.volume_fs import VolumeBlobFs
 from fleet_rlm.files.models import AttachmentRef, StagedAttachment
+from fleet_rlm.files.workspace_validation import normalize_workspace_path
 from fleet_rlm.rlm.events import JsonValue
 from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text
 
@@ -154,32 +157,40 @@ class FileToolHost:
             parsed_kind = parse_kind(kind)
             safe_title = sanitize_title(title)
             data = encode_content(parsed_kind, content)
-            validate_content_size(len(data), max_bytes=self._max_artifact_bytes)
-            artifact_id = uuid4()
-            extension = KIND_EXTENSIONS[parsed_kind]
-            staging_path = as_posix(
-                self._paths.run_artifacts_dir(self._session_id, self._run_id) / f"{artifact_id}{extension}"
-            )
-            durable_path = as_posix(self._paths.artifact_blob_path(artifact_id))
-            self._volume_fs.write_bytes(staging_path, data)
-            candidate = ArtifactCandidate(
-                id=artifact_id,
-                user_id=self._user_id,
-                workspace_id=self._workspace_id,
-                session_id=self._session_id,
-                run_id=self._run_id,
-                kind=parsed_kind,
-                title=safe_title,
-                media_type=media_type_for(parsed_kind),
-                byte_size=len(data),
-                checksum_sha256=hashlib.sha256(data).hexdigest(),
-                staging_path=staging_path,
-                durable_path=durable_path,
-            )
+            return self._stage_artifact_candidate(parsed_kind, data, safe_title)
         except ValueError as exc:
             return {"ok": False, "error": "validation", "message": str(exc)[:200]}
         except Exception:  # noqa: BLE001 - never leak internals to model
             return {"ok": False, "error": "validation"}
+
+    def _stage_artifact_candidate(
+        self,
+        parsed_kind: ArtifactKind,
+        data: bytes,
+        safe_title: str | None,
+    ) -> dict[str, Any]:
+        validate_content_size(len(data), max_bytes=self._max_artifact_bytes)
+        artifact_id = uuid4()
+        extension = KIND_EXTENSIONS[parsed_kind]
+        staging_path = as_posix(
+            self._paths.run_artifacts_dir(self._session_id, self._run_id) / f"{artifact_id}{extension}"
+        )
+        durable_path = as_posix(self._paths.artifact_blob_path(artifact_id))
+        self._volume_fs.write_bytes(staging_path, data)
+        candidate = ArtifactCandidate(
+            id=artifact_id,
+            user_id=self._user_id,
+            workspace_id=self._workspace_id,
+            session_id=self._session_id,
+            run_id=self._run_id,
+            kind=parsed_kind,
+            title=safe_title,
+            media_type=media_type_for(parsed_kind),
+            byte_size=len(data),
+            checksum_sha256=hashlib.sha256(data).hexdigest(),
+            staging_path=staging_path,
+            durable_path=durable_path,
+        )
 
         self._artifact_candidates.append(candidate)
         self._artifact_staging_paths.append(candidate.staging_path)
@@ -191,6 +202,45 @@ class FileToolHost:
             "byte_size": candidate.byte_size,
             "checksum_sha256": candidate.checksum_sha256,
         }
+
+    def publish_workspace_artifact(
+        self,
+        path: str,
+        kind: str,
+        title: str | None = None,
+        expected_sha256: str | None = None,
+    ) -> dict[str, Any]:
+        """Stage an existing Workspace file as a private Artifact Candidate."""
+        try:
+            relative = normalize_workspace_path(path)
+            parsed_kind = parse_kind(kind)
+            safe_title = sanitize_title(title)
+            source = as_posix(self._paths.session_workspace_dir(self._session_id) / relative)
+            data = self._volume_fs.read_bytes(source)
+            validate_content_size(len(data), max_bytes=self._max_artifact_bytes)
+            text = data.decode("utf-8")
+            encode_content(parsed_kind, text)
+            checksum = hashlib.sha256(data).hexdigest()
+            if expected_sha256 is not None and (
+                not isinstance(expected_sha256, str) or not hmac.compare_digest(checksum, expected_sha256)
+            ):
+                return {"ok": False, "error": "checksum_mismatch"}
+            result = self._stage_artifact_candidate(parsed_kind, data, safe_title)
+            if result.get("ok") is True:
+                self._pending_events.append(
+                    {
+                        "event_kind": "artifact.workspace_publish",
+                        "path": relative,
+                        "kind": parsed_kind,
+                        "title": safe_title,
+                        "byte_size": len(data),
+                    }
+                )
+            return result
+        except (ArtifactValidationError, ValueError, UnicodeError) as exc:
+            return {"ok": False, "error": "validation", "message": str(exc)[:200]}
+        except Exception:  # noqa: BLE001 - never leak internals to model
+            return {"ok": False, "error": "not_found"}
 
     def as_tools(self) -> tuple[dspy.Tool, ...]:
         """Return the canonical typed Tools owned by this host."""
@@ -207,6 +257,15 @@ class FileToolHost:
             """Stage a text/markdown/json Artifact Candidate for Turn Commit."""
             return self.create_artifact(kind, content, title=title)
 
+        def publish_workspace_artifact(
+            path: str,
+            kind: str,
+            title: str | None = None,
+            expected_sha256: str | None = None,
+        ) -> dict[str, Any]:
+            """Stage an existing Workspace file as an Artifact Candidate for Turn Commit."""
+            return self.publish_workspace_artifact(path, kind, title=title, expected_sha256=expected_sha256)
+
         return (
             dspy.Tool(
                 read_attachment,
@@ -217,6 +276,11 @@ class FileToolHost:
                 create_artifact,
                 name="create_artifact",
                 desc="Stage a text, markdown, or JSON Artifact Candidate for Turn Commit.",
+            ),
+            dspy.Tool(
+                publish_workspace_artifact,
+                name="publish_workspace_artifact",
+                desc="Stage an existing Workspace text file as an Artifact Candidate for Turn Commit.",
             ),
         )
 
@@ -234,6 +298,14 @@ class FileToolHost:
                 "content_chars": len(str(content or "")),
             }
 
+        def workspace_artifact_input(arguments: Mapping[str, Any]) -> JsonValue:
+            return {
+                "path": _bounded_text(arguments.get("path")),
+                "kind": _bounded_text(arguments.get("kind")),
+                "title": _bounded_text(arguments.get("title")) if arguments.get("title") is not None else None,
+                "expected_sha256_present": bool(arguments.get("expected_sha256")),
+            }
+
         return MappingProxyType(
             {
                 "read_attachment": ToolEventView(
@@ -248,6 +320,13 @@ class FileToolHost:
                     output_projection=lambda result: _project_fields(
                         result,
                         ("ok", "error", "kind", "title", "byte_size"),
+                    ),
+                ),
+                "publish_workspace_artifact": ToolEventView(
+                    input_projection=workspace_artifact_input,
+                    output_projection=lambda result: _project_fields(
+                        result,
+                        ("ok", "error", "artifact_candidate_id", "kind", "title", "byte_size"),
                     ),
                 ),
             }

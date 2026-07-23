@@ -13,14 +13,14 @@ def test_workspace_failure_is_cleared_only_by_successful_same_workspace_write() 
     other = {"path": "notes/other.md", "content": "new", "overwrite": True}
 
     guards.failed("write_workspace_text", original)
-    guards.completed("read_workspace_text", {"path": "notes/report.md"}, "old")
+    guards.completed("read_workspace_text", {"path": "notes/report.md"}, {"content": "old", "eof": True})
     guards.completed("write_workspace_text", other, {"ok": True})
 
     assert guards.integrity.unresolved == ("session_workspace:notes/report.md",)
 
     repaired = {**original, "content": "new", "overwrite": True}
     guards.completed("write_workspace_text", repaired, {"ok": True})
-    guards.completed("read_workspace_text", {"path": "notes/report.md"}, "new")
+    guards.completed("read_workspace_text", {"path": "notes/report.md"}, {"content": "new", "eof": True})
     assert guards.integrity.unresolved == ()
 
 
@@ -29,7 +29,7 @@ def test_required_target_scope_ignores_unrelated_diagnostic_mutations() -> None:
 
     guards.failed("write_workspace_text", {"path": "notes/diagnostic.md"})
     guards.completed("write_workspace_text", {"path": "notes/report.md", "content": "new"}, {"ok": True})
-    guards.completed("read_workspace_text", {"path": "notes/report.md"}, "new")
+    guards.completed("read_workspace_text", {"path": "notes/report.md"}, {"content": "new", "eof": True})
 
     assert guards.integrity.unresolved == ()
 
@@ -72,7 +72,7 @@ def test_unrelated_failure_does_not_block_verified_required_target() -> None:
         {"path": "date.txt", "content": "2026-07-20"},
         {"ok": True},
     )
-    guards.completed("read_workspace_text", {"path": "date.txt"}, "2026-07-20")
+    guards.completed("read_workspace_text", {"path": "date.txt"}, {"content": "2026-07-20", "eof": True})
 
     assert guards.integrity.unresolved == ()
 
@@ -95,8 +95,15 @@ def test_cleanup_warning_does_not_invalidate_verified_primary_mutation() -> None
         {"path": "date.txt", "content": "2026-07-20"},
         {"ok": True, "warnings": [{"code": "cleanup_failed"}]},
     )
-    guards.completed("read_workspace_text", {"path": "date.txt"}, "2026-07-20")
+    guards.completed("read_workspace_text", {"path": "date.txt"}, {"content": "2026-07-20", "eof": True})
 
+
+def test_successful_append_repairs_the_same_required_workspace_target() -> None:
+    guards = TurnToolGuards(required_targets=frozenset({"session_workspace:date.txt"}))
+    guards.failed("append_workspace_text", {"path": "date.txt", "content": "new"})
+    assert guards.integrity.unresolved == ("session_workspace:date.txt",)
+
+    guards.completed("append_workspace_text", {"path": "date.txt", "content": "new"}, {"ok": True})
     assert guards.integrity.unresolved == ()
 
 

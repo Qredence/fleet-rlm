@@ -32,6 +32,8 @@ def _entry(entry: WorkspaceEntry) -> dict[str, object]:
 
 
 def _raise_tool_error(exc: BaseException) -> NoReturn:
+    if isinstance(exc, WorkspaceToolError):
+        raise exc
     if getattr(exc, "code", None) == "unsupported_storage":
         raise WorkspaceToolError(
             "unsupported_storage",
@@ -48,6 +50,11 @@ def _raise_tool_error(exc: BaseException) -> NoReturn:
     if isinstance(exc, NotADirectoryError):
         raise WorkspaceToolError("invalid_path", "Session Workspace path has a non-directory parent") from None
     if isinstance(exc, ValueError):
+        message = str(exc)
+        if "cursor" in message:
+            raise WorkspaceToolError("invalid_cursor", "Session Workspace cursor is invalid") from None
+        if "size" in message or "bound" in message:
+            raise WorkspaceToolError("too_large", "Session Workspace file exceeds its size bound") from None
         raise WorkspaceToolError("invalid_path", "Session Workspace request is invalid") from None
     raise WorkspaceToolError("unavailable", "Session Workspace is unavailable") from None
 
@@ -60,16 +67,23 @@ class WorkspaceToolHost:
         self._max_file_bytes = max(1, int(max_file_bytes))
 
     def as_tools(self) -> tuple[dspy.Tool, ...]:
-        def list_workspace_files(path: str = ".", limit: int = 100) -> dict[str, object]:
+        def list_workspace_files(
+            path: str = ".",
+            limit: int = 100,
+            after: str | None = None,
+        ) -> dict[str, object]:
             """List immediate entries in this Session's durable workspace."""
             try:
-                listing = self._workspace.list_entries(path, limit=limit)
+                if limit < 1 or limit > 100:
+                    raise WorkspaceToolError("invalid_path", "Session Workspace list bound is invalid")
+                listing = self._workspace.list_entries(path, limit=limit, after=after)
                 return {
                     "ok": True,
                     "namespace": SESSION_WORKSPACE_NAMESPACE,
                     "path": path,
                     "count": len(listing.entries),
                     "truncated": listing.truncated,
+                    "next_cursor": listing.next_cursor,
                     "entries": [_entry(item) for item in listing.entries],
                 }
             except Exception as exc:  # noqa: BLE001 - public error is normalized
@@ -87,17 +101,32 @@ class WorkspaceToolHost:
             except Exception as exc:  # noqa: BLE001 - public error is normalized
                 _raise_tool_error(exc)
 
-        def read_workspace_text(path: str, max_chars: int = MAX_WORKSPACE_READ_CHARS) -> str:
-            """Read one UTF-8 workspace file without returning more than max_chars."""
+        def read_workspace_text(
+            path: str,
+            cursor: str | None = None,
+            max_chars: int = MAX_WORKSPACE_READ_CHARS,
+        ) -> dict[str, object]:
+            """Read one UTF-8 workspace page without returning more than max_chars."""
             if max_chars < 1 or max_chars > MAX_WORKSPACE_READ_CHARS:
                 raise WorkspaceToolError("invalid_path", "Session Workspace read bound is invalid")
             try:
-                content = self._workspace.read_text(path, max_bytes=self._max_file_bytes)
+                page = self._workspace.read_text_page(
+                    path,
+                    cursor=cursor,
+                    max_chars=max_chars,
+                    max_bytes=self._max_file_bytes,
+                )
             except Exception as exc:  # noqa: BLE001 - public error is normalized
                 _raise_tool_error(exc)
-            if len(content) > max_chars:
-                raise WorkspaceToolError("too_large", "Session Workspace file exceeds the requested read bound")
-            return content
+            return {
+                "ok": True,
+                "namespace": SESSION_WORKSPACE_NAMESPACE,
+                "path": path,
+                "content": page.content,
+                "next_cursor": page.next_cursor,
+                "byte_size": page.byte_size,
+                "eof": page.eof,
+            }
 
         def write_workspace_text(
             path: str,
@@ -122,6 +151,25 @@ class WorkspaceToolHost:
             except Exception as exc:  # noqa: BLE001 - public error is normalized
                 _raise_tool_error(exc)
 
+        def append_workspace_text(path: str, content: str) -> dict[str, object]:
+            """Append UTF-8 text immediately into this Session's durable workspace."""
+            if not isinstance(content, str):
+                raise WorkspaceToolError("invalid_path", "Session Workspace content must be text")
+            if len(content.encode("utf-8")) > self._max_file_bytes:
+                raise WorkspaceToolError("too_large", "Session Workspace file exceeds the maximum size")
+            try:
+                result = {
+                    "ok": True,
+                    "namespace": SESSION_WORKSPACE_NAMESPACE,
+                    **_entry(self._workspace.append_text(path, content)),
+                }
+                warnings = getattr(self._workspace, "last_warnings", None)
+                if isinstance(warnings, tuple) and warnings:
+                    result["warnings"] = [dict(item) for item in warnings if isinstance(item, Mapping)]
+                return result
+            except Exception as exc:  # noqa: BLE001 - public error is normalized
+                _raise_tool_error(exc)
+
         return (
             dspy.Tool(
                 list_workspace_files,
@@ -130,6 +178,7 @@ class WorkspaceToolHost:
                 args={
                     "path": {"type": "string"},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "after": {"type": ["string", "null"]},
                 },
             ),
             dspy.Tool(
@@ -141,12 +190,10 @@ class WorkspaceToolHost:
             dspy.Tool(
                 read_workspace_text,
                 name="read_workspace_text",
-                desc=(
-                    "Read UTF-8 workspace text with max_chars in 1..10000. If the file is longer than the "
-                    "requested bound, raises too_large; it does not truncate or return a prefix."
-                ),
+                desc=("Read one UTF-8 workspace page with max_chars in 1..10000. Continue with next_cursor until eof."),
                 args={
                     "path": {"type": "string"},
+                    "cursor": {"type": ["string", "null"]},
                     "max_chars": {
                         "type": "integer",
                         "minimum": 1,
@@ -162,6 +209,15 @@ class WorkspaceToolHost:
                     "path": {"type": "string"},
                     "content": {"type": "string"},
                     "overwrite": {"type": "boolean"},
+                },
+            ),
+            dspy.Tool(
+                append_workspace_text,
+                name="append_workspace_text",
+                desc="Append UTF-8 text immediately into this Session's durable workspace.",
+                args={
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
                 },
             ),
         )
@@ -228,25 +284,47 @@ class WorkspaceToolHost:
                 "content_chars": len(str(content or "")),
             }
 
+        def append_input(arguments: Mapping[str, Any]) -> JsonValue:
+            content = arguments.get("content")
+            return {
+                **fields(arguments, ("path",)),
+                "content_chars": len(str(content or "")),
+            }
+
         return MappingProxyType(
             {
                 "list_workspace_files": ToolEventView(
-                    input_projection=lambda arguments: fields(arguments, ("path", "limit"), allow_root=True),
-                    output_projection=lambda result: output(result, ("ok", "error", "path", "count", "truncated")),
+                    input_projection=lambda arguments: fields(
+                        arguments,
+                        ("path", "limit", "after"),
+                        allow_root=True,
+                    ),
+                    output_projection=lambda result: output(
+                        result,
+                        ("ok", "error", "path", "count", "truncated", "next_cursor"),
+                    ),
                 ),
                 "stat_workspace_file": ToolEventView(
                     input_projection=lambda arguments: fields(arguments, ("path",)),
                     output_projection=stat_output,
                 ),
                 "read_workspace_text": ToolEventView(
-                    input_projection=lambda arguments: fields(arguments, ("path", "max_chars")),
-                    output_projection=lambda result: (
-                        {"ok": True, "namespace": SESSION_WORKSPACE_NAMESPACE} if isinstance(result, str) else {}
+                    input_projection=lambda arguments: fields(arguments, ("path", "cursor", "max_chars")),
+                    output_projection=lambda result: output(
+                        result,
+                        ("ok", "namespace", "path", "next_cursor", "byte_size", "eof"),
                     ),
                     allow_repeated_identical=True,
                 ),
                 "write_workspace_text": ToolEventView(
                     input_projection=write_input,
+                    output_projection=lambda result: output(
+                        result,
+                        ("ok", "namespace", "path", "byte_size", "warnings"),
+                    ),
+                ),
+                "append_workspace_text": ToolEventView(
+                    input_projection=append_input,
                     output_projection=lambda result: output(
                         result,
                         ("ok", "namespace", "path", "byte_size", "warnings"),

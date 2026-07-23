@@ -4,7 +4,7 @@ description: Create, save, read back, and verify reports from trusted source dat
 compatibility: Durable Session Workspace writes and Artifact promotion require the Daytona run environment.
 metadata:
   version: "1.0.0"
-allowed-tools: list_workspace_files stat_workspace_file read_workspace_text write_workspace_text create_artifact
+allowed-tools: list_workspace_files stat_workspace_file read_workspace_text write_workspace_text append_workspace_text publish_workspace_artifact create_artifact
 ---
 
 # Report builder
@@ -22,16 +22,21 @@ Create the requested report from verified source data.
    List or stat the target when needed, then call
    `write_workspace_text(path=..., content=..., overwrite=False)`. Require
    `ok: true`; use `overwrite=True` only when replacing an intentionally chosen
-   existing file.
+   existing file. Use `append_workspace_text` when producing the report across
+   incremental steps.
 5. If the report is at most 10,000 characters, read the same path with
    `read_workspace_text(path=..., max_chars=10000)` and verify exact equality
-   before reporting success. The read tool rejects longer files; it never
-   truncates or returns a prefix.
+   from the returned `content` before reporting success. For larger reports,
+   continue page reads with each returned `next_cursor` until `eof`; never
+   invent or edit a cursor. The read tool never returns a truncated page without
+   continuation metadata.
 6. Create an Artifact only when the user asks for a downloadable public output
-   and `create_artifact` is available. Require `ok: true`; its result is a
+   and a publication tool is available. For an existing Workspace report, use
+   `publish_workspace_artifact` so the body is not resent; use `create_artifact`
+   only for newly generated content. Require `ok: true`; the result is a
    private Artifact Candidate, not proof of public publication until Turn
    Commit succeeds.
-7. For a report longer than 10,000 characters, write it once, then call
+7. For a report longer than 10,000 characters, write or append it once, then call
    `stat_workspace_file` on the same path. Treat this as metadata confirmation
    only when both the write receipt's `byte_size` and
    `stat_result["entry"]["byte_size"]` equal

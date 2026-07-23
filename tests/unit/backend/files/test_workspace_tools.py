@@ -7,7 +7,7 @@ from dataclasses import replace
 import dspy
 import pytest
 
-from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult
+from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 from fleet_rlm.rlm.events import ToolFailed, WarningEvent
 from fleet_rlm.rlm.tool_guards import TurnToolGuards
 from fleet_rlm.rlm.tool_observer import observe_tool
@@ -17,15 +17,17 @@ class FakeWorkspace:
     def __init__(self) -> None:
         self.files: dict[str, str] = {}
 
-    def list_entries(self, path: str, *, limit: int = 100) -> WorkspaceListResult:
+    def list_entries(self, path: str, *, limit: int = 100, after: str | None = None) -> WorkspaceListResult:
         del path
-        items = sorted(self.files.items())
+        items = [(name, content) for name, content in sorted(self.files.items()) if after is None or name > after]
+        selected = items[:limit]
         return WorkspaceListResult(
             entries=tuple(
                 WorkspaceEntry(name, "file", len(content.encode()), "2026-07-16T12:00:00Z")
-                for name, content in items[:limit]
+                for name, content in selected
             ),
             truncated=len(items) > limit,
+            next_cursor=selected[-1][0] if len(items) > limit else None,
         )
 
     def stat(self, path: str) -> WorkspaceEntry | None:
@@ -34,19 +36,32 @@ class FakeWorkspace:
             return None
         return WorkspaceEntry(path, "file", len(content.encode()), "2026-07-16T12:00:00Z")
 
-    def read_text(self, path: str, *, max_bytes: int) -> str:
+    def read_text_page(
+        self,
+        path: str,
+        *,
+        cursor: str | None,
+        max_chars: int,
+        max_bytes: int,
+    ) -> WorkspaceTextPage:
         if path not in self.files:
             raise FileNotFoundError(path)
         content = self.files[path]
         if len(content.encode()) > max_bytes:
             raise ValueError("workspace file exceeds read bound")
-        return content
+        if cursor is not None:
+            raise ValueError("workspace cursor is invalid")
+        return WorkspaceTextPage(content[:max_chars], None, len(content.encode()), len(content) <= max_chars)
 
     def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
         if path in self.files and not overwrite:
             raise FileExistsError(path)
         self.files[path] = content
         return WorkspaceEntry(path, "file", len(content.encode()), "2026-07-16T12:00:00Z")
+
+    def append_text(self, path: str, content: str) -> WorkspaceEntry:
+        self.files[path] = self.files.get(path, "") + content
+        return WorkspaceEntry(path, "file", len(self.files[path].encode()), "2026-07-16T12:00:00Z")
 
 
 def _tools(workspace: FakeWorkspace | None = None) -> tuple[FakeWorkspace, dict[str, dspy.Tool]]:
@@ -65,11 +80,13 @@ def test_exposes_exact_typed_tool_contracts() -> None:
         "stat_workspace_file",
         "read_workspace_text",
         "write_workspace_text",
+        "append_workspace_text",
     )
     assert all(type(tool) is dspy.Tool for tool in tools.values())
     assert tools["list_workspace_files"].args == {
         "path": {"type": "string"},
         "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+        "after": {"type": ["string", "null"]},
     }
     assert tools["read_workspace_text"].args["max_chars"] == {
         "type": "integer",
@@ -77,8 +94,7 @@ def test_exposes_exact_typed_tool_contracts() -> None:
         "maximum": 10_000,
     }
     assert "1..10000" in tools["read_workspace_text"].desc
-    assert "too_large" in tools["read_workspace_text"].desc
-    assert "does not truncate or return a prefix" in tools["read_workspace_text"].desc
+    assert "next_cursor" in tools["read_workspace_text"].desc
     assert tools["write_workspace_text"].args == {
         "path": {"type": "string"},
         "content": {"type": "string"},
@@ -110,7 +126,7 @@ def test_round_trips_text_with_bounded_json_results() -> None:
     assert listed["truncated"] is False
     assert listed["entries"][0]["path"] == "notes/decision.md"
     assert stated["entry"]["byte_size"] == 16
-    assert read == "durable decision"
+    assert read["content"] == "durable decision"
 
 
 def test_workspace_event_views_expose_metadata_without_file_bodies_or_entries() -> None:
@@ -147,8 +163,21 @@ def test_workspace_event_views_expose_metadata_without_file_bodies_or_entries() 
         "path": "notes/private.md",
         "byte_size": 22,
     }
-    assert observed[3].output == {"ok": True, "path": ".", "count": 1, "truncated": False}
-    assert observed[5].output == {"ok": True, "namespace": "session_workspace"}
+    assert observed[3].output == {
+        "ok": True,
+        "path": ".",
+        "count": 1,
+        "truncated": False,
+        "next_cursor": None,
+    }
+    assert observed[5].output == {
+        "ok": True,
+        "namespace": "session_workspace",
+        "path": "notes/private.md",
+        "next_cursor": None,
+        "byte_size": 22,
+        "eof": True,
+    }
     assert "private workspace body" not in str(observed)
     assert "entries" not in str(observed)
 
@@ -181,8 +210,8 @@ def test_repeated_workspace_reads_are_idempotent_but_still_observed() -> None:
     guards = TurnToolGuards()
     read = observe_tool(tools["read_workspace_text"], observed.append, view, guards=guards)
 
-    assert read(path="date.txt", max_chars=32) == "2026-07-21"
-    assert read(path="date.txt", max_chars=32) == "2026-07-21"
+    assert read(path="date.txt", max_chars=32)["content"] == "2026-07-21"
+    assert read(path="date.txt", max_chars=32)["content"] == "2026-07-21"
     assert sum(isinstance(item, WarningEvent) for item in observed) == 1
     assert not any(isinstance(item, ToolFailed) for item in observed)
 
@@ -199,9 +228,9 @@ def test_raises_stable_safe_errors_without_exception_details() -> None:
         tools["read_workspace_text"](path="missing.txt", max_chars=10)
 
     workspace.files["large.txt"] = "x" * 20
-    with pytest.raises(WorkspaceToolError) as large:
-        tools["read_workspace_text"](path="large.txt", max_chars=10)
-    assert large.value.code == "too_large"
+    page = tools["read_workspace_text"](path="large.txt", max_chars=10)
+    assert page["content"] == "x" * 10
+    assert page["eof"] is False
     with pytest.raises(WorkspaceToolError) as conflict:
         tools["write_workspace_text"](path="large.txt", content="new", overwrite=False)
     assert conflict.value.code == "conflict"
@@ -227,9 +256,35 @@ def test_workspace_storage_failure_has_structured_host_error() -> None:
 def test_entry_serialization_does_not_mutate_domain_value() -> None:
     entry = WorkspaceEntry("notes", "directory", None, None)
     workspace, tools = _tools()
-    workspace.list_entries = lambda _path, limit=100: WorkspaceListResult((entry,), truncated=False)  # type: ignore[method-assign]
+    workspace.list_entries = lambda _path, limit=100, after=None: WorkspaceListResult(  # type: ignore[method-assign]
+        (entry,),
+        truncated=False,
+        next_cursor=None,
+    )
 
     result = tools["list_workspace_files"](path=".", limit=1)
 
     assert result["entries"] == [{"path": "notes", "kind": "directory", "byte_size": None, "modified_at": None}]
     assert entry == replace(entry)
+
+
+def test_paged_read_list_cursor_and_append_tool_contracts() -> None:
+    _, tools = _tools()
+
+    assert "after" in tools["list_workspace_files"].args
+    assert "cursor" in tools["read_workspace_text"].args
+    assert "append_workspace_text" in tools
+
+    appended = tools["append_workspace_text"](path="notes.md", content="first")
+    page = tools["read_workspace_text"](path="notes.md", max_chars=10)
+
+    assert appended["ok"] is True
+    assert page == {
+        "ok": True,
+        "namespace": "session_workspace",
+        "path": "notes.md",
+        "content": "first",
+        "next_cursor": None,
+        "byte_size": 5,
+        "eof": True,
+    }

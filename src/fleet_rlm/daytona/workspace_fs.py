@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import base64
+import json
 from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import Any, cast
 
 from fleet_rlm.daytona.workspace_agent import WorkspaceAgentStorageError, run_workspace_agent
-from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult
+from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 from fleet_rlm.files.workspace_validation import normalize_workspace_path
 
 
@@ -17,6 +18,56 @@ class WorkspaceStorageError(OSError):
 
     code = "unsupported_storage"
     public_message = "Session Workspace storage does not support this mutation"
+
+
+_MAX_CURSOR_CHARS = 512
+
+
+def _encode_text_cursor(path: str, offset: int) -> str:
+    payload = json.dumps(
+        {"offset": offset, "path": path, "v": 1},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_text_cursor(cursor: str, path: str, byte_size: int) -> int:
+    if not isinstance(cursor, str) or not cursor or len(cursor) > _MAX_CURSOR_CHARS:
+        raise ValueError("workspace cursor is invalid")
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        raw = base64.urlsafe_b64decode((cursor + padding).encode("ascii"))
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, ValueError, json.JSONDecodeError):
+        raise ValueError("workspace cursor is invalid") from None
+    if not isinstance(payload, dict) or set(payload) != {"offset", "path", "v"}:
+        raise ValueError("workspace cursor is invalid")
+    version = payload.get("v")
+    cursor_path = payload.get("path")
+    offset = payload.get("offset")
+    if (
+        type(version) is not int
+        or version != 1
+        or cursor_path != path
+        or type(offset) is not int
+        or offset < 0
+        or offset > byte_size
+    ):
+        raise ValueError("workspace cursor is invalid")
+    if _encode_text_cursor(cursor_path, offset) != cursor:
+        raise ValueError("workspace cursor is invalid")
+    return offset
+
+
+def _normalize_list_cursor(path: str, after: str | None) -> str | None:
+    if after is None:
+        return None
+    normalized = normalize_workspace_path(after)
+    parent = normalized.rpartition("/")[0] or "."
+    if parent != path:
+        raise ValueError("workspace list cursor is invalid")
+    return normalized
 
 
 def _entry_from_payload(raw: Mapping[str, object]) -> WorkspaceEntry:
@@ -91,10 +142,17 @@ class DaytonaSessionWorkspaceFS:
     def last_warnings(self) -> tuple[dict[str, object], ...]:
         return self._last_warnings
 
-    def list_entries(self, path: str, *, limit: int = 100) -> WorkspaceListResult:
+    def list_entries(
+        self,
+        path: str,
+        *,
+        limit: int = 100,
+        after: str | None = None,
+    ) -> WorkspaceListResult:
         relative = normalize_workspace_path(path, allow_root=True)
         if limit < 1 or limit > 100:
             raise ValueError("workspace list limit must be between 1 and 100")
+        normalized_after = _normalize_list_cursor(relative, after)
         payload = self._atomic_run(
             operation="list",
             relative=relative,
@@ -103,6 +161,9 @@ class DaytonaSessionWorkspaceFS:
             limit=limit,
             overwrite=False,
             content_b64="",
+            after=normalized_after or "",
+            offset=0,
+            max_chars=0,
         )
         raw_entries = payload.get("entries")
         entries: list[WorkspaceEntry] = []
@@ -110,7 +171,12 @@ class DaytonaSessionWorkspaceFS:
             for item in raw_entries:
                 if isinstance(item, dict):
                     entries.append(_entry_from_payload(cast(Mapping[str, object], item)))
-        return WorkspaceListResult(entries=tuple(entries), truncated=bool(payload.get("truncated")))
+        next_cursor = payload.get("next_cursor")
+        return WorkspaceListResult(
+            entries=tuple(entries),
+            truncated=bool(payload.get("truncated")),
+            next_cursor=str(next_cursor) if isinstance(next_cursor, str) else None,
+        )
 
     def stat(self, path: str) -> WorkspaceEntry | None:
         relative = normalize_workspace_path(path, allow_root=True)
@@ -122,6 +188,9 @@ class DaytonaSessionWorkspaceFS:
             limit=0,
             overwrite=False,
             content_b64="",
+            after="",
+            offset=0,
+            max_chars=0,
         )
         if payload.get("entry") is None:
             if relative == ".":
@@ -132,24 +201,55 @@ class DaytonaSessionWorkspaceFS:
             raise RuntimeError("workspace stat returned invalid entry")
         return _entry_from_payload(cast(Mapping[str, object], entry))
 
-    def read_text(self, path: str, *, max_bytes: int) -> str:
+    def read_text_page(
+        self,
+        path: str,
+        *,
+        cursor: str | None,
+        max_chars: int,
+        max_bytes: int,
+    ) -> WorkspaceTextPage:
         relative = normalize_workspace_path(path)
         bound = min(self._max_file_bytes, int(max_bytes))
-        if bound < 1:
+        if bound < 1 or max_chars < 1:
             raise ValueError("workspace read bound must be positive")
+        if max_chars > 10_000:
+            raise ValueError("workspace read character bound is invalid")
+        offset = 0
+        if cursor is not None:
+            stat = self.stat(relative)
+            if stat is None or stat.byte_size is None:
+                raise ValueError("workspace cursor is invalid")
+            offset = _decode_text_cursor(cursor, relative, stat.byte_size)
         payload = self._atomic_run(
-            operation="read",
+            operation="read_page",
             relative=relative,
             allow_missing=False,
             max_bytes=bound,
             limit=0,
             overwrite=False,
             content_b64="",
+            after="",
+            offset=offset,
+            max_chars=max_chars,
         )
         content = payload.get("content")
         if not isinstance(content, str):
             raise RuntimeError("workspace read returned invalid content")
-        return content
+        byte_size = payload.get("byte_size")
+        next_offset = payload.get("next_offset")
+        eof = bool(payload.get("eof"))
+        if not isinstance(byte_size, int) or not isinstance(next_offset, int):
+            raise RuntimeError("workspace read returned invalid page metadata")
+        next_cursor = None if eof else _encode_text_cursor(relative, next_offset)
+        return WorkspaceTextPage(content, next_cursor, byte_size, eof)
+
+    def read_text(self, path: str, *, max_bytes: int) -> str:
+        """Compatibility adapter for internal callers that need a bounded whole read."""
+        page = self.read_text_page(path, cursor=None, max_chars=max_bytes, max_bytes=max_bytes)
+        if not page.eof:
+            raise ValueError("workspace file exceeds read bound")
+        return page.content
 
     def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
         relative = normalize_workspace_path(path)
@@ -166,6 +266,9 @@ class DaytonaSessionWorkspaceFS:
             limit=0,
             overwrite=overwrite,
             content_b64=base64.b64encode(data).decode("ascii"),
+            after="",
+            offset=0,
+            max_chars=0,
         )
         raw_warnings = payload.get("warnings")
         self._last_warnings = (
@@ -178,6 +281,36 @@ class DaytonaSessionWorkspaceFS:
             raise RuntimeError("workspace write returned invalid entry")
         return _entry_from_payload(cast(Mapping[str, object], entry))
 
+    def append_text(self, path: str, content: str) -> WorkspaceEntry:
+        relative = normalize_workspace_path(path)
+        if not isinstance(content, str):
+            raise ValueError("workspace content must be text")
+        data = content.encode("utf-8")
+        if len(data) > self._max_file_bytes:
+            raise ValueError("workspace file exceeds maximum size")
+        payload = self._atomic_run(
+            operation="append",
+            relative=relative,
+            allow_missing=True,
+            max_bytes=self._max_file_bytes,
+            limit=0,
+            overwrite=False,
+            content_b64=base64.b64encode(data).decode("ascii"),
+            after="",
+            offset=0,
+            max_chars=0,
+        )
+        raw_warnings = payload.get("warnings")
+        self._last_warnings = (
+            tuple(cast(dict[str, object], item) for item in raw_warnings if isinstance(item, dict))
+            if isinstance(raw_warnings, list)
+            else ()
+        )
+        entry = payload.get("entry")
+        if not isinstance(entry, dict):
+            raise RuntimeError("workspace append returned invalid entry")
+        return _entry_from_payload(cast(Mapping[str, object], entry))
+
     def _atomic_run(
         self,
         *,
@@ -188,6 +321,9 @@ class DaytonaSessionWorkspaceFS:
         limit: int,
         overwrite: bool,
         content_b64: str,
+        after: str,
+        offset: int,
+        max_chars: int,
     ) -> dict[str, object]:
         try:
             return run_workspace_agent(
@@ -201,6 +337,9 @@ class DaytonaSessionWorkspaceFS:
                 limit=limit,
                 overwrite=overwrite,
                 content_b64=content_b64,
+                after=after,
+                offset=offset,
+                max_chars=max_chars,
             )
         except WorkspaceAgentStorageError as exc:
             raise WorkspaceStorageError(*exc.args) from exc

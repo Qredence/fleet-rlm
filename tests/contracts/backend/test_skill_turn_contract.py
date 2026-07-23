@@ -316,7 +316,7 @@ async def test_deterministic_composition_runs_data_analysis_signature() -> None:
 async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_owned(monkeypatch) -> None:
     from fleet_rlm.config import Settings
     from fleet_rlm.daytona.run_environment import _LiveCapabilityPreparer
-    from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult
+    from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 
     class FakeWorkspace:
         last_warnings: tuple[dict[str, object], ...] = ()
@@ -324,8 +324,9 @@ async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_o
         def __init__(self) -> None:
             self.values: dict[str, str] = {}
 
-        def list_entries(self, path: str, *, limit: int = 100) -> WorkspaceListResult:
+        def list_entries(self, path: str, *, limit: int = 100, after: str | None = None) -> WorkspaceListResult:
             del limit
+            del after
             return WorkspaceListResult(
                 tuple(WorkspaceEntry(name, "file", len(value), None) for name, value in self.values.items()), False
             )
@@ -334,17 +335,30 @@ async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_o
             value = self.values.get(path)
             return None if value is None else WorkspaceEntry(path, "file", len(value), None)
 
-        def read_text(self, path: str, *, max_bytes: int) -> str:
+        def read_text_page(
+            self,
+            path: str,
+            *,
+            cursor: str | None,
+            max_chars: int,
+            max_bytes: int,
+        ) -> WorkspaceTextPage:
             value = self.values[path]
             if len(value.encode()) > max_bytes:
                 raise ValueError("too large")
-            return value
+            if cursor is not None:
+                raise ValueError("cursor")
+            return WorkspaceTextPage(value[:max_chars], None, len(value.encode()), len(value) <= max_chars)
 
         def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
             if path in self.values and not overwrite:
                 raise FileExistsError(path)
             self.values[path] = content
             return WorkspaceEntry(path, "file", len(content.encode()), None)
+
+        def append_text(self, path: str, content: str) -> WorkspaceEntry:
+            self.values[path] = self.values.get(path, "") + content
+            return WorkspaceEntry(path, "file", len(self.values[path].encode()), None)
 
     fake_workspace = FakeWorkspace()
     monkeypatch.setattr(
@@ -380,7 +394,7 @@ async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_o
     }
     assert tools["load_skill"](skill_id=str(stable_skill_id("long-context")))["error"] == "skill_not_found"
     assert tools["write_workspace_text"](path="report.md", content="# Report")["ok"] is True
-    assert tools["read_workspace_text"](path="report.md") == "# Report"
+    assert tools["read_workspace_text"](path="report.md")["content"] == "# Report"
     assert {detail.name for detail in prepared.drain_public_details() if detail.kind == "skill.activated"} == {
         "report-builder",
         "workspace-files",

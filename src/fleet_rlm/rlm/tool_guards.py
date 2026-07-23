@@ -42,7 +42,7 @@ def _canonical_path(path: object) -> str | None:
 
 
 def _workspace_target(tool_name: str, arguments: Mapping[str, Any]) -> str | None:
-    if tool_name not in {"write_workspace_text", "read_workspace_text"}:
+    if tool_name not in {"write_workspace_text", "append_workspace_text", "read_workspace_text"}:
         return None
     path = _canonical_path(arguments.get("path"))
     return f"session_workspace:{path}" if path else None
@@ -87,9 +87,18 @@ class TurnIntegrityLedger:
             if isinstance(content, str) and target in self._unresolved:
                 self._expected_content[target] = sha256(content.encode("utf-8")).hexdigest()
             return
-        if tool_name == "read_workspace_text" and isinstance(result, str):
+        if tool_name == "append_workspace_text":
+            self._unresolved.discard(target)
+            self._expected_content.pop(target, None)
+            return
+        if tool_name == "read_workspace_text":
+            content: object = result
+            eof = True
+            if isinstance(result, Mapping):
+                content = result.get("content")
+                eof = result.get("eof") is not False
             expected = self._expected_content.get(target)
-            if expected == sha256(result.encode("utf-8")).hexdigest():
+            if eof and isinstance(content, str) and expected == sha256(content.encode("utf-8")).hexdigest():
                 self._unresolved.discard(target)
                 self._expected_content.pop(target, None)
 

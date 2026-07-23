@@ -18,6 +18,15 @@ class WorkspaceEntry:
 class WorkspaceListResult:
     entries: tuple[WorkspaceEntry, ...]
     truncated: bool = False
+    next_cursor: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceTextPage:
+    content: str
+    next_cursor: str | None
+    byte_size: int
+    eof: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,10 +57,25 @@ DENO_WORKSPACE_CAPABILITY = WorkspaceCapabilityMetadata(
 
 
 class SessionWorkspaceFS(Protocol):
-    def list_entries(self, path: str, *, limit: int = 100) -> WorkspaceListResult: ...
+    def list_entries(
+        self,
+        path: str,
+        *,
+        limit: int = 100,
+        after: str | None = None,
+    ) -> WorkspaceListResult: ...
 
     def stat(self, path: str) -> WorkspaceEntry | None: ...
 
-    def read_text(self, path: str, *, max_bytes: int) -> str: ...
+    def read_text_page(
+        self,
+        path: str,
+        *,
+        cursor: str | None,
+        max_chars: int,
+        max_bytes: int,
+    ) -> WorkspaceTextPage: ...
 
     def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry: ...
+
+    def append_text(self, path: str, content: str) -> WorkspaceEntry: ...
