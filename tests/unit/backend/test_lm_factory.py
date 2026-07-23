@@ -2,10 +2,51 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
+from pydantic import SecretStr
 
 from fleet_rlm.config import Settings
-from fleet_rlm.rlm.lm_factory import build_model_bundle, normalize_model_id, sanitize_base_url
+from fleet_rlm.rlm.lm_factory import (
+    build_model_bundle,
+    has_llm_credentials,
+    normalize_model_id,
+    sanitize_base_url,
+)
+
+
+def test_model_bundle_applies_independent_role_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.rlm.lm_factory as factory
+
+    monkeypatch.setenv("ROOT_KEY", "root-secret")
+    monkeypatch.setenv("SUB_KEY", "sub-secret")
+    build = MagicMock(side_effect=("root-lm", "sub-lm"))
+    monkeypatch.setattr(factory, "build_lm", build)
+    settings = Settings(
+        _env_file=None,
+        root_model="openai/root",
+        sub_model="openai/sub",
+        root_llm_api_key_env="ROOT_KEY",
+        sub_llm_api_key_env="SUB_KEY",
+        root_llm_max_tokens=101,
+        sub_llm_max_tokens=202,
+        root_llm_cache=True,
+        sub_llm_cache=False,
+        root_llm_num_retries=1,
+        sub_llm_num_retries=4,
+        sub_llm_temperature=0.3,
+    )
+
+    bundle = factory.build_model_bundle(settings)
+
+    assert bundle.root_lm == "root-lm"
+    assert bundle.sub_lm == "sub-lm"
+    assert build.call_args_list[0].kwargs["max_tokens"] == 101
+    assert build.call_args_list[0].kwargs["cache"] is True
+    assert build.call_args_list[1].kwargs["max_tokens"] == 202
+    assert build.call_args_list[1].kwargs["cache"] is False
+    assert build.call_args_list[1].kwargs["temperature"] == 0.3
 
 
 def test_sanitize_base_url_accepts_https_and_strips_comments() -> None:
@@ -48,3 +89,9 @@ def test_runtime_does_not_accept_provider_environment_aliases(monkeypatch: pytes
     assert settings.root_model == "openai/gpt-4o-mini"
     with pytest.raises(RuntimeError, match="FLEET_LLM_API_KEY"):
         build_model_bundle(settings)
+
+
+def test_whitespace_legacy_key_is_not_a_credential() -> None:
+    settings = Settings(_env_file=None, llm_api_key=SecretStr("   "))
+
+    assert has_llm_credentials(settings) is False

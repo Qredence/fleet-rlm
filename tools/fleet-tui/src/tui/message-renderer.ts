@@ -15,6 +15,7 @@ import {
   redact,
   shortId,
 } from "./format.js";
+import { formatExecutionMetric } from "./execution-summary.js";
 import type { Message, Role } from "./store.js";
 import { highlightCode } from "./syntax-highlight.js";
 import { markdownTheme, theme, type ThemeBackground } from "./theme.js";
@@ -72,11 +73,19 @@ export function renderMessage(message: Message, width: number): string[] {
         `  ${theme.fg("success", theme.bold("✓ ARTIFACT"))}  ${theme.bold(message.name)}  ${muted(`${message.artifactKind} · ${formatBytes(message.bytes)} · ${shortId(message.artifactId)}`)}`,
         safeWidth,
       );
-    case "usage":
+    case "usage": {
+      const summary = message.executionSummary ?? {
+        iterations: message.iterations,
+        subLmCalls: null,
+        hostCapabilityCalls: null,
+        interpreterErrors: null,
+        durationMs: message.durationMs,
+      };
       return wrappedLine(
-        `  ${theme.fg("accent", theme.bold("USAGE"))}  ${muted(`${message.iterations} iterations · ↑ input ${formatObservedTokens(message.inputTokens)} · ↓ output ${formatObservedTokens(message.outputTokens)} · ${formatDuration(message.durationMs)}`)}`,
+        `  ${theme.fg("accent", theme.bold("USAGE"))}  ${muted(`${formatExecutionMetric(summary.iterations)} iterations · ${formatExecutionMetric(summary.subLmCalls)} sub-LM · ${formatExecutionMetric(summary.hostCapabilityCalls)} host · ${formatExecutionMetric(summary.interpreterErrors)} errors · ↑ input ${formatObservedTokens(message.inputTokens)} · ↓ output ${formatObservedTokens(message.outputTokens)} · ${summary.durationMs === null ? "—" : formatDuration(summary.durationMs)}`)}`,
         safeWidth,
       );
+    }
     case "warning":
       return wrapStyled(
         `! WARNING  ${message.code}: ${message.message}`,

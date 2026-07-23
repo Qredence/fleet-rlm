@@ -131,15 +131,16 @@ _DOCTOR_ACTIONS = {
 def _run_doctor(parser: argparse.ArgumentParser, provider: str) -> None:
     if provider != "daytona":
         parser.error(f"unsupported doctor provider: {provider}")
-    from fleet_rlm.config import Settings
+    from fleet_rlm.config import _PROFILE_ENVIRONMENT, load_runtime_settings, redacted_policy_summary
     from fleet_rlm.daytona.diagnostics import run_daytona_doctor
 
     try:
-        settings = Settings()
+        settings = load_runtime_settings()
     except Exception:  # noqa: BLE001 - settings errors must remain bounded and secret-free
         print("[failed] settings: Required Fleet Daytona settings are missing or invalid.")
         print(f"action: {_DOCTOR_ACTIONS['settings']}")
         raise SystemExit(1) from None
+    print(f"[ok] policy: {redacted_policy_summary(settings, profile=os.environ[_PROFILE_ENVIRONMENT])}")
     result = asyncio.run(run_daytona_doctor(settings))
     for step in result.steps:
         state = "ok" if step.ok else "failed"

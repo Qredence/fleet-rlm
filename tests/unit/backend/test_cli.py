@@ -10,6 +10,12 @@ from fleet_rlm.cli import supervisor
 from fleet_rlm.cli.main import fleet_main, fleet_rlm_main
 
 
+@pytest.fixture(autouse=True)
+def _select_runtime_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FLEET_CONFIG_PROFILE", "daytona")
+    monkeypatch.setenv("FLEET_RUN_ENVIRONMENT", "daytona")
+
+
 def test_fleet_doctor_daytona_prints_safe_steps_and_succeeds(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -31,7 +37,9 @@ def test_fleet_doctor_daytona_prints_safe_steps_and_succeeds(
 
     fleet_main(["doctor", "daytona"])
 
-    assert capsys.readouterr().out == "[ok] settings: Settings valid.\n[ok] cleanup: Sandbox deleted.\n"
+    output = capsys.readouterr().out
+    assert "[ok] policy: profile=daytona" in output
+    assert output.endswith("[ok] settings: Settings valid.\n[ok] cleanup: Sandbox deleted.\n")
 
 
 def test_fleet_doctor_daytona_returns_nonzero_with_provider_action(
@@ -62,7 +70,9 @@ def test_fleet_doctor_daytona_returns_nonzero_with_provider_action(
         fleet_main(["doctor", "daytona"])
 
     assert error.value.code == 1
-    assert capsys.readouterr().out == (
+    output = capsys.readouterr().out
+    assert "[ok] policy: profile=daytona" in output
+    assert output.endswith(
         "[failed] provider: Daytona authentication was rejected.\n"
         "action: verify FLEET_DAYTONA_API_KEY and Daytona account access.\n"
     )

@@ -1,5 +1,7 @@
 /** Multi-turn conversation store. Renderer-independent source of truth. */
 
+import { summarizeExecution, type ExecutionSummary } from "./execution-summary.js";
+
 export type Phase = "idle" | "submitting" | "running" | "cancelling" | "completed" | "error";
 
 export type Role = "user" | "assistant" | "system";
@@ -88,11 +90,12 @@ export type Message =
       id: string;
       kind: "usage";
       runId: string;
-      iterations: number;
+      iterations: number | null;
       inputTokens: number | null;
       outputTokens: number | null;
-      durationMs: number;
+      durationMs: number | null;
       observedLmUsage: Record<string, unknown>;
+      executionSummary?: ExecutionSummary;
       ts: number;
     }
   | { id: string; kind: "warning"; runId: string; code: string; message: string; ts: number }
@@ -357,18 +360,31 @@ function reduce(state: State, event: Event): State {
         },
       };
     case "message/upsert": {
-      const existing = state.messages.findIndex((m) => m.id === event.message.id);
+      const incoming =
+        event.message.kind === "usage"
+          ? {
+              ...event.message,
+              executionSummary: summarizeExecution(
+                [
+                  ...state.messages.filter((message) => message.id !== event.message.id),
+                  event.message,
+                ],
+                event.message.runId,
+              ),
+            }
+          : event.message;
+      const existing = state.messages.findIndex((m) => m.id === incoming.id);
       let run = state.run;
-      if (existing < 0 && event.message.kind === "tool") {
+      if (existing < 0 && incoming.kind === "tool") {
         run = { ...run, toolCount: run.toolCount + 1 };
       }
       if (existing >= 0) {
         const messages = state.messages.slice();
-        messages[existing] = event.message;
+        messages[existing] = incoming;
         return { ...state, messages, run };
       }
-      if (event.message.kind === "reasoning") {
-        const reasoning = event.message;
+      if (incoming.kind === "reasoning") {
+        const reasoning = incoming;
         const firstStepDetail = state.messages.findIndex(
           (message) =>
             (message.kind === "code" || message.kind === "output") &&
@@ -381,7 +397,7 @@ function reduce(state: State, event: Event): State {
           return { ...state, messages, run };
         }
       }
-      return { ...state, messages: [...state.messages, event.message], run };
+      return { ...state, messages: [...state.messages, incoming], run };
     }
     case "message/patch": {
       const existing = state.messages.findIndex((m) => m.id === event.id);

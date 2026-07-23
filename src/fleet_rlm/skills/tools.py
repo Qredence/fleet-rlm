@@ -142,16 +142,17 @@ class SkillToolHost:
                 self.load_skill,
                 name="load_skill",
                 desc=(
-                    "Load an authorized Skill progressively. Returns a dictionary with ok, skill_markdown, "
-                    "and resources on success, or error on failure."
+                    "Load an authorized Skill only when its advertised Skill Card is relevant to the current "
+                    "request. Returns a dictionary with ok, skill_markdown, and resources on success, or error "
+                    "on failure; do not load Skills speculatively."
                 ),
             ),
             dspy.Tool(
                 self.read_skill_resource,
                 name="read_skill_resource",
                 desc=(
-                    "Read one resource from a previously loaded Skill. Returns a dictionary with ok, content, "
-                    "and resource metadata on success, or error on failure."
+                    "Read one relevant resource from a previously loaded Skill. Returns a dictionary with ok, "
+                    "content, and resource metadata on success, or error on failure."
                 ),
             ),
         )

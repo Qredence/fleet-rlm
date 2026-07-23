@@ -1,9 +1,16 @@
 # Configuration Reference
 
-Fleet backend settings are read by `Settings` from `FLEET_*` environment
-variables and an optional repository `.env`. Unknown variables are ignored;
-retired compatibility variables are rejected by application startup. Secrets
-use masked `SecretStr` values.
+Fleet starts from the required, committed [`config/fleet.toml`](../../config/fleet.toml)
+policy file. Set `FLEET_CONFIG_PROFILE` to one of its named profiles (`local-deno`
+or `daytona`) before starting any backend or running `fleet doctor`. Policy is
+strict, resolved once at process startup, and takes effect only after restart.
+
+The TOML file contains no secret values. Its Root and Sub Model blocks name the
+environment variable that supplies each API key. Process environment and the
+optional repository `.env` remain higher-precedence sources for every existing
+`FLEET_*` value; they are suitable for secret injection and deployment/CI
+overrides. Unknown TOML keys, absent profiles, missing TOML, invalid secret
+references, and a conflicting `FLEET_RUN_ENVIRONMENT` fail startup.
 
 ## Runtime prerequisites
 
@@ -15,10 +22,22 @@ use masked `SecretStr` values.
 Profiles are explicit and do not fall back to each other. Daytona startup never
 applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
 
-## Settings
+## Policy settings
+
+`config/fleet.toml` deep-merges `[defaults]` into the selected
+`[profiles.<name>]`. It centralizes application identity; runtime timeouts,
+leases, and liveness; Root/Sub model ids, endpoint, token limit, temperature,
+cache, retries, and secret-variable references; RLM limits and host verbosity;
+storage limits; Daytona Volume/Snapshot policy; and Fleet/DSPy logger level.
+
+`rlm.verbose` controls native DSPy host logs only. It does not control the
+typed Runtime Events projected through SSE or the terminal client.
+
+## Compatibility environment overrides
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `FLEET_CONFIG_PROFILE` | required | Named profile in `config/fleet.toml` |
 | `FLEET_APP_NAME` | `fleet-rlm` | FastAPI application title |
 | `FLEET_RUN_ENVIRONMENT` | `daytona` | Public profile: `daytona` or `deno` |
 | `FLEET_DATABASE_URL` | unset | Async SQLAlchemy URL |
@@ -42,6 +61,13 @@ applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
 | `FLEET_RUN_HEARTBEAT_SECONDS` | `10` | Durable active-Run heartbeat interval |
 | `FLEET_RUN_STALE_AFTER_SECONDS` | `60` | Stale-claim threshold; at least three heartbeat intervals |
 
+Role-specific overrides are also available for the TOML Root/Sub policy:
+`FLEET_ROOT_LLM_API_KEY_ENV`, `FLEET_ROOT_LLM_BASE_URL`,
+`FLEET_ROOT_LLM_MAX_TOKENS`, `FLEET_ROOT_LLM_TEMPERATURE`,
+`FLEET_ROOT_LLM_CACHE`, `FLEET_ROOT_LLM_NUM_RETRIES`, with corresponding
+`FLEET_SUB_LLM_*` names. `FLEET_LLM_BASE_URL` and `FLEET_LLM_MAX_TOKENS`
+remain shared compatibility overrides for both roles.
+
 Model ids may use an explicit `provider/model` prefix. For an OpenAI-compatible
 base URL, bare ids are normalized with the `openai/` prefix before constructing
 `dspy.LM`.
@@ -54,7 +80,7 @@ when the supervised command supplies the local API URL.
 
 ## Example
 
-Copy `.env.example` and fill only the selected profile's secrets. Process
-exports override `.env` in normal Pydantic settings loading and in the live MVP
-verifier. Never commit `.env`, credentials, raw provider failures, or evidence
-containing secrets.
+Copy `.env.example`, set `FLEET_CONFIG_PROFILE`, and fill only the selected
+profile's secret variables. Process exports override `.env` in normal settings
+loading and in the live MVP verifier. Never commit `.env`, credentials, raw
+provider failures, or evidence containing secrets.

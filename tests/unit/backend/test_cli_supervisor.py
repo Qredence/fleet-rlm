@@ -161,7 +161,7 @@ def test_daytona_database_preflight_maps_revision_mismatch(
 ) -> None:
     monkeypatch.setattr(
         supervisor,
-        "Settings",
+        "load_runtime_settings",
         lambda: SimpleNamespace(database_url="sqlite+aiosqlite:///private/database.sqlite3"),
     )
 
@@ -182,7 +182,7 @@ def test_daytona_database_preflight_sanitizes_connectivity_failure(
     tmp_path: Path,
 ) -> None:
     secret_url = "postgresql+asyncpg://user:top-secret@private-db/fleet"
-    monkeypatch.setattr(supervisor, "Settings", lambda: SimpleNamespace(database_url=secret_url))
+    monkeypatch.setattr(supervisor, "load_runtime_settings", lambda: SimpleNamespace(database_url=secret_url))
 
     async def reject_database(*_args: object, **_kwargs: object) -> None:
         raise DatabaseConnectionError(f"could not connect to {secret_url}")
@@ -247,6 +247,7 @@ def test_supervisor_runs_pi_tui_against_ready_backend_and_terminates_backend_gro
     ]
     assert backend_options["start_new_session"] is True
     assert backend_options["env"]["FLEET_RUN_ENVIRONMENT"] == "deno"  # type: ignore[index]
+    assert backend_options["env"]["FLEET_CONFIG_PROFILE"] == "local-deno"  # type: ignore[index]
     assert Path(backend_options["stdout"].name).parent == tmp_path / ".fleet_rlm" / "logs"  # type: ignore[union-attr]
     latest_log = tmp_path / ".fleet_rlm" / "logs" / "latest.log"
     assert latest_log.is_symlink()

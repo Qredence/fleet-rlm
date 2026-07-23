@@ -12,7 +12,6 @@ from typing import Any, Sequence
 
 from daytona import CreateSnapshotParams, Resources
 
-from fleet_rlm.config import Settings
 from fleet_rlm.daytona.client import build_daytona_client
 from fleet_rlm.daytona.errors import is_sandbox_not_found, sanitize_provider_message
 from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec, build_snapshot_image
@@ -94,7 +93,11 @@ def check_snapshot(client: Any, spec: DaytonaSandboxSpec) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     spec = _spec(args.name)
-    settings = Settings()
+    from fleet_rlm.config import load_runtime_settings
+
+    # Snapshot operations still use the selected policy profile for credentials
+    # and dotenv loading, but do not require the profile's runtime to be live.
+    settings = load_runtime_settings()
     if settings.daytona_api_key is None or not settings.daytona_api_key.get_secret_value().strip():
         raise SystemExit("FLEET_DAYTONA_API_KEY is required")
     client = build_daytona_client(settings)

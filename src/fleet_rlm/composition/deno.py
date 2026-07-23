@@ -23,8 +23,10 @@ def require_deno_settings(settings: Settings) -> None:
     """Fail closed when Deno dependencies are missing."""
     if settings.run_environment != "deno":
         raise CompositionError("Deno composition requires run_environment='deno'")
-    if settings.llm_api_key is None or not settings.llm_api_key.get_secret_value().strip():
-        raise CompositionError("FLEET_LLM_API_KEY is required in deno mode")
+    from fleet_rlm.rlm.lm_factory import has_llm_credentials
+
+    if not has_llm_credentials(settings):
+        raise CompositionError("FLEET_LLM_API_KEY or configured role API key is required in deno mode")
     if shutil.which("deno") is None:
         raise CompositionError("deno executable is required in deno mode")
 
@@ -41,21 +43,9 @@ def install_deno_composition(
     from fleet_rlm.files.local_catalog import LocalAttachmentBlobGateway
     from fleet_rlm.files.paths import LocalAttachmentPathPolicy
     from fleet_rlm.rlm.factory import RLMFactory
-    from fleet_rlm.rlm.lm_factory import build_lm
+    from fleet_rlm.rlm.lm_factory import build_model_bundle
 
-    api_key = settings.llm_api_key.get_secret_value() if settings.llm_api_key else ""
-    root_lm = build_lm(
-        settings.root_model,
-        api_key=api_key,
-        base_url=settings.llm_base_url,
-        max_tokens=settings.llm_max_tokens,
-    )
-    sub_lm = build_lm(
-        settings.sub_model,
-        api_key=api_key,
-        base_url=settings.llm_base_url,
-        max_tokens=settings.llm_max_tokens,
-    )
+    models = build_model_bundle(settings)
     upload_root, artifact_root = host_roots(settings)
     sql_artifact_blobs = None
     if session_factory is not None:
@@ -82,11 +72,11 @@ def install_deno_composition(
         preparation=DenoTurnPreparation(
             attachments=storage.attachment_lifecycle,
             options=rlm_options(settings),
-            root_lm=root_lm,
-            sub_lm=sub_lm,
+            root_lm=models.root_lm,
+            sub_lm=models.sub_lm,
             skill_catalog=app.state.skill_catalog,
             max_artifact_bytes=settings.max_artifact_bytes,
         ),
-        rlm_factory=RLMFactory(),
+        rlm_factory=RLMFactory(verbose=settings.rlm_verbose),
         workspace_volume_mirror=None,
     )

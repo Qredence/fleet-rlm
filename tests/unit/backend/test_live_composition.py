@@ -321,7 +321,9 @@ def test_app_py_top_level_avoids_dspy_daytona() -> None:
     assert "daytona" not in imported
 
 
-def test_main_exports_single_app_factory() -> None:
+def test_main_exports_single_app_factory(monkeypatch) -> None:
+    monkeypatch.setenv("FLEET_CONFIG_PROFILE", "daytona")
+    monkeypatch.setenv("FLEET_RUN_ENVIRONMENT", "daytona")
     from fleet_rlm import main as main_mod
 
     assert callable(main_mod.create_app)

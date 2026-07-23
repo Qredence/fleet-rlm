@@ -2,6 +2,7 @@ PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/unit/scripts tests/contr
 PYTEST_FAST_MARKERS = not deno and not live_llm and not live_daytona and not benchmark and not db
 PYTEST := uv run --no-sync pytest
 PYTEST_ISOLATED := env \
+	FLEET_CONFIG_PROFILE=daytona \
 	FLEET_RUN_ENVIRONMENT=daytona \
 	FLEET_DAYTONA_API_KEY= \
 	FLEET_DAYTONA_SNAPSHOT= \
@@ -145,10 +146,10 @@ check-codebase-tree:
 	uv run python scripts/check_codebase_tree.py
 
 api-check:
-	uv run python scripts/openapi_tools.py check
+	env FLEET_CONFIG_PROFILE=daytona FLEET_RUN_ENVIRONMENT=daytona uv run python scripts/openapi_tools.py check
 
 api-sync:
-	uv run python scripts/openapi_tools.py generate
+	env FLEET_CONFIG_PROFILE=daytona FLEET_RUN_ENVIRONMENT=daytona uv run python scripts/openapi_tools.py generate
 
 build:
 	rm -rf dist build

@@ -75,8 +75,9 @@ class SessionHistoryToolHost:
                 read_session_history,
                 name="read_session_history",
                 desc=(
-                    'Read a bounded page dictionary of older committed messages. Iterate result["messages"]; '
-                    "each message contains role and content."
+                    "Read a bounded page dictionary of older committed messages only when the current request "
+                    'requires prior-turn evidence. Iterate result["messages"]; each message contains role and '
+                    "content; do not read history for self-contained requests."
                 ),
                 args={
                     "offset": {"type": "integer", "minimum": 0},

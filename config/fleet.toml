@@ -1,0 +1,50 @@
+[config]
+schema_version = 1
+
+[defaults.application]
+name = "fleet-rlm"
+
+[defaults.runtime]
+turn_timeout_seconds = 1800
+max_active_daytona_leases = 8
+heartbeat_seconds = 10
+stale_after_seconds = 60
+
+[defaults.llm.root]
+model = 'openai/deepseek-v4-flash-free'
+api_key_env = "FLEET_LLM_API_KEY"
+cache = true
+num_retries = 3
+
+[defaults.llm.sub]
+model = 'openai/deepseek-v4-flash-free'
+api_key_env = "FLEET_LLM_API_KEY"
+cache = true
+num_retries = 3
+
+[defaults.rlm]
+max_iterations = 20
+max_llm_calls = 50
+max_output_chars = 10000
+verbose = true
+
+[defaults.storage]
+data_root = ".fleet_rlm"
+max_upload_bytes = 10485760
+max_artifact_bytes = 10485760
+
+[defaults.daytona]
+volume_name = "rlm-volume-dspy"
+volume_mount_path = "/home/daytona/fleet"
+
+[defaults.logging]
+level = "INFO"
+
+[profiles.local-deno.runtime]
+environment = "deno"
+
+[profiles.daytona.runtime]
+environment = "daytona"
+
+[profiles.daytona.daytona]
+snapshot = "fleet-rlm-python313-v2"

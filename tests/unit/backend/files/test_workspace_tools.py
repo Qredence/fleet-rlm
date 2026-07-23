@@ -83,6 +83,7 @@ def test_exposes_exact_typed_tool_contracts() -> None:
         "append_workspace_text",
     )
     assert all(type(tool) is dspy.Tool for tool in tools.values())
+    assert "do not explore it for a self-contained request" in tools["list_workspace_files"].desc
     assert tools["list_workspace_files"].args == {
         "path": {"type": "string"},
         "limit": {"type": "integer", "minimum": 1, "maximum": 100},
@@ -95,11 +96,13 @@ def test_exposes_exact_typed_tool_contracts() -> None:
     }
     assert "1..10000" in tools["read_workspace_text"].desc
     assert "next_cursor" in tools["read_workspace_text"].desc
+    assert "relevant" in tools["read_workspace_text"].desc
     assert tools["write_workspace_text"].args == {
         "path": {"type": "string"},
         "content": {"type": "string"},
         "overwrite": {"type": "boolean"},
     }
+    assert "independent of Turn Commit" in tools["write_workspace_text"].desc
 
 
 def test_round_trips_text_with_bounded_json_results() -> None:

@@ -10,6 +10,9 @@ under `tools/fleet-tui/`.
 ```bash
 uv sync --all-extras --dev
 
+# Select the required non-secret runtime policy profile.
+export FLEET_CONFIG_PROFILE=daytona
+
 # supervised backend + pi-tui
 uv run fleet cli   # Daytona
 uv run fleet deno  # Deno/Pyodide
@@ -37,7 +40,7 @@ Deno is the canonical reduced local runtime. It needs an LLM key and Deno on
 `PATH`; SQLite is the normal local persistence choice.
 
 ```bash
-export FLEET_RUN_ENVIRONMENT=deno
+export FLEET_CONFIG_PROFILE=local-deno
 export FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3'
 export FLEET_LLM_API_KEY='...'
 uv run fleet-rlm serve-api --port 8000
@@ -54,12 +57,11 @@ database URL. Initialize the configured database explicitly; startup never
 applies migrations automatically.
 
 ```bash
-export FLEET_RUN_ENVIRONMENT=daytona
+export FLEET_CONFIG_PROFILE=daytona
 export FLEET_DATABASE_URL='postgresql+asyncpg://...'
 export FLEET_DAYTONA_API_KEY='...'
-export FLEET_DAYTONA_SNAPSHOT=fleet-rlm-python313-v2
 export FLEET_LLM_API_KEY='...'
-uv run python scripts/daytona_snapshot.py check --name "$FLEET_DAYTONA_SNAPSHOT"
+uv run python scripts/daytona_snapshot.py check --name fleet-rlm-python313-v2
 uv run python scripts/db_init.py
 uv run fleet-rlm serve-api --port 8000
 ```

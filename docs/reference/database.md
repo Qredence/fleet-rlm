@@ -5,11 +5,11 @@ Canonical Run Environment set: `deno`, `daytona`.
 Local compatibility development can use Deno with SQLite:
 
 ```bash
-export FLEET_RUN_ENVIRONMENT=deno
+export FLEET_CONFIG_PROFILE=local-deno
 export FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3'
 ```
 
-`FLEET_RUN_ENVIRONMENT` selects the Run environment at startup:
+`FLEET_CONFIG_PROFILE` selects the committed Run policy at startup:
 
 | Value | Code execution | LLM calls | Durable volume | Auth/scope |
 | --- | --- | --- | --- | --- |

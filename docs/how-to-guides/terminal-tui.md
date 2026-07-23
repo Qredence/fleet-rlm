@@ -6,19 +6,22 @@ Sandbox, or execution runtime.
 
 ## Start a supervised session
 
-For Daytona, configure the LLM/Daytona keys and an upgraded database. The
+For Daytona, select the `daytona` runtime policy profile, configure the
+LLM/Daytona keys and an upgraded database. The
 supervisor verifies Alembic head and never migrates automatically:
 
 ```bash
+export FLEET_CONFIG_PROFILE=daytona
 uv run python scripts/db_init.py
 uv run fleet cli --port 8000
 ```
 
-For the reduced local Deno/Pyodide runtime, configure the LLM key and ensure
+For the reduced local Deno/Pyodide runtime, select `local-deno`, configure the LLM key and ensure
 Deno is on `PATH`. Add a SQLite database URL when Sessions must survive a
 backend restart:
 
 ```bash
+export FLEET_CONFIG_PROFILE=local-deno
 export FLEET_DATABASE_URL='sqlite+aiosqlite:///./.fleet_rlm/local.sqlite3'
 uv run fleet deno --port 8000
 ```

@@ -124,6 +124,20 @@ def test_each_factory_call_returns_new_rlm_instance() -> None:
     assert first is not second
 
 
+def test_factory_accepts_policy_controlled_host_verbosity() -> None:
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.factory import RLMFactory
+    from fleet_rlm.rlm.model_bundle import RLMModelBundle
+
+    rlm = RLMFactory(verbose=False).create(
+        models=RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock()),
+        options=RLMOptions(),
+        interpreter=_FakeInterpreter(),
+    )
+
+    assert rlm.verbose is False
+
+
 def test_dspy_contract_is_only_native_dspy_rlm_call_site_in_rlm_package() -> None:
     """Static guard: only dspy_contract.py may directly construct native dspy.RLM."""
     import ast

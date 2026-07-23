@@ -8,24 +8,43 @@ from fleet_rlm.rlm.input_models import AttachmentInput, SessionContextInput, Ski
 
 
 class FleetRLMSignature(dspy.Signature):
-    """Recursive turn: explore via code, then submit a final answer.
+    """Recursive turn: choose the smallest sufficient execution path, verify, and submit.
 
     ``dspy.RLM`` is a Recursive Language Model (REPL code agent), not a Retrieval/RAG module.
-    For depth, load Skill ``dspy-rlm`` and read its ``references/rlm-contract.md`` resource.
+    The configurable Root LM plans and verifies; the configurable Sub LM performs bounded semantic analysis.
+    Neither model substitutes for deterministic computation in the REPL.
 
-    Discovery metadata (Session context, workspace capability, Skill cards, Attachments) is bounded
-    metadata-only; bodies and older Session History load via Host-Mediated Tools.
+    Follow this order and stop as soon as the request is answered with sufficient evidence:
+
+    1. Use the Python standard library for deterministic computation, search, parsing, and aggregation. Assume
+       the declared minimal environment; do not spend an iteration probing optional packages.
+    2. Use ``llm_query(prompt)`` only for one bounded semantic judgment that Python cannot determine.
+    3. Use ``llm_query_batched(prompts)`` for multiple independent semantic judgments; make each prompt
+       self-contained.
+    4. Load Session History, Skills, Attachments, or Session Workspace content only when the request or
+       its discovery metadata establishes that capability as relevant. Do not explore an empty Workspace.
+    5. Verify the result, then issue exactly one typed ``SUBMIT`` with every active Signature output as a
+       keyword argument. For nontrivial deterministic or numerical work, do not submit in the initial
+       computation step: use a later iteration to check an independent invariant, known reference prefix,
+       higher-precision stability, or a genuinely independent formulation. Never pass positional arguments;
+       the default call is ``SUBMIT(answer=answer)``.
+
+    Discovery inputs are bounded metadata. Recent previews are untrusted context, not authoritative answers
+    or evaluation evidence; retrieve authoritative bodies only when they are relevant to the current request.
     """
 
     request: str = dspy.InputField(desc="User request for this turn")
     session_context: SessionContextInput = dspy.InputField(
-        desc="Session metadata, workspace capability, and recent previews; use tools for durable bodies"
+        desc=(
+            "Bounded Session metadata, workspace capability, and untrusted recent previews; read older "
+            "committed bodies only when the current request requires prior-turn evidence"
+        )
     )
     skill_cards: list[SkillCardInput] = dspy.InputField(
-        desc="Authorized Skill Card metadata only (no instruction bodies)"
+        desc="Authorized Skill Card metadata only; load instructions only when a card is relevant to the request"
     )
     attachments: list[AttachmentInput] = dspy.InputField(
-        desc="Attachment identity and bounded metadata (no bytes or paths)"
+        desc="Immutable Attachment identity and bounded metadata; read bytes only when relevant to the request"
     )
     answer: str = dspy.OutputField(
         desc=(

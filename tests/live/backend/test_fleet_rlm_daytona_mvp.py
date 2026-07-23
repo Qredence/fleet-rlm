@@ -513,6 +513,98 @@ async def _replace_binding(resources: Any, binding: SandboxBinding) -> SandboxBi
     )
 
 
+def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(tmp_path: Path) -> None:
+    settings = _live_settings(tmp_path).model_copy(
+        update={
+            "rlm_max_iterations": 3,
+            "turn_timeout_seconds": 840,
+        }
+    )
+    app = create_app(settings=settings)
+    sandbox_ids: set[str] = set()
+    cleanup_failures: tuple[str, ...] = ()
+
+    with TestClient(app) as client:
+        resources = app.state.run_environment_resources
+        portal = client.portal
+        assert portal is not None
+        try:
+            created = client.post("/api/sessions", json={"title": "Direct Pi digit proof"})
+            assert created.status_code == 201
+            session_id = UUID(created.json()["id"])
+
+            response = client.post(
+                f"/api/sessions/{session_id}/turns",
+                json={"text": "Tell me the 14952th digit after the decimal point of Pi"},
+                headers={"Idempotency-Key": f"live-direct-pi-{uuid4()}"},
+            )
+            assert response.status_code == 200
+            chunks, done = _sse_chunks(response)
+            assert done == 1
+            _assert_sse_stop(chunks, label="direct_pi_digit")
+
+            code_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-code"]
+            output_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-output"]
+            usage_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-usage"]
+            structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
+            assert len(usage_chunks) == 1
+            # The default one-output Signature is projected as text; multi-output
+            # Signatures use data-structured-result.
+            assert structured == []
+            text = "".join(str(chunk.get("delta", "")) for chunk in chunks if chunk.get("type") == "text-delta")
+            assert text == "1"
+
+            usage = usage_chunks[0]["data"].get("usage", usage_chunks[0]["data"])
+            assert 1 <= int(usage["iterations"]) <= 3
+            assert len(code_chunks) <= 3
+
+            tool_names = [
+                str(chunk.get("toolName", "")) for chunk in chunks if chunk.get("type") == "tool-input-available"
+            ]
+            assert "llm_query" not in tool_names
+            assert "llm_query_batched" not in tool_names
+            forbidden_capabilities = {
+                "load_skill",
+                "read_skill_resource",
+                "read_session_history",
+                "read_attachment",
+                "list_workspace_files",
+                "stat_workspace_file",
+                "read_workspace_text",
+                "write_workspace_text",
+                "append_workspace_text",
+                "create_artifact",
+                "publish_workspace_artifact",
+            }
+            assert forbidden_capabilities.isdisjoint(tool_names)
+
+            outputs = [str(chunk.get("data", {}).get("output", "")) for chunk in output_chunks]
+            assert not any(
+                output.lstrip().startswith(("[Error]", "Execution error", "Execution failed")) for output in outputs
+            )
+            submit_shapes = _call_shapes(chunks, "SUBMIT")
+            assert len(submit_shapes) == 1
+            assert submit_shapes[0]["positional_count"] == 0
+            assert submit_shapes[0]["keyword_names"] == ["answer"]
+
+            page = client.get(f"/api/sessions/{session_id}/turns")
+            assert page.status_code == 200
+            assistant = _assistant_messages(page.json())
+            assert len(assistant) == 1
+            text_parts = [part for part in assistant[0]["parts"] if part["type"] == "text"]
+            assert len(text_parts) == 1
+            assert text_parts[0]["text"] == "1"
+
+            binding = portal.call(resources.bindings.get, session_id)
+            assert binding is not None
+            assert binding.sandbox_id is not None
+            sandbox_ids.add(binding.sandbox_id)
+            assert resources.platform.get(binding.sandbox_id) is not None
+        finally:
+            cleanup_failures = _strict_cleanup(resources, sandbox_ids, settings.volume_name)
+    assert cleanup_failures == ()
+
+
 def test_complete_daytona_mvp_through_fastapi(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
@@ -619,6 +711,7 @@ def test_complete_daytona_mvp_through_fastapi(
 
     try:
         with TestClient(app) as client:
+            resources = app.state.run_environment_resources
             preparation = app.state.turn_preparation
             preparation._capabilities = _ProofCapabilityPreparer(  # noqa: SLF001
                 preparation._capabilities,

@@ -13,11 +13,12 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from types import FrameType
 
-from fleet_rlm.config import Settings
+from fleet_rlm.config import load_runtime_settings
 from fleet_rlm.persistence.database import DatabaseCompatibilityError, check_database_compatibility
 
 SignalHandler = int | Callable[[int, FrameType | None], object] | None
@@ -33,6 +34,37 @@ _READY_TIMEOUT_SECONDS = {
     "daytona": 90.0,
     "deno": 30.0,
 }
+_RUNTIME_PROFILES = {
+    "daytona": "daytona",
+    "deno": "local-deno",
+}
+
+
+def _profile_for_run_environment(run_environment: str) -> str:
+    try:
+        return _RUNTIME_PROFILES[run_environment]
+    except KeyError as exc:
+        raise SupervisorError(f"unsupported Fleet run environment: {run_environment}") from exc
+
+
+@contextmanager
+def _selected_runtime_profile(profile: str, run_environment: str):
+    """Temporarily align parent-process config while validating a forced launcher."""
+    previous_profile = os.environ.get("FLEET_CONFIG_PROFILE")
+    previous_environment = os.environ.get("FLEET_RUN_ENVIRONMENT")
+    os.environ["FLEET_CONFIG_PROFILE"] = profile
+    os.environ["FLEET_RUN_ENVIRONMENT"] = run_environment
+    try:
+        yield
+    finally:
+        if previous_profile is None:
+            os.environ.pop("FLEET_CONFIG_PROFILE", None)
+        else:
+            os.environ["FLEET_CONFIG_PROFILE"] = previous_profile
+        if previous_environment is None:
+            os.environ.pop("FLEET_RUN_ENVIRONMENT", None)
+        else:
+            os.environ["FLEET_RUN_ENVIRONMENT"] = previous_environment
 
 
 def _validate_prerequisites(repo_root: Path) -> tuple[Path, str]:
@@ -91,7 +123,7 @@ def _api_url(host: str, port: int) -> str:
 
 def _validate_daytona_database(repo_root: Path) -> None:
     try:
-        settings = Settings()
+        settings = load_runtime_settings()
     except Exception as exc:  # noqa: BLE001 - CLI configuration failures must remain secret-free
         raise SupervisorError("Fleet database preflight failed; verify FLEET_DATABASE_URL") from exc
     database_url = (settings.database_url or "").strip()
@@ -160,11 +192,13 @@ def supervise(
     repo_root: Path | None = None,
 ) -> None:
     """Run the selected backend and repository pi-tui client together."""
+    profile = _profile_for_run_environment(run_environment)
     root = repo_root or Path(__file__).resolve().parents[3]
     workspace, pnpm = _validate_prerequisites(root)
     _require_available_port(host, port)
     if run_environment == "daytona":
-        _validate_daytona_database(root)
+        with _selected_runtime_profile(profile, run_environment):
+            _validate_daytona_database(root)
     logs = root / ".fleet_rlm" / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
@@ -183,7 +217,11 @@ def supervise(
     ]
     if reload:
         backend_command.append("--reload")
-    backend_env = {**os.environ, "FLEET_RUN_ENVIRONMENT": run_environment}
+    backend_env = {
+        **os.environ,
+        "FLEET_CONFIG_PROFILE": profile,
+        "FLEET_RUN_ENVIRONMENT": run_environment,
+    }
     previous_handlers: dict[int, SignalHandler] = {}
     received_signal: int | None = None
 

@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/pi-tui";
 
 import { formatDuration, formatTokens } from "./format.js";
+import { formatExecutionMetric, summarizeExecution } from "./execution-summary.js";
 import type { ConversationStore, Run, State } from "./store.js";
 import { theme } from "./theme.js";
 import { TranscriptComponent } from "./transcript.js";
@@ -112,13 +113,14 @@ class FooterComponent implements Component {
           ),
         ];
     const run = state.run;
+    const execution = summarizeExecution(state.messages, run.id);
     const outcome = run.outcome
       ? `  ${dim("outcome")} ${theme.fg(outcomeColor(run.outcome), run.outcome)}`
       : "";
     const replay = run.delivery === "replay" ? " · replay" : "";
     lines.push(
       truncateToWidth(
-        `${dim("observed committed")} ↑ ${formatObservedTokens(usage.input)}  ↓ ${formatObservedTokens(usage.output)}  ${dim("turn steps")} ${run.completedSteps}/${run.startedSteps}  ${dim("turn tools")} ${run.toolCount}${outcome}${replay}`,
+        `${dim("observed committed")} ↑ ${formatObservedTokens(usage.input)} ↓ ${formatObservedTokens(usage.output)}  ${dim("turn")} ${formatExecutionMetric(execution.iterations)} iter · ${formatExecutionMetric(execution.subLmCalls)} sub-LM · ${formatExecutionMetric(execution.hostCapabilityCalls)} host · ${formatExecutionMetric(execution.interpreterErrors)} errors · ${execution.durationMs === null ? "—" : formatDuration(execution.durationMs)}${outcome}${replay}`,
         width,
         "",
       ),

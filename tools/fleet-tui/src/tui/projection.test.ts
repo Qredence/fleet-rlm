@@ -72,6 +72,29 @@ describe("terminal projection", () => {
     ]);
   });
 
+  it("preserves missing usage telemetry as unknown", () => {
+    const live = new LiveTurnProjector(clock);
+    live.push({ type: "start", messageId: "run-1", messageMetadata: {} });
+
+    const events = live.push({
+      type: "data-usage",
+      id: "usage-part",
+      data: { usage: {} },
+    });
+
+    expect(events).toMatchObject([
+      {
+        type: "message/upsert",
+        message: {
+          kind: "usage",
+          runId: "run-1",
+          iterations: null,
+          durationMs: null,
+        },
+      },
+    ]);
+  });
+
   it("preserves backend failure and cancellation terminal detail", () => {
     const failed = new LiveTurnProjector(clock);
     failed.push({ type: "start", messageId: "run-1", messageMetadata: {} });

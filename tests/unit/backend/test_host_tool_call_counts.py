@@ -82,6 +82,8 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
         "attachment_id": {"type": "string"},
     }
     assert file_tools["read_attachment"].arg_types == {"attachment_id": str}
+    assert "immutable authorized Attachment" in file_tools["read_attachment"].desc
+    assert "only when" in file_tools["read_attachment"].desc
     assert file_tools["create_artifact"].args == {
         "kind": {"type": "string"},
         "content": {"type": "string"},
@@ -95,6 +97,7 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
         "content": str,
         "title": str | None,
     }
+    assert "promoted only by a successful Turn Commit" in file_tools["create_artifact"].desc
     assert skill_tools["load_skill"].args == {
         "skill_id": {"type": "string"},
         "expected_version": {

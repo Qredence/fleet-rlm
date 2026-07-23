@@ -22,8 +22,10 @@ def require_daytona_settings(settings: Settings) -> None:
         missing.append("FLEET_DAYTONA_API_KEY")
     if not (settings.daytona_snapshot or "").strip():
         missing.append("FLEET_DAYTONA_SNAPSHOT")
-    if settings.llm_api_key is None or not settings.llm_api_key.get_secret_value().strip():
-        missing.append("FLEET_LLM_API_KEY")
+    from fleet_rlm.rlm.lm_factory import has_llm_credentials
+
+    if not has_llm_credentials(settings):
+        missing.append("FLEET_LLM_API_KEY or configured role API key")
     if not (settings.database_url or "").strip():
         missing.append("FLEET_DATABASE_URL")
     if missing:
@@ -160,7 +162,7 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
         coordinator = TurnCoordinator(
             lifecycle=lifecycle,
             preparation=turn_preparation,
-            runner=RLMRunner(factory=RLMFactory()),
+            runner=RLMRunner(factory=RLMFactory(verbose=resolved.rlm_verbose)),
             turn_timeout_seconds=resolved.turn_timeout_seconds,
             cleanup=cleanup,
             claim_loss_fence=resources.session_manager.fence_session,

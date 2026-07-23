@@ -174,7 +174,10 @@ class WorkspaceToolHost:
             dspy.Tool(
                 list_workspace_files,
                 name="list_workspace_files",
-                desc="List immediate entries in this Session's durable workspace.",
+                desc=(
+                    "List immediate entries in this Session's durable Workspace only when existing durable "
+                    "state is relevant; do not explore it for a self-contained request."
+                ),
                 args={
                     "path": {"type": "string"},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 100},
@@ -184,13 +187,16 @@ class WorkspaceToolHost:
             dspy.Tool(
                 stat_workspace_file,
                 name="stat_workspace_file",
-                desc="Read bounded metadata for a Session Workspace path.",
+                desc="Read bounded metadata for a relevant durable Session Workspace path.",
                 args={"path": {"type": "string"}},
             ),
             dspy.Tool(
                 read_workspace_text,
                 name="read_workspace_text",
-                desc=("Read one UTF-8 workspace page with max_chars in 1..10000. Continue with next_cursor until eof."),
+                desc=(
+                    "Read one relevant UTF-8 durable Workspace page with max_chars in 1..10000. Continue with "
+                    "next_cursor until eof."
+                ),
                 args={
                     "path": {"type": "string"},
                     "cursor": {"type": ["string", "null"]},
@@ -204,7 +210,10 @@ class WorkspaceToolHost:
             dspy.Tool(
                 write_workspace_text,
                 name="write_workspace_text",
-                desc="Write UTF-8 text immediately into this Session's durable workspace.",
+                desc=(
+                    "Write UTF-8 text immediately into this Session's durable Workspace when the result must "
+                    "survive the Run; this durability is independent of Turn Commit."
+                ),
                 args={
                     "path": {"type": "string"},
                     "content": {"type": "string"},
@@ -214,7 +223,10 @@ class WorkspaceToolHost:
             dspy.Tool(
                 append_workspace_text,
                 name="append_workspace_text",
-                desc="Append UTF-8 text immediately into this Session's durable workspace.",
+                desc=(
+                    "Append UTF-8 text immediately into this Session's durable Workspace when incremental "
+                    "state must survive the Run; this durability is independent of Turn Commit."
+                ),
                 args={
                     "path": {"type": "string"},
                     "content": {"type": "string"},

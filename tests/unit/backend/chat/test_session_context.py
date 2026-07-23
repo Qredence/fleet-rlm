@@ -134,7 +134,10 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
         "workspace": {
             "available": False,
             "root": ".",
-            "instructions": ("Durable workspace files require the Daytona runtime; REPL variables are not durable."),
+            "instructions": (
+                "Session Workspace is unavailable in Deno. REPL variables and sandbox-local files are "
+                "temporary to the Run; no durable Workspace or Turn Commit artifact workflow is available."
+            ),
         },
     }
     assert all(len(item["preview"]) <= 320 for item in manifest["recent"])

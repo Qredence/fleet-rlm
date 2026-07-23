@@ -37,6 +37,8 @@ def test_history_tool_pages_canonical_messages_with_stable_ordinals() -> None:
     (tool,) = SessionHistoryToolHost(SessionHistory(messages)).as_tools()
 
     assert tool.name == "read_session_history"
+    assert "only when" in tool.desc
+    assert "do not read history for self-contained requests" in tool.desc
     assert tool.args == {
         "offset": {"type": "integer", "minimum": 0},
         "limit": {"type": "integer", "minimum": 1, "maximum": 20},

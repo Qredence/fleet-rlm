@@ -7,12 +7,13 @@ credentials and OpenAI-compatible bases are passed as kwargs (``api_key``,
 
 from __future__ import annotations
 
+import os
 import re
-from typing import Any
+from typing import Any, Literal
 
 import dspy
 
-from fleet_rlm.config import Settings
+from fleet_rlm.config import LLMRoleSettings, Settings
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 
 # Values that look like secrets/keys must never be treated as base URLs.
@@ -51,25 +52,22 @@ def normalize_model_id(model: str, *, base_url: str | None) -> str:
     return f"openai/{cleaned}"
 
 
-def _resolve_api_key(settings: Settings) -> str | None:
-    if settings.llm_api_key is None:
-        return None
-    value = settings.llm_api_key.get_secret_value()
-    return value or None
+def resolve_role_api_key(settings: Settings, role: LLMRoleSettings) -> str | None:
+    """Resolve a secret only from the role's configured environment reference."""
+    value = os.environ.get(role.api_key_env)
+    if value is None:
+        value = settings._dotenv_values.get(role.api_key_env)
+    value = (value or "").strip()
+    if value:
+        return value
+    if role.api_key_env == "FLEET_LLM_API_KEY" and settings.llm_api_key is not None:
+        return settings.llm_api_key.get_secret_value().strip() or None
+    return None
 
 
-def _resolve_base_url(settings: Settings) -> str | None:
-    return sanitize_base_url(settings.llm_base_url)
-
-
-def _resolve_max_tokens(settings: Settings) -> int | None:
-    return settings.llm_max_tokens
-
-
-def _resolve_model_name(settings: Settings, *, role: str) -> str:
-    if role == "root":
-        return settings.root_model
-    return settings.sub_model
+def has_llm_credentials(settings: Settings) -> bool:
+    """Return whether both explicit LLM roles have a configured secret."""
+    return all(resolve_role_api_key(settings, settings.llm_role(role)) for role in ("root", "sub"))
 
 
 def build_lm(
@@ -102,25 +100,23 @@ def build_lm(
 
 
 def build_model_bundle(settings: Settings) -> RLMModelBundle:
-    """Build Root and Sub Model roles from canonical ``FLEET_*`` settings."""
-    api_key = _resolve_api_key(settings)
-    if not api_key:
-        msg = "LLM API key not configured (FLEET_LLM_API_KEY)"
-        raise RuntimeError(msg)
-    base_url = _resolve_base_url(settings)
-    max_tokens = _resolve_max_tokens(settings)
-    root_name = _resolve_model_name(settings, role="root")
-    sub_name = _resolve_model_name(settings, role="sub")
-    root = build_lm(
-        root_name,
-        api_key=api_key,
-        base_url=base_url,
-        max_tokens=max_tokens,
-    )
-    sub = build_lm(
-        sub_name,
-        api_key=api_key,
-        base_url=base_url,
-        max_tokens=max_tokens,
-    )
+    """Build explicit Root and Sub Model roles from resolved Fleet policy."""
+
+    def build(role: Literal["root", "sub"]) -> dspy.LM:
+        policy = settings.llm_role(role)
+        api_key = resolve_role_api_key(settings, policy)
+        if not api_key:
+            raise RuntimeError(f"LLM API key not configured ({policy.api_key_env})")
+        return build_lm(
+            policy.model,
+            api_key=api_key,
+            base_url=sanitize_base_url(policy.base_url),
+            max_tokens=policy.max_tokens,
+            temperature=policy.temperature,
+            cache=policy.cache,
+            num_retries=policy.num_retries,
+        )
+
+    root = build("root")
+    sub = build("sub")
     return RLMModelBundle(root_lm=root, sub_lm=sub)

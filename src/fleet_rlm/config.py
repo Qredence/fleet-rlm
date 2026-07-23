@@ -6,12 +6,49 @@ Secrets use ``SecretStr`` so public dumps never expose plaintext values.
 
 from __future__ import annotations
 
-from typing import Literal
+import logging
+import os
+import re
+import tomllib
+from collections.abc import Mapping
+from copy import deepcopy
+from pathlib import Path
+from typing import Any, Literal, cast
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from dotenv import dotenv_values
+from pydantic import BaseModel, Field, PrivateAttr, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fleet_rlm.snapshot_contract import validate_snapshot_name
+
+_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "fleet.toml"
+_PROFILE_ENVIRONMENT = "FLEET_CONFIG_PROFILE"
+_ENVIRONMENT_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+class FleetConfigurationError(ValueError):
+    """Raised when the required Fleet runtime policy is invalid."""
+
+
+class LLMRoleSettings(BaseModel):
+    """Non-secret settings for one explicit Root or Sub Model role."""
+
+    model_config = SettingsConfigDict(extra="forbid")
+
+    model: str
+    api_key_env: str
+    base_url: str | None = None
+    max_tokens: int | None = Field(default=None, ge=1)
+    temperature: float | None = None
+    cache: bool = True
+    num_retries: int = Field(default=3, ge=0)
+
+    @field_validator("api_key_env")
+    @classmethod
+    def _validate_api_key_env(cls, value: str) -> str:
+        if not _ENVIRONMENT_NAME.fullmatch(value):
+            raise ValueError("api_key_env must name an uppercase environment variable")
+        return value
 
 
 class Settings(BaseSettings):
@@ -83,6 +120,21 @@ class Settings(BaseSettings):
     rlm_max_output_chars: int = Field(default=10_000, gt=0)
     run_heartbeat_seconds: int = Field(default=10, gt=0)
     run_stale_after_seconds: int = Field(default=60, gt=0)
+    rlm_verbose: bool = True
+    log_level: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = "INFO"
+    root_llm_api_key_env: str = "FLEET_LLM_API_KEY"
+    root_llm_base_url: str | None = None
+    root_llm_max_tokens: int | None = Field(default=None, ge=1)
+    root_llm_temperature: float | None = None
+    root_llm_cache: bool = True
+    root_llm_num_retries: int = Field(default=3, ge=0)
+    sub_llm_api_key_env: str = "FLEET_LLM_API_KEY"
+    sub_llm_base_url: str | None = None
+    sub_llm_max_tokens: int | None = Field(default=None, ge=1)
+    sub_llm_temperature: float | None = None
+    sub_llm_cache: bool = True
+    sub_llm_num_retries: int = Field(default=3, ge=0)
+    _dotenv_values: dict[str, str] = PrivateAttr(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_run_liveness(self) -> Settings:
@@ -115,3 +167,203 @@ class Settings(BaseSettings):
             return validate_snapshot_name(text)
         except ValueError as exc:
             raise ValueError("FLEET_DAYTONA_SNAPSHOT must be immutable and end in -v<positive integer>") from exc
+
+    def llm_role(self, role: Literal["root", "sub"]) -> LLMRoleSettings:
+        """Resolve one role, retaining the legacy shared LLM env overrides."""
+        prefix = f"{role}_llm"
+        base_url = getattr(self, f"{prefix}_base_url")
+        max_tokens = getattr(self, f"{prefix}_max_tokens")
+        if "llm_base_url" in self.model_fields_set:
+            base_url = self.llm_base_url
+        if "llm_max_tokens" in self.model_fields_set:
+            max_tokens = self.llm_max_tokens
+        return LLMRoleSettings(
+            model=self.root_model if role == "root" else self.sub_model,
+            api_key_env=getattr(self, f"{prefix}_api_key_env"),
+            base_url=base_url,
+            max_tokens=max_tokens,
+            temperature=getattr(self, f"{prefix}_temperature"),
+            cache=getattr(self, f"{prefix}_cache"),
+            num_retries=getattr(self, f"{prefix}_num_retries"),
+        )
+
+
+_TABLE_KEYS: dict[str, frozenset[str]] = {
+    "application": frozenset({"name"}),
+    "runtime": frozenset(
+        {
+            "environment",
+            "turn_timeout_seconds",
+            "max_active_daytona_leases",
+            "heartbeat_seconds",
+            "stale_after_seconds",
+        }
+    ),
+    "llm": frozenset({"root", "sub"}),
+    "rlm": frozenset({"max_iterations", "max_llm_calls", "max_output_chars", "verbose"}),
+    "storage": frozenset({"data_root", "max_upload_bytes", "max_artifact_bytes", "database_url"}),
+    "daytona": frozenset({"snapshot", "volume_name", "volume_mount_path"}),
+    "logging": frozenset({"level"}),
+}
+_ROLE_KEYS = frozenset({"model", "api_key_env", "base_url", "max_tokens", "temperature", "cache", "num_retries"})
+
+
+def _require_mapping(value: object, location: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise FleetConfigurationError(f"{location} must be a TOML table")
+    return cast(Mapping[str, Any], value)
+
+
+def _validate_policy_table(value: object, location: str) -> None:
+    table = _require_mapping(value, location)
+    unknown = set(table).difference(_TABLE_KEYS)
+    if unknown:
+        raise FleetConfigurationError(f"unknown configuration key(s) at {location}: {', '.join(sorted(unknown))}")
+    for name, child in table.items():
+        if name != "llm":
+            allowed = _TABLE_KEYS[name]
+            child_table = _require_mapping(child, f"{location}.{name}")
+            extras = set(child_table).difference(allowed)
+            if extras:
+                raise FleetConfigurationError(
+                    f"unknown configuration key(s) at {location}.{name}: {', '.join(sorted(extras))}"
+                )
+            continue
+        llm = _require_mapping(child, f"{location}.llm")
+        extras = set(llm).difference(_TABLE_KEYS["llm"])
+        if extras:
+            raise FleetConfigurationError(
+                f"unknown configuration key(s) at {location}.llm: {', '.join(sorted(extras))}"
+            )
+        for role, role_value in llm.items():
+            role_table = _require_mapping(role_value, f"{location}.llm.{role}")
+            role_extras = set(role_table).difference(_ROLE_KEYS)
+            if role_extras:
+                raise FleetConfigurationError(
+                    f"unknown configuration key(s) at {location}.llm.{role}: {', '.join(sorted(role_extras))}"
+                )
+
+
+def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+    result = deepcopy(dict(base))
+    for key, value in override.items():
+        if isinstance(value, Mapping) and isinstance(result.get(key), Mapping):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = deepcopy(value)
+    return result
+
+
+def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
+    def table(name: str) -> Mapping[str, Any]:
+        return _require_mapping(policy.get(name, {}), name)
+
+    application = table("application")
+    runtime = table("runtime")
+    rlm = table("rlm")
+    storage = table("storage")
+    daytona = table("daytona")
+    log = table("logging")
+    llm = table("llm")
+    values: dict[str, Any] = {
+        "app_name": application.get("name"),
+        "run_environment": runtime.get("environment"),
+        "turn_timeout_seconds": runtime.get("turn_timeout_seconds"),
+        "max_active_daytona_leases": runtime.get("max_active_daytona_leases"),
+        "run_heartbeat_seconds": runtime.get("heartbeat_seconds"),
+        "run_stale_after_seconds": runtime.get("stale_after_seconds"),
+        "rlm_max_iterations": rlm.get("max_iterations"),
+        "rlm_max_llm_calls": rlm.get("max_llm_calls"),
+        "rlm_max_output_chars": rlm.get("max_output_chars"),
+        "rlm_verbose": rlm.get("verbose"),
+        "data_root": storage.get("data_root"),
+        "max_upload_bytes": storage.get("max_upload_bytes"),
+        "max_artifact_bytes": storage.get("max_artifact_bytes"),
+        "database_url": storage.get("database_url"),
+        "daytona_snapshot": daytona.get("snapshot"),
+        "volume_name": daytona.get("volume_name"),
+        "volume_mount_path": daytona.get("volume_mount_path"),
+        "log_level": log.get("level"),
+    }
+    for role in ("root", "sub"):
+        role_values = _require_mapping(llm.get(role, {}), f"llm.{role}")
+        values[f"{role}_model"] = role_values.get("model")
+        values[f"{role}_llm_api_key_env"] = role_values.get("api_key_env")
+        values[f"{role}_llm_base_url"] = role_values.get("base_url")
+        values[f"{role}_llm_max_tokens"] = role_values.get("max_tokens")
+        values[f"{role}_llm_temperature"] = role_values.get("temperature")
+        values[f"{role}_llm_cache"] = role_values.get("cache")
+        values[f"{role}_llm_num_retries"] = role_values.get("num_retries")
+    optional = {
+        "database_url",
+        "daytona_snapshot",
+        "root_llm_base_url",
+        "sub_llm_base_url",
+        "root_llm_max_tokens",
+        "sub_llm_max_tokens",
+        "root_llm_temperature",
+        "sub_llm_temperature",
+    }
+    missing = sorted(key for key, value in values.items() if value is None and key not in optional)
+    if missing:
+        raise FleetConfigurationError(f"selected profile is missing required setting(s): {', '.join(missing)}")
+    return values
+
+
+def load_runtime_settings() -> Settings:
+    """Load the one required, restart-only Fleet policy profile for production."""
+    dotenv = dotenv_values(".env")
+    profile = (os.environ.get(_PROFILE_ENVIRONMENT) or dotenv.get(_PROFILE_ENVIRONMENT) or "").strip()
+    if not profile:
+        raise FleetConfigurationError(f"{_PROFILE_ENVIRONMENT} is required")
+    if not _CONFIG_PATH.is_file():
+        raise FleetConfigurationError(f"required Fleet configuration file is missing: {_CONFIG_PATH}")
+    try:
+        document = tomllib.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        raise FleetConfigurationError(f"invalid Fleet configuration TOML: {exc}") from exc
+    root = _require_mapping(document, "root")
+    allowed_root = {"config", "defaults", "profiles"}
+    unknown = set(root).difference(allowed_root)
+    if unknown:
+        raise FleetConfigurationError(f"unknown configuration key(s): {', '.join(sorted(unknown))}")
+    config = _require_mapping(root.get("config", {}), "config")
+    if config != {"schema_version": 1}:
+        raise FleetConfigurationError("config.schema_version must be 1")
+    defaults = _require_mapping(root.get("defaults", {}), "defaults")
+    profiles = _require_mapping(root.get("profiles", {}), "profiles")
+    _validate_policy_table(defaults, "defaults")
+    if profile not in profiles:
+        raise FleetConfigurationError(f"configured profile does not exist: {profile}")
+    selected = _require_mapping(profiles[profile], f"profiles.{profile}")
+    _validate_policy_table(selected, f"profiles.{profile}")
+    values = _flatten_policy(_deep_merge(defaults, selected))
+
+    environment = Settings()
+    if "run_environment" in environment.model_fields_set and environment.run_environment != values["run_environment"]:
+        raise FleetConfigurationError("FLEET_RUN_ENVIRONMENT conflicts with the selected Fleet configuration profile")
+    values.update({field: getattr(environment, field) for field in environment.model_fields_set})
+    settings = Settings(**values)
+    settings._dotenv_values = {key: value for key, value in dotenv.items() if value is not None}
+    return settings
+
+
+def configure_logging(settings: Settings) -> None:
+    """Apply Fleet-owned logger levels without configuring handlers or sinks."""
+    level = getattr(logging, settings.log_level)
+    logging.getLogger("fleet_rlm").setLevel(level)
+    logging.getLogger("dspy").setLevel(level)
+
+
+def redacted_policy_summary(settings: Settings, *, profile: str) -> str:
+    """Return safe operator diagnostics without resolving any secret values."""
+    root = settings.llm_role("root")
+    sub = settings.llm_role("sub")
+    return (
+        f"profile={profile} environment={settings.run_environment} "
+        f"root_model={root.model} sub_model={sub.model} "
+        f"rlm_iterations={settings.rlm_max_iterations} "
+        f"rlm_llm_calls={settings.rlm_max_llm_calls} "
+        f"rlm_verbose={settings.rlm_verbose} log_level={settings.log_level} "
+        f"volume={settings.volume_name}"
+    )

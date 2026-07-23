@@ -13,8 +13,12 @@ uv run fleet-rlm serve-api [--host 127.0.0.1] [--port 8000] [--reload] [--allow-
 Fleet has no caller authentication. Launchers default to `127.0.0.1` and reject
 non-loopback hosts (`0.0.0.0`, LAN addresses, hostnames other than `localhost`)
 unless `--allow-non-loopback-bind` is supplied deliberately.
+Set `FLEET_CONFIG_PROFILE` to `daytona` or `local-deno` before starting a
+backend; the supervised `cli` and `deno` commands select the matching profile
+for their child backend automatically.
 `fleet cli` forces Daytona; `fleet deno` forces Deno. Each starts the backend in
-its own process group, waits up to 30 seconds for readiness, and runs pi-tui in
+its own process group, waits up to 90 seconds for Daytona or 30 seconds for
+Deno readiness, and runs pi-tui in
 the foreground. Node 22.19+, pnpm, the installed TUI workspace, and an unused
 port are required.
 

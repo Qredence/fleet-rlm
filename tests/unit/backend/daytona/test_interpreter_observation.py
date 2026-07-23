@@ -6,7 +6,7 @@ import pytest
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted, ToolCompleted, ToolStarted
 
 
@@ -114,3 +114,47 @@ def test_interpreter_bounds_details_and_finishes_failed_steps() -> None:
     assert observed[2].output == "Execution failed"
     assert "secret-value" not in observed[2].output
     assert "/home/daytona" not in observed[2].output
+
+
+def test_sandbox_backend_uses_one_explicit_context_per_run_and_fails_closed() -> None:
+    class CodeInterpreter:
+        def __init__(self) -> None:
+            self.created: list[object] = []
+            self.deleted: list[object] = []
+
+        def create_context(self) -> object:
+            context = object()
+            self.created.append(context)
+            return context
+
+        def run_code(self, code: str, *, context: object):
+            del code
+            assert context is self.created[-1]
+            return type("Result", (), {"stdout": "ok", "error": None})()
+
+        def delete_context(self, context: object) -> None:
+            self.deleted.append(context)
+
+    code_interpreter = CodeInterpreter()
+    sandbox = type("Sandbox", (), {"code_interpreter": code_interpreter})()
+    first = sandbox_backend(sandbox)
+    second = sandbox_backend(sandbox)
+
+    assert first.run("_out = 'first'").stdout == "ok"
+    assert first.run("_out = 'again'").stdout == "ok"
+    assert second.run("_out = 'second'").stdout == "ok"
+    assert len(code_interpreter.created) == 2
+
+    first.close()
+    second.close()
+    assert code_interpreter.deleted == code_interpreter.created
+
+    class Unavailable:
+        def create_context(self) -> object:
+            raise RuntimeError("api_key=private-key path=/home/daytona/private")
+
+    unavailable = type("Sandbox", (), {"code_interpreter": Unavailable()})()
+    with pytest.raises(DaytonaAdapterError) as failure:
+        sandbox_backend(unavailable).run("print('must not fall back')")
+    assert "private-key" not in str(failure.value)
+    assert "/home/daytona" not in str(failure.value)

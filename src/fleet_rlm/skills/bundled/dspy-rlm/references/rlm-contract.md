@@ -19,6 +19,16 @@ Authority: installed `dspy==3.3.0b1` and [dspy.ai RLM](https://dspy.ai/api/modul
 5. `SUBMIT(...)` ends the RLM loop with typed Signature outputs.
 6. If the loop ends without SUBMIT, DSPy may extract outputs from the trajectory.
 
+For deterministic computation, parsing, search, or aggregation, use Python
+directly. Reserve `llm_query(prompt)` for one bounded semantic judgment and
+`llm_query_batched(prompts)` for multiple independent semantic judgments with
+self-contained prompts. Load Fleet Host Capability bodies only when their
+discovery metadata establishes relevance to the current request.
+Use keyword arguments for the one typed submission and provide every active
+Signature output; for the default Signature, call `SUBMIT(answer=answer)`.
+For nontrivial deterministic work, keep the initial computation and later
+independent verification in separate iterations.
+
 ## Constructor knobs (DSPy defaults)
 
 | Parameter | Default | Role |

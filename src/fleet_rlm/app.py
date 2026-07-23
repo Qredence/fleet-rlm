@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from . import __version__
-from .config import Settings
+from .config import Settings, configure_logging, load_runtime_settings
 
 _RETIRED_ENVIRONMENT_VARIABLES = frozenset(
     {
@@ -98,7 +98,8 @@ def create_app(
     Daytona is the default public profile. Runtime inventory validates at startup.
     """
     _reject_retired_environment_variables()
-    resolved = settings if settings is not None else Settings()
+    resolved = settings if settings is not None else load_runtime_settings()
+    configure_logging(resolved)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

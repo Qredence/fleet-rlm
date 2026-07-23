@@ -71,7 +71,10 @@ class _SandboxCodeInterpreterBackend:
 
     def _ensure_context(self) -> Any:
         if self._context is None:
-            self._context = self._sandbox.code_interpreter.create_context()
+            try:
+                self._context = self._sandbox.code_interpreter.create_context()
+            except Exception as exc:  # noqa: BLE001 - normalize at the SDK boundary
+                raise map_provider_error(exc) from exc
         return self._context
 
     def run(self, code: str, variables: dict[str, object] | None = None) -> BackendExecutionResult:

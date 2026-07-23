@@ -1,7 +1,7 @@
 """ASGI entrypoints for the canonical Fleet RLM backend.
 
-The default ``app`` uses Daytona. Set ``FLEET_RUN_ENVIRONMENT=deno`` for the
-canonical reduced local runtime.
+The default ``app`` uses the selected Fleet policy profile. Set
+``FLEET_CONFIG_PROFILE=local-deno`` for the canonical reduced local runtime.
 """
 
 from __future__ import annotations

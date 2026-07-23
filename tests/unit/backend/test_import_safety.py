@@ -53,12 +53,14 @@ def test_settings_exclude_secrets_from_serialization() -> None:
     }
 
 
-def test_create_app_returns_fastapi_without_side_effects() -> None:
+def test_create_app_returns_fastapi_without_side_effects(monkeypatch) -> None:
     """create_app must return a FastAPI instance without constructing clients."""
     from fastapi import FastAPI
 
     from fleet_rlm.app import create_app
 
+    monkeypatch.setenv("FLEET_CONFIG_PROFILE", "daytona")
+    monkeypatch.setenv("FLEET_RUN_ENVIRONMENT", "daytona")
     app = create_app()
     assert isinstance(app, FastAPI)
     assert app.title

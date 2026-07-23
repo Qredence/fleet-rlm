@@ -46,13 +46,20 @@ class WorkspaceCapabilityMetadata:
 DAYTONA_WORKSPACE_CAPABILITY = WorkspaceCapabilityMetadata(
     available=True,
     root=".",
-    instructions="Use workspace tools for durable files; REPL variables are not durable.",
+    instructions=(
+        "REPL variables and sandbox-local files are temporary to the Run. Session Workspace tool writes are "
+        "immediately durable independently of Turn success. Artifact Candidates are promoted only by a "
+        "successful Turn Commit. Use Workspace tools only when durable state is relevant."
+    ),
 )
 
 DENO_WORKSPACE_CAPABILITY = WorkspaceCapabilityMetadata(
     available=False,
     root=".",
-    instructions="Durable workspace files require the Daytona runtime; REPL variables are not durable.",
+    instructions=(
+        "Session Workspace is unavailable in Deno. REPL variables and sandbox-local files are temporary to "
+        "the Run; no durable Workspace or Turn Commit artifact workflow is available."
+    ),
 )
 
 

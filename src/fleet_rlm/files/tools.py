@@ -270,17 +270,26 @@ class FileToolHost:
             dspy.Tool(
                 read_attachment,
                 name="read_attachment",
-                desc="Read one authorized Attachment by opaque identity.",
+                desc=(
+                    "Read one immutable authorized Attachment by opaque identity only when its advertised "
+                    "metadata is relevant to the current request."
+                ),
             ),
             dspy.Tool(
                 create_artifact,
                 name="create_artifact",
-                desc="Stage a text, markdown, or JSON Artifact Candidate for Turn Commit.",
+                desc=(
+                    "Stage generated text, markdown, or JSON as a private Artifact Candidate; it is promoted "
+                    "only by a successful Turn Commit."
+                ),
             ),
             dspy.Tool(
                 publish_workspace_artifact,
                 name="publish_workspace_artifact",
-                desc="Stage an existing Workspace text file as an Artifact Candidate for Turn Commit.",
+                desc=(
+                    "Stage an existing durable Session Workspace text file as a private Artifact Candidate; "
+                    "it is promoted only by a successful Turn Commit."
+                ),
             ),
         )
 

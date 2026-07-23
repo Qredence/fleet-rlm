@@ -14,6 +14,7 @@ mounts only `workspaces/<workspace_id>` at `/home/daytona/fleet`.
 ## Provision and check
 
 ```bash
+export FLEET_CONFIG_PROFILE=daytona
 export FLEET_DAYTONA_API_KEY='...'
 uv run python scripts/daytona_snapshot.py create --name fleet-rlm-python313-v2
 uv run python scripts/daytona_snapshot.py check --name fleet-rlm-python313-v2

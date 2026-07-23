@@ -281,6 +281,50 @@ describe("renderMessage", () => {
     expect(loadedOutput).toContain("SKILL LOADED");
     expect(loadedOutput).not.toContain("system");
   });
+
+  it("renders the completed execution summary and preserves unknown telemetry", () => {
+    const complete: Message = {
+      id: "usage",
+      kind: "usage",
+      runId: "run",
+      iterations: 2,
+      inputTokens: 1200,
+      outputTokens: 300,
+      durationMs: 4200,
+      observedLmUsage: {},
+      executionSummary: {
+        iterations: 2,
+        subLmCalls: 0,
+        hostCapabilityCalls: 1,
+        interpreterErrors: 0,
+        durationMs: 4200,
+      },
+      ts: 1,
+    };
+    const partial: Message = {
+      ...complete,
+      id: "partial",
+      executionSummary: {
+        iterations: null,
+        subLmCalls: null,
+        hostCapabilityCalls: null,
+        interpreterErrors: null,
+        durationMs: null,
+      },
+    };
+
+    const completedOutput = stripAnsi(renderMessage(complete, 100).join("\n"));
+    const partialOutput = stripAnsi(renderMessage(partial, 100).join("\n"));
+
+    expect(completedOutput).toContain("2 iterations");
+    expect(completedOutput).toContain("0 sub-LM");
+    expect(completedOutput).toContain("1 host");
+    expect(completedOutput).toContain("0 errors");
+    expect(partialOutput).toContain("— iterations");
+    expect(partialOutput).toContain("— sub-LM");
+    expect(partialOutput).toContain("— host");
+    expect(partialOutput).toContain("— errors");
+  });
 });
 
 function stripAnsi(value: string): string {

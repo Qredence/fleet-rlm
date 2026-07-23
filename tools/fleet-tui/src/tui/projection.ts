@@ -1,5 +1,6 @@
 import type { FleetTurn } from "../fleet-api-client.js";
 import type { FleetUIMessageChunk } from "../sse.js";
+import { summarizeExecution } from "./execution-summary.js";
 import type { Message, Role, StoreEvent } from "./store.js";
 import { observedTokenCounts } from "./usage-summary.js";
 
@@ -348,7 +349,16 @@ export function projectDurableTurns(turns: FleetTurn[], clock: Clock = Date.now)
       }
     }
   }
-  return messages.map((message) => ({ type: "message/upsert", message }));
+  return messages.map((message) => ({
+    type: "message/upsert",
+    message:
+      message.kind === "usage"
+        ? {
+            ...message,
+            executionSummary: summarizeExecution(messages, message.runId),
+          }
+        : message,
+  }));
 }
 
 function text(id: string, role: Role, value: string, streaming: boolean, clock: Clock): Message {
@@ -519,10 +529,10 @@ function usage(id: string, runId: string, source: Record<string, unknown>, clock
     id,
     kind: "usage",
     runId,
-    iterations: number(value.iterations),
+    iterations: nullableNumber(value.iterations),
     inputTokens: tokens.input,
     outputTokens: tokens.output,
-    durationMs: number(value.duration_ms ?? value.durationMs),
+    durationMs: nullableNumber(value.duration_ms ?? value.durationMs),
     observedLmUsage,
     ts: clock(),
   };
