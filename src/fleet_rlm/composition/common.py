@@ -145,7 +145,7 @@ def install_local_inventory(
     assert_dspy_version()
     from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.persistence.repositories import (
         InMemorySessionCatalog,
         InMemoryTurnStateStore,
@@ -163,7 +163,7 @@ def install_local_inventory(
             stale_after_seconds=settings.run_stale_after_seconds,
         )
         session_catalog = SqlAlchemySessionCatalog(session_factory)
-    lifecycle = TurnLifecycleModule(
+    lifecycle = TurnLifecycleService(
         turn_state,
         max_artifact_bytes=settings.max_artifact_bytes,
         heartbeat_seconds=settings.run_heartbeat_seconds,

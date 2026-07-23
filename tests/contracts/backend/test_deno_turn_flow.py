@@ -13,7 +13,7 @@ import pytest
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.deno_run_environment import DenoTurnPreparation
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
 from fleet_rlm.files.models import PreparedAttachments
 from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
 from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -77,7 +77,7 @@ async def test_deno_turn_commits_once_without_artifact_or_live_dependencies(monk
         title="Deno contract",
     )
     forbidden_lm = _NetworkForbiddenLM()
-    lifecycle = TurnLifecycleModule(store, max_artifact_bytes=1024)
+    lifecycle = TurnLifecycleService(store, max_artifact_bytes=1024)
     coordinator = TurnCoordinator(
         lifecycle=lifecycle,
         preparation=DenoTurnPreparation(

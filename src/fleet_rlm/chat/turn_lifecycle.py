@@ -13,6 +13,15 @@ from uuid import UUID
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate, ArtifactRef
 from fleet_rlm.artifacts.promotion import ArtifactPromotion, PromotedArtifact, RunArtifactSink
 from fleet_rlm.chat.run_authority import RunAuthority
+from fleet_rlm.chat.turn_claim import (
+    BeginSettlement,
+    ClaimCommand,
+    ClaimFailure,
+    CompleteSettlement,
+    FailClaim,
+    HeartbeatClaim,
+    RevokeClaim,
+)
 from fleet_rlm.chat.turn_detail_policy import commit_success
 from fleet_rlm.result_snapshot import ResultSnapshotSink, encode_result_snapshot
 from fleet_rlm.rlm.context import AsyncCancellationProbe
@@ -144,6 +153,10 @@ class TurnFailure:
     usage: RLMUsage
 
 
+def _claim_failure(failure: TurnFailure) -> ClaimFailure:
+    return ClaimFailure(failure.terminal_status, failure.failure_code, failure.public_message)
+
+
 @dataclass(frozen=True, slots=True)
 class CommittedTurnReceipt:
     run_id: UUID
@@ -175,17 +188,9 @@ class _TurnStateStore(Protocol):
         artifacts: tuple[PromotedArtifact, ...],
     ) -> CommittedTurnReceipt: ...
 
-    async def fail(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt: ...
-
-    async def settle(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt: ...
-
-    async def revoke_claim(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt: ...
-
-    async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt: ...
+    async def transition_claim(self, turn: ExecuteTurn, command: ClaimCommand) -> FailedRunReceipt | None: ...
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult: ...
-
-    async def heartbeat(self, turn: ExecuteTurn) -> None: ...
 
 
 class TurnLifecycle(Protocol):
@@ -214,7 +219,7 @@ class TurnLifecycle(Protocol):
     async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt: ...
 
 
-class TurnLifecycleModule:
+class TurnLifecycleService:
     """Coordinate validation, Artifact publication, and atomic Turn state."""
 
     def __init__(
@@ -245,7 +250,7 @@ class TurnLifecycleModule:
         if turn.authority.revoked:
             raise TurnLifecycleUnavailable("Turn claim is no longer available")
         if isinstance(resolution, TurnFailure):
-            return await self._store.fail(turn, resolution)
+            return await self._transition_receipt(turn, FailClaim(_claim_failure(resolution), resolution.usage))
         if not resolution.succeeded:
             await self._rollback(
                 artifact_sink,
@@ -254,15 +259,13 @@ class TurnLifecycleModule:
             status = resolution.terminal_status
             if status == "completed":
                 raise TurnStateError("contradictory successful outcome state")
-            return await self._store.fail(
-                turn,
-                TurnFailure(
-                    terminal_status=status,
-                    failure_code=failure_code_for_terminal_status(status),
-                    public_message=resolution.public_error_message or "Turn failed",
-                    usage=resolution.usage,
-                ),
+            failure = TurnFailure(
+                terminal_status=status,
+                failure_code=failure_code_for_terminal_status(status),
+                public_message=resolution.public_error_message or "Turn failed",
+                usage=resolution.usage,
             )
+            return await self._transition_receipt(turn, FailClaim(_claim_failure(failure), failure.usage))
 
         candidates = self._promotion.validate(
             resolution.artifact_candidates,
@@ -334,7 +337,7 @@ class TurnLifecycleModule:
                 "Turn could not be committed",
                 resolution.usage,
             )
-            return await self._store.fail(turn, failure)
+            return await self._transition_receipt(turn, FailClaim(_claim_failure(failure), failure.usage))
 
         await self._rollback(artifact_sink, (candidate.staging_path for candidate in candidates))
         return receipt
@@ -343,19 +346,28 @@ class TurnLifecycleModule:
         return await self._store.request_cancel(access, run_id)
 
     async def heartbeat(self, turn: ExecuteTurn) -> None:
-        await self._store.heartbeat(turn)
+        await self._transition(turn, HeartbeatClaim())
 
     async def settle(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
         """Revoke commit authority while retaining the durable claim for cleanup."""
-        return await self._store.settle(turn, failure)
+        return await self._transition_receipt(turn, BeginSettlement(_claim_failure(failure), failure.usage))
 
     async def revoke_claim(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
         """Idempotently classify a Run whose durable claim authority was lost."""
-        return await self._store.revoke_claim(turn, failure)
+        return await self._transition_receipt(turn, RevokeClaim(_claim_failure(failure), failure.usage))
 
     async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt:
         """Release a retained claim only after owned cleanup has completed."""
-        return await self._store.complete_settling(turn)
+        return await self._transition_receipt(turn, CompleteSettlement())
+
+    async def _transition(self, turn: ExecuteTurn, command: ClaimCommand) -> FailedRunReceipt | None:
+        return await self._store.transition_claim(turn, command)
+
+    async def _transition_receipt(self, turn: ExecuteTurn, command: ClaimCommand) -> FailedRunReceipt:
+        receipt = await self._transition(turn, command)
+        if receipt is None:
+            raise TurnStateError("claim transition did not return a receipt")
+        return receipt
 
     async def _read_candidates(
         self,

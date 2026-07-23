@@ -14,6 +14,9 @@ and its matching automated check in the same patch.
 - `chat/` owns preparation, coordination, Turn Lifecycle, terminal ordering, and
   cleanup. `TurnLifecycle.finish()` owns Artifact publication and atomic commit;
   `TurnCoordinator` owns stream settlement and resource release.
+- Turn Claim persistence has one typed `transition_claim()` operation. Its pure
+  command/state policy is shared by in-memory and SQL adapters; successful
+  commit and cancellation requests remain separate.
 - `rlm/` owns model roles, Signature inputs, fresh native RLM construction,
   options, Runtime Events, cancellation, and execution.
 - `daytona/` is the exclusive SDK boundary and owns provider-error normalization.

@@ -13,7 +13,7 @@ import pytest
 
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, TurnLifecycleModule
+from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, TurnLifecycleService
 from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 from fleet_rlm.persistence.repositories import InMemoryTurnStateStore
@@ -95,7 +95,7 @@ class _Harness:
         self.mode = mode
         self.access = TurnAccess(uuid4(), uuid4())
         self.store = InMemoryTurnStateStore()
-        self.lifecycle = TurnLifecycleModule(self.store, max_artifact_bytes=1024)
+        self.lifecycle = TurnLifecycleService(self.store, max_artifact_bytes=1024)
         self.session_id = uuid4()
         self.run_id = uuid4()
         self.cleanup_calls = 0

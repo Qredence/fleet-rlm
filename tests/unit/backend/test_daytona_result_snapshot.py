@@ -111,7 +111,7 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
     from fleet_rlm.chat.turn_lifecycle import (
         ExecuteTurn,
         FailedRunReceipt,
-        TurnLifecycleModule,
+        TurnLifecycleService,
         _TurnClaimToken,
     )
     from fleet_rlm.daytona.paths import VolumePaths
@@ -163,7 +163,18 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
         async def commit(self, claimed, committed, artifacts):
             raise RuntimeError("commit failed")
 
-        async def fail(self, claimed, failure):
+        async def transition_claim(self, claimed, command):
+            from fleet_rlm.chat.turn_claim import FailClaim
+            from fleet_rlm.chat.turn_lifecycle import TurnFailure
+            from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+
+            assert isinstance(command, FailClaim)
+            failure = TurnFailure(
+                command.failure.status,
+                command.failure.code,
+                command.failure.public_message,
+                command.usage or empty_rlm_usage(),
+            )
             return FailedRunReceipt(
                 claimed.run_id,
                 "failed",
@@ -172,7 +183,7 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
                 True,
             )
 
-    receipt = await TurnLifecycleModule(Store(), max_artifact_bytes=1024).finish(
+    receipt = await TurnLifecycleService(Store(), max_artifact_bytes=1024).finish(
         turn,
         RLMOutcome(
             "completed",

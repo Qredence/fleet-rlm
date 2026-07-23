@@ -16,14 +16,19 @@ from fleet_rlm.artifacts.models import ArtifactRef
 from fleet_rlm.artifacts.promotion import PromotedArtifact
 from fleet_rlm.artifacts.safety import parse_kind
 from fleet_rlm.chat.turn_claim import (
+    BeginSettlement,
+    ClaimCommand,
     ClaimFailure,
     ClaimFailureCode,
     ClaimState,
     ClaimStatus,
     ClaimTransition,
+    CompleteSettlement,
+    FailClaim,
+    HeartbeatClaim,
     InvalidClaimTransition,
-    heartbeat_allowed,
-    transition_claim,
+    RevokeClaim,
+    decide_claim_transition,
 )
 from fleet_rlm.chat.turn_lifecycle import (
     BeginTurn,
@@ -117,6 +122,12 @@ def _decode_claim_code(value: str | None) -> ClaimFailureCode | None:
 
 def _claim_failure(failure: TurnFailure) -> ClaimFailure:
     return ClaimFailure(failure.terminal_status, failure.failure_code, failure.public_message)
+
+
+def _command_usage(command: ClaimCommand) -> RLMUsage | None:
+    if isinstance(command, (FailClaim, BeginSettlement, RevokeClaim)):
+        return cast(RLMUsage, command.usage)
+    return None
 
 
 def _turn_failure(intent: ClaimFailure, usage: RLMUsage) -> TurnFailure:
@@ -338,63 +349,30 @@ class InMemoryTurnStateStore:
                 )
             return tuple(records)
 
-    async def fail(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
+    async def transition_claim(self, turn: ExecuteTurn, command: ClaimCommand) -> FailedRunReceipt | None:
         async with self._lock:
             run = self._runs.get(turn.run_id)
             if run is None or run.access != turn.access or run.session_id != turn.session_id:
                 raise TurnNotFoundError("Turn not found")
-            if run.claim != turn._claim:
+            stale_terminal = (
+                isinstance(command, CompleteSettlement) and run.status == "failed" and run.failure_code == "stale_claim"
+            )
+            if not isinstance(command, RevokeClaim) and not stale_terminal and run.claim != turn._claim:
                 raise TurnStateError("Turn claim is invalid")
             try:
-                decision = transition_claim("fail", _memory_claim_state(run), _claim_failure(failure))
+                decision = decide_claim_transition(_memory_claim_state(run), command)
             except InvalidClaimTransition as exc:
                 raise TurnStateError(str(exc)) from exc
-            if decision.next_state is not None:
-                _apply_memory_next_state(run, decision.next_state, usage=failure.usage)
-            return _transition_receipt(run.run_id, decision)
-
-    async def settle(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
-        async with self._lock:
-            run = self._runs.get(turn.run_id)
-            if run is None or run.access != turn.access or run.session_id != turn.session_id:
-                raise TurnNotFoundError("Turn not found")
-            if run.claim != turn._claim:
-                raise TurnStateError("Turn claim is invalid")
-            try:
-                decision = transition_claim("settle", _memory_claim_state(run), _claim_failure(failure))
-            except InvalidClaimTransition as exc:
-                raise TurnStateError(str(exc)) from exc
-            if decision.next_state is not None:
-                _apply_memory_next_state(run, decision.next_state, usage=failure.usage)
-            return _transition_receipt(run.run_id, decision)
-
-    async def revoke_claim(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
-        async with self._lock:
-            run = self._runs.get(turn.run_id)
-            if run is None or run.access != turn.access or run.session_id != turn.session_id:
-                raise TurnNotFoundError("Turn not found")
-            try:
-                decision = transition_claim("revoke", _memory_claim_state(run), _claim_failure(failure))
-            except InvalidClaimTransition as exc:
-                raise TurnStateError(str(exc)) from exc
-            if decision.next_state is not None:
-                _apply_memory_next_state(run, decision.next_state, usage=failure.usage)
-            return _transition_receipt(run.run_id, decision)
-
-    async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt:
-        async with self._lock:
-            run = self._runs.get(turn.run_id)
-            if run is not None and run.status == "failed" and run.failure_code == "stale_claim":
-                return _transition_receipt(run.run_id, transition_claim("complete", _memory_claim_state(run)))
-            if run is None or run.claim != turn._claim:
-                raise TurnStateError("Turn is not settling under this claim")
-            try:
-                decision = transition_claim("complete", _memory_claim_state(run))
-            except InvalidClaimTransition as exc:
-                raise TurnStateError(str(exc)) from exc
-            if decision.next_state is not None:
-                _apply_memory_next_state(run, decision.next_state)
-            return _transition_receipt(run.run_id, decision)
+            if isinstance(command, HeartbeatClaim):
+                if not decision.heartbeat_allowed:
+                    raise TurnStateError("Turn claim is invalid")
+                return None
+            transition = decision.transition
+            if transition is None:
+                raise TurnStateError("claim decision did not include a transition")
+            if transition.next_state is not None:
+                _apply_memory_next_state(run, transition.next_state, usage=_command_usage(command))
+            return _transition_receipt(run.run_id, transition)
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         async with self._lock:
@@ -407,12 +385,6 @@ class InMemoryTurnStateStore:
                 return "already_requested"
             run.cancel_requested = True
             return "requested"
-
-    async def heartbeat(self, turn: ExecuteTurn) -> None:
-        async with self._lock:
-            run = self._runs.get(turn.run_id)
-            if run is None or run.claim != turn._claim or not heartbeat_allowed(_memory_claim_state(run)):
-                raise TurnStateError("Turn claim is invalid")
 
     def _claimed(self, turn: ExecuteTurn) -> tuple[_RunState, _SessionState]:
         run = self._runs.get(turn.run_id)
@@ -436,8 +408,8 @@ class InMemoryTurnStateStore:
             async with self._lock:
                 run = self._runs.get(pending_run.run_id)
                 if run is not None and run.status == "settling" and run.terminal_intent is not None:
-                    decision = transition_claim("complete", _memory_claim_state(run))
-                    if decision.next_state is not None:
+                    decision = decide_claim_transition(_memory_claim_state(run), CompleteSettlement()).transition
+                    if decision is not None and decision.next_state is not None:
                         _apply_memory_next_state(run, decision.next_state)
 
 
@@ -617,91 +589,46 @@ class SqlAlchemyTurnStateStore:
                 tuple(item.ref for item in artifacts),
             )
 
-    async def fail(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
+    async def transition_claim(self, turn: ExecuteTurn, command: ClaimCommand) -> FailedRunReceipt | None:
         async with self._sessions() as db, db.begin():
             run = await db.get(RunRow, turn.run_id, with_for_update=True)
             if run is None or run.session_id != turn.session_id:
                 raise TurnNotFoundError("Turn not found")
-            if run.claim_owner != str(turn._claim.value):
+            stale_terminal = (
+                isinstance(command, CompleteSettlement) and run.status == "failed" and run.failure_code == "stale_claim"
+            )
+            if (
+                not isinstance(command, RevokeClaim)
+                and not stale_terminal
+                and run.claim_owner != str(turn._claim.value)
+            ):
                 raise TurnStateError("Turn claim is invalid")
             try:
-                decision = transition_claim("fail", _row_claim_state(run), _claim_failure(failure))
+                decision = decide_claim_transition(_row_claim_state(run), command)
             except InvalidClaimTransition as exc:
                 raise TurnStateError(str(exc)) from exc
-            if decision.next_state is not None:
+            if isinstance(command, HeartbeatClaim):
+                if not decision.heartbeat_allowed or run.claim_owner != str(turn._claim.value):
+                    raise TurnStateError("Turn claim is invalid")
+                run.claim_heartbeat_at = datetime.now(UTC)
+                return None
+            transition = decision.transition
+            if transition is None:
+                raise TurnStateError("claim decision did not include a transition")
+            if transition.next_state is not None:
                 _apply_row_next_state(
                     run,
-                    decision.next_state,
-                    public_message=decision.public_message,
-                    usage=failure.usage,
+                    transition.next_state,
+                    public_message=transition.public_message,
+                    usage=_command_usage(command),
                 )
-                run.finished_at = datetime.now(UTC)
-                run.claim_owner = None
-                run.claim_heartbeat_at = None
-            return _transition_receipt(run.id, decision)
-
-    async def settle(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
-        async with self._sessions() as db, db.begin():
-            run = await db.get(RunRow, turn.run_id, with_for_update=True)
-            if run is None or run.session_id != turn.session_id:
-                raise TurnNotFoundError("Turn not found")
-            if run.claim_owner != str(turn._claim.value):
-                raise TurnStateError("Turn claim is invalid")
-            try:
-                decision = transition_claim("settle", _row_claim_state(run), _claim_failure(failure))
-            except InvalidClaimTransition as exc:
-                raise TurnStateError(str(exc)) from exc
-            if decision.next_state is not None:
-                _apply_row_next_state(
-                    run,
-                    decision.next_state,
-                    public_message=decision.public_message,
-                    usage=failure.usage,
-                )
-                run.recovery_metadata_json = {"cleanup": "pending"}
-            return _transition_receipt(run.id, decision)
-
-    async def revoke_claim(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
-        async with self._sessions() as db, db.begin():
-            run = await db.get(RunRow, turn.run_id, with_for_update=True)
-            if run is None or run.session_id != turn.session_id:
-                raise TurnNotFoundError("Turn not found")
-            try:
-                decision = transition_claim("revoke", _row_claim_state(run), _claim_failure(failure))
-            except InvalidClaimTransition as exc:
-                raise TurnStateError(str(exc)) from exc
-            if decision.next_state is not None:
-                _apply_row_next_state(
-                    run,
-                    decision.next_state,
-                    public_message=decision.public_message,
-                    usage=failure.usage,
-                )
-                run.recovery_metadata_json = {"cleanup": "pending"}
-            return _transition_receipt(run.id, decision)
-
-    async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt:
-        async with self._sessions() as db, db.begin():
-            run = await db.get(RunRow, turn.run_id, with_for_update=True)
-            if run is not None and run.status == "failed" and run.failure_code == "stale_claim":
-                return _transition_receipt(run.id, transition_claim("complete", _row_claim_state(run)))
-            if run is None or run.session_id != turn.session_id or run.claim_owner != str(turn._claim.value):
-                raise TurnStateError("Turn is not settling under this claim")
-            try:
-                decision = transition_claim("complete", _row_claim_state(run))
-            except InvalidClaimTransition as exc:
-                raise TurnStateError(str(exc)) from exc
-            if decision.next_state is not None:
-                _apply_row_next_state(
-                    run,
-                    decision.next_state,
-                    public_message=decision.public_message,
-                )
-                run.finished_at = datetime.now(UTC)
-                run.claim_owner = None
-                run.claim_heartbeat_at = None
-                run.recovery_metadata_json = None
-            return _transition_receipt(run.id, decision)
+                if isinstance(command, (FailClaim, CompleteSettlement)):
+                    run.finished_at = datetime.now(UTC)
+                    run.claim_owner = None
+                    run.claim_heartbeat_at = None
+                elif isinstance(command, (BeginSettlement, RevokeClaim)):
+                    run.recovery_metadata_json = {"cleanup": "pending"}
+            return _transition_receipt(run.id, transition)
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         async with self._sessions() as db, db.begin():
@@ -723,18 +650,6 @@ class SqlAlchemyTurnStateStore:
                 return "already_requested"
             run.cancel_requested_at = datetime.now(UTC)
             return "requested"
-
-    async def heartbeat(self, turn: ExecuteTurn) -> None:
-        async with self._sessions() as db, db.begin():
-            run = await db.get(RunRow, turn.run_id, with_for_update=True)
-            if (
-                run is None
-                or run.session_id != turn.session_id
-                or not heartbeat_allowed(_row_claim_state(run))
-                or run.claim_owner != str(turn._claim.value)
-            ):
-                raise TurnStateError("Turn claim is invalid")
-            run.claim_heartbeat_at = datetime.now(UTC)
 
     async def _replay(self, db: AsyncSession, run: RunRow) -> ReplayTurn:
         receipt = await self._receipt(db, run)
@@ -814,21 +729,21 @@ class SqlAlchemyTurnStateStore:
                     continue
                 if run.status == "running":
                     stale = ClaimFailure("failed", "stale_claim", "Turn failed")
-                    revocation = transition_claim("revoke", _row_claim_state(run), stale)
-                    if revocation.next_state is None:
+                    revocation = decide_claim_transition(_row_claim_state(run), RevokeClaim(stale)).transition
+                    if revocation is None or revocation.next_state is None:
                         continue
                     _apply_row_next_state(
                         run,
                         revocation.next_state,
                         public_message=revocation.public_message,
                     )
-                    decision = transition_claim("complete", revocation.next_state)
+                    decision = decide_claim_transition(revocation.next_state, CompleteSettlement()).transition
                 else:
                     try:
-                        decision = transition_claim("complete", _row_claim_state(run))
+                        decision = decide_claim_transition(_row_claim_state(run), CompleteSettlement()).transition
                     except InvalidClaimTransition:
                         continue
-                if decision.next_state is None:
+                if decision is None or decision.next_state is None:
                     continue
                 _apply_row_next_state(
                     run,

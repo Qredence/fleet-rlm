@@ -44,7 +44,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.rlm.events import (
         TERMINAL_DETAIL_TYPES,
@@ -143,7 +143,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
 
     cleanup = TurnCleanupSupervisor()
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleModule(store, max_artifact_bytes=100),
+        lifecycle=TurnLifecycleService(store, max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
         cleanup=cleanup,
@@ -173,7 +173,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
 async def test_open_preparation_failure_is_durable_before_stream_and_releases_claim() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import BeginTurn, TurnFailure, TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, TurnFailure, TurnLifecycleService
     from fleet_rlm.chat.turn_preparation import TurnPreparationUnavailable
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
@@ -181,7 +181,7 @@ async def test_open_preparation_failure_is_durable_before_stream_and_releases_cl
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryTurnStateStore()
-    lifecycle = TurnLifecycleModule(store, max_artifact_bytes=100)
+    lifecycle = TurnLifecycleService(store, max_artifact_bytes=100)
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id,
         workspace_id=access.workspace_id,
@@ -216,14 +216,14 @@ async def test_open_preparation_failure_is_durable_before_stream_and_releases_cl
 async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.chat.turn_preparation import TurnPreparationTimeout
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryTurnStateStore()
-    authoritative = TurnLifecycleModule(store, max_artifact_bytes=100)
+    authoritative = TurnLifecycleService(store, max_artifact_bytes=100)
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id,
         workspace_id=access.workspace_id,
@@ -280,7 +280,7 @@ async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_orde
 
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunFailed, RunStarted, Status
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -336,7 +336,7 @@ async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_orde
             return Stream()
 
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleModule(store, max_artifact_bytes=100),
+        lifecycle=TurnLifecycleService(store, max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
     )
@@ -360,7 +360,7 @@ async def test_open_commit_failure_projects_commit_failure_terminal() -> None:
 
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunFailed, RunStarted
@@ -379,9 +379,8 @@ async def test_open_commit_failure_projects_commit_failure_terminal() -> None:
 
     class CommitFailingStore:
         begin = authoritative.begin
-        fail = authoritative.fail
+        transition_claim = authoritative.transition_claim
         request_cancel = authoritative.request_cancel
-        heartbeat = authoritative.heartbeat
 
         async def commit(self, turn, committed, artifacts):
             raise RuntimeError("database detail must not escape")
@@ -424,7 +423,7 @@ async def test_open_commit_failure_projects_commit_failure_terminal() -> None:
             return Stream()
 
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleModule(CommitFailingStore(), max_artifact_bytes=100),
+        lifecycle=TurnLifecycleService(CommitFailingStore(), max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
     )

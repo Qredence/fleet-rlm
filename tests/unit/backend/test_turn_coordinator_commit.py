@@ -17,7 +17,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import BeginTurn, TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, TurnLifecycleService
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import (
@@ -126,7 +126,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
             return Stream(execution)
 
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleModule(store, max_artifact_bytes=100),
+        lifecycle=TurnLifecycleService(store, max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
     )
@@ -170,7 +170,7 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, ArtifactCreated, EventRecorder, RunFailed, RunStarted
     from fleet_rlm.rlm.outcome import RLMOutcome
@@ -251,7 +251,7 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
             return Stream()
 
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleModule(store, max_artifact_bytes=100),
+        lifecycle=TurnLifecycleService(store, max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
     )
@@ -280,7 +280,7 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
     importlib.import_module("fleet_rlm.rlm.outcome")
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories import SqlAlchemySessionCatalog
@@ -355,7 +355,7 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
         runner = Runner()
         store = SqlAlchemyTurnStateStore(factory)
         coordinator = TurnCoordinator(
-            lifecycle=TurnLifecycleModule(store, max_artifact_bytes=100),
+            lifecycle=TurnLifecycleService(store, max_artifact_bytes=100),
             preparation=Preparation(),
             runner=runner,
         )

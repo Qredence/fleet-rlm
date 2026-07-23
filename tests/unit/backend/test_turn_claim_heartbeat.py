@@ -44,7 +44,7 @@ async def test_heartbeat_supervision_covers_preparation() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule, TurnLifecycleUnavailable, TurnStateError
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService, TurnLifecycleUnavailable, TurnStateError
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
@@ -59,14 +59,14 @@ async def test_heartbeat_supervision_covers_preparation() -> None:
     class Store:
         begin = authoritative.begin
         commit = authoritative.commit
-        fail = authoritative.fail
-        settle = authoritative.settle
-        revoke_claim = authoritative.revoke_claim
-        complete_settling = authoritative.complete_settling
         request_cancel = authoritative.request_cancel
 
-        async def heartbeat(self, _turn):
-            raise TurnStateError("Turn claim is invalid")
+        async def transition_claim(self, turn, command):
+            from fleet_rlm.chat.turn_claim import HeartbeatClaim
+
+            if isinstance(command, HeartbeatClaim):
+                raise TurnStateError("Turn claim is invalid")
+            return await authoritative.transition_claim(turn, command)
 
     class Preparation:
         async def prepare(self, _turn, *, deadline):
@@ -85,7 +85,7 @@ async def test_heartbeat_supervision_covers_preparation() -> None:
 
     cleanup = TurnCleanupSupervisor()
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleModule(
+        lifecycle=TurnLifecycleService(
             Store(),
             max_artifact_bytes=100,
             heartbeat_seconds=0.01,
@@ -108,7 +108,7 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted
@@ -127,18 +127,18 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
     class Store:
         begin = authoritative.begin
         commit = authoritative.commit
-        fail = authoritative.fail
-        settle = authoritative.settle
-        revoke_claim = authoritative.revoke_claim
-        complete_settling = authoritative.complete_settling
         request_cancel = authoritative.request_cancel
 
-        async def heartbeat(self, turn):
+        async def transition_claim(self, turn, command):
+            from fleet_rlm.chat.turn_claim import HeartbeatClaim
+
+            if not isinstance(command, HeartbeatClaim):
+                return await authoritative.transition_claim(turn, command)
             nonlocal attempts
             attempts += 1
             if attempts == 1:
                 raise ConnectionError("temporary database failure")
-            await authoritative.heartbeat(turn)
+            return await authoritative.transition_claim(turn, command)
 
     run_id = uuid4()
 
@@ -180,7 +180,7 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
 
     cleanup = TurnCleanupSupervisor()
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleModule(
+        lifecycle=TurnLifecycleService(
             Store(),
             max_artifact_bytes=100,
             heartbeat_seconds=0.01,
@@ -208,7 +208,7 @@ async def test_deno_repeated_transient_failures_revoke_without_provider_fence() 
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -224,14 +224,14 @@ async def test_deno_repeated_transient_failures_revoke_without_provider_fence() 
     class Store:
         begin = authoritative.begin
         commit = authoritative.commit
-        fail = authoritative.fail
-        settle = authoritative.settle
-        revoke_claim = authoritative.revoke_claim
-        complete_settling = authoritative.complete_settling
         request_cancel = authoritative.request_cancel
 
-        async def heartbeat(self, _turn):
-            raise ConnectionError("database unavailable")
+        async def transition_claim(self, turn, command):
+            from fleet_rlm.chat.turn_claim import HeartbeatClaim
+
+            if isinstance(command, HeartbeatClaim):
+                raise ConnectionError("database unavailable")
+            return await authoritative.transition_claim(turn, command)
 
     run_id = uuid4()
 
@@ -269,7 +269,7 @@ async def test_deno_repeated_transient_failures_revoke_without_provider_fence() 
 
     cleanup = TurnCleanupSupervisor()
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleModule(
+        lifecycle=TurnLifecycleService(
             Store(),
             max_artifact_bytes=100,
             heartbeat_seconds=0.01,
@@ -298,7 +298,7 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule, TurnStateError
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService, TurnStateError
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.events import RunFailed
@@ -316,14 +316,14 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
 
     class Store:
         begin = authoritative.begin
-        fail = authoritative.fail
-        settle = authoritative.settle
-        revoke_claim = authoritative.revoke_claim
-        complete_settling = authoritative.complete_settling
         request_cancel = authoritative.request_cancel
 
-        async def heartbeat(self, _turn):
-            raise TurnStateError("Turn claim is invalid")
+        async def transition_claim(self, turn, command):
+            from fleet_rlm.chat.turn_claim import HeartbeatClaim
+
+            if isinstance(command, HeartbeatClaim):
+                raise TurnStateError("Turn claim is invalid")
+            return await authoritative.transition_claim(turn, command)
 
         async def commit(self, turn, committed, artifacts):
             await release_commit.wait()
@@ -371,7 +371,7 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
 
     cleanup = TurnCleanupSupervisor()
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleModule(
+        lifecycle=TurnLifecycleService(
             Store(),
             max_artifact_bytes=100,
             heartbeat_seconds=0.01,
@@ -401,7 +401,7 @@ async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> 
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule, TurnStateError
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService, TurnStateError
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -419,13 +419,13 @@ async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> 
     class Store:
         begin = authoritative.begin
         commit = authoritative.commit
-        fail = authoritative.fail
-        settle = authoritative.settle
-        revoke_claim = authoritative.revoke_claim
-        complete_settling = authoritative.complete_settling
         request_cancel = authoritative.request_cancel
 
-        async def heartbeat(self, _turn):
+        async def transition_claim(self, turn, command):
+            from fleet_rlm.chat.turn_claim import HeartbeatClaim
+
+            if not isinstance(command, HeartbeatClaim):
+                return await authoritative.transition_claim(turn, command)
             heartbeat_attempted.set()
             raise TurnStateError("Turn claim is invalid")
 
@@ -473,7 +473,7 @@ async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> 
 
     cleanup = TurnCleanupSupervisor()
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleModule(
+        lifecycle=TurnLifecycleService(
             Store(),
             max_artifact_bytes=100,
             heartbeat_seconds=0.01,

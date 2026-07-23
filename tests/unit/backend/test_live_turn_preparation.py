@@ -124,7 +124,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"
     )
 
-    from fleet_rlm.chat.turn_lifecycle import CommittedTurnReceipt, TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import CommittedTurnReceipt, TurnLifecycleService
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.outcome import RLMOutcome
 
@@ -132,10 +132,21 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         async def commit(self, claimed, committed, artifacts):
             return CommittedTurnReceipt(claimed.run_id, 1, committed, artifacts)
 
-        async def fail(self, claimed, failure):
+        async def transition_claim(self, claimed, command):
+            from fleet_rlm.chat.turn_claim import FailClaim
+            from fleet_rlm.chat.turn_lifecycle import TurnFailure
+            from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+
+            assert isinstance(command, FailClaim)
+            failure = TurnFailure(
+                command.failure.status,
+                command.failure.code,
+                command.failure.public_message,
+                command.usage or empty_rlm_usage(),
+            )
             raise AssertionError((claimed, failure))
 
-    receipt = await TurnLifecycleModule(Store(), max_artifact_bytes=1024).finish(
+    receipt = await TurnLifecycleService(Store(), max_artifact_bytes=1024).finish(
         turn,
         RLMOutcome(
             "completed",

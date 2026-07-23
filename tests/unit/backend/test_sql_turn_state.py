@@ -17,6 +17,7 @@ def test_stale_claim_is_a_canonical_typed_failure_code() -> None:
 
 @pytest.mark.asyncio
 async def test_sql_failure_code_is_typed_cause_not_public_message() -> None:
+    from fleet_rlm.chat.turn_claim import ClaimFailure, FailClaim
     from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn, TurnFailure
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
@@ -46,15 +47,19 @@ async def test_sql_failure_code_is_typed_cause_not_public_message() -> None:
         store = SqlAlchemyTurnStateStore(factory)
         begun = await store.begin(BeginTurn(access, session_id, TurnInput("hello"), "key", run_id))
         assert isinstance(begun, ExecuteTurn)
-        receipt = await store.fail(
+        failure = TurnFailure(
+            "failed",
+            "execution_failed",
+            "Turn could not be committed",
+            empty_rlm_usage(),
+        )
+        receipt = await store.transition_claim(
             begun,
-            TurnFailure(
-                "failed",
-                "execution_failed",
-                "Turn could not be committed",
-                empty_rlm_usage(),
+            FailClaim(
+                ClaimFailure(failure.terminal_status, failure.failure_code, failure.public_message), failure.usage
             ),
         )
+        assert receipt is not None
 
         async with factory() as db:
             row = await db.get(RunRow, run_id)
@@ -69,6 +74,7 @@ async def test_sql_failure_code_is_typed_cause_not_public_message() -> None:
 
 @pytest.mark.asyncio
 async def test_sql_revoke_completion_uses_policy_terminal_intent() -> None:
+    from fleet_rlm.chat.turn_claim import ClaimFailure, CompleteSettlement, RevokeClaim
     from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn, TurnFailure
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
@@ -99,10 +105,14 @@ async def test_sql_revoke_completion_uses_policy_terminal_intent() -> None:
         turn = await store.begin(BeginTurn(access, session_id, TurnInput("one"), "one", run_id))
         assert isinstance(turn, ExecuteTurn)
 
-        revoked = await store.revoke_claim(
+        failure = TurnFailure("timeout", "timeout", "Timed out", empty_rlm_usage())
+        revoked = await store.transition_claim(
             turn,
-            TurnFailure("timeout", "timeout", "Timed out", empty_rlm_usage()),
+            RevokeClaim(
+                ClaimFailure(failure.terminal_status, failure.failure_code, failure.public_message), failure.usage
+            ),
         )
+        assert revoked is not None
         assert (revoked.terminal_status, revoked.failure_code, revoked.durable) == (
             "failed",
             "stale_claim",
@@ -118,7 +128,8 @@ async def test_sql_revoke_completion_uses_policy_terminal_intent() -> None:
                 "failed",
             )
 
-        terminal = await store.complete_settling(turn)
+        terminal = await store.transition_claim(turn, CompleteSettlement())
+        assert terminal is not None
         assert (terminal.terminal_status, terminal.failure_code, terminal.durable) == (
             "failed",
             "stale_claim",
@@ -337,6 +348,7 @@ async def test_startup_reconciliation_fences_a_live_prior_claim_without_waiting_
 
 @pytest.mark.asyncio
 async def test_reconcile_retries_failed_settling_fence_without_losing_intent() -> None:
+    from fleet_rlm.chat.turn_claim import BeginSettlement, ClaimFailure
     from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn, TurnFailure
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
@@ -365,9 +377,12 @@ async def test_reconcile_retries_failed_settling_fence_without_losing_intent() -
         store = SqlAlchemyTurnStateStore(factory, stale_after_seconds=30)
         started = await store.begin(BeginTurn(access, session_id, TurnInput("hello"), "key", run_id))
         assert isinstance(started, ExecuteTurn)
-        await store.settle(
+        failure = TurnFailure("timeout", "timeout", "Turn timed out", empty_rlm_usage())
+        await store.transition_claim(
             started,
-            TurnFailure("timeout", "timeout", "Turn timed out", empty_rlm_usage()),
+            BeginSettlement(
+                ClaimFailure(failure.terminal_status, failure.failure_code, failure.public_message), failure.usage
+            ),
         )
         async with factory() as db, db.begin():
             row = await db.get(RunRow, run_id)

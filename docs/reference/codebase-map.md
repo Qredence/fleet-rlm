@@ -31,6 +31,9 @@ compatibility runtime and parallel foundation package no longer exist.
 - `RLMRunner` owns execution, not Turn Commit or resource release.
   `TurnLifecycle.finish()` owns result/Artifact publication and atomic commit;
   `TurnCoordinator` owns terminal ordering and final cleanup.
+- `TurnLifecycleService` maps outcomes to typed Claim commands, and both Turn
+  repositories apply them through one `transition_claim()` seam under their
+  existing lock/transaction boundaries.
 - `LiveKernelResources` owns process-lifetime Daytona resources only;
   `composition/daytona.py` explicitly constructs Turn preparation.
 - In-memory and SQL repositories apply the pure `chat/turn_claim.py` transition

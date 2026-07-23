@@ -75,7 +75,7 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
     from fleet_rlm.artifacts.reader import ArtifactReader
     from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
     from fleet_rlm.daytona.orphan_cleanup import cleanup_orphan_bytes
     from fleet_rlm.daytona.paths import volume_paths_from_settings
     from fleet_rlm.daytona.run_environment import LiveKernelResources, build_turn_preparation, resolve_settings
@@ -150,7 +150,7 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
             stale_after_seconds=resolved.run_stale_after_seconds,
         )
         session_catalog = SqlAlchemySessionCatalog(session_factory)
-        lifecycle = TurnLifecycleModule(
+        lifecycle = TurnLifecycleService(
             turn_state,
             max_artifact_bytes=resolved.max_artifact_bytes,
             heartbeat_seconds=resolved.run_heartbeat_seconds,

@@ -18,7 +18,7 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
         CommittedTurnReceipt,
         ExecuteTurn,
         FailedRunReceipt,
-        TurnLifecycleModule,
+        TurnLifecycleService,
         _TurnClaimToken,
     )
     from fleet_rlm.rlm.dspy_contract import PredictionResult
@@ -54,7 +54,18 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
                 raise RuntimeError("commit failed")
             return CommittedTurnReceipt(run_id, 1, committed, artifacts)
 
-        async def fail(self, claimed, failure):
+        async def transition_claim(self, claimed, command):
+            from fleet_rlm.chat.turn_claim import FailClaim
+            from fleet_rlm.chat.turn_lifecycle import TurnFailure
+            from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+
+            assert isinstance(command, FailClaim)
+            failure = TurnFailure(
+                command.failure.status,
+                command.failure.code,
+                command.failure.public_message,
+                command.usage or empty_rlm_usage(),
+            )
             self.failures += 1
             return FailedRunReceipt(
                 claimed.run_id,
@@ -115,7 +126,7 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
 
     store = Store()
     coordinator = TurnCoordinator(
-        lifecycle=TurnLifecycleModule(store, max_artifact_bytes=1024),
+        lifecycle=TurnLifecycleService(store, max_artifact_bytes=1024),
         preparation=Preparation(),
         runner=Runner(),
     )

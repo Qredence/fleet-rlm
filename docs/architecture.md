@@ -54,6 +54,10 @@ host-side behind `read_session_history`.
 - `RLMRunner` executes one fresh DSPy RLM and emits no terminal event.
 - `TurnLifecycle.finish()` owns private result snapshots, Artifact publication,
   atomic Turn Commit, and durable failure settlement.
+- `TurnLifecycleService` translates lifecycle outcomes into typed Claim commands;
+  the in-memory and SQL Turn stores apply the same pure policy through one
+  `transition_claim()` persistence operation. Successful `commit()` and
+  `request_cancel()` remain separate atomic/authorization paths.
 - `TurnCoordinator` owns stream orchestration, heartbeat coordination, terminal
   ordering, and final cleanup.
 - `daytona/` is the exclusive Daytona SDK boundary.

@@ -42,7 +42,7 @@ def _outcome(*, candidates=()):
 @pytest.mark.asyncio
 async def test_cancellation_during_artifact_write_waits_then_removes_written_path() -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
 
     turn = _turn()
     data = b"artifact"
@@ -66,7 +66,7 @@ async def test_cancellation_during_artifact_write_waits_then_removes_written_pat
         async def commit(self, *args):
             raise AssertionError(args)
 
-        async def fail(self, *args):
+        async def transition_claim(self, *args):
             raise AssertionError(args)
 
     class Sink:
@@ -85,7 +85,7 @@ async def test_cancellation_during_artifact_write_waits_then_removes_written_pat
 
     sink = Sink()
     task = asyncio.create_task(
-        TurnLifecycleModule(Store(), max_artifact_bytes=1024).finish(
+        TurnLifecycleService(Store(), max_artifact_bytes=1024).finish(
             turn,
             _outcome(candidates=(candidate,)),
             artifact_sink=sink,
@@ -104,7 +104,7 @@ async def test_cancellation_during_artifact_write_waits_then_removes_written_pat
 
 @pytest.mark.asyncio
 async def test_cancellation_during_snapshot_write_waits_then_removes_snapshot() -> None:
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
 
     turn = _turn()
     write_started, release_write = asyncio.Event(), asyncio.Event()
@@ -113,7 +113,7 @@ async def test_cancellation_during_snapshot_write_waits_then_removes_snapshot() 
         async def commit(self, *args):
             raise AssertionError(args)
 
-        async def fail(self, *args):
+        async def transition_claim(self, *args):
             raise AssertionError(args)
 
     class Snapshot:
@@ -133,7 +133,7 @@ async def test_cancellation_during_snapshot_write_waits_then_removes_snapshot() 
 
     snapshot = Snapshot()
     task = asyncio.create_task(
-        TurnLifecycleModule(Store(), max_artifact_bytes=1024).finish(
+        TurnLifecycleService(Store(), max_artifact_bytes=1024).finish(
             turn,
             _outcome(),
             result_snapshot_sink=snapshot,
@@ -152,7 +152,7 @@ async def test_cancellation_during_snapshot_write_waits_then_removes_snapshot() 
 
 @pytest.mark.asyncio
 async def test_cancelled_commit_failure_settles_repeatedly_cancelled_rollback() -> None:
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
 
     turn = _turn()
     commit_started, release_commit = asyncio.Event(), asyncio.Event()
@@ -164,7 +164,7 @@ async def test_cancelled_commit_failure_settles_repeatedly_cancelled_rollback() 
             await release_commit.wait()
             raise RuntimeError("commit failed")
 
-        async def fail(self, *args):
+        async def transition_claim(self, *args):
             raise AssertionError(args)
 
     class Snapshot:
@@ -184,7 +184,7 @@ async def test_cancelled_commit_failure_settles_repeatedly_cancelled_rollback() 
 
     snapshot = Snapshot()
     task = asyncio.create_task(
-        TurnLifecycleModule(Store(), max_artifact_bytes=1024).finish(
+        TurnLifecycleService(Store(), max_artifact_bytes=1024).finish(
             turn,
             _outcome(),
             result_snapshot_sink=snapshot,
@@ -207,7 +207,7 @@ async def test_cancelled_commit_failure_settles_repeatedly_cancelled_rollback() 
 
 @pytest.mark.asyncio
 async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> None:
-    from fleet_rlm.chat.turn_lifecycle import CommittedTurnReceipt, TurnLifecycleModule
+    from fleet_rlm.chat.turn_lifecycle import CommittedTurnReceipt, TurnLifecycleService
 
     turn = _turn()
     commit_started, release_commit = asyncio.Event(), asyncio.Event()
@@ -220,7 +220,7 @@ async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> 
             await release_commit.wait()
             return CommittedTurnReceipt(claimed.run_id, 1, committed, ())
 
-        async def fail(self, *args):
+        async def transition_claim(self, *args):
             self.failures += 1
             raise AssertionError(args)
 
@@ -239,7 +239,7 @@ async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> 
 
     store, snapshot = Store(), Snapshot()
     task = asyncio.create_task(
-        TurnLifecycleModule(store, max_artifact_bytes=1024).finish(
+        TurnLifecycleService(store, max_artifact_bytes=1024).finish(
             turn,
             _outcome(),
             result_snapshot_sink=snapshot,

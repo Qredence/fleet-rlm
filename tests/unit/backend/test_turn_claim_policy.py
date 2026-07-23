@@ -5,11 +5,15 @@ from __future__ import annotations
 import pytest
 
 from fleet_rlm.chat.turn_claim import (
+    BeginSettlement,
     ClaimFailure,
     ClaimState,
+    CompleteSettlement,
+    FailClaim,
+    HeartbeatClaim,
     InvalidClaimTransition,
-    heartbeat_allowed,
-    transition_claim,
+    RevokeClaim,
+    decide_claim_transition,
 )
 
 FAILURE = ClaimFailure("failed", "execution_failed", "Turn failed")
@@ -17,25 +21,30 @@ SETTLING = ClaimState("settling", "execution_failed", FAILURE)
 
 
 @pytest.mark.parametrize(
-    ("action", "state", "status", "finalized"),
+    ("command", "state", "status", "finalized"),
     (
-        ("fail", ClaimState("running"), "failed", True),
-        ("settle", ClaimState("running"), "failed", False),
-        ("revoke", ClaimState("running"), "failed", False),
-        ("complete", ClaimState("settling", "execution_failed", FAILURE), "failed", True),
+        (FailClaim(FAILURE), ClaimState("running"), "failed", True),
+        (BeginSettlement(FAILURE), ClaimState("running"), "failed", False),
+        (RevokeClaim(FAILURE), ClaimState("running"), "failed", False),
+        (CompleteSettlement(), ClaimState("settling", "execution_failed", FAILURE), "failed", True),
     ),
 )
-def test_transition_claim_applies_one_policy(action, state, status, finalized) -> None:
-    decision = transition_claim(action, state, None if action == "complete" else FAILURE)
+def test_decide_claim_transition_applies_one_policy(command, state, status, finalized) -> None:
+    decision = decide_claim_transition(state, command).transition
 
+    assert decision is not None
     assert decision.status == status
     assert decision.finalized is finalized
     assert decision.next_state is not None
 
 
 def test_revoke_policy_owns_stale_claim_terminal_intent() -> None:
-    decision = transition_claim("revoke", ClaimState("running"), ClaimFailure("timeout", "timeout", "Timed out"))
+    decision = decide_claim_transition(
+        ClaimState("running"),
+        RevokeClaim(ClaimFailure("timeout", "timeout", "Timed out")),
+    ).transition
 
+    assert decision is not None
     assert decision.next_state == ClaimState(
         "settling",
         "stale_claim",
@@ -43,59 +52,61 @@ def test_revoke_policy_owns_stale_claim_terminal_intent() -> None:
     )
 
 
-@pytest.mark.parametrize("action", ["fail", "settle", "revoke"])
-def test_completed_claim_rejects_failure_transitions(action) -> None:
+@pytest.mark.parametrize("command", [FailClaim(FAILURE), BeginSettlement(FAILURE), RevokeClaim(FAILURE)])
+def test_completed_claim_rejects_failure_transitions(command) -> None:
     with pytest.raises(InvalidClaimTransition):
-        transition_claim(action, ClaimState("completed"), FAILURE)
+        decide_claim_transition(ClaimState("completed"), command)
 
 
 def test_terminal_transition_is_idempotent() -> None:
-    decision = transition_claim("fail", ClaimState("failed", "execution_failed"), FAILURE)
+    decision = decide_claim_transition(ClaimState("failed", "execution_failed"), FailClaim(FAILURE)).transition
 
+    assert decision is not None
     assert decision.finalized is True
     assert decision.next_state is None
 
 
 def test_heartbeat_policy_only_accepts_owned_work_states() -> None:
-    assert heartbeat_allowed(ClaimState("running"))
-    assert heartbeat_allowed(ClaimState("settling"))
-    assert not heartbeat_allowed(ClaimState("failed"))
+    assert decide_claim_transition(ClaimState("running"), HeartbeatClaim()).heartbeat_allowed
+    assert decide_claim_transition(ClaimState("settling"), HeartbeatClaim()).heartbeat_allowed
+    assert not decide_claim_transition(ClaimState("failed"), HeartbeatClaim()).heartbeat_allowed
 
 
 @pytest.mark.parametrize(
-    ("action", "state", "failure", "expected_status", "expected_finalized"),
+    ("command", "state", "expected_status", "expected_finalized"),
     (
-        ("fail", ClaimState("running"), FAILURE, "failed", True),
-        ("fail", SETTLING, FAILURE, "failed", False),
-        ("fail", ClaimState("failed", "execution_failed"), FAILURE, "failed", True),
-        ("settle", ClaimState("running"), FAILURE, "failed", False),
-        ("settle", SETTLING, FAILURE, "failed", False),
-        ("settle", ClaimState("timeout", "timeout"), FAILURE, "timeout", True),
-        ("revoke", ClaimState("running"), FAILURE, "failed", False),
-        ("revoke", SETTLING, FAILURE, "failed", False),
-        ("revoke", ClaimState("failed", "stale_claim"), FAILURE, "failed", True),
-        ("complete", SETTLING, None, "failed", True),
-        ("complete", ClaimState("failed", "stale_claim"), None, "failed", True),
+        (FailClaim(FAILURE), ClaimState("running"), "failed", True),
+        (FailClaim(FAILURE), SETTLING, "failed", False),
+        (FailClaim(FAILURE), ClaimState("failed", "execution_failed"), "failed", True),
+        (BeginSettlement(FAILURE), ClaimState("running"), "failed", False),
+        (BeginSettlement(FAILURE), SETTLING, "failed", False),
+        (BeginSettlement(FAILURE), ClaimState("timeout", "timeout"), "timeout", True),
+        (RevokeClaim(FAILURE), ClaimState("running"), "failed", False),
+        (RevokeClaim(FAILURE), SETTLING, "failed", False),
+        (RevokeClaim(FAILURE), ClaimState("failed", "stale_claim"), "failed", True),
+        (CompleteSettlement(), SETTLING, "failed", True),
+        (CompleteSettlement(), ClaimState("failed", "stale_claim"), "failed", True),
     ),
 )
-def test_transition_claim_legal_matrix(action, state, failure, expected_status, expected_finalized) -> None:
-    decision = transition_claim(action, state, failure)
+def test_decide_claim_transition_legal_matrix(command, state, expected_status, expected_finalized) -> None:
+    decision = decide_claim_transition(state, command).transition
 
+    assert decision is not None
     assert decision.status == expected_status
     assert decision.finalized is expected_finalized
 
 
 @pytest.mark.parametrize(
-    ("action", "state", "failure"),
+    ("command", "state"),
     (
-        ("fail", ClaimState("completed"), FAILURE),
-        ("settle", ClaimState("completed"), FAILURE),
-        ("revoke", ClaimState("completed"), FAILURE),
-        ("revoke", ClaimState("cancelled", "cancelled"), FAILURE),
-        ("complete", ClaimState("running"), None),
-        ("complete", ClaimState("settling"), None),
+        (FailClaim(FAILURE), ClaimState("completed")),
+        (BeginSettlement(FAILURE), ClaimState("completed")),
+        (RevokeClaim(FAILURE), ClaimState("completed")),
+        (RevokeClaim(FAILURE), ClaimState("cancelled", "cancelled")),
+        (CompleteSettlement(), ClaimState("running")),
+        (CompleteSettlement(), ClaimState("settling")),
     ),
 )
-def test_transition_claim_illegal_matrix(action, state, failure) -> None:
+def test_decide_claim_transition_illegal_matrix(command, state) -> None:
     with pytest.raises(InvalidClaimTransition):
-        transition_claim(action, state, failure)
+        decide_claim_transition(state, command)

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal, assert_never, cast
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Literal, TypeAlias, assert_never, cast
 
-ClaimAction = Literal["fail", "settle", "revoke", "complete"]
 ClaimStatus = Literal["running", "settling", "completed", "failed", "cancelled", "timeout"]
 ClaimTerminalStatus = Literal["failed", "cancelled", "timeout"]
 ClaimFailureCode = Literal[
@@ -41,31 +41,62 @@ class ClaimTransition:
     next_state: ClaimState | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class FailClaim:
+    failure: ClaimFailure
+    usage: Mapping[str, object] = field(default_factory=dict)  # adapter durability metadata; ignored by policy
+
+
+@dataclass(frozen=True, slots=True)
+class BeginSettlement:
+    failure: ClaimFailure
+    usage: Mapping[str, object] = field(default_factory=dict)  # adapter durability metadata; ignored by policy
+
+
+@dataclass(frozen=True, slots=True)
+class RevokeClaim:
+    failure: ClaimFailure
+    usage: Mapping[str, object] = field(default_factory=dict)  # adapter durability metadata; ignored by policy
+
+
+@dataclass(frozen=True, slots=True)
+class CompleteSettlement:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class HeartbeatClaim:
+    pass
+
+
+ClaimCommand: TypeAlias = FailClaim | BeginSettlement | RevokeClaim | CompleteSettlement | HeartbeatClaim
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimDecision:
+    transition: ClaimTransition | None = None
+    heartbeat_allowed: bool = False
+
+
 class InvalidClaimTransition(ValueError):
     """The requested action is invalid for the current durable state."""
 
 
-def transition_claim(
-    action: ClaimAction,
-    state: ClaimState,
-    failure: ClaimFailure | None = None,
-) -> ClaimTransition:
-    """Return the durable state/receipt decision without performing I/O."""
-    match action:
-        case "fail":
-            return _fail(state, _require_failure(failure))
-        case "settle":
-            return _settle(state, _require_failure(failure))
-        case "revoke":
-            return _revoke(state, _require_failure(failure))
-        case "complete":
-            return _complete(state)
+def decide_claim_transition(state: ClaimState, command: ClaimCommand) -> ClaimDecision:
+    """Return the durable claim decision without performing I/O."""
+    match command:
+        case FailClaim(failure):
+            return ClaimDecision(transition=_fail(state, failure))
+        case BeginSettlement(failure):
+            return ClaimDecision(transition=_settle(state, failure))
+        case RevokeClaim(failure):
+            return ClaimDecision(transition=_revoke(state, failure))
+        case CompleteSettlement():
+            return ClaimDecision(transition=_complete(state))
+        case HeartbeatClaim():
+            return ClaimDecision(heartbeat_allowed=state.status in {"running", "settling"})
         case _:
-            assert_never(action)
-
-
-def heartbeat_allowed(state: ClaimState) -> bool:
-    return state.status in {"running", "settling"}
+            assert_never(command)
 
 
 def _fail(state: ClaimState, failure: ClaimFailure) -> ClaimTransition:
@@ -134,12 +165,6 @@ def _complete(state: ClaimState) -> ClaimTransition:
         True,
         ClaimState(intent.status, intent.code),
     )
-
-
-def _require_failure(failure: ClaimFailure | None) -> ClaimFailure:
-    if failure is None:
-        raise InvalidClaimTransition("transition requires a failure intent")
-    return failure
 
 
 def _terminal_status(status: ClaimStatus) -> ClaimTerminalStatus:
