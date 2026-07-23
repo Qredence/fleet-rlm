@@ -12,16 +12,19 @@ export type FleetSkillSelection = {
 };
 
 export type SessionListPage = components["schemas"]["SessionListResponse"];
+type SessionPatch = components["schemas"]["SessionPatchRequest"];
 
 export class FleetApiError extends Error {
   readonly status: number;
   readonly correlationId?: string;
+  readonly code?: string;
 
-  constructor(status: number, message: string, correlationId?: string) {
+  constructor(status: number, message: string, correlationId?: string, code?: string) {
     super(message);
     this.name = "FleetApiError";
     this.status = status;
     this.correlationId = correlationId;
+    this.code = code;
   }
 }
 
@@ -42,13 +45,26 @@ export class FleetApiClient {
     return this.requestJson<FleetSession>(`/api/sessions/${encodeURIComponent(sessionId)}`);
   }
 
+  async updateSession(sessionId: string, patch: SessionPatch): Promise<FleetSession> {
+    return this.requestJson<FleetSession>(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  }
+
   async listSessions(
-    params: { limit?: number; offset?: number; search?: string } = {},
+    params: {
+      limit?: number;
+      offset?: number;
+      search?: string;
+      status?: "active" | "archived";
+    } = {},
   ): Promise<SessionListPage> {
     const search = new URLSearchParams();
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.search) search.set("search", params.search);
+    if (params.status) search.set("status", params.status);
     const suffix = search.toString();
     return this.requestJson<SessionListPage>(`/api/sessions${suffix ? `?${suffix}` : ""}`);
   }
@@ -165,14 +181,16 @@ export class FleetApiClient {
   private async toApiError(response: Response): Promise<FleetApiError> {
     const body = await response.text();
     let message = `Fleet API request failed (${response.status})`;
+    let code: string | undefined;
     try {
-      const parsed = JSON.parse(body) as { message?: unknown; detail?: unknown };
-      if (typeof parsed.message === "string" && parsed.message.trim()) {
-        message = parsed.message;
-      }
-      if (typeof parsed.detail === "string" && parsed.detail.trim()) {
-        message = parsed.detail;
-      }
+      const parsed = JSON.parse(body) as { code?: unknown; message?: unknown; detail?: unknown };
+      const detail = record(parsed.detail);
+      message =
+        nonEmptyString(detail.message) ??
+        nonEmptyString(parsed.message) ??
+        nonEmptyString(parsed.detail) ??
+        message;
+      code = nonEmptyString(detail.code) ?? nonEmptyString(parsed.code);
     } catch {
       // The public API may return an empty or non-JSON error body.
     }
@@ -180,6 +198,17 @@ export class FleetApiClient {
       response.status,
       message,
       response.headers.get("x-request-id") ?? undefined,
+      code,
     );
   }
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }

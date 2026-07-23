@@ -321,8 +321,8 @@ describe("terminal projection", () => {
       kind: "usage",
       runId: "run-1",
       iterations: 2,
-      prompt: 4,
-      completion: 5,
+      inputTokens: 4,
+      outputTokens: 5,
       durationMs: 1200,
       observedLmUsage: { root: { prompt_tokens: 4, completion_tokens: 5 } },
     });
@@ -605,8 +605,8 @@ function correlations(messages: Message[]): unknown[] {
           kind: message.kind,
           runId: message.runId,
           iterations: message.iterations,
-          prompt: message.prompt,
-          completion: message.completion,
+          inputTokens: message.inputTokens,
+          outputTokens: message.outputTokens,
           durationMs: message.durationMs,
           observedLmUsage: message.observedLmUsage,
         };

@@ -8,6 +8,8 @@ import {
   type Message,
   type PendingSkillSelection,
 } from "./store.js";
+import { formatTokens } from "./format.js";
+import { committedTokenCounts } from "./usage-summary.js";
 
 export type CommandContext = {
   store: ConversationStore;
@@ -96,7 +98,7 @@ registerCommand({
       .join("\n");
     appendSystem(
       ctx.store,
-      `Fleet TUI commands\n\n${lines}\n\nKeybindings:\n  Enter         submit prompt\n  Ctrl+C        cancel current run, second press exits\n  Ctrl+D        exit\n  Arrow Up/Dn   history`,
+      `Fleet TUI commands\n\n${lines}\n\nKeybindings:\n  Enter         submit prompt\n  Shift+Enter   insert newline\n  Escape        cancel current Run\n  Ctrl+C        clear editor; press twice while empty to exit\n  Ctrl+D        delete forward, or exit when the editor is empty\n  Arrow Up/Dn   history`,
     );
   },
 });
@@ -118,14 +120,22 @@ registerCommand({
 
 registerCommand({
   name: "sessions",
-  description: "List recent Fleet sessions",
-  usage: "/sessions",
-  handler: async (_args, ctx) => {
+  description: "Find and switch to an active Fleet Session",
+  usage: "/sessions [title search]",
+  handler: async (args, ctx) => {
     try {
-      const response = await ctx.client.listSessions();
+      const search = args.join(" ").trim();
+      const response = await ctx.client.listSessions({
+        limit: 100,
+        status: "active",
+        ...(search ? { search } : {}),
+      });
       const items = response.items;
       if (items.length === 0) {
-        appendSystem(ctx.store, "No sessions yet.");
+        appendSystem(
+          ctx.store,
+          search ? `No active Sessions match “${search}”.` : "No active Sessions yet.",
+        );
         return;
       }
       if (ctx.presenter) {
@@ -141,10 +151,44 @@ registerCommand({
         .join("\n");
       appendSystem(
         ctx.store,
-        `Recent sessions (${response.total} total)\n\n${lines}\n\nUse /resume <id> to switch.`,
+        `Active Sessions (${response.total} total)\n\n${lines}\n\nUse /resume <id> to switch.`,
       );
     } catch (error) {
       appendSystem(ctx.store, `Failed to list sessions: ${errorMessage(error)}`);
+    }
+  },
+});
+
+registerCommand({
+  name: "rename",
+  description: "Rename the current Fleet Session",
+  usage: "/rename <title>",
+  handler: async (args, ctx) => {
+    const session = ctx.store.getState().session;
+    const title = args.join(" ").trim();
+    if (!session) {
+      appendSystem(ctx.store, "No current Session to rename.");
+      return;
+    }
+    if (!title) {
+      appendSystem(ctx.store, "Usage: /rename <title>");
+      return;
+    }
+    try {
+      const updated = await ctx.client.updateSession(session.id, { title });
+      if (ctx.store.getState().session?.id !== session.id) return;
+      ctx.store.dispatch({
+        type: "session/init",
+        session: {
+          id: updated.id,
+          title: updated.title,
+          status: updated.status,
+          resumed: session.resumed,
+        },
+      });
+      appendSystem(ctx.store, `Session renamed to “${updated.title}”.`);
+    } catch (error) {
+      appendSystem(ctx.store, `Failed to rename Session: ${errorMessage(error)}`);
     }
   },
 });
@@ -259,10 +303,12 @@ registerCommand({
   usage: "/status",
   handler: (_args, ctx) => {
     const state = ctx.store.getState();
+    const usage = committedTokenCounts(state.messages);
     const lines = [
-      `Session:    ${state.session?.id ?? "(none)"} (${state.session?.status ?? "—"})`,
+      `Session:    ${state.session?.title ?? "(none)"}  ${state.session?.id ?? "—"} (${state.session?.status ?? "—"})`,
       `Run:        ${state.run.id ?? "(none)"}  phase=${state.run.phase}  finish=${state.run.finishReason ?? "—"}`,
       `Delivery:   ${state.run.delivery ?? "—"}  outcome=${state.run.outcome ?? "—"}`,
+      `Usage:      observed committed input=${formatObservedTokens(usage.input)} output=${formatObservedTokens(usage.output)}`,
       `Tools:      ${state.run.toolCount}    Steps: ${state.run.completedSteps}/${state.run.startedSteps}`,
       `Skills:     ${formatPendingSkills(state.pendingSkillSelections)}`,
       `Messages:   ${state.messages.length}`,
@@ -287,6 +333,7 @@ function errorMessage(error: unknown): string {
 
 async function resumeSession(id: string, ctx: CommandContext): Promise<void> {
   try {
+    const pendingSkillSelections = ctx.store.getState().pendingSkillSelections;
     const [session, turns] = await Promise.all([
       ctx.client.getSession(id),
       ctx.client.listTurns(id),
@@ -296,6 +343,9 @@ async function resumeSession(id: string, ctx: CommandContext): Promise<void> {
       session: { id: session.id, title: session.title, status: session.status, resumed: true },
       events: projectDurableTurns(turns),
     });
+    if (pendingSkillSelections.length > 0) {
+      ctx.store.dispatch({ type: "skill-selection/replace", selections: pendingSkillSelections });
+    }
     appendSystem(
       ctx.store,
       turns.length ? `Resumed session ${id}.` : `Resumed session ${id} (no prior turns).`,
@@ -336,4 +386,8 @@ function formatPendingSkills(selections: readonly PendingSkillSelection[]): stri
   return selections
     .map((selection) => `${selection.displayName}@${selection.expectedVersion}`)
     .join(", ");
+}
+
+function formatObservedTokens(value: number | null): string {
+  return value === null ? "—" : formatTokens(value);
 }

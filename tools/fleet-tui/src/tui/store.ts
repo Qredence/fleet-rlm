@@ -89,8 +89,8 @@ export type Message =
       kind: "usage";
       runId: string;
       iterations: number;
-      prompt: number;
-      completion: number;
+      inputTokens: number | null;
+      outputTokens: number | null;
       durationMs: number;
       observedLmUsage: Record<string, unknown>;
       ts: number;

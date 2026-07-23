@@ -1,6 +1,7 @@
 import type { FleetTurn } from "../fleet-api-client.js";
 import type { FleetUIMessageChunk } from "../sse.js";
 import type { Message, Role, StoreEvent } from "./store.js";
+import { observedTokenCounts } from "./usage-summary.js";
 
 export type Clock = () => number;
 
@@ -513,26 +514,18 @@ function artifact(
 function usage(id: string, runId: string, source: Record<string, unknown>, clock: Clock): Message {
   const value = data(source.usage ?? source);
   const observedLmUsage = data(value.observed_lm_usage ?? value.observedLmUsage);
+  const tokens = observedTokenCounts(observedLmUsage);
   return {
     id,
     kind: "usage",
     runId,
     iterations: number(value.iterations),
-    prompt: observedTokens(observedLmUsage, "prompt_tokens", "promptTokens"),
-    completion: observedTokens(observedLmUsage, "completion_tokens", "completionTokens"),
+    inputTokens: tokens.input,
+    outputTokens: tokens.output,
     durationMs: number(value.duration_ms ?? value.durationMs),
     observedLmUsage,
     ts: clock(),
   };
-}
-
-function observedTokens(value: Record<string, unknown>, snake: string, camel: string): number {
-  const direct = value[snake] ?? value[camel];
-  if (direct !== undefined) return number(direct);
-  return Object.values(value).reduce<number>(
-    (total, nested) => total + observedTokens(data(nested), snake, camel),
-    0,
-  );
 }
 
 function data(value: unknown): Record<string, unknown> {

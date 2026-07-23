@@ -1,5 +1,6 @@
 import {
   Container,
+  Loader,
   truncateToWidth,
   type Component,
   type Editor,
@@ -8,9 +9,10 @@ import {
 } from "@earendil-works/pi-tui";
 
 import { formatDuration, formatTokens } from "./format.js";
-import type { ConversationStore, Run } from "./store.js";
+import type { ConversationStore, Run, State } from "./store.js";
 import { theme } from "./theme.js";
 import { TranscriptComponent } from "./transcript.js";
+import { committedTokenCounts } from "./usage-summary.js";
 
 export class FleetScreen extends Container {
   private readonly activity: ActivityComponent;
@@ -30,37 +32,63 @@ export class FleetScreen extends Container {
 }
 
 class ActivityComponent implements Component {
-  private timer?: NodeJS.Timeout;
+  private readonly loader: Loader;
+  private active = false;
+  private message = "";
 
   constructor(
     private readonly store: ConversationStore,
-    private readonly ui: TUI,
-  ) {}
-  invalidate(): void {}
+    ui: TUI,
+  ) {
+    this.loader = new Loader(
+      ui,
+      (frame) => theme.fg("accent", frame),
+      (text) => theme.fg("accent", text),
+      "Preparing Turn",
+    );
+    // Loader starts from its constructor; Fleet activates it only for a live Run.
+    this.loader.stop();
+  }
+
+  invalidate(): void {
+    this.loader.invalidate();
+  }
+
   render(width: number): string[] {
-    const run = this.store.getState().run;
+    const state = this.store.getState();
+    const run = state.run;
     if (!isBusy(run)) {
-      this.dispose();
+      this.stopLoader();
       return [];
     }
-    this.timer ??= setInterval(() => this.ui.requestRender(), 250);
-    const localPhase = run.phase === "submitting" ? "preparing" : run.phase;
-    const phase = run.phase === "cancelling" ? run.phase : run.statusPhase?.trim() || localPhase;
+
     const elapsed = run.startedAt ? formatDuration(Date.now() - run.startedAt) : "0:00";
-    const detail = run.statusDetail?.trim();
-    const primary = `${theme.fg("accent", `… ${phase.replaceAll(/[_-]+/g, " ").toUpperCase()}`)}${detail ? `  ${theme.fg("muted", detail)}` : ""} ${dim(`· ${elapsed}`)}`;
-    const secondary = `${run.completedSteps}/${run.startedSteps} steps complete · ${run.toolCount} ${run.toolCount === 1 ? "tool" : "tools"} · Ctrl+C cancel`;
+    const message = `${activityAction(state)} ${dim(`· ${elapsed}`)}`;
+    if (message !== this.message) {
+      this.message = message;
+      this.loader.setMessage(message);
+    }
+    if (!this.active) {
+      this.active = true;
+      this.loader.start();
+    }
+
+    const secondary = `${run.completedSteps}/${run.startedSteps} steps complete · ${run.toolCount} ${run.toolCount === 1 ? "tool" : "tools"} · Esc cancel`;
     return [
-      "",
-      truncateToWidth(`${theme.fg("borderAccent", "│")} ${primary}`, width, ""),
+      ...this.loader.render(width),
       truncateToWidth(`${theme.fg("borderMuted", "│")} ${dim(secondary)}`, width, ""),
     ];
   }
 
   dispose(): void {
-    if (!this.timer) return;
-    clearInterval(this.timer);
-    this.timer = undefined;
+    this.stopLoader();
+  }
+
+  private stopLoader(): void {
+    if (!this.active) return;
+    this.loader.stop();
+    this.active = false;
+    this.message = "";
   }
 }
 
@@ -72,20 +100,15 @@ class FooterComponent implements Component {
   invalidate(): void {}
   render(width: number): string[] {
     const state = this.store.getState();
-    const prompt = state.messages
-      .filter((m) => m.kind === "usage")
-      .reduce((sum, m) => sum + m.prompt, 0);
-    const completion = state.messages
-      .filter((m) => m.kind === "usage")
-      .reduce((sum, m) => sum + m.completion, 0);
+    const usage = committedTokenCounts(state.messages);
     const compact = this.terminal.rows < 14 || width < 60;
     const lines = compact
       ? []
       : [
           dim(
             isBusy(state.run)
-              ? "Ctrl+C cancel · Ctrl+D cancel and exit"
-              : "Enter send · modified Enter newline · / commands · Ctrl+D exit",
+              ? "Esc cancel · draft stays unsent · Ctrl+D exits only when empty"
+              : "Enter send · Shift+Enter newline · / commands · Ctrl+D exit when empty",
           ),
         ];
     const run = state.run;
@@ -95,7 +118,7 @@ class FooterComponent implements Component {
     const replay = run.delivery === "replay" ? " · replay" : "";
     lines.push(
       truncateToWidth(
-        `${dim("session tokens")} ${formatTokens(prompt + completion)}  ${dim("turn steps")} ${run.completedSteps}/${run.startedSteps}  ${dim("turn tools")} ${run.toolCount}${outcome}${replay}`,
+        `${dim("observed committed")} ↑ ${formatObservedTokens(usage.input)}  ↓ ${formatObservedTokens(usage.output)}  ${dim("turn steps")} ${run.completedSteps}/${run.startedSteps}  ${dim("turn tools")} ${run.toolCount}${outcome}${replay}`,
         width,
         "",
       ),
@@ -110,6 +133,39 @@ export function isBusy(run: Run): boolean {
 
 function dim(value: string): string {
   return theme.fg("dim", value);
+}
+
+function activityAction(state: State): string {
+  const run = state.run;
+  if (run.phase === "submitting") return "Preparing Turn";
+  if (run.phase === "cancelling") return "Cancelling Run";
+
+  for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+    const message = state.messages[index];
+    if (message?.kind === "tool" && message.status === "running" && message.runId === run.id) {
+      return `Running Tool ${message.name}`;
+    }
+  }
+
+  const detail = run.statusDetail?.trim();
+  if (detail && detail.toLowerCase() !== "running") return terminalSafeStatus(detail);
+  if (run.delivery === "replay") return "Replaying committed Turn";
+  if (run.startedSteps > run.completedSteps) return `Executing RLM step ${run.startedSteps}`;
+
+  const phase = run.statusPhase?.trim();
+  return phase ? `Running ${terminalSafeStatus(phase)}` : "Running RLM";
+}
+
+function terminalSafeStatus(value: string): string {
+  return value
+    .replaceAll(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ")
+    .replaceAll(/[_-]+/g, " ")
+    .replaceAll(/\s+/g, " ")
+    .trim();
+}
+
+function formatObservedTokens(value: number | null): string {
+  return value === null ? "—" : formatTokens(value);
 }
 
 function outcomeColor(outcome: NonNullable<Run["outcome"]>): "success" | "warning" | "error" {

@@ -112,6 +112,65 @@ describe("renderMessage", () => {
     expect(firstAnsi(warning, "38")).not.toBe(firstAnsi(error, "38"));
   });
 
+  it("renders headings, inline styles, lists, quotes, links, fenced code, and tables as Markdown", () => {
+    const message: Message = {
+      id: "markdown",
+      kind: "text",
+      role: "assistant",
+      streaming: false,
+      text: [
+        "# Report",
+        "",
+        "Use **bold**, *emphasis*, and [Fleet](https://fleet.example).",
+        "",
+        "- first",
+        "- second",
+        "",
+        "> verified",
+        "",
+        "```python",
+        "print('ok')",
+        "```",
+        "",
+        "| item | value |",
+        "| --- | --- |",
+        "| answer | 42 |",
+      ].join("\n"),
+      ts: 1,
+    };
+
+    const lines = renderMessage(message, 60);
+    const output = stripAnsi(lines.join("\n"));
+
+    expect(output).toContain("Report");
+    expect(output).toContain("bold");
+    expect(output).toContain("emphasis");
+    expect(output).toContain("Fleet");
+    expect(output).toContain("- first");
+    expect(output).toContain("│ verified");
+    expect(output).toContain("```python");
+    expect(output).toContain("print('ok')");
+    expect(output).toContain("┌─");
+    expect(output).toContain("answer");
+    expect(lines.every((line) => visibleWidth(line) <= 60)).toBe(true);
+  });
+
+  it("keeps partial fenced code stable while assistant Markdown is streaming", () => {
+    const message: Message = {
+      id: "streaming-markdown",
+      kind: "text",
+      role: "assistant",
+      streaming: true,
+      text: "```ts\nconst value = 1;\n``",
+      ts: 1,
+    };
+
+    const output = stripAnsi(renderMessage(message, 40).join("\n"));
+    expect(output).toContain("```ts");
+    expect(output).toContain("const value = 1;");
+    expect(output).not.toContain("\n  ``\n");
+  });
+
   it("renders static complete execution evidence within the terminal width", () => {
     const messages: Message[] = [
       {

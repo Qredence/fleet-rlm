@@ -29,6 +29,50 @@ describe("FleetApiClient", () => {
     );
   });
 
+  it("renames a Session through PATCH", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "session-id", title: "Research notes" }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    globalThis.fetch = fetchMock;
+
+    await new FleetApiClient({ baseUrl: "http://fleet.test" }).updateSession("session-id", {
+      title: "Research notes",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://fleet.test/api/sessions/session-id",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ title: "Research notes" }),
+      }),
+    );
+  });
+
+  it("filters the Session list by active status and title", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ items: [], total: 0, offset: 0, limit: 100, has_more: false }),
+          { headers: { "content-type": "application/json" } },
+        ),
+      );
+    globalThis.fetch = fetchMock;
+
+    await new FleetApiClient({ baseUrl: "http://fleet.test" }).listSessions({
+      limit: 100,
+      status: "active",
+      search: "research notes",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://fleet.test/api/sessions?limit=100&search=research+notes&status=active",
+      expect.any(Object),
+    );
+  });
+
   it("sends a local-scope Fleet chat request", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response("data: [DONE]\n\n", {
@@ -129,6 +173,26 @@ describe("FleetApiClient", () => {
     await expect(
       client.streamTurn({ message: "hello", sessionId: "session-id", idempotencyKey: "turn-key" }),
     ).rejects.toBeInstanceOf(FleetApiError);
+  });
+
+  it("presents FastAPI nested public error details", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          detail: { code: "turn_in_progress", message: "A Turn is already running" },
+        }),
+        { status: 409, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
+
+    await expect(
+      client.streamTurn({ message: "hello", sessionId: "session-id", idempotencyKey: "turn-key" }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "turn_in_progress",
+      message: "A Turn is already running",
+    });
   });
 
   it("retains the request correlation id on public API failures", async () => {

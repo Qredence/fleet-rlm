@@ -74,7 +74,7 @@ export function renderMessage(message: Message, width: number): string[] {
       );
     case "usage":
       return wrappedLine(
-        `  ${theme.fg("accent", theme.bold("USAGE"))}  ${muted(`${message.iterations} iterations · prompt ${formatTokens(message.prompt)} · completion ${formatTokens(message.completion)} · ${formatDuration(message.durationMs)}`)}`,
+        `  ${theme.fg("accent", theme.bold("USAGE"))}  ${muted(`${message.iterations} iterations · ↑ input ${formatObservedTokens(message.inputTokens)} · ↓ output ${formatObservedTokens(message.outputTokens)} · ${formatDuration(message.durationMs)}`)}`,
         safeWidth,
       );
     case "warning":
@@ -235,4 +235,8 @@ function wrappedLine(value: string, width: number): string[] {
 
 function muted(value: string): string {
   return theme.fg("muted", value);
+}
+
+function formatObservedTokens(value: number | null): string {
+  return value === null ? "—" : formatTokens(value);
 }

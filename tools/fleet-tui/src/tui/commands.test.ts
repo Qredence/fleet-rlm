@@ -103,6 +103,89 @@ describe("command handlers", () => {
     }
   });
 
+  it("/rename updates the durable and local Session title", async () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "session/init",
+      session: { id: "abc-123", title: "Old", status: "active", resumed: true },
+    });
+    ctx.client.updateSession = vi.fn().mockResolvedValue({
+      id: "abc-123",
+      title: "Research notes",
+      status: "active",
+      checkpoint_version: 1,
+      created_at: null,
+      updated_at: null,
+    });
+
+    const rename = listCommands().find((command) => command.name === "rename");
+    if (rename) await rename.handler(["Research", "notes"], ctx);
+
+    expect(ctx.client.updateSession).toHaveBeenCalledWith("abc-123", {
+      title: "Research notes",
+    });
+    expect(ctx.store.getState().session).toMatchObject({
+      title: "Research notes",
+      resumed: true,
+    });
+  });
+
+  it("/rename does not restore a Session that changed while the request was pending", async () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "session/init",
+      session: { id: "old-session", title: "Old", status: "active", resumed: true },
+    });
+    type UpdatedSession = Awaited<ReturnType<FleetApiClient["updateSession"]>>;
+    let resolveUpdate!: (session: UpdatedSession) => void;
+    ctx.client.updateSession = vi.fn(
+      () =>
+        new Promise<UpdatedSession>((resolve) => {
+          resolveUpdate = resolve;
+        }),
+    );
+
+    const rename = listCommands().find((command) => command.name === "rename");
+    const pendingRename = rename?.handler(["Renamed"], ctx);
+    await vi.waitFor(() => expect(ctx.client.updateSession).toHaveBeenCalled());
+    ctx.store.dispatch({
+      type: "session/init",
+      session: { id: "new-session", title: "New", status: "active", resumed: true },
+    });
+    resolveUpdate({
+      id: "old-session",
+      title: "Renamed",
+      status: "active",
+      checkpoint_version: 1,
+    });
+    await pendingRename;
+
+    expect(ctx.store.getState().session).toMatchObject({
+      id: "new-session",
+      title: "New",
+    });
+  });
+
+  it("/sessions searches active Session titles", async () => {
+    const { ctx } = makeContext();
+    ctx.client.listSessions = vi.fn().mockResolvedValue({
+      items: [],
+      total: 0,
+      offset: 0,
+      limit: 100,
+      has_more: false,
+    });
+
+    const sessions = listCommands().find((command) => command.name === "sessions");
+    if (sessions) await sessions.handler(["research", "notes"], ctx);
+
+    expect(ctx.client.listSessions).toHaveBeenCalledWith({
+      limit: 100,
+      status: "active",
+      search: "research notes",
+    });
+  });
+
   it("/cancel forwards to the cancelActiveRun hook", () => {
     const { ctx } = makeContext();
     const cancelSpy = vi.fn();

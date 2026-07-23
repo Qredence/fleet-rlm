@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { FleetApiClient } from "../fleet-api-client.js";
 import { createFleetTui } from "./application.js";
 import type { StoreEvent } from "./store.js";
-import { getTerminalColorScheme, setTerminalColorScheme } from "./theme.js";
+import { getTerminalColorScheme, setTerminalColorScheme, theme } from "./theme.js";
 
 class FakeTerminal implements Terminal {
   columns = 80;
@@ -144,7 +144,59 @@ describe("FleetTuiApplication", () => {
     await finished;
   });
 
-  it("keeps the editor writable during a Run and routes Ctrl+C to cancellation", async () => {
+  it("shows a live loading action for the currently running Tool", async () => {
+    const terminal = new FakeTerminal();
+    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
+    const encoder = new TextEncoder();
+    client.streamTurn = vi.fn(({ signal }) =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(stream) {
+              stream.enqueue(
+                encoder.encode(
+                  'data: {"type":"start","messageId":"run-loader","messageMetadata":{"delivery":"live"}}\n\n' +
+                    'data: {"type":"tool-input-available","toolCallId":"call-loader","toolName":"inspect_workspace","input":{}}\n\n',
+                ),
+              );
+              signal?.addEventListener("abort", () =>
+                stream.error(new DOMException("aborted", "AbortError")),
+              );
+            },
+          }),
+          { headers: { "x-vercel-ai-ui-message-stream": "v1" } },
+        ),
+      ),
+    );
+    client.requestCancellation = vi.fn().mockResolvedValue({ status: "cancelled" });
+    const app = createFleetTui({
+      terminal,
+      client,
+      session,
+      resumed: false,
+      initialEvents: [],
+      queryColorScheme: false,
+    });
+
+    const finished = app.start();
+    for (const key of "inspect") terminal.send(key);
+    terminal.send("\r");
+
+    await vi.waitFor(() =>
+      expect(terminal.writes.join("")).toContain("Running Tool inspect_workspace"),
+    );
+    expect(
+      ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"].some((frame) =>
+        terminal.writes.join("").includes(theme.fg("accent", frame)),
+      ),
+    ).toBe(true);
+    terminal.send("\x1b");
+    await vi.waitFor(() => expect(client.requestCancellation).toHaveBeenCalledWith("run-loader"));
+    terminal.send("\x04");
+    await finished;
+  });
+
+  it("keeps an unsent draft during a Run and routes Escape to cancellation", async () => {
     const terminal = new FakeTerminal();
     const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
     const encoder = new TextEncoder();
@@ -185,10 +237,12 @@ describe("FleetTuiApplication", () => {
     for (const key of "next draft") terminal.send(key);
     await vi.waitFor(() => expect(terminal.writes.join("")).toContain("next draft"));
 
-    terminal.send("\x03");
+    terminal.send("\x1b");
     await vi.waitFor(() => expect(client.requestCancellation).toHaveBeenCalledWith("run-1"));
     await vi.waitFor(() => expect(terminal.progress.at(-1)).toBe(false));
+    expect(terminal.writes.join("")).toContain("next draft");
 
+    terminal.send("\x03");
     terminal.send("\x04");
     await finished;
   });

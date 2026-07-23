@@ -45,14 +45,20 @@ chronological, complete, static, and expanded. Live and reloaded Turns share one
 projection and renderer-neutral store.
 
 Fleet does not capture the mouse, clip old messages, or maintain a transcript
-viewport. Use native terminal scrollback. The activity rail reports phase,
-detail, elapsed time, steps, tools, and cancellation; the footer reports model,
-tokens, steps, and tools. The model displays `—` when the stream does not report
-one.
+viewport. Use native terminal scrollback. Assistant, user, reasoning, and Result
+narrative text is rendered as pi-tui Markdown, including lists, links,
+blockquotes, fenced code, and tables. The live activity loader names the current
+preparation, RLM step, Tool, replay, or cancellation action. The footer reports
+observed committed input/output tokens, Turn steps, Tools, and outcome; absent
+provider telemetry displays as `—` rather than an estimated zero.
 
-Use `/help` for commands. `/skills` and `/skill` manage up to four exact Skill
-selections for the next accepted Turn; `/cancel` requests durable Run
-cancellation.
+Use `/help` for commands. `/rename <title>` names the current Session;
+`/sessions [title search]` opens the active Session selector. Switching Sessions
+preserves the unsent draft and pending Skill selections. `/skills` and `/skill`
+manage up to four exact Skill selections for the next accepted Turn; `/cancel`
+requests durable Run cancellation. Escape cancels an active Run while preserving the unsent editor
+draft. Ctrl+C clears the editor and exits when pressed twice while empty;
+Ctrl+D keeps its forward-delete behavior and exits only from an empty editor.
 
 ## Artifact download
 

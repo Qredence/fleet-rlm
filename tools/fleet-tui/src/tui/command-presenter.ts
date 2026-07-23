@@ -52,25 +52,13 @@ export class PiCommandPresenter implements CommandPresenter {
   async chooseSession(sessions: FleetSession[]): Promise<string | null> {
     const state = this.store.getState();
     if (["submitting", "running", "cancelling"].includes(state.run.phase)) return null;
-    const id = await this.choose(
+    return this.choose(
       sessions.map((session) => ({
         value: session.id,
         label: session.title,
-        description: session.id,
+        description: `${relativeUpdatedAt(session.updated_at)} · ${shortId(session.id)}`,
       })),
     );
-    if (!id) return null;
-    const draft = this.editor.getText();
-    if (!draft && state.pendingSkillSelections.length === 0) return id;
-    const disclosure = `${draft ? "Unsent draft" : ""}${draft && state.pendingSkillSelections.length ? " and " : ""}${state.pendingSkillSelections.length ? `${state.pendingSkillSelections.length} pending Skill selection(s)` : ""}`;
-    const confirmed = await this.choose([
-      { value: "cancel", label: "Keep current session", description: disclosure },
-      { value: "switch", label: "Discard and switch", description: disclosure },
-    ]);
-    if (confirmed !== "switch") return null;
-    this.editor.setText("");
-    this.store.dispatch({ type: "skill-selection/clear" });
-    return id;
   }
 
   async chooseSkills(
@@ -198,6 +186,22 @@ export class SkillSelector implements Component {
       `${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query),
     );
   }
+}
+
+function shortId(id: string): string {
+  return id.length > 12 ? `${id.slice(0, 8)}…` : id;
+}
+
+function relativeUpdatedAt(value: string | null | undefined): string {
+  if (!value) return "updated —";
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "updated —";
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
+  if (elapsedMinutes < 1) return "updated now";
+  if (elapsedMinutes < 60) return `updated ${elapsedMinutes}m ago`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `updated ${elapsedHours}h ago`;
+  return `updated ${Math.floor(elapsedHours / 24)}d ago`;
 }
 
 function isPrintableInput(value: string): boolean {

@@ -38,6 +38,7 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
   private unsubscribe?: () => void;
   private started = false;
   private stopping?: Promise<void>;
+  private lastCtrlCAt = 0;
   private resolveFinished!: () => void;
   private readonly finished = new Promise<void>((resolve) => {
     this.resolveFinished = resolve;
@@ -70,22 +71,39 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
     this.started = true;
     this.unsubscribe = this.store.subscribe(() => this.onStateChange());
     this.ui.addInputListener((data) => {
-      if (fleetKeybindings.matches(data, "fleet.exit")) {
-        void this.stop();
-        return { consume: true };
-      }
-      if (fleetKeybindings.matches(data, "fleet.cancel")) {
-        if (isBusy(this.store.getState().run)) {
-          this.controller.cancel();
-        } else {
-          void this.stop();
-        }
-        return { consume: true };
-      }
       if (fleetKeybindings.matches(data, "fleet.suspend")) {
+        this.lastCtrlCAt = 0;
         this.suspend();
         return { consume: true };
       }
+      if (fleetKeybindings.matches(data, "fleet.interrupt")) {
+        this.lastCtrlCAt = 0;
+        if (this.ui.hasOverlay() || this.editor.isShowingAutocomplete()) return undefined;
+        if (isBusy(this.store.getState().run)) {
+          this.controller.cancel();
+          return { consume: true };
+        }
+        return undefined;
+      }
+      if (fleetKeybindings.matches(data, "fleet.clearOrExit")) {
+        if (this.ui.hasOverlay()) return undefined;
+        const now = Date.now();
+        if (this.editor.getText()) {
+          this.editor.setText("");
+          this.lastCtrlCAt = now;
+          return { consume: true };
+        }
+        if (now - this.lastCtrlCAt <= 750) void this.stop();
+        this.lastCtrlCAt = now;
+        return { consume: true };
+      }
+      if (fleetKeybindings.matches(data, "fleet.exit")) {
+        this.lastCtrlCAt = 0;
+        if (this.ui.hasOverlay() || this.editor.getText()) return undefined;
+        void this.stop();
+        return { consume: true };
+      }
+      this.lastCtrlCAt = 0;
       return undefined;
     });
     this.ui.setFocus(this.editor);
