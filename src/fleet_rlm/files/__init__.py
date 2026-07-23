@@ -7,7 +7,7 @@ from fleet_rlm.files.errors import (
     AttachmentNotFoundError,
     AttachmentValidationError,
 )
-from fleet_rlm.files.lifecycle import AttachmentModule, StoredAttachment
+from fleet_rlm.files.lifecycle import AttachmentLifecycleService, StoredAttachment
 from fleet_rlm.files.models import AttachmentRef, StagedAttachment
 from fleet_rlm.files.tools import FileToolHost
 
@@ -15,7 +15,7 @@ __all__ = [
     "AttachmentError",
     "AttachmentNotFoundError",
     "AttachmentRef",
-    "AttachmentModule",
+    "AttachmentLifecycleService",
     "AttachmentValidationError",
     "FileToolHost",
     "StoredAttachment",

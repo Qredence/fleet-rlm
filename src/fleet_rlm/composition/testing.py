@@ -12,10 +12,10 @@ from fastapi import FastAPI
 from fleet_rlm.chat.deno_run_environment import DenoPreparedCapabilities, _DenoCapabilityPreparer
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
 from fleet_rlm.chat.turn_preparation import (
+    DefaultTurnPreparer,
     PreparedTurn,
     RunEnvironment,
     RunEnvironmentProvider,
-    TurnPreparationModule,
 )
 from fleet_rlm.composition.common import (
     LocalCompositionHandles,
@@ -137,7 +137,7 @@ class DeterministicTurnPreparation:
     ) -> None:
         resolved_options = options or RLMOptions()
         models = RLMModelBundle(TestingLM("testing/root"), TestingLM("testing/sub"))
-        self._module = TurnPreparationModule(
+        self._module = DefaultTurnPreparer(
             models=models,
             options=resolved_options,
             attachments=attachments,

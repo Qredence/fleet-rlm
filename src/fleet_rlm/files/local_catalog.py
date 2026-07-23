@@ -1,4 +1,4 @@
-"""Local Attachment catalog and blob adapters for AttachmentModule."""
+"""Local Attachment catalog and blob adapters for AttachmentLifecycleService."""
 
 from __future__ import annotations
 
@@ -95,7 +95,7 @@ class LocalAttachmentCatalog:
 
 
 class WorkspaceAttachmentBlobGateway:
-    """Adapt Workspace Volume byte I/O to AttachmentModule's blob port."""
+    """Adapt Workspace Volume byte I/O to AttachmentLifecycleService's blob port."""
 
     def __init__(self, gateway) -> None:
         self._gateway = gateway

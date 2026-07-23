@@ -170,6 +170,71 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
 
 
 @pytest.mark.asyncio
+async def test_runner_validates_host_metadata_before_provider_execution() -> None:
+    from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
+    from fleet_rlm.rlm.context import RLMExecutionContext
+    from fleet_rlm.rlm.dspy_contract import RLMOptions
+    from fleet_rlm.rlm.runner import RLMRunner
+    from fleet_rlm.sessions.models import TurnAccess
+
+    class Program:
+        acall_calls = 0
+
+        async def acall(self, **_kwargs):
+            self.acall_calls += 1
+            return dspy.Prediction(answer="must not execute")
+
+    class Factory:
+        def __init__(self) -> None:
+            self.program = Program()
+
+        def create(self, **_kwargs):
+            return self.program
+
+    class Capabilities:
+        spec = SimpleNamespace(tools=(), tool_event_views={}, skill_cards=(), signature=None, workspace=None)
+
+        def drain_public_details(self):
+            return ()
+
+        def drain_artifact_candidates(self):
+            return ()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    malformed_context = SessionContextManifest(
+        "not-a-uuid",  # type: ignore[arg-type]
+        -1,
+        0,
+        (TurnPreview(0, "system", "malformed"),),  # type: ignore[arg-type]
+    )
+    context = RLMExecutionContext(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        "validate me",
+        malformed_context,
+        SimpleNamespace(root_lm=object(), sub_lm=object()),
+        RLMOptions(),
+        asyncio.get_running_loop().time() + 10,
+        None,
+        (),
+        Capabilities(),
+        not_cancelled,
+        (),
+    )
+    factory = Factory()
+    stream = RLMRunner(factory=factory).stream(context)
+    _events = [event async for event in stream]
+
+    assert factory.program.acall_calls == 0
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "failed"
+    assert stream.outcome.public_error_message == "Turn failed"
+
+
+@pytest.mark.asyncio
 async def test_runner_loads_two_skills_reads_python_resource_and_completes_submit() -> None:
     from fleet_rlm.chat.deno_run_environment import DenoPreparedCapabilities
     from fleet_rlm.chat.session_context import SessionContextManifest

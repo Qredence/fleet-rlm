@@ -20,12 +20,12 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
-from fleet_rlm.daytona.run_environment import LiveKernelResources
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.bindings import SandboxBinding
+from fleet_rlm.daytona.run_environment import LiveKernelResources
 from fleet_rlm.daytona.session_manager import LeaseRequest
 from fleet_rlm.daytona.volume_fs import DaytonaSandboxVolumeFs
-from fleet_rlm.files.lifecycle import AttachmentModule
+from fleet_rlm.files.lifecycle import AttachmentLifecycleService
 from fleet_rlm.files.local_catalog import LocalAttachmentCatalog
 from fleet_rlm.files.models import AttachmentAccess, AttachmentRun, AttachmentUpload
 from fleet_rlm.files.paths import DaytonaAttachmentPathPolicy
@@ -143,7 +143,7 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
         assert getattr(sandbox, "snapshot", None) == settings.daytona_snapshot
         volume_fs = DaytonaSandboxVolumeFs(sandbox)
 
-        attachment_module = AttachmentModule(
+        attachment_module = AttachmentLifecycleService(
             catalog=LocalAttachmentCatalog(tmp_path / "attachments"),
             blobs=_LiveAttachmentBlob(volume_fs),
             paths=DaytonaAttachmentPathPolicy(resources.volume_config.paths()),

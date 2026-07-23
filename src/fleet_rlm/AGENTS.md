@@ -23,6 +23,10 @@ them for backend work. Current code and tests outrank the local phase record in
 - Every Signature receives request text, bounded `session_context`, bounded
   `skill_cards`, and bounded Attachment metadata. Older committed messages
   remain behind the Session-scoped `read_session_history` Tool.
+- The default `FleetRLMSignature` uses strict Pydantic DTOs local to `rlm/`;
+  `rlm.inputs` validates and JSON-serializes the bounded payload once before
+  native `rlm.acall()`. Custom Skill Signatures retain JSON-compatible common
+  input annotations and declared output schemas.
 - Runtime-specific Session Workspace availability is bounded inside context;
   Daytona registers list/stat/paged-read/write/append workspace Tools plus
   direct Workspace Artifact Candidate publication, while Deno advertises the

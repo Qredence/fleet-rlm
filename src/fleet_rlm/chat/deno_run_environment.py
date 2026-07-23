@@ -10,11 +10,11 @@ import dspy
 
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
 from fleet_rlm.chat.turn_preparation import (
+    DefaultTurnPreparer,
     PreparedTurn,
     RunEnvironment,
     RunEnvironmentProvider,
     TurnPreparationCancelled,
-    TurnPreparationModule,
     TurnPreparationTimeout,
 )
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
@@ -281,7 +281,7 @@ class DenoTurnPreparation:
     ) -> None:
         selected_options = options or RLMOptions()
         models = RLMModelBundle(root_lm=root_lm, sub_lm=sub_lm)
-        self._module = TurnPreparationModule(
+        self._module = DefaultTurnPreparer(
             models=models,
             options=selected_options,
             attachments=attachments,

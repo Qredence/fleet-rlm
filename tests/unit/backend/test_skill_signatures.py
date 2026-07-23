@@ -3,12 +3,26 @@
 import dspy
 import pytest
 
+from fleet_rlm.rlm.input_models import AttachmentInput, SessionContextInput, SkillCardInput
+from fleet_rlm.rlm.signature import FleetRLMSignature
 from fleet_rlm.skills.signatures import DataAnalysisSignature, validate_skill_signature
 
 
 def test_data_analysis_signature_preserves_standard_inputs_and_answer() -> None:
     assert {"request", "session_context", "skill_cards", "attachments"} <= set(DataAnalysisSignature.input_fields)
     assert DataAnalysisSignature.output_fields["answer"].annotation is str
+    validate_skill_signature(DataAnalysisSignature)
+
+
+def test_default_signature_uses_strict_model_visible_input_types() -> None:
+    assert FleetRLMSignature.input_fields["request"].annotation is str
+    assert FleetRLMSignature.input_fields["session_context"].annotation is SessionContextInput
+    assert FleetRLMSignature.input_fields["skill_cards"].annotation == list[SkillCardInput]
+    assert FleetRLMSignature.input_fields["attachments"].annotation == list[AttachmentInput]
+    assert FleetRLMSignature.output_fields["answer"].annotation is str
+
+
+def test_custom_signature_can_keep_json_compatible_common_input_types() -> None:
     validate_skill_signature(DataAnalysisSignature)
 
 

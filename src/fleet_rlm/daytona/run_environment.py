@@ -13,9 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
 from fleet_rlm.chat.turn_preparation import (
+    DefaultTurnPreparer,
     RunEnvironment,
     TurnPreparationCancelled,
-    TurnPreparationModule,
     TurnPreparationTimeout,
     TurnPreparationUnavailable,
 )
@@ -445,14 +445,14 @@ def build_turn_preparation(
     *,
     attachment_lifecycle: Any,
     skill_catalog: SkillCatalog,
-) -> TurnPreparationModule:
+) -> DefaultTurnPreparer:
     """Compose Daytona Turn preparation without mutating resource ownership."""
     options = RLMOptions(
         max_iterations=resources.settings.rlm_max_iterations,
         max_llm_calls=resources.settings.rlm_max_llm_calls,
         max_output_chars=resources.settings.rlm_max_output_chars,
     )
-    return TurnPreparationModule(
+    return DefaultTurnPreparer(
         models=resources.models,
         options=options,
         attachments=_LiveAttachmentLifecycle(attachment_lifecycle),

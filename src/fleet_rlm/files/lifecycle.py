@@ -88,7 +88,7 @@ class AttachmentLifecycle(Protocol):
     ) -> PreparedAttachments: ...
 
 
-class AttachmentModule:
+class AttachmentLifecycleService:
     """Own upload, authorization, integrity, and Run staging policy."""
 
     def __init__(

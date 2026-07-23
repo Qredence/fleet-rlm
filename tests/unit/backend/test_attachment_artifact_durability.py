@@ -12,7 +12,7 @@ import pytest
 from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
 from fleet_rlm.daytona.paths import UnsafePathError, VolumePaths, as_posix
 from fleet_rlm.daytona.volume_fs import HostVolumeMirror
-from fleet_rlm.files.lifecycle import AttachmentModule
+from fleet_rlm.files.lifecycle import AttachmentLifecycleService
 from fleet_rlm.files.local_catalog import LocalAttachmentBlobGateway, LocalAttachmentCatalog
 from fleet_rlm.files.models import AttachmentAccess, AttachmentRun, AttachmentUpload
 from fleet_rlm.files.paths import LocalAttachmentPathPolicy
@@ -69,7 +69,7 @@ def test_volume_paths_durable_attachment_and_artifact_layout() -> None:
 
 
 def test_upload_promotes_durable_blob_into_workspace_volume_scope(tmp_path: Path) -> None:
-    module = AttachmentModule(
+    module = AttachmentLifecycleService(
         catalog=LocalAttachmentCatalog(tmp_path / "catalog"),
         blobs=LocalAttachmentBlobGateway(tmp_path / "catalog"),
         paths=LocalAttachmentPathPolicy(tmp_path / "catalog"),
@@ -88,7 +88,7 @@ def test_upload_promotes_durable_blob_into_workspace_volume_scope(tmp_path: Path
 
 def test_stager_requires_volume_write_and_materializes_run_path(tmp_path: Path) -> None:
     mirror = HostVolumeMirror(tmp_path / "volume")
-    module = AttachmentModule(
+    module = AttachmentLifecycleService(
         catalog=LocalAttachmentCatalog(tmp_path / "catalog"),
         blobs=LocalAttachmentBlobGateway(tmp_path / "catalog"),
         paths=_HybridPaths(mirror.volume_paths),

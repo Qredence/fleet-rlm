@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import dspy
 
+from fleet_rlm.rlm.input_models import AttachmentInput, SessionContextInput, SkillCardInput
+
 _REQUIRED_INPUTS = {
-    "request": str,
-    "session_context": dict,
-    "skill_cards": list[dict],
-    "attachments": list[dict],
+    "request": (str,),
+    "session_context": (dict, SessionContextInput),
+    "skill_cards": (list[dict], list[SkillCardInput]),
+    "attachments": (list[dict], list[AttachmentInput]),
 }
 
 
@@ -30,14 +32,14 @@ def validate_skill_signature(signature: type[dspy.Signature]) -> None:
 
     if not isinstance(signature, type) or not issubclass(signature, dspy.Signature):
         raise ValueError("Skill Signature must be a dspy.Signature")
-    for name, annotation in _REQUIRED_INPUTS.items():
+    for name, accepted_annotations in _REQUIRED_INPUTS.items():
         field = signature.fields.get(name)
         extra = getattr(field, "json_schema_extra", None) if field is not None else None
         if (
             field is None
             or not isinstance(extra, dict)
             or extra.get("__dspy_field_type") != "input"
-            or field.annotation != annotation
+            or field.annotation not in accepted_annotations
             or not field.is_required()
         ):
             raise ValueError(f"Skill Signature must define input field: {name}")

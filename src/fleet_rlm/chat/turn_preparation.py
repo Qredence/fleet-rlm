@@ -121,7 +121,7 @@ class CapabilityPreparer(Protocol):
     ) -> PreparedCapabilities: ...
 
 
-class TurnPreparationModule:
+class DefaultTurnPreparer:
     """Build exactly one complete immutable execution context before delivery."""
 
     def __init__(

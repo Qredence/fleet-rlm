@@ -75,14 +75,14 @@ def build_local_storage_adapters(
         LocalArtifactReaderCatalog,
     )
     from fleet_rlm.artifacts.reader import ArtifactReader
-    from fleet_rlm.files.lifecycle import AttachmentModule
+    from fleet_rlm.files.lifecycle import AttachmentLifecycleService
     from fleet_rlm.files.local_catalog import LocalAttachmentBlobGateway, LocalAttachmentCatalog
     from fleet_rlm.files.paths import LocalAttachmentPathPolicy
     from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
 
     upload_root, artifact_root = host_roots(settings)
     if session_factory is None:
-        attachment_lifecycle: Any = AttachmentModule(
+        attachment_lifecycle: Any = AttachmentLifecycleService(
             catalog=LocalAttachmentCatalog(upload_root),
             blobs=LocalAttachmentBlobGateway(Path(upload_root)),
             paths=LocalAttachmentPathPolicy(Path(upload_root)),
@@ -101,7 +101,7 @@ def build_local_storage_adapters(
 
     if sql_attachment_blobs is None or sql_attachment_paths is None or sql_artifact_blobs is None:
         raise CompositionError("SQL local storage adapters require runtime-specific blob and path gateways")
-    attachment_lifecycle = AttachmentModule(
+    attachment_lifecycle = AttachmentLifecycleService(
         catalog=SqlAlchemyAttachmentCatalog(session_factory),
         blobs=sql_attachment_blobs,
         paths=sql_attachment_paths,

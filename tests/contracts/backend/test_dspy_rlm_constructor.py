@@ -65,6 +65,16 @@ def test_dspy_rlm_accepts_file_tool_names_and_fresh_custom_interpreters() -> Non
     assert second._interpreter is second_interpreter  # noqa: SLF001 - installed DSPy contract
 
 
+def test_pinned_chat_adapter_formats_validated_json_inputs_for_typed_signature() -> None:
+    from fleet_rlm.rlm.signature import FleetRLMSignature
+    from tests.unit.backend.rlm.test_signature_inputs import _payload
+
+    messages = dspy.ChatAdapter().format(FleetRLMSignature, [], _payload())
+    assert messages[0]["role"] == "system"
+    assert "session_context" in messages[-1]["content"]
+    assert "report-builder" in messages[-1]["content"]
+
+
 @pytest.mark.asyncio
 async def test_pinned_async_rlm_creates_fresh_native_history_and_honors_output_bound() -> None:
     from dspy.primitives.repl_types import REPLHistory

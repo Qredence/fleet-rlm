@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import dspy
 
+from fleet_rlm.rlm.input_models import AttachmentInput, SessionContextInput, SkillCardInput
+
 
 class FleetRLMSignature(dspy.Signature):
     """Recursive turn: explore via code, then submit a final answer.
@@ -16,11 +18,15 @@ class FleetRLMSignature(dspy.Signature):
     """
 
     request: str = dspy.InputField(desc="User request for this turn")
-    session_context: dict = dspy.InputField(
+    session_context: SessionContextInput = dspy.InputField(
         desc="Session metadata, workspace capability, and recent previews; use tools for durable bodies"
     )
-    skill_cards: list[dict] = dspy.InputField(desc="Authorized Skill Card metadata only (no instruction bodies)")
-    attachments: list[dict] = dspy.InputField(desc="Attachment identity and bounded metadata (no bytes or paths)")
+    skill_cards: list[SkillCardInput] = dspy.InputField(
+        desc="Authorized Skill Card metadata only (no instruction bodies)"
+    )
+    attachments: list[AttachmentInput] = dspy.InputField(
+        desc="Attachment identity and bounded metadata (no bytes or paths)"
+    )
     answer: str = dspy.OutputField(
         desc=(
             "Concise user-facing answer within the Turn output character budget. "

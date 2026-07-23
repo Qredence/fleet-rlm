@@ -11,7 +11,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_preparation_bounds_history_and_closes_in_dependency_order() -> None:
     from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
-    from fleet_rlm.chat.turn_preparation import RunEnvironment, TurnPreparationModule
+    from fleet_rlm.chat.turn_preparation import DefaultTurnPreparer, RunEnvironment
     from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.rlm.context import RLMExecutionSpec
     from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -83,7 +83,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
         not_cancelled,
         _TurnClaimToken(uuid4()),
     )
-    prepared = await TurnPreparationModule(
+    prepared = await DefaultTurnPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -108,7 +108,7 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
     import asyncio
 
     from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
-    from fleet_rlm.chat.turn_preparation import RunEnvironment, TurnPreparationModule, TurnPreparationTimeout
+    from fleet_rlm.chat.turn_preparation import DefaultTurnPreparer, RunEnvironment, TurnPreparationTimeout
     from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
@@ -154,7 +154,7 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
         not_cancelled,
         _TurnClaimToken(uuid4()),
     )
-    module = TurnPreparationModule(
+    module = DefaultTurnPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -170,7 +170,7 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
 @pytest.mark.asyncio
 async def test_preparation_failure_removes_staged_run_bytes_but_not_session_workspace() -> None:
     from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
-    from fleet_rlm.chat.turn_preparation import RunEnvironment, TurnPreparationModule
+    from fleet_rlm.chat.turn_preparation import DefaultTurnPreparer, RunEnvironment
     from fleet_rlm.files.models import AttachmentRef, PreparedAttachments, StagedAttachment
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
@@ -228,7 +228,7 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
         not_cancelled,
         _TurnClaimToken(uuid4()),
     )
-    module = TurnPreparationModule(
+    module = DefaultTurnPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),

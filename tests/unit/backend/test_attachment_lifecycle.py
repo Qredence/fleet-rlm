@@ -86,13 +86,13 @@ class _Sink:
 
 @pytest.mark.asyncio
 async def test_upload_streams_bounded_bytes_before_creating_metadata() -> None:
-    from fleet_rlm.files.lifecycle import AttachmentModule
+    from fleet_rlm.files.lifecycle import AttachmentLifecycleService
     from fleet_rlm.files.models import AttachmentAccess, AttachmentUpload
 
     calls: list[tuple[str, object]] = []
     source = _Source([b"abc", b"def", b""])
     access = AttachmentAccess(user_id=uuid4(), workspace_id=uuid4())
-    module = AttachmentModule(
+    module = AttachmentLifecycleService(
         catalog=_Catalog(calls),
         blobs=_Blobs(calls),
         paths=_Paths(),
@@ -116,7 +116,7 @@ async def test_upload_streams_bounded_bytes_before_creating_metadata() -> None:
 @pytest.mark.asyncio
 async def test_upload_rolls_back_blob_when_catalog_create_fails() -> None:
     from fleet_rlm.files.errors import AttachmentStorageError
-    from fleet_rlm.files.lifecycle import AttachmentModule
+    from fleet_rlm.files.lifecycle import AttachmentLifecycleService
     from fleet_rlm.files.models import AttachmentAccess, AttachmentUpload
 
     class FailingCatalog(_Catalog):
@@ -126,7 +126,7 @@ async def test_upload_rolls_back_blob_when_catalog_create_fails() -> None:
     calls: list[tuple[str, object]] = []
     blobs = _Blobs(calls)
     access = AttachmentAccess(user_id=uuid4(), workspace_id=uuid4())
-    module = AttachmentModule(catalog=FailingCatalog(calls), blobs=blobs, paths=_Paths(), max_bytes=8)
+    module = AttachmentLifecycleService(catalog=FailingCatalog(calls), blobs=blobs, paths=_Paths(), max_bytes=8)
 
     with pytest.raises(AttachmentStorageError):
         await module.upload(access, AttachmentUpload("report.txt", "text/plain", _Source([b"abc", b""])))
@@ -138,7 +138,7 @@ async def test_upload_rolls_back_blob_when_catalog_create_fails() -> None:
 @pytest.mark.asyncio
 async def test_metadata_authorizes_one_batch_and_returns_request_order() -> None:
     from fleet_rlm.files.errors import AttachmentValidationError
-    from fleet_rlm.files.lifecycle import AttachmentModule, StoredAttachment
+    from fleet_rlm.files.lifecycle import AttachmentLifecycleService, StoredAttachment
     from fleet_rlm.files.models import AttachmentAccess, AttachmentRef
 
     first_id, second_id = uuid4(), uuid4()
@@ -152,7 +152,7 @@ async def test_metadata_authorizes_one_batch_and_returns_request_order() -> None
             second_id: StoredAttachment(second, "private/second"),
         },
     )
-    module = AttachmentModule(
+    module = AttachmentLifecycleService(
         catalog=catalog,
         blobs=_Blobs(calls),
         paths=_Paths(),
@@ -170,7 +170,7 @@ async def test_metadata_authorizes_one_batch_and_returns_request_order() -> None
 
 @pytest.mark.asyncio
 async def test_prepare_run_reauthorizes_verifies_and_stages_in_request_order() -> None:
-    from fleet_rlm.files.lifecycle import AttachmentModule, StoredAttachment
+    from fleet_rlm.files.lifecycle import AttachmentLifecycleService, StoredAttachment
     from fleet_rlm.files.models import AttachmentAccess, AttachmentRef, AttachmentRun
 
     first_id, second_id = uuid4(), uuid4()
@@ -199,7 +199,7 @@ async def test_prepare_run_reauthorizes_verifies_and_stages_in_request_order() -
     )
     blobs = _Blobs(calls, {"private/first": first_data, "private/second": second_data})
     sink = _Sink(calls)
-    module = AttachmentModule(catalog=catalog, blobs=blobs, paths=_Paths(), max_bytes=8)
+    module = AttachmentLifecycleService(catalog=catalog, blobs=blobs, paths=_Paths(), max_bytes=8)
     access = AttachmentAccess(user_id=uuid4(), workspace_id=uuid4())
     run = AttachmentRun(session_id=uuid4(), run_id=uuid4())
 
@@ -214,7 +214,7 @@ async def test_prepare_run_reauthorizes_verifies_and_stages_in_request_order() -
 @pytest.mark.asyncio
 async def test_prepare_run_rolls_back_staged_paths_when_a_later_write_fails() -> None:
     from fleet_rlm.files.errors import AttachmentStorageError
-    from fleet_rlm.files.lifecycle import AttachmentModule, StoredAttachment
+    from fleet_rlm.files.lifecycle import AttachmentLifecycleService, StoredAttachment
     from fleet_rlm.files.models import AttachmentAccess, AttachmentRef, AttachmentRun
 
     ids = (uuid4(), uuid4())
@@ -236,7 +236,7 @@ async def test_prepare_run_rolls_back_staged_paths_when_a_later_write_fails() ->
     )
     blobs = _Blobs(calls, {"private/a": b"a", "private/b": b"b"})
     sink = _Sink(calls, fail_after=1)
-    module = AttachmentModule(catalog=catalog, blobs=blobs, paths=_Paths(), max_bytes=8)
+    module = AttachmentLifecycleService(catalog=catalog, blobs=blobs, paths=_Paths(), max_bytes=8)
 
     with pytest.raises(AttachmentStorageError, match="unavailable"):
         await module.prepare_run(

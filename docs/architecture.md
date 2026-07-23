@@ -10,7 +10,7 @@ POST /api/sessions/{session_id}/turns + Idempotency-Key
   -> Attachment ownership and exact Skill selection validation
   -> TurnCoordinator.open()
      -> TurnLifecycle.begin(): replay or atomic Run claim
-     -> TurnPreparationModule.prepare(): context, tools, environment resources
+     -> DefaultTurnPreparer.prepare(): context, tools, environment resources
   -> RLMRunner: one fresh native dspy.RLM and interpreter context
   -> Runtime Events from native trajectory, interpreter, and host-tool boundaries
   -> TurnLifecycle.finish()
@@ -32,7 +32,10 @@ globals.
 
 Every Signature receives request text, bounded `session_context`, bounded
 `skill_cards`, and bounded Attachment metadata. Full committed history remains
-host-side behind `read_session_history`.
+host-side behind `read_session_history`. The default Signature uses strict local
+Pydantic DTOs; conversion and JSON serialization happen once immediately before
+native `dspy.RLM.acall()`. Custom Skill Signatures retain their existing
+JSON-compatible common input annotations.
 
 ## Composition and ownership
 
@@ -47,8 +50,10 @@ host-side behind `read_session_history`.
   from `composition` and is never installed by lifespan.
 - Routes retrieve composed runtime modules through `api/dependencies.py`; the
   Skills discovery route may recreate only its static in-memory catalog fallback.
-- `TurnPreparationModule` owns ordered validation, environment acquisition,
+- `DefaultTurnPreparer` owns ordered validation, environment acquisition,
   bounded context, Tool construction, and reverse-order rollback.
+- `AttachmentLifecycleService` owns Attachment upload, authorization, integrity,
+  and Run staging; it is not a DSPy execution Module.
 - Daytona composition constructs Turn preparation explicitly; process-lifetime
   `LiveKernelResources` owns provider resources but no mutable preparation graph.
 - `RLMRunner` executes one fresh DSPy RLM and emits no terminal event.

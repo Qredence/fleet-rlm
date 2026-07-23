@@ -81,7 +81,7 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
     from fleet_rlm.daytona.run_environment import LiveKernelResources, build_turn_preparation, resolve_settings
     from fleet_rlm.daytona.sandbox_spec import sandbox_spec_from_settings
     from fleet_rlm.daytona.workspace_volume import create_daytona_workspace_volume_gateway
-    from fleet_rlm.files.lifecycle import AttachmentModule
+    from fleet_rlm.files.lifecycle import AttachmentLifecycleService
     from fleet_rlm.files.local_catalog import WorkspaceAttachmentBlobGateway
     from fleet_rlm.files.paths import DaytonaAttachmentPathPolicy
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory
@@ -119,7 +119,7 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
             sandbox_spec=sandbox_spec,
         )
         volume_paths = volume_paths_from_settings(resolved)
-        attachment_lifecycle = AttachmentModule(
+        attachment_lifecycle = AttachmentLifecycleService(
             catalog=SqlAlchemyAttachmentCatalog(session_factory),
             blobs=WorkspaceAttachmentBlobGateway(gateway),
             paths=DaytonaAttachmentPathPolicy(volume_paths),

@@ -11,7 +11,7 @@ import pytest
 from fleet_rlm.daytona.paths import VolumePaths
 from fleet_rlm.daytona.volume_fs import HostVolumeMirror
 from fleet_rlm.files.errors import AttachmentNotFoundError, AttachmentValidationError
-from fleet_rlm.files.lifecycle import AttachmentModule
+from fleet_rlm.files.lifecycle import AttachmentLifecycleService
 from fleet_rlm.files.local_catalog import LocalAttachmentBlobGateway, LocalAttachmentCatalog
 from fleet_rlm.files.models import AttachmentAccess, AttachmentRun, AttachmentUpload
 from fleet_rlm.files.paths import LocalAttachmentPathPolicy
@@ -75,7 +75,7 @@ def test_validate_upload_size() -> None:
 
 
 def test_local_store_upload_and_reauth(tmp_path: Path) -> None:
-    module = AttachmentModule(
+    module = AttachmentLifecycleService(
         catalog=LocalAttachmentCatalog(tmp_path),
         blobs=LocalAttachmentBlobGateway(tmp_path),
         paths=LocalAttachmentPathPolicy(tmp_path),
@@ -102,7 +102,7 @@ def test_local_store_upload_and_reauth(tmp_path: Path) -> None:
 
 def test_stage_returns_fleet_sandbox_path_only(tmp_path: Path) -> None:
     mirror = HostVolumeMirror(tmp_path / "volume")
-    module = AttachmentModule(
+    module = AttachmentLifecycleService(
         catalog=LocalAttachmentCatalog(tmp_path / "blobs"),
         blobs=LocalAttachmentBlobGateway(tmp_path / "blobs"),
         paths=_HybridPaths(VolumePaths.from_mount()),

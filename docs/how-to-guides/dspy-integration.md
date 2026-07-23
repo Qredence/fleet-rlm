@@ -19,6 +19,18 @@ clients cannot provide models, Signatures, or executable capabilities.
 - Session Workspace files are immediate private Volume state. They survive
   later Runs and Sandbox replacement; interpreter globals do not.
 
+## Typed startup inputs
+
+Fleet keeps domain dataclasses authoritative and validates the bounded
+model-visible payload once at the `rlm.inputs` boundary immediately before
+`rlm.acall()`. The default `FleetRLMSignature` describes that payload with
+strict Pydantic DTOs. Skill instructions, resource bodies, Attachment bytes,
+provider paths, and older history remain behind host-mediated Tools.
+
+Custom Skill Signatures keep their existing JSON-compatible common input
+annotations and continue to own only their declared output fields. A custom
+DSPy Module requires the evidence gate in [ADR 0003](../adr/0003-dspy-program-composition.md).
+
 See [backend architecture](../architecture.md) for ownership and Turn commit ordering.
 
 ## Run the complete Daytona proof
