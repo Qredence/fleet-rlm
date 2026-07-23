@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
 from fleet_rlm.chat.turn_preparation import (
-    PreparedTurn,
     RunEnvironment,
     TurnPreparationCancelled,
     TurnPreparationModule,
@@ -34,7 +32,6 @@ from fleet_rlm.files.models import (
     AttachmentAccess,
     AttachmentRun,
     PreparedAttachments,
-    StagedAttachment,
 )
 from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY
 from fleet_rlm.persistence.database import (
@@ -222,7 +219,7 @@ class _DaytonaEnvironmentProvider:
 
 @dataclass(slots=True)
 class _LiveAttachmentLifecycle:
-    resources: LiveKernelResources
+    attachment_lifecycle: Any
 
     async def prepare_run(
         self,
@@ -231,45 +228,13 @@ class _LiveAttachmentLifecycle:
         run: AttachmentRun,
         sink: Any,
     ) -> PreparedAttachments:
-        attachment_lifecycle = getattr(self.resources, "attachment_lifecycle", None)
-        if attachment_lifecycle is not None:
-            return await attachment_lifecycle.prepare_run(
-                access,
-                attachment_ids,
-                run,
-                sink,
-            )
-        store = self.resources.attachment_store
-        if store is None:
-            if attachment_ids:
-                raise RuntimeError("live Attachment storage is unavailable")
-            return PreparedAttachments((), ())
-        paths = volume_paths_from_settings(self.resources.settings)
-        refs = []
-        staged = []
-        for attachment_id in attachment_ids:
-            ref = await store.get(
-                attachment_id,
-                user_id=access.user_id,
-                workspace_id=access.workspace_id,
-            )
-            data = await store.read_bytes(
-                attachment_id,
-                user_id=access.user_id,
-                workspace_id=access.workspace_id,
-            )
-            if len(data) != ref.byte_size or hashlib.sha256(data).hexdigest() != ref.checksum_sha256:
-                raise RuntimeError("Attachment failed integrity validation")
-            logical_path = str(paths.run_attachment_file(run.session_id, run.run_id, ref.id, ref.filename))
-            await sink.write_private(logical_path, data)
-            refs.append(ref)
-            staged.append(StagedAttachment(ref.id, logical_path))
-        return PreparedAttachments(tuple(refs), tuple(staged))
+        return await self.attachment_lifecycle.prepare_run(access, attachment_ids, run, sink)
 
 
 @dataclass(slots=True)
 class _LiveCapabilityPreparer:
     resources: LiveKernelResources
+    skill_catalog: SkillCatalog
 
     async def prepare(
         self,
@@ -316,26 +281,8 @@ class _LiveCapabilityPreparer:
             **workspace_host.event_views(),
             **history_host.event_views(),
         }
-        if self.resources.skill_catalog is None:
-            if turn.input.skill_selections:
-                from fleet_rlm.skills.errors import InvalidSkillSelectionError
-
-                raise InvalidSkillSelectionError()
-            return LivePreparedCapabilities(
-                RLMExecutionSpec(
-                    skill_cards=(),
-                    signature=resolved_signature(resolve_selected_skills(SkillCatalog(()), ())),
-                    output_schema_id="fleet.default",
-                    output_schema_version="1",
-                    tools=(*file_tools, *workspace_tools, *history_tools),
-                    tool_event_views=base_views,
-                    workspace=DAYTONA_WORKSPACE_CAPABILITY,
-                ),
-                files=file_host,
-                skills=_EmptySkillHost(),
-            )
         selections = tuple(turn.input.skill_selections)
-        if getattr(self.resources.skill_catalog, "unavailable", False):
+        if getattr(self.skill_catalog, "unavailable", False):
             from fleet_rlm.skills.errors import InvalidSkillSelectionError
 
             if selections:
@@ -351,13 +298,13 @@ class _LiveCapabilityPreparer:
                 skills=_EmptySkillHost(),
                 preparation_notices=(PreparationNotice("skills_unavailable", "Skills are unavailable"),),
             )
-        resolved = resolve_selected_skills(self.resources.skill_catalog, selections)
+        resolved = resolve_selected_skills(self.skill_catalog, selections)
         if await turn.cancellation_requested():
             raise TurnPreparationCancelled("Turn cancelled")
         if asyncio.get_running_loop().time() >= deadline:
             raise TurnPreparationTimeout("Turn preparation timed out")
         skill_host = SkillToolHost(
-            self.resources.skill_catalog,
+            self.skill_catalog,
             allowed_skill_ids=(frozenset(skill.card.id for skill in resolved.selected) if selections else None),
         )
         tools = (
@@ -432,12 +379,6 @@ class LiveKernelResources:
         )
         self.models = build_model_bundle(self.settings)
         self._sandbox_ids: list[str] = []
-        # Host-owned adapters wired by application composition.
-        self.skill_catalog: SkillCatalog | None = None
-        self.attachment_store: Any | None = None
-        self.artifact_store: Any | None = None
-        self.attachment_lifecycle: Any | None = None
-        self._preparation: TurnPreparationModule | None = None
 
     @classmethod
     async def with_sqlite_file(
@@ -470,41 +411,6 @@ class LiveKernelResources:
             settings,
         )
 
-    async def prepare(self, turn: ExecuteTurn, *, deadline: float | None = None) -> PreparedTurn:
-        """Acquire exactly one live Interpreter Lease before stream construction."""
-        preparation = getattr(self, "_preparation", None)
-        if preparation is None:
-            options = RLMOptions(
-                max_iterations=self.settings.rlm_max_iterations,
-                max_llm_calls=self.settings.rlm_max_llm_calls,
-                max_output_chars=self.settings.rlm_max_output_chars,
-            )
-            preparation = TurnPreparationModule(
-                models=self.models,
-                options=options,
-                turn_timeout_seconds=self.settings.turn_timeout_seconds,
-                attachments=_LiveAttachmentLifecycle(self),
-                environments=_DaytonaEnvironmentProvider(self),
-                capabilities=_LiveCapabilityPreparer(self),
-            )
-        return await preparation.prepare(turn, deadline=deadline)
-
-    def configure_preparation(self, attachment_lifecycle: Any) -> None:
-        options = RLMOptions(
-            max_iterations=self.settings.rlm_max_iterations,
-            max_llm_calls=self.settings.rlm_max_llm_calls,
-            max_output_chars=self.settings.rlm_max_output_chars,
-        )
-        self.attachment_lifecycle = attachment_lifecycle
-        self._preparation = TurnPreparationModule(
-            models=self.models,
-            options=options,
-            turn_timeout_seconds=self.settings.turn_timeout_seconds,
-            attachments=_LiveAttachmentLifecycle(self),
-            environments=_DaytonaEnvironmentProvider(self),
-            capabilities=_LiveCapabilityPreparer(self),
-        )
-
     def track_sandbox(self, sandbox_id: str | None) -> None:
         if sandbox_id and sandbox_id not in self._sandbox_ids:
             self._sandbox_ids.append(sandbox_id)
@@ -532,3 +438,24 @@ class LiveKernelResources:
         """Delete sandboxes and dispose engine (end of proof)."""
         self.cleanup()
         await self.adispose_engine()
+
+
+def build_turn_preparation(
+    resources: LiveKernelResources,
+    *,
+    attachment_lifecycle: Any,
+    skill_catalog: SkillCatalog,
+) -> TurnPreparationModule:
+    """Compose Daytona Turn preparation without mutating resource ownership."""
+    options = RLMOptions(
+        max_iterations=resources.settings.rlm_max_iterations,
+        max_llm_calls=resources.settings.rlm_max_llm_calls,
+        max_output_chars=resources.settings.rlm_max_output_chars,
+    )
+    return TurnPreparationModule(
+        models=resources.models,
+        options=options,
+        attachments=_LiveAttachmentLifecycle(attachment_lifecycle),
+        environments=_DaytonaEnvironmentProvider(resources),
+        capabilities=_LiveCapabilityPreparer(resources, skill_catalog),
+    )

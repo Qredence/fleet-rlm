@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol, Self
@@ -51,6 +50,8 @@ class TurnEventStream(AsyncIterator[RuntimeEvent], Protocol):
     def outcome(self) -> RLMOutcome | None: ...
 
     async def aclose(self) -> None: ...
+
+    async def wait_owned(self) -> None: ...
 
 
 class TurnRunner(Protocol):
@@ -161,11 +162,7 @@ class TurnCoordinator:
         heartbeat = self._start_heartbeat(start)
 
         try:
-            parameters = inspect.signature(self._preparation.prepare).parameters
-            if "deadline" in parameters:
-                preparation = self._preparation.prepare(start, deadline=deadline)
-            else:  # Compatibility for narrow test/private adapters.
-                preparation = self._preparation.prepare(start)
+            preparation = self._preparation.prepare(start, deadline=deadline)
             preparation_task = asyncio.create_task(preparation)
             heartbeat_lost = asyncio.create_task(heartbeat.lost.wait()) if heartbeat is not None else None
             waiters = {preparation_task}
@@ -424,9 +421,7 @@ class TurnCoordinator:
                         await stream.aclose()
                     except BaseException:
                         pass
-                    wait_owned = getattr(stream, "wait_owned", None)
-                    if callable(wait_owned):
-                        await wait_owned()
+                    await stream.wait_owned()
                 if finalization_task is not None:
                     try:
                         await asyncio.shield(finalization_task)
@@ -440,11 +435,8 @@ class TurnCoordinator:
         self._cleanup.submit(cleanup())
 
     def _start_heartbeat(self, turn: ExecuteTurn) -> _ClaimHeartbeat | None:
-        renew = getattr(self._lifecycle, "heartbeat", None)
-        if not callable(renew):
-            return None
-        interval = max(0.01, float(getattr(self._lifecycle, "heartbeat_seconds", 10)))
-        stale_after = max(interval * 3, float(getattr(self._lifecycle, "stale_after_seconds", 60)))
+        interval = max(0.01, float(self._lifecycle.heartbeat_seconds))
+        stale_after = max(interval * 3, float(self._lifecycle.stale_after_seconds))
         lost = asyncio.Event()
 
         async def maintain_claim() -> None:
@@ -456,7 +448,7 @@ class TurnCoordinator:
                 await asyncio.sleep(max(0.0, next_attempt - loop.time()))
                 try:
                     async with asyncio.timeout_at(authority_deadline):
-                        await renew(turn)
+                        await self._lifecycle.heartbeat(turn)
                 except (TurnLifecycleUnavailable, TurnStateError):
                     turn.authority.revoke()
                     lost.set()
@@ -495,8 +487,5 @@ class TurnCoordinator:
         self._cleanup.submit(cleanup())
 
     async def _revoke_claim(self, turn: ExecuteTurn, usage) -> FailedRunReceipt:
-        revoke = getattr(self._lifecycle, "revoke_claim", None)
         failure = TurnFailure("failed", "stale_claim", "Turn failed", usage)
-        if callable(revoke):
-            return await revoke(turn, failure)
-        return await self._lifecycle.settle(turn, failure)
+        return await self._lifecycle.revoke_claim(turn, failure)

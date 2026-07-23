@@ -10,14 +10,14 @@ compatibility runtime and parallel foundation package no longer exist.
 | `app.py`, `main.py` | FastAPI factory, handlers/routers, static Skill catalog, lifespan selection, ASGI entrypoint | composition, API routers, Skill catalog |
 | `composition/` | common inventory plus explicit Daytona, Deno, and private testing wiring | domain modules and adapters |
 | `api/` | HTTP translation, local scope, dependency aliases, OpenAPI/SSE projection, UIMessage reload | domain interfaces and composed modules |
-| `chat/` | Turn preparation, coordinator orchestration, lifecycle finalization, Deno environment and sinks | RLM, Sessions, Skills, files |
+| `chat/` | Turn preparation, coordinator orchestration, lifecycle finalization, shared Turn Claim policy, Deno environment and sinks | RLM, Sessions, Skills, files |
 | `rlm/` | DSPy Signature, model roles, fresh RLM construction, options, events, runner | DSPy and domain values |
-| `daytona/` | exclusive SDK boundary, Sandbox/lease/Volume/interpreter adapters | Daytona SDK and domain values |
+| `daytona/` | exclusive SDK boundary, process resources, explicit Turn-preparation adapters, Sandbox/lease/Volume/interpreter adapters | Daytona SDK and domain values |
 | `sessions/` | Session catalog, Turn input/history, versioned Committed Turn | domain values |
 | `files/`, `artifacts/` | Attachment staging, Session Workspace tools, Artifact Candidate promotion/read | storage interfaces and safe paths |
 | `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |
 | `persistence/` | SQLAlchemy models and repository adapters | Session/file/Artifact interfaces |
-| `observability/` | sanitized Turn records and exporters | Runtime Events |
+| `observability/` | sanitized failure diagnostics | domain errors |
 | `cli/` | supervised Daytona/Deno plus pi-tui, backend launchers, doctor dispatch | ASGI entrypoint and Daytona diagnostics |
 
 ## Hard boundaries
@@ -31,6 +31,10 @@ compatibility runtime and parallel foundation package no longer exist.
 - `RLMRunner` owns execution, not Turn Commit or resource release.
   `TurnLifecycle.finish()` owns result/Artifact publication and atomic commit;
   `TurnCoordinator` owns terminal ordering and final cleanup.
+- `LiveKernelResources` owns process-lifetime Daytona resources only;
+  `composition/daytona.py` explicitly constructs Turn preparation.
+- In-memory and SQL repositories apply the pure `chat/turn_claim.py` transition
+  policy inside their respective lock and transaction boundaries.
 - Alembic owns live schema evolution. `create_tables` is limited to explicit
   SQLite test/local helpers.
 - Runtime Events are transport-neutral. `api/sse.py` alone owns the public AI

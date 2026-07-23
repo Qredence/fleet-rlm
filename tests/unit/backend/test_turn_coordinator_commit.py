@@ -83,7 +83,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
             operations.append("close")
 
     class Preparation:
-        async def prepare(self, _turn):
+        async def prepare(self, _turn, *, deadline):
             operations.append("prepare")
             return Prepared()
 
@@ -222,7 +222,7 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
             closes += 1
 
     class Preparation:
-        async def prepare(self, _turn):
+        async def prepare(self, _turn, *, deadline):
             return Prepared()
 
     class Stream:
@@ -322,7 +322,7 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
                 closes += 1
 
         class Preparation:
-            async def prepare(self, _turn):
+            async def prepare(self, _turn, *, deadline):
                 return Prepared()
 
         class Stream:
@@ -417,8 +417,23 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
     operations: list[str] = []
 
     class Lifecycle:
+        heartbeat_seconds = 60.0
+        stale_after_seconds = 120.0
+
         async def begin(self, request):
             return turn
+
+        async def heartbeat(self, claimed):
+            return None
+
+        async def settle(self, claimed, failure):
+            return None
+
+        async def revoke_claim(self, claimed, failure):
+            return None
+
+        async def complete_settling(self, claimed):
+            return None
 
         async def finish(
             self,
@@ -441,7 +456,7 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
             operations.append("close")
 
     class Preparation:
-        async def prepare(self, claimed):
+        async def prepare(self, claimed, *, deadline):
             operations.append("prepare")
             return Prepared()
 
@@ -459,6 +474,9 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
             raise StopAsyncIteration
 
         async def aclose(self):
+            return None
+
+        async def wait_owned(self):
             return None
 
     class Runner:

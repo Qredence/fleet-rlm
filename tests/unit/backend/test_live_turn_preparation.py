@@ -13,7 +13,7 @@ import pytest
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
 from fleet_rlm.chat.turn_preparation import TurnPreparationUnavailable
 from fleet_rlm.config import Settings
-from fleet_rlm.daytona.run_environment import LiveKernelResources
+from fleet_rlm.daytona.run_environment import build_turn_preparation
 from fleet_rlm.files.models import AttachmentRef
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -59,27 +59,30 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         async def release(self, _lease) -> None:
             self.released = True
 
-    class AttachmentStore:
-        async def get(self, *_args, **_kwargs):
-            return ref
+    class Attachments:
+        async def prepare_run(self, _access, _attachment_ids, _run, sink):
+            logical_path = "/volume/attachments/notes.txt"
+            await sink.write_private(logical_path, data)
+            from fleet_rlm.files.models import PreparedAttachments, StagedAttachment
 
-        async def read_bytes(self, *_args, **_kwargs):
-            return data
+            return PreparedAttachments((ref,), (StagedAttachment(ref.id, logical_path),))
 
     monkeypatch.setattr("fleet_rlm.daytona.volume_fs.DaytonaSandboxVolumeFs", VolumeFs)
-    resources = object.__new__(LiveKernelResources)
-    resources.settings = Settings(run_environment="daytona")
-    resources.session_manager = SessionManager()
-    resources.platform = SimpleNamespace(get=lambda _sandbox_id: object())
-    resources.models = RLMModelBundle(object(), object())
-    resources._sandbox_ids = []
+    resources = SimpleNamespace(
+        settings=Settings(run_environment="daytona"),
+        session_manager=SessionManager(),
+        platform=SimpleNamespace(get=lambda _sandbox_id: object()),
+        models=RLMModelBundle(object(), object()),
+        track_sandbox=lambda _sandbox_id: None,
+    )
     if with_skill_catalog:
         from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
-        resources.skill_catalog = build_bundled_skill_catalog()
+        skill_catalog = build_bundled_skill_catalog()
     else:
-        resources.skill_catalog = None
-    resources.attachment_store = AttachmentStore()
+        from fleet_rlm.skills.catalog import SkillCatalog
+
+        skill_catalog = SkillCatalog(())
 
     async def not_cancelled() -> bool:
         return False
@@ -93,7 +96,11 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         not_cancelled,
         _TurnClaimToken(uuid4()),
     )
-    prepared = await resources.prepare(turn)
+    prepared = await build_turn_preparation(
+        resources,
+        attachment_lifecycle=Attachments(),
+        skill_catalog=skill_catalog,
+    ).prepare(turn, deadline=float("inf"))
 
     assert prepared.execution.attachments[0].attachment_id == attachment_id
     assert data in volume.values()
@@ -106,8 +113,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         "stat_workspace_file",
         "write_workspace_text",
     }
-    if with_skill_catalog:
-        expected_tools.update({"load_skill", "read_skill_resource"})
+    expected_tools.update({"load_skill", "read_skill_resource"})
     assert {
         str(getattr(tool, "name", getattr(tool, "__name__", ""))) for tool in prepared.execution.capabilities.spec.tools
     } == expected_tools
@@ -157,13 +163,17 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
             assert deadline > asyncio.get_running_loop().time()
             raise DaytonaAdmissionTimeout("provider secret should not escape")
 
-    resources = object.__new__(LiveKernelResources)
-    resources.settings = Settings(run_environment="daytona")
-    resources.session_manager = SessionManager()
-    resources.models = RLMModelBundle(object(), object())
-    resources.attachment_lifecycle = None
-    resources.attachment_store = None
-    resources.skill_catalog = None
+    resources = SimpleNamespace(
+        settings=Settings(run_environment="daytona"),
+        session_manager=SessionManager(),
+        models=RLMModelBundle(object(), object()),
+    )
+
+    class Attachments:
+        async def prepare_run(self, *_args):
+            raise AssertionError("environment acquisition must fail first")
+
+    from fleet_rlm.skills.catalog import SkillCatalog
 
     async def not_cancelled() -> bool:
         return False
@@ -179,7 +189,11 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
     )
 
     with pytest.raises(TurnPreparationUnavailable) as caught:
-        await resources.prepare(turn)
+        await build_turn_preparation(
+            resources,
+            attachment_lifecycle=Attachments(),
+            skill_catalog=SkillCatalog(()),
+        ).prepare(turn, deadline=float("inf"))
     assert str(caught.value) == "Turn environment is unavailable"
     assert "secret" not in str(caught.value)
 
@@ -208,11 +222,12 @@ async def test_post_acquisition_sandbox_lookup_settles_before_lease_release(mode
         async def release(self, _lease) -> None:
             self.released += 1
 
-    resources = object.__new__(LiveKernelResources)
-    resources.settings = Settings(run_environment="daytona")
-    resources.session_manager = SessionManager()
-    resources.platform = Platform()
-    resources._sandbox_ids = []
+    resources = SimpleNamespace(
+        settings=Settings(run_environment="daytona"),
+        session_manager=SessionManager(),
+        platform=Platform(),
+        track_sandbox=lambda _sandbox_id: None,
+    )
 
     async def not_cancelled() -> bool:
         return False

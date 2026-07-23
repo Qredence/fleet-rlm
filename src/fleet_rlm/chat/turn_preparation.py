@@ -84,7 +84,7 @@ class PreparedTurn:
 
 
 class TurnPreparation(Protocol):
-    async def prepare(self, turn: ExecuteTurn, *, deadline: float | None = None) -> PreparedTurn: ...
+    async def prepare(self, turn: ExecuteTurn, *, deadline: float) -> PreparedTurn: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,21 +129,17 @@ class TurnPreparationModule:
         *,
         models: RLMModelBundle,
         options: RLMOptions,
-        turn_timeout_seconds: int | float,
         attachments: RunAttachmentPreparer,
         environments: RunEnvironmentProvider,
         capabilities: CapabilityPreparer,
     ) -> None:
         self._models = models
         self._options = options
-        self._turn_timeout_seconds = float(turn_timeout_seconds)
         self._attachments = attachments
         self._environments = environments
         self._capabilities = capabilities
 
-    async def prepare(self, turn: ExecuteTurn, *, deadline: float | None = None) -> PreparedTurn:
-        loop = asyncio.get_running_loop()
-        deadline = deadline if deadline is not None else loop.time() + self._turn_timeout_seconds
+    async def prepare(self, turn: ExecuteTurn, *, deadline: float) -> PreparedTurn:
         if await turn.cancellation_requested():
             raise TurnPreparationCancelled("Turn cancelled")
 

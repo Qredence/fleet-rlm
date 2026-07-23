@@ -189,6 +189,9 @@ class _TurnStateStore(Protocol):
 
 
 class TurnLifecycle(Protocol):
+    heartbeat_seconds: int
+    stale_after_seconds: int
+
     async def begin(self, request: BeginTurn) -> TurnStart: ...
 
     async def finish(
@@ -344,24 +347,15 @@ class TurnLifecycleModule:
 
     async def settle(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
         """Revoke commit authority while retaining the durable claim for cleanup."""
-        settle = getattr(self._store, "settle", None)
-        if not callable(settle):
-            return await self._store.fail(turn, failure)
-        return await settle(turn, failure)
+        return await self._store.settle(turn, failure)
 
     async def revoke_claim(self, turn: ExecuteTurn, failure: TurnFailure) -> FailedRunReceipt:
         """Idempotently classify a Run whose durable claim authority was lost."""
-        revoke = getattr(self._store, "revoke_claim", None)
-        if callable(revoke):
-            return await revoke(turn, failure)
-        return await self.settle(turn, failure)
+        return await self._store.revoke_claim(turn, failure)
 
     async def complete_settling(self, turn: ExecuteTurn) -> FailedRunReceipt:
         """Release a retained claim only after owned cleanup has completed."""
-        complete = getattr(self._store, "complete_settling", None)
-        if not callable(complete):
-            raise TurnStateError("Turn store does not support detached cleanup")
-        return await complete(turn)
+        return await self._store.complete_settling(turn)
 
     async def _read_candidates(
         self,

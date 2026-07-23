@@ -105,7 +105,7 @@ class _Harness:
     async def start(self) -> None:
         await self.store.add_session(self.session_id, self.access)
 
-    async def prepare(self, turn: ExecuteTurn):
+    async def prepare(self, turn: ExecuteTurn, *, deadline: float):
         from fleet_rlm.chat.session_context import build_session_context_manifest
 
         if self.mode == "internal_cancel":

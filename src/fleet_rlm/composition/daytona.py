@@ -40,6 +40,7 @@ class DaytonaCompositionHandles:
     artifact_reader: Any
     workspace_volume_gateway: Any
     turn_cleanup_supervisor: Any = None
+    turn_preparation: Any = None
 
 
 async def _dispose_components(
@@ -77,13 +78,12 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
     from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
     from fleet_rlm.daytona.orphan_cleanup import cleanup_orphan_bytes
     from fleet_rlm.daytona.paths import volume_paths_from_settings
-    from fleet_rlm.daytona.run_environment import LiveKernelResources, resolve_settings
+    from fleet_rlm.daytona.run_environment import LiveKernelResources, build_turn_preparation, resolve_settings
     from fleet_rlm.daytona.sandbox_spec import sandbox_spec_from_settings
     from fleet_rlm.daytona.workspace_volume import create_daytona_workspace_volume_gateway
     from fleet_rlm.files.lifecycle import AttachmentModule
     from fleet_rlm.files.local_catalog import WorkspaceAttachmentBlobGateway
     from fleet_rlm.files.paths import DaytonaAttachmentPathPolicy
-    from fleet_rlm.observability.exporters import LoggingTurnExporter
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory
     from fleet_rlm.persistence.repositories import (
         SqlAlchemyArtifactCatalog,
@@ -140,7 +140,11 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
             active_runs=await artifact_catalog.list_active_runs(workspace_id=local_scope.workspace_id),
             grace_period=timedelta(hours=1),
         )
-        resources.configure_preparation(attachment_lifecycle)
+        turn_preparation = build_turn_preparation(
+            resources,
+            attachment_lifecycle=attachment_lifecycle,
+            skill_catalog=build_bundled_skill_catalog(),
+        )
         turn_state = SqlAlchemyTurnStateStore(
             session_factory,
             stale_after_seconds=resolved.run_stale_after_seconds,
@@ -155,13 +159,12 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
         await turn_state.reconcile_settling(resources.session_manager.fence_session)
         coordinator = TurnCoordinator(
             lifecycle=lifecycle,
-            preparation=resources,
+            preparation=turn_preparation,
             runner=RLMRunner(factory=RLMFactory()),
             turn_timeout_seconds=resolved.turn_timeout_seconds,
             cleanup=cleanup,
             claim_loss_fence=resources.session_manager.fence_session,
         )
-        _ = LoggingTurnExporter()
         return DaytonaCompositionHandles(
             resources=resources,
             turn_coordinator=coordinator,
@@ -171,6 +174,7 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
             artifact_reader=artifact_reader,
             workspace_volume_gateway=gateway,
             turn_cleanup_supervisor=cleanup,
+            turn_preparation=turn_preparation,
         )
     except Exception:
         if resources is None:
@@ -187,14 +191,13 @@ async def install_daytona_composition(
     """Attach an already-migrated Daytona inventory to app state."""
     handles = await build_daytona_composition(settings)
     try:
-        catalog = getattr(app.state, "skill_catalog", None)
-        handles.resources.skill_catalog = catalog or build_bundled_skill_catalog()
         app.state.composition_ready = True
         app.state.run_environment_resources = handles.resources
         app.state.db_engine = handles.resources._engine  # noqa: SLF001
         app.state.session_catalog = handles.session_catalog
         app.state.turn_lifecycle = handles.turn_lifecycle
         app.state.turn_coordinator = handles.turn_coordinator
+        app.state.turn_preparation = handles.turn_preparation
         app.state.turn_cleanup_supervisor = handles.turn_cleanup_supervisor
         app.state.attachment_lifecycle = handles.attachment_lifecycle
         app.state.artifact_reader = handles.artifact_reader

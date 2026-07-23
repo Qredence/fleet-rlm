@@ -186,7 +186,7 @@ async def test_deno_progressive_tools_preload_exact_selection_and_keep_events_me
 @pytest.mark.asyncio
 async def test_progressive_resource_requires_load_and_daytona_preparation_is_provider_free() -> None:
     from fleet_rlm.config import Settings
-    from fleet_rlm.daytona.run_environment import LiveKernelResources, _LiveCapabilityPreparer
+    from fleet_rlm.daytona.run_environment import _LiveCapabilityPreparer
     from fleet_rlm.skills.tools import SkillToolHost
 
     catalog = _catalog()
@@ -197,12 +197,12 @@ async def test_progressive_resource_requires_load_and_daytona_preparation_is_pro
     assert host.load_skill(str(selected.card.id), selected.card.version)["ok"] is True
     assert host.read_skill_resource(str(selected.card.id), resource_path, selected.card.version)["ok"] is True
 
-    resources = object.__new__(LiveKernelResources)
-    resources.settings = Settings(_env_file=None, run_environment="daytona")
-    resources.models = RLMModelBundle(MagicMock(), MagicMock())
-    resources.skill_catalog = catalog
+    resources = SimpleNamespace(
+        settings=Settings(_env_file=None, run_environment="daytona"),
+        models=RLMModelBundle(MagicMock(), MagicMock()),
+    )
     environment = SimpleNamespace(attachment_sink=SimpleNamespace(volume_fs=SimpleNamespace(sandbox=object())))
-    prepared = await _LiveCapabilityPreparer(resources).prepare(
+    prepared = await _LiveCapabilityPreparer(resources, catalog).prepare(
         _turn(),
         environment,
         PreparedAttachments((), ()),
@@ -297,7 +297,10 @@ async def test_deterministic_composition_runs_data_analysis_signature() -> None:
     prepared = await DeterministicTurnPreparation(
         attachments=NoAttachments(),
         skill_catalog=catalog,
-    ).prepare(_turn(selections=(SkillSelectionRef(selected.card.id, selected.card.version),)))
+    ).prepare(
+        _turn(selections=(SkillSelectionRef(selected.card.id, selected.card.version),)),
+        deadline=float("inf"),
+    )
     stream = RLMRunner(factory=TestingRLMFactory()).stream(prepared.execution)
     _ = [event async for event in stream]
 
@@ -312,7 +315,7 @@ async def test_deterministic_composition_runs_data_analysis_signature() -> None:
 @pytest.mark.asyncio
 async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_owned(monkeypatch) -> None:
     from fleet_rlm.config import Settings
-    from fleet_rlm.daytona.run_environment import LiveKernelResources, _LiveCapabilityPreparer
+    from fleet_rlm.daytona.run_environment import _LiveCapabilityPreparer
     from fleet_rlm.files.workspace_models import WorkspaceEntry, WorkspaceListResult
 
     class FakeWorkspace:
@@ -357,12 +360,12 @@ async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_o
             SkillSelectionRef(workspace_files.card.id, workspace_files.card.version),
         )
     )
-    resources = object.__new__(LiveKernelResources)
-    resources.settings = Settings(_env_file=None, run_environment="daytona")
-    resources.models = RLMModelBundle(MagicMock(), MagicMock())
-    resources.skill_catalog = catalog
+    resources = SimpleNamespace(
+        settings=Settings(_env_file=None, run_environment="daytona"),
+        models=RLMModelBundle(MagicMock(), MagicMock()),
+    )
     environment = SimpleNamespace(attachment_sink=SimpleNamespace(volume_fs=SimpleNamespace(sandbox=object())))
-    prepared = await _LiveCapabilityPreparer(resources).prepare(
+    prepared = await _LiveCapabilityPreparer(resources, catalog).prepare(
         turn,
         environment,
         PreparedAttachments((), ()),

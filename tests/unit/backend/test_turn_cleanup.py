@@ -56,3 +56,40 @@ async def test_settling_revokes_commit_and_blocks_replacement_until_cleanup() ->
     assert terminal.durable is True
     assert terminal.terminal_status == "timeout"
     await store.begin(BeginTurn(access, session.id, TurnInput("two"), "two", uuid4()))
+
+
+@pytest.mark.asyncio
+async def test_in_memory_revoke_completion_uses_policy_terminal_intent() -> None:
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn, TurnFailure
+    from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
+    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    access = TurnAccess(uuid4(), uuid4())
+    store = InMemoryTurnStateStore()
+    session = await InMemorySessionCatalog(store).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="stale claim parity",
+    )
+    turn = await store.begin(BeginTurn(access, session.id, TurnInput("one"), "one", uuid4()))
+    assert isinstance(turn, ExecuteTurn)
+
+    revoked = await store.revoke_claim(
+        turn,
+        TurnFailure("timeout", "timeout", "Timed out", empty_rlm_usage()),
+    )
+    assert (revoked.terminal_status, revoked.failure_code, revoked.durable) == ("failed", "stale_claim", False)
+
+    run = store._runs[turn.run_id]  # noqa: SLF001 - policy parity acceptance evidence
+    assert (run.status, run.failure_code, run.terminal_intent.terminal_status) == (
+        "settling",
+        "stale_claim",
+        "failed",
+    )
+
+    terminal = await store.complete_settling(turn)
+    assert (terminal.terminal_status, terminal.failure_code, terminal.durable) == ("failed", "stale_claim", True)
+    assert (run.status, run.failure_code) == ("failed", "stale_claim")
+    replacement = await store.begin(BeginTurn(access, session.id, TurnInput("two"), "two", uuid4()))
+    assert isinstance(replacement, ExecuteTurn)

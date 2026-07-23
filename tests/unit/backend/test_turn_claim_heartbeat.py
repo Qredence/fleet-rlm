@@ -69,7 +69,7 @@ async def test_heartbeat_supervision_covers_preparation() -> None:
             raise TurnStateError("Turn claim is invalid")
 
     class Preparation:
-        async def prepare(self, _turn):
+        async def prepare(self, _turn, *, deadline):
             await asyncio.Event().wait()
             raise AssertionError("unreachable")
 
@@ -151,7 +151,7 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
             return None
 
     class Preparation:
-        async def prepare(self, _turn):
+        async def prepare(self, _turn, *, deadline):
             await asyncio.sleep(0.08)
             return Prepared()
 
@@ -244,7 +244,7 @@ async def test_deno_repeated_transient_failures_revoke_without_provider_fence() 
             return None
 
     class Preparation:
-        async def prepare(self, _turn):
+        async def prepare(self, _turn, *, deadline):
             return Prepared()
 
     class Stream:
@@ -340,7 +340,7 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
             return None
 
     class Preparation:
-        async def prepare(self, _turn):
+        async def prepare(self, _turn, *, deadline):
             return Prepared()
 
     class Stream:
@@ -356,6 +356,9 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
             run = authoritative._runs[run_id]  # noqa: SLF001 - ordering acceptance evidence
             assert (run.status, run.failure_code) == ("settling", "stale_claim")
             assert release_commit.is_set()
+
+        async def wait_owned(self):
+            return None
 
     class Runner:
         def stream(self, _execution):
@@ -437,7 +440,7 @@ async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> 
             cleanup_order.append("resources-closed")
 
     class Preparation:
-        async def prepare(self, _turn):
+        async def prepare(self, _turn, *, deadline):
             return Prepared()
 
     class Stream:

@@ -42,6 +42,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
 
     from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.chat.commands import OpenTurnCommand
+    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.chat.turn_lifecycle import TurnLifecycleModule
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
@@ -103,7 +104,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
             closes += 1
 
     class Preparation:
-        async def prepare(self, _turn):
+        async def prepare(self, _turn, *, deadline):
             return Prepared()
 
     class Stream:
@@ -133,18 +134,27 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
         async def aclose(self):
             return None
 
+        async def wait_owned(self):
+            return None
+
     class Runner:
         def stream(self, _execution):
             return Stream()
 
+    cleanup = TurnCleanupSupervisor()
+    coordinator = TurnCoordinator(
+        lifecycle=TurnLifecycleModule(store, max_artifact_bytes=100),
+        preparation=Preparation(),
+        runner=Runner(),
+        cleanup=cleanup,
+    )
     events = [
         event
-        async for event in await TurnCoordinator(
-            lifecycle=TurnLifecycleModule(store, max_artifact_bytes=100),
-            preparation=Preparation(),
-            runner=Runner(),
-        ).open(OpenTurnCommand(access, session.id, TurnInput(status), status, run_id))
+        async for event in await coordinator.open(
+            OpenTurnCommand(access, session.id, TurnInput(status), status, run_id)
+        )
     ]
+    await cleanup.shutdown(drain_seconds=1)
 
     assert isinstance(events[0].detail, RunStarted)
     assert all(not isinstance(event.detail, TERMINAL_DETAIL_TYPES) for event in events[:-1])
@@ -153,6 +163,9 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
     assert [event.sequence for event in events] == [1, 2, 3]
     assert sink_operations == []
     assert closes == 1
+    run = store._runs[run_id]  # noqa: SLF001 - cleanup ordering acceptance evidence
+    assert (run.status, run.failure_code) == (status, status)
+    assert cleanup.active_jobs == 0
     assert await store.turn_records(session.id, access) == ()
 
 
@@ -177,7 +190,7 @@ async def test_open_preparation_failure_is_durable_before_stream_and_releases_cl
     runner_calls = 0
 
     class Preparation:
-        async def prepare(self, _turn):
+        async def prepare(self, _turn, *, deadline):
             raise TurnPreparationUnavailable("provider detail must not escape")
 
     class Runner:
@@ -219,15 +232,30 @@ async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream(
     finishes = []
 
     class Lifecycle:
+        heartbeat_seconds = authoritative.heartbeat_seconds
+        stale_after_seconds = authoritative.stale_after_seconds
+
         async def begin(self, request):
             return await authoritative.begin(request)
+
+        async def heartbeat(self, turn):
+            return await authoritative.heartbeat(turn)
+
+        async def settle(self, turn, failure):
+            return await authoritative.settle(turn, failure)
+
+        async def revoke_claim(self, turn, failure):
+            return await authoritative.revoke_claim(turn, failure)
+
+        async def complete_settling(self, turn):
+            return await authoritative.complete_settling(turn)
 
         async def finish(self, turn, resolution, **kwargs):
             finishes.append(resolution)
             return await authoritative.finish(turn, resolution, **kwargs)
 
     class Preparation:
-        async def prepare(self, _turn):
+        async def prepare(self, _turn, *, deadline):
             raise TurnPreparationTimeout("private provider timeout")
 
     class Runner:
@@ -277,7 +305,7 @@ async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_orde
             closes += 1
 
     class Preparation:
-        async def prepare(self, _turn):
+        async def prepare(self, _turn, *, deadline):
             return Prepared()
 
     class Stream:
@@ -368,7 +396,7 @@ async def test_open_commit_failure_projects_commit_failure_terminal() -> None:
             closes += 1
 
     class Preparation:
-        async def prepare(self, _turn):
+        async def prepare(self, _turn, *, deadline):
             return Prepared()
 
     class Stream:

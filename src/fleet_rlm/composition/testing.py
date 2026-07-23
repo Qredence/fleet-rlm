@@ -134,14 +134,12 @@ class DeterministicTurnPreparation:
         skill_catalog: SkillCatalog | None = None,
         options: RLMOptions | None = None,
         max_artifact_bytes: int = 10_000_000,
-        turn_timeout_seconds: int = 1800,
     ) -> None:
         resolved_options = options or RLMOptions()
         models = RLMModelBundle(TestingLM("testing/root"), TestingLM("testing/sub"))
         self._module = TurnPreparationModule(
             models=models,
             options=resolved_options,
-            turn_timeout_seconds=turn_timeout_seconds,
             attachments=attachments,
             environments=TestingRunEnvironmentProvider(),
             capabilities=TestingCapabilityPreparer(
@@ -152,7 +150,7 @@ class DeterministicTurnPreparation:
             ),
         )
 
-    async def prepare(self, turn: ExecuteTurn, *, deadline: float | None = None) -> PreparedTurn:
+    async def prepare(self, turn: ExecuteTurn, *, deadline: float) -> PreparedTurn:
         return await self._module.prepare(turn, deadline=deadline)
 
 
@@ -197,7 +195,6 @@ def install_testing_composition(
             skill_catalog=app.state.skill_catalog,
             options=rlm_options(settings),
             max_artifact_bytes=settings.max_artifact_bytes,
-            turn_timeout_seconds=settings.turn_timeout_seconds,
         ),
         rlm_factory=TestingRLMFactory(),
         workspace_volume_mirror=mirror,

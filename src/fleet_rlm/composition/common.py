@@ -26,6 +26,7 @@ COMPOSITION_STATE_FIELDS = (
     "turn_coordinator",
     "turn_cleanup_supervisor",
     "turn_lifecycle",
+    "turn_preparation",
     "turn_state_store",
     "workspace_volume_gateway",
     "workspace_volume_mirror",
@@ -187,6 +188,7 @@ def install_local_inventory(
         turn_cleanup_supervisor=cleanup,
     )
     app.state.turn_coordinator = coordinator
+    app.state.turn_preparation = preparation
     app.state.turn_lifecycle = lifecycle
     app.state.turn_cleanup_supervisor = cleanup
     app.state.turn_state_store = turn_state

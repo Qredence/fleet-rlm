@@ -580,52 +580,6 @@ class DaytonaSessionManager:
                 raise mapped from exc
         raise AssertionError("unreachable")
 
-    async def stop(self, sandbox_id: str) -> None:
-        sandbox = self._require(sandbox_id)
-        try:
-            call_if_supported(sandbox, "stop")
-        except LifecycleCapabilityError:
-            # Fallback: some clients expose stop via platform
-            stop = getattr(self._platform, "stop", None)
-            if callable(stop):
-                stop(sandbox_id)
-            else:
-                raise
-
-    async def start(self, sandbox_id: str) -> None:
-        sandbox = self._require(sandbox_id)
-        try:
-            call_if_supported(sandbox, "start")
-        except LifecycleCapabilityError:
-            start = getattr(self._platform, "start", None)
-            if callable(start):
-                start(sandbox_id)
-            else:
-                raise
-
-    async def pause(self, sandbox_id: str) -> None:
-        sandbox = self._require(sandbox_id)
-        call_if_supported(sandbox, "pause")
-
-    async def resume(self, sandbox_id: str) -> None:
-        sandbox = self._require(sandbox_id)
-        call_if_supported(sandbox, "resume")
-
-    async def archive(self, sandbox_id: str) -> None:
-        sandbox = self._require(sandbox_id)
-        # Daytona: archive typically requires stopped first when supported.
-        state = sandbox_state(sandbox)
-        if state == "running":
-            try:
-                call_if_supported(sandbox, "stop")
-            except LifecycleCapabilityError:
-                pass
-        call_if_supported(sandbox, "archive")
-
-    async def restore(self, sandbox_id: str) -> None:
-        sandbox = self._require(sandbox_id)
-        call_if_supported(sandbox, "restore")
-
     async def replace(
         self,
         binding: SandboxBinding,
@@ -675,18 +629,6 @@ class DaytonaSessionManager:
             last_verified_at=datetime.now(UTC),
         )
         return await self._bindings.upsert(new_binding)
-
-    def _require(self, sandbox_id: str) -> Any:
-        try:
-            sandbox = self._platform.get(sandbox_id)
-        except Exception as exc:  # noqa: BLE001
-            raise map_provider_error(exc) from exc
-        if sandbox is None:
-            raise DaytonaAdapterError(
-                message=f"sandbox not found: {sandbox_id}",
-                cause_type="SandboxNotFound",
-            )
-        return sandbox
 
     async def _ensure_running(
         self,

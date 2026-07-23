@@ -66,9 +66,7 @@ def check(_args: argparse.Namespace) -> int:
     if any(path.startswith("/api/v1") for path in paths):
         print("Legacy /api/v1 path found in backend contract", file=sys.stderr)
         return 1
-    if "post" in paths.get("/api/artifacts", {}) or "post" in paths.get(
-        "/api/artifacts/{artifact_id}", {}
-    ):
+    if "post" in paths.get("/api/artifacts", {}) or "post" in paths.get("/api/artifacts/{artifact_id}", {}):
         print("Public Artifact creation must not exist", file=sys.stderr)
         return 1
     if any("/stage" in path for path in paths):

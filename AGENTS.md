@@ -116,11 +116,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
   the legacy top-level chat, `/api/v1`, and WebSocket surfaces are removed.
 - `src/fleet_rlm/` is the canonical RLM-native backend. The parallel foundation package was cut over after exit-bar evidence on `71e79271`; there is no compatibility runtime or dual-serve path.
 - The canonical public Run Environment set is `deno` and `daytona`. Private tests install a credential-free deterministic composition explicitly. Deno is intentional local vanilla `dspy.RLM` (real LM + DSPy default Deno/Pyodide) with Attachment reads and Skills but no durable Artifact promotion; Daytona is the full Fleet path (Sandbox, Workspace Volume Scope, Artifact promotion).
-- `create_app()` installs handlers, routers, and the static in-memory bundled
-  Skill catalog (including `dspy-rlm`, which defines `dspy.RLM` as Recursive
-  LM/REPL — never RAG/`dspy.Retrieve`). FastAPI lifespan installs one complete
-  Deno or Daytona runtime inventory through `composition/`; routes retrieve
-  composed runtime modules.
+- `create_app()` installs handlers, routers, and the static in-memory bundled Skill catalog (including `dspy-rlm`, which defines `dspy.RLM` as Recursive LM/REPL — never RAG/`dspy.Retrieve`). FastAPI lifespan installs one complete Deno or Daytona runtime inventory through `composition/`; routes retrieve composed runtime modules.
 - The maintained terminal uses pi-tui only. `fleet-turn-stream.ts` owns strict stream lifecycle, `sse.ts` owns frame/chunk validation, `tui/projection.ts` owns live/reload projection, and `tui/store.ts` owns atomic hydration. The monochrome operator timeline renders all evidence statically expanded in native terminal scrollback; Fleet does not capture the mouse or maintain a transcript viewport. Live mid-turn evidence is tools plus Daytona interpreter code/output; `RLMReasoning` is usually filled after `rlm.acall` from the native trajectory; `dspy.RLM(verbose=…)` is host-logger-only and does not feed RuntimeEvents.
 - Live Daytona MVP proof (`tests/live/backend/`, `scripts/live_daytona_verify.py`) loads repo `.env` via `python-dotenv` with `override=False`; existing process exports still win.
 - Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments

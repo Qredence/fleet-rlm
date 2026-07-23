@@ -82,7 +82,6 @@ def install_deno_composition(
         preparation=DenoTurnPreparation(
             attachments=storage.attachment_lifecycle,
             options=rlm_options(settings),
-            turn_timeout_seconds=settings.turn_timeout_seconds,
             root_lm=root_lm,
             sub_lm=sub_lm,
             skill_catalog=app.state.skill_catalog,

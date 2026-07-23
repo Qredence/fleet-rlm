@@ -203,6 +203,27 @@ def _detail_position(details: Sequence[ExecutionDetail], detail_type: type[objec
     )
 
 
+def _outside_reasoning_position(details: Sequence[ExecutionDetail], target: ObservationDetail, step: int) -> int | None:
+    if not isinstance(target, RLMReasoning):
+        return None
+    return _detail_position(details, RLMReasoning, step)
+
+
+def _trajectory_insertion(details: Sequence[ExecutionDetail], target: ObservationDetail, step: int, finish: int) -> int:
+    if isinstance(target, RLMReasoning):
+        start = _detail_position(details, StepStarted, step)
+        assert start is not None
+        return start + 1
+    if isinstance(target, RLMCode):
+        reasoning = _detail_position(details, RLMReasoning, step)
+        if reasoning is not None:
+            return reasoning + 1
+        start = _detail_position(details, StepStarted, step)
+        assert start is not None
+        return start + 1
+    return finish
+
+
 def _reconcile_trajectory(
     details: list[ExecutionDetail],
     trajectory: Sequence[TrajectoryStep],
@@ -246,20 +267,14 @@ def _reconcile_trajectory(
                 assert start is not None and finish is not None
                 continue
 
-            if isinstance(target, RLMReasoning):
-                # Live observation may publish reasoning before interpreter StepStarted.
-                outside = _detail_position(details, RLMReasoning, step)
-                if outside is not None:
-                    if details[outside] != target:
-                        details[outside] = target
-                        emissions.append(target)
-                    continue
-                insertion = start + 1
-            elif isinstance(target, RLMCode):
-                reasoning = _detail_position(details, RLMReasoning, step)
-                insertion = reasoning + 1 if reasoning is not None else start + 1
-            else:
-                insertion = finish
+            # Live observation may publish reasoning before interpreter StepStarted.
+            outside = _outside_reasoning_position(details, target, step)
+            if outside is not None:
+                if details[outside] != target:
+                    details[outside] = target
+                    emissions.append(target)
+                continue
+            insertion = _trajectory_insertion(details, target, step, finish)
             details.insert(insertion, target)
             emissions.append(target)
             start = _detail_position(details, StepStarted, step)
@@ -299,198 +314,261 @@ async def _settle_worker(task: asyncio.Task[Any]) -> bool:
     return cancellation_requested
 
 
+class _WorkerMonitor:
+    """Bound polling/cancellation policy for one non-cancellable RLM worker."""
+
+    def __init__(
+        self,
+        task: asyncio.Task[Any],
+        relay: _DetailRelay,
+        context: RLMExecutionContext,
+        drain_capabilities: Callable[[], tuple[ExecutionDetail, ...]],
+    ) -> None:
+        self.task = task
+        self.relay = relay
+        self.context = context
+        self.drain_capabilities = drain_capabilities
+        self.intended_stop: BaseException | None = None
+        self.caller_cancelled = False
+
+    async def stream(self) -> AsyncIterator[ExecutionDetail]:
+        pending: asyncio.Task[ExecutionDetail] | None = None
+        try:
+            while not self.task.done():
+                if await self.context.cancellation_requested():
+                    self.intended_stop = TurnCancelled()
+                    break
+                remaining = self.context.deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    self.intended_stop = asyncio.TimeoutError()
+                    break
+                pending = asyncio.create_task(self.relay.get())
+                done, _ = await asyncio.wait(
+                    {self.task, pending},
+                    timeout=min(remaining, 0.25),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if pending in done:
+                    yield pending.result()
+                else:
+                    pending.cancel()
+                    await asyncio.gather(pending, return_exceptions=True)
+                pending = None
+                for detail in self.drain_capabilities():
+                    yield detail
+        except (GeneratorExit, asyncio.CancelledError):
+            self.caller_cancelled = True
+        finally:
+            if pending is not None and not pending.done():
+                pending.cancel()
+                self.caller_cancelled |= await _settle_worker(pending)
+            if self.intended_stop is None and not self.caller_cancelled:
+                self.caller_cancelled |= await _settle_worker(self.task)
+
+    def raise_if_stopped(self) -> None:
+        if self.caller_cancelled:
+            if self.task.done() and not self.task.cancelled():
+                self.task.exception()
+            raise asyncio.CancelledError
+        if self.intended_stop is not None:
+            if self.task.done() and not self.task.cancelled():
+                self.task.exception()
+            raise self.intended_stop
+
+
+class _ObservationBuffer:
+    """Own durable execution details and their matching Runtime Event records."""
+
+    def __init__(self, recorder: EventRecorder) -> None:
+        self.recorder = recorder
+        self.details: list[ExecutionDetail] = []
+
+    def record(self, detail: ExecutionDetail) -> RuntimeEvent:
+        self.details.append(detail)
+        return self.recorder.record(detail)
+
+
 class RLMRunner:
     """Consume only an immutable prepared context and emit no terminal detail."""
 
-    def __init__(self, *, factory: RLMFactoryLike | None = None, turn_exporter: Any | None = None) -> None:
+    def __init__(self, *, factory: RLMFactoryLike | None = None) -> None:
         self._factory = factory or RLMFactory()
-        self._turn_exporter = turn_exporter
 
     def stream(self, context: RLMExecutionContext) -> TurnEventStream:
         outcome: list[RLMOutcome] = []
         ownership = _WorkerOwnership()
+        events = self._generate(context, outcome, ownership)
+        return TurnEventStream(events, lambda: outcome[-1], ownership)
 
-        async def generate() -> AsyncIterator[RuntimeEvent]:
-            recorder = EventRecorder(context.run_id, context.session_id)
-            started = time.perf_counter()
-            details: list[ExecutionDetail] = []
-            rlm: Any = None
-            prediction: Any | None = None
-            try:
-                yield recorder.record(RunStarted(delivery="live"))
-                yield recorder.record(Status("execution", "running"))
-                for notice in context.preparation_notices:
-                    yield recorder.record(WarningEvent(notice.message, notice.code))
-                for item in self._drain_capability_details(context):
-                    details.append(item)
-                    yield recorder.record(item)
-                if await context.cancellation_requested():
-                    raise TurnCancelled
-
-                spec = context.capabilities.spec
-                relay = _DetailRelay()
-                guards = TurnToolGuards(required_targets=workspace_obligations(context.request))
-                bind_observer = getattr(context.interpreter, "bind_observer", None)
-                if callable(bind_observer):
-                    bind_observer(relay.publish, max_chars=context.options.max_output_chars)
-
-                def relay_capability_details(_result: Any) -> None:
-                    for detail in self._drain_capability_details(context):
-                        relay.publish(detail)
-
-                observed_tools = tuple(
-                    observe_tool(
-                        tool,
-                        relay.publish,
-                        spec.tool_event_views.get(str(tool.name), ToolEventView.metadata_only()),
-                        after_result=(relay_capability_details if str(tool.name) == "load_skill" else None),
-                        is_authorized=lambda: not context.authority.revoked,
-                        guards=guards,
-                    )
-                    for tool in spec.tools
+    async def _generate(
+        self,
+        context: RLMExecutionContext,
+        outcome: list[RLMOutcome],
+        ownership: _WorkerOwnership,
+    ) -> AsyncIterator[RuntimeEvent]:
+        started = time.perf_counter()
+        prediction: list[Any] = []
+        try:
+            async for event in self._run_success(context, outcome, ownership, prediction, started):
+                yield event
+        except (GeneratorExit, asyncio.CancelledError):
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            outcome.append(
+                RLMOutcome(
+                    terminal_status="cancelled",
+                    usage=observed_usage(prediction[-1] if prediction else None, duration_ms=duration_ms),
+                    public_error_message="Turn cancelled",
+                    duration_ms=duration_ms,
                 )
-                rlm = self._factory.create(
-                    models=context.models,
-                    options=context.options,
-                    interpreter=context.interpreter,
-                    tools=observed_tools or None,
-                    signature=spec.signature,
+            )
+            raise
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            outcome.append(
+                RLMOutcome(
+                    terminal_status=_terminal_status(exc),
+                    usage=observed_usage(prediction[-1] if prediction else None, duration_ms=duration_ms),
+                    public_error_message=_public_failure_message(exc),
+                    duration_ms=duration_ms,
                 )
-                bind_rlm_observer = getattr(rlm, "bind_observer", None)
-                if callable(bind_rlm_observer):
-                    bind_rlm_observer(relay.publish, max_chars=context.options.max_output_chars)
-                task = asyncio.create_task(self._execute_rlm_in_worker(rlm, context, spec))
-                ownership.task = task
-                pending: asyncio.Task[ExecutionDetail] | None = None
-                intended_stop: BaseException | None = None
-                caller_cancelled = False
-                try:
-                    while not task.done():
-                        if await context.cancellation_requested():
-                            intended_stop = TurnCancelled()
-                            break
-                        remaining = context.deadline - asyncio.get_running_loop().time()
-                        if remaining <= 0:
-                            intended_stop = asyncio.TimeoutError()
-                            break
-                        pending = asyncio.create_task(relay.get())
-                        done, _ = await asyncio.wait(
-                            {task, pending}, timeout=min(remaining, 0.25), return_when=asyncio.FIRST_COMPLETED
-                        )
-                        if pending in done:
-                            item = pending.result()
-                            details.append(item)
-                            yield recorder.record(item)
-                        else:
-                            pending.cancel()
-                            await asyncio.gather(pending, return_exceptions=True)
-                        pending = None
-                        for item in self._drain_capability_details(context):
-                            details.append(item)
-                            yield recorder.record(item)
-                except (GeneratorExit, asyncio.CancelledError):
-                    caller_cancelled = True
-                finally:
-                    if pending is not None and not pending.done():
-                        pending.cancel()
-                        caller_cancelled |= await _settle_worker(pending)
-                    if intended_stop is None and not caller_cancelled:
-                        caller_cancelled |= await _settle_worker(task)
+            )
+        finally:
+            if not outcome:
+                outcome.append(RLMOutcome(terminal_status="failed", public_error_message="Turn failed"))
 
-                for item in self._drain_capability_details(context):
-                    details.append(item)
-                    yield recorder.record(item)
-                for observed in relay.drain():
-                    details.append(observed)
-                    yield recorder.record(observed)
-                if relay.overflowed:
-                    warning = WarningEvent("some detailed execution events were omitted")
-                    details.append(warning)
-                    yield recorder.record(warning)
+    async def _run_success(
+        self,
+        context: RLMExecutionContext,
+        outcome: list[RLMOutcome],
+        ownership: _WorkerOwnership,
+        prediction: list[Any],
+        started: float,
+    ) -> AsyncIterator[RuntimeEvent]:
+        observations = _ObservationBuffer(EventRecorder(context.run_id, context.session_id))
+        async for event in self._initial_events(context, observations):
+            yield event
+        spec, relay, guards, task = self._start_worker(context)
+        ownership.task = task
+        monitor = _WorkerMonitor(task, relay, context, lambda: self._drain_capability_details(context))
+        async for event in self._worker_events(context, observations, relay, monitor):
+            yield event
+        prediction.append(task.result())
+        if guards.integrity.unresolved:
+            raise TurnIntegrityFailure
+        async for event in self._prediction_events(context, observations, prediction[-1]):
+            yield event
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        result = prediction_result(
+            prediction[-1],
+            spec.signature,
+            schema_id=spec.output_schema_id,
+            schema_version=spec.output_schema_version,
+            max_output_chars=context.options.max_output_chars,
+        )
+        outcome.append(
+            RLMOutcome(
+                terminal_status="completed",
+                prediction=result,
+                usage=observed_usage(prediction[-1], duration_ms=duration_ms),
+                artifact_candidates=context.capabilities.drain_artifact_candidates(),
+                execution_details=tuple(observations.details),
+                duration_ms=duration_ms,
+            )
+        )
 
-                if caller_cancelled:
-                    if task.done() and not task.cancelled():
-                        task.exception()
-                    raise asyncio.CancelledError
-                if intended_stop is not None:
-                    if task.done() and not task.cancelled():
-                        task.exception()
-                    raise intended_stop
+    async def _initial_events(
+        self,
+        context: RLMExecutionContext,
+        observations: _ObservationBuffer,
+    ) -> AsyncIterator[RuntimeEvent]:
+        yield observations.recorder.record(RunStarted(delivery="live"))
+        yield observations.recorder.record(Status("execution", "running"))
+        for notice in context.preparation_notices:
+            yield observations.recorder.record(WarningEvent(notice.message, notice.code))
+        for item in self._drain_capability_details(context):
+            yield observations.record(item)
+        if await context.cancellation_requested():
+            raise TurnCancelled
 
-                prediction = task.result()
+    def _start_worker(
+        self, context: RLMExecutionContext
+    ) -> tuple[RLMExecutionSpec, _DetailRelay, TurnToolGuards, asyncio.Task[Any]]:
+        spec = context.capabilities.spec
+        relay = _DetailRelay()
+        guards = TurnToolGuards(required_targets=workspace_obligations(context.request))
+        self._bind_observer(context.interpreter, relay, context.options.max_output_chars)
 
-                if guards.integrity.unresolved:
-                    raise TurnIntegrityFailure
+        def relay_capability_details(_result: Any) -> None:
+            for detail in self._drain_capability_details(context):
+                relay.publish(detail)
 
-                trajectory = normalize_prediction_trajectory(prediction)
-                for item in _reconcile_trajectory(
-                    details,
-                    trajectory,
-                    max_chars=context.options.max_output_chars,
-                ):
-                    yield recorder.record(item)
-                final_reasoning = getattr(prediction, "final_reasoning", None)
-                if isinstance(final_reasoning, str) and final_reasoning.strip():
-                    public_reasoning = truncate_public_text(final_reasoning, max_len=context.options.max_output_chars)
-                    if not any(
-                        isinstance(detail, RLMReasoning)
-                        and truncate_public_text(detail.text, max_len=context.options.max_output_chars)
-                        == public_reasoning
-                        for detail in details
-                    ):
-                        item = RLMReasoning(public_reasoning)
-                        details.append(item)
-                        yield recorder.record(item)
+        observed_tools = tuple(
+            observe_tool(
+                tool,
+                relay.publish,
+                spec.tool_event_views.get(str(tool.name), ToolEventView.metadata_only()),
+                after_result=(relay_capability_details if str(tool.name) == "load_skill" else None),
+                is_authorized=lambda: not context.authority.revoked,
+                guards=guards,
+            )
+            for tool in spec.tools
+        )
+        rlm = self._factory.create(
+            models=context.models,
+            options=context.options,
+            interpreter=context.interpreter,
+            tools=observed_tools or None,
+            signature=spec.signature,
+        )
+        self._bind_observer(rlm, relay, context.options.max_output_chars)
+        return spec, relay, guards, asyncio.create_task(self._execute_rlm_in_worker(rlm, context, spec))
 
-                for item in self._drain_capability_details(context):
-                    details.append(item)
-                    yield recorder.record(item)
+    async def _worker_events(
+        self,
+        context: RLMExecutionContext,
+        observations: _ObservationBuffer,
+        relay: _DetailRelay,
+        monitor: _WorkerMonitor,
+    ) -> AsyncIterator[RuntimeEvent]:
+        async for item in monitor.stream():
+            yield observations.record(item)
+        for item in (*self._drain_capability_details(context), *relay.drain()):
+            yield observations.record(item)
+        if relay.overflowed:
+            warning = WarningEvent("some detailed execution events were omitted")
+            yield observations.record(warning)
+        monitor.raise_if_stopped()
 
-                duration_ms = int((time.perf_counter() - started) * 1000)
-                usage = observed_usage(prediction, duration_ms=duration_ms)
-                result = prediction_result(
-                    prediction,
-                    spec.signature,
-                    schema_id=spec.output_schema_id,
-                    schema_version=spec.output_schema_version,
-                    max_output_chars=context.options.max_output_chars,
-                )
-                outcome.append(
-                    RLMOutcome(
-                        terminal_status="completed",
-                        prediction=result,
-                        usage=usage,
-                        artifact_candidates=context.capabilities.drain_artifact_candidates(),
-                        execution_details=tuple(details),
-                        duration_ms=duration_ms,
-                    )
-                )
-            except (GeneratorExit, asyncio.CancelledError):
-                duration_ms = int((time.perf_counter() - started) * 1000)
-                outcome.append(
-                    RLMOutcome(
-                        terminal_status="cancelled",
-                        usage=observed_usage(prediction, duration_ms=duration_ms),
-                        public_error_message="Turn cancelled",
-                        duration_ms=duration_ms,
-                    )
-                )
-                raise
-            except Exception as exc:
-                duration_ms = int((time.perf_counter() - started) * 1000)
-                outcome.append(
-                    RLMOutcome(
-                        terminal_status=_terminal_status(exc),
-                        usage=observed_usage(prediction, duration_ms=duration_ms),
-                        public_error_message=_public_failure_message(exc),
-                        duration_ms=duration_ms,
-                    )
-                )
-            finally:
-                if not outcome:
-                    outcome.append(RLMOutcome(terminal_status="failed", public_error_message="Turn failed"))
+    async def _prediction_events(
+        self,
+        context: RLMExecutionContext,
+        observations: _ObservationBuffer,
+        prediction: Any,
+    ) -> AsyncIterator[RuntimeEvent]:
+        trajectory = normalize_prediction_trajectory(prediction)
+        for item in _reconcile_trajectory(observations.details, trajectory, max_chars=context.options.max_output_chars):
+            yield observations.recorder.record(item)
+        final_reasoning = getattr(prediction, "final_reasoning", None)
+        if isinstance(final_reasoning, str) and final_reasoning.strip():
+            public_reasoning = truncate_public_text(final_reasoning, max_len=context.options.max_output_chars)
+            if not self._has_reasoning(observations.details, public_reasoning, context.options.max_output_chars):
+                item = RLMReasoning(public_reasoning)
+                yield observations.record(item)
+        for item in self._drain_capability_details(context):
+            yield observations.record(item)
 
-        return TurnEventStream(generate(), lambda: outcome[-1], ownership)
+    @staticmethod
+    def _bind_observer(target: Any, relay: _DetailRelay, max_chars: int) -> None:
+        bind = getattr(target, "bind_observer", None)
+        if callable(bind):
+            bind(relay.publish, max_chars=max_chars)
+
+    @staticmethod
+    def _has_reasoning(details: Sequence[ExecutionDetail], text: str, max_chars: int) -> bool:
+        return any(
+            isinstance(detail, RLMReasoning) and truncate_public_text(detail.text, max_len=max_chars) == text
+            for detail in details
+        )
 
     async def _execute_rlm(
         self,

@@ -68,6 +68,78 @@ async def test_sql_failure_code_is_typed_cause_not_public_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_sql_revoke_completion_uses_policy_terminal_intent() -> None:
+    from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn, TurnFailure
+    from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
+    from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyTurnStateStore
+    from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
+    try:
+        await create_tables(engine)
+        factory = create_session_factory(engine)
+        access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+        async with factory() as db, db.begin():
+            db.add_all(
+                (
+                    UserRow(id=access.user_id),
+                    WorkspaceRow(id=access.workspace_id),
+                    SessionRow(
+                        id=session_id,
+                        user_id=access.user_id,
+                        workspace_id=access.workspace_id,
+                        title="stale claim parity",
+                    ),
+                )
+            )
+
+        store = SqlAlchemyTurnStateStore(factory)
+        turn = await store.begin(BeginTurn(access, session_id, TurnInput("one"), "one", run_id))
+        assert isinstance(turn, ExecuteTurn)
+
+        revoked = await store.revoke_claim(
+            turn,
+            TurnFailure("timeout", "timeout", "Timed out", empty_rlm_usage()),
+        )
+        assert (revoked.terminal_status, revoked.failure_code, revoked.durable) == (
+            "failed",
+            "stale_claim",
+            False,
+        )
+
+        async with factory() as db:
+            row = await db.get(RunRow, run_id)
+            assert row is not None
+            assert (row.status, row.failure_code, row.terminal_intent) == (
+                "settling",
+                "stale_claim",
+                "failed",
+            )
+
+        terminal = await store.complete_settling(turn)
+        assert (terminal.terminal_status, terminal.failure_code, terminal.durable) == (
+            "failed",
+            "stale_claim",
+            True,
+        )
+        async with factory() as db:
+            row = await db.get(RunRow, run_id)
+            assert row is not None
+            assert (row.status, row.failure_code, row.terminal_intent, row.claim_owner) == (
+                "failed",
+                "stale_claim",
+                "failed",
+                None,
+            )
+        replacement = await store.begin(BeginTurn(access, session_id, TurnInput("two"), "two", uuid4()))
+        assert isinstance(replacement, ExecuteTurn)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_sql_state_round_trips_canonical_turn_without_result_mirrors() -> None:
     from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn, ReplayTurn
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables

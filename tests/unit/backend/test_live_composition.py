@@ -341,6 +341,7 @@ async def test_install_daytona_composition_does_not_create_schema(monkeypatch) -
     class Gateway:
         pass
 
+    preparation = object()
     handles = composition.DaytonaCompositionHandles(
         resources=Resources(),
         turn_coordinator=object(),
@@ -349,6 +350,7 @@ async def test_install_daytona_composition_does_not_create_schema(monkeypatch) -
         attachment_lifecycle=object(),
         artifact_reader=object(),
         workspace_volume_gateway=Gateway(),
+        turn_preparation=preparation,
     )
 
     async def fake_build(_settings):
@@ -365,6 +367,7 @@ async def test_install_daytona_composition_does_not_create_schema(monkeypatch) -
 
     assert installed is handles
     assert app.state.composition_ready is True
+    assert app.state.turn_preparation is preparation
 
 
 def test_offline_lifespan_disposes_engine_when_table_creation_fails(monkeypatch) -> None:

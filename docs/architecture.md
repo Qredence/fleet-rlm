@@ -49,6 +49,8 @@ host-side behind `read_session_history`.
   Skills discovery route may recreate only its static in-memory catalog fallback.
 - `TurnPreparationModule` owns ordered validation, environment acquisition,
   bounded context, Tool construction, and reverse-order rollback.
+- Daytona composition constructs Turn preparation explicitly; process-lifetime
+  `LiveKernelResources` owns provider resources but no mutable preparation graph.
 - `RLMRunner` executes one fresh DSPy RLM and emits no terminal event.
 - `TurnLifecycle.finish()` owns private result snapshots, Artifact publication,
   atomic Turn Commit, and durable failure settlement.
@@ -56,7 +58,8 @@ host-side behind `read_session_history`.
   ordering, and final cleanup.
 - `daytona/` is the exclusive Daytona SDK boundary.
 - `persistence/` implements domain repository interfaces; Alembic owns the live
-  schema.
+  schema. Its in-memory and SQL Turn stores share the pure Turn Claim transition
+  policy while retaining lock-backed and transaction-backed atomicity.
 
 ## Skills
 

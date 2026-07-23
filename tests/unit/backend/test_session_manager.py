@@ -13,7 +13,6 @@ from fleet_rlm.daytona.active_leases import ActiveLeaseConflictError
 from fleet_rlm.daytona.admission import DaytonaAdmission
 from fleet_rlm.daytona.bindings import InMemoryBindingStore, SandboxBinding
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
-from fleet_rlm.daytona.lifecycle import LifecycleCapabilityError
 from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec
 from fleet_rlm.daytona.session_manager import DaytonaSessionManager, LeaseRequest
 from fleet_rlm.daytona.volumes import VolumeConfig
@@ -426,7 +425,7 @@ async def test_reacquire_repairs_stopped_sandbox_after_restart() -> None:
     sandbox = plat.sandboxes[first.sandbox_id]
     attachments_path = "/home/daytona/fleet/attachments"
     sandbox.fs.directories.remove(attachments_path)
-    await mgr.stop(first.sandbox_id)
+    sandbox.stop()
 
     second = await _acquire(
         mgr,
@@ -662,53 +661,6 @@ async def test_acquire_replaces_sandbox_with_mismatched_snapshot() -> None:
     assert replacement.sandbox_id != first.sandbox_id
     assert replacement.volume_id == first.volume_id
     assert replacement.volume_subpath == first.volume_subpath
-
-
-@pytest.mark.asyncio
-async def test_stop_start_lifecycle() -> None:
-    mgr, plat, _store, _volumes = _manager()
-    req = _request()
-    lease = await _acquire(mgr, req)
-    await mgr.stop(lease.sandbox_id)
-    assert plat.sandboxes[lease.sandbox_id].state == "stopped"
-    await mgr.start(lease.sandbox_id)
-    assert plat.sandboxes[lease.sandbox_id].state == "running"
-
-
-@pytest.mark.asyncio
-async def test_pause_resume_when_supported() -> None:
-    mgr, plat, _store, _volumes = _manager()
-    req = _request()
-    lease = await _acquire(mgr, req)
-    await mgr.pause(lease.sandbox_id)
-    assert plat.sandboxes[lease.sandbox_id].state == "paused"
-    await mgr.resume(lease.sandbox_id)
-    assert plat.sandboxes[lease.sandbox_id].state == "running"
-
-
-@pytest.mark.asyncio
-async def test_pause_raises_when_unsupported() -> None:
-    limited = _LimitedSandbox("lim-1", state="running")
-
-    class _Plat:
-        def get(self, sandbox_id: str) -> Any:
-            return limited if sandbox_id == "lim-1" else None
-
-        def create(self, **kwargs: Any) -> Any:
-            raise AssertionError("create should not be called")
-
-        def delete(self, sandbox_id: str) -> None:
-            return None
-
-    mgr = DaytonaSessionManager(
-        platform=_Plat(),
-        volume_client=_FakeVolumeClient(),
-        volume_config=VolumeConfig(),
-        bindings=InMemoryBindingStore(),
-        sandbox_spec=_SPEC,
-    )
-    with pytest.raises(LifecycleCapabilityError):
-        await mgr.pause("lim-1")
 
 
 @pytest.mark.asyncio

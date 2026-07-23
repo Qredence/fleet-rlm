@@ -4,11 +4,11 @@
 src/fleet_rlm/
 ├── api/            # HTTP identity, dependencies, schemas, routes, SSE
 ├── artifacts/      # candidates, validation, persistent/local stores
-├── chat/           # Turn context and coordination
+├── chat/           # Turn context, coordination, and claim policy
 ├── cli/            # supervised TUI/backend launchers and Daytona doctor
-├── daytona/        # exclusive Daytona SDK boundary
+├── daytona/        # Daytona resources, adapters, and Workspace agent
 ├── files/          # Attachment upload, staging, host tools
-├── observability/  # sanitized Turn records/exporters
+├── observability/  # sanitized failure diagnostics
 ├── persistence/    # SQLAlchemy models and repository adapters
 ├── rlm/            # DSPy signature, models, runner, Runtime Events
 ├── sessions/       # Session/Turn domain and repository interfaces

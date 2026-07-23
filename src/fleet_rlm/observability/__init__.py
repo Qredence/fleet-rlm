@@ -1,16 +1,5 @@
-"""Observability: turn traces and optional non-fatal exporters."""
+"""Safe observability helpers for public transport boundaries."""
 
-from fleet_rlm.observability.exporters import (
-    InMemoryTurnStore,
-    LoggingTurnExporter,
-    safe_export,
-)
-from fleet_rlm.observability.record import TurnTrace, apply_event_to_trace
+from fleet_rlm.observability.failure_diagnostics import FailureDiagnostic, normalize_turn_failure
 
-__all__ = [
-    "InMemoryTurnStore",
-    "LoggingTurnExporter",
-    "TurnTrace",
-    "apply_event_to_trace",
-    "safe_export",
-]
+__all__ = ["FailureDiagnostic", "normalize_turn_failure"]

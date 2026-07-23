@@ -94,11 +94,10 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
     prepared = await TurnPreparationModule(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
-        turn_timeout_seconds=900,
         attachments=Attachments(),
         environments=Environments(),
         capabilities=CapabilityFactory(),
-    ).prepare(turn)
+    ).prepare(turn, deadline=float("inf"))
 
     class Factory:
         kwargs: dict[str, object] | None = None

@@ -91,7 +91,7 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
             return None
 
     class Preparation:
-        async def prepare(self, claimed):
+        async def prepare(self, claimed, *, deadline):
             return Prepared()
 
     class Stream:

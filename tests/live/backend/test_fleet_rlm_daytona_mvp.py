@@ -615,9 +615,9 @@ def test_complete_daytona_mvp_through_fastapi(
 
     try:
         with TestClient(app) as client:
-            resources = app.state.run_environment_resources
-            resources._preparation._capabilities = _ProofCapabilityPreparer(  # noqa: SLF001
-                resources._preparation._capabilities,
+            preparation = app.state.turn_preparation
+            preparation._capabilities = _ProofCapabilityPreparer(  # noqa: SLF001
+                preparation._capabilities,
                 proof_tools,
                 proof_views,  # noqa: SLF001
             )

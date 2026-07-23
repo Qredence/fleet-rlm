@@ -86,11 +86,10 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
     prepared = await TurnPreparationModule(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
-        turn_timeout_seconds=900,
         attachments=Attachments(),
         environments=Environments(),
         capabilities=CapabilityFactory(),
-    ).prepare(turn)
+    ).prepare(turn, deadline=float("inf"))
 
     assert prepared.execution.session_context.to_input() == {
         "session_id": str(turn.session_id),
@@ -158,14 +157,13 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
     module = TurnPreparationModule(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
-        turn_timeout_seconds=0.01,
         attachments=Attachments(),
         environments=Environments(),
         capabilities=SlowCapabilities(),
     )
 
     with pytest.raises(TurnPreparationTimeout, match="timed out"):
-        await module.prepare(turn)
+        await module.prepare(turn, deadline=asyncio.get_running_loop().time() + 0.01)
     assert released is True
 
 
@@ -233,14 +231,13 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
     module = TurnPreparationModule(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
-        turn_timeout_seconds=900,
         attachments=Attachments(),
         environments=Environments(),
         capabilities=FailingCapabilities(),
     )
 
     with pytest.raises(RuntimeError, match="private capability failure"):
-        await module.prepare(turn)
+        await module.prepare(turn, deadline=float("inf"))
 
     assert staged_path not in values
     assert values == {workspace_path: b"immediate workspace state"}
