@@ -178,12 +178,13 @@ exclude = [
 ]
 
 [tool.ruff.lint]
-# Essential rules: F (pyflakes), E/W (pycodestyle), I (isort), N (pep8-naming),
-# B (flake8-bugbear), UP (pyupgrade), A (flake8-builtins),
-# Q (flake8-quotes), T (flake8-print), D (pydocstyle), ARG (unused-arguments),
-# RUF (ruff-specific), SIM (simplify), LOG (flake8-logging-usage).
-# Several families are selected for targeted rules but temporarily ignored
-# below until the existing repo-wide backlog is remediated.
+# Selected families: F (pyflakes), E/W (pycodestyle), I (isort), N (pep8-naming),
+# B (flake8-bugbear), UP (pyupgrade), A (flake8-builtins), Q (flake8-quotes),
+# T20 (flake8-print), ARG (unused-arguments), RUF (ruff-specific), SIM (simplify),
+# LOG (flake8-logging-usage).
+# Several selected families are partially suppressed in `ignore` until the
+# repo-wide backlog is remediated one rule (or small cluster) at a time.
+# pydocstyle (D) is not selected; enable only after a dedicated docstring pass.
 # Note: COM (trailing commas) handled by formatter, so excluded to avoid conflicts
 select = [
     "F",     # Pyflakes
@@ -196,18 +197,16 @@ select = [
     "A",     # flake8-builtins
     "Q",     # flake8-quotes
     "T20",   # flake8-print
-    "D",     # pydocstyle
     "ARG",   # flake8-unused-arguments
     "RUF",   # ruff-specific rules
     "SIM",   # flake8-simplify
     "LOG",   # flake8-logging-usage
 ]
 
-# Ignore specific rules that conflict or are too strict
+# Permanent policy: E501 (formatter-owned). Remaining entries are temporary
+# backlog suppressions — prefer fix+re-enable or per-file scope over growth.
 ignore = [
-    "D",      # Existing docstring backlog; keep docs quality checks separate.
     "E501",   # Line too long (handled by formatter)
-    "ANN401", # Dynamically typed expressions (Any) allowed in certain contexts
     "A002",   # Existing builtin-shadowing backlog in tests.
     "ARG001", # Unused function arguments (common in callbacks/handlers)
     "ARG002", # Unused method arguments (common in inheritance)
@@ -218,7 +217,6 @@ ignore = [
     "B904",   # Existing exception chaining backlog.
     "B905",   # Existing zip(strict=...) backlog.
     "T201",   # Existing CLI/script print backlog.
-    "TRY003", # Avoid specifying long messages outside exception class (sometimes required)
     "UP037",  # Existing quoted annotation backlog.
     "UP041",  # Existing asyncio timeout alias backlog.
     "UP045",  # Existing Optional[...] annotation backlog.
@@ -257,8 +255,6 @@ ignore = [
 # Per-file ignores for specific directories
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401", "F403"]  # Allow star imports and unused imports in __init__
-"tests/**" = ["ARG001", "ARG002", "D100", "D101", "D102", "D103"]  # Less strict for tests
-"scripts/**" = ["D100", "D101", "D102", "D103"]  # Less strict for scripts
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"
@@ -267,6 +263,7 @@ inline-quotes = "double"
 [tool.ruff.lint.flake8-builtins]
 builtins-ignorelist = []
 
+# Applied when D is selected in a future docstring-enforcement mission.
 [tool.ruff.lint.pydocstyle]
 convention = "google"  # Use Google-style docstrings
 
