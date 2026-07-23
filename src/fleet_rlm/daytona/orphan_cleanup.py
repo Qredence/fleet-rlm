@@ -49,37 +49,36 @@ async def cleanup_orphan_bytes(
     kept_storage_refs = frozenset(committed_storage_refs)
     kept_completed_runs = frozenset(completed_runs)
     kept_active_runs = frozenset(active_runs)
-    artifact_files = await gateway.list_files(
-        workspace_id,
-        str(paths.artifacts_root()),
-        max_depth=2,
-        max_files=max_files,
-    )
-    snapshot_files = await gateway.list_files(
-        workspace_id,
-        str(paths.sessions_root()),
-        max_depth=6,
-        max_files=max_files,
-    )
+    async with gateway.open_workspace(workspace_id) as volume:
+        artifact_files = await volume.list_files(
+            str(paths.artifacts_root()),
+            max_depth=2,
+            max_files=max_files,
+        )
+        snapshot_files = await volume.list_files(
+            str(paths.sessions_root()),
+            max_depth=6,
+            max_files=max_files,
+        )
 
-    scanned = removed = retained = skipped_fresh = 0
-    for item in (*artifact_files, *snapshot_files):
-        scanned += 1
-        if item.modified_at > cutoff:
-            skipped_fresh += 1
-            continue
-        if (
-            _is_committed_artifact(item.path, paths, kept_storage_refs)
-            or _is_active_run_file(item.path, paths, kept_active_runs)
-            or _is_completed_snapshot(item.path, paths, kept_completed_runs)
-        ):
-            retained += 1
-            continue
-        if _is_artifact_candidate(item.path, paths) or _is_run_scoped_file(item.path, paths):
-            await gateway.remove_bytes(workspace_id, item.path)
-            removed += 1
-        else:
-            retained += 1
+        scanned = removed = retained = skipped_fresh = 0
+        for item in (*artifact_files, *snapshot_files):
+            scanned += 1
+            if item.modified_at > cutoff:
+                skipped_fresh += 1
+                continue
+            if (
+                _is_committed_artifact(item.path, paths, kept_storage_refs)
+                or _is_active_run_file(item.path, paths, kept_active_runs)
+                or _is_completed_snapshot(item.path, paths, kept_completed_runs)
+            ):
+                retained += 1
+                continue
+            if _is_artifact_candidate(item.path, paths) or _is_run_scoped_file(item.path, paths):
+                await volume.remove_bytes(item.path)
+                removed += 1
+            else:
+                retained += 1
     return OrphanCleanupReport(scanned, removed, retained, skipped_fresh)
 
 

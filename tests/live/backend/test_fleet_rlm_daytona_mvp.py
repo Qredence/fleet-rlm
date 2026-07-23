@@ -231,8 +231,9 @@ def _assert_skill_lifecycle(chunks: list[dict[str, Any]], *, skill_id: UUID, ver
     assert events[0]["trust"] == "system"
     assert events[1] == {
         "skill_id": str(skill_id),
-        "name": "live-daytona-mvp-proof",
+        "name": "long-context",
         "version": version,
+        "phase": "loaded",
     }
 
 

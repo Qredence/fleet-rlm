@@ -9,6 +9,7 @@ Gate: FLEET_LIVE=1
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -131,7 +132,8 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
                 session_id=session_id,
                 user_id=user_id,
                 workspace_id=workspace_id,
-            )
+            ),
+            deadline=asyncio.get_running_loop().time() + 120,
         )
         resources.track_sandbox(lease.sandbox_id)
         sandbox_ids.append(lease.sandbox_id)
@@ -216,7 +218,8 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
                 session_id=session_id,
                 user_id=user_id,
                 workspace_id=workspace_id,
-            )
+            ),
+            deadline=asyncio.get_running_loop().time() + 120,
         )
         resources.track_sandbox(lease2.sandbox_id)
         if lease2.sandbox_id not in sandbox_ids:

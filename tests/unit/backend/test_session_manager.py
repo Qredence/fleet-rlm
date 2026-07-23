@@ -245,7 +245,7 @@ class _FailingLayoutPlatform(_FakePlatform):
     def create(self, **kwargs: Any) -> _FakeSandbox:
         sandbox = super().create(**kwargs)
         if self.fail_layout:
-            sandbox.fs.info_failures["/home/daytona/fleet/skills"] = RuntimeError(
+            sandbox.fs.info_failures["/home/daytona/fleet/artifacts"] = RuntimeError(
                 "provider failed at /home/daytona/private"
             )
         return sandbox
@@ -254,14 +254,14 @@ class _FailingLayoutPlatform(_FakePlatform):
 class _RacingFilesystem(_FakeFilesystem):
     def __init__(self, mount_path: str) -> None:
         super().__init__(mount_path)
-        self._skills_barrier = threading.Barrier(2)
-        self._skills_lock = threading.Lock()
+        self._artifacts_barrier = threading.Barrier(2)
+        self._artifacts_lock = threading.Lock()
 
     def create_folder(self, path: str, mode: str) -> None:
-        if path != "/home/daytona/fleet/skills":
+        if path != "/home/daytona/fleet/artifacts":
             return super().create_folder(path, mode)
-        self._skills_barrier.wait(timeout=5)
-        with self._skills_lock:
+        self._artifacts_barrier.wait(timeout=5)
+        with self._artifacts_lock:
             if path in self.directories:
                 raise FileExistsError(path)
             super().create_folder(path, mode)
@@ -345,18 +345,13 @@ async def test_acquire_provisions_complete_workspace_volume_layout() -> None:
     run = f"{session}/runs/{run_id}"
     expected_layout = {
         root,
-        f"{root}/skills",
-        f"{root}/memory",
         f"{root}/artifacts",
         f"{root}/attachments",
         f"{root}/sessions",
         session,
-        f"{session}/exports",
-        f"{session}/staging",
         f"{session}/workspace",
         f"{session}/runs",
         run,
-        f"{run}/staging",
         f"{run}/artifacts",
         f"{run}/attachments",
     }
@@ -366,10 +361,7 @@ async def test_acquire_provisions_complete_workspace_volume_layout() -> None:
     created_paths = [path for path, _mode in sandbox.fs.created]
     assert created_paths.index(session) < created_paths.index(f"{session}/workspace")
     assert created_paths.index(run) < created_paths.index(f"{run}/attachments")
-    assert sandbox.fs.uploaded["/home/daytona/fleet/skills/__init__.py"]
-    assert sandbox.fs.uploaded["/home/daytona/fleet/skills/catalog.py"]
-    assert sandbox.fs.uploaded["/home/daytona/fleet/skills/bundled/workspace-files/SKILL.md"]
-    assert sandbox.fs.uploaded["/home/daytona/fleet/skills/bundled/long-context/references/chunking-strategies.md"]
+    assert sandbox.fs.uploaded == {}
 
 
 @pytest.mark.asyncio
@@ -389,9 +381,7 @@ async def test_reacquire_repairs_missing_containers_without_touching_files() -> 
     await mgr.release(first)
     sandbox = plat.sandboxes[first.sandbox_id]
     workspace_path = f"/home/daytona/fleet/sessions/{session_id}/workspace"
-    exports_path = f"/home/daytona/fleet/sessions/{session_id}/exports"
     durable_file = f"{workspace_path}/decision.md"
-    sandbox.fs.directories.remove(exports_path)
     sandbox.fs.files.add(durable_file)
 
     second_run_id = uuid4()
@@ -406,7 +396,6 @@ async def test_reacquire_repairs_missing_containers_without_touching_files() -> 
     )
 
     assert second.sandbox_id == first.sandbox_id
-    assert exports_path in sandbox.fs.directories
     assert durable_file in sandbox.fs.files
     assert f"/home/daytona/fleet/sessions/{session_id}/runs/{second_run_id}/attachments" in (sandbox.fs.directories)
 
@@ -516,9 +505,9 @@ async def test_acquire_fails_closed_when_required_directory_is_a_file() -> None:
     first = await _acquire(mgr, request)
     await mgr.release(first)
     sandbox = plat.sandboxes[first.sandbox_id]
-    skills_path = "/home/daytona/fleet/skills"
-    sandbox.fs.directories.remove(skills_path)
-    sandbox.fs.files.add(skills_path)
+    artifacts_path = "/home/daytona/fleet/artifacts"
+    sandbox.fs.directories.remove(artifacts_path)
+    sandbox.fs.files.add(artifacts_path)
 
     with pytest.raises(DaytonaAdapterError) as captured:
         await _acquire(mgr, request)
@@ -565,7 +554,7 @@ async def test_sibling_session_acquisitions_tolerate_shared_root_creation_race()
 
     leases = await asyncio.gather(*(_acquire(mgr, request) for request in requests))
 
-    assert "/home/daytona/fleet/skills" in platform.filesystem.directories
+    assert "/home/daytona/fleet/artifacts" in platform.filesystem.directories
     for request in requests:
         assert f"/home/daytona/fleet/sessions/{request.session_id}/workspace" in (platform.filesystem.directories)
     for lease in leases:

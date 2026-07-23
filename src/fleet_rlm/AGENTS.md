@@ -61,6 +61,11 @@ them for backend work. Current code and tests outrank the local phase record in
   `write_workspace_text(..., overwrite=True)` for replacement. Direct
   Workspace Artifact publication stages bytes privately; deletion is not
   exposed as a Tool.
+- Daytona composition owns one synchronous client for retained Session
+  execution and one `AsyncDaytona` client for non-Turn Volume I/O. Grouped
+  Volume operations use one ephemeral, Workspace-subpath-mounted I/O Sandbox;
+  the gateway deletes it when the operation context exits. The Volume does not
+  materialize the host Skill catalog or unowned memory/export/staging roots.
 - Alembic owns live schema evolution. `create_tables` is test/local SQLite only.
 - Do not add `/api/v1`, WebSocket, legacy-backend, auth, or environment aliases.
 

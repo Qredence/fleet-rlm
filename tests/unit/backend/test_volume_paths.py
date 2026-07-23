@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from uuid import UUID, uuid4
 
 import pytest
@@ -29,11 +29,25 @@ def test_default_mount_matches_design() -> None:
     assert DEFAULT_VOLUME_MOUNT_PATH == "/home/daytona/fleet"
     root = VolumePaths.from_mount()
     assert root.root == PurePosixPath("/home/daytona/fleet")
-    assert root.skills_root() == PurePosixPath("/home/daytona/fleet/skills")
     assert root.artifacts_root() == PurePosixPath("/home/daytona/fleet/artifacts")
     assert root.attachments_root() == PurePosixPath("/home/daytona/fleet/attachments")
-    assert root.memory_root() == PurePosixPath("/home/daytona/fleet/memory")
     assert root.sessions_root() == PurePosixPath("/home/daytona/fleet/sessions")
+
+
+def test_removed_volume_namespaces_have_no_production_references() -> None:
+    source_root = Path(__file__).parents[3] / "src" / "fleet_rlm"
+    forbidden = (
+        "skills_root",
+        "memory_root",
+        "session_exports_dir",
+        "session_staging_dir",
+        "run_staging_dir",
+        "_ensure_skill_tree",
+    )
+    references = [
+        f"{path}:{term}" for path in source_root.rglob("*.py") for term in forbidden if term in path.read_text()
+    ]
+    assert references == []
 
 
 def test_validate_mount_path_rejects_unsafe() -> None:
@@ -65,19 +79,6 @@ def test_validate_path_id_rejects_traversal_and_separators() -> None:
     sid = uuid4()
     assert validate_path_id(sid) == str(sid)
     assert validate_path_id(str(sid)) == str(sid)
-
-
-def test_run_staging_roots_are_unique_per_run() -> None:
-    paths = VolumePaths.from_mount()
-    session_id = uuid4()
-    run_a = uuid4()
-    run_b = uuid4()
-    a = paths.run_staging_dir(session_id, run_a)
-    b = paths.run_staging_dir(session_id, run_b)
-    assert a != b
-    assert a.parent == paths.run_dir(session_id, run_a)
-    assert str(a).startswith(str(paths.session_dir(session_id)))
-    assert a.name == "staging"
 
 
 def test_session_workspace_root_is_session_scoped() -> None:

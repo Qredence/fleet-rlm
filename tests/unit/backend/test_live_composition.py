@@ -440,4 +440,4 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
             SimpleNamespace(state=SimpleNamespace()), Settings(run_environment="daytona")
         )
 
-    assert disposed == ["gateway", "resources"]
+    assert disposed == ["resources", "gateway"]

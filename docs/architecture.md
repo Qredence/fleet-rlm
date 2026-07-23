@@ -56,6 +56,11 @@ JSON-compatible common input annotations.
   and Run staging; it is not a DSPy execution Module.
 - Daytona composition constructs Turn preparation explicitly; process-lifetime
   `LiveKernelResources` owns provider resources but no mutable preparation graph.
+- Daytona keeps two intentional client roles: one synchronous client retained by
+  Session execution resources and one lifespan-owned `AsyncDaytona` client for
+  non-Turn Volume I/O. `WorkspaceVolumeGateway.open_workspace()` scopes each
+  grouped operation to one ephemeral Sandbox, which is deleted before the
+  context exits.
 - `RLMRunner` executes one fresh DSPy RLM and emits no terminal event.
 - `TurnLifecycle.finish()` owns private result snapshots, Artifact publication,
   atomic Turn Commit, and durable failure settlement.
@@ -98,6 +103,10 @@ exception text.
 - Daytona owns Sandbox/Interpreter Leases, Workspace Volume Scope, durable
   Attachment staging, Session Workspace files, private result snapshots, and
   Artifact Candidate promotion.
+- The Volume layout provisions only owned namespaces: shared attachments and
+  artifacts, Session Workspace, Run attachments and candidates, committed
+  Artifacts, and private `result.json`. Bundled Skills remain host-owned and
+  are not copied into the Volume.
 - Profiles are explicit and fail closed when prerequisites are absent. Private
   deterministic testing composition is not a public fallback profile.
 

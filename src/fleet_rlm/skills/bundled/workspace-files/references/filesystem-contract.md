@@ -8,17 +8,12 @@ Before a Run begins, Fleet creates the shared roots and the current Session and 
 
 ```text
 /home/daytona/fleet/
-├── skills/
-├── memory/
 ├── artifacts/
 ├── attachments/
 └── sessions/<session_uuid>/
-    ├── exports/
-    ├── staging/
     ├── workspace/
     └── runs/
         └── <run_uuid>/
-            ├── staging/
             ├── artifacts/
             └── attachments/
 ```
@@ -33,6 +28,10 @@ Session and Run directory names are UUID-shaped. The containers exist at acquisi
 | `sessions/<session_uuid>/runs/<run_uuid>/attachments/` | Private Run staging for Attachments authorized to that Turn. Read them with `read_attachment`, not by guessing a path. |
 | `sessions/<session_uuid>/runs/<run_uuid>/artifacts/` | Private Artifact Candidate bytes. Writing here directly does not publish or register an Artifact. |
 | `artifacts/<artifact_uuid>/` | Durable promoted bytes. They represent a public Artifact only after successful Turn Commit; raw paths remain private. |
+
+The host-owned bundled Skill catalog is not copied into the Volume. `memory/`,
+Session `exports/` and `staging/`, and Run `staging/` are not provisioned
+namespaces; Fleet has no production writer or reader for them.
 
 `create_artifact` writes a private candidate under the current Run. On successful finalization, Fleet validates the candidate, promotes its bytes to the durable Artifact area, and commits its public identity with the Turn. Failure, cancellation, timeout, or commit failure does not publish that identity, even if private bytes were written before the metadata commit completed.
 

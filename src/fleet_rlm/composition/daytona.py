@@ -50,7 +50,7 @@ async def _dispose_components(
     suppress_errors: bool,
 ) -> None:
     first_error: Exception | None = None
-    for target, method_name in ((gateway, "close"), (resources, "adispose")):
+    for target, method_name in ((resources, "adispose"), (gateway, "close")):
         method = getattr(target, method_name, None)
         if not callable(method):
             continue

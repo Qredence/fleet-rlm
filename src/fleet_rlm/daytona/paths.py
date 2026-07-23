@@ -131,12 +131,6 @@ class VolumePaths:
     def root(self) -> PurePosixPath:
         return self.mount_path
 
-    def skills_root(self) -> PurePosixPath:
-        return resolve_under_root(self.mount_path, "skills")
-
-    def memory_root(self) -> PurePosixPath:
-        return resolve_under_root(self.mount_path, "memory")
-
     def artifacts_root(self) -> PurePosixPath:
         return resolve_under_root(self.mount_path, "artifacts")
 
@@ -149,14 +143,6 @@ class VolumePaths:
     def session_dir(self, session_id: str | UUID) -> PurePosixPath:
         sid = validate_path_id(session_id, label="session_id")
         return resolve_under_root(self.mount_path, "sessions", sid)
-
-    def session_exports_dir(self, session_id: str | UUID) -> PurePosixPath:
-        sid = validate_path_id(session_id, label="session_id")
-        return resolve_under_root(self.mount_path, "sessions", sid, "exports")
-
-    def session_staging_dir(self, session_id: str | UUID) -> PurePosixPath:
-        sid = validate_path_id(session_id, label="session_id")
-        return resolve_under_root(self.mount_path, "sessions", sid, "staging")
 
     def session_workspace_dir(self, session_id: str | UUID) -> PurePosixPath:
         """Private durable workspace for one Session."""
@@ -173,10 +159,6 @@ class VolumePaths:
         sid = validate_path_id(session_id, label="session_id")
         rid = validate_path_id(run_id, label="run_id")
         return resolve_under_root(self.mount_path, "sessions", sid, "runs", rid)
-
-    def run_staging_dir(self, session_id: str | UUID, run_id: str | UUID) -> PurePosixPath:
-        """Unique staging root for one run (under the run directory)."""
-        return resolve_under_root(self.run_dir(session_id, run_id), "staging")
 
     def run_artifacts_dir(self, session_id: str | UUID, run_id: str | UUID) -> PurePosixPath:
         """Run-scoped durable artifacts: sessions/{session}/runs/{run}/artifacts/."""

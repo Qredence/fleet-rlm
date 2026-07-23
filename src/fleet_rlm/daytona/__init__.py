@@ -21,6 +21,7 @@ from fleet_rlm.daytona.workspace_volume import (
     DaytonaWorkspaceVolumeGateway,
     HostWorkspaceVolumeGateway,
     WorkspaceVolumeGateway,
+    WorkspaceVolumeSession,
     create_daytona_workspace_volume_gateway,
 )
 
@@ -37,6 +38,7 @@ __all__ = [
     "DaytonaWorkspaceVolumeGateway",
     "HostWorkspaceVolumeGateway",
     "WorkspaceVolumeGateway",
+    "WorkspaceVolumeSession",
     "create_daytona_workspace_volume_gateway",
     "InMemoryBindingStore",
     "InterpreterLease",
