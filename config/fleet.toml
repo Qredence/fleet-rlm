@@ -57,11 +57,11 @@ environment = "daytona"
 [profiles.databricks-daytona.daytona]
 snapshot = "fleet-rlm-python313-v2"
 
-# Worker tier: primary live-Turn root model.
+# Fast-tier root: nemotron-3-ultra-free via MPS deepseek-v4-flash-free / opencode.ai/zen.
 # Frontier models (claude-opus-4-8, gpt-5-6-sol) are reserved for offline GEPA;
 # build_lm_for_tier(LMTier.FRONTIER, ...) handles them explicitly.
 [profiles.databricks-daytona.llm.root]
-model = "system.ai.gpt-5-6-terra"
+model = "uscentral.default.nemotron-3-ultra-free"
 api_key_env = "DATABRICKS_TOKEN"
 base_url = "https://8259565402437752.2.gcp.databricks.com/ai-gateway/openai/v1"
 cache = true
