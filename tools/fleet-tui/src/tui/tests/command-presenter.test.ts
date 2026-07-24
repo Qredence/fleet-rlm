@@ -1,8 +1,8 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 
-import type { FleetSkillCard } from "../fleet-api-client.js";
-import { SkillSelector } from "./command-presenter.js";
+import type { FleetSkillCard } from "../../fleet-api-client.js";
+import { SkillSelector } from "../command-presenter.js";
 
 const skills = Array.from({ length: 14 }, (_, index) => ({
   id: `skill-${index}`,

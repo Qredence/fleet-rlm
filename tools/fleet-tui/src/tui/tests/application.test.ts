@@ -1,10 +1,10 @@
 import type { Terminal } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 
-import { FleetApiClient } from "../fleet-api-client.js";
-import { createFleetTui } from "./application.js";
-import type { StoreEvent } from "./store.js";
-import { getTerminalColorScheme, setTerminalColorScheme, theme } from "./theme.js";
+import { FleetApiClient } from "../../fleet-api-client.js";
+import { createFleetTui } from "../application.js";
+import type { StoreEvent } from "../store.js";
+import { getTerminalColorScheme, setTerminalColorScheme, theme } from "../theme.js";
 
 class FakeTerminal implements Terminal {
   columns = 80;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseArgs, run } from "./cli.js";
+import { parseArgs, run } from "../cli.js";
 
 describe("CLI options", () => {
   it("uses the local API by default and accepts a resumed session", () => {

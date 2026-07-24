@@ -11,7 +11,7 @@ import {
   sliceVisible,
   visibleLength,
   wrapToWidth,
-} from "./format.js";
+} from "../format.js";
 
 describe("format helpers", () => {
   it("measures visible length ignoring ANSI escapes", () => {

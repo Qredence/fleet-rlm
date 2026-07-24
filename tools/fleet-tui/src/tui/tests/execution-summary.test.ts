@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { summarizeExecution } from "./execution-summary.js";
-import type { Message } from "./store.js";
+import { summarizeExecution } from "../execution-summary.js";
+import type { Message } from "../store.js";
 
 function usage(runId = "run"): Message {
   return {

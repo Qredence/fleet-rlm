@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ConversationStore, type Message } from "./store.js";
-import { setTerminalColorScheme } from "./theme.js";
-import { TranscriptComponent } from "./transcript.js";
+import { ConversationStore, type Message } from "../store.js";
+import { setTerminalColorScheme } from "../theme.js";
+import { TranscriptComponent } from "../transcript.js";
 
 function message(id: string, text: string): Message {
   return { id, kind: "text", role: "assistant", text, streaming: false, ts: 1 };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ConversationStore } from "./store.js";
+import { ConversationStore } from "../store.js";
 
 function makeStore(): ConversationStore {
   return new ConversationStore();

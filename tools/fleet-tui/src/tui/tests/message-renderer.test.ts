@@ -1,9 +1,9 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { renderMessage } from "./message-renderer.js";
-import type { Message } from "./store.js";
-import { setTerminalColorScheme } from "./theme.js";
+import { renderMessage } from "../message-renderer.js";
+import type { Message } from "../store.js";
+import { setTerminalColorScheme } from "../theme.js";
 
 describe("renderMessage", () => {
   beforeEach(() => setTerminalColorScheme("dark"));

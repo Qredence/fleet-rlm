@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { highlightCode } from "./syntax-highlight.js";
-import type { ThemeColor } from "./theme.js";
+import { highlightCode } from "../syntax-highlight.js";
+import type { ThemeColor } from "../theme.js";
 
 describe("highlightCode", () => {
   it("maps upstream highlight.js scopes to semantic pi tokens and decodes entities", () => {

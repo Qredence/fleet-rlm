@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { FleetApiClient } from "../fleet-api-client.js";
-import { ConversationStore } from "./store.js";
-import { listCommands, parseInput, type CommandContext } from "./commands.js";
+import type { FleetApiClient } from "../../fleet-api-client.js";
+import { ConversationStore } from "../store.js";
+import { listCommands, parseInput, type CommandContext } from "../commands.js";
 
 function makeContext(): { ctx: CommandContext; exits: { count: number } } {
   const store = new ConversationStore();

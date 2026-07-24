@@ -8,7 +8,7 @@ import {
   getTerminalColorScheme,
   selectTheme,
   setTerminalColorScheme,
-} from "./theme.js";
+} from "../theme.js";
 
 describe("Fleet pi theme", () => {
   it("uses the upstream dark and light semantic colors in truecolor terminals", () => {

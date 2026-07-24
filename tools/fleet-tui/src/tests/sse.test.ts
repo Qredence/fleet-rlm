@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseSSE, parseUIChunk } from "./sse.js";
+import { parseSSE, parseUIChunk } from "../sse.js";
 
 function streamFrom(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();

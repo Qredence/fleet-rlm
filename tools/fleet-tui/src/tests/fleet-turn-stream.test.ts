@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { FleetApiError, type FleetApiClient } from "./fleet-api-client.js";
-import { streamFleetTurn } from "./fleet-turn-stream.js";
+import { FleetApiError, type FleetApiClient } from "../fleet-api-client.js";
+import { streamFleetTurn } from "../fleet-turn-stream.js";
 
 function response(...frames: string[]): Response {
   return new Response(frames.map((frame) => `data: ${frame}\n\n`).join(""), {

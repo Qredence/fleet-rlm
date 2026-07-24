@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { FleetTurn } from "../fleet-api-client.js";
-import type { FleetUIMessageChunk } from "../sse.js";
-import { LiveTurnProjector, projectDurableTurns } from "./projection.js";
-import type { Message, StoreEvent } from "./store.js";
+import type { FleetTurn } from "../../fleet-api-client.js";
+import type { FleetUIMessageChunk } from "../../sse.js";
+import { LiveTurnProjector, projectDurableTurns } from "../projection.js";
+import type { Message, StoreEvent } from "../store.js";
 
 const clock = () => 100;
 

@@ -13,7 +13,7 @@ database lanes remain explicit.
 | LiteLLM invariant | `tests/unit/test_litellm_invariant.py` | forbids direct application LiteLLM use |
 | Backend contracts | `tests/contracts/backend/` | API, persistence, packaging, composition, boundary contracts |
 | End to end | `tests/e2e/` | canonical local process and request flows |
-| TUI | `tools/fleet-tui/src/**/*.test.ts` | transport, projection, store, commands, rendering, terminal lifecycle |
+| TUI | `tools/fleet-tui/src/tests/`, `tools/fleet-tui/src/tui/tests/` | transport, projection, store, commands, rendering, terminal lifecycle |
 | Deno | named unit/contract tests marked `deno` | real deterministic DSPy Deno/Pyodide contract |
 | Database | tests marked `db` | explicit configured database behavior |
 | Daytona MVP | `tests/live/backend/test_fleet_rlm_daytona_mvp.py` | complete real FastAPI/DSPy/Daytona flow, including Session Workspace durability across Sandbox replacement |

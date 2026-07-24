@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { Message } from "./store.js";
-import { committedTokenCounts, observedTokenCounts } from "./usage-summary.js";
+import type { Message } from "../store.js";
+import { committedTokenCounts, observedTokenCounts } from "../usage-summary.js";
 
 describe("observed usage summaries", () => {
   it("accepts DSPy prompt/completion and input/output token names without double counting aliases", () => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { FleetApiClient, FleetApiError } from "./fleet-api-client.js";
+import { FleetApiClient, FleetApiError } from "../fleet-api-client.js";
 
 const originalFetch = globalThis.fetch;
 

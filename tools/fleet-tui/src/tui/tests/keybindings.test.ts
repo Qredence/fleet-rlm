@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { fleetKeybindings } from "./keybindings.js";
+import { fleetKeybindings } from "../keybindings.js";
 
 describe("Fleet keybindings", () => {
   it("uses Pi-style interrupt, clear/exit, empty-editor exit, and suspend actions", () => {
