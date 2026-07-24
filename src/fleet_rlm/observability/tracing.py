@@ -32,6 +32,10 @@ def configure_tracing() -> None:
         return
     _TRACING_CONFIGURED = True
 
+    from dotenv import load_dotenv
+
+    load_dotenv(override=False)
+
     tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "").strip()
     if not tracking_uri:
         logger.debug("MLFLOW_TRACKING_URI not set; tracing disabled")
