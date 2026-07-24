@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+from enum import Enum
 from typing import Any, Literal
 
 import dspy
@@ -120,3 +121,76 @@ def build_model_bundle(settings: Settings) -> RLMModelBundle:
     root = build("root")
     sub = build("sub")
     return RLMModelBundle(root_lm=root, sub_lm=sub)
+
+
+class LMTier(str, Enum):
+    """AI Gateway capability/cost tier for fleet-rlm DSPy modules.
+
+    FRONTIER  Highest capability; reserved for offline optimization (GEPA only).
+              Must never be used inside a live Turn transaction.
+    WORKER    Primary live-Turn root model. Balanced performance / cost.
+    FAST      High-throughput: sub-model analysis and inner-loop iterations.
+    """
+
+    FRONTIER = "frontier"
+    WORKER = "worker"
+    FAST = "fast"
+
+
+# Databricks AI Gateway path appended to the workspace URL.
+# The OpenAI client adds /chat/completions automatically.
+_AI_GATEWAY_PATH = "/ai-gateway/openai/v1"
+
+# Ordered by preference within each tier; index 0 is the default.
+# Values are Unity Catalog model service names routed by the AI Gateway.
+_TIER_MODELS: dict[LMTier, list[str]] = {
+    LMTier.FRONTIER: [
+        "system.ai.claude-opus-4-8",
+        "system.ai.gpt-5-6-sol",
+    ],
+    LMTier.WORKER: [
+        "system.ai.gpt-5-6-terra",
+        "system.ai.glm-5-2",
+        "system.ai.gpt-5-6-luna",
+    ],
+    LMTier.FAST: [
+        "uscentral.default.deepseek-v4-flash",
+        "system.ai.gpt-oss-120b",
+        "system.ai.gemini-3-1-flash-lite",
+        "uscentral.default.nemotron-3-ultra-free",
+        "uscentral.default.qwen3-7-max-2026-05-20",
+        "uscentral.default.glm-5-1",
+    ],
+}
+
+
+def build_lm_for_tier(
+    tier: LMTier,
+    *,
+    workspace_url: str,
+    api_key: str,
+    preference: int = 0,
+    max_tokens: int | None = None,
+    cache: bool = True,
+    num_retries: int = 3,
+) -> dspy.LM:
+    """Build a ``dspy.LM`` for the given tier via the Databricks AI Gateway.
+
+    ``workspace_url`` is the Databricks workspace base URL, e.g.
+    ``https://8259565402437752.2.gcp.databricks.com``.  ``preference``
+    selects an alternative within the tier (0 = primary default).
+
+    FRONTIER is reserved for offline GEPA optimization.  Live Turn callers
+    must use WORKER or FAST only.
+    """
+    models = _TIER_MODELS[tier]
+    model_uc = models[preference % len(models)]
+    base = f"{workspace_url.rstrip('/')}{_AI_GATEWAY_PATH}"
+    return build_lm(
+        model_uc,
+        api_key=api_key,
+        base_url=base,
+        max_tokens=max_tokens,
+        cache=cache,
+        num_retries=num_retries,
+    )

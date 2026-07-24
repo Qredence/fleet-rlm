@@ -48,3 +48,29 @@ environment = "daytona"
 
 [profiles.daytona.daytona]
 snapshot = "fleet-rlm-python313-v2"
+
+# Databricks-hosted profile: AI Gateway routes both roles through the unified
+# /ai-gateway/openai/v1 endpoint.  Set DATABRICKS_TOKEN in .env or process env.
+[profiles.databricks-daytona.runtime]
+environment = "daytona"
+
+[profiles.databricks-daytona.daytona]
+snapshot = "fleet-rlm-python313-v2"
+
+# Worker tier: primary live-Turn root model.
+# Frontier models (claude-opus-4-8, gpt-5-6-sol) are reserved for offline GEPA;
+# build_lm_for_tier(LMTier.FRONTIER, ...) handles them explicitly.
+[profiles.databricks-daytona.llm.root]
+model = "system.ai.gpt-5-6-terra"
+api_key_env = "DATABRICKS_TOKEN"
+base_url = "https://8259565402437752.2.gcp.databricks.com/ai-gateway/openai/v1"
+cache = true
+num_retries = 3
+
+# Fast tier: bounded semantic analysis sub model.
+[profiles.databricks-daytona.llm.sub]
+model = "uscentral.default.deepseek-v4-flash"
+api_key_env = "DATABRICKS_TOKEN"
+base_url = "https://8259565402437752.2.gcp.databricks.com/ai-gateway/openai/v1"
+cache = true
+num_retries = 3
