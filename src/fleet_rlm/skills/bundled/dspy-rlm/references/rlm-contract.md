@@ -47,6 +47,9 @@ Fleet maps these via `FLEET_RLM_MAX_ITERATIONS`, `FLEET_RLM_MAX_LLM_CALLS`, and 
 
 - Every primary Turn builds a fresh native `dspy.RLM` with the active Fleet Signature. The default is
   `FleetRLMSignature` (`answer: str`), but a selected Skill may supply additional required output fields.
+- Fleet scopes DSPy's stock native `JSONAdapter` to each Turn. RLM action output
+  contains `reasoning` and `code`; `completed` is internal loop state, not a
+  Signature output field.
 - **Daytona** (primary durable path): custom interpreter, Session Workspace tools, Artifact candidates promoted on Turn Commit.
 - **Deno**: vanilla local interpreter path without durable Artifact promotion; do not invent Deno-specific workflows here.
 - Declared `answer` JSON must fit the Turn commit budget. Oversized SUBMIT fails with public message `Turn output is too large`. Prefer writing long reports to Session Workspace, then SUBMIT a short summary.

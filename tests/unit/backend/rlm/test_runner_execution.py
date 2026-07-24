@@ -108,6 +108,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     main_thread = threading.get_ident()
     contexts: list[dict[str, object]] = []
     original_context = dspy.context
+    global_adapter = dspy.settings.adapter
 
     def tracked_context(**kwargs):
         contexts.append(kwargs)
@@ -166,7 +167,13 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     assert stream.outcome.usage["iterations"] == 1
     assert stream.outcome.usage["observed_lm_usage"] == {"root": {"prompt_tokens": 4, "completion_tokens": 2}}
     assert set(stream.outcome.usage) == {"iterations", "observed_lm_usage", "duration_ms"}
-    assert contexts == [{"lm": context.models.root_lm, "track_usage": True}]
+    assert len(contexts) == 1
+    assert contexts[0]["lm"] is context.models.root_lm
+    assert contexts[0]["track_usage"] is True
+    adapter = contexts[0]["adapter"]
+    assert type(adapter) is dspy.JSONAdapter
+    assert adapter.use_native_function_calling is True
+    assert dspy.settings.adapter is global_adapter
 
 
 @pytest.mark.asyncio

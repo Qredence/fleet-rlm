@@ -18,6 +18,19 @@ clients cannot provide models, Signatures, or executable capabilities.
   structured result, and a commit-gated private `result.json` snapshot.
 - Session Workspace files are immediate private Volume state. They survive
   later Runs and Sandbox replacement; interpreter globals do not.
+- Fleet scopes `dspy.JSONAdapter(use_native_function_calling=True)` to each Turn
+  alongside the Root Model. Native structured output applies to the RLM action
+  (`reasoning` and `code`) and final extraction without changing process-global
+  DSPy settings.
+- Fleet remains on DSPy's public program and LM call surfaces: `rlm.acall()`
+  delegates request and response normalization to stock DSPy. Application code
+  does not call LM `forward()` methods, construct provider-shaped requests, or
+  opt into DSPy's experimental typed LM API while `dspy==3.3.0b1` is pinned.
+  See DSPy's
+  [normalized LM API migration](https://dspy.ai/community/normalized-lm-api-migration/).
+- Do not replace the Turn-scoped adapter with global `dspy.configure()`.
+  Composition may execute independent Turns with different scoped models, and
+  Fleet must not mutate shared DSPy defaults.
 
 ## Typed startup inputs
 
