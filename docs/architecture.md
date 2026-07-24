@@ -112,7 +112,7 @@ exception text.
 
 ## Terminal client
 
-`@earendil-works/pi-tui@0.80.10` is the only renderer. The client requires Node
+`@earendil-works/pi-tui@0.82.0` is the only renderer. The client requires Node
 22.19+, owns no model or provider runtime, and consumes the FastAPI HTTP/SSE
 contract.
 

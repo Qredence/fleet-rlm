@@ -1,7 +1,7 @@
 # Fleet RLM Terminal UI
 
 This is Fleet's maintained local Node 22.19+ client. It uses
-`@earendil-works/pi-tui@0.80.10` to render the backend's AI SDK UI v1 HTTP/SSE
+`@earendil-works/pi-tui@0.82.0` to render the backend's AI SDK UI v1 HTTP/SSE
 contract; it does not run a model, Harness agent, or Sandbox.
 
 ## Run

@@ -179,7 +179,12 @@ type Event =
   | { type: "session/init"; session: Session }
   | { type: "session/hydrate"; session: Session; events: Event[] }
   | { type: "user/submit"; text: string }
-  | { type: "run/start"; runId: string; delivery: "live" | "replay" | null; traceId?: string | null }
+  | {
+      type: "run/start";
+      runId: string;
+      delivery: "live" | "replay" | null;
+      traceId?: string | null;
+    }
   | { type: "run/step-start" }
   | { type: "run/step-finish" }
   | { type: "run/status"; phase: string; detail: string }

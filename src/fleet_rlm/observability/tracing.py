@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from fleet_rlm.config import Settings
@@ -75,12 +75,16 @@ def configure_tracing(settings: Settings) -> None:
         from mlflow.entities.trace_location import UnityCatalog
 
         mlflow.set_tracking_uri(_DATABRICKS_TRACKING_URI)
-        os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = settings.mlflow_tracing_sql_warehouse_id
+        # All required settings are guaranteed non-None here (validated above).
+        _sql_warehouse_id = cast(str, settings.mlflow_tracing_sql_warehouse_id)
+        _catalog = cast(str, settings.mlflow_trace_catalog)
+        _schema = cast(str, settings.mlflow_trace_schema)
+        os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = _sql_warehouse_id
         mlflow.set_experiment(
             experiment_name=settings.mlflow_experiment_name,
             trace_location=UnityCatalog(
-                catalog_name=settings.mlflow_trace_catalog,
-                schema_name=settings.mlflow_trace_schema,
+                catalog_name=_catalog,
+                schema_name=_schema,
                 table_prefix=settings.mlflow_trace_table_prefix,
             ),
         )
