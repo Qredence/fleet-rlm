@@ -101,6 +101,10 @@ def create_app(
     resolved = settings if settings is not None else load_runtime_settings()
     configure_logging(resolved)
 
+    from fleet_rlm.observability.tracing import configure_tracing
+
+    configure_tracing()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         settings_obj: Settings = app.state.settings

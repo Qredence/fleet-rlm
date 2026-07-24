@@ -49,6 +49,8 @@ dependencies = [
     "fastapi[standard]==0.139.0",
     "uvicorn>=0.47.0,<1",
     "httpx2>=2.5.0",
+    # MLflow 3 tracing: DSPy autolog + Databricks tracking backend.
+    "mlflow>=3.14,<4",
 ]
 
 [project.urls]
