@@ -52,7 +52,7 @@ describe("terminal projection", () => {
         messageId: "run-1",
         messageMetadata: { delivery: "replay" },
       }),
-    ).toEqual([{ type: "run/start", runId: "run-1", delivery: "replay" }]);
+    ).toEqual([{ type: "run/start", runId: "run-1", delivery: "replay", traceId: null }]);
     expect(live.push({ type: "start-step" })).toEqual([{ type: "run/step-start" }]);
     expect(live.push({ type: "finish-step" })).toEqual([{ type: "run/step-finish" }]);
     expect(
@@ -68,6 +68,7 @@ describe("terminal projection", () => {
         error: null,
         durationMs: 1250,
         checkpointVersion: 7,
+        traceId: null,
       },
     ]);
   });
@@ -110,6 +111,7 @@ describe("terminal projection", () => {
         error: "Run failed safely",
         durationMs: null,
         checkpointVersion: null,
+        traceId: null,
       },
     ]);
 

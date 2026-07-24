@@ -86,7 +86,7 @@ jobs:
 
       - name: Run tests
         env:
-          MLFLOW_TRACKING_URI: "file:///tmp/mlruns"
+          FLEET_MLFLOW_TRACING_ENABLED: "false"
         run: >
           uv run pytest -q
           --timeout=120

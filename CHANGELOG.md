@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Change:** Wired opt-in Databricks-backed MLflow Option B: `FLEET_MLFLOW_*`
+  settings, real `set_tracking_uri("databricks")` / `set_experiment` /
+  `mlflow.dspy.autolog()` at app boot, fail-soft `fleet_turn` root spans on live
+  Turns, and operator-facing `traceId` on existing SSE `messageMetadata`, TUI run
+  status, and durable assistant UI metadata.
+  **Outcome:** Engineering DSPy traces land in a named Databricks experiment when
+  enabled; operators can correlate Turns to traces without new SSE chunk types or
+  Turn-path coupling. Default remains off and fail-soft.
+
 ## [0.7.0] - 2026-07-17
 
 ### Added

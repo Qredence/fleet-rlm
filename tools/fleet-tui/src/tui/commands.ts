@@ -308,6 +308,7 @@ registerCommand({
       `Session:    ${state.session?.title ?? "(none)"}  ${state.session?.id ?? "—"} (${state.session?.status ?? "—"})`,
       `Run:        ${state.run.id ?? "(none)"}  phase=${state.run.phase}  finish=${state.run.finishReason ?? "—"}`,
       `Delivery:   ${state.run.delivery ?? "—"}  outcome=${state.run.outcome ?? "—"}`,
+      `Trace:      ${state.run.traceId ?? "—"}`,
       `Usage:      observed committed input=${formatObservedTokens(usage.input)} output=${formatObservedTokens(usage.output)}`,
       `Tools:      ${state.run.toolCount}    Steps: ${state.run.completedSteps}/${state.run.startedSteps}`,
       `Skills:     ${formatPendingSkills(state.pendingSkillSelections)}`,

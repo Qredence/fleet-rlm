@@ -132,14 +132,17 @@ def user_turn_to_ui_message(record: UserTurnRecord) -> dict[str, Any]:
 
 
 def assistant_turn_to_ui_message(record: AssistantTurnRecord) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "schemaVersion": 1,
+        "runId": str(record.run_id),
+        "sessionId": str(record.session_id),
+        "sequence": record.sequence,
+    }
+    if record.committed.trace_id:
+        metadata["traceId"] = record.committed.trace_id
     return {
         "id": str(record.run_id),
         "role": "assistant",
         "parts": [_assistant_part(part) for part in record.committed.parts],
-        "metadata": {
-            "schemaVersion": 1,
-            "runId": str(record.run_id),
-            "sessionId": str(record.session_id),
-            "sequence": record.sequence,
-        },
+        "metadata": metadata,
     }

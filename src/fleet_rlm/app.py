@@ -103,7 +103,7 @@ def create_app(
 
     from fleet_rlm.observability.tracing import configure_tracing
 
-    configure_tracing()
+    configure_tracing(resolved)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

@@ -166,6 +166,8 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
             turn_timeout_seconds=resolved.turn_timeout_seconds,
             cleanup=cleanup,
             claim_loss_fence=resources.session_manager.fence_session,
+            mlflow_tracing_enabled=resolved.mlflow_tracing_enabled,
+            mlflow_expose_trace_id=resolved.mlflow_expose_trace_id,
         )
         return DaytonaCompositionHandles(
             resources=resources,

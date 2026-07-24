@@ -17,7 +17,7 @@ compatibility runtime and parallel foundation package no longer exist.
 | `files/`, `artifacts/` | Attachment staging, paged/append Session Workspace tools, direct Workspace Artifact Candidate staging, Artifact promotion/read | storage interfaces and safe paths |
 | `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |
 | `persistence/` | SQLAlchemy models and repository adapters | Session/file/Artifact interfaces |
-| `observability/` | sanitized failure diagnostics | domain errors |
+| `observability/` | sanitized failure diagnostics; opt-in Databricks MLflow DSPy tracing | domain errors, Settings |
 | `cli/` | supervised Daytona/Deno plus pi-tui, backend launchers, doctor dispatch | ASGI entrypoint and Daytona diagnostics |
 
 ## Hard boundaries

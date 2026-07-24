@@ -177,6 +177,8 @@ def install_local_inventory(
         turn_timeout_seconds=settings.turn_timeout_seconds,
         cleanup=cleanup,
         claim_loss_fence=None,
+        mlflow_tracing_enabled=settings.mlflow_tracing_enabled,
+        mlflow_expose_trace_id=settings.mlflow_expose_trace_id,
     )
     handles = LocalCompositionHandles(
         turn_coordinator=coordinator,

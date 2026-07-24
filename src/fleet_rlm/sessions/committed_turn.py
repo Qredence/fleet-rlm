@@ -251,6 +251,7 @@ class CommittedTurn:
 
     schema_version: Literal[1]
     parts: tuple[CommittedPart, ...]
+    trace_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.schema_version != 1:
@@ -523,18 +524,22 @@ class CommittedTurnCodec:
 
     @staticmethod
     def encode(committed: CommittedTurn) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "schema_version": committed.schema_version,
             "parts": [_encode_part(part) for part in committed.parts],
         }
+        if committed.trace_id:
+            payload["trace_id"] = committed.trace_id
+        return payload
 
     @staticmethod
     def decode(value: object) -> CommittedTurn:
         data = _expect_mapping(value, "committed Turn")
-        _expect_exact(data, {"schema_version", "parts"})
+        _expect_exact(data, {"schema_version", "parts"}, optional={"trace_id"})
         if data.get("schema_version") != 1:
             raise CommittedTurnValidationError("unsupported committed Turn schema version")
         raw_parts = data.get("parts")
         if not isinstance(raw_parts, Sequence) or isinstance(raw_parts, (str, bytes, bytearray)):
             raise CommittedTurnValidationError("committed Turn parts must be an array")
-        return CommittedTurn(schema_version=1, parts=tuple(_decode_part(part) for part in raw_parts))
+        trace_id = _optional_str(data, "trace_id")
+        return CommittedTurn(schema_version=1, parts=tuple(_decode_part(part) for part in raw_parts), trace_id=trace_id)

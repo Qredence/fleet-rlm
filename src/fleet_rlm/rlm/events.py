@@ -38,6 +38,7 @@ def _freeze_json(value: object) -> JsonValue:
 class RunStarted:
     kind: ClassVar[Literal["run.started"]] = "run.started"
     delivery: Literal["live", "replay"]
+    trace_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +208,7 @@ class RunCompleted:
     checkpoint_version: int
     delivery: Literal["live", "replay"]
     duration_ms: int | None = None
+    trace_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

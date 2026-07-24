@@ -118,6 +118,7 @@ export type Run = {
   toolCount: number;
   startedSteps: number;
   completedSteps: number;
+  traceId: string | null;
 };
 
 export type Session = {
@@ -168,6 +169,7 @@ function initialState(): State {
       toolCount: 0,
       startedSteps: 0,
       completedSteps: 0,
+      traceId: null,
     },
     pendingSkillSelections: [],
   };
@@ -177,7 +179,7 @@ type Event =
   | { type: "session/init"; session: Session }
   | { type: "session/hydrate"; session: Session; events: Event[] }
   | { type: "user/submit"; text: string }
-  | { type: "run/start"; runId: string; delivery: "live" | "replay" | null }
+  | { type: "run/start"; runId: string; delivery: "live" | "replay" | null; traceId?: string | null }
   | { type: "run/step-start" }
   | { type: "run/step-finish" }
   | { type: "run/status"; phase: string; detail: string }
@@ -187,6 +189,7 @@ type Event =
       error: string | null;
       durationMs: number | null;
       checkpointVersion: number | null;
+      traceId?: string | null;
     }
   | { type: "run/cancelling" }
   | { type: "run/cancelled"; reason: string }
@@ -294,6 +297,7 @@ function reduce(state: State, event: Event): State {
           toolCount: 0,
           startedSteps: 0,
           completedSteps: 0,
+          traceId: event.traceId ?? null,
         },
       };
     case "run/step-start":
@@ -329,6 +333,7 @@ function reduce(state: State, event: Event): State {
           error: event.error,
           durationMs: event.durationMs,
           checkpointVersion: event.checkpointVersion,
+          traceId: event.traceId ?? state.run.traceId,
         },
       };
     case "run/cancelling":

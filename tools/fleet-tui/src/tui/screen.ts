@@ -74,7 +74,14 @@ class ActivityComponent implements Component {
       this.loader.start();
     }
 
-    const secondary = `${run.completedSteps}/${run.startedSteps} steps complete · ${run.toolCount} ${run.toolCount === 1 ? "tool" : "tools"} · Esc cancel`;
+    const secondary = [
+      `${run.completedSteps}/${run.startedSteps} steps complete`,
+      `${run.toolCount} ${run.toolCount === 1 ? "tool" : "tools"}`,
+      run.traceId ? `trace ${run.traceId}` : null,
+      "Esc cancel",
+    ]
+      .filter((part): part is string => part !== null)
+      .join(" · ");
     return [
       ...this.loader.render(width),
       truncateToWidth(`${theme.fg("borderMuted", "│")} ${dim(secondary)}`, width, ""),

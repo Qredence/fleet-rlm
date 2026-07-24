@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fleet_rlm.artifacts.models import ArtifactRef
+from fleet_rlm.observability.turn_tracing import current_turn_trace_id
 from fleet_rlm.rlm.events import (
     AttachmentRead,
     RLMCode,
@@ -211,4 +212,4 @@ def commit_success(outcome: RLMOutcome, artifacts: tuple[ArtifactRef, ...]) -> C
             )
         )
     parts.append(TextPart(text=prediction.display_text))
-    return CommittedTurn(schema_version=1, parts=tuple(parts))
+    return CommittedTurn(schema_version=1, parts=tuple(parts), trace_id=current_turn_trace_id())

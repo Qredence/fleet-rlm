@@ -169,6 +169,14 @@ def test_turn_timeout_defaults_to_thirty_minutes() -> None:
     assert Settings(_env_file=None).turn_timeout_seconds == 1800
 
 
+def test_mlflow_tracing_defaults_to_disabled() -> None:
+    assert Settings(_env_file=None).mlflow_tracing_enabled is False
+
+
+def test_mlflow_tracing_can_be_disabled_explicitly() -> None:
+    assert Settings(_env_file=None, mlflow_tracing_enabled=False).mlflow_tracing_enabled is False
+
+
 def test_daytona_admission_defaults_to_eight_leases() -> None:
     assert Settings(_env_file=None).max_active_daytona_leases == 8
 
@@ -176,6 +184,20 @@ def test_daytona_admission_defaults_to_eight_leases() -> None:
 def test_daytona_admission_reads_fleet_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FLEET_MAX_ACTIVE_DAYTONA_LEASES", "3")
     assert Settings(_env_file=None).max_active_daytona_leases == 3
+
+
+def test_mlflow_uc_settings_read_fleet_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FLEET_MLFLOW_TRACE_CATALOG", "analytics")
+    monkeypatch.setenv("FLEET_MLFLOW_TRACE_SCHEMA", "traces")
+    monkeypatch.setenv("FLEET_MLFLOW_TRACE_TABLE_PREFIX", "fleet_app")
+    monkeypatch.setenv("FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID", "warehouse-123")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.mlflow_trace_catalog == "analytics"
+    assert settings.mlflow_trace_schema == "traces"
+    assert settings.mlflow_trace_table_prefix == "fleet_app"
+    assert settings.mlflow_tracing_sql_warehouse_id == "warehouse-123"
 
 
 @pytest.mark.parametrize("value", [0, -1, 9])

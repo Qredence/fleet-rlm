@@ -8,7 +8,7 @@ src/fleet_rlm/
 ├── cli/            # supervised TUI/backend launchers and Daytona doctor
 ├── daytona/        # Daytona resources, adapters, and Workspace agent
 ├── files/          # Attachment upload, staging, host tools
-├── observability/  # sanitized failure diagnostics
+├── observability/  # failure diagnostics + opt-in MLflow tracing
 ├── persistence/    # SQLAlchemy models and repository adapters
 ├── rlm/            # DSPy signature, models, runner, Runtime Events
 ├── sessions/       # Session/Turn domain and repository interfaces

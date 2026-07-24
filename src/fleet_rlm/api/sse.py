@@ -104,17 +104,20 @@ class AISDKUIProjector:
         detail = event.detail
         data = _detail_data(detail)
         if isinstance(detail, RunStarted):
+            metadata = {
+                "schemaVersion": event.schema_version,
+                "runId": str(event.run_id),
+                "sessionId": str(event.session_id),
+                "createdAt": event.timestamp.isoformat(),
+                "delivery": detail.delivery,
+            }
+            if detail.trace_id:
+                metadata["traceId"] = detail.trace_id
             return [
                 {
                     "type": "start",
                     "messageId": str(event.run_id),
-                    "messageMetadata": {
-                        "schemaVersion": event.schema_version,
-                        "runId": str(event.run_id),
-                        "sessionId": str(event.session_id),
-                        "createdAt": event.timestamp.isoformat(),
-                        "delivery": detail.delivery,
-                    },
+                    "messageMetadata": metadata,
                 }
             ]
         if isinstance(detail, Status):
@@ -220,6 +223,7 @@ class AISDKUIProjector:
                         "checkpointVersion": detail.checkpoint_version,
                         "durationMs": detail.duration_ms,
                         "idempotentReplay": detail.delivery == "replay",
+                        **({"traceId": detail.trace_id} if detail.trace_id else {}),
                     },
                 }
             )

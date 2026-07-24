@@ -28,6 +28,7 @@ export class LiveTurnProjector {
             type: "run/start",
             runId: chunk.messageId,
             delivery: delivery(chunk.messageMetadata),
+            traceId: metadataStringValue(chunk.messageMetadata, "traceId"),
           },
         ];
       case "start-step":
@@ -45,6 +46,7 @@ export class LiveTurnProjector {
             checkpointVersion: nullableNumber(
               metadata.checkpointVersion ?? metadata.checkpoint_version,
             ),
+            traceId: metadataStringValue(chunk.messageMetadata, "traceId"),
           },
         ];
       }
@@ -264,6 +266,17 @@ export function projectDurableTurns(turns: FleetTurn[], clock: Clock = Date.now)
   const messages: Message[] = [];
   for (const turn of turns) {
     const runId = metadataString(turn, "runId") ?? turn.id;
+    const durableTraceId = metadataString(turn, "traceId");
+    if (turn.role === "assistant" && durableTraceId) {
+      messages.push(
+        warning(
+          `${turn.id}:trace`,
+          runId,
+          { code: "mlflow_trace", message: `trace ${durableTraceId}` },
+          clock,
+        ),
+      );
+    }
     const resultIndex = turn.parts.findIndex((part) => part.type === "data-structured-result");
     const narrative = turn.parts
       .filter((part) => part.type === "text")
@@ -567,6 +580,12 @@ function inferStep(id: string | undefined): number {
 function metadataString(turn: FleetTurn, key: string): string | undefined {
   const value = turn.metadata?.[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function metadataStringValue(value: unknown, key: string): string | null {
+  const metadata = data(value);
+  const item = metadata[key];
+  return typeof item === "string" && item.length > 0 ? item : null;
 }
 
 function assertNever(value: never): never {

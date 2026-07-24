@@ -44,6 +44,11 @@ them for backend work. Current code and tests outrank the local phase record in
   answer text up to configured bounds. Tool event views expose only bounded
   allowlisted metadata; Tools without a view expose no arguments or results.
   Provider failures use closed public messages.
+- Opt-in Databricks MLflow (`observability/tracing.py`, `observability/turn_tracing.py`)
+  is fail-soft engineering observability. It must never change Turn outcomes.
+  When `FLEET_MLFLOW_EXPOSE_TRACE_ID` is enabled, public `traceId` may appear only
+  as optional `messageMetadata` on existing `start`/`finish` chunks — never as a
+  new RuntimeEvent kind or credential-bearing payload.
 - `TurnLifecycle.finish()` owns result-snapshot handling, Artifact publication,
   and atomic Turn Commit or failure settlement. `TurnCoordinator` owns stream
   orchestration, terminal ordering, heartbeat coordination, and final resource

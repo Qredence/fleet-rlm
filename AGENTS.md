@@ -134,6 +134,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
   whole-message omission with `truncated` / `bytes_returned` / `byte_budget` /
   `skipped_ordinal` continuation metadata.
 - Settings use only `FLEET_*`. The local BYOK API uses one deterministic process-local User and Workspace scope and accepts no Authorization or synthetic identity headers.
+- Opt-in Databricks MLflow tracing is engineering observability only (`FLEET_MLFLOW_TRACING_ENABLED`, default off). When enabled, `create_app` runs `mlflow.set_tracking_uri("databricks")` + `set_experiment` + `mlflow.dspy.autolog()`, and live Turns open a fail-soft `fleet_turn` root span. Operator-facing `traceId` may appear on SSE `start`/`finish` `messageMetadata`, TUI run status, and durable assistant UI metadata when `FLEET_MLFLOW_EXPOSE_TRACE_ID` is true. Databricks auth stays on `DATABRICKS_HOST`/`DATABRICKS_TOKEN` or databricks-cli — never in `FLEET_*` secrets. Product turn evidence remains RuntimeEvents → SSE → TUI.
 - Alembic owns the live schema through one fresh canonical baseline. `create_tables` is restricted to explicit SQLite test/offline helpers; run `alembic check` against an upgraded empty database for drift.
 - Repository validation is `make check`; its default test targets mask local
   live credentials, install private deterministic composition explicitly, and

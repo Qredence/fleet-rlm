@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol, Self
 from uuid import UUID
 
@@ -28,6 +28,7 @@ from fleet_rlm.chat.turn_preparation import (
     TurnPreparationCancelled,
     TurnPreparationTimeout,
 )
+from fleet_rlm.observability.turn_tracing import turn_trace
 from fleet_rlm.rlm.context import RLMExecutionContext
 from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 from fleet_rlm.rlm.events import (
@@ -93,9 +94,20 @@ class OpenedTurnStream:
             await _shield_cleanup(close())
 
 
-def _terminal(recorder: EventRecorder, receipt: CommittedTurnReceipt | FailedRunReceipt) -> RuntimeEvent:
+def _terminal(
+    recorder: EventRecorder,
+    receipt: CommittedTurnReceipt | FailedRunReceipt,
+    *,
+    trace_id: str | None = None,
+) -> RuntimeEvent:
     if isinstance(receipt, CommittedTurnReceipt):
-        return recorder.record(RunCompleted(checkpoint_version=receipt.checkpoint_version, delivery="live"))
+        return recorder.record(
+            RunCompleted(
+                checkpoint_version=receipt.checkpoint_version,
+                delivery="live",
+                trace_id=trace_id,
+            )
+        )
     if receipt.terminal_status == "cancelled":
         return recorder.record(RunCancelled())
     if receipt.terminal_status == "timeout":
@@ -114,6 +126,25 @@ def _terminal(recorder: EventRecorder, receipt: CommittedTurnReceipt | FailedRun
     return recorder.record(RunFailed(code="execution_failed", message=public_message))
 
 
+def _with_trace_id(event: RuntimeEvent, trace_id: str | None) -> RuntimeEvent:
+    if not trace_id:
+        return event
+    detail = event.detail
+    if isinstance(detail, RunStarted) and detail.trace_id is None:
+        return replace(event, detail=RunStarted(delivery=detail.delivery, trace_id=trace_id))
+    if isinstance(detail, RunCompleted) and detail.trace_id is None:
+        return replace(
+            event,
+            detail=RunCompleted(
+                checkpoint_version=detail.checkpoint_version,
+                delivery=detail.delivery,
+                duration_ms=detail.duration_ms,
+                trace_id=trace_id,
+            ),
+        )
+    return event
+
+
 class TurnCoordinator:
     """Own public delivery ordering while domain modules own state and resources."""
 
@@ -127,6 +158,8 @@ class TurnCoordinator:
         turn_timeout_seconds: int | float = 1800,
         cleanup: TurnCleanupSupervisor | None = None,
         claim_loss_fence: Callable[[UUID], Awaitable[None]] | None = None,
+        mlflow_tracing_enabled: bool = False,
+        mlflow_expose_trace_id: bool = True,
     ) -> None:
         self._lifecycle = lifecycle
         self._preparation = preparation
@@ -135,6 +168,8 @@ class TurnCoordinator:
         self._turn_timeout_seconds = float(turn_timeout_seconds)
         self._cleanup = cleanup or TurnCleanupSupervisor()
         self._claim_loss_fence = claim_loss_fence
+        self._mlflow_tracing_enabled = mlflow_tracing_enabled
+        self._mlflow_expose_trace_id = mlflow_expose_trace_id
 
     async def open(self, command: OpenTurnCommand) -> OpenedTurnStream:
         """Complete claim and preparation before a transport sends headers."""
@@ -234,6 +269,23 @@ class TurnCoordinator:
         prepared: PreparedTurn,
         heartbeat: _ClaimHeartbeat | None,
     ) -> AsyncGenerator[RuntimeEvent]:
+        with turn_trace(
+            turn.session_id,
+            turn.run_id,
+            enabled=self._mlflow_tracing_enabled,
+            expose_trace_id=self._mlflow_expose_trace_id,
+        ) as handle:
+            async for event in self._execute_traced(turn, prepared, heartbeat, trace_id=handle.trace_id):
+                yield event
+
+    async def _execute_traced(
+        self,
+        turn: ExecuteTurn,
+        prepared: PreparedTurn,
+        heartbeat: _ClaimHeartbeat | None,
+        *,
+        trace_id: str | None,
+    ) -> AsyncGenerator[RuntimeEvent]:
         stream: TurnEventStream | None = None
         settled = False
         recorder = EventRecorder(turn.run_id, turn.session_id)
@@ -279,7 +331,7 @@ class TurnCoordinator:
                     raise RuntimeError("runner emitted a terminal Runtime Event")
                 last_sequence = event.sequence
                 recorder = EventRecorder(turn.run_id, turn.session_id, start_sequence=last_sequence)
-                yield event
+                yield _with_trace_id(event, trace_id)
             outcome = stream.outcome or RLMOutcome(
                 terminal_status="failed",
                 public_error_message="Turn failed",
@@ -362,7 +414,7 @@ class TurnCoordinator:
                     mode="live_suffix",
                 ):
                     yield event
-            yield _terminal(recorder, receipt)
+            yield _terminal(recorder, receipt, trace_id=trace_id)
         except (GeneratorExit, asyncio.CancelledError):
             if not settled:
                 try:
@@ -391,7 +443,7 @@ class TurnCoordinator:
                         )
                     )
                     settled = True
-                    yield _terminal(recorder, receipt)
+                    yield _terminal(recorder, receipt, trace_id=trace_id)
                 except Exception:
                     yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
         finally:

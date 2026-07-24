@@ -134,6 +134,22 @@ class Settings(BaseSettings):
     sub_llm_temperature: float | None = None
     sub_llm_cache: bool = True
     sub_llm_num_retries: int = Field(default=3, ge=0)
+    mlflow_tracing_enabled: bool = Field(
+        default=False,
+        description="Enable Databricks-backed MLflow DSPy autolog (engineering observability)",
+    )
+    mlflow_experiment_name: str | None = Field(
+        default=None,
+        description="MLflow experiment name when tracing is enabled",
+    )
+    mlflow_expose_trace_id: bool = Field(
+        default=True,
+        description="When tracing is enabled, surface trace ids on Turn SSE metadata",
+    )
+    mlflow_trace_catalog: str | None = Field(default=None)
+    mlflow_trace_schema: str | None = Field(default=None)
+    mlflow_trace_table_prefix: str | None = Field(default=None)
+    mlflow_tracing_sql_warehouse_id: str | None = Field(default=None)
     _dotenv_values: dict[str, str] = PrivateAttr(default_factory=dict)
 
     @model_validator(mode="after")
@@ -204,6 +220,17 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
     "storage": frozenset({"data_root", "max_upload_bytes", "max_artifact_bytes", "database_url"}),
     "daytona": frozenset({"snapshot", "volume_name", "volume_mount_path"}),
     "logging": frozenset({"level"}),
+    "mlflow": frozenset(
+        {
+            "tracing_enabled",
+            "experiment_name",
+            "expose_trace_id",
+            "trace_catalog",
+            "trace_schema",
+            "trace_table_prefix",
+            "tracing_sql_warehouse_id",
+        }
+    ),
 }
 _ROLE_KEYS = frozenset({"model", "api_key_env", "base_url", "max_tokens", "temperature", "cache", "num_retries"})
 
@@ -265,6 +292,7 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
     daytona = table("daytona")
     log = table("logging")
     llm = table("llm")
+    mlflow = table("mlflow")
     values: dict[str, Any] = {
         "app_name": application.get("name"),
         "run_environment": runtime.get("environment"),
@@ -285,6 +313,20 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         "volume_mount_path": daytona.get("volume_mount_path"),
         "log_level": log.get("level"),
     }
+    if "tracing_enabled" in mlflow:
+        values["mlflow_tracing_enabled"] = mlflow["tracing_enabled"]
+    if "experiment_name" in mlflow:
+        values["mlflow_experiment_name"] = mlflow["experiment_name"]
+    if "expose_trace_id" in mlflow:
+        values["mlflow_expose_trace_id"] = mlflow["expose_trace_id"]
+    if "trace_catalog" in mlflow:
+        values["mlflow_trace_catalog"] = mlflow["trace_catalog"]
+    if "trace_schema" in mlflow:
+        values["mlflow_trace_schema"] = mlflow["trace_schema"]
+    if "trace_table_prefix" in mlflow:
+        values["mlflow_trace_table_prefix"] = mlflow["trace_table_prefix"]
+    if "tracing_sql_warehouse_id" in mlflow:
+        values["mlflow_tracing_sql_warehouse_id"] = mlflow["tracing_sql_warehouse_id"]
     for role in ("root", "sub"):
         role_values = _require_mapping(llm.get(role, {}), f"llm.{role}")
         values[f"{role}_model"] = role_values.get("model")
@@ -365,5 +407,6 @@ def redacted_policy_summary(settings: Settings, *, profile: str) -> str:
         f"rlm_iterations={settings.rlm_max_iterations} "
         f"rlm_llm_calls={settings.rlm_max_llm_calls} "
         f"rlm_verbose={settings.rlm_verbose} log_level={settings.log_level} "
-        f"volume={settings.volume_name}"
+        f"volume={settings.volume_name} "
+        f"mlflow_tracing={settings.mlflow_tracing_enabled}"
     )
