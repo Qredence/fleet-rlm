@@ -65,14 +65,19 @@ def test_dspy_rlm_accepts_file_tool_names_and_fresh_custom_interpreters() -> Non
     assert second._interpreter is second_interpreter  # noqa: SLF001 - installed DSPy contract
 
 
-def test_pinned_chat_adapter_formats_validated_json_inputs_for_typed_signature() -> None:
+def test_pinned_json_adapter_formats_typed_inputs_and_native_rlm_action_outputs() -> None:
     from fleet_rlm.rlm.signature import FleetRLMSignature
     from tests.unit.backend.rlm.test_signature_inputs import _payload
 
-    messages = dspy.ChatAdapter().format(FleetRLMSignature, [], _payload())
+    adapter = dspy.JSONAdapter(use_native_function_calling=True)
+    messages = adapter.format(FleetRLMSignature, [], _payload())
     assert messages[0]["role"] == "system"
     assert "session_context" in messages[-1]["content"]
     assert "report-builder" in messages[-1]["content"]
+
+    rlm = dspy.RLM(FleetRLMSignature)
+    assert set(rlm.generate_action.signature.output_fields) == {"reasoning", "code"}
+    assert "completed" not in rlm.generate_action.signature.output_fields
 
 
 @pytest.mark.asyncio

@@ -583,7 +583,11 @@ class RLMRunner:
             attachments=context.attachments,
             workspace=spec.workspace,
         )
-        with dspy.context(lm=context.models.root_lm, track_usage=True):
+        with dspy.context(
+            lm=context.models.root_lm,
+            adapter=dspy.JSONAdapter(use_native_function_calling=True),
+            track_usage=True,
+        ):
             return await rlm.acall(**kwargs)
 
     async def _execute_rlm_in_worker(

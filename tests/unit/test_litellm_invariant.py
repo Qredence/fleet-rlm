@@ -2,11 +2,12 @@
 
 Two-part policy, both mechanically enforced here:
 
-1. No source file under ``src/fleet_rlm/`` may import or call litellm directly.
-   fleet-rlm interacts with language models exclusively through DSPy's
-   normalized LM API (``dspy.LM``, ``dspy.settings.lm``, ``dspy.configure``).
-   litellm is a transitive dependency of DSPy and remains DSPy's internal
-   compatibility layer (see
+1. No source file under ``src/fleet_rlm/`` may import or call litellm directly,
+   or bypass DSPy's public LM call boundary with a direct ``forward()`` or
+   ``aforward()`` call on an LM-shaped receiver. Fleet interacts with language
+   models exclusively through stock DSPy public entry points. litellm is a
+   transitive dependency of DSPy and remains DSPy's internal compatibility
+   layer (see
    https://dspy.ai/community/normalized-lm-api-migration/ — "Removing the
    legacy BaseLM.forward contract does not necessitate removing LiteLLM").
 
@@ -69,6 +70,28 @@ def _directly_imports_or_uses_litellm(path: Path) -> list[str]:
     return violations
 
 
+def _directly_calls_lm_forward(path: Path) -> list[str]:
+    """Return direct calls that bypass DSPy's public LM compatibility boundary."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except SyntaxError:
+        return []
+
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr not in {"forward", "aforward"}:
+            continue
+
+        receiver = node.func.value
+        receiver_name = receiver.id if isinstance(receiver, ast.Name) else ""
+        if receiver_name == "lm" or receiver_name.endswith("_lm"):
+            violations.append(f"{path}:{node.lineno}: {receiver_name}.{node.func.attr}(...)")
+
+    return violations
+
+
 @pytest.mark.parametrize("py_file", _iter_python_files(_SRC_ROOT), ids=lambda p: str(p.relative_to(_SRC_ROOT)))
 def test_no_direct_litellm_usage(py_file: Path) -> None:
     """No source file in fleet_rlm may import or call litellm directly."""
@@ -76,6 +99,20 @@ def test_no_direct_litellm_usage(py_file: Path) -> None:
     assert not violations, (
         "fleet-rlm must not use litellm directly — go through dspy.LM / dspy.settings.lm. "
         "Found violations:\n  " + "\n  ".join(violations)
+    )
+
+
+def test_no_direct_lm_forward_calls() -> None:
+    """Fleet calls stock DSPy LMs through __call__/acall, never forward directly."""
+    violations = [
+        violation
+        for py_file in _iter_python_files(_SRC_ROOT)
+        for violation in _directly_calls_lm_forward(py_file)
+    ]
+    assert not violations, (
+        "fleet-rlm must not bypass DSPy's normalized LM compatibility boundary. "
+        "Call dspy.LM through its public __call__/acall surface. Found violations:\n  "
+        + "\n  ".join(violations)
     )
 
 
