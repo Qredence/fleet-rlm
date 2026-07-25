@@ -38,8 +38,7 @@ _VALUE_ERRORS = {
 }
 
 
-def run_workspace_agent(
-    sandbox: Any,
+def build_workspace_agent_code(
     *,
     volume_root: str,
     root: str,
@@ -53,7 +52,7 @@ def run_workspace_agent(
     after: str = "",
     offset: int = 0,
     max_chars: int = 0,
-) -> dict[str, object]:
+) -> str:
     code = "\n".join(
         (
             "import base64, errno, json, os, stat, time",
@@ -529,7 +528,10 @@ def run_workspace_agent(
             "    close_all(base_fds if 'base_fds' in locals() else [])",
         )
     )
-    response = sandbox.process.code_run(code)
+    return code
+
+
+def decode_workspace_agent_response(response: Any, relative: str) -> dict[str, object]:
     if int(getattr(response, "exit_code", 1)) != 0:
         raise ValueError("workspace path is unsafe")
     try:
@@ -539,6 +541,19 @@ def run_workspace_agent(
     if payload.get("ok") is not True:
         _raise_workspace_error(payload, relative)
     return payload
+
+
+def run_workspace_agent(sandbox: Any, **arguments: Any) -> dict[str, object]:
+    relative = str(arguments.get("relative") or "")
+    code = build_workspace_agent_code(**arguments)
+    return decode_workspace_agent_response(sandbox.process.code_run(code), relative)
+
+
+async def run_workspace_agent_async(sandbox: Any, **arguments: Any) -> dict[str, object]:
+    relative = str(arguments.get("relative") or "")
+    code = build_workspace_agent_code(**arguments)
+    response = await sandbox.process.code_run(code)
+    return decode_workspace_agent_response(response, relative)
 
 
 def _raise_workspace_error(payload: dict[str, object], relative: str) -> None:

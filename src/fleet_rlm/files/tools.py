@@ -21,9 +21,9 @@ from fleet_rlm.artifacts.safety import (
     sanitize_title,
     validate_content_size,
 )
-from fleet_rlm.daytona.paths import VolumePaths, as_posix
-from fleet_rlm.daytona.volume_fs import VolumeBlobFs
 from fleet_rlm.files.models import AttachmentRef, StagedAttachment
+from fleet_rlm.files.volume_paths import VolumePaths, as_posix
+from fleet_rlm.files.volume_storage import VolumeBlobFs
 from fleet_rlm.files.workspace_validation import normalize_workspace_path
 from fleet_rlm.rlm.events import JsonValue
 from fleet_rlm.rlm.tool_observer import ToolEventView, bound_event_text

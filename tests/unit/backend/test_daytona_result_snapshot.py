@@ -80,7 +80,7 @@ def test_result_snapshot_rejects_non_strict_usage() -> None:
 
 
 def test_volume_result_path_is_unique_and_path_safe() -> None:
-    from fleet_rlm.daytona.paths import UnsafePathError, VolumePaths
+    from fleet_rlm.files.volume_paths import UnsafePathError, VolumePaths
 
     paths = VolumePaths.from_mount()
     session_id, first_run, second_run = uuid4(), uuid4(), uuid4()
@@ -92,7 +92,7 @@ def test_volume_result_path_is_unique_and_path_safe() -> None:
 
 
 def test_daytona_volume_adapter_removes_exact_file_path() -> None:
-    from fleet_rlm.daytona.volume_fs import DaytonaSandboxVolumeFs
+    from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
 
     calls: list[tuple[str, str]] = []
 
@@ -114,9 +114,8 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
         TurnLifecycleService,
         _TurnClaimToken,
     )
-    from fleet_rlm.daytona.paths import VolumePaths
     from fleet_rlm.daytona.run_environment import _DaytonaRunSink
-    from fleet_rlm.daytona.volume_fs import DaytonaSandboxVolumeFs
+    from fleet_rlm.files.volume_paths import VolumePaths
     from fleet_rlm.rlm.dspy_contract import PredictionResult
     from fleet_rlm.rlm.outcome import RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -125,22 +124,23 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
     deleted: list[str] = []
 
     class Fs:
-        def create_folder(self, path: str) -> None:
+        async def create_folder(self, path: str, mode: str | None = None) -> None:
+            del path, mode
             return None
 
-        def upload_file(self, data: bytes, path: str) -> None:
+        async def upload_file(self, data: bytes, path: str) -> None:
             values[path] = data
 
-        def download_file(self, path: str) -> bytes:
+        async def download_file(self, path: str) -> bytes:
             return values[path]
 
-        def delete_file(self, path: str) -> None:
+        async def delete_file(self, path: str) -> None:
             deleted.append(path)
             values.pop(path, None)
 
     paths = VolumePaths.from_mount()
     sink = _DaytonaRunSink(
-        DaytonaSandboxVolumeFs(type("Sandbox", (), {"fs": Fs()})()),
+        type("Sandbox", (), {"fs": Fs()})(),
         max_read_bytes=1024,
         paths=paths,
     )

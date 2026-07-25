@@ -19,7 +19,7 @@ class _RecordingTool:
 
 
 def test_submit_returns_final_output() -> None:
-    from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 
     backend = InProcessInterpreterBackend()
@@ -34,7 +34,7 @@ def test_submit_returns_final_output() -> None:
 
 
 def test_sandbox_code_invokes_host_mediated_tool() -> None:
-    from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 
     tool = _RecordingTool()
@@ -51,7 +51,7 @@ def test_sandbox_code_invokes_host_mediated_tool() -> None:
 
 
 def test_llm_query_host_callable_is_reachable_from_sandbox_code() -> None:
-    from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 
     seen: list[str] = []
@@ -75,7 +75,7 @@ def test_llm_query_host_callable_is_reachable_from_sandbox_code() -> None:
 
 def test_shutdown_stops_broker_and_rejects_further_execute() -> None:
     from fleet_rlm.daytona.errors import DaytonaAdapterError
-    from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 
     backend = InProcessInterpreterBackend()
@@ -91,7 +91,7 @@ def test_shutdown_stops_broker_and_rejects_further_execute() -> None:
 
 
 def test_host_tool_public_errors_are_sanitized() -> None:
-    from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
+    from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 
     def leaky_tool() -> str:

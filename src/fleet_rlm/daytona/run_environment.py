@@ -11,41 +11,55 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from fleet_rlm.chat.capability_preparation import (
+    PreparedHostCapabilities,
+    prepare_host_capabilities,
+)
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
 from fleet_rlm.chat.turn_preparation import (
     DefaultTurnPreparer,
     RunEnvironment,
-    TurnPreparationCancelled,
     TurnPreparationTimeout,
     TurnPreparationUnavailable,
 )
 from fleet_rlm.config import Settings
-from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionTimeout
 from fleet_rlm.daytona.bindings import BindingStore, InMemoryBindingStore
-from fleet_rlm.daytona.client import build_daytona_client
-from fleet_rlm.daytona.paths import VolumePaths, volume_paths_from_settings
-from fleet_rlm.daytona.platform import LiveDaytonaPlatform, LiveDaytonaVolumeClient
-from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec, sandbox_spec_from_settings
-from fleet_rlm.daytona.session_manager import DaytonaLeaseAcquisitionTimeout, DaytonaSessionManager, LeaseRequest
-from fleet_rlm.daytona.volumes import volume_config_from_settings
+from fleet_rlm.daytona.interpreter import sync_sandbox
+from fleet_rlm.daytona.platform import (
+    LiveDaytonaPlatform,
+    LiveDaytonaVolumeClient,
+    build_daytona_client,
+)
+from fleet_rlm.daytona.provisioning import (
+    DaytonaSandboxSpec,
+    sandbox_spec_from_settings,
+    volume_config_from_settings,
+)
+from fleet_rlm.daytona.session_manager import (
+    DEFAULT_IDLE_STOP_SECONDS,
+    DaytonaAdmission,
+    DaytonaAdmissionTimeout,
+    DaytonaLeaseAcquisitionTimeout,
+    DaytonaSessionManager,
+    LeaseRequest,
+)
+from fleet_rlm.daytona.workspace_fs import AsyncDaytonaVolumeFS, DaytonaSandboxVolumeFs
 from fleet_rlm.files.models import (
     AttachmentAccess,
     AttachmentRun,
     PreparedAttachments,
 )
+from fleet_rlm.files.volume_paths import VolumePaths, volume_paths_from_settings
 from fleet_rlm.files.workspace_models import DAYTONA_WORKSPACE_CAPABILITY
 from fleet_rlm.persistence.database import (
     create_async_engine_from_url,
     create_session_factory,
     create_tables,
 )
-from fleet_rlm.rlm.context import PreparationNotice, RLMExecutionSpec
+from fleet_rlm.rlm.context import RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.events import AttachmentRead, SkillActivated, SkillLoaded
 from fleet_rlm.rlm.lm_factory import build_model_bundle
-from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
 from fleet_rlm.skills.catalog import SkillCatalog
-from fleet_rlm.skills.resolver import resolve_selected_skills, resolved_schema, resolved_signature
 
 
 async def _settle_owned_thread(task: asyncio.Task[Any]) -> bool:
@@ -70,7 +84,7 @@ def _consume_task_result(task: asyncio.Task[Any]) -> None:
         pass
 
 
-class LivePreparedCapabilities:
+class LivePreparedCapabilities(PreparedHostCapabilities):
     """Run-bound Skill/Attachment tools and their typed public ledgers."""
 
     def __init__(
@@ -79,54 +93,30 @@ class LivePreparedCapabilities:
         *,
         files: Any,
         skills: Any,
-        preparation_notices: tuple[PreparationNotice, ...] = (),
+        preparation_notices: tuple[Any, ...] = (),
     ) -> None:
-        self.spec = spec
-        self._files = files
-        self._skills = skills
-        self.preparation_notices = preparation_notices
-
-    def drain_public_details(self) -> tuple[AttachmentRead | SkillActivated | SkillLoaded, ...]:
-        values: list[AttachmentRead | SkillActivated | SkillLoaded] = []
-        for item in self._files.drain_public_events():
-            values.append(
-                AttachmentRead(
-                    UUID(item["attachment_id"]),
-                    str(item["filename"]),
-                    int(item["byte_size"]),
-                )
-            )
-        for item in self._skills.drain_public_events():
-            values.append(_skill_event(item))
-        return tuple(values)
-
-    def drain_artifact_candidates(self):
-        return self._files.drain_artifact_candidates()
-
-    async def aclose(self) -> None:
-        await self._files.aclose()
-
-
-class _EmptySkillHost:
-    def drain_public_events(self) -> list[dict[str, Any]]:
-        return []
-
-
-def _skill_event(item: dict[str, Any]) -> SkillActivated | SkillLoaded:
-    if item.get("kind") == "skill.activated":
-        return SkillActivated(
-            str(item["skill_id"]),
-            str(item["name"]),
-            str(item["version"]),
-            str(item["trust"]),
-            tuple(str(value) for value in item.get("affordances", ())),
+        super().__init__(
+            spec,
+            files=files,
+            skills=skills,
+            close_files=True,
+            artifact_candidates=True,
+            preparation_notices=preparation_notices,
         )
-    return SkillLoaded(str(item["skill_id"]), str(item["name"]), str(item["version"]))
 
 
 class _DaytonaRunSink:
-    def __init__(self, volume_fs: Any, *, max_read_bytes: int, paths: VolumePaths) -> None:
-        self.volume_fs = volume_fs
+    def __init__(
+        self,
+        sandbox: Any,
+        *,
+        loop: asyncio.AbstractEventLoop | None = None,
+        max_read_bytes: int,
+        paths: VolumePaths,
+    ) -> None:
+        self._sandbox = sandbox
+        self._files = AsyncDaytonaVolumeFS(sandbox)
+        self.volume_fs = DaytonaSandboxVolumeFs(sync_sandbox(sandbox, loop)) if loop is not None else None
         self._max_read_bytes = max_read_bytes
         self._paths = paths
 
@@ -134,22 +124,16 @@ class _DaytonaRunSink:
         return str(self._paths.run_result_path(session_id, run_id))
 
     async def read(self, location: str, *, max_bytes: int) -> bytes:
-        import asyncio
-
-        value = await asyncio.to_thread(self.volume_fs.read_bytes, location)
+        value = await self._files.read_bytes(location)
         if len(value) > max_bytes:
             raise ValueError("value exceeds read bound")
         return value
 
     async def write(self, location: str, data: bytes) -> None:
-        import asyncio
-
-        await asyncio.to_thread(self.volume_fs.write_bytes, location, data)
+        await self._files.write_bytes(location, data)
 
     async def remove(self, location: str) -> None:
-        import asyncio
-
-        await asyncio.to_thread(self.volume_fs.remove, location)
+        await self._files.remove(location)
 
     async def read_private(self, logical_path: str) -> bytes:
         return await self.read(logical_path, max_bytes=self._max_read_bytes)
@@ -182,9 +166,7 @@ class _DaytonaEnvironmentProvider:
             raise TurnPreparationTimeout("Turn preparation timed out") from exc
         try:
             self.resources.track_sandbox(lease.sandbox_id)
-            from fleet_rlm.daytona.volume_fs import DaytonaSandboxVolumeFs
-
-            lookup = asyncio.create_task(asyncio.to_thread(self.resources.platform.get, lease.sandbox_id))
+            lookup = asyncio.create_task(self.resources.platform.get(lease.sandbox_id))
             try:
                 async with asyncio.timeout_at(deadline):
                     sandbox = await asyncio.shield(lookup)
@@ -203,7 +185,8 @@ class _DaytonaEnvironmentProvider:
             if sandbox is None:
                 raise RuntimeError("acquired Sandbox is unavailable")
             sink = _DaytonaRunSink(
-                DaytonaSandboxVolumeFs(sandbox),
+                sandbox,
+                loop=asyncio.get_running_loop(),
                 max_read_bytes=self.resources.settings.max_upload_bytes,
                 paths=volume_paths_from_settings(self.resources.settings),
             )
@@ -247,7 +230,6 @@ class _LiveCapabilityPreparer:
         from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
         from fleet_rlm.files.tools import FileToolHost
         from fleet_rlm.files.workspace_tools import WorkspaceToolHost
-        from fleet_rlm.skills.tools import SkillToolHost
 
         sink = environment.attachment_sink
         volume_fs = getattr(sink, "volume_fs")
@@ -274,59 +256,25 @@ class _LiveCapabilityPreparer:
         )
         file_tools = file_host.as_tools()
         workspace_tools = workspace_host.as_tools()
-        history_host = SessionHistoryToolHost(turn.history)
-        history_tools = history_host.as_tools()
         base_views = {
             **file_host.event_views(),
             **workspace_host.event_views(),
-            **history_host.event_views(),
         }
-        selections = tuple(turn.input.skill_selections)
-        if getattr(self.skill_catalog, "unavailable", False):
-            from fleet_rlm.skills.errors import InvalidSkillSelectionError
-
-            if selections:
-                raise InvalidSkillSelectionError() from None
-            return LivePreparedCapabilities(
-                RLMExecutionSpec(
-                    skill_cards=(),
-                    tools=(*file_tools, *workspace_tools, *history_tools),
-                    tool_event_views=base_views,
-                    workspace=DAYTONA_WORKSPACE_CAPABILITY,
-                ),
-                files=file_host,
-                skills=_EmptySkillHost(),
-                preparation_notices=(PreparationNotice("skills_unavailable", "Skills are unavailable"),),
-            )
-        resolved = resolve_selected_skills(self.skill_catalog, selections)
-        if await turn.cancellation_requested():
-            raise TurnPreparationCancelled("Turn cancelled")
-        if asyncio.get_running_loop().time() >= deadline:
-            raise TurnPreparationTimeout("Turn preparation timed out")
-        skill_host = SkillToolHost(
-            self.skill_catalog,
-            allowed_skill_ids=(frozenset(skill.card.id for skill in resolved.selected) if selections else None),
-        )
-        tools = (
-            *file_tools,
-            *workspace_tools,
-            *history_tools,
-            *skill_host.as_tools(),
-        )
-        tool_event_views = {**base_views, **skill_host.event_views()}
-        schema_id, schema_version = resolved_schema(resolved)
-        spec = RLMExecutionSpec(
-            skill_cards=resolved.cards,
-            signature=resolved_signature(resolved),
-            output_schema_id=schema_id,
-            output_schema_version=schema_version,
-            tools=tools,
-            tool_event_views=tool_event_views,
+        spec, skill_host, notices = await prepare_host_capabilities(
+            turn=turn,
+            skill_catalog=self.skill_catalog,
+            files=file_host,
+            base_tools=(*file_tools, *workspace_tools),
+            base_event_views=base_views,
             workspace=DAYTONA_WORKSPACE_CAPABILITY,
+            deadline=deadline,
         )
-        for skill in resolved.selected:
-            skill_host.mark_preloaded(skill)
-        return LivePreparedCapabilities(spec, files=file_host, skills=skill_host)
+        return LivePreparedCapabilities(
+            spec,
+            files=file_host,
+            skills=skill_host,
+            preparation_notices=notices,
+        )
 
 
 def resolve_settings(settings: Settings | None = None) -> Settings:
@@ -376,6 +324,7 @@ class LiveKernelResources:
             admission=self.daytona_admission,
             sandbox_spec=self.sandbox_spec,
             cleanup=cleanup,
+            idle_stop_seconds=DEFAULT_IDLE_STOP_SECONDS,
         )
         self.models = build_model_bundle(self.settings)
         self._sandbox_ids: list[str] = []
@@ -419,11 +368,15 @@ class LiveKernelResources:
         """Drop tracked sandbox ids without deleting (API-restart simulation)."""
         self._sandbox_ids.clear()
 
-    def cleanup(self) -> None:
+    @property
+    def engine(self) -> AsyncEngine | None:
+        return self._engine
+
+    async def cleanup(self) -> None:
         """Delete tracked sandboxes (best-effort). Does not dispose the DB engine."""
         for sid in list(self._sandbox_ids):
             try:
-                self.platform.delete(sid)
+                await self.platform.delete(sid)
             except Exception:  # noqa: BLE001 - best-effort live cleanup
                 pass
         self._sandbox_ids.clear()
@@ -436,8 +389,10 @@ class LiveKernelResources:
 
     async def adispose(self) -> None:
         """Delete sandboxes and dispose engine (end of proof)."""
-        self.cleanup()
+        await self.session_manager.aclose()
+        await self.cleanup()
         await self.adispose_engine()
+        await self.client.close()
 
 
 def build_turn_preparation(

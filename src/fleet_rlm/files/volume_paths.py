@@ -1,4 +1,4 @@
-"""Safe Volume path layout for Fleet-controlled Daytona mounts.
+"""Safe Volume path layout for Fleet-controlled mounted Workspace storage.
 
 Paths are *logical* Sandbox/Volume locations (PurePosixPath). They are not host
 paths. Callers never interpolate untrusted tokens without ``validate_path_id``.
@@ -139,6 +139,10 @@ class VolumePaths:
 
     def sessions_root(self) -> PurePosixPath:
         return resolve_under_root(self.mount_path, "sessions")
+
+    def files_root(self) -> PurePosixPath:
+        """Public independent Workspace files, isolated from Fleet-managed roots."""
+        return resolve_under_root(self.mount_path, "files")
 
     def session_dir(self, session_id: str | UUID) -> PurePosixPath:
         sid = validate_path_id(session_id, label="session_id")

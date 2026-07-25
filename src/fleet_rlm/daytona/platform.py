@@ -2,15 +2,75 @@
 
 from __future__ import annotations
 
-import time
-from typing import Any
+import asyncio
+from typing import Any, Literal
 
+from fleet_rlm.config import Settings
 from fleet_rlm.daytona.errors import DaytonaAdapterError, is_sandbox_not_found, map_provider_error
-from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec
-from fleet_rlm.daytona.volumes import require_scoped_volume_subpath
+from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec, require_scoped_volume_subpath
 
 _VOLUME_READY_RETRY_DELAYS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
 _VOLUME_FAILED_STATES = frozenset({"deleting", "deleted", "error"})
+ProviderState = Literal[
+    "missing",
+    "running",
+    "stopped",
+    "paused",
+    "archived",
+    "unrecoverable",
+]
+_RUNNING_STATES = frozenset({"running", "started", "active"})
+_STOPPED_STATES = frozenset({"stopped", "stop"})
+_PAUSED_STATES = frozenset({"paused", "pause"})
+_ARCHIVED_STATES = frozenset({"archived", "archive"})
+
+
+def build_daytona_client(settings: Settings) -> Any:
+    """Construct the process-owned asynchronous Daytona SDK client."""
+    from daytona import AsyncDaytona, DaytonaConfig
+
+    api_key = None
+    if settings.daytona_api_key is not None:
+        raw = settings.daytona_api_key
+        api_key = raw.get_secret_value() if hasattr(raw, "get_secret_value") else str(raw)
+        api_key = api_key or None
+    config_kwargs: dict[str, Any] = {}
+    if api_key:
+        config_kwargs["api_key"] = api_key
+    if settings.daytona_org_id:
+        config_kwargs["organization_id"] = settings.daytona_org_id
+    config = DaytonaConfig(**config_kwargs) if config_kwargs else None
+    client = AsyncDaytona(config)
+    # The SDK only sets X-Daytona-Organization-ID for JWT auth; also set it for
+    # API-key auth so the org routing is respected.
+    if settings.daytona_org_id and api_key:
+        client._api_client.default_headers["X-Daytona-Organization-ID"] = settings.daytona_org_id
+    return client
+
+
+def normalize_state(raw: Any) -> ProviderState:
+    """Normalize provider-specific states at the provider adapter boundary."""
+    if raw is None:
+        return "missing"
+    text = str(getattr(raw, "value", raw)).strip().lower()
+    if text in _RUNNING_STATES:
+        return "running"
+    if text in _STOPPED_STATES:
+        return "stopped"
+    if text in _PAUSED_STATES:
+        return "paused"
+    if text in _ARCHIVED_STATES:
+        return "archived"
+    if text in {"missing", "deleted", ""}:
+        return "missing"
+    return "unrecoverable"
+
+
+def sandbox_state(sandbox: Any) -> ProviderState:
+    raw = getattr(sandbox, "state", None)
+    if raw is None:
+        raw = getattr(sandbox, "status", None)
+    return normalize_state(raw)
 
 
 class LiveDaytonaVolumeClient:
@@ -19,8 +79,8 @@ class LiveDaytonaVolumeClient:
     def __init__(self, client: Any) -> None:
         self._client = client
 
-    def get(self, name: str, *, create: bool = False) -> Any:
-        volume = self._client.volume.get(name, create=create)
+    async def get(self, name: str, *, create: bool = False) -> Any:
+        volume = await self._client.volume.get(name, create=create)
         if not create:
             return volume
 
@@ -30,8 +90,8 @@ class LiveDaytonaVolumeClient:
         if state in _VOLUME_FAILED_STATES:
             raise DaytonaAdapterError(message="Daytona Volume did not become ready", cause_type="VolumeLifecycleError")
         for delay in _VOLUME_READY_RETRY_DELAYS:
-            time.sleep(delay)
-            volume = self._client.volume.get(name, create=False)
+            await asyncio.sleep(delay)
+            volume = await self._client.volume.get(name, create=False)
             state = _volume_state(volume)
             if state is None or state == "ready":
                 return volume
@@ -54,19 +114,19 @@ class LiveDaytonaPlatform:
         self._client = client
         self._sandbox_spec = sandbox_spec
 
-    def get(self, sandbox_id: str) -> Any | None:
+    async def get(self, sandbox_id: str) -> Any | None:
         """Return sandbox or ``None`` only for explicit not-found.
 
         Auth / network / 5xx / timeout raise typed ``ProviderRequestError``.
         """
         try:
-            return self._client.get(sandbox_id)
+            return await self._client.get(sandbox_id)
         except Exception as exc:  # noqa: BLE001 - classify provider outcomes
             if is_sandbox_not_found(exc):
                 return None
             raise map_provider_error(exc) from exc
 
-    def create(
+    async def create(
         self,
         *,
         volume_id: str | None = None,
@@ -99,16 +159,18 @@ class LiveDaytonaPlatform:
             volumes=volumes,
             ephemeral=ephemeral,
         )
-        return self._client.create(params)
+        return await self._client.create(params)
 
-    def delete(self, sandbox_id: Any) -> None:
-        """Delete through Daytona 0.192, which requires a Sandbox object."""
-        target = self._client.get(sandbox_id) if isinstance(sandbox_id, str) else sandbox_id
-        self._client.delete(target)
+    async def delete(self, sandbox_id: Any) -> None:
+        """Delete through Daytona's async client, which requires a Sandbox object."""
+        target = await self._client.get(sandbox_id) if isinstance(sandbox_id, str) else sandbox_id
+        await self._client.delete(target)
 
-    def start(self, sandbox_id: str) -> None:
-        self._client.start(sandbox_id)
+    async def start(self, sandbox_id: str) -> None:
+        sandbox = await self._client.get(sandbox_id)
+        await self._client.start(sandbox)
 
-    def stop(self, sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None:
-        sandbox = self._client.get(sandbox_id)
-        sandbox.stop(timeout=timeout, force=force)
+    async def stop(self, sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None:
+        del force
+        sandbox = await self._client.get(sandbox_id)
+        await self._client.stop(sandbox, timeout=timeout)

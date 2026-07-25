@@ -18,17 +18,89 @@ import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from threading import Thread
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from daytona import SessionExecuteRequest
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError, sanitize_provider_message
-from fleet_rlm.daytona.in_process import BackendExecutionResult
-from fleet_rlm.daytona.submit import extract_final_payload, remote_submit_setup_code
+
+if TYPE_CHECKING:
+    from fleet_rlm.daytona.interpreter import BackendExecutionResult
 
 _BROKER_PORT = 3000
 _BROKER_SERVER_PATH = "/home/daytona/fleet_rlm_broker_server.py"
 _BROKER_SESSION_COMMAND = f"cd /home/daytona && python {_BROKER_SERVER_PATH.rsplit('/', 1)[-1]}"
+_FINAL_OUTPUT_MARKER = "__FLEET_FINAL_OUTPUT__"
+
+
+class FleetFinalOutput(Exception):
+    """Raised inside an interpreter when SUBMIT completes successfully."""
+
+    def __init__(self, value: dict[str, Any]) -> None:
+        self.value = value
+        super().__init__("Final output submitted")
+
+
+def build_submit_setup_code(output_fields: list[dict[str, Any]] | None) -> str:
+    return _typed_submit_source(output_fields) if output_fields else _generic_submit_source()
+
+
+def remote_submit_setup_code(output_fields: list[dict[str, Any]] | None) -> str:
+    return f"""
+import json as _json
+_FINAL_OUTPUT_MARKER = {_FINAL_OUTPUT_MARKER!r}
+
+class FleetFinalOutput(Exception):
+    def __init__(self, value):
+        self.value = value
+        super().__init__("Final output submitted")
+
+{build_submit_setup_code(output_fields)}
+""".strip()
+
+
+def _generic_submit_source() -> str:
+    return """
+def SUBMIT(**kwargs):
+    print(f"{_FINAL_OUTPUT_MARKER}{_json.dumps(kwargs, ensure_ascii=False)}{_FINAL_OUTPUT_MARKER}")
+    raise FleetFinalOutput(kwargs)
+""".strip()
+
+
+def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
+    signature_parts: list[str] = []
+    result_parts: list[str] = []
+    for field in output_fields:
+        name = str(field.get("name") or "").strip()
+        if not name:
+            continue
+        type_hint = str(field.get("type") or "").strip()
+        signature_parts.append(f"{name}: {type_hint}" if type_hint else name)
+        result_parts.append(f'"{name}": {name}')
+    signature = ", ".join(signature_parts) or "**kwargs"
+    body = f"result = {{{', '.join(result_parts)}}}" if result_parts else "result = dict(kwargs)"
+    return f"""
+def SUBMIT({signature}):
+    {body}
+    print(f"{{_FINAL_OUTPUT_MARKER}}{{_json.dumps(result, ensure_ascii=False)}}{{_FINAL_OUTPUT_MARKER}}")
+    raise FleetFinalOutput(result)
+""".strip()
+
+
+def extract_final_payload(stdout: str, *, marker: str = _FINAL_OUTPUT_MARKER) -> dict[str, Any] | None:
+    start = stdout.find(marker)
+    if start == -1:
+        return None
+    start += len(marker)
+    end = stdout.find(marker, start)
+    if end == -1:
+        return None
+    try:
+        parsed = json.loads(stdout[start:end])
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
 
 _BROKER_SERVER_CODE = """
 import hmac
@@ -261,6 +333,8 @@ class DaytonaHttpToolBroker:
         run_code: Callable[[], str | BackendExecutionResult],
         tool_executor: Callable[[str, list[Any], dict[str, Any]], Any],
     ) -> BackendExecutionResult:
+        from fleet_rlm.daytona.interpreter import BackendExecutionResult
+
         self.ensure_started()
         if self._stopped:
             msg = "broker already stopped"

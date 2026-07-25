@@ -8,11 +8,11 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from fleet_rlm.daytona.paths import DEFAULT_VOLUME_MOUNT_PATH
-from fleet_rlm.daytona.volumes import (
+from fleet_rlm.daytona.provisioning import (
     require_non_zero_workspace_id,
     require_scoped_volume_subpath,
 )
+from fleet_rlm.files.volume_paths import DEFAULT_VOLUME_MOUNT_PATH
 from fleet_rlm.persistence.models import SandboxBindingRow
 
 

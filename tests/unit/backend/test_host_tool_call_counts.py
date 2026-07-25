@@ -10,10 +10,10 @@ import pytest
 
 
 def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path) -> None:
-    from fleet_rlm.daytona.paths import VolumePaths
-    from fleet_rlm.daytona.volume_fs import HostVolumeMirror
+    from fleet_rlm.files.host_volume import HostVolumeMirror
     from fleet_rlm.files.models import AttachmentRef, StagedAttachment
     from fleet_rlm.files.tools import FileToolHost
+    from fleet_rlm.files.volume_paths import VolumePaths
     from fleet_rlm.rlm.tool_observer import observe_tool
     from fleet_rlm.skills.catalog import SkillCatalog
     from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillResource
@@ -166,10 +166,10 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
 
 @pytest.mark.asyncio
 async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes(tmp_path) -> None:
-    from fleet_rlm.daytona.paths import VolumePaths
     from fleet_rlm.daytona.run_environment import LivePreparedCapabilities
-    from fleet_rlm.daytona.volume_fs import HostVolumeMirror
+    from fleet_rlm.files.host_volume import HostVolumeMirror
     from fleet_rlm.files.tools import FileToolHost
+    from fleet_rlm.files.volume_paths import VolumePaths
     from fleet_rlm.rlm.context import RLMExecutionSpec
 
     user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
@@ -200,9 +200,9 @@ async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes
 
 
 def test_workspace_artifact_publication_reads_source_and_stages_only_a_candidate(tmp_path) -> None:
-    from fleet_rlm.daytona.paths import VolumePaths
-    from fleet_rlm.daytona.volume_fs import HostVolumeMirror
+    from fleet_rlm.files.host_volume import HostVolumeMirror
     from fleet_rlm.files.tools import FileToolHost
+    from fleet_rlm.files.volume_paths import VolumePaths
 
     user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
     paths = VolumePaths.from_mount("/mnt/fleet")

@@ -7,21 +7,21 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from fleet_rlm.daytona.paths import (
-    DEFAULT_VOLUME_MOUNT_PATH,
-    UnsafePathError,
-    VolumePaths,
-    resolve_under_root,
-    validate_mount_path,
-    validate_path_id,
-)
-from fleet_rlm.daytona.volumes import (
+from fleet_rlm.daytona.provisioning import (
     DEFAULT_VOLUME_NAME,
     VolumeConfig,
     get_or_create_volume_id,
     require_scoped_volume_subpath,
     volume_config_from_settings,
     volume_mount_spec,
+)
+from fleet_rlm.files.volume_paths import (
+    DEFAULT_VOLUME_MOUNT_PATH,
+    UnsafePathError,
+    VolumePaths,
+    resolve_under_root,
+    validate_mount_path,
+    validate_path_id,
 )
 
 
@@ -134,7 +134,8 @@ def test_volume_config_and_mount_spec() -> None:
         require_scoped_volume_subpath("/home/daytona/fleet")
 
 
-def test_get_or_create_volume_id_uses_injected_client() -> None:
+@pytest.mark.asyncio
+async def test_get_or_create_volume_id_uses_injected_client() -> None:
     class _Vol:
         id = "vid-1"
 
@@ -142,12 +143,12 @@ def test_get_or_create_volume_id_uses_injected_client() -> None:
         def __init__(self) -> None:
             self.calls: list[tuple[str, bool]] = []
 
-        def get(self, name: str, *, create: bool = False) -> _Vol:
+        async def get(self, name: str, *, create: bool = False) -> _Vol:
             self.calls.append((name, create))
             return _Vol()
 
     client = _Client()
-    vid = get_or_create_volume_id(client, VolumeConfig(name="my-vol"))
+    vid = await get_or_create_volume_id(client, VolumeConfig(name="my-vol"))
     assert vid == "vid-1"
     assert client.calls == [("my-vol", True)]
 
