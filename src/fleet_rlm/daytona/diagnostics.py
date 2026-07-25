@@ -159,6 +159,7 @@ class _ProductionDaytonaDoctorDependencies:
                 "    importlib.import_module(package.replace('-', '_'))\n"
                 "    assert importlib.metadata.version(package) == expected\n"
                 "print('fleet-doctor-ok')",
+                context=context,
             )
             stdout = getattr(result, "stdout", result)
             error = getattr(result, "error", None)

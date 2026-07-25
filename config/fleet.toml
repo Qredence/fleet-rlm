@@ -41,7 +41,7 @@ volume_mount_path = "/home/daytona/fleet"
 level = "INFO"
 
 [profiles.local-deno.runtime]
-environment = "daytona"
+environment = "deno"
 
 [profiles.daytona.runtime]
 environment = "daytona"
