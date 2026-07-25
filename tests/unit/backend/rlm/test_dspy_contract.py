@@ -190,8 +190,7 @@ def test_build_native_rlm_preserves_exact_public_constructor_inputs() -> None:
     first = build_native_rlm(**kwargs)
     second = build_native_rlm(**kwargs)
 
-    assert isinstance(first, dspy.RLM)
-    assert type(first).__name__ == "ObservedRLM"
+    assert type(first) is dspy.RLM
     assert first is not second
     assert first.verbose is True
     assert first.signature is TaskSignature
@@ -201,20 +200,23 @@ def test_build_native_rlm_preserves_exact_public_constructor_inputs() -> None:
     assert first.sub_lm is sub_lm
     assert first._interpreter is interpreter  # noqa: SLF001 - pinned DSPy contract
     assert set(first.tools) == {"_lookup"}
-    assert hasattr(first, "bind_observer")
+    assert first.generate_action.callbacks == []
 
 
 @pytest.mark.asyncio
-async def test_observed_rlm_publishes_reasoning_before_execute_without_interpreter() -> None:
-    from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
+async def test_native_rlm_callback_observes_completed_action_without_altering_prediction() -> None:
+    from fleet_rlm.rlm.dspy_contract import RLMOptions, bind_native_rlm_observer, build_native_rlm
     from fleet_rlm.rlm.events import RLMReasoning
 
     class TaskSignature(dspy.Signature):
         request: str = dspy.InputField()
         answer: str = dspy.OutputField()
 
-    class Action:
-        async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+    class Action(dspy.Predict):
+        def __init__(self) -> None:
+            super().__init__("variables_info, repl_history, iteration -> reasoning, code")
+
+        async def aforward(self, **_kwargs: Any) -> dspy.Prediction:
             return dspy.Prediction(
                 reasoning="Decide the answer directly.",
                 code="SUBMIT(answer='ok')",
@@ -240,11 +242,12 @@ async def test_observed_rlm_publishes_reasoning_before_execute_without_interpret
         options=RLMOptions(max_iterations=1),
         interpreter=Interpreter(),
     )
-    rlm.bind_observer(observed.append, max_chars=64)
     rlm.generate_action = Action()
+    bind_native_rlm_observer(rlm, observed.append, max_chars=64)
 
     prediction = await rlm.acall(request="go")
 
+    assert type(rlm) is dspy.RLM
     assert prediction.answer == "ok"
     assert [type(item) for item in observed] == [RLMReasoning]
     assert observed[0].text == "Decide the answer directly."

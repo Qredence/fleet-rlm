@@ -10,10 +10,9 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.rlm.context import RLMExecutionSpec
-from fleet_rlm.rlm.dspy_contract import RLMOptions
+from fleet_rlm.rlm.dspy_contract import RLMOptions, bind_native_rlm_observer
 from fleet_rlm.rlm.events import (
     RLMCode,
     RLMOutput,
@@ -31,11 +30,17 @@ from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
 from fleet_rlm.sessions.models import TurnAccess
 
 
-class _StatefulActionPredictor:
+class _ActionPredictor(dspy.Predict):
     def __init__(self) -> None:
+        super().__init__("variables_info, repl_history, iteration -> reasoning, code")
+
+
+class _StatefulActionPredictor(_ActionPredictor):
+    def __init__(self) -> None:
+        super().__init__()
         self.calls = 0
 
-    async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+    async def aforward(self, **_kwargs: Any) -> dspy.Prediction:
         self.calls += 1
         if self.calls == 1:
             return dspy.Prediction(
@@ -48,28 +53,30 @@ class _StatefulActionPredictor:
         )
 
 
-class _InvalidThenValidSubmit:
+class _InvalidThenValidSubmit(_ActionPredictor):
     def __init__(self) -> None:
+        super().__init__()
         self.calls = 0
 
-    async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+    async def aforward(self, **_kwargs: Any) -> dspy.Prediction:
         self.calls += 1
         code = "SUBMIT(wrong='invalid')" if self.calls == 1 else "SUBMIT(answer='repaired')"
         return dspy.Prediction(reasoning="repair invalid typed submit", code=code)
 
 
-class _InvalidToolThenSubmit:
+class _InvalidToolThenSubmit(_ActionPredictor):
     def __init__(self) -> None:
+        super().__init__()
         self.calls = 0
 
-    async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+    async def aforward(self, **_kwargs: Any) -> dspy.Prediction:
         self.calls += 1
         code = "value = helper(value=123)" if self.calls == 1 else "SUBMIT(answer='repaired')"
         return dspy.Prediction(reasoning="repair invalid host Tool input", code=code)
 
 
-class _NeverSubmit:
-    async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+class _NeverSubmit(_ActionPredictor):
+    async def aforward(self, **_kwargs: Any) -> dspy.Prediction:
         return dspy.Prediction(reasoning="inspect", code="value = 42")
 
 
@@ -78,12 +85,13 @@ class _TypedExtract:
         return dspy.Prediction(answer="extracted")
 
 
-class _ThreeIterationActions:
+class _ThreeIterationActions(_ActionPredictor):
     def __init__(self) -> None:
+        super().__init__()
         self.histories: list[object] = []
         self.calls = 0
 
-    async def acall(self, **kwargs: Any) -> dspy.Prediction:
+    async def aforward(self, **kwargs: Any) -> dspy.Prediction:
         from dspy.primitives.repl_types import REPLHistory
 
         history = kwargs["repl_history"]
@@ -115,11 +123,12 @@ class _ThreeIterationActions:
         )
 
 
-class _FreshTurnAction:
+class _FreshTurnAction(_ActionPredictor):
     def __init__(self) -> None:
+        super().__init__()
         self.history: object | None = None
 
-    async def acall(self, **kwargs: Any) -> dspy.Prediction:
+    async def aforward(self, **kwargs: Any) -> dspy.Prediction:
         from dspy.primitives.repl_types import REPLHistory
 
         history = kwargs["repl_history"]
@@ -145,11 +154,12 @@ class _CapturingExtract:
         return dspy.Prediction(answer="extracted")
 
 
-class _TwoIterationNoSubmit:
+class _TwoIterationNoSubmit(_ActionPredictor):
     def __init__(self) -> None:
+        super().__init__()
         self.calls = 0
 
-    async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+    async def aforward(self, **_kwargs: Any) -> dspy.Prediction:
         self.calls += 1
         if self.calls == 1:
             return dspy.Prediction(reasoning="initialize", code="values = [1]\n_out = values")
@@ -172,8 +182,8 @@ async def test_native_rlm_preserves_state_tools_submit_prediction_and_trajectory
         tools=(observe_tool(dspy.Tool(helper), observed.append, ToolEventView.metadata_only()),),
         signature="request -> answer",
     )
-    rlm.bind_observer(observed.append, max_chars=1_000)
     rlm.generate_action = _StatefulActionPredictor()
+    bind_native_rlm_observer(rlm, observed.append, max_chars=1_000)
 
     prediction = await rlm.acall(request="run the deterministic contract")
 

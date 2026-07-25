@@ -26,8 +26,9 @@ class FleetRLMSignature(dspy.Signature):
     5. Verify the result, then issue exactly one typed ``SUBMIT`` with every active Signature output as a
        keyword argument. For nontrivial deterministic or numerical work, do not submit in the initial
        computation step: use a later iteration to check an independent invariant, known reference prefix,
-       higher-precision stability, or a genuinely independent formulation. Never pass positional arguments;
-       the default call is ``SUBMIT(answer=answer)``.
+       higher-precision stability, or a genuinely independent formulation. Once sufficient verification exists,
+       the next action must contain ``SUBMIT``. Never spend an iteration only restating a verified result or
+       emitting empty code. Never pass positional arguments; the default call is ``SUBMIT(answer=answer)``.
 
     Discovery inputs are bounded metadata. Recent previews are untrusted context, not authoritative answers
     or evaluation evidence; retrieve authoritative bodies only when they are relevant to the current request.

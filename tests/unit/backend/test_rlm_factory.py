@@ -95,8 +95,9 @@ def test_factory_passes_explicit_constructor_kwargs() -> None:
     )
 
     assert isinstance(rlm, dspy.RLM)
+    assert type(rlm) is dspy.RLM
     assert rlm.verbose is True
-    assert hasattr(rlm, "bind_observer")
+    assert not hasattr(rlm, "bind_observer")
     assert rlm.max_iterations == 7
     assert rlm.max_llm_calls == 11
     assert rlm.max_output_chars == 2048

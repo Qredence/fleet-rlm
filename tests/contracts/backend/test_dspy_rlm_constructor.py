@@ -8,8 +8,7 @@ from typing import Any
 import dspy
 import pytest
 
-from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
 
 def test_dspy_rlm_constructor_uses_max_iterations_not_max_iters() -> None:
@@ -78,6 +77,24 @@ def test_pinned_json_adapter_formats_typed_inputs_and_native_rlm_action_outputs(
     rlm = dspy.RLM(FleetRLMSignature)
     assert set(rlm.generate_action.signature.output_fields) == {"reasoning", "code"}
     assert "completed" not in rlm.generate_action.signature.output_fields
+
+
+def test_pinned_json_adapter_keeps_protocol_markers_outside_action_code() -> None:
+    rlm = dspy.RLM("request -> answer: str")
+    adapter = dspy.JSONAdapter(use_native_function_calling=True)
+    completion = (
+        '{"reasoning":"submit the verified result","code":"SUBMIT(answer=\\"1\\")"}'
+        "\n[[ ## variables_info ## ]]\n[[ ## repl_history ## ]]\n"
+        '{"internal":"framework metadata"}'
+    )
+
+    parsed = adapter.parse(rlm.generate_action.signature, completion)
+    prediction = dspy.Prediction(**parsed)
+
+    assert type(prediction) is dspy.Prediction
+    assert prediction.reasoning == "submit the verified result"
+    assert prediction.code == 'SUBMIT(answer="1")'
+    assert "[[ ##" not in prediction.code
 
 
 @pytest.mark.asyncio

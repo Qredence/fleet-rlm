@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
 from types import MappingProxyType
 from typing import Any, TypeAlias, TypedDict, cast
 
 import dspy
-from dspy.predict.rlm import _strip_code_fences, logger
+from dspy.utils.callback import BaseCallback
 from pydantic import TypeAdapter
 from pydantic_core import PydanticSerializationError
 
@@ -21,7 +21,7 @@ DSPY_VERSION = "3.3.0b1"
 
 JsonValue: TypeAlias = None | bool | int | float | str | tuple["JsonValue", ...] | Mapping[str, "JsonValue"]
 ObservedUsageValue: TypeAlias = None | bool | int | float | str | dict[str, JsonValue]
-ReasoningObserver: TypeAlias = Any
+ReasoningObserver: TypeAlias = Callable[[Any], None]
 
 
 class RLMUsage(TypedDict):
@@ -301,95 +301,60 @@ class RLMOptions:
                 raise RLMConfigError(f"{name} must be a positive integer, got {value!r}")
 
 
-_NativeRLM = cast(type[Any], dspy.RLM)
+class _RLMReasoningCallback(BaseCallback):
+    """Observe completed native action predictions without changing them."""
 
+    def __init__(self, observer: ReasoningObserver, *, max_chars: int) -> None:
+        self._observer = observer
+        self._max_chars = max(1, int(max_chars))
+        self._iteration = 0
 
-class ObservedRLM(_NativeRLM):
-    """Native ``dspy.RLM`` with optional live ``RLMReasoning`` observation."""
-
-    def bind_observer(self, observer: ReasoningObserver | None, *, max_chars: int = 10_000) -> None:
-        """Bind one run-local reasoning observer without changing RLM semantics."""
-        self._fleet_observer = observer
-        self._fleet_observation_max_chars = max(1, int(max_chars))
-
-    def _observe_reasoning(self, prediction: Any, iteration: int) -> None:
-        observer = getattr(self, "_fleet_observer", None)
-        if observer is None:
+    def on_module_end(
+        self,
+        call_id: str,
+        outputs: Any | None,
+        exception: Exception | None = None,
+    ) -> None:
+        del call_id
+        if exception is not None or not isinstance(outputs, dspy.Prediction):
             return
-        reasoning = getattr(prediction, "reasoning", None)
+        self._iteration += 1
+        reasoning = getattr(outputs, "reasoning", None)
         if not isinstance(reasoning, str) or not reasoning.strip():
             return
         try:
             # Circular-import boundary: events imports usage validators from this module.
             from fleet_rlm.rlm.events import RLMReasoning
 
-            observer(
+            self._observer(
                 RLMReasoning(
-                    truncate_public_text(reasoning, max_len=self._fleet_observation_max_chars),
-                    iteration + 1,
+                    truncate_public_text(reasoning, max_len=self._max_chars),
+                    self._iteration,
                 )
             )
         except Exception:  # noqa: BLE001 - observation must never alter execution
             return
 
-    def _execute_iteration(
-        self,
-        repl: Any,
-        variables: Any,
-        history: Any,
-        iteration: int,
-        input_args: dict[str, Any],
-        output_field_names: list[str],
-    ) -> Any:
-        variables_info = [variable.format() for variable in variables]
-        action = self.generate_action(
-            variables_info=variables_info,
-            repl_history=history,
-            iteration=f"{iteration + 1}/{self.max_iterations}",
-        )
-        self._observe_reasoning(action, iteration)
-        if self.verbose:
-            logger.info(
-                f"RLM iteration {iteration + 1}/{self.max_iterations}\n"
-                f"Reasoning: {action.reasoning}\nCode:\n{action.code}"
-            )
-        try:
-            code = _strip_code_fences(action.code)
-        except SyntaxError as exc:
-            code = action.code
-            result = f"[Error] {exc}"
-            return self._process_execution_result(action, code, result, history, output_field_names)
-        result = self._execute_code(repl, code, input_args)
-        return self._process_execution_result(action, code, result, history, output_field_names)
 
-    async def _aexecute_iteration(
-        self,
-        repl: Any,
-        variables: Any,
-        history: Any,
-        iteration: int,
-        input_args: dict[str, Any],
-        output_field_names: list[str],
-    ) -> Any:
-        variables_info = [variable.format() for variable in variables]
-        pred = await self.generate_action.acall(
-            variables_info=variables_info,
-            repl_history=history,
-            iteration=f"{iteration + 1}/{self.max_iterations}",
-        )
-        self._observe_reasoning(pred, iteration)
-        if self.verbose:
-            logger.info(
-                f"RLM iteration {iteration + 1}/{self.max_iterations}\nReasoning: {pred.reasoning}\nCode:\n{pred.code}"
-            )
-        try:
-            code = _strip_code_fences(pred.code)
-        except SyntaxError as exc:
-            code = pred.code
-            result = f"[Error] {exc}"
-            return self._process_execution_result(pred, code, result, history, output_field_names)
-        result = self._execute_code(repl, code, input_args)
-        return self._process_execution_result(pred, code, result, history, output_field_names)
+def bind_native_rlm_observer(
+    rlm: Any,
+    observer: ReasoningObserver | None,
+    *,
+    max_chars: int = 10_000,
+) -> None:
+    """Attach one run-local callback to the native action predictor."""
+    if type(rlm) is not dspy.RLM:
+        raise RLMConfigError("reasoning observation requires native dspy.RLM")
+    predictor = rlm.generate_action
+    if not isinstance(predictor, dspy.Predict):
+        # Deterministic tests may replace the predictor with a narrow fake. The
+        # production constructor always supplies DSPy's native Predict module.
+        return
+    predictor.callbacks = [
+        callback for callback in predictor.callbacks if not isinstance(callback, _RLMReasoningCallback)
+    ]
+    if observer is not None:
+        predictor.callbacks.append(_RLMReasoningCallback(observer, max_chars=max_chars))
 
 
 def build_native_rlm(
@@ -400,9 +365,9 @@ def build_native_rlm(
     sub_lm: dspy.LM | None = None,
     interpreter: Any = None,
     verbose: bool = True,
-) -> ObservedRLM:
+) -> Any:
     """Build one fresh RLM using only the pinned public constructor spelling."""
-    return ObservedRLM(
+    return dspy.RLM(
         signature,
         max_iterations=options.max_iterations,
         max_llm_calls=options.max_llm_calls,

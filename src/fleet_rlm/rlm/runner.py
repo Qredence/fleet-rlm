@@ -13,6 +13,7 @@ from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import (
     PredictionOutputError,
     TrajectoryStep,
+    bind_native_rlm_observer,
     normalize_prediction_trajectory,
     observed_usage,
     prediction_result,
@@ -559,6 +560,9 @@ class RLMRunner:
 
     @staticmethod
     def _bind_observer(target: Any, relay: _DetailRelay, max_chars: int) -> None:
+        if type(target) is dspy.RLM:
+            bind_native_rlm_observer(target, relay.publish, max_chars=max_chars)
+            return
         bind = getattr(target, "bind_observer", None)
         if callable(bind):
             bind(relay.publish, max_chars=max_chars)
