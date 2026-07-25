@@ -300,7 +300,7 @@ class ConfigPolicyService:
                 raise FleetConfigurationError("settings value must be boolean")
             return value
         if field.editor == "number":
-            if not isinstance(value, (int, float)) or isinstance(value, bool):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise FleetConfigurationError("settings value must be numeric")
             return value
         if field.editor == "single_choice":

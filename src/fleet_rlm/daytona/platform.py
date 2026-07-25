@@ -174,7 +174,7 @@ class LiveDaytonaPlatform:
         sandbox = await self._client.get(sandbox_id)
         try:
             await self._client.stop(sandbox, timeout=timeout)
-        except (DaytonaAdapterError, TimeoutError, ConnectionError, OSError):
+        except Exception:
             if force:
                 await self._client.delete(sandbox)
             else:
