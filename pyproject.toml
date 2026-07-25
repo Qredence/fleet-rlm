@@ -174,10 +174,14 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["src/fleet_rlm/daytona"]
+# Project-wide scope: all backend modules are measured, not only daytona/.
+# The daytona subpackage remains visible per-file in the coverage report.
+source = ["src/fleet_rlm"]
 
 [tool.coverage.report]
-fail_under = 70
+# Project-wide floor.  Raised from the legacy daytona-only 70% gate after
+# extending scope; current full-package coverage is ~82%.
+fail_under = 75
 precision = 1
 show_missing = true
 

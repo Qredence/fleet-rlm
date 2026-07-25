@@ -4,20 +4,6 @@
       "type": "http",
       "url": "https://mcp.context7.com/mcp/oauth"
     },
-    "neon": {
-      "type": "http",
-      "url": "https://mcp.neon.tech/mcp"
-    },
-    "playwright": {
-      "type": "local",
-      "command": "npx",
-      "tools": [
-        "*"
-      ],
-      "args": [
-        "@playwright/mcp@latest"
-      ]
-    },
     "daytona": {
       "type": "local",
       "command": "daytona",
@@ -47,13 +33,6 @@
       "env": {
         "MLFLOW_TRACKING_URI": "http://localhost:5001"
       }
-    },
-    "shadcn": {
-      "command": "npx",
-      "args": [
-        "shadcn@latest",
-        "mcp"
-      ]
     }
   }
 }
