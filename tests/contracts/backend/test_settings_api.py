@@ -51,6 +51,10 @@ def test_settings_policy_is_loopback_only_and_revision_checked(monkeypatch, tmp_
         assert stale.status_code == 409
         assert stale.json()["code"] == "settings_revision_conflict"
 
+        proxied = client.get("/api/settings", headers={"X-Forwarded-For": "192.0.2.10"})
+        assert proxied.status_code == 403
+        assert proxied.json()["code"] == "settings_local_only"
+
     remote_app = create_testing_app(settings=Settings(_env_file=None, run_environment="daytona"))
     with TestClient(remote_app, client=("192.0.2.10", 50000)) as client:
         denied = client.get("/api/settings")

@@ -186,6 +186,19 @@ async def test_live_platform_start_and_stop_use_async_client_methods() -> None:
 
 
 @pytest.mark.asyncio
+async def test_live_platform_force_stop_deletes_sandbox_when_stop_fails() -> None:
+    client = MagicMock()
+    sandbox = MagicMock()
+    client.get = AsyncMock(return_value=sandbox)
+    client.stop = AsyncMock(side_effect=RuntimeError("stop failed"))
+    client.delete = AsyncMock()
+
+    await LiveDaytonaPlatform(client, _SPEC).stop("sb-1", force=True)
+
+    client.delete.assert_awaited_once_with(sandbox)
+
+
+@pytest.mark.asyncio
 async def test_live_platform_create_defaults_ephemeral_false(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
