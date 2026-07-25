@@ -1,8 +1,8 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 
-import type { FleetSkillCard } from "../../fleet-api-client.js";
-import { SkillSelector } from "../command-presenter.js";
+import type { FleetSettingsPolicy, FleetSkillCard } from "../../fleet-api-client.js";
+import { SettingsSelector, SkillSelector } from "../command-presenter.js";
 
 const skills = Array.from({ length: 14 }, (_, index) => ({
   id: `skill-${index}`,
@@ -14,6 +14,50 @@ const skills = Array.from({ length: 14 }, (_, index) => ({
   affordances: [],
   resources_available: true,
 })) satisfies FleetSkillCard[];
+
+const settings = {
+  revision: "a".repeat(64),
+  active_profile: "daytona",
+  restart_required: true,
+  scopes: [
+    {
+      name: "defaults",
+      fields: [
+        {
+          path: "rlm.verbose",
+          group: "RLM",
+          label: "DSPy host verbose logging",
+          value: true,
+          editor: "boolean",
+          choices: [],
+          environment_overridden: false,
+        },
+      ],
+    },
+  ],
+} satisfies FleetSettingsPolicy;
+
+describe("SettingsSelector", () => {
+  it("navigates scope, field, boolean choice, and confirmation without a form", () => {
+    const finish = vi.fn();
+    const selector = new SettingsSelector(settings, finish);
+
+    selector.handleInput("\r");
+    selector.handleInput("\r");
+    expect(stripAnsi(selector.render(60).join("\n"))).toContain("Current: true");
+    selector.handleInput("\x1b[B");
+    selector.handleInput("\r");
+    expect(stripAnsi(selector.render(60).join("\n"))).toContain("true → false");
+    selector.handleInput("\r");
+
+    expect(finish).toHaveBeenCalledWith({
+      revision: "a".repeat(64),
+      scope: "defaults",
+      path: "rlm.verbose",
+      value: false,
+    });
+  });
+});
 
 describe("SkillSelector", () => {
   it("keeps a bounded width-aware viewport and filters by typed input", () => {

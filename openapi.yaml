@@ -472,6 +472,205 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/settings:
+    get:
+      tags:
+      - settings
+      summary: Get Settings Policy
+      operationId: get_settings_policy
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsPolicyResponse'
+    patch:
+      tags:
+      - settings
+      summary: Patch Settings Policy
+      operationId: update_settings_policy
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettingsPolicyPatchRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsPolicyResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/files:
+    get:
+      tags:
+      - workspace-files
+      summary: List Workspace Files
+      operationId: list_workspace_files_api
+      parameters:
+      - name: path
+        in: query
+        required: false
+        schema:
+          type: string
+          default: .
+          title: Path
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 100
+          title: Limit
+      - name: after
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: After
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceFileListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/files/stat:
+    get:
+      tags:
+      - workspace-files
+      summary: Stat Workspace File
+      operationId: stat_workspace_file_api
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Path
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceFileEntryResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/files/content:
+    get:
+      tags:
+      - workspace-files
+      summary: Read Workspace File
+      operationId: read_workspace_file_api
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Path
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      - name: max_chars
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 10000
+          minimum: 1
+          default: 10000
+          title: Max Chars
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceFileReadResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      tags:
+      - workspace-files
+      summary: Write Workspace File
+      operationId: write_workspace_file_api
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceFileWriteRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceFileEntryResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/files/append:
+    post:
+      tags:
+      - workspace-files
+      summary: Append Workspace File
+      operationId: append_workspace_file_api
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceFileAppendRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceFileEntryResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
     ArtifactResponse:
@@ -745,6 +944,114 @@ components:
       required:
       - items
       title: SessionTurnPageResponse
+    SettingsFieldResponse:
+      properties:
+        path:
+          type: string
+          title: Path
+        group:
+          type: string
+          title: Group
+        label:
+          type: string
+          title: Label
+        value:
+          $ref: '#/components/schemas/JsonValue'
+        editor:
+          type: string
+          enum:
+          - text
+          - number
+          - boolean
+          - single_choice
+          - multi_choice
+          title: Editor
+        choices:
+          items:
+            type: string
+          type: array
+          title: Choices
+        environment_overridden:
+          type: boolean
+          title: Environment Overridden
+          default: false
+      type: object
+      required:
+      - path
+      - group
+      - label
+      - value
+      - editor
+      title: SettingsFieldResponse
+    SettingsPolicyPatchRequest:
+      properties:
+        revision:
+          type: string
+          maxLength: 64
+          minLength: 64
+          pattern: ^[0-9a-f]{64}$
+          title: Revision
+        scope:
+          type: string
+          maxLength: 128
+          minLength: 1
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$
+          title: Scope
+        path:
+          type: string
+          maxLength: 128
+          minLength: 1
+          pattern: ^[a-z][a-z0-9_.]*$
+          title: Path
+        value:
+          $ref: '#/components/schemas/JsonValue'
+      additionalProperties: false
+      type: object
+      required:
+      - revision
+      - scope
+      - path
+      - value
+      title: SettingsPolicyPatchRequest
+    SettingsPolicyResponse:
+      properties:
+        revision:
+          type: string
+          title: Revision
+        active_profile:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Active Profile
+        restart_required:
+          type: boolean
+          title: Restart Required
+          default: true
+        scopes:
+          items:
+            $ref: '#/components/schemas/SettingsScopeResponse'
+          type: array
+          title: Scopes
+      type: object
+      required:
+      - revision
+      - scopes
+      title: SettingsPolicyResponse
+    SettingsScopeResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        fields:
+          items:
+            $ref: '#/components/schemas/SettingsFieldResponse'
+          type: array
+          title: Fields
+      type: object
+      required:
+      - name
+      - fields
+      title: SettingsScopeResponse
     SkillCardResponse:
       properties:
         id:
@@ -909,6 +1216,135 @@ components:
       - role
       - parts
       title: UIMessageResponse
+    WorkspaceFileAppendRequest:
+      properties:
+        path:
+          type: string
+          maxLength: 1024
+          minLength: 1
+          title: Path
+        content:
+          type: string
+          title: Content
+        expected_sha256:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 64
+            pattern: ^[0-9a-f]{64}$
+          - type: 'null'
+          title: Expected Sha256
+      additionalProperties: false
+      type: object
+      required:
+      - path
+      - content
+      title: WorkspaceFileAppendRequest
+    WorkspaceFileEntryResponse:
+      properties:
+        path:
+          type: string
+          title: Path
+        kind:
+          type: string
+          enum:
+          - file
+          - directory
+          title: Kind
+        byte_size:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Byte Size
+        modified_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Modified At
+        checksum_sha256:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Checksum Sha256
+      type: object
+      required:
+      - path
+      - kind
+      title: WorkspaceFileEntryResponse
+    WorkspaceFileListResponse:
+      properties:
+        entries:
+          items:
+            $ref: '#/components/schemas/WorkspaceFileEntryResponse'
+          type: array
+          title: Entries
+        truncated:
+          type: boolean
+          title: Truncated
+          default: false
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+      type: object
+      required:
+      - entries
+      title: WorkspaceFileListResponse
+    WorkspaceFileReadResponse:
+      properties:
+        path:
+          type: string
+          title: Path
+        content:
+          type: string
+          title: Content
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+        byte_size:
+          type: integer
+          title: Byte Size
+        eof:
+          type: boolean
+          title: Eof
+      type: object
+      required:
+      - path
+      - content
+      - byte_size
+      - eof
+      title: WorkspaceFileReadResponse
+    WorkspaceFileWriteRequest:
+      properties:
+        path:
+          type: string
+          maxLength: 1024
+          minLength: 1
+          title: Path
+        content:
+          type: string
+          title: Content
+        overwrite:
+          type: boolean
+          title: Overwrite
+        expected_sha256:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 64
+            pattern: ^[0-9a-f]{64}$
+          - type: 'null'
+          title: Expected Sha256
+      additionalProperties: false
+      type: object
+      required:
+      - path
+      - content
+      - overwrite
+      title: WorkspaceFileWriteRequest
     ErrorResponse:
       properties:
         code:

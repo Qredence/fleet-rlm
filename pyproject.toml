@@ -51,6 +51,7 @@ dependencies = [
     "httpx2>=2.5.0",
     # MLflow 3 tracing: DSPy autolog + Databricks tracking backend.
     "mlflow>=3.14,<4",
+    "tomlkit>=0.13,<1",
 ]
 
 [project.urls]

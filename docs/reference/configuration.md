@@ -33,6 +33,20 @@ storage limits; Daytona Volume/Snapshot policy; and Fleet/DSPy logger level.
 `rlm.verbose` controls native DSPy host logs only. It does not control the
 typed Runtime Events projected through SSE or the terminal client.
 
+## Local terminal editing
+
+The local pi-tui `/settings` command reads and edits the non-secret policy in
+`config/fleet.toml`. It is available only to a loopback API client, including
+when an operator has explicitly exposed the normal API on another interface.
+The selector supports `[defaults]` and every existing named profile, and offers
+choice, text/number, and boolean child panels according to each setting type.
+
+Edits are revision-checked, atomically written, and validated against every
+profile before saving. They never read or display `.env` values, process
+environment overrides, or provider credentials. A credential-bearing database
+URL is rejected. A saved policy applies only after Fleet is restarted; existing
+runtime composition and active Turns are never changed in place.
+
 ## Compatibility environment overrides
 
 | Variable | Default | Meaning |

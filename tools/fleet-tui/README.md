@@ -55,8 +55,10 @@ provider telemetry displays as `—` rather than an estimated zero.
 Use `/help` for commands. `/rename <title>` names the current Session;
 `/sessions [title search]` opens the active Session selector. Switching Sessions
 preserves the unsent draft and pending Skill selections. `/skills` and `/skill`
-manage up to four exact Skill selections for the next accepted Turn; `/cancel`
-requests durable Run cancellation. Escape cancels an active Run while preserving the unsent editor
+manage up to four exact Skill selections for the next accepted Turn; `/settings`
+opens local TOML policy selectors for defaults and named profiles. Saving a
+setting validates it and requires a Fleet restart to apply. `/cancel` requests
+durable Run cancellation. Escape cancels an active Run while preserving the unsent editor
 draft. Ctrl+C clears the editor and exits when pressed twice while empty;
 Ctrl+D keeps its forward-delete behavior and exits only from an empty editor.
 

@@ -16,9 +16,12 @@ The generated source of truth is [`openapi.yaml`](../../openapi.yaml).
 | `GET` | `/api/skills` | List bounded system Skill Cards |
 | `GET` | `/api/skills/{skill_id}` | Read one bounded system Skill Card |
 | `PUT` | `/api/runs/{run_id}/cancellation` | Request cancellation of an owned Run |
+| `GET/PATCH` | `/api/settings` | Read or revision-update non-secret `config/fleet.toml` policy from a loopback client |
 
 The API uses one deterministic local User and Workspace scope. It accepts no
-Authorization or caller-supplied identity headers.
+Authorization or caller-supplied identity headers. The settings endpoint is a
+separate local administration surface: it rejects non-loopback clients,
+including when the API has been explicitly bound to a network interface.
 Turn creation requires an `Idempotency-Key` header. Its JSON body accepts
 `text`, `attachment_ids`, and up to four unique `skill_selections` entries,
 each containing an exact Skill `id` and `expected_version`. Explicit selections

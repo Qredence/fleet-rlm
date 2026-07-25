@@ -183,6 +183,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Settings Policy */
+        get: operations["get_settings_policy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Settings Policy */
+        patch: operations["update_settings_policy"];
+        trace?: never;
+    };
+    "/api/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Workspace Files */
+        get: operations["list_workspace_files_api"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/stat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stat Workspace File */
+        get: operations["stat_workspace_file_api"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Workspace File */
+        get: operations["read_workspace_file_api"];
+        /** Write Workspace File */
+        put: operations["write_workspace_file_api"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/append": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Append Workspace File */
+        post: operations["append_workspace_file_api"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -345,6 +432,59 @@ export interface components {
             /** Next After Sequence */
             next_after_sequence?: number | null;
         };
+        /** SettingsFieldResponse */
+        SettingsFieldResponse: {
+            /** Path */
+            path: string;
+            /** Group */
+            group: string;
+            /** Label */
+            label: string;
+            value: components["schemas"]["JsonValue"];
+            /**
+             * Editor
+             * @enum {string}
+             */
+            editor: "text" | "number" | "boolean" | "single_choice" | "multi_choice";
+            /** Choices */
+            choices?: string[];
+            /**
+             * Environment Overridden
+             * @default false
+             */
+            environment_overridden: boolean;
+        };
+        /** SettingsPolicyPatchRequest */
+        SettingsPolicyPatchRequest: {
+            /** Revision */
+            revision: string;
+            /** Scope */
+            scope: string;
+            /** Path */
+            path: string;
+            value: components["schemas"]["JsonValue"];
+        };
+        /** SettingsPolicyResponse */
+        SettingsPolicyResponse: {
+            /** Revision */
+            revision: string;
+            /** Active Profile */
+            active_profile?: string | null;
+            /**
+             * Restart Required
+             * @default true
+             */
+            restart_required: boolean;
+            /** Scopes */
+            scopes: components["schemas"]["SettingsScopeResponse"][];
+        };
+        /** SettingsScopeResponse */
+        SettingsScopeResponse: {
+            /** Name */
+            name: string;
+            /** Fields */
+            fields: components["schemas"]["SettingsFieldResponse"][];
+        };
         /**
          * SkillCardResponse
          * @description Bounded Skill discovery metadata — no instructions body.
@@ -432,6 +572,67 @@ export interface components {
             metadata?: {
                 [key: string]: components["schemas"]["JsonValue"];
             } | null;
+        };
+        /** WorkspaceFileAppendRequest */
+        WorkspaceFileAppendRequest: {
+            /** Path */
+            path: string;
+            /** Content */
+            content: string;
+            /** Expected Sha256 */
+            expected_sha256?: string | null;
+        };
+        /** WorkspaceFileEntryResponse */
+        WorkspaceFileEntryResponse: {
+            /** Path */
+            path: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "file" | "directory";
+            /** Byte Size */
+            byte_size?: number | null;
+            /** Modified At */
+            modified_at?: string | null;
+            /** Checksum Sha256 */
+            checksum_sha256?: string | null;
+        };
+        /** WorkspaceFileListResponse */
+        WorkspaceFileListResponse: {
+            /** Entries */
+            entries: components["schemas"]["WorkspaceFileEntryResponse"][];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** WorkspaceFileReadResponse */
+        WorkspaceFileReadResponse: {
+            /** Path */
+            path: string;
+            /** Content */
+            content: string;
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /** Byte Size */
+            byte_size: number;
+            /** Eof */
+            eof: boolean;
+        };
+        /** WorkspaceFileWriteRequest */
+        WorkspaceFileWriteRequest: {
+            /** Path */
+            path: string;
+            /** Content */
+            content: string;
+            /** Overwrite */
+            overwrite: boolean;
+            /** Expected Sha256 */
+            expected_sha256?: string | null;
         };
         /** ErrorResponse */
         ErrorResponse: {
@@ -1033,6 +1234,222 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CancellationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_settings_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsPolicyResponse"];
+                };
+            };
+        };
+    };
+    update_settings_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsPolicyPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsPolicyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_workspace_files_api: {
+        parameters: {
+            query?: {
+                path?: string;
+                limit?: number;
+                after?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceFileListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    stat_workspace_file_api: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceFileEntryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_workspace_file_api: {
+        parameters: {
+            query: {
+                path: string;
+                cursor?: string | null;
+                max_chars?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceFileReadResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    write_workspace_file_api: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceFileWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceFileEntryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    append_workspace_file_api: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceFileAppendRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceFileEntryResponse"];
                 };
             };
             /** @description Validation Error */

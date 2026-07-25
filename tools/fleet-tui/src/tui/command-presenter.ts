@@ -8,8 +8,8 @@ import {
   type TUI,
 } from "@earendil-works/pi-tui";
 
-import type { FleetSession, FleetSkillCard } from "../fleet-api-client.js";
-import type { CommandPresenter, CommandSpec } from "./commands.js";
+import type { FleetSession, FleetSettingsPolicy, FleetSkillCard } from "../fleet-api-client.js";
+import type { CommandPresenter, CommandSpec, SettingsUpdate } from "./commands.js";
 import type { ConversationStore, PendingSkillSelection } from "./store.js";
 import { selectTheme, theme } from "./theme.js";
 
@@ -67,6 +67,21 @@ export class PiCommandPresenter implements CommandPresenter {
   ): Promise<PendingSkillSelection[] | null> {
     return new Promise((resolve) => {
       const selector = new SkillSelector(skills, current, (value) => {
+        handle.hide();
+        this.restoreFocus();
+        resolve(value);
+      });
+      const handle = this.ui.showOverlay(selector, {
+        width: "80%",
+        maxHeight: "80%",
+        anchor: "center",
+      });
+    });
+  }
+
+  async chooseSetting(settings: FleetSettingsPolicy): Promise<SettingsUpdate | null> {
+    return new Promise((resolve) => {
+      const selector = new SettingsSelector(settings, (value) => {
         handle.hide();
         this.restoreFocus();
         resolve(value);
@@ -202,6 +217,236 @@ function relativeUpdatedAt(value: string | null | undefined): string {
   const elapsedHours = Math.floor(elapsedMinutes / 60);
   if (elapsedHours < 24) return `updated ${elapsedHours}h ago`;
   return `updated ${Math.floor(elapsedHours / 24)}d ago`;
+}
+
+type SettingsField = FleetSettingsPolicy["scopes"][number]["fields"][number];
+type SelectorPage = "scopes" | "fields" | "edit" | "confirm";
+
+/** Keyboard-only hierarchical settings selector and scalar editor. */
+export class SettingsSelector implements Component {
+  private page: SelectorPage = "scopes";
+  private scopeIndex = 0;
+  private fieldIndex = 0;
+  private choiceIndex = 0;
+  private selectedChoices: string[] = [];
+  private text = "";
+
+  constructor(
+    private readonly settings: FleetSettingsPolicy,
+    private readonly finish: (value: SettingsUpdate | null) => void,
+  ) {}
+
+  invalidate(): void {}
+
+  render(width: number): string[] {
+    const safeWidth = Math.max(1, width);
+    const lines =
+      this.page === "scopes"
+        ? this.renderScopes()
+        : this.page === "fields"
+          ? this.renderFields()
+          : this.page === "edit"
+            ? this.renderEditor()
+            : this.renderConfirmation();
+    return lines.map((line) => truncateToWidth(line, safeWidth, "…"));
+  }
+
+  handleInput(data: string): void {
+    if (this.page === "scopes") this.handleScopes(data);
+    else if (this.page === "fields") this.handleFields(data);
+    else if (this.page === "edit") this.handleEditor(data);
+    else this.handleConfirmation(data);
+  }
+
+  private renderScopes(): string[] {
+    return [
+      theme.fg("accent", theme.bold("Fleet settings (select a policy scope)")),
+      theme.fg("muted", "Enter open · Escape cancel · saved settings require restart"),
+      "",
+      ...this.settings.scopes.map((scope, index) =>
+        this.row(index, scope.name, `${scope.fields.length} settings`),
+      ),
+    ];
+  }
+
+  private renderFields(): string[] {
+    const scope = this.scope();
+    return [
+      theme.fg("accent", theme.bold(`[${scope.name}] settings`)),
+      theme.fg("muted", "Enter edit · Escape back"),
+      "",
+      ...scope.fields.map((field, index) =>
+        this.row(index, `${field.group} · ${field.label}`, displayValue(field.value)),
+      ),
+    ];
+  }
+
+  private renderEditor(): string[] {
+    const field = this.field();
+    const current = displayValue(field.value);
+    const header = theme.fg("accent", theme.bold(`${field.group} · ${field.label}`));
+    if (field.editor === "boolean") {
+      return [
+        header,
+        theme.fg("muted", `Current: ${current} · Enter choose · Escape back`),
+        "",
+        ...["true", "false"].map((choice, index) => this.row(index, choice, "")),
+      ];
+    }
+    if (field.editor === "single_choice" || field.editor === "multi_choice") {
+      const instruction =
+        field.editor === "multi_choice"
+          ? "Space toggle · Enter choose · Escape back"
+          : "Enter choose · Escape back";
+      return [
+        header,
+        theme.fg("muted", `Current: ${current} · ${instruction}`),
+        "",
+        ...choicesOf(field).map((choice, index) => {
+          const label =
+            field.editor === "multi_choice"
+              ? `[${this.selectedChoices.includes(choice) ? "x" : " "}] ${choice}`
+              : choice;
+          return this.row(index, label, "");
+        }),
+      ];
+    }
+    return [
+      header,
+      theme.fg("muted", `Current: ${current} · Enter continue · Escape back`),
+      "",
+      `${theme.fg("muted", "New value:")} ${this.text || theme.fg("dim", "(type a value)")}`,
+    ];
+  }
+
+  private renderConfirmation(): string[] {
+    const field = this.field();
+    return [
+      theme.fg("warning", theme.bold("Save Fleet setting?")),
+      "",
+      `${field.path}: ${displayValue(field.value)} → ${displayValue(this.editedValue())}`,
+      "",
+      theme.fg("muted", "Enter save · Escape return to editor"),
+    ];
+  }
+
+  private handleScopes(data: string): void {
+    if (matchesKey(data, "up")) this.scopeIndex = Math.max(0, this.scopeIndex - 1);
+    else if (matchesKey(data, "down"))
+      this.scopeIndex = Math.min(this.settings.scopes.length - 1, this.scopeIndex + 1);
+    else if (matchesKey(data, "enter")) {
+      this.fieldIndex = 0;
+      this.page = "fields";
+    } else if (matchesKey(data, "escape")) this.finish(null);
+  }
+
+  private handleFields(data: string): void {
+    const fields = this.scope().fields;
+    if (matchesKey(data, "up")) this.fieldIndex = Math.max(0, this.fieldIndex - 1);
+    else if (matchesKey(data, "down"))
+      this.fieldIndex = Math.min(fields.length - 1, this.fieldIndex + 1);
+    else if (matchesKey(data, "enter")) {
+      const field = this.field();
+      this.choiceIndex = Math.max(0, choicesOf(field).indexOf(String(field.value)));
+      this.selectedChoices = Array.isArray(field.value)
+        ? field.value.filter((value): value is string => typeof value === "string")
+        : [];
+      this.text = field.editor === "text" || field.editor === "number" ? String(field.value) : "";
+      this.page = "edit";
+    } else if (matchesKey(data, "escape")) this.page = "scopes";
+  }
+
+  private handleEditor(data: string): void {
+    const field = this.field();
+    if (matchesKey(data, "escape")) {
+      this.page = "fields";
+      return;
+    }
+    if (
+      field.editor === "boolean" ||
+      field.editor === "single_choice" ||
+      field.editor === "multi_choice"
+    ) {
+      const choices = field.editor === "boolean" ? ["true", "false"] : choicesOf(field);
+      if (matchesKey(data, "up")) this.choiceIndex = Math.max(0, this.choiceIndex - 1);
+      else if (matchesKey(data, "down"))
+        this.choiceIndex = Math.min(choices.length - 1, this.choiceIndex + 1);
+      else if (field.editor === "multi_choice" && data === " ") {
+        const choice = choices[this.choiceIndex];
+        if (!choice) return;
+        this.selectedChoices = this.selectedChoices.includes(choice)
+          ? this.selectedChoices.filter((item) => item !== choice)
+          : [...this.selectedChoices, choice];
+      } else if (matchesKey(data, "enter")) this.page = "confirm";
+      return;
+    }
+    if (matchesKey(data, "backspace")) {
+      this.text = Array.from(this.text).slice(0, -1).join("");
+    } else if (matchesKey(data, "enter")) {
+      if (this.text.trim()) this.page = "confirm";
+    } else {
+      const printable = decodeKittyPrintable(data) ?? (isPrintableInput(data) ? data : undefined);
+      if (printable) this.text += printable;
+    }
+  }
+
+  private handleConfirmation(data: string): void {
+    if (matchesKey(data, "escape")) {
+      this.page = "edit";
+      return;
+    }
+    if (!matchesKey(data, "enter")) return;
+    this.finish({
+      revision: this.settings.revision,
+      scope: this.scope().name,
+      path: this.field().path,
+      value: this.editedValue(),
+    });
+  }
+
+  private scope(): FleetSettingsPolicy["scopes"][number] {
+    return this.settings.scopes[this.scopeIndex] ?? { name: "defaults", fields: [] };
+  }
+
+  private field(): SettingsField {
+    return (
+      this.scope().fields[this.fieldIndex] ?? {
+        path: "",
+        group: "",
+        label: "",
+        value: "",
+        editor: "text",
+        choices: [],
+        environment_overridden: false,
+      }
+    );
+  }
+
+  private editedValue(): string | number | boolean | string[] | null {
+    const field = this.field();
+    if (field.editor === "boolean") return this.choiceIndex === 0;
+    if (field.editor === "single_choice") return choicesOf(field)[this.choiceIndex] ?? "";
+    if (field.editor === "multi_choice") return this.selectedChoices;
+    if (field.editor === "number") return Number(this.text);
+    return this.text;
+  }
+
+  private row(index: number, label: string, description: string): string {
+    const selected =
+      (this.page === "scopes" && index === this.scopeIndex) ||
+      (this.page === "fields" && index === this.fieldIndex) ||
+      (this.page === "edit" && index === this.choiceIndex);
+    const content = description ? `${label}  ${selectTheme.description(description)}` : label;
+    return `${selected ? selectTheme.selectedPrefix(">") : " "} ${selected ? selectTheme.selectedText(content) : content}`;
+  }
+}
+
+function choicesOf(field: SettingsField): string[] {
+  return field.choices ?? [];
+}
+
+function displayValue(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 function isPrintableInput(value: string): boolean {

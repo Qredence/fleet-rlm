@@ -179,3 +179,38 @@ class UIMessageResponse(BaseModel):
 class SessionTurnPageResponse(BaseModel):
     items: list[UIMessageResponse]
     next_after_sequence: int | None = None
+
+
+# Local settings policy (config/fleet.toml; never .env or process secrets)
+# ---------------------------------------------------------------------------
+
+
+class SettingsFieldResponse(BaseModel):
+    path: str
+    group: str
+    label: str
+    value: JsonValue
+    editor: Literal["text", "number", "boolean", "single_choice", "multi_choice"]
+    choices: list[str] = Field(default_factory=list)
+    environment_overridden: bool = False
+
+
+class SettingsScopeResponse(BaseModel):
+    name: str
+    fields: list[SettingsFieldResponse]
+
+
+class SettingsPolicyResponse(BaseModel):
+    revision: str
+    active_profile: str | None = None
+    restart_required: bool = True
+    scopes: list[SettingsScopeResponse]
+
+
+class SettingsPolicyPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    scope: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    path: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_.]*$")
+    value: JsonValue

@@ -10,6 +10,7 @@ from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactContent, Artifact
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
 from fleet_rlm.chat.turn_lifecycle import TurnLifecycle
 from fleet_rlm.config import Settings
+from fleet_rlm.config_policy import ConfigPolicyService
 from fleet_rlm.files.models import (
     AttachmentAccess,
     AttachmentRef,
@@ -82,15 +83,24 @@ def get_settings(request: Request) -> Settings:
     return request.app.state.settings
 
 
+def get_config_policy(request: Request) -> ConfigPolicyService:
+    policy = getattr(request.app.state, "config_policy", None)
+    if not isinstance(policy, ConfigPolicyService):
+        raise HTTPException(status_code=503, detail="application composition is not ready")
+    return policy
+
+
 TurnCoordinatorDep = Annotated[TurnCoordinator, Depends(get_turn_coordinator)]
 ArtifactReaderDep = Annotated[ArtifactReaderPort, Depends(get_artifact_reader)]
 AttachmentLifecycleDep = Annotated[AttachmentLifecyclePort, Depends(get_attachment_lifecycle)]
 SessionCatalogDep = Annotated[SessionCatalog, Depends(get_session_catalog)]
 TurnLifecycleDep = Annotated[TurnLifecycle, Depends(get_turn_lifecycle)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+ConfigPolicyDep = Annotated[ConfigPolicyService, Depends(get_config_policy)]
 
 __all__ = [
     "ArtifactReaderDep",
+    "ConfigPolicyDep",
     "AttachmentLifecycleDep",
     "SessionCatalogDep",
     "SettingsDep",
