@@ -8,8 +8,8 @@ import {
   type TUI,
 } from "@earendil-works/pi-tui";
 
-import { formatDuration, formatTokens } from "./format.js";
-import { formatExecutionMetric, summarizeExecution } from "./execution-summary.js";
+import { formatDuration, formatTokens, shortTraceId } from "./format.js";
+import { summarizeExecution } from "./execution-summary.js";
 import type { ConversationStore, Run, State } from "./store.js";
 import { theme } from "./theme.js";
 import { TranscriptComponent } from "./transcript.js";
@@ -74,17 +74,17 @@ class ActivityComponent implements Component {
       this.loader.start();
     }
 
-    const secondary = [
-      `${run.completedSteps}/${run.startedSteps} steps complete`,
-      `${run.toolCount} ${run.toolCount === 1 ? "tool" : "tools"}`,
-      run.traceId ? `trace ${run.traceId}` : null,
+    const secondaryParts = [
+      `${run.completedSteps}/${run.startedSteps} steps`,
+      run.toolCount > 0 ? `${run.toolCount} ${run.toolCount === 1 ? "tool" : "tools"}` : null,
+      run.traceId ? shortTraceId(run.traceId) : null,
       "Esc cancel",
     ]
       .filter((part): part is string => part !== null)
       .join(" · ");
     return [
       ...this.loader.render(width),
-      truncateToWidth(`${theme.fg("borderMuted", "│")} ${dim(secondary)}`, width, ""),
+      truncateToWidth(`${theme.fg("borderMuted", "│")} ${dim(secondaryParts)}`, width, ""),
     ];
   }
 
@@ -121,13 +121,22 @@ class FooterComponent implements Component {
         ];
     const run = state.run;
     const execution = summarizeExecution(state.messages, run.id);
+
+    const metricsParts: string[] = [];
+    if (execution.iterations !== null) metricsParts.push(`${execution.iterations} iter`);
+    if (execution.subLmCalls !== null) metricsParts.push(`${execution.subLmCalls} sub-LM`);
+    if (execution.hostCapabilityCalls !== null) metricsParts.push(`${execution.hostCapabilityCalls} host`);
+    if (execution.interpreterErrors !== null) metricsParts.push(`${execution.interpreterErrors} errors`);
+    if (execution.durationMs !== null) metricsParts.push(formatDuration(execution.durationMs));
+
+    const metrics = metricsParts.length > 0 ? ` · ${metricsParts.join(" · ")}` : "";
     const outcome = run.outcome
-      ? `  ${dim("outcome")} ${theme.fg(outcomeColor(run.outcome), run.outcome)}`
+      ? ` · ${theme.fg(outcomeColor(run.outcome), run.outcome)}`
       : "";
     const replay = run.delivery === "replay" ? " · replay" : "";
     lines.push(
       truncateToWidth(
-        `${dim("observed committed")} ↑ ${formatObservedTokens(usage.input)} ↓ ${formatObservedTokens(usage.output)}  ${dim("turn")} ${formatExecutionMetric(execution.iterations)} iter · ${formatExecutionMetric(execution.subLmCalls)} sub-LM · ${formatExecutionMetric(execution.hostCapabilityCalls)} host · ${formatExecutionMetric(execution.interpreterErrors)} errors · ${execution.durationMs === null ? "—" : formatDuration(execution.durationMs)}${outcome}${replay}`,
+        `↑ ${formatObservedTokens(usage.input)} ↓ ${formatObservedTokens(usage.output)}${metrics}${outcome}${replay}`,
         width,
         "",
       ),
