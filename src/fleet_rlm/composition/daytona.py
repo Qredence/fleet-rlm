@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -41,6 +42,7 @@ class DaytonaCompositionHandles:
     attachment_lifecycle: Any
     artifact_reader: Any
     workspace_volume_gateway: Any
+    workspace_file_service: Any = None
     turn_cleanup_supervisor: Any = None
     turn_preparation: Any = None
 
@@ -73,19 +75,23 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
     require_daytona_settings(settings)
 
     from fleet_rlm.api.local_scope import LocalScope
-    from fleet_rlm.artifacts.daytona_catalog import DaytonaArtifactBlobGateway
     from fleet_rlm.artifacts.reader import ArtifactReader
+    from fleet_rlm.artifacts.workspace_storage import WorkspaceArtifactBlobGateway
     from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
-    from fleet_rlm.daytona.orphan_cleanup import cleanup_orphan_bytes
-    from fleet_rlm.daytona.paths import volume_paths_from_settings
+    from fleet_rlm.daytona.provisioning import sandbox_spec_from_settings
     from fleet_rlm.daytona.run_environment import LiveKernelResources, build_turn_preparation, resolve_settings
-    from fleet_rlm.daytona.sandbox_spec import sandbox_spec_from_settings
-    from fleet_rlm.daytona.workspace_volume import create_daytona_workspace_volume_gateway
+    from fleet_rlm.daytona.workspace_gateway import (
+        DaytonaWorkspaceGateway,
+        DaytonaWorkspaceVolumeGateway,
+        cleanup_orphan_bytes,
+    )
     from fleet_rlm.files.lifecycle import AttachmentLifecycleService
     from fleet_rlm.files.local_catalog import WorkspaceAttachmentBlobGateway
-    from fleet_rlm.files.paths import DaytonaAttachmentPathPolicy
+    from fleet_rlm.files.paths import WorkspaceAttachmentPathPolicy
+    from fleet_rlm.files.volume_paths import volume_paths_from_settings
+    from fleet_rlm.files.workspace_access import WorkspaceFileService
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory
     from fleet_rlm.persistence.repositories import (
         SqlAlchemyArtifactCatalog,
@@ -112,26 +118,30 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
             sandbox_spec=sandbox_spec,
             cleanup=cleanup,
         )
-        if resolved.daytona_api_key is None:
-            raise CompositionError("Daytona composition missing required settings: FLEET_DAYTONA_API_KEY")
-        gateway = create_daytona_workspace_volume_gateway(
-            api_key=resolved.daytona_api_key.get_secret_value(),
-            volume_name=resolved.volume_name,
+        mounted_workspace_gateway = DaytonaWorkspaceGateway(
+            platform=resources.platform,
+            volume_client=resources.volume_client,
+            volume_config=resources.volume_config,
+            sandbox_spec=resources.sandbox_spec,
+            max_file_bytes=resolved.max_upload_bytes,
+        )
+        gateway = DaytonaWorkspaceVolumeGateway(
+            mounted_workspace_gateway,
             mount_path=resolved.volume_mount_path,
-            sandbox_spec=sandbox_spec,
         )
         volume_paths = volume_paths_from_settings(resolved)
         attachment_lifecycle = AttachmentLifecycleService(
             catalog=SqlAlchemyAttachmentCatalog(session_factory),
             blobs=WorkspaceAttachmentBlobGateway(gateway),
-            paths=DaytonaAttachmentPathPolicy(volume_paths),
+            paths=WorkspaceAttachmentPathPolicy(volume_paths),
             max_bytes=resolved.max_upload_bytes,
         )
         artifact_catalog = SqlAlchemyArtifactCatalog(session_factory)
         artifact_reader = ArtifactReader(
             catalog=artifact_catalog,
-            blobs=DaytonaArtifactBlobGateway(gateway),
+            blobs=WorkspaceArtifactBlobGateway(gateway),
         )
+        workspace_file_service = WorkspaceFileService(mounted_workspace_gateway)
         local_scope = LocalScope()
         await cleanup_orphan_bytes(
             gateway,
@@ -177,6 +187,7 @@ async def build_daytona_composition(settings: Settings) -> DaytonaCompositionHan
             attachment_lifecycle=attachment_lifecycle,
             artifact_reader=artifact_reader,
             workspace_volume_gateway=gateway,
+            workspace_file_service=workspace_file_service,
             turn_cleanup_supervisor=cleanup,
             turn_preparation=turn_preparation,
         )
@@ -195,9 +206,16 @@ async def install_daytona_composition(
     """Attach an already-migrated Daytona inventory to app state."""
     handles = await build_daytona_composition(settings)
     try:
+        from fleet_rlm.config import _CONFIG_PATH, _PROFILE_ENVIRONMENT
+        from fleet_rlm.config_policy import ConfigPolicyService
+
         app.state.composition_ready = True
+        app.state.config_policy = ConfigPolicyService(
+            _CONFIG_PATH,
+            active_profile=os.environ.get(_PROFILE_ENVIRONMENT),
+        )
         app.state.run_environment_resources = handles.resources
-        app.state.db_engine = handles.resources._engine  # noqa: SLF001
+        app.state.db_engine = handles.resources.engine
         app.state.session_catalog = handles.session_catalog
         app.state.turn_lifecycle = handles.turn_lifecycle
         app.state.turn_coordinator = handles.turn_coordinator
@@ -206,6 +224,7 @@ async def install_daytona_composition(
         app.state.attachment_lifecycle = handles.attachment_lifecycle
         app.state.artifact_reader = handles.artifact_reader
         app.state.workspace_volume_gateway = handles.workspace_volume_gateway
+        app.state.workspace_file_service = handles.workspace_file_service
         app.state.session_manager = handles.resources.session_manager
         app.state.rlm_model_bundle = handles.resources.models
         return handles

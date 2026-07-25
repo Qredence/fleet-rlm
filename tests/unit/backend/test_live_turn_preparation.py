@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import threading
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -36,17 +37,17 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     )
     volume: dict[str, bytes] = {}
 
-    class VolumeFs:
-        def __init__(self, sandbox) -> None:
-            self.sandbox = sandbox
+    class SandboxFs:
+        async def create_folder(self, path: str, mode: str | None = None) -> None:
+            del path, mode
 
-        def read_bytes(self, path: str) -> bytes:
+        async def download_file(self, path: str) -> bytes:
             return volume[path]
 
-        def write_bytes(self, path: str, value: bytes) -> None:
+        async def upload_file(self, value: bytes, path: str) -> None:
             volume[path] = value
 
-        def remove(self, path: str) -> None:
+        async def delete_file(self, path: str) -> None:
             volume.pop(path, None)
 
     class SessionManager:
@@ -67,11 +68,10 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
 
             return PreparedAttachments((ref,), (StagedAttachment(ref.id, logical_path),))
 
-    monkeypatch.setattr("fleet_rlm.daytona.volume_fs.DaytonaSandboxVolumeFs", VolumeFs)
     resources = SimpleNamespace(
         settings=Settings(run_environment="daytona"),
         session_manager=SessionManager(),
-        platform=SimpleNamespace(get=lambda _sandbox_id: object()),
+        platform=SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(fs=SandboxFs()))),
         models=RLMModelBundle(object(), object()),
         track_sandbox=lambda _sandbox_id: None,
     )
@@ -169,7 +169,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
 
 @pytest.mark.asyncio
 async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
-    from fleet_rlm.daytona.admission import DaytonaAdmissionTimeout
+    from fleet_rlm.daytona.session_manager import DaytonaAdmissionTimeout
 
     class SessionManager:
         async def acquire(self, _request, *, deadline):
@@ -221,9 +221,9 @@ async def test_post_acquisition_sandbox_lookup_settles_before_lease_release(mode
     release_lookup = threading.Event()
 
     class Platform:
-        def get(self, _sandbox_id):
+        async def get(self, _sandbox_id):
             entered.set()
-            assert release_lookup.wait(timeout=5)
+            assert await asyncio.to_thread(release_lookup.wait, 5)
             return object()
 
     class SessionManager:

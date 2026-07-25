@@ -181,6 +181,61 @@ class SessionTurnPageResponse(BaseModel):
     next_after_sequence: int | None = None
 
 
+# ---------------------------------------------------------------------------
+# Independent Workspace files (public files/ namespace only)
+# ---------------------------------------------------------------------------
+
+
+class WorkspaceFileEntryResponse(BaseModel):
+    path: str
+    kind: Literal["file", "directory"]
+    byte_size: int | None = None
+    modified_at: str | None = None
+    checksum_sha256: str | None = None
+
+
+class WorkspaceFileListResponse(BaseModel):
+    entries: list[WorkspaceFileEntryResponse]
+    truncated: bool = False
+    next_cursor: str | None = None
+
+
+class WorkspaceFileReadResponse(BaseModel):
+    path: str
+    content: str
+    next_cursor: str | None = None
+    byte_size: int
+    eof: bool
+
+
+class WorkspaceFileWriteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1, max_length=1_024)
+    content: str
+    overwrite: bool
+    expected_sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+
+
+class WorkspaceFileAppendRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1, max_length=1_024)
+    content: str
+    expected_sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Local settings policy (config/fleet.toml; never .env or process secrets)
 # ---------------------------------------------------------------------------
 

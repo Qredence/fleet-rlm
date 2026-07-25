@@ -32,6 +32,7 @@ COMPOSITION_STATE_FIELDS = (
     "turn_state_store",
     "workspace_volume_gateway",
     "workspace_volume_mirror",
+    "workspace_file_service",
 )
 
 
