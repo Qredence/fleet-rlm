@@ -13,6 +13,11 @@ The generated source of truth is [`openapi.yaml`](../../openapi.yaml).
 | `GET` | `/api/attachments/{attachment_id}` | Read owned Attachment metadata |
 | `GET` | `/api/artifacts/{artifact_id}` | Read committed Artifact metadata |
 | `GET` | `/api/artifacts/{artifact_id}/content` | Download verified committed Artifact bytes |
+| `GET` | `/api/files` | List the independent Workspace `files/` namespace |
+| `GET` | `/api/files/stat` | Read file metadata and SHA-256 |
+| `GET` | `/api/files/content` | Read one bounded UTF-8 page |
+| `PUT` | `/api/files/content` | Create or explicitly overwrite a UTF-8 file |
+| `POST` | `/api/files/append` | Append UTF-8 text |
 | `GET` | `/api/skills` | List bounded system Skill Cards |
 | `GET` | `/api/skills/{skill_id}` | Read one bounded system Skill Card |
 | `PUT` | `/api/runs/{run_id}/cancellation` | Request cancellation of an owned Run |
@@ -34,6 +39,12 @@ catalog entries.
 Attachment ownership and explicit Skill selections are validated before SSE
 begins. Provider exceptions, credentials, Skill instructions, resource bodies,
 and storage paths never enter public responses or Skill lifecycle projections.
+
+The files API always resolves the process-local Workspace. Callers cannot
+select a Workspace or address Daytona Volume, mount, Sandbox, Attachment,
+Artifact, Session, or Run identifiers. It exposes only the durable `files/`
+root, has no delete or rename operation, and accepts an optional current
+SHA-256 on overwrite/append; stale preconditions return `409`.
 
 `POST /api/artifacts` does not exist. Artifacts become public only through Turn
 Commit after host-mediated `create_artifact` produces a private candidate.

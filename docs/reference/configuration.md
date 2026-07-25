@@ -56,7 +56,7 @@ runtime composition and active Turns are never changed in place.
 | `FLEET_RUN_ENVIRONMENT` | `daytona` | Public profile: `daytona` or `deno` |
 | `FLEET_DATABASE_URL` | unset | Async SQLAlchemy URL |
 | `FLEET_DAYTONA_API_KEY` | unset | Daytona provider credential; required only for Daytona |
-| `FLEET_DAYTONA_SNAPSHOT` | unset | Required immutable Fleet Daytona Snapshot name, for example `fleet-rlm-python313-v2` |
+| `FLEET_DAYTONA_SNAPSHOT` | unset | Required immutable Fleet Daytona Snapshot name, for example `fleet-rlm-python313-v3` |
 | `FLEET_LLM_API_KEY` | unset | Credential passed to both DSPy model roles |
 | `FLEET_LLM_BASE_URL` | unset | Optional HTTP(S) OpenAI-compatible base URL |
 | `FLEET_LLM_MAX_TOKENS` | unset | Optional output-token limit for both model roles; minimum 1 |

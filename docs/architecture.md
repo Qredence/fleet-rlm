@@ -56,11 +56,12 @@ JSON-compatible common input annotations.
   and Run staging; it is not a DSPy execution Module.
 - Daytona composition constructs Turn preparation explicitly; process-lifetime
   `LiveKernelResources` owns provider resources but no mutable preparation graph.
-- Daytona keeps two intentional client roles: one synchronous client retained by
-  Session execution resources and one lifespan-owned `AsyncDaytona` client for
-  non-Turn Volume I/O. `WorkspaceVolumeGateway.open_workspace()` scopes each
-  grouped operation to one ephemeral Sandbox, which is deleted before the
-  context exits.
+- Daytona uses one process-owned `AsyncDaytona` for provisioning, lifecycle,
+  filesystem, and Workspace operations. Only DSPy's synchronous
+  `CodeInterpreter.execute()` seam receives an explicit, allowlisted
+  async-to-sync view, and it blocks only the DSPy worker thread.
+  `WorkspaceVolumeGateway.open_workspace()` scopes each grouped I/O operation
+  to one ephemeral Sandbox, which is deleted before the context exits.
 - `RLMRunner` executes one fresh DSPy RLM and emits no terminal event.
 - `TurnLifecycle.finish()` owns private result snapshots, Artifact publication,
   atomic Turn Commit, and durable failure settlement.

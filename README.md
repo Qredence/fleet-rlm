@@ -61,7 +61,7 @@ export FLEET_CONFIG_PROFILE=daytona
 export FLEET_DATABASE_URL='postgresql+asyncpg://...'
 export FLEET_DAYTONA_API_KEY='...'
 export FLEET_LLM_API_KEY='...'
-uv run python scripts/daytona_snapshot.py check --name fleet-rlm-python313-v2
+make daytona-snapshot-check
 uv run python scripts/db_init.py
 uv run fleet-rlm serve-api --port 8000
 ```

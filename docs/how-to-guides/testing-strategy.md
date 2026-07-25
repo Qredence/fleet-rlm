@@ -29,6 +29,19 @@ The default pytest targets mask local live `FLEET_*` credentials so `.env`
 cannot silently select provider composition. They install deterministic private
 composition where required and run with at most two xdist workers by default.
 
+Daytona branch coverage is enforced separately over the same canonical
+non-live corpus:
+
+```bash
+make test-daytona-cov
+```
+
+This target measures `src/fleet_rlm/daytona`, fails below 70%, prints missing
+lines, and writes `.scratch/coverage/daytona.xml`. CircleCI runs it as one
+aggregate job because the existing unit and E2E jobs execute independent test
+shards that cannot enforce a package-wide threshold individually. Coverage is
+not a substitute for the opt-in live Daytona durability checks below.
+
 `make check` includes:
 
 - Ruff lint and format checks;
@@ -86,9 +99,17 @@ Tests and Deno local SQLite helpers may create ephemeral schemas explicitly.
 Live checks require canonical credentials and explicit opt-in:
 
 ```bash
+FLEET_LIVE=1 uv run python scripts/benchmark_daytona_lifecycle.py \
+  --output .scratch/daytona-lifecycle-benchmark.json
 FLEET_LIVE=1 uv run pytest tests/live/backend/test_fleet_rlm_daytona_mvp.py -q -n 0 --timeout=900
 FLEET_LIVE=1 uv run pytest tests/live/backend/test_attachment_artifact_durability.py -q -n 0
 ```
+
+The lifecycle benchmark always runs three warmups and twenty measured cycles
+against the configured immutable Snapshot and Workspace-scoped Volume mount.
+Only a create-through-first-execution p95 at or below ten seconds with all
+twenty measured Sandboxes deleted selects per-Turn lifecycle. A missing,
+partial, slower, or cleanup-failing receipt retains Session Sandboxes.
 
 The complete release-oriented verifier loads `.env` with `override=False`, so
 existing process exports win:
