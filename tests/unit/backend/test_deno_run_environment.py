@@ -50,9 +50,9 @@ def test_rlm_factory_keeps_dspy_default_interpreter() -> None:
 
     models = RLMModelBundle(MagicMock(), MagicMock())
     rlm = RLMFactory().create(models=models, options=RLMOptions(), interpreter=None)
-    assert isinstance(rlm, dspy.RLM)
+    assert type(rlm) is dspy.RLM
     assert rlm.verbose is True
-    assert hasattr(rlm, "bind_observer")
+    assert not hasattr(rlm, "bind_observer")
     assert rlm._interpreter is None  # noqa: SLF001
 
 

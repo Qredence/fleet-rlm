@@ -2,31 +2,28 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Protocol
-from uuid import UUID
 
 import dspy
 
+from fleet_rlm.chat.capability_preparation import (
+    PreparedHostCapabilities,
+    prepare_host_capabilities,
+)
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
 from fleet_rlm.chat.turn_preparation import (
     DefaultTurnPreparer,
     PreparedTurn,
     RunEnvironment,
     RunEnvironmentProvider,
-    TurnPreparationCancelled,
-    TurnPreparationTimeout,
 )
 from fleet_rlm.files.lifecycle import AttachmentLifecycle
 from fleet_rlm.files.models import PreparedAttachments
 from fleet_rlm.files.workspace_models import DENO_WORKSPACE_CAPABILITY
-from fleet_rlm.rlm.context import PreparationNotice, RLMExecutionSpec
+from fleet_rlm.rlm.context import RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.events import AttachmentRead, SkillActivated, SkillLoaded
 from fleet_rlm.rlm.model_bundle import RLMModelBundle
-from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
 from fleet_rlm.skills.catalog import SkillCatalog
-from fleet_rlm.skills.resolver import resolve_selected_skills, resolved_schema, resolved_signature
 
 
 class DenoRunSink:
@@ -68,7 +65,7 @@ class DenoRunEnvironmentProvider(RunEnvironmentProvider):
         return RunEnvironment(None, sink, sink, release)
 
 
-class DenoPreparedCapabilities:
+class DenoPreparedCapabilities(PreparedHostCapabilities):
     """Run-bound Skill/Attachment tools for Deno mode (no HTTP broker)."""
 
     def __init__(
@@ -77,33 +74,16 @@ class DenoPreparedCapabilities:
         *,
         files: Any,
         skills: Any,
-        preparation_notices: tuple[PreparationNotice, ...] = (),
+        preparation_notices: tuple[Any, ...] = (),
     ) -> None:
-        self.spec = spec
-        self._files = files
-        self._skills = skills
-        self.preparation_notices = preparation_notices
-
-    def drain_public_details(self) -> tuple[AttachmentRead | SkillActivated | SkillLoaded, ...]:
-        values: list[AttachmentRead | SkillActivated | SkillLoaded] = []
-        for item in self._files.drain_public_events():
-            values.append(
-                AttachmentRead(
-                    UUID(item["attachment_id"]),
-                    str(item["filename"]),
-                    int(item["byte_size"]),
-                )
-            )
-        for item in self._skills.drain_public_events():
-            values.append(_skill_event(item))
-        return tuple(values)
-
-    def drain_artifact_candidates(self) -> tuple[()]:
-        """Deno does not promote Artifact Candidates; durable tools are excluded."""
-        return ()
-
-    async def aclose(self) -> None:
-        return None
+        super().__init__(
+            spec,
+            files=files,
+            skills=skills,
+            close_files=False,
+            artifact_candidates=False,
+            preparation_notices=preparation_notices,
+        )
 
 
 class _DenoSinkValues(Protocol):
@@ -158,7 +138,6 @@ class _DenoCapabilityPreparer:
         deadline: float,
     ) -> DenoPreparedCapabilities:
         from fleet_rlm.files.tools import FileToolHost
-        from fleet_rlm.skills.tools import SkillToolHost
 
         sink = environment.attachment_sink
         volume_fs: Any = (
@@ -183,83 +162,26 @@ class _DenoCapabilityPreparer:
             for tool in file_host.as_tools()
             if str(tool.name) not in {"create_artifact", "publish_workspace_artifact"}
         )
-        history_host = SessionHistoryToolHost(turn.history)
-        history_tools = history_host.as_tools()
-
-        selections = tuple(turn.input.skill_selections)
-        if getattr(self._skill_catalog, "unavailable", False):
-            from fleet_rlm.skills.errors import InvalidSkillSelectionError
-
-            if selections:
-                raise InvalidSkillSelectionError() from None
-            spec = RLMExecutionSpec(
-                skill_cards=(),
-                tools=(*file_tools, *history_tools),
-                tool_event_views={
-                    name: view
-                    for name, view in {**file_host.event_views(), **history_host.event_views()}.items()
-                    if name not in {"create_artifact", "publish_workspace_artifact"}
-                },
-                workspace=DENO_WORKSPACE_CAPABILITY,
-            )
-            return DenoPreparedCapabilities(
-                spec,
-                files=file_host,
-                skills=_EmptySkillHost(),
-                preparation_notices=(PreparationNotice("skills_unavailable", "Skills are unavailable"),),
-            )
-        resolved = resolve_selected_skills(self._skill_catalog, selections)
-
-        if await turn.cancellation_requested():
-            raise TurnPreparationCancelled("Turn cancelled")
-        if asyncio.get_running_loop().time() >= deadline:
-            raise TurnPreparationTimeout("Turn preparation timed out")
-        allowed_ids = frozenset(skill.card.id for skill in resolved.selected) if selections else None
-        skill_host = SkillToolHost(
-            self._skill_catalog,
-            allowed_skill_ids=allowed_ids,
-        )
-
-        tools = (*file_tools, *history_tools, *skill_host.as_tools())
-        tool_event_views = {
+        file_event_views = {
             name: view
-            for name, view in {
-                **file_host.event_views(),
-                **history_host.event_views(),
-                **skill_host.event_views(),
-            }.items()
+            for name, view in file_host.event_views().items()
             if name not in {"create_artifact", "publish_workspace_artifact"}
         }
-        schema_id, schema_version = resolved_schema(resolved)
-        spec = RLMExecutionSpec(
-            skill_cards=resolved.cards,
-            signature=resolved_signature(resolved),
-            output_schema_id=schema_id,
-            output_schema_version=schema_version,
-            tools=tools,
-            tool_event_views=tool_event_views,
+        spec, skill_host, notices = await prepare_host_capabilities(
+            turn=turn,
+            skill_catalog=self._skill_catalog,
+            files=file_host,
+            base_tools=file_tools,
+            base_event_views=file_event_views,
             workspace=DENO_WORKSPACE_CAPABILITY,
+            deadline=deadline,
         )
-        for skill in resolved.selected:
-            skill_host.mark_preloaded(skill)
-        return DenoPreparedCapabilities(spec, files=file_host, skills=skill_host)
-
-
-class _EmptySkillHost:
-    def drain_public_events(self) -> list[dict[str, Any]]:
-        return []
-
-
-def _skill_event(item: dict[str, Any]) -> SkillActivated | SkillLoaded:
-    if item.get("kind") == "skill.activated":
-        return SkillActivated(
-            str(item["skill_id"]),
-            str(item["name"]),
-            str(item["version"]),
-            str(item["trust"]),
-            tuple(str(value) for value in item.get("affordances", ())),
+        return DenoPreparedCapabilities(
+            spec,
+            files=file_host,
+            skills=skill_host,
+            preparation_notices=notices,
         )
-    return SkillLoaded(str(item["skill_id"]), str(item["name"]), str(item["version"]))
 
 
 class DenoTurnPreparation:
