@@ -124,6 +124,21 @@ jobs:
           path: test-results
           destination: test-results/e2e
 
+  daytona-coverage:
+    executor: python
+    resource_class: medium+
+    steps:
+      - checkout
+      - install_python_dependencies
+      - save_uv_cache
+      - run:
+          name: Run Daytona branch coverage gate
+          no_output_timeout: 10m
+          command: make test-daytona-cov
+      - store_artifacts:
+          path: .scratch/coverage
+          destination: coverage/daytona
+
   test-deno:
     executor: python
     resource_class: small
@@ -152,4 +167,5 @@ workflows:
       - lint-typecheck
       - test-unit
       - test-e2e
+      - daytona-coverage
       - test-deno
