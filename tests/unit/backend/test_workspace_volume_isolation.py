@@ -11,18 +11,18 @@ import pytest
 from fleet_rlm.daytona.bindings import InMemoryBindingStore, SandboxBinding
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.platform import LiveDaytonaPlatform
-from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec
-from fleet_rlm.daytona.session_manager import (
-    DaytonaSessionManager,
+from fleet_rlm.daytona.provisioning import (
+    DaytonaSandboxSpec,
     ExpectedWorkspaceMount,
-    LeaseRequest,
-    verify_sandbox_workspace_mount,
-)
-from fleet_rlm.daytona.volumes import (
     VolumeConfig,
     require_scoped_volume_subpath,
+    verify_sandbox_workspace_mount,
     volume_mount_spec,
     workspace_volume_subpath,
+)
+from fleet_rlm.daytona.session_manager import (
+    DaytonaSessionManager,
+    LeaseRequest,
 )
 
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")
@@ -33,7 +33,7 @@ class _FakeVolume:
 
 
 class _FakeVolumeClient:
-    def get(self, name: str, *, create: bool = False) -> _FakeVolume:
+    async def get(self, name: str, *, create: bool = False) -> _FakeVolume:
         del name, create
         return _FakeVolume()
 
@@ -48,7 +48,7 @@ class _FakeFilesystem:
         self.directories = {mount_path}
         self.files: set[str] = set()
 
-    def get_file_info(self, path: str) -> _FakeFileInfo:
+    async def get_file_info(self, path: str) -> _FakeFileInfo:
         if path in self.directories:
             return _FakeFileInfo(is_dir=True)
         if path in self.files:
@@ -56,11 +56,11 @@ class _FakeFilesystem:
         if path not in self.directories:
             raise FileNotFoundError(path)
 
-    def create_folder(self, path: str, mode: str) -> None:
+    async def create_folder(self, path: str, mode: str) -> None:
         del mode
         self.directories.add(path)
 
-    def upload_file(self, data: bytes, path: str) -> None:
+    async def upload_file(self, data: bytes, path: str) -> None:
         del data
         self.files.add(path)
 
@@ -100,17 +100,19 @@ class _FakePlatform:
         self.deleted: list[str] = []
         self._n = 0
 
-    def get(self, sandbox_id: str) -> _FakeSandbox | None:
+    async def get(self, sandbox_id: str) -> _FakeSandbox | None:
         return self.sandboxes.get(sandbox_id)
 
-    def create(
+    async def create(
         self,
         *,
         volume_id: str,
         mount_path: str,
         volume_subpath: str,
         labels: dict[str, str] | None = None,
+        ephemeral: bool = False,
     ) -> _FakeSandbox:
+        del ephemeral
         require_scoped_volume_subpath(volume_subpath)
         self._n += 1
         sid = f"sb-{self._n}"
@@ -134,7 +136,7 @@ class _FakePlatform:
         )
         return sb
 
-    def delete(self, sandbox_id: str) -> None:
+    async def delete(self, sandbox_id: str) -> None:
         self.deleted.append(sandbox_id)
         self.sandboxes.pop(sandbox_id, None)
 
@@ -172,14 +174,15 @@ def test_volume_mount_spec_requires_workspace_subpath() -> None:
         volume_mount_spec(VolumeConfig(), "vol-1", workspace_id=UUID(int=0))
 
 
-def test_live_platform_rejects_unscoped_volume_mount() -> None:
+@pytest.mark.asyncio
+async def test_live_platform_rejects_unscoped_volume_mount() -> None:
     class _Client:
-        def create(self, params: Any) -> Any:
+        async def create(self, params: Any) -> Any:
             raise AssertionError("must not create unscoped sandbox")
 
     platform = LiveDaytonaPlatform(_Client(), _SPEC)
     with pytest.raises(ValueError, match="without workspace subpath"):
-        platform.create(
+        await platform.create(
             volume_id="vol-1",
             mount_path="/home/daytona/fleet",
             volume_subpath=None,

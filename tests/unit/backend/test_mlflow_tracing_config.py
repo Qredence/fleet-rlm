@@ -108,6 +108,14 @@ def test_configure_tracing_enabled_without_workspace_settings_is_soft_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_fake_mlflow(monkeypatch)
+    for name in (
+        "FLEET_MLFLOW_EXPERIMENT_NAME",
+        "FLEET_MLFLOW_TRACE_CATALOG",
+        "FLEET_MLFLOW_TRACE_SCHEMA",
+        "FLEET_MLFLOW_TRACE_TABLE_PREFIX",
+        "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
     tracing.configure_tracing(Settings(_env_file=None, mlflow_tracing_enabled=True))
     assert calls.tracking_uri_args == []
     assert calls.autolog_calls == 0

@@ -6,20 +6,23 @@ behind an injectable dependency seam so unit tests remain credential-free.
 
 from __future__ import annotations
 
-import asyncio
-import inspect
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 from fleet_rlm.config import Settings
-from fleet_rlm.daytona.client import build_daytona_client
 from fleet_rlm.daytona.errors import DaytonaAdapterError, classify_provider_error
-from fleet_rlm.daytona.interpreter import sandbox_backend
-from fleet_rlm.daytona.platform import LiveDaytonaPlatform, LiveDaytonaVolumeClient
-from fleet_rlm.daytona.sandbox_spec import sandbox_spec_from_settings, verify_sandbox_spec
-from fleet_rlm.daytona.session_manager import ExpectedWorkspaceMount, verify_sandbox_workspace_mount
-from fleet_rlm.daytona.volumes import (
+from fleet_rlm.daytona.platform import (
+    LiveDaytonaPlatform,
+    LiveDaytonaVolumeClient,
+    build_daytona_client,
+)
+from fleet_rlm.daytona.provisioning import (
+    ExpectedWorkspaceMount,
+    sandbox_spec_from_settings,
+    snapshot_execution_dependencies,
+    verify_sandbox_spec,
+    verify_sandbox_workspace_mount,
     volume_config_from_settings,
     workspace_volume_subpath,
 )
@@ -100,11 +103,7 @@ class _ProductionDaytonaDoctorDependencies:
 
     async def resolve_volume(self, settings: Settings) -> str:
         del settings
-        volume = await asyncio.to_thread(
-            self._volume_client.get,
-            self._volume_config.name,
-            create=False,
-        )
+        volume = await self._volume_client.get(self._volume_config.name, create=False)
         volume_id = getattr(volume, "id", None)
         if volume_id is None:
             raise DaytonaAdapterError(
@@ -120,8 +119,7 @@ class _ProductionDaytonaDoctorDependencies:
         labels: dict[str, str],
         ephemeral: bool,
     ) -> Any:
-        return await asyncio.to_thread(
-            self._platform.create,
+        return await self._platform.create(
             volume_id=expected_mount.volume_id,
             mount_path=expected_mount.mount_path,
             volume_subpath=expected_mount.volume_subpath,
@@ -133,7 +131,7 @@ class _ProductionDaytonaDoctorDependencies:
     async def verify_mount(self, sandbox: Any, expected_mount: ExpectedWorkspaceMount) -> None:
         refresh = getattr(sandbox, "refresh_data", None)
         if callable(refresh):
-            await asyncio.to_thread(refresh)
+            await refresh()
         mounts = getattr(sandbox, "volumes", None)
         if mounts is None:
             mounts = getattr(sandbox, "mounts", None)
@@ -146,16 +144,22 @@ class _ProductionDaytonaDoctorDependencies:
         verify_sandbox_spec(sandbox, self._sandbox_spec)
 
     async def execute(self, sandbox: Any) -> str:
-        backend = sandbox_backend(sandbox)
+        context = await sandbox.code_interpreter.create_context()
         run_error: BaseException | None = None
         try:
-            result = await asyncio.to_thread(
-                backend.run,
-                "import os, sys\n"
+            dependencies = snapshot_execution_dependencies()
+            result = await sandbox.code_interpreter.run_code(
+                "import importlib, importlib.metadata, os, sys\n"
                 "assert sys.version_info[:3] == (3, 13, 13)\n"
                 "assert os.geteuid() != 0\n"
                 "assert os.getcwd() == '/home/daytona'\n"
+                f"dependencies = {dependencies!r}\n"
+                "for requirement in dependencies:\n"
+                "    package, expected = requirement.split('==', 1)\n"
+                "    importlib.import_module(package.replace('-', '_'))\n"
+                "    assert importlib.metadata.version(package) == expected\n"
                 "print('fleet-doctor-ok')",
+                context=context,
             )
             stdout = getattr(result, "stdout", result)
             error = getattr(result, "error", None)
@@ -167,7 +171,7 @@ class _ProductionDaytonaDoctorDependencies:
             raise
         finally:
             try:
-                await asyncio.to_thread(backend.close)
+                await sandbox.code_interpreter.delete_context(context)
             except Exception:
                 if run_error is None:
                     raise
@@ -178,15 +182,10 @@ class _ProductionDaytonaDoctorDependencies:
                 message="disposable sandbox did not expose an id",
                 cause_type="SandboxIdentityError",
             )
-        await asyncio.to_thread(self._platform.delete, sandbox)
+        await self._platform.delete(sandbox)
 
     async def close(self) -> None:
-        close = getattr(self._client, "close", None)
-        if not callable(close):
-            return
-        result = close()
-        if inspect.isawaitable(result):
-            await result
+        await self._client.close()
 
 
 _SUCCESS_MESSAGES: dict[DoctorStepName, str] = {

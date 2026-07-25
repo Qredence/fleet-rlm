@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend, sandbox_backend
+from fleet_rlm.rlm.errors import TurnNoProgress
 from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted, ToolCompleted, ToolStarted
 
 
@@ -114,6 +114,66 @@ def test_interpreter_bounds_details_and_finishes_failed_steps() -> None:
     assert observed[2].output == "Execution failed"
     assert "secret-value" not in observed[2].output
     assert "/home/daytona" not in observed[2].output
+
+
+def test_empty_code_returns_direct_feedback_then_repetition_stops_the_turn() -> None:
+    class Backend:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run(self, code: str, variables=None):
+            del code, variables
+            self.calls += 1
+            return ""
+
+        def close(self) -> None:
+            return None
+
+    backend = Backend()
+    observed: list[object] = []
+    interpreter = DaytonaCodeInterpreter(backend=backend)
+    interpreter.bind_observer(observed.append, max_chars=1_000)
+
+    first = interpreter.execute(" \n\t")
+
+    assert first == "[Error] No executable code was provided; execute useful Python or call SUBMIT."
+    assert backend.calls == 0
+    with pytest.raises(TurnNoProgress, match="repeated tool calls made no progress"):
+        interpreter.execute("")
+
+    assert backend.calls == 0
+    assert [type(item) for item in observed] == [
+        StepStarted,
+        RLMCode,
+        RLMOutput,
+        StepFinished,
+        StepStarted,
+        RLMCode,
+        RLMOutput,
+        StepFinished,
+    ]
+    assert observed[2].output == "Execution error"
+    assert observed[6].output == "Execution failed"
+
+
+def test_f_string_backslash_syntax_error_gets_focused_native_repair_feedback() -> None:
+    from fleet_rlm.daytona.interpreter import BackendExecutionResult
+
+    class SyntaxBackend:
+        def run(self, code: str, variables=None):
+            del code, variables
+            return BackendExecutionResult(error="SyntaxError: f-string expression part cannot include a backslash")
+
+        def close(self) -> None:
+            return None
+
+    interpreter = DaytonaCodeInterpreter(backend=SyntaxBackend())
+
+    result = interpreter.execute("generated_f_string_code")
+
+    assert result.startswith("[Error]")
+    assert "f-string expression part cannot include a backslash" in result
+    assert "Build the escaped fragment before the f-string expression" in result
 
 
 def test_sandbox_backend_uses_one_explicit_context_per_run_and_fails_closed() -> None:

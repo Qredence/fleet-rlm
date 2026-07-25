@@ -1,142 +1,113 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
-from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.paths import UnsafePathError
-from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec
-from fleet_rlm.daytona.workspace_volume import DaytonaWorkspaceVolumeGateway
-
-_SPEC = DaytonaSandboxSpec("fleet-test-v1")
+from fleet_rlm.daytona.workspace_gateway import DaytonaWorkspaceVolumeGateway
+from fleet_rlm.files.volume_paths import UnsafePathError
 
 
 class _FakeFs:
     def __init__(self, *, fail_upload: bool = False) -> None:
         self.data: dict[str, bytes] = {}
-        self.folders = {"/home/daytona/fleet"}
         self.fail_upload = fail_upload
 
-    async def get_file_info(self, path: str) -> object:
-        if path not in self.folders:
-            error = RuntimeError("not found")
-            error.status_code = 404  # type: ignore[attr-defined]
-            raise error
-        return SimpleNamespace(path=path)
-
-    async def create_folder(self, path: str, mode: str) -> None:
-        assert mode == "755"
-        self.folders.add(path)
+    async def create_folder(self, path: str, mode: str | None = None) -> None:
+        del path, mode
 
     async def upload_file(self, data: bytes, path: str) -> None:
         if self.fail_upload:
-            raise RuntimeError("provider api_key=super-secret unavailable")
-        self.data[path] = data
+            raise RuntimeError("provider unavailable")
+        self.data[path] = bytes(data)
 
     async def download_file(self, path: str) -> bytes:
         return self.data[path]
 
+    async def delete_file(self, path: str) -> None:
+        self.data.pop(path, None)
 
-class _FakeClient:
-    def __init__(self, *, fail_upload: bool = False, fail_delete: bool = False) -> None:
-        self.volume = SimpleNamespace(get=self._get_volume)
+    async def list_files(self, path: str, *, depth: int) -> list[object]:
+        del depth
+        return [
+            SimpleNamespace(path=value, is_dir=False, mod_time=1.0)
+            for value in sorted(self.data)
+            if value.startswith(path + "/")
+        ]
+
+
+class _MountedGateway:
+    def __init__(self, *, fail_upload: bool = False) -> None:
         self.sandbox = SimpleNamespace(fs=_FakeFs(fail_upload=fail_upload))
-        self.params = None
-        self.deleted = 0
-        self.fail_delete = fail_delete
+        self.opens: list[tuple[UUID, str]] = []
+        self.closes = 0
 
-    async def _get_volume(self, name: str, *, create: bool) -> object:
-        assert name == "shared"
-        assert create is True
-        return SimpleNamespace(id="vol-1")
-
-    async def create(self, params: object) -> object:
-        self.params = params
-        return self.sandbox
-
-    async def delete(self, sandbox: object) -> None:
-        assert sandbox is self.sandbox
-        if self.fail_delete:
-            raise RuntimeError("api_key=private cleanup failed")
-        self.deleted += 1
+    @asynccontextmanager
+    async def open_sandbox(self, workspace_id: UUID, *, purpose: str):
+        self.opens.append((workspace_id, purpose))
+        try:
+            yield self.sandbox
+        finally:
+            self.closes += 1
 
 
 @pytest.mark.asyncio
-async def test_gateway_mounts_only_workspace_scope_and_deletes_io_sandbox() -> None:
-    client = _FakeClient()
+async def test_gateway_uses_one_shared_mounted_scope_for_grouped_byte_operations() -> None:
+    mounted = _MountedGateway()
+    gateway = DaytonaWorkspaceVolumeGateway(
+        mounted,  # ty: ignore[invalid-argument-type] - focused mounted gateway fake
+        mount_path="/home/daytona/fleet",
+    )
     workspace_id = uuid4()
-    gateway = DaytonaWorkspaceVolumeGateway(
-        client,
-        volume_name="shared",
-        mount_path="/home/daytona/fleet",
-        sandbox_spec=_SPEC,
-    )
+    path = "/home/daytona/fleet/attachments/a.bin"
 
-    await gateway.write_bytes(workspace_id, "/home/daytona/fleet/attachments/a.bin", b"payload")
+    async with gateway.open_workspace(workspace_id) as volume:
+        await volume.write_bytes(path, b"payload")
+        assert await volume.read_bytes(path) == b"payload"
+        assert await volume.list_files(
+            "/home/daytona/fleet/attachments",
+            max_depth=2,
+            max_files=10,
+        )
+        await volume.remove_bytes(path)
 
-    mount = client.params.volumes[0]
-    assert mount.subpath == f"workspaces/{workspace_id}"
-    assert mount.mount_path == "/home/daytona/fleet"
-    assert client.params.ephemeral is True
-    # Daytona 0.192 rejects auto_delete_interval with ephemeral=True; explicit
-    # deletion is primary and ephemeral lifecycle is the provider backstop.
-    assert client.params.auto_delete_interval == 0
-    assert "/home/daytona/fleet/attachments" in client.sandbox.fs.folders
-    assert client.deleted == 1
+    assert mounted.opens == [(workspace_id, "workspace-volume-io")]
+    assert mounted.closes == 1
 
 
 @pytest.mark.asyncio
-async def test_gateway_deletes_io_sandbox_when_file_operation_fails() -> None:
-    client = _FakeClient(fail_upload=True)
+async def test_gateway_releases_mounted_scope_when_operation_fails() -> None:
+    mounted = _MountedGateway(fail_upload=True)
     gateway = DaytonaWorkspaceVolumeGateway(
-        client,
-        volume_name="shared",
+        mounted,  # ty: ignore[invalid-argument-type]
         mount_path="/home/daytona/fleet",
-        sandbox_spec=_SPEC,
     )
 
-    with pytest.raises(DaytonaAdapterError) as caught:
-        await gateway.write_bytes(uuid4(), "/home/daytona/fleet/attachments/a.bin", b"payload")
-
-    assert "super-secret" not in str(caught.value)
-    assert client.deleted == 1
-
-
-@pytest.mark.asyncio
-async def test_gateway_rejects_paths_outside_the_mounted_workspace_scope() -> None:
-    client = _FakeClient()
-    gateway = DaytonaWorkspaceVolumeGateway(
-        client,
-        volume_name="shared",
-        mount_path="/home/daytona/fleet",
-        sandbox_spec=_SPEC,
-    )
-
-    with pytest.raises(UnsafePathError):
-        await gateway.write_bytes(uuid4(), "/home/daytona/other/foreign.bin", b"payload")
-
-    assert client.params is None
-
-
-@pytest.mark.asyncio
-async def test_gateway_logs_safe_cleanup_failure_and_relies_on_ephemeral_backstop(caplog) -> None:
-    client = _FakeClient(fail_delete=True)
-    workspace_id = uuid4()
-    gateway = DaytonaWorkspaceVolumeGateway(
-        client,
-        volume_name="shared",
-        mount_path="/home/daytona/fleet",
-        sandbox_spec=_SPEC,
-    )
-
-    with caplog.at_level("WARNING"):
+    with pytest.raises(RuntimeError, match="unavailable"):
         await gateway.write_bytes(
-            workspace_id,
+            uuid4(),
             "/home/daytona/fleet/attachments/a.bin",
             b"payload",
         )
 
-    assert "Sandbox deletion failed" in caplog.text
-    assert "api_key" not in caplog.text
+    assert mounted.closes == 1
+
+
+@pytest.mark.asyncio
+async def test_gateway_rejects_paths_outside_workspace_mount_before_file_io() -> None:
+    mounted = _MountedGateway()
+    gateway = DaytonaWorkspaceVolumeGateway(
+        mounted,  # ty: ignore[invalid-argument-type]
+        mount_path="/home/daytona/fleet",
+    )
+
+    with pytest.raises(UnsafePathError):
+        await gateway.write_bytes(
+            uuid4(),
+            "/home/daytona/other/foreign.bin",
+            b"payload",
+        )
+
+    assert mounted.sandbox.fs.data == {}

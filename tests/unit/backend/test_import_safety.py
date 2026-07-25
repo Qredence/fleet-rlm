@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+from pathlib import Path
 from typing import Any
 
 
@@ -64,3 +65,15 @@ def test_create_app_returns_fastapi_without_side_effects(monkeypatch) -> None:
     app = create_app()
     assert isinstance(app, FastAPI)
     assert app.title
+
+
+def test_generic_runtime_modules_do_not_import_daytona_implementations() -> None:
+    root = Path("src/fleet_rlm")
+    candidates = [
+        path for package in ("chat", "files", "artifacts", "skills") for path in (root / package).glob("*.py")
+    ]
+    candidates.append(root / "composition" / "testing.py")
+
+    violations = [str(path) for path in candidates if "fleet_rlm.daytona" in path.read_text(encoding="utf-8")]
+
+    assert violations == []

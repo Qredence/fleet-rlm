@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -15,9 +15,8 @@ from fleet_rlm.daytona.errors import (
     provider_status_category,
     sanitize_provider_message,
 )
-from fleet_rlm.daytona.lifecycle import normalize_state
-from fleet_rlm.daytona.platform import LiveDaytonaPlatform, LiveDaytonaVolumeClient
-from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec
+from fleet_rlm.daytona.platform import LiveDaytonaPlatform, LiveDaytonaVolumeClient, normalize_state
+from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
 
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")
 
@@ -106,31 +105,38 @@ def test_sanitize_provider_message_redacts_secrets_and_private_paths() -> None:
     assert sanitized.count("[redacted]") >= 4
 
 
-def test_live_platform_get_none_only_on_not_found() -> None:
+@pytest.mark.asyncio
+async def test_live_platform_get_none_only_on_not_found() -> None:
     client = MagicMock()
-    client.get.side_effect = DaytonaNotFoundError()
+    client.get = AsyncMock(side_effect=DaytonaNotFoundError())
     platform = LiveDaytonaPlatform(client, _SPEC)
-    assert platform.get("sb-missing") is None
+    assert await platform.get("sb-missing") is None
 
 
-def test_live_platform_get_raises_on_auth_error() -> None:
+@pytest.mark.asyncio
+async def test_live_platform_get_raises_on_auth_error() -> None:
     client = MagicMock()
-    client.get.side_effect = _AuthError()
+    client.get = AsyncMock(side_effect=_AuthError())
     platform = LiveDaytonaPlatform(client, _SPEC)
     with pytest.raises(ProviderRequestError):
-        platform.get("sb-1")
+        await platform.get("sb-1")
 
 
-def test_live_volume_client_waits_for_created_volume_to_be_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_live_volume_client_waits_for_created_volume_to_be_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     client = MagicMock()
-    client.volume.get.side_effect = [
-        SimpleNamespace(id="vol-1", state="creating"),
-        SimpleNamespace(id="vol-1", state="ready"),
-    ]
-    monkeypatch.setattr("fleet_rlm.daytona.platform.time.sleep", lambda _delay: None)
+    client.volume.get = AsyncMock(
+        side_effect=[
+            SimpleNamespace(id="vol-1", state="creating"),
+            SimpleNamespace(id="vol-1", state="ready"),
+        ]
+    )
 
-    volume = LiveDaytonaVolumeClient(client).get("vol-1", create=True)
+    async def _no_sleep(_delay: float) -> None:
+        return None
 
+    monkeypatch.setattr("fleet_rlm.daytona.platform.asyncio.sleep", _no_sleep)
+    volume = await LiveDaytonaVolumeClient(client).get("vol-1", create=True)
     assert volume.state == "ready"
     assert client.volume.get.call_args_list == [
         (("vol-1",), {"create": True}),
@@ -138,28 +144,62 @@ def test_live_volume_client_waits_for_created_volume_to_be_ready(monkeypatch: py
     ]
 
 
-def test_live_volume_client_rejects_failed_volume_state() -> None:
+@pytest.mark.asyncio
+async def test_live_volume_client_rejects_failed_volume_state() -> None:
     from fleet_rlm.daytona.errors import DaytonaAdapterError
 
     client = MagicMock()
-    client.volume.get.side_effect = [SimpleNamespace(id="vol-1", state="error")]
+    client.volume.get = AsyncMock(side_effect=[SimpleNamespace(id="vol-1", state="error")])
 
     with pytest.raises(DaytonaAdapterError, match="did not become ready"):
-        LiveDaytonaVolumeClient(client).get("vol-1", create=True)
+        await LiveDaytonaVolumeClient(client).get("vol-1", create=True)
 
 
-def test_live_platform_delete_resolves_id_for_daytona_0_192_contract() -> None:
+@pytest.mark.asyncio
+async def test_live_platform_delete_resolves_id_for_daytona_async_contract() -> None:
     client = MagicMock()
     sandbox = SimpleNamespace(id="sb-1")
-    client.get.return_value = sandbox
+    client.get = AsyncMock(return_value=sandbox)
+    client.delete = AsyncMock()
 
-    LiveDaytonaPlatform(client, _SPEC).delete("sb-1")
+    await LiveDaytonaPlatform(client, _SPEC).delete("sb-1")
 
     client.get.assert_called_once_with("sb-1")
     client.delete.assert_called_once_with(sandbox)
 
 
-def test_live_platform_create_defaults_ephemeral_false(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_live_platform_start_and_stop_use_async_client_methods() -> None:
+    client = MagicMock()
+    sandbox = MagicMock()
+    client.get = AsyncMock(return_value=sandbox)
+    client.start = AsyncMock()
+    client.stop = AsyncMock()
+    platform = LiveDaytonaPlatform(client, _SPEC)
+
+    await platform.start("sb-1")
+    await platform.stop("sb-1", timeout=12, force=True)
+
+    assert client.get.await_args_list == [(("sb-1",), {}), (("sb-1",), {})]
+    client.start.assert_awaited_once_with(sandbox)
+    client.stop.assert_awaited_once_with(sandbox, timeout=12)
+
+
+@pytest.mark.asyncio
+async def test_live_platform_force_stop_deletes_sandbox_when_stop_fails() -> None:
+    client = MagicMock()
+    sandbox = MagicMock()
+    client.get = AsyncMock(return_value=sandbox)
+    client.stop = AsyncMock(side_effect=RuntimeError("stop failed"))
+    client.delete = AsyncMock()
+
+    await LiveDaytonaPlatform(client, _SPEC).stop("sb-1", force=True)
+
+    client.delete.assert_awaited_once_with(sandbox)
+
+
+@pytest.mark.asyncio
+async def test_live_platform_create_defaults_ephemeral_false(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
     class _Params:
@@ -176,9 +216,9 @@ def test_live_platform_create_defaults_ephemeral_false(monkeypatch: pytest.Monke
     monkeypatch.setattr(daytona_mod, "VolumeMount", _Mount)
 
     client = MagicMock()
-    client.create.side_effect = lambda params: SimpleNamespace(id="sb-new", params=params)
+    client.create = AsyncMock(side_effect=lambda params: SimpleNamespace(id="sb-new", params=params))
     platform = LiveDaytonaPlatform(client, _SPEC)
-    platform.create(
+    await platform.create(
         volume_id="vol-1",
         mount_path="/home/daytona/fleet",
         volume_subpath="workspaces/11111111-1111-1111-1111-111111111111",
@@ -188,13 +228,14 @@ def test_live_platform_create_defaults_ephemeral_false(monkeypatch: pytest.Monke
     client.create.assert_called_once()
 
 
-def test_live_platform_create_matches_daytona_0_192_payload_contract() -> None:
-    """Pin the scoped mount payload consumed by Daytona SDK 0.192.0."""
+@pytest.mark.asyncio
+async def test_live_platform_create_matches_daytona_async_payload_contract() -> None:
+    """Pin the scoped mount payload consumed by the asynchronous Daytona SDK."""
     client = MagicMock()
-    client.create.side_effect = lambda params: SimpleNamespace(id="sb-new", params=params)
+    client.create = AsyncMock(side_effect=lambda params: SimpleNamespace(id="sb-new", params=params))
     platform = LiveDaytonaPlatform(client, _SPEC)
 
-    platform.create(
+    await platform.create(
         volume_id="vol-1",
         mount_path="/home/daytona/fleet",
         volume_subpath="workspaces/11111111-1111-1111-1111-111111111111",

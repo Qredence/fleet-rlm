@@ -154,6 +154,50 @@ describe("FleetApiClient", () => {
     expect(onStreamOpen).not.toHaveBeenCalled();
   });
 
+  it("reads and revision-updates local settings policy", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ revision: "a".repeat(64), scopes: [] }), {
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ revision: "b".repeat(64), scopes: [] }), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    globalThis.fetch = fetchMock;
+    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
+
+    await client.getSettings();
+    await client.updateSettings({
+      revision: "a".repeat(64),
+      scope: "defaults",
+      path: "rlm.max_iterations",
+      value: 21,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://fleet.test/api/settings",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://fleet.test/api/settings",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          revision: "a".repeat(64),
+          scope: "defaults",
+          path: "rlm.max_iterations",
+          value: 21,
+        }),
+      }),
+    );
+  });
+
   it("lists discoverable Skill cards", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify([{ id: "skill-1", name: "long-context" }]), {

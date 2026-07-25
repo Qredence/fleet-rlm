@@ -7,13 +7,15 @@ Workspace Volume Scope uses VolumeMount subpath ``workspaces/<workspace_id>``.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from threading import Lock
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailable
-from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionPermit
 from fleet_rlm.daytona.bindings import SandboxBinding
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
@@ -22,27 +24,141 @@ from fleet_rlm.daytona.errors import (
     map_provider_error,
 )
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
-from fleet_rlm.daytona.leases import InterpreterLease
-from fleet_rlm.daytona.lifecycle import (
-    LifecycleCapabilityError,
-    call_if_supported,
-    sandbox_state,
-)
-from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec, verify_sandbox_spec
-from fleet_rlm.daytona.volume_layout import ensure_volume_layout
-from fleet_rlm.daytona.volumes import (
+from fleet_rlm.daytona.platform import sandbox_state
+from fleet_rlm.daytona.provisioning import (
+    DaytonaSandboxSpec,
+    ExpectedWorkspaceMount,
+    SandboxPlatform,
+    SandboxProvisioner,
     VolumeClient,
     VolumeConfig,
     get_or_create_volume_id,
     require_non_zero_workspace_id,
     require_scoped_volume_subpath,
-    volume_mount_spec,
     workspace_volume_subpath,
 )
+
+logger = logging.getLogger(__name__)
+
+
+class DaytonaAdmissionTimeout(RuntimeError):
+    """The Turn deadline elapsed before Daytona capacity became available."""
+
+
+@dataclass(slots=True)
+class DaytonaAdmissionPermit:
+    """One idempotently releasable slot in Daytona admission."""
+
+    _semaphore: asyncio.BoundedSemaphore
+    _released: bool = field(default=False, init=False)
+
+    def release(self) -> None:
+        if self._released:
+            return
+        self._released = True
+        self._semaphore.release()
+
+
+class DaytonaAdmission:
+    """Bound acquiring plus active Interpreter Leases for one process."""
+
+    def __init__(self, *, max_active_leases: int = 8) -> None:
+        if max_active_leases <= 0:
+            raise ValueError("max_active_leases must be positive")
+        if max_active_leases > 8:
+            raise ValueError("max_active_leases must be at most 8")
+        self._semaphore = asyncio.BoundedSemaphore(max_active_leases)
+
+    async def acquire(self, *, deadline: float) -> DaytonaAdmissionPermit:
+        try:
+            async with asyncio.timeout_at(deadline):
+                await self._semaphore.acquire()
+        except TimeoutError:
+            raise DaytonaAdmissionTimeout("Daytona admission unavailable") from None
+        return DaytonaAdmissionPermit(self._semaphore)
+
+
+class ActiveLeaseConflictError(RuntimeError):
+    """Another run already holds the active lease for this Session."""
+
+    def __init__(self, session_id: UUID, holder_run_id: UUID | None = None) -> None:
+        self.session_id = session_id
+        self.holder_run_id = holder_run_id
+        super().__init__(f"active lease conflict for session {session_id}")
+
+
+class ActiveLeaseRegistry:
+    """At most one active Interpreter Lease per Session in this process."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._holders: dict[UUID, UUID] = {}
+
+    def acquire(self, session_id: UUID, run_id: UUID) -> None:
+        with self._lock:
+            existing = self._holders.get(session_id)
+            if existing is not None and existing != run_id:
+                raise ActiveLeaseConflictError(session_id, holder_run_id=existing)
+            self._holders[session_id] = run_id
+
+    def release(self, session_id: UUID, run_id: UUID) -> None:
+        with self._lock:
+            if self._holders.get(session_id) == run_id:
+                del self._holders[session_id]
+
+    def holder(self, session_id: UUID) -> UUID | None:
+        with self._lock:
+            return self._holders.get(session_id)
+
+
+_REGISTRY = ActiveLeaseRegistry()
+
+
+def get_active_lease_registry() -> ActiveLeaseRegistry:
+    return _REGISTRY
+
+
+def set_active_lease_registry(registry: ActiveLeaseRegistry) -> None:
+    global _REGISTRY
+    _REGISTRY = registry
+
+
+@dataclass(slots=True)
+class InterpreterLease:
+    """Acquired interpreter binding for one Run."""
+
+    sandbox_id: str
+    interpreter_id: str
+    volume_id: str
+    mount_path: str
+    interpreter: DaytonaCodeInterpreter
+    session_id: str | None = None
+    run_id: str | None = None
+    volume_subpath: str | None = None
+    delete_sandbox: Callable[[str], None] | None = None
+    created_sandbox: bool = False
+    _released: bool = field(default=False, init=False, repr=False)
+    _on_release: Callable[[], None] | None = field(default=None, init=False, repr=False)
+
+    def release(self) -> None:
+        if self._released:
+            return
+        self._released = True
+        try:
+            self.interpreter.shutdown()
+        finally:
+            if self._on_release is not None:
+                try:
+                    self._on_release()
+                except Exception:
+                    pass
 
 
 class DaytonaLeaseAcquisitionTimeout(RuntimeError):
     """The Turn deadline elapsed while provider lease work was in flight."""
+
+
+DEFAULT_IDLE_STOP_SECONDS = 300.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,37 +169,10 @@ class LeaseRequest:
     run_id: UUID | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ExpectedWorkspaceMount:
-    volume_id: str
-    volume_subpath: str
-    mount_path: str
-    workspace_id: UUID
-
-
 class BindingStoreLike(Protocol):
     async def get(self, session_id: UUID) -> SandboxBinding | None: ...
 
     async def upsert(self, binding: SandboxBinding) -> SandboxBinding: ...
-
-
-class SandboxPlatform(Protocol):
-    """Minimal provider surface; unit tests inject fakes."""
-
-    def get(self, sandbox_id: str) -> Any | None: ...
-
-    def create(
-        self,
-        *,
-        volume_id: str,
-        mount_path: str,
-        volume_subpath: str,
-        labels: dict[str, str] | None = None,
-    ) -> Any: ...
-
-    def delete(self, sandbox_id: str) -> None: ...
-
-    def stop(self, sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None: ...
 
 
 def _sandbox_id(sandbox: Any) -> str:
@@ -93,25 +182,19 @@ def _sandbox_id(sandbox: Any) -> str:
     return str(sid)
 
 
-def _build_interpreter(sandbox: Any) -> DaytonaCodeInterpreter:
+def _build_interpreter(
+    sandbox: Any,
+    *,
+    loop: asyncio.AbstractEventLoop,
+) -> DaytonaCodeInterpreter:
     """Attach a code-interpreter backend when the sandbox exposes one."""
     if hasattr(sandbox, "code_interpreter"):
-        return DaytonaCodeInterpreter(backend=sandbox_backend(sandbox))
+        return DaytonaCodeInterpreter(backend=sandbox_backend(sandbox, loop=loop))
     # Fake/test sandboxes may already carry an interpreter attribute.
     existing = getattr(sandbox, "interpreter", None)
     if isinstance(existing, DaytonaCodeInterpreter):
         return existing
     return DaytonaCodeInterpreter(backend=getattr(sandbox, "backend", None))
-
-
-def _mount_field(mount: Any, key: str) -> str | None:
-    if isinstance(mount, dict):
-        value = mount.get(key)
-    else:
-        value = getattr(mount, key, None)
-    if value is None:
-        return None
-    return str(value)
 
 
 def binding_matches_expected(binding: SandboxBinding, expected: ExpectedWorkspaceMount) -> bool:
@@ -128,51 +211,6 @@ def binding_matches_expected(binding: SandboxBinding, expected: ExpectedWorkspac
     )
 
 
-def verify_sandbox_workspace_mount(
-    sandbox: Any,
-    expected: ExpectedWorkspaceMount,
-) -> None:
-    """Fail closed when the live Sandbox mount/labels disagree with expected scope."""
-    labels = getattr(sandbox, "labels", None)
-    if isinstance(labels, dict) and labels:
-        labeled = str(labels.get("workspace_id") or "").strip()
-        if labeled and labeled != str(expected.workspace_id):
-            raise DaytonaAdapterError(
-                message="sandbox workspace label does not match lease workspace",
-                cause_type="WorkspaceMountMismatch",
-            )
-
-    mounts = getattr(sandbox, "volumes", None)
-    if mounts is None:
-        mounts = getattr(sandbox, "mounts", None)
-    if not mounts:
-        # Fake/limited sandboxes may only expose flat fields.
-        flat_sub = getattr(sandbox, "volume_subpath", None)
-        flat_vid = getattr(sandbox, "volume_id", None)
-        flat_mount = getattr(sandbox, "mount_path", None)
-        if flat_sub is None and flat_vid is None and flat_mount is None:
-            return
-        mounts = [
-            {
-                "volume_id": flat_vid,
-                "mount_path": flat_mount,
-                "subpath": flat_sub,
-            }
-        ]
-
-    for mount in mounts:
-        vid = _mount_field(mount, "volume_id")
-        mpath = _mount_field(mount, "mount_path")
-        sub = _mount_field(mount, "subpath") or _mount_field(mount, "volume_subpath")
-        if vid == expected.volume_id and mpath == expected.mount_path and sub == expected.volume_subpath:
-            return
-
-    raise DaytonaAdapterError(
-        message="sandbox volume mount does not match workspace scope",
-        cause_type="WorkspaceMountMismatch",
-    )
-
-
 class DaytonaSessionManager:
     """Owns Sandbox lifecycle policy for Fleet RLM sessions."""
 
@@ -186,6 +224,7 @@ class DaytonaSessionManager:
         admission: DaytonaAdmission | None = None,
         sandbox_spec: DaytonaSandboxSpec,
         cleanup: TurnCleanupSupervisor | None = None,
+        idle_stop_seconds: float | None = None,
     ) -> None:
         self._platform = platform
         self._volume_client = volume_client
@@ -194,24 +233,28 @@ class DaytonaSessionManager:
         self._admission = admission or DaytonaAdmission()
         self._sandbox_spec = sandbox_spec
         self._cleanup = cleanup or TurnCleanupSupervisor()
+        if idle_stop_seconds is not None and idle_stop_seconds <= 0:
+            raise ValueError("idle_stop_seconds must be positive")
+        self._idle_stop_seconds = idle_stop_seconds
+        self._idle_tasks: dict[UUID, asyncio.Task[None]] = {}
+        self._provisioner = SandboxProvisioner(
+            platform=platform,
+            volume_config=volume_config,
+            sandbox_spec=sandbox_spec,
+        )
 
     def _expected_mount(self, *, volume_id: str, workspace_id: UUID) -> ExpectedWorkspaceMount:
-        require_non_zero_workspace_id(workspace_id)
-        spec = volume_mount_spec(self._volume_config, volume_id, workspace_id=workspace_id)
-        return ExpectedWorkspaceMount(
-            volume_id=spec["volume_id"],
-            volume_subpath=spec["subpath"],
-            mount_path=spec["mount_path"],
+        return self._provisioner.expected_mount(
+            volume_id=volume_id,
             workspace_id=workspace_id,
         )
 
     async def acquire(self, request: LeaseRequest, *, deadline: float) -> InterpreterLease:
         """Ensure a running Sandbox with Workspace Volume Scope; return a lease."""
-        from fleet_rlm.daytona.active_leases import get_active_lease_registry
-
         require_non_zero_workspace_id(request.workspace_id)
         run_id = request.run_id or uuid4()
         session_id = request.session_id
+        self._cancel_idle_stop(session_id)
         get_active_lease_registry().acquire(session_id, run_id)
         claim_held = True
         permit: DaytonaAdmissionPermit | None = None
@@ -264,8 +307,6 @@ class DaytonaSessionManager:
         request: LeaseRequest,
         run_id: UUID,
     ) -> None:
-        from fleet_rlm.daytona.active_leases import get_active_lease_registry
-
         async def cleanup() -> None:
             try:
                 lease = await self._settle_provider_acquisition(acquisition)
@@ -284,8 +325,7 @@ class DaytonaSessionManager:
 
     async def _quarantine(self, lease: InterpreterLease, request: LeaseRequest) -> None:
         """Confirm the old Sandbox is stopped before its ownership is released."""
-
-        await self._bindings.upsert(
+        await self._fence_binding(
             SandboxBinding(
                 session_id=request.session_id,
                 sandbox_id=lease.sandbox_id,
@@ -293,63 +333,26 @@ class DaytonaSessionManager:
                 volume_id=lease.volume_id,
                 volume_subpath=lease.volume_subpath or workspace_volume_subpath(request.workspace_id),
                 mount_path=lease.mount_path,
-                provider_state="fencing",
-                last_verified_at=datetime.now(UTC),
-            )
-        )
-
-        def stop_target(target: Any, *, platform_call: bool) -> None:
-            try:
-                if platform_call:
-                    target(lease.sandbox_id, timeout=60, force=True)
-                else:
-                    target(timeout=60, force=True)
-            except TypeError:
-                # Narrow fake/legacy adapters have no force parameters. The
-                # production Daytona Sandbox surface is verified separately.
-                if platform_call:
-                    target(lease.sandbox_id)
-                else:
-                    target()
-
-        stop = getattr(self._platform, "stop", None)
-        if callable(stop):
-            await asyncio.wait_for(
-                asyncio.to_thread(stop_target, stop, platform_call=True),
-                timeout=60,
-            )
-        else:
-            sandbox = await asyncio.to_thread(self._platform.get, lease.sandbox_id)
-            if sandbox is None:
-                return
-            await asyncio.wait_for(
-                asyncio.to_thread(stop_target, sandbox.stop, platform_call=False),
-                timeout=60,
-            )
-        await self._bindings.upsert(
-            SandboxBinding(
-                session_id=request.session_id,
-                sandbox_id=lease.sandbox_id,
-                workspace_id=request.workspace_id,
-                volume_id=lease.volume_id,
-                volume_subpath=lease.volume_subpath or workspace_volume_subpath(request.workspace_id),
-                mount_path=lease.mount_path,
-                provider_state="quarantined",
-                last_verified_at=datetime.now(UTC),
+                provider_state="running",
             )
         )
         if lease.created_sandbox:
-            deletion = asyncio.to_thread(self._platform.delete, lease.sandbox_id)
+            deletion = self._platform.delete(lease.sandbox_id)
             try:
                 self._cleanup.submit(deletion)
             except TurnCleanupUnavailable:
                 deletion.close()
+                await self._platform.delete(lease.sandbox_id)
 
     async def fence_session(self, session_id: UUID) -> None:
         """Fence a Sandbox retained by a settling Run during startup recovery."""
         binding = await self._bindings.get(session_id)
         if binding is None or not binding.sandbox_id:
             return
+        await self._fence_binding(binding)
+
+    async def _fence_binding(self, binding: SandboxBinding) -> None:
+        """Persist fencing around one awaited provider stop."""
         await self._bindings.upsert(
             SandboxBinding(
                 session_id=binding.session_id,
@@ -362,26 +365,12 @@ class DaytonaSessionManager:
                 last_verified_at=datetime.now(UTC),
             )
         )
-        stop = getattr(self._platform, "stop", None)
-        if callable(stop):
-            try:
-                await asyncio.wait_for(
-                    asyncio.to_thread(stop, binding.sandbox_id, timeout=60, force=True),
-                    timeout=60,
-                )
-            except TypeError:
-                await asyncio.wait_for(asyncio.to_thread(stop, binding.sandbox_id), timeout=60)
-        else:
-            sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id)
-            if sandbox is None:
-                return
-            try:
-                await asyncio.wait_for(
-                    asyncio.to_thread(sandbox.stop, timeout=60, force=True),
-                    timeout=60,
-                )
-            except TypeError:
-                await asyncio.wait_for(asyncio.to_thread(sandbox.stop), timeout=60)
+        if binding.sandbox_id is None:
+            return
+        await asyncio.wait_for(
+            self._platform.stop(binding.sandbox_id, timeout=60, force=True),
+            timeout=60,
+        )
         await self._bindings.upsert(
             SandboxBinding(
                 session_id=binding.session_id,
@@ -403,8 +392,6 @@ class DaytonaSessionManager:
         session_id: UUID,
         run_id: UUID,
     ) -> None:
-        from fleet_rlm.daytona.active_leases import get_active_lease_registry
-
         def _clear_active() -> None:
             try:
                 permit.release()
@@ -438,7 +425,7 @@ class DaytonaSessionManager:
                     cause_type="WorkspaceMountMismatch",
                 )
             try:
-                sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id)
+                sandbox = await self._platform.get(binding.sandbox_id)
             except ProviderRequestError:
                 raise
             except DaytonaAdapterError:
@@ -448,8 +435,7 @@ class DaytonaSessionManager:
 
         if sandbox is not None:
             try:
-                verify_sandbox_workspace_mount(sandbox, expected)
-                verify_sandbox_spec(sandbox, self._sandbox_spec)
+                self._provisioner.verify(sandbox, expected)
                 state = sandbox_state(sandbox)
                 sandbox = await self._ensure_running(
                     sandbox,
@@ -457,8 +443,7 @@ class DaytonaSessionManager:
                     volume_id=expected.volume_id,
                     mount_path=expected.mount_path,
                 )
-                verify_sandbox_workspace_mount(sandbox, expected)
-                verify_sandbox_spec(sandbox, self._sandbox_spec)
+                self._provisioner.verify(sandbox, expected)
             except ProviderRequestError:
                 raise
             except DaytonaAdapterError as exc:
@@ -478,31 +463,12 @@ class DaytonaSessionManager:
                         workspace_id=request.workspace_id,
                         user_id=request.user_id,
                     )
-                    sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id or "")
-                else:
-                    sandbox = None
-            except LifecycleCapabilityError:
-                if binding is not None:
-                    binding = await self.replace(
-                        SandboxBinding(
-                            session_id=session_id,
-                            sandbox_id=binding.sandbox_id,
-                            workspace_id=request.workspace_id,
-                            volume_id=expected.volume_id,
-                            volume_subpath=expected.volume_subpath,
-                            mount_path=expected.mount_path,
-                            provider_state="unrecoverable",
-                        ),
-                        workspace_id=request.workspace_id,
-                        user_id=request.user_id,
-                    )
-                    sandbox = await asyncio.to_thread(self._platform.get, binding.sandbox_id or "")
+                    sandbox = await self._platform.get(binding.sandbox_id or "")
                 else:
                     sandbox = None
         created_sandbox = False
         if sandbox is None:
-            sandbox = await asyncio.to_thread(
-                self._create_sandbox,
+            sandbox = await self._create_sandbox(
                 volume_id=expected.volume_id,
                 mount_path=expected.mount_path,
                 volume_subpath=expected.volume_subpath,
@@ -511,19 +477,16 @@ class DaytonaSessionManager:
             created_sandbox = True
 
         try:
-            verify_sandbox_workspace_mount(sandbox, expected)
-            verify_sandbox_spec(sandbox, self._sandbox_spec)
-            await asyncio.to_thread(
-                ensure_volume_layout,
+            await self._provisioner.verify_run_layout(
                 sandbox,
-                self._volume_config.paths(),
+                expected,
                 session_id=session_id,
                 run_id=run_id,
             )
         except BaseException:
             if created_sandbox:
                 try:
-                    await asyncio.to_thread(self._platform.delete, _sandbox_id(sandbox))
+                    await self._platform.delete(_sandbox_id(sandbox))
                 except Exception:  # noqa: BLE001 - preserve the acquisition failure
                     pass
             raise
@@ -543,7 +506,7 @@ class DaytonaSessionManager:
             )
         )
 
-        interpreter = _build_interpreter(sandbox)
+        interpreter = _build_interpreter(sandbox, loop=asyncio.get_running_loop())
         interpreter_id = f"interp-{sid}-{uuid4().hex[:8]}"
         return InterpreterLease(
             sandbox_id=sid,
@@ -559,18 +522,82 @@ class DaytonaSessionManager:
         )
 
     async def release(self, lease: InterpreterLease) -> None:
-        """Release interpreter resources only — never deletes the Sandbox."""
-        lease.release()
+        """Release the interpreter and schedule the explicit retained-Sandbox idle stop."""
+        # The Daytona interpreter is a synchronous facade over the async SDK.
+        # Its shutdown must not run on the event loop that owns the bridge.
+        await asyncio.to_thread(lease.release)
+        if self._idle_stop_seconds is None or lease.session_id is None:
+            return
+        session_id = UUID(lease.session_id)
+        self._cancel_idle_stop(session_id)
+        task = asyncio.create_task(
+            self._stop_after_idle(
+                session_id=session_id,
+                sandbox_id=lease.sandbox_id,
+                delay=self._idle_stop_seconds,
+            )
+        )
+        self._idle_tasks[session_id] = task
+        task.add_done_callback(lambda completed, sid=session_id: self._forget_idle_task(sid, completed))
+
+    def _cancel_idle_stop(self, session_id: UUID) -> None:
+        task = self._idle_tasks.pop(session_id, None)
+        if task is not None:
+            task.cancel()
+
+    def _forget_idle_task(self, session_id: UUID, task: asyncio.Task[None]) -> None:
+        if self._idle_tasks.get(session_id) is task:
+            self._idle_tasks.pop(session_id, None)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.warning(
+                "Retained Daytona Sandbox idle stop failed",
+                extra={
+                    "session_id": str(session_id),
+                    "error_type": type(error).__name__,
+                },
+            )
+
+    async def _stop_after_idle(self, *, session_id: UUID, sandbox_id: str, delay: float) -> None:
+        await asyncio.sleep(delay)
+        if get_active_lease_registry().holder(session_id) is not None:
+            return
+        binding = await self._bindings.get(session_id)
+        if binding is None or binding.sandbox_id != sandbox_id or binding.provider_state != "running":
+            return
+        sandbox = await self._platform.get(sandbox_id)
+        if sandbox is None:
+            return
+        await self._platform.stop(sandbox_id)
+        await self._bindings.upsert(
+            SandboxBinding(
+                session_id=binding.session_id,
+                sandbox_id=binding.sandbox_id,
+                workspace_id=binding.workspace_id,
+                volume_id=binding.volume_id,
+                volume_subpath=binding.volume_subpath,
+                mount_path=binding.mount_path,
+                provider_state="stopped",
+                last_verified_at=datetime.now(UTC),
+            )
+        )
+
+    async def aclose(self) -> None:
+        """Cancel process-local idle policy tasks during composition shutdown."""
+        tasks = tuple(self._idle_tasks.values())
+        self._idle_tasks.clear()
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _resolve_volume_id(self) -> str:
         """Retry one safe transient failure before sandbox creation can begin."""
         for attempt in range(2):
             try:
-                return await asyncio.to_thread(
-                    get_or_create_volume_id,
-                    self._volume_client,
-                    self._volume_config,
-                )
+                return await get_or_create_volume_id(self._volume_client, self._volume_config)
             except Exception as exc:  # noqa: BLE001
                 mapped = map_provider_error(exc)
                 if attempt == 0 and is_safe_pre_creation_retry(mapped):
@@ -595,13 +622,11 @@ class DaytonaSessionManager:
                 message="replace requires a real user_id (zero UUID is forbidden)",
                 cause_type="SandboxReplaceIdentityError",
             )
-        volume_id = binding.volume_id or await asyncio.to_thread(
-            get_or_create_volume_id, self._volume_client, self._volume_config
-        )
+        volume_id = binding.volume_id or await get_or_create_volume_id(self._volume_client, self._volume_config)
         expected = self._expected_mount(volume_id=volume_id, workspace_id=resolved_workspace)
         if binding.sandbox_id:
             try:
-                await asyncio.to_thread(self._platform.delete, binding.sandbox_id)
+                await self._platform.delete(binding.sandbox_id)
             except Exception:  # noqa: BLE001 - best-effort delete of broken sandbox
                 pass
         request = LeaseRequest(
@@ -609,15 +634,13 @@ class DaytonaSessionManager:
             user_id=user_id,
             workspace_id=resolved_workspace,
         )
-        sandbox = await asyncio.to_thread(
-            self._create_sandbox,
+        sandbox = await self._create_sandbox(
             volume_id=expected.volume_id,
             mount_path=expected.mount_path,
             volume_subpath=expected.volume_subpath,
             request=request,
         )
-        verify_sandbox_workspace_mount(sandbox, expected)
-        verify_sandbox_spec(sandbox, self._sandbox_spec)
+        self._provisioner.verify(sandbox, expected)
         new_binding = SandboxBinding(
             session_id=binding.session_id,
             sandbox_id=_sandbox_id(sandbox),
@@ -641,42 +664,19 @@ class DaytonaSessionManager:
         del volume_id, mount_path  # reserved for future remount checks
         if state == "running":
             return sandbox
-        if state == "stopped":
-            await self._call_lifecycle(sandbox, "start")
-            return sandbox
-        if state == "paused":
+        if state in {"stopped", "paused", "archived"}:
             try:
-                await self._call_lifecycle(sandbox, "resume")
-            except LifecycleCapabilityError:
-                await self._call_lifecycle(sandbox, "start")
-            return sandbox
-        if state == "archived":
-            try:
-                await self._call_lifecycle(sandbox, "restore")
-            except LifecycleCapabilityError as exc:
-                raise LifecycleCapabilityError("restore") from exc
-            # After restore, may still need start
-            if sandbox_state(sandbox) != "running":
-                try:
-                    await self._call_lifecycle(sandbox, "start")
-                except LifecycleCapabilityError:
-                    pass
-            return sandbox
+                await self._platform.start(_sandbox_id(sandbox))
+                return await self._platform.get(_sandbox_id(sandbox)) or sandbox
+            except Exception as exc:
+                raise map_provider_error(exc) from exc
         # missing / unrecoverable → caller should create; signal by raising
         raise DaytonaAdapterError(
             message=f"sandbox unusable in state {state}",
             cause_type="SandboxUnrecoverable",
         )
 
-    async def _call_lifecycle(self, sandbox: Any, operation: str) -> None:
-        try:
-            await asyncio.to_thread(call_if_supported, sandbox, operation)
-        except (DaytonaAdapterError, LifecycleCapabilityError):
-            raise
-        except Exception as exc:  # noqa: BLE001 - normalize provider SDK failures
-            raise map_provider_error(exc) from exc
-
-    def _create_sandbox(
+    async def _create_sandbox(
         self,
         *,
         volume_id: str,
@@ -684,34 +684,35 @@ class DaytonaSessionManager:
         volume_subpath: str,
         request: LeaseRequest,
     ) -> Any:
-        require_non_zero_workspace_id(request.workspace_id)
-        scoped = require_scoped_volume_subpath(volume_subpath, workspace_id=request.workspace_id)
-        try:
-            return self._platform.create(
-                volume_id=volume_id,
-                mount_path=mount_path,
-                volume_subpath=scoped,
-                labels={
-                    "session_id": str(request.session_id),
-                    "user_id": str(request.user_id),
-                    "workspace_id": str(request.workspace_id),
-                    "fleet_package": "fleet_rlm",
-                    "volume_subpath": scoped,
-                },
-            )
-        except Exception as exc:  # noqa: BLE001
-            raise map_provider_error(exc) from exc
+        expected = ExpectedWorkspaceMount(
+            volume_id=volume_id,
+            volume_subpath=volume_subpath,
+            mount_path=mount_path,
+            workspace_id=request.workspace_id,
+        )
+        return await self._provisioner.create(
+            expected,
+            labels={
+                "session_id": str(request.session_id),
+                "user_id": str(request.user_id),
+                "workspace_id": str(request.workspace_id),
+                "fleet_package": "fleet_rlm",
+                "volume_subpath": expected.volume_subpath,
+            },
+            ephemeral=False,
+        )
 
 
-# Re-export mount helpers for SessionManager callers
 __all__ = [
+    "ActiveLeaseConflictError",
     "BindingStoreLike",
+    "DaytonaAdmission",
+    "DaytonaAdmissionTimeout",
     "DaytonaSessionManager",
-    "ExpectedWorkspaceMount",
+    "InterpreterLease",
     "LeaseRequest",
-    "SandboxPlatform",
     "binding_matches_expected",
-    "verify_sandbox_workspace_mount",
-    "volume_mount_spec",
+    "get_active_lease_registry",
+    "set_active_lease_registry",
     "workspace_volume_subpath",
 ]

@@ -10,9 +10,9 @@ compatibility runtime and parallel foundation package no longer exist.
 | `app.py`, `main.py` | FastAPI factory, handlers/routers, static Skill catalog, lifespan selection, ASGI entrypoint | composition, API routers, Skill catalog |
 | `composition/` | common inventory plus explicit Daytona, Deno, and private testing wiring | domain modules and adapters |
 | `api/` | HTTP translation, local scope, dependency aliases, OpenAPI/SSE projection, UIMessage reload | domain interfaces and composed modules |
-| `chat/` | Turn preparation, coordinator orchestration, lifecycle finalization, shared Turn Claim policy, Deno environment and sinks | RLM, Sessions, Skills, files |
+| `chat/` | Turn preparation, shared capability preparation, coordinator orchestration, lifecycle finalization, shared Turn Claim policy, Deno environment and sinks | RLM, Sessions, Skills, files |
 | `rlm/` | DSPy Signature, model roles, fresh RLM construction, options, events, runner | DSPy and domain values |
-| `daytona/` | exclusive SDK boundary, process resources, explicit Turn-preparation adapters, Sandbox/lease/Volume/interpreter adapters | Daytona SDK and domain values |
+| `daytona/` | exclusive 13-module SDK boundary: async platform/provisioning, Session ownership, DSPy-only sync interpreter seam, broker, diagnostics, and async Workspace gateways | Daytona SDK and domain values |
 | `sessions/` | Session catalog, Turn input/history, versioned Committed Turn | domain values |
 | `files/`, `artifacts/` | Attachment staging, paged/append Session Workspace tools, direct Workspace Artifact Candidate staging, Artifact promotion/read | storage interfaces and safe paths |
 | `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |
@@ -36,6 +36,11 @@ compatibility runtime and parallel foundation package no longer exist.
   existing lock/transaction boundaries.
 - `LiveKernelResources` owns process-lifetime Daytona resources only;
   `composition/daytona.py` explicitly constructs Turn preparation.
+- Daytona Admission bounds acquiring or active Interpreter Leases, not retained
+  Session Sandboxes. Released Session Sandboxes are stopped after the explicit
+  five-minute idle policy and restarted on the next acquisition.
+- Independent Workspace access mounts exactly `workspaces/<workspace_id>` in a
+  purpose-labelled ephemeral I/O Sandbox and exposes only its `files/` root.
 - In-memory and SQL repositories apply the pure `chat/turn_claim.py` transition
   policy inside their respective lock and transaction boundaries.
 - Alembic owns live schema evolution. `create_tables` is limited to explicit

@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     app_name: str = Field(default="fleet-rlm")
     daytona_api_key: SecretStr | None = Field(default=None)
     daytona_snapshot: str | None = Field(default=None)
+    daytona_org_id: str | None = Field(default=None)
     llm_api_key: SecretStr | None = Field(default=None)
     llm_base_url: str | None = Field(
         default=None,

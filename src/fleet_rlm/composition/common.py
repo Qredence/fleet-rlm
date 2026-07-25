@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ class CompositionError(RuntimeError):
 
 COMPOSITION_STATE_FIELDS = (
     "artifact_reader",
+    "config_policy",
     "attachment_lifecycle",
     "rlm_model_bundle",
     "run_environment_resources",
@@ -30,6 +32,7 @@ COMPOSITION_STATE_FIELDS = (
     "turn_state_store",
     "workspace_volume_gateway",
     "workspace_volume_mirror",
+    "workspace_file_service",
 )
 
 
@@ -146,6 +149,8 @@ def install_local_inventory(
     from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
+    from fleet_rlm.config import _CONFIG_PATH, _PROFILE_ENVIRONMENT
+    from fleet_rlm.config_policy import ConfigPolicyService
     from fleet_rlm.persistence.repositories import (
         InMemorySessionCatalog,
         InMemoryTurnStateStore,
@@ -188,6 +193,13 @@ def install_local_inventory(
         session_catalog=session_catalog,
         turn_lifecycle=lifecycle,
         turn_cleanup_supervisor=cleanup,
+    )
+    app.state.config_policy = ConfigPolicyService(
+        _CONFIG_PATH,
+        active_profile=(
+            os.environ.get(_PROFILE_ENVIRONMENT)
+            or settings._dotenv_values.get(_PROFILE_ENVIRONMENT)
+        ),
     )
     app.state.turn_coordinator = coordinator
     app.state.turn_preparation = preparation

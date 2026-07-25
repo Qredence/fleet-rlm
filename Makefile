@@ -1,4 +1,4 @@
-PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/unit/scripts tests/contracts/backend tests/e2e scripts/openapi_tools.py scripts/db_init.py scripts/live_daytona_verify.py scripts/daytona_snapshot.py migrations
+PYTHON_SOURCES = src/fleet_rlm tests/unit/backend tests/unit/scripts tests/contracts/backend tests/e2e scripts/openapi_tools.py scripts/db_init.py scripts/live_daytona_verify.py scripts/daytona_snapshot.py scripts/benchmark_daytona_lifecycle.py scripts/benchmarks migrations
 PYTEST_FAST_MARKERS = not deno and not live_llm and not live_daytona and not benchmark and not db
 PYTEST := uv run --no-sync pytest
 PYTEST_ISOLATED := env \
@@ -17,12 +17,14 @@ PYTEST_PARALLEL := -n auto --maxprocesses=$(PYTEST_XDIST_MAX_WORKERS)
 	help \
 	install install-dev install-all \
 	dev format format-check lint typecheck \
-	test test-fast test-unit test-contract test-deno \
+	test test-fast test-unit test-contract test-deno test-daytona-cov \
 	check quality-gate check-release check-docs check-security check-deps check-codebase-tree api-check api-sync tui-check \
 	build build-release release release-check \
 	clean cli precommit-install precommit-run precommit \
 	sync sync-dev sync-all metadata-check docs-check security-check dependency-check release-artifacts cli-help \
-	cloud-preflight
+	cloud-preflight \
+	daytona-snapshot-create daytona-snapshot-check \
+	benchmark-oolong
 
 help:
 	@echo "Setup:"
@@ -42,6 +44,8 @@ help:
 	@echo "  make test-unit        - Run unit tests (non-live/non-benchmark)"
 	@echo "  make test-contract    - Run backend contracts and CLI smoke tests"
 	@echo "  make test-deno        - Run deterministic contracts against the Deno runtime"
+	@echo "  make test-daytona-cov - Run canonical non-live tests with Daytona branch coverage"
+	@echo "  make benchmark-oolong - Run OOLONG benchmark (requires FLEET_LIVE=1, CONTEXT_LEN, MAX_TASKS, OUTPUT)"
 	@echo ""
 	@echo "Quality:"
 	@echo "  make check            - Run the primary repo quality gate"
@@ -63,6 +67,8 @@ help:
 	@echo "  make cloud-preflight  - Validate the app boots for FastAPI Cloud deploy"
 	@echo ""
 	@echo "Utility:"
+	@echo "  make daytona-snapshot-create - Create or validate the immutable Daytona Snapshot"
+	@echo "  make daytona-snapshot-check  - Check the immutable Daytona Snapshot contract"
 	@echo "  make clean            - Remove caches and local generated artifacts"
 	@echo "  make precommit-install - Install pre-commit and pre-push git hooks"
 	@echo "  make precommit-run    - Run pre-commit on all files"
@@ -106,8 +112,28 @@ test-contract:
 test-deno:
 	$(PYTEST) -q tests/unit/backend/test_deno_run_environment.py tests/contracts/backend/test_deno_turn_flow.py -m "deno" -n 0 --timeout=120
 
+test-daytona-cov:
+	mkdir -p .scratch/coverage
+	$(PYTEST_ISOLATED) -q $(PYTEST_PARALLEL) tests/unit/backend tests/unit/scripts tests/contracts/backend tests/unit/test_litellm_invariant.py tests/e2e -m "$(PYTEST_FAST_MARKERS)" --cov --cov-config=pyproject.toml --cov-report=term-missing --cov-report=xml:.scratch/coverage/daytona.xml
+
 test-db:
 	$(PYTEST) -q -m "db" -n 0
+
+CONTEXT_LEN ?= 1024
+MAX_TASKS ?= 50
+OUTPUT ?= .scratch/benchmark-reports/oolong-$(shell date +%Y-%m-%d).json
+
+benchmark-oolong:
+	@test -n "$(FLEET_LIVE)" || { echo "FLEET_LIVE=1 is required for live OOLONG benchmark"; exit 1; }
+	uv run python scripts/benchmarks/evaluate_oolong.py --context-len $(CONTEXT_LEN) --max-tasks $(MAX_TASKS) --output $(OUTPUT)
+
+DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v3
+
+daytona-snapshot-create:
+	uv run python scripts/daytona_snapshot.py create --name $(DAYTONA_SNAPSHOT_NAME)
+
+daytona-snapshot-check:
+	uv run python scripts/daytona_snapshot.py check --name $(DAYTONA_SNAPSHOT_NAME)
 
 tui-check:
 	$(MAKE) api-check
@@ -116,7 +142,7 @@ tui-check:
 	pnpm --dir tools/fleet-tui run typecheck
 	pnpm --dir tools/fleet-tui run test
 
-check: lint format-check typecheck test api-check tui-check check-codebase-tree check-docs
+check: lint format-check typecheck test-daytona-cov api-check tui-check check-codebase-tree check-docs
 
 quality-gate: check
 

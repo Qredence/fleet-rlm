@@ -8,13 +8,14 @@ after argparse handles ``--help``.
 from __future__ import annotations
 
 import argparse
+import asyncio
 from typing import Any, Sequence
 
 from daytona import CreateSnapshotParams, Resources
 
-from fleet_rlm.daytona.client import build_daytona_client
 from fleet_rlm.daytona.errors import is_sandbox_not_found, sanitize_provider_message
-from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec, build_snapshot_image
+from fleet_rlm.daytona.platform import build_daytona_client
+from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec, build_snapshot_image
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -22,7 +23,7 @@ def _parser() -> argparse.ArgumentParser:
     subcommands = parser.add_subparsers(dest="command", required=True)
     for command in ("create", "check"):
         sub = subcommands.add_parser(command)
-        sub.add_argument("--name", required=True, help="Immutable snapshot name, for example fleet-rlm-python313-v2")
+        sub.add_argument("--name", required=True, help="Immutable snapshot name, for example fleet-rlm-python313-v3")
     return parser
 
 
@@ -47,17 +48,17 @@ def _validate_snapshot(snapshot: Any, spec: DaytonaSandboxSpec) -> None:
             raise RuntimeError("snapshot resources did not match the Fleet contract")
 
 
-def _get_existing(client: Any, name: str) -> Any | None:
+async def _get_existing(client: Any, name: str) -> Any | None:
     try:
-        return client.snapshot.get(name)
+        return await client.snapshot.get(name)
     except Exception as exc:  # provider SDK has a dedicated not-found family
         if is_sandbox_not_found(exc):
             return None
         raise RuntimeError(sanitize_provider_message(str(exc))) from exc
 
 
-def create_snapshot(client: Any, spec: DaytonaSandboxSpec) -> None:
-    existing = _get_existing(client, spec.snapshot)
+async def create_snapshot(client: Any, spec: DaytonaSandboxSpec) -> None:
+    existing = await _get_existing(client, spec.snapshot)
     if existing is not None:
         _validate_snapshot(existing, spec)
         print(f"Snapshot {spec.snapshot} already exists and matches its public contract.")
@@ -68,7 +69,7 @@ def create_snapshot(client: Any, spec: DaytonaSandboxSpec) -> None:
         print("Snapshot build progress received.")
 
     try:
-        snapshot = client.snapshot.create(
+        snapshot = await client.snapshot.create(
             CreateSnapshotParams(
                 name=spec.snapshot,
                 image=build_snapshot_image(spec),
@@ -82,16 +83,15 @@ def create_snapshot(client: Any, spec: DaytonaSandboxSpec) -> None:
     print(f"Snapshot {spec.snapshot} is active and matches the Fleet resource contract.")
 
 
-def check_snapshot(client: Any, spec: DaytonaSandboxSpec) -> None:
-    snapshot = _get_existing(client, spec.snapshot)
+async def check_snapshot(client: Any, spec: DaytonaSandboxSpec) -> None:
+    snapshot = await _get_existing(client, spec.snapshot)
     if snapshot is None:
         raise RuntimeError("configured Daytona snapshot was not found")
     _validate_snapshot(snapshot, spec)
     print(f"Snapshot {spec.snapshot} is active and matches the Fleet resource contract.")
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+async def _run(args: argparse.Namespace) -> int:
     spec = _spec(args.name)
     from fleet_rlm.config import load_runtime_settings
 
@@ -101,11 +101,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     if settings.daytona_api_key is None or not settings.daytona_api_key.get_secret_value().strip():
         raise SystemExit("FLEET_DAYTONA_API_KEY is required")
     client = build_daytona_client(settings)
-    if args.command == "create":
-        create_snapshot(client, spec)
-    else:
-        check_snapshot(client, spec)
+    try:
+        if args.command == "create":
+            await create_snapshot(client, spec)
+        else:
+            await check_snapshot(client, spec)
+    finally:
+        await client.close()
     return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    return asyncio.run(_run(args))
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entrypoint

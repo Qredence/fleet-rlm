@@ -14,7 +14,7 @@ import pytest
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, TurnLifecycleService
-from fleet_rlm.daytona.in_process import InProcessInterpreterBackend
+from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 from fleet_rlm.persistence.repositories import InMemoryTurnStateStore
 from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec

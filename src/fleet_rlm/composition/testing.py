@@ -161,14 +161,17 @@ def install_testing_composition(
     session_factory: Any | None = None,
 ) -> LocalCompositionHandles:
     """Install credential-free deterministic adapters for a test lifespan."""
-    from fleet_rlm.artifacts.daytona_catalog import DaytonaArtifactBlobGateway
-    from fleet_rlm.daytona.paths import volume_paths_from_settings
-    from fleet_rlm.daytona.volume_fs import HostVolumeMirror
-    from fleet_rlm.daytona.workspace_volume import OfflineHostVolumeGateway
+    from fleet_rlm.artifacts.workspace_storage import WorkspaceArtifactBlobGateway
+    from fleet_rlm.files.host_volume import HostVolumeMirror, OfflineHostVolumeGateway
     from fleet_rlm.files.local_catalog import (
         WorkspaceAttachmentBlobGateway,
     )
-    from fleet_rlm.files.paths import DaytonaAttachmentPathPolicy
+    from fleet_rlm.files.paths import WorkspaceAttachmentPathPolicy
+    from fleet_rlm.files.volume_paths import volume_paths_from_settings
+    from fleet_rlm.files.workspace_access import (
+        HostWorkspaceAccessGateway,
+        WorkspaceFileService,
+    )
 
     upload_root, artifact_root = host_roots(settings)
     mirror = HostVolumeMirror(
@@ -181,10 +184,10 @@ def install_testing_composition(
         session_factory=session_factory,
         volume_paths=mirror.volume_paths,
         sql_attachment_blobs=WorkspaceAttachmentBlobGateway(volume_gateway),
-        sql_attachment_paths=DaytonaAttachmentPathPolicy(mirror.volume_paths),
-        sql_artifact_blobs=DaytonaArtifactBlobGateway(volume_gateway),
+        sql_attachment_paths=WorkspaceAttachmentPathPolicy(mirror.volume_paths),
+        sql_artifact_blobs=WorkspaceArtifactBlobGateway(volume_gateway),
     )
-    return install_local_inventory(
+    handles = install_local_inventory(
         app,
         settings,
         session_factory=session_factory,
@@ -199,6 +202,13 @@ def install_testing_composition(
         rlm_factory=TestingRLMFactory(),
         workspace_volume_mirror=mirror,
     )
+    app.state.workspace_file_service = WorkspaceFileService(
+        HostWorkspaceAccessGateway(
+            Path(settings.data_root) / "workspace-files",
+            max_file_bytes=settings.max_upload_bytes,
+        )
+    )
+    return handles
 
 
 def create_testing_app(*, settings: Settings | None = None) -> FastAPI:

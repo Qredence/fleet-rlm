@@ -118,6 +118,13 @@ export function shortId(id: string, length = 4): string {
   return `${clean.slice(0, length)}…${clean.slice(-length)}`;
 }
 
+/** Strip the `trace:` prefix and shorten a trace ID for display. */
+export function shortTraceId(traceId: string | null | undefined): string {
+  if (!traceId) return "—";
+  const clean = traceId.replace(/^trace:\/?/, "");
+  return shortId(clean);
+}
+
 const sensitiveKey =
   /(?:api[-_]?key|authorization|credential|password|secret|private[-_]?key|env(?:ironment)?)/i;
 const standaloneTokenKey = /(?:^|[-_])token(?:$|[-_])/i;

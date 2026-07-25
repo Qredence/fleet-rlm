@@ -47,7 +47,7 @@ environment = "deno"
 environment = "daytona"
 
 [profiles.daytona.daytona]
-snapshot = "fleet-rlm-python313-v2"
+snapshot = "fleet-rlm-python313-v3"
 
 # Databricks-hosted profile: AI Gateway routes both roles through the unified
 # /ai-gateway/openai/v1 endpoint.  Set DATABRICKS_TOKEN in .env or process env.
@@ -55,7 +55,7 @@ snapshot = "fleet-rlm-python313-v2"
 environment = "daytona"
 
 [profiles.databricks-daytona.daytona]
-snapshot = "fleet-rlm-python313-v2"
+snapshot = "fleet-rlm-python313-v3"
 
 # Fast-tier root: nemotron-3-ultra-free via MPS deepseek-v4-flash-free / opencode.ai/zen.
 # Frontier models (claude-opus-4-8, gpt-5-6-sol) are reserved for offline GEPA;

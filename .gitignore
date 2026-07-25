@@ -52,7 +52,7 @@ docs/superpowers/
 .superpowers/
 
 qa-results/
-
+.qoder
 plan/
 
 # Generated wiki (Factory artifact)

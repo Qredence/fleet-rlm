@@ -140,7 +140,8 @@ def _run_doctor(parser: argparse.ArgumentParser, provider: str) -> None:
         print("[failed] settings: Required Fleet Daytona settings are missing or invalid.")
         print(f"action: {_DOCTOR_ACTIONS['settings']}")
         raise SystemExit(1) from None
-    print(f"[ok] policy: {redacted_policy_summary(settings, profile=os.environ[_PROFILE_ENVIRONMENT])}")
+    profile = os.environ.get(_PROFILE_ENVIRONMENT) or settings._dotenv_values.get(_PROFILE_ENVIRONMENT)
+    print(f"[ok] policy: {redacted_policy_summary(settings, profile=profile or 'unknown')}")
     result = asyncio.run(run_daytona_doctor(settings))
     for step in result.steps:
         state = "ok" if step.ok else "failed"

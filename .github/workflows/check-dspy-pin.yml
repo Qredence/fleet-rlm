@@ -35,7 +35,12 @@ jobs:
         run: |
           # 3.3.0b1 is the backend contract pin in pyproject.toml.
           # Fail loudly if PyPI yanks or removes the beta.
-          if ! uv pip install --dry-run --python "$(uv python find 3.12)" "dspy==3.3.0b1"; then
+          # uv-managed Python installations are externally managed; probe from
+          # a temporary virtual environment instead of writing to the base
+          # interpreter.
+          probe_venv="$RUNNER_TEMP/dspy-pin-venv"
+          uv venv --python 3.12 "$probe_venv"
+          if ! uv pip install --dry-run --python "$probe_venv/bin/python" "dspy==3.3.0b1"; then
             echo "::error::dspy==3.3.0b1 is no longer installable from PyPI. The beta may have been yanked. Re-pin to a reissued beta or vendor the source per the AGENTS.md contract."
             exit 1
           fi

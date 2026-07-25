@@ -29,8 +29,8 @@ from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.bindings import SandboxBinding
-from fleet_rlm.daytona.paths import volume_paths_from_settings
-from fleet_rlm.daytona.volume_fs import DaytonaSandboxVolumeFs
+from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
+from fleet_rlm.files.volume_paths import volume_paths_from_settings
 from fleet_rlm.rlm.tool_observer import ToolEventView
 from fleet_rlm.skills.catalog import stable_skill_id
 from tests.live.backend._database import upgrade_to_head

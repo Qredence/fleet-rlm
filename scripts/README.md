@@ -10,6 +10,8 @@
 | `check_agents_md_freshness.py` | Validate agent-guide reachability |
 | `validate_release.py` | Validate package metadata and wheel contents |
 | `live_daytona_verify.py` | Run the opt-in Daytona MVP proof and validate its bounded JSON receipt |
+| `benchmark_daytona_lifecycle.py` | Benchmark full Daytona create-through-first-execution lifecycle and select retained versus per-Turn mode |
+| `benchmarks/evaluate_oolong.py` | Run the bounded OOLONG benchmark against a live Fleet API and emit a scored receipt |
 | `daytona_snapshot.py` | Explicitly create or check the immutable Fleet Daytona Snapshot |
 | `codex_feedback_loop.py` | Run the local Codex feedback-loop probes |
 | `deployment_observability.py` | Inspect deployment observability inputs |

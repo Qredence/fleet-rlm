@@ -55,7 +55,7 @@ repository or pass them through Fleet API requests.
 ```bash
 export FLEET_LIVE=1
 export FLEET_CONFIG_PROFILE=daytona
-export FLEET_DAYTONA_SNAPSHOT=fleet-rlm-python313-v2
+export FLEET_DAYTONA_SNAPSHOT=fleet-rlm-python313-v3
 # Credentials may come from the process environment or repo `.env`
 # (loaded via python-dotenv; existing exports win).
 uv run python scripts/live_daytona_verify.py \

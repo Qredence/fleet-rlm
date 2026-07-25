@@ -336,7 +336,7 @@ async def test_install_daytona_composition_does_not_create_schema(monkeypatch) -
     import fleet_rlm.persistence.database as database
 
     class Resources:
-        _engine = object()
+        engine = object()
         session_manager = object()
         models = object()
 
@@ -408,7 +408,7 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
     disposed: list[str] = []
 
     class Resources:
-        _engine = object()
+        engine = object()
 
         @property
         def session_manager(self):

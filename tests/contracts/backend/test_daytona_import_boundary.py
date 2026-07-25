@@ -9,6 +9,26 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[3] / "src" / "fleet_rlm"
 ALLOWED_DAYTONA_IMPORT_ROOTS = {
     PACKAGE_ROOT / "daytona",
 }
+EXPECTED_DAYTONA_MODULES = {
+    "__init__.py",
+    "bindings.py",
+    "diagnostics.py",
+    "errors.py",
+    "http_broker.py",
+    "interpreter.py",
+    "platform.py",
+    "provisioning.py",
+    "run_environment.py",
+    "session_manager.py",
+    "workspace_agent.py",
+    "workspace_fs.py",
+    "workspace_gateway.py",
+}
+
+
+def test_daytona_package_has_exact_simplified_module_boundary() -> None:
+    actual = {path.name for path in (PACKAGE_ROOT / "daytona").glob("*.py")}
+    assert actual == EXPECTED_DAYTONA_MODULES
 
 
 def _imported_roots(tree: ast.AST) -> set[str]:
@@ -34,10 +54,10 @@ def test_only_daytona_package_imports_daytona_sdk() -> None:
 
 
 def test_build_daytona_client_is_lazy() -> None:
-    """client module may import Daytona types, but must not construct at import."""
-    import fleet_rlm.daytona.client as client_module
+    """Platform module may import Daytona types, but must not construct at import."""
+    import fleet_rlm.daytona.platform as platform_module
 
-    source = Path(client_module.__file__).read_text(encoding="utf-8")
+    source = Path(platform_module.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
     for node in tree.body:
         if not isinstance(node, ast.Expr | ast.Assign | ast.AnnAssign):

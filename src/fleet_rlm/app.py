@@ -162,8 +162,10 @@ def create_app(
     from fleet_rlm.api.routes.attachments import router as attachments_router
     from fleet_rlm.api.routes.runs import router as runs_router
     from fleet_rlm.api.routes.sessions import router as sessions_router
+    from fleet_rlm.api.routes.settings import router as settings_router
     from fleet_rlm.api.routes.skills import router as skills_router
     from fleet_rlm.api.routes.turns import router as turns_router
+    from fleet_rlm.api.routes.workspace_files import router as workspace_files_router
 
     app.include_router(turns_router)
     app.include_router(sessions_router)
@@ -171,6 +173,8 @@ def create_app(
     app.include_router(artifacts_router)
     app.include_router(skills_router)
     app.include_router(runs_router)
+    app.include_router(settings_router)
+    app.include_router(workspace_files_router)
 
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 

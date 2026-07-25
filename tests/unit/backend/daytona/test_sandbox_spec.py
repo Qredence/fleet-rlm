@@ -6,13 +6,15 @@ import pytest
 
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.sandbox_spec import (
+from fleet_rlm.daytona.provisioning import (
     BASE_IMAGE,
     DEFAULT_SNAPSHOT_NAME,
     PYTHON_VERSION,
     DaytonaSandboxSpec,
     build_snapshot_image,
     sandbox_spec_from_settings,
+    snapshot_dependency_sha256,
+    snapshot_execution_dependencies,
     verify_sandbox_spec,
 )
 
@@ -23,23 +25,28 @@ def test_spec_requires_an_immutable_versioned_name() -> None:
             DaytonaSandboxSpec(name)
 
 
-def test_spec_builds_minimal_non_root_pinned_image() -> None:
+def test_spec_builds_minimal_non_root_pinned_image_with_declared_dependencies() -> None:
     spec = DaytonaSandboxSpec("fleet-rlm-python313-v1")
     dockerfile = build_snapshot_image(spec).dockerfile()
+    digest = snapshot_dependency_sha256()
 
     assert f"FROM {BASE_IMAGE}" in dockerfile
     assert "groupadd --gid 1000 daytona" in dockerfile
     assert "USER daytona" in dockerfile
     assert "PYTHONUNBUFFERED=1" in dockerfile
+    assert f"FLEET_SNAPSHOT_DEPENDENCIES_SHA256={digest}" in dockerfile
     assert "WORKDIR /home/daytona" in dockerfile
-    assert "pip install" not in dockerfile
+    assert snapshot_execution_dependencies() == ("mpmath==1.4.1",)
+    assert "pip install mpmath==1.4.1" in dockerfile
+    assert dockerfile.index("pip install mpmath==1.4.1") < dockerfile.index("USER daytona")
+    assert "dspy" not in dockerfile.lower()
     assert "apt-get" not in dockerfile
 
 
 def test_default_snapshot_envelope_stays_minimal_and_fixed() -> None:
     spec = DaytonaSandboxSpec(DEFAULT_SNAPSHOT_NAME)
 
-    assert spec.snapshot == "fleet-rlm-python313-v2"
+    assert spec.snapshot == "fleet-rlm-python313-v3"
     assert spec.python_version == PYTHON_VERSION == "3.13.13"
     assert (spec.cpu, spec.memory_gib, spec.disk_gib) == (1, 1, 3)
 

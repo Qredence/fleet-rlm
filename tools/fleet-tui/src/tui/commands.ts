@@ -1,6 +1,11 @@
 /** Slash command registry for the Fleet TUI. */
 
-import type { FleetApiClient, FleetSession, FleetSkillCard } from "../fleet-api-client.js";
+import type {
+  FleetApiClient,
+  FleetSession,
+  FleetSettingsPolicy,
+  FleetSkillCard,
+} from "../fleet-api-client.js";
 import { projectDurableTurns } from "./projection.js";
 import {
   newMessageId,
@@ -19,6 +24,13 @@ export type CommandContext = {
   presenter?: CommandPresenter;
 };
 
+export type SettingsUpdate = {
+  revision: string;
+  scope: string;
+  path: string;
+  value: string | number | boolean | string[] | null;
+};
+
 export interface CommandPresenter {
   showHelp(commands: CommandSpec[]): void;
   chooseSession(sessions: FleetSession[]): Promise<string | null>;
@@ -26,6 +38,7 @@ export interface CommandPresenter {
     skills: FleetSkillCard[],
     current: PendingSkillSelection[],
   ): Promise<PendingSkillSelection[] | null>;
+  chooseSetting(settings: FleetSettingsPolicy): Promise<SettingsUpdate | null>;
 }
 
 export type CommandHandler = (args: string[], ctx: CommandContext) => Promise<void> | void;
@@ -298,6 +311,37 @@ registerCommand({
 });
 
 registerCommand({
+  name: "settings",
+  description: "View and edit local Fleet policy settings",
+  usage: "/settings",
+  handler: async (_args, ctx) => {
+    try {
+      const settings = await ctx.client.getSettings();
+      if (ctx.presenter) {
+        const update = await ctx.presenter.chooseSetting(settings);
+        if (!update) return;
+        await ctx.client.updateSettings(update);
+        appendSystem(
+          ctx.store,
+          "Saved to config/fleet.toml. Restart Fleet to apply the new policy.",
+        );
+        return;
+      }
+      const lines = settings.scopes.flatMap((scope) => [
+        `[${scope.name}]`,
+        ...scope.fields.map((field) => `  ${field.path} = ${formatSettingValue(field.value)}`),
+      ]);
+      appendSystem(
+        ctx.store,
+        `Fleet settings (restart required after save)\n\n${lines.join("\n")}`,
+      );
+    } catch (error) {
+      appendSystem(ctx.store, `Failed to access settings: ${errorMessage(error)}`);
+    }
+  },
+});
+
+registerCommand({
   name: "status",
   description: "Show session, run, and token usage",
   usage: "/status",
@@ -387,6 +431,10 @@ function formatPendingSkills(selections: readonly PendingSkillSelection[]): stri
   return selections
     .map((selection) => `${selection.displayName}@${selection.expectedVersion}`)
     .join(", ");
+}
+
+function formatSettingValue(value: unknown): string {
+  return JSON.stringify(value);
 }
 
 function formatObservedTokens(value: number | null): string {

@@ -5,6 +5,8 @@ export type FleetTurnPart = components["schemas"]["UIMessagePart"];
 export type FleetTurn = components["schemas"]["UIMessageResponse"];
 type FleetTurnPage = components["schemas"]["SessionTurnPageResponse"];
 export type FleetSkillCard = components["schemas"]["SkillCardResponse"];
+export type FleetSettingsPolicy = components["schemas"]["SettingsPolicyResponse"];
+export type FleetSettingsPatch = components["schemas"]["SettingsPolicyPatchRequest"];
 
 export type FleetSkillSelection = {
   id: string;
@@ -88,6 +90,17 @@ export class FleetApiClient {
 
   async listSkills(): Promise<FleetSkillCard[]> {
     return this.requestJson<FleetSkillCard[]>("/api/skills");
+  }
+
+  async getSettings(): Promise<FleetSettingsPolicy> {
+    return this.requestJson<FleetSettingsPolicy>("/api/settings");
+  }
+
+  async updateSettings(patch: FleetSettingsPatch): Promise<FleetSettingsPolicy> {
+    return this.requestJson<FleetSettingsPolicy>("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
   }
 
   async streamTurn({

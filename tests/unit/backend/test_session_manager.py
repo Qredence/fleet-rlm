@@ -9,13 +9,15 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from fleet_rlm.daytona.active_leases import ActiveLeaseConflictError
-from fleet_rlm.daytona.admission import DaytonaAdmission
 from fleet_rlm.daytona.bindings import InMemoryBindingStore, SandboxBinding
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
-from fleet_rlm.daytona.sandbox_spec import DaytonaSandboxSpec
-from fleet_rlm.daytona.session_manager import DaytonaSessionManager, LeaseRequest
-from fleet_rlm.daytona.volumes import VolumeConfig
+from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec, VolumeConfig
+from fleet_rlm.daytona.session_manager import (
+    ActiveLeaseConflictError,
+    DaytonaAdmission,
+    DaytonaSessionManager,
+    LeaseRequest,
+)
 
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")
 
@@ -30,7 +32,7 @@ class _FakeVolumeClient:
         self.gets: list[tuple[str, bool]] = []
         self.failures: list[BaseException] = []
 
-    def get(self, name: str, *, create: bool = False) -> _FakeVolume:
+    async def get(self, name: str, *, create: bool = False) -> _FakeVolume:
         self.gets.append((name, create))
         if self.failures:
             raise self.failures.pop(0)
@@ -50,7 +52,7 @@ class _FakeFilesystem:
         self.created: list[tuple[str, str]] = []
         self.info_failures: dict[str, BaseException] = {}
 
-    def get_file_info(self, path: str) -> _FakeFileInfo:
+    async def get_file_info(self, path: str) -> _FakeFileInfo:
         failure = self.info_failures.pop(path, None)
         if failure is not None:
             raise failure
@@ -60,11 +62,11 @@ class _FakeFilesystem:
             return _FakeFileInfo(is_dir=False)
         raise FileNotFoundError(path)
 
-    def create_folder(self, path: str, mode: str) -> None:
+    async def create_folder(self, path: str, mode: str) -> None:
         self.directories.add(path)
         self.created.append((path, mode))
 
-    def upload_file(self, data: bytes, path: str) -> None:
+    async def upload_file(self, data: bytes, path: str) -> None:
         self.files.add(path)
         self.uploaded[path] = bytes(data)
 
@@ -153,17 +155,19 @@ class _FakePlatform:
         self.deleted: list[str] = []
         self._n = 0
 
-    def get(self, sandbox_id: str) -> _FakeSandbox | None:
+    async def get(self, sandbox_id: str) -> _FakeSandbox | None:
         return self.sandboxes.get(sandbox_id)
 
-    def create(
+    async def create(
         self,
         *,
         volume_id: str,
         mount_path: str,
         volume_subpath: str,
         labels: dict[str, str] | None = None,
+        ephemeral: bool = False,
     ) -> _FakeSandbox:
+        del ephemeral
         if not volume_subpath:
             raise ValueError("VolumeMount without workspace subpath is rejected")
         self._n += 1
@@ -188,21 +192,22 @@ class _FakePlatform:
         )
         return sb
 
-    def delete(self, sandbox_id: str) -> None:
+    async def delete(self, sandbox_id: str) -> None:
         self.deleted.append(sandbox_id)
         self.sandboxes.pop(sandbox_id, None)
 
+    async def start(self, sandbox_id: str) -> None:
+        self.sandboxes[sandbox_id].start()
+
+    async def stop(self, sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None:
+        del timeout, force
+        self.sandboxes[sandbox_id].stop()
+
 
 class _FailingStopPlatform(_FakePlatform):
-    def get(self, sandbox_id: str) -> _FakeSandbox | None:
-        sandbox = super().get(sandbox_id)
-        if sandbox is not None:
-
-            def fail_stop() -> None:
-                raise RuntimeError("provider stop failed")
-
-            sandbox.stop = fail_stop  # type: ignore[method-assign]
-        return sandbox
+    async def stop(self, sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None:
+        del sandbox_id, timeout, force
+        raise RuntimeError("provider stop failed")
 
 
 class _CountingBackend:
@@ -223,8 +228,8 @@ class _BlockingCreatePlatform(_FakePlatform):
         self.release_creates = threading.Event()
         self.backends: list[_CountingBackend] = []
 
-    def create(self, **kwargs: Any) -> _FakeSandbox:
-        sandbox = super().create(**kwargs)
+    async def create(self, **kwargs: Any) -> _FakeSandbox:
+        sandbox = await super().create(**kwargs)
         backend = _CountingBackend()
         sandbox.backend = backend
         self.backends.append(backend)
@@ -232,7 +237,7 @@ class _BlockingCreatePlatform(_FakePlatform):
             self.entered += 1
             if self.entered >= self.expected_entries:
                 self.all_entered.set()
-        if not self.release_creates.wait(timeout=5):
+        if not await asyncio.to_thread(self.release_creates.wait, 5):
             raise TimeoutError("test provider create gate timed out")
         return sandbox
 
@@ -242,8 +247,8 @@ class _FailingLayoutPlatform(_FakePlatform):
         super().__init__()
         self.fail_layout = True
 
-    def create(self, **kwargs: Any) -> _FakeSandbox:
-        sandbox = super().create(**kwargs)
+    async def create(self, **kwargs: Any) -> _FakeSandbox:
+        sandbox = await super().create(**kwargs)
         if self.fail_layout:
             sandbox.fs.info_failures["/home/daytona/fleet/artifacts"] = RuntimeError(
                 "provider failed at /home/daytona/private"
@@ -257,14 +262,14 @@ class _RacingFilesystem(_FakeFilesystem):
         self._artifacts_barrier = threading.Barrier(2)
         self._artifacts_lock = threading.Lock()
 
-    def create_folder(self, path: str, mode: str) -> None:
+    async def create_folder(self, path: str, mode: str) -> None:
         if path != "/home/daytona/fleet/artifacts":
-            return super().create_folder(path, mode)
-        self._artifacts_barrier.wait(timeout=5)
+            return await super().create_folder(path, mode)
+        await asyncio.to_thread(self._artifacts_barrier.wait, 5)
         with self._artifacts_lock:
             if path in self.directories:
                 raise FileExistsError(path)
-            super().create_folder(path, mode)
+            await super().create_folder(path, mode)
 
 
 class _SharedFilesystemPlatform(_FakePlatform):
@@ -272,8 +277,8 @@ class _SharedFilesystemPlatform(_FakePlatform):
         super().__init__()
         self.filesystem = _RacingFilesystem("/home/daytona/fleet")
 
-    def create(self, **kwargs: Any) -> _FakeSandbox:
-        sandbox = super().create(**kwargs)
+    async def create(self, **kwargs: Any) -> _FakeSandbox:
+        sandbox = await super().create(**kwargs)
         sandbox.fs = self.filesystem
         return sandbox
 
@@ -282,6 +287,7 @@ def _manager(
     platform: _FakePlatform | None = None,
     bindings: InMemoryBindingStore | None = None,
     admission: DaytonaAdmission | None = None,
+    idle_stop_seconds: float | None = None,
 ) -> tuple[DaytonaSessionManager, _FakePlatform, InMemoryBindingStore, _FakeVolumeClient]:
     plat = platform or _FakePlatform()
     store = bindings or InMemoryBindingStore()
@@ -293,6 +299,7 @@ def _manager(
         bindings=store,
         admission=admission,
         sandbox_spec=_SPEC,
+        idle_stop_seconds=idle_stop_seconds,
     )
     return mgr, plat, store, volumes
 
@@ -594,7 +601,7 @@ async def test_acquire_retries_only_safe_pre_creation_failures(
 @pytest.mark.asyncio
 async def test_acquire_never_retries_ambiguous_sandbox_creation_failure() -> None:
     class _FailingCreatePlatform(_FakePlatform):
-        def create(self, **kwargs: Any) -> _FakeSandbox:
+        async def create(self, **kwargs: Any) -> _FakeSandbox:
             self._n += 1
             raise ProviderRequestError("provider unavailable", cause_type="ProviderError", status_code=503)
 
@@ -665,6 +672,23 @@ async def test_release_never_deletes_sandbox() -> None:
 
 
 @pytest.mark.asyncio
+async def test_release_stops_retained_sandbox_after_explicit_idle_timeout() -> None:
+    mgr, plat, store, _volumes = _manager(idle_stop_seconds=0.01)
+    req = _request()
+    lease = await _acquire(mgr, req)
+
+    await mgr.release(lease)
+    await asyncio.sleep(0.05)
+
+    assert plat.sandboxes[lease.sandbox_id].state == "stopped"
+    binding = await store.get(req.session_id)
+    assert binding is not None
+    assert binding.provider_state == "stopped"
+    assert plat.deleted == []
+    await mgr.aclose()
+
+
+@pytest.mark.asyncio
 async def test_acquisition_error_restores_admission_capacity() -> None:
     admission = DaytonaAdmission(max_active_leases=1)
     mgr, plat, _store, volumes = _manager(admission=admission)
@@ -728,7 +752,7 @@ async def test_cancellation_during_provider_create_transfers_owned_cleanup() -> 
     platform.release_creates.set()
     replacement_lease = await asyncio.wait_for(replacement, timeout=2)
 
-    from fleet_rlm.daytona.active_leases import get_active_lease_registry
+    from fleet_rlm.daytona.session_manager import get_active_lease_registry
 
     assert get_active_lease_registry().holder(cancelled_request.session_id) is None
     assert platform.backends[0].close_calls == 1
@@ -738,8 +762,7 @@ async def test_cancellation_during_provider_create_transfers_owned_cleanup() -> 
 
 @pytest.mark.asyncio
 async def test_provider_acquisition_deadline_returns_before_late_owned_cleanup() -> None:
-    from fleet_rlm.daytona.active_leases import get_active_lease_registry
-    from fleet_rlm.daytona.session_manager import DaytonaLeaseAcquisitionTimeout
+    from fleet_rlm.daytona.session_manager import DaytonaLeaseAcquisitionTimeout, get_active_lease_registry
 
     platform = _BlockingCreatePlatform(expected_entries=1)
     admission = DaytonaAdmission(max_active_leases=1)
@@ -782,7 +805,7 @@ async def test_cancelled_admission_wait_restores_session_claim() -> None:
 
 @pytest.mark.asyncio
 async def test_admission_timeout_restores_session_claim() -> None:
-    from fleet_rlm.daytona.admission import DaytonaAdmissionTimeout
+    from fleet_rlm.daytona.session_manager import DaytonaAdmissionTimeout
 
     admission = DaytonaAdmission(max_active_leases=1)
     held = await admission.acquire(deadline=asyncio.get_running_loop().time() + 10)

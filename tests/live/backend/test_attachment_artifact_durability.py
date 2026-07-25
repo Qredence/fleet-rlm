@@ -23,13 +23,14 @@ import pytest
 from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.bindings import SandboxBinding
+from fleet_rlm.daytona.interpreter import sync_sandbox
 from fleet_rlm.daytona.run_environment import LiveKernelResources
 from fleet_rlm.daytona.session_manager import LeaseRequest
-from fleet_rlm.daytona.volume_fs import DaytonaSandboxVolumeFs
+from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
 from fleet_rlm.files.lifecycle import AttachmentLifecycleService
 from fleet_rlm.files.local_catalog import LocalAttachmentCatalog
 from fleet_rlm.files.models import AttachmentAccess, AttachmentRun, AttachmentUpload
-from fleet_rlm.files.paths import DaytonaAttachmentPathPolicy
+from fleet_rlm.files.paths import WorkspaceAttachmentPathPolicy
 
 
 class _LiveAttachmentBlob:
@@ -37,10 +38,10 @@ class _LiveAttachmentBlob:
         self.volume_fs = volume_fs
 
     async def write(self, _workspace_id, logical_path: str, data: bytes) -> None:
-        self.volume_fs.write_bytes(logical_path, data)
+        await asyncio.to_thread(self.volume_fs.write_bytes, logical_path, data)
 
     async def read(self, _workspace_id, logical_path: str) -> bytes:
-        return self.volume_fs.read_bytes(logical_path)
+        return await asyncio.to_thread(self.volume_fs.read_bytes, logical_path)
 
 
 class _LiveSink:
@@ -48,13 +49,13 @@ class _LiveSink:
         self.volume_fs = volume_fs
 
     async def read_private(self, logical_path: str) -> bytes:
-        return self.volume_fs.read_bytes(logical_path)
+        return await asyncio.to_thread(self.volume_fs.read_bytes, logical_path)
 
     async def write_private(self, logical_path: str, data: bytes) -> None:
-        self.volume_fs.write_bytes(logical_path, data)
+        await asyncio.to_thread(self.volume_fs.write_bytes, logical_path, data)
 
     async def remove_private(self, logical_path: str) -> None:
-        self.volume_fs.remove(logical_path)
+        await asyncio.to_thread(self.volume_fs.remove, logical_path)
 
 
 class _Source:
@@ -68,6 +69,7 @@ class _Source:
         chunk = self.data[self.offset : self.offset + size]
         self.offset += len(chunk)
         return chunk
+
 
 pytestmark = [pytest.mark.live_daytona]
 
@@ -140,15 +142,15 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
         volume_id = lease.volume_id
         assert lease.volume_subpath == f"workspaces/{workspace_id}"
 
-        sandbox = resources.platform.get(lease.sandbox_id)
+        sandbox = await resources.platform.get(lease.sandbox_id)
         assert sandbox is not None
         assert getattr(sandbox, "snapshot", None) == settings.daytona_snapshot
-        volume_fs = DaytonaSandboxVolumeFs(sandbox)
+        volume_fs = DaytonaSandboxVolumeFs(sync_sandbox(sandbox, asyncio.get_running_loop()))
 
         attachment_module = AttachmentLifecycleService(
             catalog=LocalAttachmentCatalog(tmp_path / "attachments"),
             blobs=_LiveAttachmentBlob(volume_fs),
-            paths=DaytonaAttachmentPathPolicy(resources.volume_config.paths()),
+            paths=WorkspaceAttachmentPathPolicy(resources.volume_config.paths()),
             max_bytes=1024 * 1024,
         )
         artifact_store = LocalArtifactCatalog(
@@ -169,15 +171,17 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
         )
         staged = prepared.staged[0]
 
-        lease.interpreter.start()
-        read_staged = lease.interpreter.execute(
+        await asyncio.to_thread(lease.interpreter.start)
+        read_staged = await asyncio.to_thread(
+            lease.interpreter.execute,
             "from pathlib import Path\n"
             f"p = Path({staged.sandbox_path!r})\n"
-            "print(p.read_text(encoding='utf-8') if p.is_file() else 'MISSING')\n"
+            "print(p.read_text(encoding='utf-8') if p.is_file() else 'MISSING')\n",
         )
         assert ATTACHMENT_BYTES.decode() in read_staged
 
-        art = artifact_store.create(
+        art = await asyncio.to_thread(
+            artifact_store.create,
             user_id=user_id,
             workspace_id=workspace_id,
             session_id=session_id,
@@ -209,9 +213,9 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
         resources.track_sandbox(new_binding.sandbox_id)
         if new_binding.sandbox_id:
             sandbox_ids.append(new_binding.sandbox_id)
-            replacement_sandbox = resources.platform.get(new_binding.sandbox_id)
-            assert replacement_sandbox is not None
-            assert getattr(replacement_sandbox, "snapshot", None) == settings.daytona_snapshot
+        replacement_sandbox = await resources.platform.get(new_binding.sandbox_id)
+        assert replacement_sandbox is not None
+        assert getattr(replacement_sandbox, "snapshot", None) == settings.daytona_snapshot
 
         lease2 = await resources.session_manager.acquire(
             LeaseRequest(
@@ -225,11 +229,11 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
         if lease2.sandbox_id not in sandbox_ids:
             sandbox_ids.append(lease2.sandbox_id)
 
-        sandbox2 = resources.platform.get(lease2.sandbox_id)
+        sandbox2 = await resources.platform.get(lease2.sandbox_id)
         assert sandbox2 is not None
         assert getattr(sandbox2, "snapshot", None) == settings.daytona_snapshot
-        volume_fs2 = DaytonaSandboxVolumeFs(sandbox2)
-        remounted = volume_fs2.read_bytes(durable)
+        volume_fs2 = DaytonaSandboxVolumeFs(sync_sandbox(sandbox2, asyncio.get_running_loop()))
+        remounted = await asyncio.to_thread(volume_fs2.read_bytes, durable)
         assert remounted == ARTIFACT_TEXT.encode("utf-8")
         assert hashlib.sha256(remounted).hexdigest() == art.checksum_sha256
 
@@ -239,9 +243,12 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
             max_bytes=1024 * 1024,
             volume_fs=volume_fs2,
         )
-        assert rebound_store.read_bytes(art.id, user_id=user_id, workspace_id=workspace_id) == (
-            ARTIFACT_TEXT.encode("utf-8")
-        )
+        assert await asyncio.to_thread(
+            rebound_store.read_bytes,
+            art.id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        ) == ARTIFACT_TEXT.encode("utf-8")
 
         await resources.session_manager.release(lease2)
 
@@ -262,5 +269,5 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
         path = _write_evidence("live-b5-attachment-artifact-durability-evidence.json", evidence)
         assert path.is_file()
     finally:
-        resources.cleanup()
+        await resources.cleanup()
         await resources.adispose_engine()

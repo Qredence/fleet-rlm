@@ -89,8 +89,9 @@ operator state and are not inserted into durable transcript messages.
 ## Commands and Skills
 
 Use `/help` for the current slash-command list. Important commands include
-`/sessions`, `/resume`, `/status`, `/cancel`, `/clear`, `/skills`, `/skill`, and
-`/exit`.
+`/sessions`, `/resume`, `/status`, `/settings`, `/cancel`, `/clear`, `/skills`,
+`/skill`, and `/exit`. `/settings` is a local-only TOML policy editor; saved
+settings take effect after restarting Fleet.
 
 `/clear` resets only the current local presentation. It does not delete or
 rewrite durable Session History; resuming the Session restores committed Turns.
