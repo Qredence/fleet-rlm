@@ -30,7 +30,7 @@ def _entry(value: WorkspaceFileEntry) -> WorkspaceFileEntryResponse:
 
 
 def _raise_public_error(exc: BaseException) -> None:
-    if isinstance(exc, WorkspaceFileConflictError | FileExistsError):
+    if isinstance(exc, (WorkspaceFileConflictError, FileExistsError)):
         raise HTTPException(
             status_code=409,
             detail={

@@ -16,6 +16,13 @@ router = APIRouter(tags=["settings"])
 
 def require_loopback_client(request: Request) -> None:
     """Keep filesystem policy administration local even on an unsafe API bind."""
+    # Reject requests that carry proxy-forwarding headers: a local reverse proxy
+    # connecting from 127.0.0.1 would make non-local clients appear loopback.
+    if request.headers.get("x-forwarded-for") or request.headers.get("forwarded"):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "settings_local_only", "message": "Settings are available only from the local machine"},
+        )
     host = request.client.host if request.client is not None else ""
     try:
         is_loopback = ipaddress.ip_address(host).is_loopback

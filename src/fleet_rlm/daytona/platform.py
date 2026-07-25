@@ -171,6 +171,11 @@ class LiveDaytonaPlatform:
         await self._client.start(sandbox)
 
     async def stop(self, sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None:
-        del force
         sandbox = await self._client.get(sandbox_id)
-        await self._client.stop(sandbox, timeout=timeout)
+        try:
+            await self._client.stop(sandbox, timeout=timeout)
+        except (DaytonaAdapterError, TimeoutError, ConnectionError, OSError):
+            if force:
+                await self._client.delete(sandbox)
+            else:
+                raise
