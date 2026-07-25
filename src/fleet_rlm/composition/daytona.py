@@ -212,7 +212,10 @@ async def install_daytona_composition(
         app.state.composition_ready = True
         app.state.config_policy = ConfigPolicyService(
             _CONFIG_PATH,
-            active_profile=os.environ.get(_PROFILE_ENVIRONMENT),
+            active_profile=(
+                os.environ.get(_PROFILE_ENVIRONMENT)
+                or settings._dotenv_values.get(_PROFILE_ENVIRONMENT)
+            ),
         )
         app.state.run_environment_resources = handles.resources
         app.state.db_engine = handles.resources.engine

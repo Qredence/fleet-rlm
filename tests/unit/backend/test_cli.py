@@ -45,10 +45,13 @@ def test_fleet_doctor_daytona_prints_safe_steps_and_succeeds(
 def test_fleet_doctor_reads_profile_from_dotenv_when_not_exported(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    tmp_path: pytest.TempPathFactory,
 ) -> None:
     from fleet_rlm.daytona import diagnostics
 
     monkeypatch.delenv("FLEET_CONFIG_PROFILE", raising=False)
+    (tmp_path / ".env").write_text("FLEET_CONFIG_PROFILE=databricks-daytona\n")
+    monkeypatch.chdir(tmp_path)
     result = diagnostics.DaytonaDoctorResult(
         ok=True,
         steps=(diagnostics.DaytonaDoctorStep("settings", True, "Settings valid."),),
