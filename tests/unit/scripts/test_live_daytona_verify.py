@@ -12,6 +12,12 @@ import pytest
 from scripts import live_daytona_verify as verifier
 
 
+@pytest.fixture(autouse=True)
+def _avoid_loading_repository_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep verifier unit tests from mutating the worker environment via ``.env``."""
+    monkeypatch.setattr(verifier, "_load_repo_env", lambda: None)
+
+
 def _success_receipt(sha: str) -> dict[str, object]:
     return {
         "schema": verifier.RECEIPT_SCHEMA,
@@ -95,27 +101,8 @@ def test_help_is_credential_free(capsys: pytest.CaptureFixture[str]) -> None:
 
     help_text = capsys.readouterr().out
     assert "--output" in help_text
-    assert "--root-model" in help_text
-    assert "--sub-model" in help_text
-
-
-def test_model_overrides_must_be_paired(tmp_path: Path) -> None:
-    assert (
-        verifier.main(
-            [
-                "--output",
-                str(tmp_path / "receipt.json"),
-                "--root-model",
-                "openai/root",
-            ]
-        )
-        == verifier.EXIT_PRECONDITION
-    )
-
-
-def test_empty_model_override_is_rejected() -> None:
-    with pytest.raises(SystemExit, match="2"):
-        verifier.build_parser().parse_args(["--output", "receipt.json", "--root-model", " "])
+    assert "--root-model" not in help_text
+    assert "--sub-model" not in help_text
 
 
 def test_pytest_command_is_exact_and_has_no_retry() -> None:
@@ -187,7 +174,7 @@ def test_main_records_missing_live_precondition(
     monkeypatch.setattr(verifier, "_load_repo_env", lambda: None)
     monkeypatch.delenv("FLEET_LIVE", raising=False)
     monkeypatch.delenv("FLEET_DAYTONA_API_KEY", raising=False)
-    monkeypatch.delenv("FLEET_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
 
     assert verifier.main(["--output", str(output)]) == verifier.EXIT_PRECONDITION
     receipt = json.loads(output.read_text(encoding="utf-8"))
@@ -211,28 +198,15 @@ def test_main_rejects_tracked_output_path(
     assert not output.exists()
 
 
-def test_main_rejects_unapproved_effective_models_before_worktree(
-    tmp_path: Path,
+def test_configured_models_ignore_stale_environment_model_variables(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    output = tmp_path / "receipt.json"
-    monkeypatch.setenv("FLEET_LIVE", "1")
-    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
-    monkeypatch.setenv("FLEET_LLM_API_KEY", "secret-llm")
     monkeypatch.setenv("FLEET_ROOT_MODEL", "provider/private-model")
-    monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_MODEL)
-    monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
-    monkeypatch.setattr(verifier, "_candidate", lambda: ("a" * 40, "dev-0.7"))
-    monkeypatch.setattr(
-        verifier,
-        "_create_detached_worktree",
-        lambda *_args, **_kwargs: pytest.fail("worktree must not be created"),
-    )
+    monkeypatch.setenv("FLEET_SUB_MODEL", "provider/private-model")
 
-    assert verifier.main(["--output", str(output)]) == verifier.EXIT_PRECONDITION
-    assert json.loads(output.read_text(encoding="utf-8"))["failure"] == {
-        "category": "precondition_failed",
-        "phase": "models",
+    assert verifier._configured_models() == {
+        "root": verifier._LIVE_MODEL,
+        "sub": verifier._LIVE_MODEL,
     }
 
 
@@ -247,7 +221,7 @@ def test_first_lane_failure_skips_second_and_preserves_untracked_sentinel(
     worktree.mkdir()
     monkeypatch.setenv("FLEET_LIVE", "1")
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
-    monkeypatch.setenv("FLEET_LLM_API_KEY", "secret-llm")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "secret-databricks")
     monkeypatch.setenv("FLEET_ROOT_MODEL", verifier._LIVE_MODEL)
     monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_MODEL)
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
@@ -279,7 +253,7 @@ def test_lane_timeout_cleans_owned_worktree(
     worktree.mkdir()
     monkeypatch.setenv("FLEET_LIVE", "1")
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
-    monkeypatch.setenv("FLEET_LLM_API_KEY", "secret-llm")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "secret-databricks")
     monkeypatch.setenv("FLEET_ROOT_MODEL", verifier._LIVE_MODEL)
     monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_MODEL)
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
@@ -314,7 +288,7 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
     calls: list[tuple[list[str], Path, dict[str, str], int]] = []
     monkeypatch.setenv("FLEET_LIVE", "1")
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
-    monkeypatch.setenv("FLEET_LLM_API_KEY", "secret-llm")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "secret-databricks")
     monkeypatch.setenv("FLEET_ROOT_MODEL", verifier._LIVE_MODEL)
     monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_MODEL)
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
@@ -369,21 +343,7 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
 
     monkeypatch.setattr(verifier.subprocess, "run", run_once)
 
-    assert (
-        verifier.main(
-            [
-                "--output",
-                str(output),
-                "--timeout-seconds",
-                "840",
-                "--root-model",
-                verifier._LIVE_MODEL,
-                "--sub-model",
-                verifier._LIVE_MODEL,
-            ]
-        )
-        == 0
-    )
+    assert verifier.main(["--output", str(output), "--timeout-seconds", "840"]) == 0
     lane_calls = [call for call in calls if call[0][1:3] == ["run", "pytest"]]
     assert [call[0] for call in lane_calls] == [
         verifier.lane_command("attachment_artifact_durability", 840),
@@ -393,8 +353,8 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
     command, _, child_env, timeout = lane_calls[1]
     assert command == verifier.pytest_command(840)
     assert child_env[verifier.EVIDENCE_ENV] == str(worktree / ".fleet-live-proof-receipt.json")
-    assert child_env["FLEET_ROOT_MODEL"] == verifier._LIVE_MODEL
-    assert child_env["FLEET_SUB_MODEL"] == verifier._LIVE_MODEL
+    assert "FLEET_ROOT_MODEL" not in child_env
+    assert "FLEET_SUB_MODEL" not in child_env
     assert timeout == 900
     assert removed == [worktree]
     receipt = json.loads(output.read_text(encoding="utf-8"))
@@ -439,7 +399,7 @@ def test_main_records_pytest_failure_without_subprocess_output(
     sha = "4" * 40
     monkeypatch.setenv("FLEET_LIVE", "1")
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
-    monkeypatch.setenv("FLEET_LLM_API_KEY", "secret-llm")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "secret-databricks")
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
     monkeypatch.setattr(verifier, "_candidate", lambda: (sha, "dev-0.7"))
     monkeypatch.setattr(verifier, "_git", lambda *_args, **_kwargs: str(tmp_path))
@@ -467,7 +427,7 @@ def test_main_rejects_success_without_receipt(
     sha = "5" * 40
     monkeypatch.setenv("FLEET_LIVE", "1")
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "secret-daytona")
-    monkeypatch.setenv("FLEET_LLM_API_KEY", "secret-llm")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "secret-databricks")
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
     monkeypatch.setattr(verifier, "_candidate", lambda: (sha, "dev-0.7"))
     monkeypatch.setattr(verifier, "_git", lambda *_args, **_kwargs: str(tmp_path))

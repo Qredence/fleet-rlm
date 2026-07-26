@@ -246,8 +246,8 @@ def test_supervisor_runs_pi_tui_against_ready_backend_and_terminates_backend_gro
         "--reload",
     ]
     assert backend_options["start_new_session"] is True
-    assert backend_options["env"]["FLEET_RUN_ENVIRONMENT"] == "deno"  # type: ignore[index]
     assert backend_options["env"]["FLEET_CONFIG_PROFILE"] == "local-deno"  # type: ignore[index]
+    assert "FLEET_RUN_ENVIRONMENT" not in backend_options["env"]  # type: ignore[index]
     assert Path(backend_options["stdout"].name).parent == tmp_path / ".fleet_rlm" / "logs"  # type: ignore[union-attr]
     latest_log = tmp_path / ".fleet_rlm" / "logs" / "latest.log"
     assert latest_log.is_symlink()

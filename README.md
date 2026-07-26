@@ -52,15 +52,17 @@ promotion.
 
 ### Daytona
 
-Daytona is the full Fleet runtime and requires an LLM key, Daytona key, and
-database URL. Initialize the configured database explicitly; startup never
+Daytona is the full Fleet runtime and requires a Databricks token, AI Gateway
+URL, Daytona key, and database URL. The selected policy supplies the immutable
+Daytona Snapshot. Initialize the configured database explicitly; startup never
 applies migrations automatically.
 
 ```bash
 export FLEET_CONFIG_PROFILE=daytona
 export FLEET_DATABASE_URL='postgresql+asyncpg://...'
 export FLEET_DAYTONA_API_KEY='...'
-export FLEET_LLM_API_KEY='...'
+export DATABRICKS_TOKEN='...'
+export FLEET_DATABRICKS_AI_GATEWAY_BASE_URL='https://<workspace>/ai-gateway/openai/v1'
 make daytona-snapshot-check
 uv run python scripts/db_init.py
 uv run fleet-rlm serve-api --port 8000
@@ -132,9 +134,7 @@ exact candidate SHA:
 
 ```bash
 FLEET_LIVE=1 uv run python scripts/live_daytona_verify.py \
-  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json \
-  --root-model <approved-root-model> \
-  --sub-model <approved-sub-model>
+  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json
 ```
 
 The verifier keeps credentials out of Sandboxes and writes only bounded local

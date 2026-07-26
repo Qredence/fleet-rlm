@@ -48,12 +48,10 @@ def _profile_for_run_environment(run_environment: str) -> str:
 
 
 @contextmanager
-def _selected_runtime_profile(profile: str, run_environment: str):
-    """Temporarily align parent-process config while validating a forced launcher."""
+def _selected_runtime_profile(profile: str):
+    """Temporarily select the TOML profile while validating a launcher."""
     previous_profile = os.environ.get("FLEET_CONFIG_PROFILE")
-    previous_environment = os.environ.get("FLEET_RUN_ENVIRONMENT")
     os.environ["FLEET_CONFIG_PROFILE"] = profile
-    os.environ["FLEET_RUN_ENVIRONMENT"] = run_environment
     try:
         yield
     finally:
@@ -61,10 +59,6 @@ def _selected_runtime_profile(profile: str, run_environment: str):
             os.environ.pop("FLEET_CONFIG_PROFILE", None)
         else:
             os.environ["FLEET_CONFIG_PROFILE"] = previous_profile
-        if previous_environment is None:
-            os.environ.pop("FLEET_RUN_ENVIRONMENT", None)
-        else:
-            os.environ["FLEET_RUN_ENVIRONMENT"] = previous_environment
 
 
 def _validate_prerequisites(repo_root: Path) -> tuple[Path, str]:
@@ -197,7 +191,7 @@ def supervise(
     workspace, pnpm = _validate_prerequisites(root)
     _require_available_port(host, port)
     if run_environment == "daytona":
-        with _selected_runtime_profile(profile, run_environment):
+        with _selected_runtime_profile(profile):
             _validate_daytona_database(root)
     logs = root / ".fleet_rlm" / "logs"
     logs.mkdir(parents=True, exist_ok=True)
@@ -220,8 +214,8 @@ def supervise(
     backend_env = {
         **os.environ,
         "FLEET_CONFIG_PROFILE": profile,
-        "FLEET_RUN_ENVIRONMENT": run_environment,
     }
+    backend_env.pop("FLEET_RUN_ENVIRONMENT", None)
     previous_handlers: dict[int, SignalHandler] = {}
     received_signal: int | None = None
 

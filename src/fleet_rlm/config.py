@@ -16,8 +16,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from dotenv import dotenv_values
-from pydantic import BaseModel, Field, PrivateAttr, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, SecretStr, field_validator, model_validator
 
 from fleet_rlm.snapshot_contract import validate_snapshot_name
 
@@ -33,7 +32,7 @@ class FleetConfigurationError(ValueError):
 class LLMRoleSettings(BaseModel):
     """Non-secret settings for one explicit Root or Sub Model role."""
 
-    model_config = SettingsConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid")
 
     model: str
     api_key_env: str
@@ -51,15 +50,16 @@ class LLMRoleSettings(BaseModel):
         return value
 
 
-class Settings(BaseSettings):
-    """Fleet RLM process settings (``FLEET_*``)."""
+class Settings(BaseModel):
+    """Fully resolved Fleet runtime settings.
 
-    model_config = SettingsConfigDict(
-        env_prefix="FLEET_",
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
+    Production callers must use :func:`load_runtime_settings`, which derives
+    these values from the selected TOML policy and its explicit environment
+    references.  This model deliberately never consumes ambient ``FLEET_*``
+    settings: that would let stale deployment values override the policy.
+    """
+
+    model_config = ConfigDict(extra="ignore")
 
     app_name: str = Field(default="fleet-rlm")
     daytona_api_key: SecretStr | None = Field(default=None)
@@ -143,6 +143,10 @@ class Settings(BaseSettings):
         default=None,
         description="MLflow experiment name when tracing is enabled",
     )
+    mlflow_tracking_uri: str = Field(
+        default="databricks",
+        description="MLflow tracking URI selected by the Fleet policy",
+    )
     mlflow_expose_trace_id: bool = Field(
         default=True,
         description="When tracing is enabled, surface trace ids on Turn SSE metadata",
@@ -186,19 +190,13 @@ class Settings(BaseSettings):
             raise ValueError("FLEET_DAYTONA_SNAPSHOT must be immutable and end in -v<positive integer>") from exc
 
     def llm_role(self, role: Literal["root", "sub"]) -> LLMRoleSettings:
-        """Resolve one role, retaining the legacy shared LLM env overrides."""
+        """Return one explicit Root or Sub role resolved from TOML policy."""
         prefix = f"{role}_llm"
-        base_url = getattr(self, f"{prefix}_base_url")
-        max_tokens = getattr(self, f"{prefix}_max_tokens")
-        if "llm_base_url" in self.model_fields_set:
-            base_url = self.llm_base_url
-        if "llm_max_tokens" in self.model_fields_set:
-            max_tokens = self.llm_max_tokens
         return LLMRoleSettings(
             model=self.root_model if role == "root" else self.sub_model,
             api_key_env=getattr(self, f"{prefix}_api_key_env"),
-            base_url=base_url,
-            max_tokens=max_tokens,
+            base_url=getattr(self, f"{prefix}_base_url"),
+            max_tokens=getattr(self, f"{prefix}_max_tokens"),
             temperature=getattr(self, f"{prefix}_temperature"),
             cache=getattr(self, f"{prefix}_cache"),
             num_retries=getattr(self, f"{prefix}_num_retries"),
@@ -218,22 +216,30 @@ _TABLE_KEYS: dict[str, frozenset[str]] = {
     ),
     "llm": frozenset({"root", "sub"}),
     "rlm": frozenset({"max_iterations", "max_llm_calls", "max_output_chars", "verbose"}),
-    "storage": frozenset({"data_root", "max_upload_bytes", "max_artifact_bytes", "database_url"}),
-    "daytona": frozenset({"snapshot", "volume_name", "volume_mount_path"}),
+    "storage": frozenset({"data_root", "max_upload_bytes", "max_artifact_bytes", "database_url_env"}),
+    "daytona": frozenset({"api_key_env", "snapshot", "org_id", "volume_name", "volume_mount_path"}),
     "logging": frozenset({"level"}),
     "mlflow": frozenset(
         {
             "tracing_enabled",
             "experiment_name",
+            "experiment_name_env",
+            "tracking_uri",
             "expose_trace_id",
             "trace_catalog",
+            "trace_catalog_env",
             "trace_schema",
+            "trace_schema_env",
             "trace_table_prefix",
+            "trace_table_prefix_env",
             "tracing_sql_warehouse_id",
+            "tracing_sql_warehouse_id_env",
         }
     ),
 }
-_ROLE_KEYS = frozenset({"model", "api_key_env", "base_url", "max_tokens", "temperature", "cache", "num_retries"})
+_ROLE_KEYS = frozenset(
+    {"model", "api_key_env", "base_url", "base_url_env", "max_tokens", "temperature", "cache", "num_retries"}
+)
 
 
 def _require_mapping(value: object, location: str) -> Mapping[str, Any]:
@@ -270,6 +276,49 @@ def _validate_policy_table(value: object, location: str) -> None:
                 raise FleetConfigurationError(
                     f"unknown configuration key(s) at {location}.llm.{role}: {', '.join(sorted(role_extras))}"
                 )
+            if "base_url" in role_table and "base_url_env" in role_table:
+                raise FleetConfigurationError(f"{location}.llm.{role} cannot define both base_url and base_url_env")
+            _validate_environment_reference(role_table.get("api_key_env"), f"{location}.llm.{role}.api_key_env")
+            _validate_optional_environment_reference(
+                role_table.get("base_url_env"), f"{location}.llm.{role}.base_url_env"
+            )
+        continue
+    for name, child in table.items():
+        if name == "storage":
+            _validate_optional_environment_reference(
+                _require_mapping(child, f"{location}.storage").get("database_url_env"),
+                f"{location}.storage.database_url_env",
+            )
+        elif name == "daytona":
+            _validate_optional_environment_reference(
+                _require_mapping(child, f"{location}.daytona").get("api_key_env"),
+                f"{location}.daytona.api_key_env",
+            )
+        elif name == "mlflow":
+            mlflow = _require_mapping(child, f"{location}.mlflow")
+            for key in (
+                "experiment_name",
+                "trace_catalog",
+                "trace_schema",
+                "trace_table_prefix",
+                "tracing_sql_warehouse_id",
+            ):
+                reference = f"{key}_env"
+                if key in mlflow and reference in mlflow:
+                    raise FleetConfigurationError(f"{location}.mlflow cannot define both {key} and {reference}")
+                _validate_optional_environment_reference(mlflow.get(reference), f"{location}.mlflow.{reference}")
+
+
+def _validate_environment_reference(value: object, location: str) -> str:
+    if not isinstance(value, str) or not _ENVIRONMENT_NAME.fullmatch(value):
+        raise FleetConfigurationError(f"{location} must name an uppercase environment variable")
+    return value
+
+
+def _validate_optional_environment_reference(value: object, location: str) -> str | None:
+    if value is None:
+        return None
+    return _validate_environment_reference(value, location)
 
 
 def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
@@ -308,40 +357,55 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
         "data_root": storage.get("data_root"),
         "max_upload_bytes": storage.get("max_upload_bytes"),
         "max_artifact_bytes": storage.get("max_artifact_bytes"),
-        "database_url": storage.get("database_url"),
+        "database_url_env": storage.get("database_url_env"),
+        "daytona_api_key_env": daytona.get("api_key_env"),
         "daytona_snapshot": daytona.get("snapshot"),
+        "daytona_org_id": daytona.get("org_id"),
         "volume_name": daytona.get("volume_name"),
         "volume_mount_path": daytona.get("volume_mount_path"),
         "log_level": log.get("level"),
     }
     if "tracing_enabled" in mlflow:
         values["mlflow_tracing_enabled"] = mlflow["tracing_enabled"]
-    if "experiment_name" in mlflow:
-        values["mlflow_experiment_name"] = mlflow["experiment_name"]
+    for key, settings_field in (
+        ("experiment_name", "mlflow_experiment_name"),
+        ("trace_catalog", "mlflow_trace_catalog"),
+        ("trace_schema", "mlflow_trace_schema"),
+        ("trace_table_prefix", "mlflow_trace_table_prefix"),
+        ("tracing_sql_warehouse_id", "mlflow_tracing_sql_warehouse_id"),
+    ):
+        if key in mlflow:
+            values[settings_field] = mlflow[key]
+        if f"{key}_env" in mlflow:
+            values[f"{settings_field}_env"] = mlflow[f"{key}_env"]
+    if "tracking_uri" in mlflow:
+        values["mlflow_tracking_uri"] = mlflow["tracking_uri"]
     if "expose_trace_id" in mlflow:
         values["mlflow_expose_trace_id"] = mlflow["expose_trace_id"]
-    if "trace_catalog" in mlflow:
-        values["mlflow_trace_catalog"] = mlflow["trace_catalog"]
-    if "trace_schema" in mlflow:
-        values["mlflow_trace_schema"] = mlflow["trace_schema"]
-    if "trace_table_prefix" in mlflow:
-        values["mlflow_trace_table_prefix"] = mlflow["trace_table_prefix"]
-    if "tracing_sql_warehouse_id" in mlflow:
-        values["mlflow_tracing_sql_warehouse_id"] = mlflow["tracing_sql_warehouse_id"]
     for role in ("root", "sub"):
         role_values = _require_mapping(llm.get(role, {}), f"llm.{role}")
         values[f"{role}_model"] = role_values.get("model")
         values[f"{role}_llm_api_key_env"] = role_values.get("api_key_env")
         values[f"{role}_llm_base_url"] = role_values.get("base_url")
+        values[f"{role}_llm_base_url_env"] = role_values.get("base_url_env")
         values[f"{role}_llm_max_tokens"] = role_values.get("max_tokens")
         values[f"{role}_llm_temperature"] = role_values.get("temperature")
         values[f"{role}_llm_cache"] = role_values.get("cache")
         values[f"{role}_llm_num_retries"] = role_values.get("num_retries")
     optional = {
-        "database_url",
+        "database_url_env",
+        "daytona_api_key_env",
         "daytona_snapshot",
+        "daytona_org_id",
         "root_llm_base_url",
         "sub_llm_base_url",
+        "root_llm_base_url_env",
+        "sub_llm_base_url_env",
+        "mlflow_experiment_name_env",
+        "mlflow_trace_catalog_env",
+        "mlflow_trace_schema_env",
+        "mlflow_trace_table_prefix_env",
+        "mlflow_tracing_sql_warehouse_id_env",
         "root_llm_max_tokens",
         "sub_llm_max_tokens",
         "root_llm_temperature",
@@ -351,6 +415,17 @@ def _flatten_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
     if missing:
         raise FleetConfigurationError(f"selected profile is missing required setting(s): {', '.join(missing)}")
     return values
+
+
+def _resolve_environment_value(name: str | None, dotenv: Mapping[str, str | None]) -> str | None:
+    """Resolve one TOML-declared external value; exports win over ``.env``."""
+    if name is None:
+        return None
+    value = os.environ.get(name)
+    if value is None:
+        value = dotenv.get(name)
+    value = (value or "").strip()
+    return value or None
 
 
 def load_runtime_settings() -> Settings:
@@ -382,10 +457,23 @@ def load_runtime_settings() -> Settings:
     _validate_policy_table(selected, f"profiles.{profile}")
     values = _flatten_policy(_deep_merge(defaults, selected))
 
-    environment = Settings()
-    if "run_environment" in environment.model_fields_set and environment.run_environment != values["run_environment"]:
-        raise FleetConfigurationError("FLEET_RUN_ENVIRONMENT conflicts with the selected Fleet configuration profile")
-    values.update({field: getattr(environment, field) for field in environment.model_fields_set})
+    database_url_env = values.pop("database_url_env", None)
+    daytona_api_key_env = values.pop("daytona_api_key_env", None)
+    values["database_url"] = _resolve_environment_value(database_url_env, dotenv)
+    daytona_api_key = _resolve_environment_value(daytona_api_key_env, dotenv)
+    values["daytona_api_key"] = SecretStr(daytona_api_key) if daytona_api_key is not None else None
+    for settings_field in (
+        "root_llm_base_url",
+        "sub_llm_base_url",
+        "mlflow_experiment_name",
+        "mlflow_trace_catalog",
+        "mlflow_trace_schema",
+        "mlflow_trace_table_prefix",
+        "mlflow_tracing_sql_warehouse_id",
+    ):
+        reference = values.pop(f"{settings_field}_env", None)
+        if reference is not None:
+            values[settings_field] = _resolve_environment_value(reference, dotenv)
     settings = Settings(**values)
     settings._dotenv_values = {key: value for key, value in dotenv.items() if value is not None}
     return settings

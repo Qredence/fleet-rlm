@@ -57,7 +57,7 @@ def test_common_storage_adapter_builder_owns_local_and_sql_catalog_branches(tmp_
         assert adapters.artifact_reader._blobs is sql_artifact_blobs  # noqa: SLF001
 
 
-def test_require_daytona_settings_fails_closed_without_deps() -> None:
+def test_require_daytona_settings_fails_closed_without_deps(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(CompositionError, match="run_environment"):
         require_daytona_settings(Settings(run_environment="deno"))
     with pytest.raises(CompositionError, match="DAYTONA_API_KEY"):
@@ -98,6 +98,21 @@ def test_require_daytona_settings_fails_closed_without_deps() -> None:
                 database_url="",
                 daytona_api_key=SecretStr("daytona-key"),
                 daytona_snapshot="fleet-test-v1",
+                llm_api_key=SecretStr("llm-key"),
+            )
+        )
+    with pytest.raises(CompositionError, match="FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"):
+        monkeypatch.setenv("DATABRICKS_TOKEN", "databricks-key")
+        require_daytona_settings(
+            Settings(
+                run_environment="daytona",
+                database_url="sqlite+aiosqlite:///:memory:",
+                daytona_api_key=SecretStr("daytona-key"),
+                daytona_snapshot="fleet-test-v1",
+                root_model="uscentral.default.deepseek-v4-flash",
+                sub_model="uscentral.default.deepseek-v4-flash",
+                root_llm_api_key_env="DATABRICKS_TOKEN",
+                sub_llm_api_key_env="DATABRICKS_TOKEN",
                 llm_api_key=SecretStr("llm-key"),
             )
         )

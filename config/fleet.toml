@@ -32,8 +32,10 @@ verbose = true
 data_root = ".fleet_rlm"
 max_upload_bytes = 10485760
 max_artifact_bytes = 10485760
+database_url_env = "FLEET_DATABASE_URL"
 
 [defaults.daytona]
+api_key_env = "FLEET_DAYTONA_API_KEY"
 volume_name = "rlm-volume-dspy"
 volume_mount_path = "/home/daytona/fleet"
 
@@ -49,28 +51,59 @@ environment = "daytona"
 [profiles.daytona.daytona]
 snapshot = "fleet-rlm-python313-v3"
 
+[profiles.daytona.llm.root]
+model = "uscentral.default.deepseek-v4-flash"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
+cache = true
+num_retries = 3
+
+[profiles.daytona.llm.sub]
+model = "uscentral.default.deepseek-v4-flash"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
+cache = true
+num_retries = 3
+
+[profiles.daytona.mlflow]
+tracing_enabled = true
+tracking_uri = "databricks"
+experiment_name_env = "FLEET_MLFLOW_EXPERIMENT_NAME"
+trace_catalog_env = "FLEET_MLFLOW_TRACE_CATALOG"
+trace_schema_env = "FLEET_MLFLOW_TRACE_SCHEMA"
+trace_table_prefix_env = "FLEET_MLFLOW_TRACE_TABLE_PREFIX"
+tracing_sql_warehouse_id_env = "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID"
+
 # Databricks-hosted profile: AI Gateway routes both roles through the unified
-# /ai-gateway/openai/v1 endpoint.  Set DATABRICKS_TOKEN in .env or process env.
+# /ai-gateway/openai/v1 endpoint. Set DATABRICKS_TOKEN in .env or process env.
 [profiles.databricks-daytona.runtime]
 environment = "daytona"
 
 [profiles.databricks-daytona.daytona]
 snapshot = "fleet-rlm-python313-v3"
 
-# Fast-tier root: nemotron-3-ultra-free via MPS deepseek-v4-flash-free / opencode.ai/zen.
-# Frontier models (claude-opus-4-8, gpt-5-6-sol) are reserved for offline GEPA;
-# build_lm_for_tier(LMTier.FRONTIER, ...) handles them explicitly.
+# DeepSeek is used for both live RLM roles because it supports Fleet's native
+# structured action contract. Frontier models remain offline-GEPA only.
 [profiles.databricks-daytona.llm.root]
-model = "uscentral.default.nemotron-3-ultra-free"
+model = "uscentral.default.deepseek-v4-flash"
 api_key_env = "DATABRICKS_TOKEN"
-base_url = "https://8259565402437752.2.gcp.databricks.com/ai-gateway/openai/v1"
+base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 cache = true
 num_retries = 3
 
-# Fast tier: bounded semantic analysis sub model.
+# Bounded semantic analysis sub model.
 [profiles.databricks-daytona.llm.sub]
 model = "uscentral.default.deepseek-v4-flash"
 api_key_env = "DATABRICKS_TOKEN"
-base_url = "https://8259565402437752.2.gcp.databricks.com/ai-gateway/openai/v1"
+base_url_env = "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL"
 cache = true
 num_retries = 3
+
+[profiles.databricks-daytona.mlflow]
+tracing_enabled = true
+tracking_uri = "databricks"
+experiment_name_env = "FLEET_MLFLOW_EXPERIMENT_NAME"
+trace_catalog_env = "FLEET_MLFLOW_TRACE_CATALOG"
+trace_schema_env = "FLEET_MLFLOW_TRACE_SCHEMA"
+trace_table_prefix_env = "FLEET_MLFLOW_TRACE_TABLE_PREFIX"
+tracing_sql_warehouse_id_env = "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID"

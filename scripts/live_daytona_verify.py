@@ -16,12 +16,14 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from fleet_rlm.config import load_runtime_settings
+
 RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
 EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 _LIVE_TEST = "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_complete_daytona_mvp_through_fastapi"
-_REQUIRED_ENV = ("FLEET_DAYTONA_API_KEY", "FLEET_LLM_API_KEY")
+_REQUIRED_ENV = ("FLEET_DAYTONA_API_KEY", "DATABRICKS_TOKEN")
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_LIVE_MODEL = "deepseek-v4-flash-free"
+_LIVE_MODEL = "uscentral.default.deepseek-v4-flash"
 _APPROVED_MODELS = frozenset({_LIVE_MODEL, f"openai/{_LIVE_MODEL}"})
 _DURABILITY_TEST = "tests/live/backend/test_attachment_artifact_durability.py"
 _SUCCESS_FIELDS = frozenset(
@@ -76,13 +78,6 @@ class LaneResult:
         return {"order": self.order, "passed": self.passed}
 
 
-def _model_argument(value: str) -> str:
-    cleaned = value.strip()
-    if not cleaned:
-        raise argparse.ArgumentTypeError("model must not be empty")
-    return cleaned
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -96,16 +91,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=900,
         help="Pytest timeout for the live proof (default: 900).",
-    )
-    parser.add_argument(
-        "--root-model",
-        type=_model_argument,
-        help="Optional non-secret FLEET_ROOT_MODEL override for the child proof process.",
-    )
-    parser.add_argument(
-        "--sub-model",
-        type=_model_argument,
-        help="Optional non-secret FLEET_SUB_MODEL override for the child proof process.",
     )
     return parser
 
@@ -634,15 +619,16 @@ def _write_failure(
 def _load_repo_env() -> None:
     """Load repo ``.env`` into the process without overriding exported values."""
     load_dotenv(_REPO_ROOT / ".env", override=False)
-    os.environ.setdefault("FLEET_ROOT_MODEL", _LIVE_MODEL)
-    os.environ.setdefault("FLEET_SUB_MODEL", _LIVE_MODEL)
+
+
+def _configured_models() -> dict[str, str]:
+    """Return the approved models resolved from the selected TOML profile."""
+    settings = load_runtime_settings()
+    return {"root": settings.root_model, "sub": settings.sub_model}
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if (args.root_model is None) != (args.sub_model is None):
-        print("--root-model and --sub-model must be provided together.", file=sys.stderr)
-        return EXIT_PRECONDITION
     output = args.output.expanduser().resolve()
     started_at = _utc_now()
     if args.timeout_seconds <= 0 or not _path_is_allowed(output):
@@ -670,15 +656,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         print("Live proof candidate precondition failed.", file=sys.stderr)
         return EXIT_PRECONDITION
-    models = {
-        "root": os.environ.get("FLEET_ROOT_MODEL", ""),
-        "sub": os.environ.get("FLEET_SUB_MODEL", ""),
-    }
+    models = _configured_models()
     child_env = os.environ.copy()
-    if args.root_model is not None:
-        child_env["FLEET_ROOT_MODEL"] = args.root_model
-        child_env["FLEET_SUB_MODEL"] = args.sub_model
-        models = {"root": args.root_model, "sub": args.sub_model}
+    child_env.pop("FLEET_ROOT_MODEL", None)
+    child_env.pop("FLEET_SUB_MODEL", None)
     if any(model not in _APPROVED_MODELS for model in models.values()):
         _write_failure(
             output,

@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
-from fleet_rlm.config import Settings
+from fleet_rlm.config import Settings, load_runtime_settings
 from fleet_rlm.daytona.bindings import SandboxBinding
 from fleet_rlm.daytona.workspace_fs import DaytonaSandboxVolumeFs
 from fleet_rlm.files.volume_paths import volume_paths_from_settings
@@ -43,10 +43,10 @@ _CAPABILITY_ID = "fleet.live-daytona-mvp"
 _WORKSPACE_PATH = "notes/findings.md"
 _RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
 _EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
-_SECRET_NAMES = ("FLEET_DAYTONA_API_KEY", "FLEET_LLM_API_KEY")
+_SECRET_NAMES = ("FLEET_DAYTONA_API_KEY", "DATABRICKS_TOKEN")
 _CLEANUP_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
 # Gateway-local bare id; normalize_model_id adds openai/ for dspy.LM.
-_LIVE_MODEL = "deepseek-v4-flash-free"
+_LIVE_MODEL = "uscentral.default.deepseek-v4-flash"
 
 
 class LiveDaytonaMVPResult(dspy.Signature):
@@ -182,25 +182,22 @@ def _live_settings(tmp_path: Path) -> Settings:
         pytest.skip("Set FLEET_LIVE=1 for the complete Daytona MVP proof")
     missing = [
         name
-        for name in ("FLEET_DAYTONA_API_KEY", "FLEET_LLM_API_KEY", "FLEET_DAYTONA_SNAPSHOT")
+        for name in ("FLEET_DAYTONA_API_KEY", "DATABRICKS_TOKEN")
         if not os.environ.get(name)
     ]
     if missing:
         pytest.fail("Live Daytona MVP proof missing required credentials: " + ", ".join(missing))
-    # Prefer verify-script / shell overrides; otherwise pin the approved free DeepSeek id.
-    os.environ.setdefault("FLEET_ROOT_MODEL", _LIVE_MODEL)
-    os.environ.setdefault("FLEET_SUB_MODEL", _LIVE_MODEL)
+    policy = load_runtime_settings()
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'live-mvp.db').resolve()}"
     upgrade_to_head(database_url)
-    return Settings(
-        run_environment="daytona",
-        database_url=database_url,
-        volume_name=f"fleet-rlm-live-mvp-{uuid4()}",
-        root_model=os.environ["FLEET_ROOT_MODEL"],
-        sub_model=os.environ["FLEET_SUB_MODEL"],
-        rlm_max_iterations=8,
-        rlm_max_llm_calls=12,
-        turn_timeout_seconds=840,
+    return policy.model_copy(
+        update={
+            "database_url": database_url,
+            "volume_name": f"fleet-rlm-live-mvp-{uuid4()}",
+            "rlm_max_iterations": 8,
+            "rlm_max_llm_calls": 12,
+            "turn_timeout_seconds": 840,
+        }
     )
 
 

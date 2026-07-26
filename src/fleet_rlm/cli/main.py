@@ -33,7 +33,10 @@ def _add_serve_command(
     )
     if supervise_tui:
         serve.add_argument("tui_args", nargs=argparse.REMAINDER)
-    serve.set_defaults(run_environment=run_environment, supervise_tui=supervise_tui)
+    serve.set_defaults(
+        run_environment=run_environment,
+        supervise_tui=supervise_tui,
+    )
 
 
 def _fleet_parser() -> argparse.ArgumentParser:

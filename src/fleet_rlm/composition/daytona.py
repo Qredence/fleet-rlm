@@ -23,10 +23,15 @@ def require_daytona_settings(settings: Settings) -> None:
         missing.append("FLEET_DAYTONA_API_KEY")
     if not (settings.daytona_snapshot or "").strip():
         missing.append("FLEET_DAYTONA_SNAPSHOT")
-    from fleet_rlm.rlm.lm_factory import has_llm_credentials
+    from fleet_rlm.rlm.lm_factory import has_llm_credentials, sanitize_base_url
 
     if not has_llm_credentials(settings):
         missing.append("FLEET_LLM_API_KEY or configured role API key")
+    if any(
+        role.api_key_env == "DATABRICKS_TOKEN" and not sanitize_base_url(role.base_url)
+        for role in (settings.llm_role("root"), settings.llm_role("sub"))
+    ):
+        missing.append("FLEET_DATABRICKS_AI_GATEWAY_BASE_URL")
     if not (settings.database_url or "").strip():
         missing.append("FLEET_DATABASE_URL")
     if missing:

@@ -15,7 +15,6 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlsplit
 
 import tomlkit
 from tomlkit import TOMLDocument
@@ -88,6 +87,7 @@ _FIELDS: tuple[PolicyField, ...] = (
         settings_field="root_llm_api_key_env",
     ),
     PolicyField("llm.root.base_url", "Root LLM", "Base URL", "text", settings_field="root_llm_base_url"),
+    PolicyField("llm.root.base_url_env", "Root LLM", "Base URL environment variable", "text"),
     PolicyField("llm.root.max_tokens", "Root LLM", "Maximum tokens", "number", settings_field="root_llm_max_tokens"),
     PolicyField("llm.root.temperature", "Root LLM", "Temperature", "number", settings_field="root_llm_temperature"),
     PolicyField("llm.root.cache", "Root LLM", "Cache", "boolean", settings_field="root_llm_cache"),
@@ -97,6 +97,7 @@ _FIELDS: tuple[PolicyField, ...] = (
         "llm.sub.api_key_env", "Sub LLM", "API key environment variable", "text", settings_field="sub_llm_api_key_env"
     ),
     PolicyField("llm.sub.base_url", "Sub LLM", "Base URL", "text", settings_field="sub_llm_base_url"),
+    PolicyField("llm.sub.base_url_env", "Sub LLM", "Base URL environment variable", "text"),
     PolicyField("llm.sub.max_tokens", "Sub LLM", "Maximum tokens", "number", settings_field="sub_llm_max_tokens"),
     PolicyField("llm.sub.temperature", "Sub LLM", "Temperature", "number", settings_field="sub_llm_temperature"),
     PolicyField("llm.sub.cache", "Sub LLM", "Cache", "boolean", settings_field="sub_llm_cache"),
@@ -114,8 +115,10 @@ _FIELDS: tuple[PolicyField, ...] = (
     PolicyField(
         "storage.max_artifact_bytes", "Storage", "Maximum artifact bytes", "number", settings_field="max_artifact_bytes"
     ),
-    PolicyField("storage.database_url", "Storage", "Database URL", "text", settings_field="database_url"),
+    PolicyField("storage.database_url_env", "Storage", "Database URL environment variable", "text"),
+    PolicyField("daytona.api_key_env", "Daytona", "API key environment variable", "text"),
     PolicyField("daytona.snapshot", "Daytona", "Snapshot", "text", settings_field="daytona_snapshot"),
+    PolicyField("daytona.org_id", "Daytona", "Organization ID", "text", settings_field="daytona_org_id"),
     PolicyField("daytona.volume_name", "Daytona", "Volume name", "text", settings_field="volume_name"),
     PolicyField(
         "daytona.volume_mount_path", "Daytona", "Volume mount path", "text", settings_field="volume_mount_path"
@@ -132,20 +135,31 @@ _FIELDS: tuple[PolicyField, ...] = (
         "mlflow.tracing_enabled", "MLflow", "Tracing enabled", "boolean", settings_field="mlflow_tracing_enabled"
     ),
     PolicyField("mlflow.experiment_name", "MLflow", "Experiment name", "text", settings_field="mlflow_experiment_name"),
+    PolicyField("mlflow.experiment_name_env", "MLflow", "Experiment environment variable", "text"),
+    PolicyField("mlflow.tracking_uri", "MLflow", "Tracking URI", "text", settings_field="mlflow_tracking_uri"),
     PolicyField(
         "mlflow.expose_trace_id", "MLflow", "Expose trace ID", "boolean", settings_field="mlflow_expose_trace_id"
     ),
     PolicyField("mlflow.trace_catalog", "MLflow", "Trace catalog", "text", settings_field="mlflow_trace_catalog"),
+    PolicyField("mlflow.trace_catalog_env", "MLflow", "Trace catalog environment variable", "text"),
     PolicyField("mlflow.trace_schema", "MLflow", "Trace schema", "text", settings_field="mlflow_trace_schema"),
+    PolicyField("mlflow.trace_schema_env", "MLflow", "Trace schema environment variable", "text"),
     PolicyField(
         "mlflow.trace_table_prefix", "MLflow", "Trace table prefix", "text", settings_field="mlflow_trace_table_prefix"
     ),
+    PolicyField("mlflow.trace_table_prefix_env", "MLflow", "Trace table prefix environment variable", "text"),
     PolicyField(
         "mlflow.tracing_sql_warehouse_id",
         "MLflow",
         "Tracing SQL warehouse ID",
         "text",
         settings_field="mlflow_tracing_sql_warehouse_id",
+    ),
+    PolicyField(
+        "mlflow.tracing_sql_warehouse_id_env",
+        "MLflow",
+        "Tracing SQL warehouse environment variable",
+        "text",
     ),
 )
 _FIELD_BY_PATH = {field.path: field for field in _FIELDS}
@@ -199,23 +213,21 @@ class ConfigPolicyService:
             raise FleetConfigurationError("invalid Fleet configuration TOML") from exc
 
     def _snapshot(self, document: TOMLDocument, raw: str) -> PolicySnapshot:
-        overridden = {field for field in Settings.model_fields if f"FLEET_{field.upper()}" in os.environ}
         scopes: list[dict[str, Any]] = []
         defaults = document.get("defaults")
         if isinstance(defaults, dict):
-            scopes.append(self._scope("defaults", defaults, overridden))
+            scopes.append(self._scope("defaults", defaults))
         profiles = document.get("profiles")
         if isinstance(profiles, dict):
             for name, profile in profiles.items():
                 if isinstance(name, str) and isinstance(profile, dict):
-                    scopes.append(self._scope(name, profile, overridden, inherited=defaults))
+                    scopes.append(self._scope(name, profile, inherited=defaults))
         return PolicySnapshot(self._revision(raw), self._active_profile, tuple(scopes))
 
     def _scope(
         self,
         name: str,
         table: dict[str, Any],
-        overridden: set[str],
         *,
         inherited: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -231,10 +243,10 @@ class ConfigPolicyService:
                     "path": field.path,
                     "group": field.group,
                     "label": field.label,
-                    "value": self._public_value(field, value),
+                    "value": value,
                     "editor": field.editor,
                     "choices": list(field.choices),
-                    "environment_overridden": field.settings_field in overridden if field.settings_field else False,
+                    "environment_overridden": False,
                 }
             )
         return {"name": name, "fields": values}
@@ -275,25 +287,10 @@ class ConfigPolicyService:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     @staticmethod
-    def _public_value(field: PolicyField, value: Any) -> Any:
-        if field.path != "storage.database_url" or not isinstance(value, str):
-            return value
-        parts = urlsplit(value)
-        if parts.username is None and parts.password is None:
-            return value
-        host = parts.hostname or ""
-        port = f":{parts.port}" if parts.port else ""
-        return f"{parts.scheme}://***@{host}{port}{parts.path}"
-
-    @staticmethod
     def _normalize_value(field: PolicyField, value: Any) -> Any:
         if field.editor == "text":
             if not isinstance(value, str):
                 raise FleetConfigurationError("settings value must be text")
-            if field.path == "storage.database_url":
-                parts = urlsplit(value)
-                if parts.username is not None or parts.password is not None:
-                    raise FleetConfigurationError("database URL must not embed credentials")
             return value
         if field.editor == "boolean":
             if not isinstance(value, bool):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any, Protocol, Self, cast
@@ -45,6 +46,8 @@ from fleet_rlm.rlm.outcome import ExecutionDetail, RLMOutcome, TerminalStatus
 from fleet_rlm.rlm.sanitize import truncate_public_text
 from fleet_rlm.rlm.tool_guards import TurnToolGuards, workspace_obligations
 from fleet_rlm.rlm.tool_observer import ToolEventView, observe_tool
+
+logger = logging.getLogger(__name__)
 
 
 class RLMFactoryLike(Protocol):
@@ -425,6 +428,7 @@ class RLMRunner:
             raise
         except Exception as exc:
             duration_ms = int((time.perf_counter() - started) * 1000)
+            logger.warning("RLM execution failed (%s)", type(exc).__name__)
             outcome.append(
                 RLMOutcome(
                     terminal_status=_terminal_status(exc),

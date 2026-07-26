@@ -22,7 +22,7 @@ from fleet_rlm.chat.turn_preparation import (
     TurnPreparationTimeout,
     TurnPreparationUnavailable,
 )
-from fleet_rlm.config import Settings
+from fleet_rlm.config import Settings, load_runtime_settings
 from fleet_rlm.daytona.bindings import BindingStore, InMemoryBindingStore
 from fleet_rlm.daytona.interpreter import sync_sandbox
 from fleet_rlm.daytona.platform import (
@@ -278,8 +278,8 @@ class _LiveCapabilityPreparer:
 
 
 def resolve_settings(settings: Settings | None = None) -> Settings:
-    """Return explicit settings or resolve the canonical ``FLEET_*`` surface."""
-    return settings or Settings()
+    """Return explicit settings or load the resolved TOML policy."""
+    return settings or load_runtime_settings()
 
 
 class LiveKernelResources:

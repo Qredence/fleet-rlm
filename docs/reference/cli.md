@@ -16,11 +16,16 @@ unless `--allow-non-loopback-bind` is supplied deliberately.
 Set `FLEET_CONFIG_PROFILE` to `daytona` or `local-deno` before starting a
 backend; the supervised `cli` and `deno` commands select the matching profile
 for their child backend automatically.
-`fleet cli` forces Daytona; `fleet deno` forces Deno. Each starts the backend in
+`fleet cli` forces Daytona and sends traces to the selected Managed Databricks
+MLflow policy; `fleet deno` forces Deno. Each starts the backend in
 its own process group, waits up to 90 seconds for Daytona or 30 seconds for
 Deno readiness, and runs pi-tui in
 the foreground. Node 22.19+, pnpm, the installed TUI workspace, and an unused
 port are required.
+
+Fleet no longer starts a local MLflow UI. You can still start one manually on
+port 5001 to inspect existing local data; the standard Daytona profiles route
+new traces to Managed Databricks MLflow.
 
 Backend output goes to timestamped files under `.fleet_rlm/logs/`; `latest.log`
 points to the active launch. `Ctrl+C` reaches pi-tui, and backend shutdown
@@ -42,7 +47,7 @@ Artifact mode downloads content, checks length and SHA-256, fsyncs a temporary
 file, and atomically renames it. It does not start the interactive screen.
 
 `fleet web` and `fleet-rlm serve-api` are backend-only and preserve the selected
-`FLEET_RUN_ENVIRONMENT`. The standalone
+`FLEET_CONFIG_PROFILE`. The standalone
 `pnpm --dir tools/fleet-tui start -- [options]` command connects pi-tui to an
 already-running API.
 

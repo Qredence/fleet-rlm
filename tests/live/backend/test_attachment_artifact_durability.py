@@ -21,7 +21,7 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
-from fleet_rlm.config import Settings
+from fleet_rlm.config import Settings, load_runtime_settings
 from fleet_rlm.daytona.bindings import SandboxBinding
 from fleet_rlm.daytona.interpreter import sync_sandbox
 from fleet_rlm.daytona.run_environment import LiveKernelResources
@@ -119,7 +119,7 @@ def _write_evidence(name: str, payload: dict[str, Any]) -> Path:
 @pytest.mark.asyncio
 @pytest.mark.timeout(600)
 async def test_staged_attachment_is_readable_and_artifact_survives_replacement(tmp_path: Path) -> None:
-    settings = Settings(run_environment="daytona")
+    settings = load_runtime_settings()
     _skip_unless_live(settings)
 
     user_id, workspace_id = uuid4(), uuid4()

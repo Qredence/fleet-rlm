@@ -15,7 +15,7 @@
 | `daytona_snapshot.py` | Explicitly create or check the immutable Fleet Daytona Snapshot |
 | `codex_feedback_loop.py` | Run the local Codex feedback-loop probes |
 | `deployment_observability.py` | Inspect deployment observability inputs |
-| `validate_mlflow_tracing.py` | Emit and validate a Databricks Unity Catalog MLflow smoke trace |
+| `validate_mlflow_tracing.py` | Emit and validate a Managed Databricks trace using the selected Fleet TOML policy |
 
 Legacy WebSocket, optimization, evaluation, and compatibility
 runtime scripts were retired with the backend hard cutover.

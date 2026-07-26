@@ -86,6 +86,7 @@ def _enabled_settings(**overrides: Any) -> Settings:
     values: dict[str, Any] = {
         "mlflow_tracing_enabled": True,
         "mlflow_experiment_name": "fleet-test-exp",
+        "mlflow_tracking_uri": "databricks",
         "mlflow_trace_catalog": "analytics",
         "mlflow_trace_schema": "traces",
         "mlflow_trace_table_prefix": "fleet_app",
@@ -125,6 +126,7 @@ def test_configure_tracing_enabled_sets_uri_experiment_and_autolog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_fake_mlflow(monkeypatch)
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     tracing.configure_tracing(_enabled_settings())
     assert calls.tracking_uri_args == ["databricks"]
     assert calls.experiment_args == [()]
@@ -134,6 +136,41 @@ def test_configure_tracing_enabled_sets_uri_experiment_and_autolog(
     assert location.schema_name == "traces"
     assert location.table_prefix == "fleet_app"
     assert os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] == "warehouse-123"
+    assert calls.autolog_calls == 1
+
+
+def test_configure_tracing_local_server_needs_only_experiment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    tracing.configure_tracing(
+        Settings(
+            _env_file=None,
+            mlflow_tracing_enabled=True,
+            mlflow_experiment_name="fleet-rlm-eval",
+            mlflow_tracking_uri="http://localhost:5001",
+        )
+    )
+    assert calls.tracking_uri_args == ["http://localhost:5001"]
+    assert calls.experiment_kwargs == [{"experiment_name": "fleet-rlm-eval"}]
+    assert calls.autolog_calls == 1
+
+
+def test_configure_tracing_ignores_tracking_uri_environment_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://ignored.example:5001")
+    settings = Settings(
+        _env_file=None,
+        mlflow_tracing_enabled=True,
+        mlflow_experiment_name="fleet-rlm-eval",
+        mlflow_tracking_uri="http://configured.example:5001",
+    )
+
+    tracing.configure_tracing(settings)
+
+    assert calls.tracking_uri_args == ["http://configured.example:5001"]
     assert calls.autolog_calls == 1
 
 
@@ -183,6 +220,7 @@ def test_configure_tracing_setup_failure_is_soft(monkeypatch: pytest.MonkeyPatch
 
 def test_configure_tracing_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mlflow(monkeypatch)
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     settings = _enabled_settings()
     tracing.configure_tracing(settings)
     tracing.configure_tracing(settings)

@@ -204,6 +204,50 @@ def test_build_native_rlm_preserves_exact_public_constructor_inputs() -> None:
 
 
 @pytest.mark.asyncio
+async def test_native_json_action_contract_parses_first_and_followup_iterations() -> None:
+    from dspy.primitives.repl_types import REPLHistory
+    from dspy.utils import DummyLM
+
+    from fleet_rlm.rlm.dspy_contract import RLMOptions, build_native_rlm
+
+    adapter = dspy.JSONAdapter(use_native_function_calling=True)
+    lm = DummyLM(
+        [
+            {"reasoning": "Inspect the request.", "code": "print(request)"},
+            {"reasoning": "Use the observed value.", "code": "SUBMIT(answer='ok')"},
+        ],
+        adapter=adapter,
+    )
+    rlm = build_native_rlm(
+        signature="request -> answer",
+        options=RLMOptions(max_iterations=2),
+        sub_lm=lm,
+        verbose=False,
+    )
+    history = REPLHistory()
+
+    with dspy.context(lm=lm, adapter=adapter):
+        first = await rlm.generate_action.acall(
+            variables_info=["request: str"],
+            repl_history=history,
+            iteration="1/2",
+        )
+        history = history.append(
+            reasoning=first.reasoning,
+            code=first.code,
+            output="sample",
+        )
+        second = await rlm.generate_action.acall(
+            variables_info=["request: str"],
+            repl_history=history,
+            iteration="2/2",
+        )
+
+    assert (first.reasoning, first.code) == ("Inspect the request.", "print(request)")
+    assert (second.reasoning, second.code) == ("Use the observed value.", "SUBMIT(answer='ok')")
+
+
+@pytest.mark.asyncio
 async def test_native_rlm_callback_observes_completed_action_without_altering_prediction() -> None:
     from fleet_rlm.rlm.dspy_contract import RLMOptions, bind_native_rlm_observer, build_native_rlm
     from fleet_rlm.rlm.events import RLMReasoning

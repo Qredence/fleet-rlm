@@ -17,6 +17,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from fleet_rlm.config import Settings, load_runtime_settings
+
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -29,6 +31,21 @@ def _resolve_option(value: str | None, environment_name: str, *, required: bool 
     if required and not resolved:
         raise RuntimeError(f"{environment_name} is required; set it in .env or pass the corresponding option")
     return resolved or None
+
+
+def _managed_settings() -> Settings:
+    """Load one selected Fleet policy that targets Managed Databricks MLflow."""
+    settings = load_runtime_settings()
+    values = {
+        "mlflow.experiment_name": settings.mlflow_experiment_name,
+        "mlflow.trace_catalog": settings.mlflow_trace_catalog,
+        "mlflow.trace_schema": settings.mlflow_trace_schema,
+        "mlflow.trace_table_prefix": settings.mlflow_trace_table_prefix,
+        "mlflow.tracing_sql_warehouse_id": settings.mlflow_tracing_sql_warehouse_id,
+    }
+    if settings.mlflow_tracking_uri != "databricks" or any(not value for value in values.values()):
+        raise RuntimeError("selected Fleet TOML profile must declare Managed Databricks MLflow tracing")
+    return settings
 
 
 def _tables(profile: str | None, schema: str) -> set[str]:
@@ -68,45 +85,35 @@ def main() -> int:
     _load_repository_env()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile")
-    parser.add_argument("--host")
-    parser.add_argument("--experiment")
-    parser.add_argument("--catalog")
-    parser.add_argument("--schema")
-    parser.add_argument("--table-prefix")
-    parser.add_argument("--warehouse")
     args = parser.parse_args()
 
-    host = _resolve_option(args.host, "DATABRICKS_HOST")
-    experiment_name = _resolve_option(args.experiment, "FLEET_MLFLOW_EXPERIMENT_NAME")
-    catalog = _resolve_option(args.catalog, "FLEET_MLFLOW_TRACE_CATALOG")
-    schema_name = _resolve_option(args.schema, "FLEET_MLFLOW_TRACE_SCHEMA")
-    table_prefix = _resolve_option(args.table_prefix, "FLEET_MLFLOW_TRACE_TABLE_PREFIX")
-    warehouse = _resolve_option(args.warehouse, "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID")
+    settings = _managed_settings()
+    host = _resolve_option(None, "DATABRICKS_HOST")
     profile = _resolve_option(args.profile, "DATABRICKS_CONFIG_PROFILE", required=False)
 
     assert host is not None
-    assert experiment_name is not None
-    assert catalog is not None
-    assert schema_name is not None
-    assert table_prefix is not None
-    assert warehouse is not None
+    assert settings.mlflow_experiment_name is not None
+    assert settings.mlflow_trace_catalog is not None
+    assert settings.mlflow_trace_schema is not None
+    assert settings.mlflow_trace_table_prefix is not None
+    assert settings.mlflow_tracing_sql_warehouse_id is not None
     os.environ["DATABRICKS_HOST"] = host
     if os.environ.get("DATABRICKS_TOKEN", "").strip():
         profile = None
     elif profile:
         os.environ["DATABRICKS_CONFIG_PROFILE"] = profile
-    os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = warehouse
+    os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = settings.mlflow_tracing_sql_warehouse_id
 
     import mlflow
     from mlflow.entities.trace_location import UnityCatalog
 
     mlflow.set_tracking_uri("databricks")
     experiment = mlflow.set_experiment(
-        experiment_name=experiment_name,
+        experiment_name=settings.mlflow_experiment_name,
         trace_location=UnityCatalog(
-            catalog_name=catalog,
-            schema_name=schema_name,
-            table_prefix=table_prefix,
+            catalog_name=settings.mlflow_trace_catalog,
+            schema_name=settings.mlflow_trace_schema,
+            table_prefix=settings.mlflow_trace_table_prefix,
         ),
     )
 
@@ -122,10 +129,10 @@ def main() -> int:
     verified_trace_id, spans = _trace_summary(trace)
 
     expected_tables = {
-        f"{catalog}.{schema_name}.{table_prefix}_{suffix}"
+        f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.{settings.mlflow_trace_table_prefix}_{suffix}"
         for suffix in ("otel_spans", "otel_annotations", "otel_logs", "otel_metrics")
     }
-    actual_tables = _tables(profile, f"{catalog}.{schema_name}")
+    actual_tables = _tables(profile, f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}")
     missing_tables = expected_tables.difference(actual_tables)
     if missing_tables:
         raise RuntimeError(f"missing Unity Catalog trace table(s): {', '.join(sorted(missing_tables))}")
@@ -133,7 +140,10 @@ def main() -> int:
     print(f"experiment_id={experiment.experiment_id}")
     print(f"trace_id={verified_trace_id}")
     print(f"span_count={len(spans)}")
-    print(f"trace_location={catalog}.{schema_name}.{table_prefix}")
+    print(
+        "trace_location="
+        f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.{settings.mlflow_trace_table_prefix}"
+    )
     print("status=PASS")
     return 0
 

@@ -19,10 +19,9 @@ from fleet_rlm.rlm.sanitize import truncate_public_text, validate_declared_publi
 
 DSPY_VERSION = "3.3.0b1"
 
-JsonValue: TypeAlias = None | bool | int | float | str | tuple["JsonValue", ...] | Mapping[str, "JsonValue"]
-ObservedUsageValue: TypeAlias = None | bool | int | float | str | dict[str, JsonValue]
+JsonValue: TypeAlias = bool | int | float | str | tuple["JsonValue", ...] | Mapping[str, "JsonValue"] | None
+ObservedUsageValue: TypeAlias = bool | int | float | str | dict[str, JsonValue] | None
 ReasoningObserver: TypeAlias = Callable[[Any], None]
-
 
 class RLMUsage(TypedDict):
     """Closed public and durable usage observed for one RLM Turn."""

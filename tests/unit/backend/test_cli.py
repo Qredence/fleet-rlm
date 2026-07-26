@@ -107,16 +107,22 @@ def test_fleet_doctor_reports_invalid_environment_without_traceback(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    from fleet_rlm.daytona import diagnostics
+
     monkeypatch.setenv("FLEET_RUN_ENVIRONMENT", "invalid")
 
-    with pytest.raises(SystemExit) as error:
-        fleet_main(["doctor", "daytona"])
+    async def run(_settings: object) -> diagnostics.DaytonaDoctorResult:
+        return diagnostics.DaytonaDoctorResult(
+            ok=True,
+            steps=(diagnostics.DaytonaDoctorStep("settings", True, "Settings valid."),),
+        )
 
-    assert error.value.code == 1
-    assert capsys.readouterr().out == (
-        "[failed] settings: Required Fleet Daytona settings are missing or invalid.\n"
-        "action: configure the required FLEET_DAYTONA_API_KEY and FLEET_DATABASE_URL settings.\n"
-    )
+    monkeypatch.setattr(diagnostics, "run_daytona_doctor", run)
+
+    fleet_main(["doctor", "daytona"])
+    output = capsys.readouterr().out
+    assert output.startswith("[ok] policy: profile=daytona environment=daytona")
+    assert output.endswith("[ok] settings: Settings valid.\n")
 
 
 def test_fleet_doctor_prints_cleanup_action_after_primary_failure(

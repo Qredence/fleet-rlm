@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -20,25 +20,37 @@ def verifier() -> ModuleType:
     return module
 
 
-def test_explicit_option_overrides_process_environment(verifier: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FLEET_MLFLOW_TRACE_SCHEMA", "from-environment")
+def test_managed_settings_are_resolved_from_fleet_policy(verifier: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = SimpleNamespace(
+        mlflow_tracking_uri="databricks",
+        mlflow_experiment_name="/Users/zachary@qredence.ai/fleet-rlm-traces",
+        mlflow_trace_catalog="uscentral",
+        mlflow_trace_schema="default",
+        mlflow_trace_table_prefix="fleet_rlm",
+        mlflow_tracing_sql_warehouse_id="4d07bd43a3ddfff2",
+    )
+    monkeypatch.setattr(verifier, "load_runtime_settings", lambda: settings)
+    monkeypatch.setenv("FLEET_MLFLOW_TRACE_SCHEMA", "stale-environment-value")
 
-    assert verifier._resolve_option("from-cli", "FLEET_MLFLOW_TRACE_SCHEMA") == "from-cli"
+    assert verifier._managed_settings() is settings
 
 
-def test_environment_option_is_used_when_cli_option_is_missing(
-    verifier: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("FLEET_MLFLOW_TRACE_SCHEMA", "from-environment")
+def test_managed_settings_reject_local_trace_policy(verifier: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        verifier,
+        "load_runtime_settings",
+        lambda: SimpleNamespace(
+            mlflow_tracking_uri="http://127.0.0.1:5001",
+            mlflow_experiment_name="fleet-local",
+            mlflow_trace_catalog=None,
+            mlflow_trace_schema=None,
+            mlflow_trace_table_prefix=None,
+            mlflow_tracing_sql_warehouse_id=None,
+        ),
+    )
 
-    assert verifier._resolve_option(None, "FLEET_MLFLOW_TRACE_SCHEMA") == "from-environment"
-
-
-def test_missing_required_option_fails_closed(verifier: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("FLEET_MLFLOW_TRACE_SCHEMA", raising=False)
-
-    with pytest.raises(RuntimeError, match="FLEET_MLFLOW_TRACE_SCHEMA is required"):
-        verifier._resolve_option(None, "FLEET_MLFLOW_TRACE_SCHEMA")
+    with pytest.raises(RuntimeError, match="Managed Databricks MLflow"):
+        verifier._managed_settings()
 
 
 def test_tables_uses_configured_cli_profile(verifier: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
