@@ -1,15 +1,20 @@
 # Scripts Agent Guide
 
+Root workflow and safety rules remain authoritative from
+[AGENTS.md](../AGENTS.md); this guide narrows them for `scripts/`.
+
 Standalone maintenance, validation, and benchmark scripts. One-way dependency:
 scripts import the installed `fleet_rlm` package; the backend never imports scripts.
 
 ## Conventions
 
-- Every script defines `main(argv=None) -> int` with `argparse`, invoked via
-  `raise SystemExit(main())`.
-- Resolve repo root: `ROOT = Path(__file__).resolve().parents[1]`.
-- Load env via `dotenv.load_dotenv(..., override=False)` — explicit process
-  exports still win.
+- Prefer `main(argv=None) -> int` with `argparse` for new executable entry
+  points and invoke it via `raise SystemExit(main())`; reusable scorer/helper
+  modules need no CLI entry point.
+- Resolve the repo root from `Path(__file__)`, preserving the local module's
+  established constant name.
+- Credentialed scripts that load `.env` use
+  `dotenv.load_dotenv(..., override=False)` so process exports still win.
 - Print errors to `sys.stderr`; return non-zero on failure.
 
 ## Validation
@@ -22,7 +27,7 @@ make api-sync              # OpenAPI + generated TUI types (openapi_tools.py)
 
 ## Credential Boundary
 
-- Benchmark and live scripts require explicit `FLEET_LIVE=1`.
+- Live proof and networked benchmark entry points require explicit `FLEET_LIVE=1`.
 - Never hardcode or log credentials; read from env after dotenv load.
 - `scripts/benchmarks/` is self-contained (OOLONG, SNIah scorers).
 

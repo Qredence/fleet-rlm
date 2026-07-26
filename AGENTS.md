@@ -1,13 +1,11 @@
 # Repository Agent Map
 
-`fleet-rlm` is a backend-first adaptive recursive language model workspace built around a Daytona-backed DSPy RLM runtime. The prior Web frontend has been removed; the maintained development client is `tools/fleet-tui/`.
+`fleet-rlm` is a backend-first adaptive recursive language model workspace with Deno and Daytona DSPy RLM runtimes. The prior Web frontend has been removed; the maintained development client is `tools/fleet-tui/`.
 
 ## Operating Model
 
 - Use closest applicable `AGENTS.md` before editing files; deeper guides override this map.
-- This guide describes the current checkout. Local `PLANS.md` records verified
-  phase outcomes and remaining promotion evidence; current code, tests, generated
-  contracts, and tracked docs remain authoritative.
+- This guide describes the current checkout; code, tests, generated contracts, committed policy, and tracked docs remain authoritative.
 - Keep repo docs, generated contracts, and `.codex/` actions aligned with implementation changes.
 - Prefer smallest validation lane that covers the change, then escalate when contracts move.
 - Do not hand-edit generated/synced artifacts; use the commands listed below.
@@ -26,6 +24,8 @@ For the current Codex Cloud delivery sequence, use `dev-0.7` as the base branch 
 ## Deeper Agent Guides
 
 - `src/fleet_rlm/AGENTS.md` - backend, runtime, API, persistence, Daytona, and package rules.
+- `scripts/AGENTS.md` - maintenance, validation, benchmark, and release scripts.
+- `tools/fleet-tui/AGENTS.md` - pi-tui client, SSE projection, state, and tests.
 
 ## Durable Detail Locations
 
@@ -117,7 +117,7 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
 - `src/fleet_rlm/` is the canonical RLM-native backend. The parallel foundation package was cut over after exit-bar evidence on `71e79271`; there is no compatibility runtime or dual-serve path.
 - The canonical public Run Environment set is `deno` and `daytona`. Private tests install a credential-free deterministic composition explicitly. Deno is intentional local vanilla `dspy.RLM` (real LM + DSPy default Deno/Pyodide) with Attachment reads and Skills but no durable Artifact promotion; Daytona is the full Fleet path (Sandbox, Workspace Volume Scope, Artifact promotion).
 - `create_app()` installs handlers, routers, and the static in-memory bundled Skill catalog (including `dspy-rlm`, which defines `dspy.RLM` as Recursive LM/REPL — never RAG/`dspy.Retrieve`). FastAPI lifespan installs one complete Deno or Daytona runtime inventory through `composition/`; routes retrieve composed runtime modules.
-- The maintained terminal uses pi-tui only. `fleet-turn-stream.ts` owns strict stream lifecycle, `sse.ts` owns frame/chunk validation, `tui/projection.ts` owns live/reload projection, and `tui/store.ts` owns atomic hydration. The monochrome operator timeline renders all evidence statically expanded in native terminal scrollback; Fleet does not capture the mouse or maintain a transcript viewport. Live mid-turn evidence is tools plus Daytona interpreter code/output; `RLMReasoning` is usually filled after `rlm.acall` from the native trajectory; `dspy.RLM(verbose=…)` is host-logger-only and does not feed RuntimeEvents.
+- The maintained terminal uses pi-tui only. `fleet-turn-stream.ts` owns strict stream lifecycle, `sse.ts` owns frame/chunk validation, `tui/projection.ts` owns live/reload projection, and `tui/store.ts` owns atomic hydration. The monochrome operator timeline renders all evidence statically expanded in native terminal scrollback; Fleet does not capture the mouse or maintain a transcript viewport. Live evidence includes DSPy callback reasoning, Tools, and Daytona interpreter code/output; the completed native trajectory reconciles gaps or corrections. `dspy.RLM(verbose=…)` remains host-logger-only.
 - Live Daytona MVP proof (`tests/live/backend/`, `scripts/live_daytona_verify.py`) loads repo `.env` via `python-dotenv` with `override=False`; existing process exports still win.
 - Daytona SDK imports are confined to `fleet_rlm.daytona`. Durable Attachments
   and Artifacts use Workspace Volume Scope; Session Workspace is
@@ -133,17 +133,17 @@ Run `make check-docs` when docs, commands, Codex config, generated contracts, or
   returned message bodies (host constant, not a `FLEET_*` setting), using
   whole-message omission with `truncated` / `bytes_returned` / `byte_budget` /
   `skipped_ordinal` continuation metadata.
-- Settings use only `FLEET_*`. The local BYOK API uses one deterministic process-local User and Workspace scope and accepts no Authorization or synthetic identity headers.
-- Opt-in Databricks MLflow tracing is engineering observability only (`FLEET_MLFLOW_TRACING_ENABLED`, default off). When enabled, `create_app` runs `mlflow.set_tracking_uri("databricks")` + `set_experiment` + `mlflow.dspy.autolog()`, and live Turns open a fail-soft `fleet_turn` root span. Operator-facing `traceId` may appear on SSE `start`/`finish` `messageMetadata`, TUI run status, and durable assistant UI metadata when `FLEET_MLFLOW_EXPOSE_TRACE_ID` is true. Databricks auth stays on `DATABRICKS_HOST`/`DATABRICKS_TOKEN` or databricks-cli — never in `FLEET_*` secrets. Product turn evidence remains RuntimeEvents → SSE → TUI.
+- Runtime policy is required from `config/fleet.toml`; `FLEET_CONFIG_PROFILE` selects a profile, and only environment variables explicitly referenced by that policy supply secrets or endpoints. The loopback-only settings API edits non-secret TOML policy for the next restart. The local BYOK API uses one deterministic process-local User and Workspace scope and accepts no Authorization or synthetic identity headers.
+- Databricks MLflow tracing is fail-soft engineering observability controlled by the selected TOML profile. When enabled, live Turns open a `fleet_turn` root span, and policy may expose `traceId` on existing SSE metadata, TUI status, and durable assistant UI metadata. Databricks auth stays on `DATABRICKS_HOST`/`DATABRICKS_TOKEN` or databricks-cli; product evidence remains RuntimeEvents → SSE → TUI.
 - Alembic owns the live schema through one fresh canonical baseline. `create_tables` is restricted to explicit SQLite test/offline helpers; run `alembic check` against an upgraded empty database for drift.
 - Repository validation is `make check`; its default test targets mask local
   live credentials, install private deterministic composition explicitly, and
   include the maintained TUI. Live promotion uses `tests/live/backend/` with
   explicit `FLEET_LIVE=1`. `make api-sync` owns root OpenAPI and generated TUI
   HTTP types; a future graphical client is separate work.
-- Under DSPy 3.3.Xb, every model passed to `dspy.LM` must resolve a provider.
-  Canonical defaults are `openai/gpt-4o-mini`; bare model ids are accepted for
-  OpenAI-compatible bases and normalized by `normalize_model_id`. Prefer stock
+- Under pinned DSPy 3.3.0b1, every model passed to `dspy.LM` must resolve a
+  provider. Model roles and defaults come from the selected TOML profile; bare
+  ids on OpenAI-compatible bases are normalized by `normalize_model_id`. Prefer stock
   `dspy.LM` with stateless call/context overrides over stateful copies or custom
   LM wrappers. Pinned `dspy==3.3.0b1` RLM uses `max_iterations` (not
   `max_iters`). DSPy private-protocol knowledge stays behind `rlm.dspy_contract`

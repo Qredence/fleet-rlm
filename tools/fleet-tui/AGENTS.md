@@ -1,5 +1,8 @@
 # Fleet TUI Agent Guide
 
+Root workflow and safety rules remain authoritative from
+[AGENTS.md](../../AGENTS.md); this guide narrows them for `tools/fleet-tui/`.
+
 pi-tui-only terminal client. No web frontend, no React, no browser runtime.
 
 ## Ownership
@@ -10,6 +13,7 @@ pi-tui-only terminal client. No web frontend, no React, no browser runtime.
 | `src/sse.ts` | Frame/chunk validation against `FleetUIMessageChunk` union |
 | `src/tui/projection.ts` | Live and reload durable-turn projection |
 | `src/tui/store.ts` | Atomic hydration; all state via `dispatch` + pure `reduce` |
+| `src/tui/commands.ts` | Slash commands, including loopback-only TOML policy editing |
 | `src/generated/openapi.ts` | **Generated** — do not hand-edit; use `make api-sync` |
 
 ## Validation
@@ -26,5 +30,8 @@ Individual lanes: `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm format:check
 - State mutations exclusively through `store.dispatch`; no direct mutation.
 - SSE ordering invariants are enforced in `streamFleetTurn` — one start, one terminal, [DONE] last.
 - API errors use `FleetApiError` with `status`, `correlationId`, `code`.
-- Each feature file pairs with `src/tui/tests/<file>.test.ts`.
+- Keep focused tests beside their source level under `src/tests/` or
+  `src/tui/tests/`; shared behavior may be covered through its owning feature.
+- `/settings` reads and edits non-secret `config/fleet.toml` policy only; it
+  never displays `.env` values and saved changes require a Fleet restart.
 - Requires Node ≥ 22.19.0 and pnpm.

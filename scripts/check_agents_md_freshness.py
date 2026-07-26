@@ -341,8 +341,10 @@ class AgentsMdValidator:
 
         content = root_agents.read_text(encoding="utf-8", errors="ignore")
 
-        # Expected cross-references from root to sub AGENTS.md files
-        expected_refs = ["src/fleet_rlm/AGENTS.md"]
+        # Every discovered sub-guide must be reachable from the root map.
+        expected_refs = [
+            str(agents_file.relative_to(self.repo_root)) for agents_file in agents_files if agents_file != root_agents
+        ]
 
         for ref in expected_refs:
             if ref not in content:

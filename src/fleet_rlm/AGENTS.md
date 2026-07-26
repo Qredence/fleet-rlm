@@ -2,8 +2,8 @@
 
 This directory is the sole Fleet RLM Python backend. Root workflow and validation
 rules remain authoritative from [AGENTS.md](../../AGENTS.md); this guide narrows
-them for backend work. Current code and tests outrank the local phase record in
-`PLANS.md`.
+them for backend work. Current code, tests, committed policy, generated
+contracts, and tracked docs remain authoritative.
 
 ## Architecture
 
@@ -14,6 +14,10 @@ them for backend work. Current code and tests outrank the local phase record in
 - `create_app()` installs routers, error/OpenAPI handlers, and the static
   in-memory bundled Skill catalog. Lifespan composition installs and disposes
   one complete Deno, Daytona, or explicitly injected private-test inventory.
+- Production startup resolves one required profile from `config/fleet.toml`.
+  `config.py` owns strict runtime resolution; `config_policy.py` and the
+  loopback-only `/api/settings` routes edit only non-secret policy for restart.
+  Do not restore ambient environment aliases or expose referenced secret values.
 - Keep Daytona SDK imports inside `daytona/`.
 - Create a fresh native DSPy RLM per Turn through `rlm.dspy_contract`. Inject and
   `FinalOutput` protocol knowledge lives in `rlm.dspy_interpreter_contract`.
@@ -44,11 +48,12 @@ them for backend work. Current code and tests outrank the local phase record in
   answer text up to configured bounds. Tool event views expose only bounded
   allowlisted metadata; Tools without a view expose no arguments or results.
   Provider failures use closed public messages.
-- Opt-in Databricks MLflow (`observability/tracing.py`, `observability/turn_tracing.py`)
-  is fail-soft engineering observability. It must never change Turn outcomes.
-  When `FLEET_MLFLOW_EXPOSE_TRACE_ID` is enabled, public `traceId` may appear only
-  as optional `messageMetadata` on existing `start`/`finish` chunks — never as a
-  new RuntimeEvent kind or credential-bearing payload.
+- Databricks MLflow (`observability/tracing.py`, `observability/turn_tracing.py`)
+  is fail-soft engineering observability controlled by the selected TOML
+  profile. It must never change Turn outcomes. When policy enables trace
+  exposure, public `traceId` may appear only as optional `messageMetadata` on
+  existing `start`/`finish` chunks — never as a new RuntimeEvent kind or
+  credential-bearing payload.
 - `TurnLifecycle.finish()` owns result-snapshot handling, Artifact publication,
   and atomic Turn Commit or failure settlement. `TurnCoordinator` owns stream
   orchestration, terminal ordering, heartbeat coordination, and final resource
