@@ -212,10 +212,10 @@ def supervise(
     ]
     if reload:
         backend_command.append("--reload")
-    backend_env = {
-        **os.environ,
-        "FLEET_CONFIG_PROFILE": profile,
-    }
+    backend_env = {**os.environ}
+    # Respect explicit FLEET_CONFIG_PROFILE (e.g. from .env) if already
+    # set; otherwise fall back to the runtime profile mapping.
+    backend_env.setdefault("FLEET_CONFIG_PROFILE", profile)
     backend_env.pop("FLEET_RUN_ENVIRONMENT", None)
     previous_handlers: dict[int, SignalHandler] = {}
     received_signal: int | None = None
