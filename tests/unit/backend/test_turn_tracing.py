@@ -115,6 +115,7 @@ def test_annotate_trace_io_updates_trace_request_response(monkeypatch: pytest.Mo
         "request": {"request": "how are you?"},
         "response": {"answer": "public answer", "final_reasoning": "public reasoning"},
     }
+    assert "internal_payload" not in calls.update_kwargs[-1]["response"]
 
 
 def test_annotate_trace_io_falls_back_to_empty_answer(monkeypatch: pytest.MonkeyPatch) -> None:
