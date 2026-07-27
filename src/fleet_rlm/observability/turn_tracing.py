@@ -36,27 +36,32 @@ def annotate_trace_io(
     """Fail-soft: propagate request/response to the active root trace for MLflow judges.
 
     MLflow LLM judges (Safety, Completeness, RelevanceToQuery) read from the
-    trace-level request/response fields. Without this, judges either fail or
-    fall back to expensive trace-based parsing of all spans.
+    root span\'s inputs/outputs. Without this, judges either fail or fall back
+    to expensive trace-based parsing of all spans.
+
+    Uses span.set_inputs()/set_outputs() on the current active span (which is
+    the fleet_turn root span when called from TurnCoordinator._execute_traced).
 
     Must never raise — trace annotation failures are not Turn failures.
     """
     try:
         import mlflow
 
+        span = mlflow.get_current_active_span()
+        if span is None:
+            return
+
+        span.set_inputs({"request": request})
+
         response: dict[str, object] = {}
         if response_text is not None:
             response["answer"] = response_text
         if response_outputs is not None:
-            # Only include declared public output fields; exclude large internals
             for key in ("answer", "final_reasoning"):
                 if key in response_outputs:
                     response[key] = response_outputs[key]
 
-        mlflow.update_current_trace(
-            request={"request": request},
-            response=response or {"answer": response_text or ""},
-        )
+        span.set_outputs(response or {"answer": response_text or ""})
     except Exception:
         logger.debug("annotate_trace_io failed; continuing without root span I/O", exc_info=True)
 
