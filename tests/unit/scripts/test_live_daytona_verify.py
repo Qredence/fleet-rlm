@@ -378,6 +378,13 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
         (lambda receipt: receipt["assertions"].update(cleanup_passed=False), "receipt_assertions"),
         (lambda receipt: receipt.update(extra="not-allowlisted"), "receipt_fields"),
     ],
+    ids=[
+        "receipt-schema",
+        "candidate-fingerprint",
+        "candidate-fields",
+        "receipt-assertions",
+        "receipt-fields",
+    ],
 )
 def test_success_receipt_allowlist_rejects_mutations(
     mutation: Any,

@@ -19,8 +19,8 @@ from fleet_rlm.files.models import (
     PreparedAttachments,
     RunAttachmentSink,
 )
-from fleet_rlm.files.workspace_access import WorkspaceFileService
 from fleet_rlm.files.volume_storage import WorkspaceVolumeGateway
+from fleet_rlm.files.workspace_access import WorkspaceFileService
 from fleet_rlm.sessions.catalog import SessionCatalog
 
 
