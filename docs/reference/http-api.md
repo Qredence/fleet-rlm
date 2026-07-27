@@ -31,8 +31,11 @@ Turn creation requires an `Idempotency-Key` header. Its JSON body accepts
 `text`, `attachment_ids`, and up to four unique `skill_selections` entries,
 each containing an exact Skill `id` and `expected_version`. Explicit selections
 are authoritative for that Turn and are included in its idempotency
-fingerprint. Missing, unauthorized, or version-mismatched selections fail
-before SSE begins with the generic
+fingerprint. Omitting `skill_selections` still supplies the bounded catalog
+Cards and permits the RLM to load up to four advertised Skills progressively.
+Providing selections preloads those exact versions and restricts loading to
+that set. Missing, unauthorized, or version-mismatched selections fail before
+SSE begins with the generic
 `invalid_skill_selection` response; the response does not reveal hidden
 catalog entries.
 

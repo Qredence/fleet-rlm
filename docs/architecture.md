@@ -80,10 +80,13 @@ JSON-compatible common input annotations.
 
 The bundled catalog contains `dspy-rlm`, `long-context`, `workspace-files`,
 `data-analysis`, and `report-builder`. Skill disclosure is progressive: bounded
-Cards are available at startup, a full `SKILL.md` loads only when invoked or
-exactly preselected, and declared resources load only after the Skill body.
-`data-analysis` is the only bundled Skill that supplies a custom validated DSPy
-Signature; `report-builder` and `dspy-rlm` are instruction-only.
+Cards are the startup discovery surface. Without explicit selections, the RLM
+may load up to four advertised Skills during the Turn. Exact version-pinned
+selections instead preload and restrict the Turn to that set. A full `SKILL.md`
+loads only when invoked or exactly preselected, and declared resources load only
+after the Skill body. `data-analysis` is the only bundled Skill that supplies a
+custom validated DSPy Signature; `report-builder` and `dspy-rlm` are
+instruction-only.
 
 Skill Markdown and resources cannot register host tools. Runtime composition
 owns the fixed core tools plus exactly `load_skill` and
