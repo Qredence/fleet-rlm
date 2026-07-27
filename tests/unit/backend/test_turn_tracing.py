@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.observability.turn_tracing import current_turn_trace_id, turn_trace
+from fleet_rlm.observability.turn_tracing import annotate_trace_io, current_turn_trace_id, turn_trace
 
 
 def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch, *, explode: bool = False) -> SimpleNamespace:
@@ -96,3 +96,34 @@ def test_turn_trace_respects_expose_flag(monkeypatch: pytest.MonkeyPatch) -> Non
     with turn_trace(uuid4(), uuid4(), enabled=True, expose_trace_id=False) as handle:
         assert handle.trace_id is None
         assert current_turn_trace_id() is None
+
+
+def test_annotate_trace_io_updates_trace_request_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    annotate_trace_io(
+        request="how are you?",
+        response_text="display answer",
+        response_outputs={
+            "answer": "public answer",
+            "final_reasoning": "public reasoning",
+            "internal_payload": {"secret": "value"},
+        },
+    )
+
+    assert calls.update_kwargs[-1] == {
+        "request": {"request": "how are you?"},
+        "response": {"answer": "public answer", "final_reasoning": "public reasoning"},
+    }
+    assert "internal_payload" not in calls.update_kwargs[-1]["response"]
+
+
+def test_annotate_trace_io_falls_back_to_empty_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    annotate_trace_io(request="hello")
+
+    assert calls.update_kwargs[-1] == {
+        "request": {"request": "hello"},
+        "response": {"answer": ""},
+    }

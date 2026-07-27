@@ -29,7 +29,7 @@ from fleet_rlm.chat.turn_preparation import (
     TurnPreparationCancelledError,
     TurnPreparationTimeoutError,
 )
-from fleet_rlm.observability.turn_tracing import turn_trace
+from fleet_rlm.observability.turn_tracing import annotate_trace_io, turn_trace
 from fleet_rlm.rlm.context import RLMExecutionContext
 from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
 from fleet_rlm.rlm.events import (
@@ -319,6 +319,10 @@ class TurnCoordinator:
                     )
                     heartbeat = None
                     settled = True
+                    annotate_trace_io(
+                        request=prepared.execution.request,
+                        response_text="Turn failed",
+                    )
                     yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
                     return
                 if heartbeat_lost is not None:
@@ -336,6 +340,16 @@ class TurnCoordinator:
             outcome = stream.outcome or RLMOutcome(
                 terminal_status="failed",
                 public_error_message="Turn failed",
+            )
+            # Propagate request/response to root trace span for MLflow judges
+            annotate_trace_io(
+                request=prepared.execution.request,
+                response_text=(
+                    outcome.prediction.display_text if outcome.prediction else outcome.public_error_message
+                ),
+                response_outputs=(
+                    dict(outcome.prediction.outputs) if outcome.prediction else None
+                ),
             )
             if outcome.terminal_status in {"timeout", "cancelled"}:
                 status = "timeout" if outcome.terminal_status == "timeout" else "cancelled"
@@ -393,6 +407,10 @@ class TurnCoordinator:
                     )
                     heartbeat = None
                     settled = True
+                    annotate_trace_io(
+                        request=prepared.execution.request,
+                        response_text="Turn failed",
+                    )
                     yield recorder.record(RunFailed(code="unavailable", message="Turn failed"))
                     return
                 else:

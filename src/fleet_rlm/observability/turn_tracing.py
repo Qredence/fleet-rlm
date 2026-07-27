@@ -27,6 +27,40 @@ class TraceHandle:
     trace_id: str | None
 
 
+def annotate_trace_io(
+    *,
+    request: str,
+    response_text: str | None = None,
+    response_outputs: dict[str, object] | None = None,
+) -> None:
+    """Fail-soft: propagate request/response to the active root trace for MLflow judges.
+
+    MLflow LLM judges (Safety, Completeness, RelevanceToQuery) read from the
+    trace-level request/response fields. Without this, judges either fail or
+    fall back to expensive trace-based parsing of all spans.
+
+    Must never raise — trace annotation failures are not Turn failures.
+    """
+    try:
+        import mlflow
+
+        response: dict[str, object] = {}
+        if response_text is not None:
+            response["answer"] = response_text
+        if response_outputs is not None:
+            # Only include declared public output fields; exclude large internals
+            for key in ("answer", "final_reasoning"):
+                if key in response_outputs:
+                    response[key] = response_outputs[key]
+
+        mlflow.update_current_trace(
+            request={"request": request},
+            response=response or {"answer": response_text or ""},
+        )
+    except Exception:
+        logger.debug("annotate_trace_io failed; continuing without root span I/O", exc_info=True)
+
+
 def current_turn_trace_id() -> str | None:
     """Return the active Turn trace id for this context, if any."""
     return _current_trace_id.get()
