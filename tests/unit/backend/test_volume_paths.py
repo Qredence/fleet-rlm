@@ -29,6 +29,11 @@ def test_default_mount_matches_design() -> None:
     assert DEFAULT_VOLUME_MOUNT_PATH == "/home/daytona/fleet"
     root = VolumePaths.from_mount()
     assert root.root == PurePosixPath("/home/daytona/fleet")
+    assert root.files == PurePosixPath("/home/daytona/fleet/files")
+    assert root.attachments == PurePosixPath("/home/daytona/fleet/attachments")
+    assert root.artifacts == PurePosixPath("/home/daytona/fleet/artifacts")
+    assert root.runs == PurePosixPath("/home/daytona/fleet/runs")
+    assert root.memory_file == PurePosixPath("/home/daytona/fleet/MEMORIES.md")
     assert root.artifacts_root() == PurePosixPath("/home/daytona/fleet/artifacts")
     assert root.attachments_root() == PurePosixPath("/home/daytona/fleet/attachments")
     assert root.sessions_root() == PurePosixPath("/home/daytona/fleet/sessions")

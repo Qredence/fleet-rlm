@@ -129,6 +129,26 @@ class VolumePaths:
     def root(self) -> PurePosixPath:
         return self.mount_path
 
+    @property
+    def files(self) -> PurePosixPath:
+        return self.files_root()
+
+    @property
+    def attachments(self) -> PurePosixPath:
+        return self.attachments_root()
+
+    @property
+    def artifacts(self) -> PurePosixPath:
+        return self.artifacts_root()
+
+    @property
+    def runs(self) -> PurePosixPath:
+        return resolve_under_root(self.mount_path, "runs")
+
+    @property
+    def memory_file(self) -> PurePosixPath:
+        return resolve_under_root(self.mount_path, "MEMORIES.md")
+
     def artifacts_root(self) -> PurePosixPath:
         return resolve_under_root(self.mount_path, "artifacts")
 

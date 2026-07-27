@@ -17,9 +17,9 @@ def _snapshot(
     return SimpleNamespace(
         name=spec.snapshot,
         state=state,
-        cpu=1,
-        mem=1,
-        disk=3,
+        cpu=spec.cpu,
+        mem=spec.memory_gib,
+        disk=spec.disk_gib,
         build_info=SimpleNamespace(
             dockerfile_content=dockerfile or daytona_snapshot.build_snapshot_image(spec).dockerfile()
         ),
@@ -81,6 +81,19 @@ async def test_check_rejects_snapshot_with_dependency_contract_drift() -> None:
 
 
 @pytest.mark.asyncio
+async def test_check_rejects_snapshot_with_resource_contract_drift() -> None:
+    spec = DaytonaSandboxSpec("fleet-test-v1")
+    snapshot = _snapshot(spec)
+    snapshot.cpu = 1
+
+    async def get(_name: str) -> object:
+        return snapshot
+
+    with pytest.raises(RuntimeError, match="resources"):
+        await daytona_snapshot.check_snapshot(SimpleNamespace(snapshot=SimpleNamespace(get=get)), spec)
+
+
+@pytest.mark.asyncio
 async def test_create_is_idempotent_without_overwriting_existing_snapshot() -> None:
     spec = DaytonaSandboxSpec("fleet-test-v1")
     create = pytest.fail
@@ -112,4 +125,4 @@ async def test_create_builds_with_expected_resources() -> None:
     await daytona_snapshot.create_snapshot(SimpleNamespace(snapshot=SimpleNamespace(get=get, create=create)), spec)
     params = captured["params"]
     assert params.name == spec.snapshot
-    assert (params.resources.cpu, params.resources.memory, params.resources.disk) == (1, 1, 3)
+    assert (params.resources.cpu, params.resources.memory, params.resources.disk) == (2, 4, 8)

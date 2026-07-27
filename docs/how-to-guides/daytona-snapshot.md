@@ -1,10 +1,10 @@
 # Daytona Snapshot
 
 Fleet Daytona Sandboxes use an explicit immutable Snapshot rather than the
-provider default. The current contract is `fleet-rlm-python313-v3`: Python
+provider default. The current contract is `fleet-rlm-python313-v4`: Python
 3.13.13 from a linux/amd64 digest-pinned `python:3.13.13-slim-bookworm` image,
-a `daytona` non-root user, `/home/daytona` working directory, and 1 vCPU, 1 GiB
-memory, and 3 GiB disk. Its repository-owned dependency manifest currently
+a `daytona` non-root user, `/home/daytona` working directory, and 2 vCPU, 4 GiB
+memory, and 8 GiB disk. Its repository-owned dependency manifest currently
 bakes `mpmath==1.4.1` into system site-packages and records the manifest digest
 in the image contract. It contains no Fleet source, provider credentials, DSPy,
 or uv.
@@ -20,7 +20,7 @@ export FLEET_CONFIG_PROFILE=daytona
 export FLEET_DAYTONA_API_KEY='...'
 make daytona-snapshot-create
 make daytona-snapshot-check
-export FLEET_DAYTONA_SNAPSHOT=fleet-rlm-python313-v3
+export FLEET_DAYTONA_SNAPSHOT=fleet-rlm-python313-v4
 uv run fleet doctor daytona
 ```
 
@@ -32,8 +32,10 @@ disposable Sandbox without user-site repair.
 
 ## Upgrade and rollback
 
-Create a new immutable name such as `fleet-rlm-python313-v4`, verify it, and
+For a future upgrade, create a new immutable name such as
+`fleet-rlm-python313-v5`, verify it, and
 change only `FLEET_DAYTONA_SNAPSHOT`. Existing Session Sandboxes with the old
 identity are replaced lazily while retaining their Workspace Volume ID and
-`workspaces/<workspace_id>` scope. Roll back by restoring the previous setting;
-do not mutate or overwrite either Snapshot.
+`workspaces/<workspace_id>` scope. During the v4 rollout, roll back by restoring
+`fleet-rlm-python313-v3`; for later upgrades, restore the preceding immutable
+Snapshot. Do not mutate or overwrite an existing Snapshot.

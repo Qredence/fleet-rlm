@@ -127,7 +127,7 @@ benchmark-oolong:
 	@test -n "$(FLEET_LIVE)" || { echo "FLEET_LIVE=1 is required for live OOLONG benchmark"; exit 1; }
 	uv run python scripts/benchmarks/evaluate_oolong.py --context-len $(CONTEXT_LEN) --max-tasks $(MAX_TASKS) --output $(OUTPUT)
 
-DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v3
+DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v4
 
 daytona-snapshot-create:
 	uv run python scripts/daytona_snapshot.py create --name $(DAYTONA_SNAPSHOT_NAME)
