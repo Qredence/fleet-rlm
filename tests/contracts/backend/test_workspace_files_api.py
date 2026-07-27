@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from uuid import NAMESPACE_URL, uuid5
 
 from fastapi.testclient import TestClient
 
@@ -87,3 +88,45 @@ def test_workspace_files_api_cannot_address_fleet_managed_namespaces(tmp_path: P
         listed = client.get("/api/files")
         assert listed.status_code == 200
         assert listed.json()["entries"] == []
+
+
+def test_volume_tree_returns_relative_logical_paths(tmp_path: Path) -> None:
+    app = create_testing_app(
+        settings=Settings(_env_file=None, run_environment="daytona", data_root=str(tmp_path))
+    )
+    workspace_id = uuid5(NAMESPACE_URL, "fleet-rlm/local-workspace")
+
+    import asyncio
+
+    with TestClient(app) as client:
+        gateway = app.state.workspace_volume_gateway
+        asyncio.run(
+            gateway.write_bytes(workspace_id, "/home/daytona/fleet/sessions/a/turn.json", b"{}")
+        )
+        response = client.get("/api/volume/tree")
+        assert response.status_code == 200
+        assert response.json() == {
+            "paths": ["sessions/a/turn.json"],
+            "directories": ["artifacts", "attachments", "files", "sessions"],
+            "truncated": False,
+        }
+
+
+def test_volume_tree_is_not_truncated_when_file_count_equals_requested_limit(tmp_path: Path) -> None:
+    app = create_testing_app(
+        settings=Settings(_env_file=None, run_environment="daytona", data_root=str(tmp_path))
+    )
+    workspace_id = uuid5(NAMESPACE_URL, "fleet-rlm/local-workspace")
+
+    import asyncio
+
+    with TestClient(app) as client:
+        gateway = app.state.workspace_volume_gateway
+        asyncio.run(
+            gateway.write_bytes(workspace_id, "/home/daytona/fleet/sessions/a/turn.json", b"{}")
+        )
+        response = client.get("/api/volume/tree", params={"max_files": 1})
+
+        assert response.status_code == 200
+        assert response.json()["paths"] == ["sessions/a/turn.json"]
+        assert response.json()["truncated"] is False

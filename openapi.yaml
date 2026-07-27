@@ -671,6 +671,53 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/volume/tree:
+    get:
+      tags:
+      - volume
+      summary: List Volume Tree
+      operationId: list_volume_tree_api
+      parameters:
+      - name: root
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 256
+          default: .
+          title: Root
+      - name: max_depth
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 32
+          minimum: 1
+          default: 8
+          title: Max Depth
+      - name: max_files
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 10000
+          minimum: 1
+          default: 2000
+          title: Max Files
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VolumeTreeResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
     ArtifactResponse:
@@ -1216,6 +1263,28 @@ components:
       - role
       - parts
       title: UIMessageResponse
+    VolumeTreeResponse:
+      properties:
+        paths:
+          items:
+            type: string
+          type: array
+          title: Paths
+        directories:
+          items:
+            type: string
+          type: array
+          title: Directories
+          default: []
+        truncated:
+          type: boolean
+          title: Truncated
+          default: false
+      type: object
+      required:
+      - paths
+      title: VolumeTreeResponse
+      description: Logical files visible in the LocalScope Workspace Volume.
     WorkspaceFileAppendRequest:
       properties:
         path:

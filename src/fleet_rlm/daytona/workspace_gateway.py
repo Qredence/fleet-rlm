@@ -173,8 +173,12 @@ class _DaytonaWorkspaceVolumeSession:
         max_depth: int,
         max_files: int,
     ) -> tuple[VolumeFile, ...]:
+        path = PurePosixPath(logical_root)
+        # Listing the mount root is valid even though byte operations require
+        # a concrete child path. This is the public `/api/volume/tree` default.
+        target = str(self._mount_path) if path == self._mount_path else self._path(logical_root)
         return await self._files.list_files(
-            self._path(logical_root),
+            target,
             max_depth=max_depth,
             max_files=max_files,
         )
