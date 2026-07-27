@@ -103,14 +103,15 @@ exception text.
 
 - Deno uses real `dspy.LM` roles and DSPy's default Deno/Pyodide interpreter.
   It supports Attachment reads and Skills, but has no Daytona broker, Session
-  Workspace tools, `create_artifact`, or durable Artifact promotion.
+  Workspace or Workspace Memory tools, `create_artifact`, or durable Artifact
+  promotion.
 - Daytona owns Sandbox/Interpreter Leases, Workspace Volume Scope, durable
-  Attachment staging, Session Workspace files, private result snapshots, and
-  Artifact Candidate promotion.
+  Attachment staging, Session Workspace files, Workspace Memory, private result
+  snapshots, and Artifact Candidate promotion.
 - The Volume layout provisions only owned namespaces: shared attachments and
-  artifacts, Session Workspace, Run attachments and candidates, committed
-  Artifacts, and private `result.json`. Bundled Skills remain host-owned and
-  are not copied into the Volume.
+  artifacts, the root `MEMORIES.md`, Session Workspace, Run attachments and
+  candidates, committed Artifacts, and private `result.json`. Bundled Skills
+  remain host-owned and are not copied into the Volume.
 - Profiles are explicit and fail closed when prerequisites are absent. Private
   deterministic testing composition is not a public fallback profile.
 
@@ -146,6 +147,32 @@ private Artifact Candidates without resending their bodies; Turn Commit remains
 the only publication boundary. Workspace files survive failed Runs and Sandbox
 replacement independently of the commit-gated result snapshot and Artifact
 lifecycle.
+
+Daytona Workspace Memory is separate workspace-wide immediate state. Its fixed
+`MEMORIES.md` lives at the root of the already mounted
+`workspaces/<workspace_id>` Volume subpath; Session and Run state retain their
+nested paths below that root. The RLM accesses memory only on demand through
+`read_workspace_memory` and `update_workspace_memory`; Fleet does not inject it
+at Turn start, and Deno registers neither Tool.
+
+Each update appends one complete UTC-timestamped record, limited to 4 KiB of
+formatted UTF-8, and becomes durable immediately, independently of Turn Commit.
+A completed append therefore survives failed or cancelled Turns and Sandbox
+replacement. The update Tool permits writes only when the user explicitly
+requests memory, but that is an auditable Tool policy rather than a filesystem
+ACL: the Daytona interpreter can see the mounted Volume. Append serialization
+is process-local; separate Fleet processes are not coordinated, so concurrent
+cross-process append is not guaranteed.
+
+Reads return the newest complete records within a fixed 256 KiB byte budget.
+The configured `max_upload_bytes` caps the whole memory file. Appends against a
+full or torn file fail closed, as does access to unsafe or invalid storage;
+reads omit an incomplete trailing record, and appends never repair or rewrite
+one. Fleet performs no automatic compaction, deletion, or Turn-start recall.
+Memory calls use generic Tool events whose allowlisted metadata excludes
+learning bodies, provider paths, and raw errors; there is no dedicated memory
+event. The live cross-Sandbox, cross-Session Workspace Memory proof remains
+gated and has not been run.
 
 ## Compatibility and status
 

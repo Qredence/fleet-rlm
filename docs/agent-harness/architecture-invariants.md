@@ -53,6 +53,14 @@ routes or public events.
   serialized Tools, or Signatures.
 - Tool event views are host-owned bounded allowlists. No declared view means no
   public arguments or results.
+- Daytona alone registers `read_workspace_memory` and
+  `update_workspace_memory`. Memory is loaded only when the RLM calls the read
+  Tool; it is never injected at Turn start. The update Tool permits an append
+  only for an explicit user request. This is an auditable Tool-use policy, not a
+  filesystem ACL, because the Daytona interpreter sees the mounted Volume.
+- Workspace Memory uses generic Tool events only. Their allowlisted metadata
+  never exposes the learning body, provider path, or raw error, and there is no
+  dedicated memory Runtime Event.
 
 ## Persistence and storage
 
@@ -64,6 +72,20 @@ routes or public events.
   listings, append, and replacement writes are immediate private state, not
   Turn-commit candidates; direct Workspace Artifact publication only stages a
   private candidate, and Deno registers no workspace tools.
+- Daytona Workspace Memory is distinct workspace-wide immediate state. Its only
+  target is the root `MEMORIES.md` of the already mounted
+  `workspaces/<workspace_id>` Volume subpath; Session and Run paths remain
+  nested below that root. Deno registers no memory tools.
+- Memory updates are append-only, complete UTC-timestamped records of at most
+  4 KiB formatted UTF-8. They become durable independently of Turn Commit and
+  survive failed or cancelled Turns and Sandbox replacement. Reads return the
+  newest complete records within the fixed 256 KiB read budget.
+  `max_upload_bytes` caps the complete file; appends against full or torn state
+  and access to unsafe or invalid storage fail closed, with no automatic
+  compaction, deletion, or repair.
+- Memory append serialization is process-local. Separate Fleet processes are
+  not coordinated, so concurrent cross-process append is not guaranteed. The
+  live cross-Sandbox, cross-Session proof remains gated and has not been run.
 - Daytona acquisition idempotently creates canonical shared, Session, and Run
   directories and fails closed on mount/provider conflicts.
 - Workspace events expose relative paths, counts, sizes, and status, never file

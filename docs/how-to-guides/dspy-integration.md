@@ -18,6 +18,25 @@ clients cannot provide models, Signatures, or executable capabilities.
   structured result, and a commit-gated private `result.json` snapshot.
 - Session Workspace files are immediate private Volume state. They survive
   later Runs and Sandbox replacement; interpreter globals do not.
+- Daytona Workspace Memory is separate workspace-wide immediate state at the
+  fixed root `MEMORIES.md` of the already mounted
+  `workspaces/<workspace_id>` Volume subpath. The RLM recalls it on demand with
+  `read_workspace_memory`; Fleet does not inject it at Turn start. Deno exposes
+  neither memory Tool.
+- `update_workspace_memory` appends one complete UTC-timestamped record, limited
+  to 4 KiB of formatted UTF-8, only when the user explicitly requests memory. A
+  completed append is immediately durable outside Turn Commit, so it survives
+  failed or cancelled Turns and Sandbox replacement. The explicit-request rule
+  is Tool audit policy, not a filesystem ACL, because the Daytona interpreter
+  can see the mounted Volume. Append serialization is process-local; separate
+  Fleet processes are not coordinated, so concurrent cross-process append is
+  not guaranteed.
+- Memory reads return the newest complete records up to 256 KiB.
+  `max_upload_bytes` caps the total file; appends against full or torn state and
+  access to unsafe or invalid storage fail closed without automatic compaction,
+  deletion, or repair. Generic Tool events expose metadata only, never the
+  learning body, provider path, or raw error; there is no dedicated memory
+  event.
 - Fleet scopes `dspy.JSONAdapter(use_native_function_calling=True)` to each Turn
   alongside the Root Model. Native structured output applies to the RLM action
   (`reasoning` and `code`) and final extraction without changing process-global
@@ -79,6 +98,10 @@ single and batched recursive calls, a host Tool, a durable workspace write,
 typed submission, result snapshot commit, strict SSE completion, Sandbox
 replacement, fresh interpreter state, Session History reload, and strict
 Sandbox/Volume cleanup.
+
+The current proof does not establish Workspace Memory across real
+provider-backed Sandbox replacement and separate Sessions. That live
+cross-Sandbox, cross-Session proof remains gated and has not been run.
 
 ## Evidence and failure policy
 

@@ -18,6 +18,7 @@ The generated source of truth is [`openapi.yaml`](../../openapi.yaml).
 | `GET` | `/api/files/content` | Read one bounded UTF-8 page |
 | `PUT` | `/api/files/content` | Create or explicitly overwrite a UTF-8 file |
 | `POST` | `/api/files/append` | Append UTF-8 text |
+| `GET` | `/api/volume/tree` | List relative file paths from the mounted Workspace Volume |
 | `GET` | `/api/skills` | List bounded system Skill Cards |
 | `GET` | `/api/skills/{skill_id}` | Read one bounded system Skill Card |
 | `PUT` | `/api/runs/{run_id}/cancellation` | Request cancellation of an owned Run |

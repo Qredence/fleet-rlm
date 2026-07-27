@@ -12,9 +12,9 @@ compatibility runtime and parallel foundation package no longer exist.
 | `api/` | HTTP translation, local scope, dependency aliases, OpenAPI/SSE projection, UIMessage reload | domain interfaces and composed modules |
 | `chat/` | Turn preparation, shared capability preparation, coordinator orchestration, lifecycle finalization, shared Turn Claim policy, Deno environment and sinks | RLM, Sessions, Skills, files |
 | `rlm/` | DSPy Signature, model roles, fresh RLM construction, options, events, runner | DSPy and domain values |
-| `daytona/` | exclusive 13-module SDK boundary: async platform/provisioning, Session ownership, DSPy-only sync interpreter seam, broker, diagnostics, and async Workspace gateways | Daytona SDK and domain values |
+| `daytona/` | exclusive SDK boundary: async platform/provisioning, Session ownership, DSPy-only sync interpreter seam, broker, diagnostics, Session Workspace gateways, and the mounted Workspace Memory adapter | Daytona SDK and domain values |
 | `sessions/` | Session catalog, Turn input/history, versioned Committed Turn | domain values |
-| `files/`, `artifacts/` | Attachment staging, paged/append Session Workspace tools, direct Workspace Artifact Candidate staging, Artifact promotion/read | storage interfaces and safe paths |
+| `files/`, `artifacts/` | Attachment staging, paged/append Session Workspace tools, workspace-wide Memory values/tools, direct Workspace Artifact Candidate staging, Artifact promotion/read | storage interfaces and safe paths |
 | `skills/` | bundled catalog, authorization, progressive loading, capability seam, Tool construction | domain values and package resources |
 | `persistence/` | SQLAlchemy models and repository adapters | Session/file/Artifact interfaces |
 | `observability/` | sanitized failure diagnostics; opt-in Databricks MLflow DSPy tracing | domain errors, Settings |
@@ -41,6 +41,10 @@ compatibility runtime and parallel foundation package no longer exist.
   five-minute idle policy and restarted on the next acquisition.
 - Independent Workspace access mounts exactly `workspaces/<workspace_id>` in a
   purpose-labelled ephemeral I/O Sandbox and exposes only its `files/` root.
+- During Daytona Turn execution, Workspace Memory uses the fixed `MEMORIES.md`
+  at the root of the already workspace-scoped mount. It is distinct from
+  Session Workspace under `sessions/{session_id}/workspace/` and Run state under
+  `sessions/{session_id}/runs/{run_id}/`.
 - In-memory and SQL repositories apply the pure `chat/turn_claim.py` transition
   policy inside their respective lock and transaction boundaries.
 - Alembic owns live schema evolution. `create_tables` is limited to explicit
