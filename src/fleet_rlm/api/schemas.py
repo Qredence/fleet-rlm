@@ -204,7 +204,7 @@ class VolumeTreeResponse(BaseModel):
     """Logical files visible in the LocalScope Workspace Volume."""
 
     paths: list[str]
-    directories: list[str] = []
+    directories: list[str] = Field(default_factory=list)
     truncated: bool = False
 
 
