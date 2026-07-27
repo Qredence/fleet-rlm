@@ -70,6 +70,7 @@ async def test_deno_preloads_exact_skill_and_excludes_durable_tools() -> None:
     ).prepare(turn, environment, PreparedAttachments((), ()), deadline=float("inf"))
     names = {str(tool.name) for tool in prepared.spec.tools}
     assert {"read_attachment", "read_session_history", "load_skill", "read_skill_resource"} == names
+    assert names.isdisjoint({"read_workspace_memory", "update_workspace_memory"})
     assert prepared.spec.workspace.available is False
     assert selected.instructions.strip() in prepared.spec.signature.instructions
     assert [detail.kind for detail in prepared.drain_public_details()] == ["skill.activated", "skill.loaded"]

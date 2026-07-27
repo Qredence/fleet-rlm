@@ -227,6 +227,8 @@ class _LiveCapabilityPreparer:
         deadline: float,
     ) -> LivePreparedCapabilities:
         from fleet_rlm.daytona.workspace_fs import DaytonaSessionWorkspaceFS
+        from fleet_rlm.daytona.workspace_memory import DaytonaWorkspaceMemoryStore
+        from fleet_rlm.files.memory_tools import WorkspaceMemoryToolHost
         from fleet_rlm.files.tools import FileToolHost
         from fleet_rlm.files.workspace_tools import WorkspaceToolHost
 
@@ -254,17 +256,26 @@ class _LiveCapabilityPreparer:
             ),
             max_file_bytes=self.resources.settings.max_upload_bytes,
         )
+        memory_host = WorkspaceMemoryToolHost(
+            DaytonaWorkspaceMemoryStore(
+                volume_fs.sandbox,
+                volume_paths=paths,
+                max_upload_bytes=self.resources.settings.max_upload_bytes,
+            )
+        )
         file_tools = file_host.as_tools()
         workspace_tools = workspace_host.as_tools()
+        memory_tools = memory_host.as_tools()
         base_views = {
             **file_host.event_views(),
             **workspace_host.event_views(),
+            **memory_host.event_views(),
         }
         spec, skill_host, notices = await prepare_host_capabilities(
             turn=turn,
             skill_catalog=self.skill_catalog,
             files=file_host,
-            base_tools=(*file_tools, *workspace_tools),
+            base_tools=(*file_tools, *workspace_tools, *memory_tools),
             base_event_views=base_views,
             workspace=DAYTONA_WORKSPACE_CAPABILITY,
             deadline=deadline,

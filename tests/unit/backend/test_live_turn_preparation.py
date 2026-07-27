@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import threading
+from contextlib import redirect_stdout, suppress
+from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -24,6 +26,7 @@ from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 @pytest.mark.parametrize("with_skill_catalog", [False, True])
 async def test_live_preparation_stages_attachment_and_cleans_it(
     monkeypatch,
+    tmp_path,
     with_skill_catalog: bool,
 ) -> None:
     del monkeypatch
@@ -37,6 +40,8 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         hashlib.sha256(data).hexdigest(),
     )
     volume: dict[str, bytes] = {}
+    volume_root = tmp_path / "volume"
+    volume_root.mkdir()
 
     class SandboxFs:
         async def create_folder(self, path: str, mode: str | None = None) -> None:
@@ -50,6 +55,13 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
 
         async def delete_file(self, path: str) -> None:
             volume.pop(path, None)
+
+    class SandboxProcess:
+        async def code_run(self, code: str):
+            output = StringIO()
+            with redirect_stdout(output), suppress(SystemExit):
+                exec(code, {})
+            return SimpleNamespace(exit_code=0, result=output.getvalue().strip())
 
     class SessionManager:
         released = False
@@ -70,9 +82,9 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             return PreparedAttachments((ref,), (StagedAttachment(ref.id, logical_path),))
 
     resources = SimpleNamespace(
-        settings=Settings(run_environment="daytona"),
+        settings=Settings(run_environment="daytona", volume_mount_path=str(volume_root)),
         session_manager=SessionManager(),
-        platform=SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(fs=SandboxFs()))),
+        platform=SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(fs=SandboxFs(), process=SandboxProcess()))),
         models=RLMModelBundle(object(), object()),
         track_sandbox=lambda _sandbox_id: None,
     )
@@ -111,9 +123,11 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         "append_workspace_text",
         "list_workspace_files",
         "read_attachment",
+        "read_workspace_memory",
         "read_workspace_text",
         "read_session_history",
         "stat_workspace_file",
+        "update_workspace_memory",
         "write_workspace_text",
     }
     expected_tools.update({"load_skill", "read_skill_resource"})
@@ -122,6 +136,27 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     } == expected_tools
     assert prepared.execution.capabilities.spec.workspace.available is True
     assert prepared.execution.capabilities.spec.workspace.root == "."
+    tools = {
+        str(getattr(tool, "name", getattr(tool, "__name__", ""))): tool
+        for tool in prepared.execution.capabilities.spec.tools
+    }
+    learning = "Prefer concise release notes."
+    updated = await asyncio.to_thread(
+        tools["update_workspace_memory"],
+        key_learning=learning,
+        category="Preference",
+    )
+    recalled = await asyncio.to_thread(tools["read_workspace_memory"])
+    assert updated["ok"] is True
+    assert recalled["content"].endswith(f"**Preference**: {learning}\n")
+    memory_views = prepared.execution.capabilities.spec.tool_event_views
+    update_input = memory_views["update_workspace_memory"].input({"key_learning": learning, "category": "Preference"})
+    read_output = memory_views["read_workspace_memory"].output(recalled)
+    assert update_input == {"category": "Preference", "key_learning_bytes": len(learning)}
+    assert "key_learning" not in update_input
+    assert "content" not in read_output
+    assert learning not in repr((update_input, read_output))
+    assert (volume_root / "MEMORIES.md").read_text(encoding="utf-8").endswith(f"**Preference**: {learning}\n")
     assert prepared.result_snapshot_sink is prepared.artifact_sink
     assert prepared.result_snapshot_sink.result_path(turn.session_id, turn.run_id).endswith(
         f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"

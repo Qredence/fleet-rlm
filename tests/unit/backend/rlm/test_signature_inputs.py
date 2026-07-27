@@ -259,6 +259,7 @@ def test_dspy_imports_stay_out_of_deterministic_backend_layers() -> None:
         "sessions/history_tools.py",
         "files/tools.py",
         "files/workspace_tools.py",
+        "files/memory_tools.py",
     }
     offenders: list[str] = []
     for package in ("api", "persistence", "sessions", "files", "artifacts"):
