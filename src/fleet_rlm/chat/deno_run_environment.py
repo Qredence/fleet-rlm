@@ -221,7 +221,7 @@ class DenoTurnPreparation:
 
 
 __all__ = [
-    "DenoRunSink",
     "DenoRunEnvironmentProvider",
+    "DenoRunSink",
     "DenoTurnPreparation",
 ]

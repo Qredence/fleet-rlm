@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -133,10 +134,8 @@ class LocalArtifactCatalog:
                 os.fsync(handle.fileno())
             os.replace(tmp_name, blob)
         except Exception:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_name)
-            except OSError:
-                pass
             raise
 
         record = {
@@ -158,10 +157,8 @@ class LocalArtifactCatalog:
         try:
             meta.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
         except Exception:
-            try:
+            with contextlib.suppress(OSError):
                 blob.unlink(missing_ok=True)
-            except OSError:
-                pass
             raise
 
         if self._volume_fs is not None:

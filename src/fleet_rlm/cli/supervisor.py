@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from types import FrameType
+from typing import cast
 
 from fleet_rlm.config import load_runtime_settings
 from fleet_rlm.persistence.database import DatabaseCompatibilityError, check_database_compatibility
@@ -118,7 +119,7 @@ def _api_url(host: str, port: int) -> str:
 def _validate_daytona_database(repo_root: Path) -> None:
     try:
         settings = load_runtime_settings()
-    except Exception as exc:  # noqa: BLE001 - CLI configuration failures must remain secret-free
+    except Exception as exc:
         raise SupervisorError("Fleet database preflight failed; verify FLEET_DATABASE_URL") from exc
     database_url = (settings.database_url or "").strip()
     if not database_url:
@@ -127,7 +128,7 @@ def _validate_daytona_database(repo_root: Path) -> None:
         asyncio.run(check_database_compatibility(database_url, repo_root=repo_root))
     except DatabaseCompatibilityError as exc:
         raise SupervisorError("Fleet database is not at Alembic head; run uv run python scripts/db_init.py") from exc
-    except Exception as exc:  # noqa: BLE001 - connectivity errors must not expose database credentials
+    except Exception as exc:
         raise SupervisorError("Fleet database preflight failed; verify FLEET_DATABASE_URL") from exc
 
 
@@ -233,16 +234,19 @@ def supervise(
         with log_path.open("wb") as backend_log:
             latest_log_path.unlink(missing_ok=True)
             latest_log_path.symlink_to(log_path.name)
-            backend: subprocess.Popen[bytes] | None = None
             tui: subprocess.Popen[bytes] | None = None
             try:
-                backend = subprocess.Popen(
-                    backend_command,
-                    cwd=root,
-                    env=backend_env,
-                    stdout=backend_log,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
+                backend = cast(
+                    "subprocess.Popen[bytes]",
+                    subprocess.Popen(
+                        backend_command,
+                        cwd=root,
+                        env=backend_env,
+                        stdout=backend_log,
+                        stderr=subprocess.STDOUT,
+                        start_new_session=True,
+                        text=False,
+                    ),
                 )
             except OSError as exc:
                 raise SupervisorError(f"Could not start the Fleet backend; see {log_path}") from exc

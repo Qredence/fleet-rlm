@@ -7,10 +7,10 @@ Must never affect Turn outcomes. When disabled or when MLflow is unavailable,
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Iterator
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ def turn_trace(
         try:
             import mlflow
             from mlflow.entities import SpanType
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("MLflow import failed for turn span; continuing without traces", exc_info=True)
             yield TraceHandle(trace_id=None)
             return
@@ -66,7 +66,7 @@ def turn_trace(
                             "fleet.session_id": str(session_id),
                         },
                     )
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.warning("MLflow update_current_trace failed; continuing", exc_info=True)
                 trace_id: str | None = None
                 try:
@@ -75,10 +75,10 @@ def turn_trace(
                         trace_id = str(raw)
                         if expose_trace_id:
                             _current_trace_id.set(trace_id)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.warning("MLflow get_last_active_trace_id failed; continuing", exc_info=True)
                 yield TraceHandle(trace_id=trace_id if expose_trace_id else None)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("MLflow turn span failed; continuing without traces", exc_info=True)
             yield TraceHandle(trace_id=None)
     finally:

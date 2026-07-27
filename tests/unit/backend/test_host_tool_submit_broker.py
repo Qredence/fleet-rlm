@@ -19,8 +19,7 @@ class _RecordingTool:
 
 
 def test_submit_returns_final_output() -> None:
-    from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
     backend = InProcessInterpreterBackend()
     interp = DaytonaCodeInterpreter(backend=backend)
@@ -34,8 +33,7 @@ def test_submit_returns_final_output() -> None:
 
 
 def test_sandbox_code_invokes_host_mediated_tool() -> None:
-    from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
     tool = _RecordingTool()
     backend = InProcessInterpreterBackend()
@@ -51,8 +49,7 @@ def test_sandbox_code_invokes_host_mediated_tool() -> None:
 
 
 def test_llm_query_host_callable_is_reachable_from_sandbox_code() -> None:
-    from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
     seen: list[str] = []
 
@@ -75,8 +72,7 @@ def test_llm_query_host_callable_is_reachable_from_sandbox_code() -> None:
 
 def test_shutdown_stops_broker_and_rejects_further_execute() -> None:
     from fleet_rlm.daytona.errors import DaytonaAdapterError
-    from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
     backend = InProcessInterpreterBackend()
     interp = DaytonaCodeInterpreter(backend=backend)
@@ -91,8 +87,7 @@ def test_shutdown_stops_broker_and_rejects_further_execute() -> None:
 
 
 def test_host_tool_public_errors_are_sanitized() -> None:
-    from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
     def leaky_tool() -> str:
         raise RuntimeError("failed api_key=sk-secret path=/tmp/secret")
@@ -138,6 +133,7 @@ def test_http_broker_wrapper_source_and_fulfill_sanitize() -> None:
             return None
 
     def _fake_urlopen(req: object, timeout: float = 0) -> _Resp:
+        del timeout
         import json
         from urllib.request import Request
 

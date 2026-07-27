@@ -325,6 +325,7 @@ async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_o
             self.values: dict[str, str] = {}
 
         def list_entries(self, path: str, *, limit: int = 100, after: str | None = None) -> WorkspaceListResult:
+            del path
             del limit
             del after
             return WorkspaceListResult(
@@ -363,7 +364,7 @@ async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_o
     fake_workspace = FakeWorkspace()
     monkeypatch.setattr(
         "fleet_rlm.daytona.workspace_fs.DaytonaSessionWorkspaceFS",
-        lambda *args, **kwargs: fake_workspace,
+        lambda *_args, **_kwargs: fake_workspace,
     )
     catalog = _catalog()
     report_builder = catalog.require(stable_skill_id("report-builder"))

@@ -121,6 +121,7 @@ async def test_upload_rolls_back_blob_when_catalog_create_fails() -> None:
 
     class FailingCatalog(_Catalog):
         async def create(self, *, access: object, ref: object, storage_ref: str) -> None:
+            del access, ref, storage_ref
             raise RuntimeError("database unavailable")
 
     calls: list[tuple[str, object]] = []

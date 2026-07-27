@@ -23,19 +23,19 @@ class TurnTerminalError(RuntimeError):
             self.public_message = message
 
 
-class TurnCancelled(TurnTerminalError):
+class TurnCancelledError(TurnTerminalError):
     status = "cancelled"
     public_message = "Turn cancelled"
 
 
-class TurnTimeout(TurnTerminalError):
+class TurnTimeoutError(TurnTerminalError):
     status = "timeout"
     public_message = "Turn timed out"
 
 
-class TurnNoProgress(TurnTerminalError):
+class TurnNoProgressError(TurnTerminalError):
     public_message = "Turn stopped after repeated tool calls made no progress"
 
 
-class TurnIntegrityFailure(TurnTerminalError):
+class TurnIntegrityFailureError(TurnTerminalError):
     public_message = "Turn failed because a required workspace update was not completed"

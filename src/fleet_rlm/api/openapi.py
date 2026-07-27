@@ -105,4 +105,4 @@ def install_openapi_contract(app: FastAPI) -> None:
         app.openapi_schema = schema
         return schema
 
-    setattr(app, "openapi", custom_openapi)
+    app.__dict__["openapi"] = custom_openapi

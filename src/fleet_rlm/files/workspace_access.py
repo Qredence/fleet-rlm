@@ -6,11 +6,11 @@ import asyncio
 import hashlib
 import os
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import AsyncContextManager, Literal, Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
 from fleet_rlm.files.workspace_models import WorkspaceTextPage
@@ -86,7 +86,7 @@ class WorkspaceAccessGateway(Protocol):
         workspace_id: UUID,
         *,
         purpose: str,
-    ) -> AsyncContextManager[WorkspaceFileSession]: ...
+    ) -> AbstractAsyncContextManager[WorkspaceFileSession]: ...
 
 
 class WorkspaceFileService:

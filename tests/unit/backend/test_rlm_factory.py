@@ -23,6 +23,7 @@ class _FakeInterpreter:
         return None
 
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> str:
+        del code, variables
         return ""
 
     def shutdown(self) -> None:
@@ -182,10 +183,9 @@ def test_dspy_primitives_imports_are_confined_to_interpreter_contract() -> None:
                 if node.module == "dspy" and any(alias.name == "primitives" for alias in node.names):
                     offenders.append(rel)
                     break
-            if isinstance(node, ast.Import):
-                if any(
-                    alias.name == "dspy.primitives" or alias.name.startswith("dspy.primitives.") for alias in node.names
-                ):
-                    offenders.append(rel)
-                    break
+            if isinstance(node, ast.Import) and any(
+                alias.name == "dspy.primitives" or alias.name.startswith("dspy.primitives.") for alias in node.names
+            ):
+                offenders.append(rel)
+                break
     assert offenders == [], f"dspy.primitives imported outside interpreter contract: {offenders}"

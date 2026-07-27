@@ -10,7 +10,7 @@ from uuid import UUID
 import dspy
 
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
-from fleet_rlm.chat.turn_preparation import TurnPreparationCancelled, TurnPreparationTimeout
+from fleet_rlm.chat.turn_preparation import TurnPreparationCancelledError, TurnPreparationTimeoutError
 from fleet_rlm.files.workspace_models import WorkspaceCapabilityMetadata
 from fleet_rlm.rlm.context import PreparationNotice, RLMExecutionSpec
 from fleet_rlm.rlm.events import AttachmentRead, SkillActivated, SkillLoaded
@@ -93,6 +93,7 @@ async def prepare_host_capabilities(
     workspace: WorkspaceCapabilityMetadata,
     deadline: float,
 ) -> tuple[RLMExecutionSpec, SkillToolHost | EmptySkillHost, tuple[PreparationNotice, ...]]:
+    del files
     """Resolve history and exact Skills identically for every Run environment."""
     history_host = SessionHistoryToolHost(turn.history)
     history_tools = history_host.as_tools()
@@ -117,9 +118,9 @@ async def prepare_host_capabilities(
 
     resolved = resolve_selected_skills(skill_catalog, selections)
     if await turn.cancellation_requested():
-        raise TurnPreparationCancelled("Turn cancelled")
+        raise TurnPreparationCancelledError("Turn cancelled")
     if asyncio.get_running_loop().time() >= deadline:
-        raise TurnPreparationTimeout("Turn preparation timed out")
+        raise TurnPreparationTimeoutError("Turn preparation timed out")
 
     skill_host = SkillToolHost(
         skill_catalog,

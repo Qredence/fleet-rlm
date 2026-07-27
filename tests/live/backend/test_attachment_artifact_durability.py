@@ -97,7 +97,7 @@ def _skip_unless_live(settings: Settings) -> None:
 def _git_commit() -> str:
     try:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return "unknown"
 
 

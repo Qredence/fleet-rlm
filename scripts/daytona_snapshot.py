@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from daytona import CreateSnapshotParams, Resources
 

@@ -140,10 +140,12 @@ def test_runtime_settings_resolves_only_toml_declared_environment_values(
     policy = tmp_path / "fleet.toml"
     _policy(policy)
     policy.write_text(
-        policy.read_text(encoding="utf-8").replace(
+        policy.read_text(encoding="utf-8")
+        .replace(
             "max_artifact_bytes = 20",
             'max_artifact_bytes = 20\ndatabase_url_env = "DATABASE_URL"',
-        ).replace(
+        )
+        .replace(
             'volume_mount_path = "/fleet"',
             'volume_mount_path = "/fleet"\napi_key_env = "DAYTONA_KEY"',
         )
@@ -246,7 +248,7 @@ def test_startup_rejects_retired_environment_variables(monkeypatch: pytest.Monke
     from fleet_rlm.app import create_app
 
     monkeypatch.setenv("FLEET_LIVE_KERNEL", "true")
-    with pytest.raises(ValueError, match="retired Fleet environment variable.*FLEET_LIVE_KERNEL"):
+    with pytest.raises(ValueError, match=r"retired Fleet environment variable.*FLEET_LIVE_KERNEL"):
         create_app(settings=Settings(_env_file=None))
 
 
@@ -254,7 +256,7 @@ def test_startup_rejects_retired_budget_environment(monkeypatch: pytest.MonkeyPa
     from fleet_rlm.app import create_app
 
     monkeypatch.setenv("FLEET_BUDGET_MAX_ITERATIONS", "6")
-    with pytest.raises(ValueError, match="retired Fleet environment variable.*FLEET_BUDGET_MAX_ITERATIONS"):
+    with pytest.raises(ValueError, match=r"retired Fleet environment variable.*FLEET_BUDGET_MAX_ITERATIONS"):
         create_app(settings=Settings(_env_file=None))
 
 

@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.errors import install_error_handlers
 from fleet_rlm.api.routes.turns import router
-from fleet_rlm.chat.turn_preparation import TurnPreparationUnavailable
+from fleet_rlm.chat.turn_preparation import TurnPreparationUnavailableError
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.errors import ProviderRequestError
 
@@ -24,7 +24,7 @@ class _UnavailableCoordinator:
         try:
             raise self._cause
         except BaseException as cause:
-            raise TurnPreparationUnavailable("Turn environment is unavailable") from cause
+            raise TurnPreparationUnavailableError("Turn environment is unavailable") from cause
 
 
 def _client(cause: BaseException) -> TestClient:

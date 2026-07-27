@@ -6,7 +6,7 @@ import pytest
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend, sandbox_backend
-from fleet_rlm.rlm.errors import TurnNoProgress
+from fleet_rlm.rlm.errors import TurnNoProgressError
 from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted, ToolCompleted, ToolStarted
 
 
@@ -138,7 +138,7 @@ def test_empty_code_returns_direct_feedback_then_repetition_stops_the_turn() -> 
 
     assert first == "[Error] No executable code was provided; execute useful Python or call SUBMIT."
     assert backend.calls == 0
-    with pytest.raises(TurnNoProgress, match="repeated tool calls made no progress"):
+    with pytest.raises(TurnNoProgressError, match="repeated tool calls made no progress"):
         interpreter.execute("")
 
     assert backend.calls == 0

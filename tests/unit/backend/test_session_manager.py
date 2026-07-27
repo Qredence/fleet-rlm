@@ -602,6 +602,7 @@ async def test_acquire_retries_only_safe_pre_creation_failures(
 async def test_acquire_never_retries_ambiguous_sandbox_creation_failure() -> None:
     class _FailingCreatePlatform(_FakePlatform):
         async def create(self, **kwargs: Any) -> _FakeSandbox:
+            del kwargs
             self._n += 1
             raise ProviderRequestError("provider unavailable", cause_type="ProviderError", status_code=503)
 
@@ -635,7 +636,7 @@ async def test_acquire_rejects_zero_workspace_id() -> None:
 
 @pytest.mark.asyncio
 async def test_acquire_reuses_running_sandbox() -> None:
-    mgr, plat, store, _volumes = _manager()
+    mgr, plat, _store, _volumes = _manager()
     req = _request()
     first = await _acquire(mgr, req)
     await mgr.release(first)  # release active lease before re-acquire
@@ -762,7 +763,7 @@ async def test_cancellation_during_provider_create_transfers_owned_cleanup() -> 
 
 @pytest.mark.asyncio
 async def test_provider_acquisition_deadline_returns_before_late_owned_cleanup() -> None:
-    from fleet_rlm.daytona.session_manager import DaytonaLeaseAcquisitionTimeout, get_active_lease_registry
+    from fleet_rlm.daytona.session_manager import DaytonaLeaseAcquisitionTimeoutError, get_active_lease_registry
 
     platform = _BlockingCreatePlatform(expected_entries=1)
     admission = DaytonaAdmission(max_active_leases=1)
@@ -772,12 +773,12 @@ async def test_provider_acquisition_deadline_returns_before_late_owned_cleanup()
     assert await asyncio.to_thread(platform.all_entered.wait, 2)
     await asyncio.sleep(0.1)
 
-    with pytest.raises(DaytonaLeaseAcquisitionTimeout):
+    with pytest.raises(DaytonaLeaseAcquisitionTimeoutError):
         await acquisition
     assert get_active_lease_registry().holder(request.session_id) is not None
 
     platform.release_creates.set()
-    await mgr._cleanup.shutdown(drain_seconds=2)  # noqa: SLF001 - prove retained cleanup ownership
+    await mgr._cleanup.shutdown(drain_seconds=2)
     assert get_active_lease_registry().holder(request.session_id) is None
     assert platform.backends[0].close_calls == 1
 
@@ -805,14 +806,14 @@ async def test_cancelled_admission_wait_restores_session_claim() -> None:
 
 @pytest.mark.asyncio
 async def test_admission_timeout_restores_session_claim() -> None:
-    from fleet_rlm.daytona.session_manager import DaytonaAdmissionTimeout
+    from fleet_rlm.daytona.session_manager import DaytonaAdmissionTimeoutError
 
     admission = DaytonaAdmission(max_active_leases=1)
     held = await admission.acquire(deadline=asyncio.get_running_loop().time() + 10)
     mgr, _plat, _store, _volumes = _manager(admission=admission)
     request = _request()
 
-    with pytest.raises(DaytonaAdmissionTimeout):
+    with pytest.raises(DaytonaAdmissionTimeoutError):
         await mgr.acquire(request, deadline=asyncio.get_running_loop().time())
     held.release()
 
@@ -875,11 +876,11 @@ async def test_acquire_maps_lifecycle_provider_failure_without_replacement() -> 
     sandbox = plat.sandboxes[lease.sandbox_id]
     sandbox.state = "stopped"
 
-    class _ProviderFailure(Exception):
+    class _ProviderError(Exception):
         status_code = 503
 
     def fail_start() -> None:
-        raise _ProviderFailure("provider failed api_key=private")
+        raise _ProviderError("provider failed api_key=private")
 
     sandbox.start = fail_start  # type: ignore[method-assign]
 

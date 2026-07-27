@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Annotated, Any
+from typing import Annotated, Any, ClassVar
 
 import dspy
 import pytest
@@ -198,7 +198,7 @@ def test_build_native_rlm_preserves_exact_public_constructor_inputs() -> None:
     assert first.max_llm_calls == 11
     assert first.max_output_chars == 2048
     assert first.sub_lm is sub_lm
-    assert first._interpreter is interpreter  # noqa: SLF001 - pinned DSPy contract
+    assert first._interpreter is interpreter
     assert set(first.tools) == {"_lookup"}
     assert first.generate_action.callbacks == []
 
@@ -267,12 +267,13 @@ async def test_native_rlm_callback_observes_completed_action_without_altering_pr
             )
 
     class Interpreter:
-        tools: dict[str, object] = {}
+        tools: ClassVar[dict[str, object]] = {}
 
         def start(self) -> None:
             return None
 
         def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
+            del code, variables
             from fleet_rlm.rlm.dspy_interpreter_contract import wrap_final_output
 
             return wrap_final_output({"answer": "ok"})
@@ -302,7 +303,7 @@ def test_composition_version_guard_rejects_any_unpinned_dspy(monkeypatch: pytest
     from fleet_rlm.rlm.dspy_contract import assert_dspy_version
 
     monkeypatch.setattr(dspy, "__version__", "3.3.0")
-    with pytest.raises(RuntimeError, match="DSPy 3.3.0b1 is required"):
+    with pytest.raises(RuntimeError, match=r"DSPy 3.3.0b1 is required"):
         assert_dspy_version()
 
 
@@ -343,7 +344,7 @@ def test_observed_usage_never_exposes_call_or_retry_counters(forbidden: str) -> 
     from fleet_rlm.rlm.dspy_contract import observed_usage, validate_rlm_usage
 
     class Prediction:
-        trajectory = []
+        trajectory: ClassVar[list[object]] = []
 
         def get_lm_usage(self):
             return {
@@ -376,7 +377,7 @@ def test_malformed_provider_usage_degrades_without_losing_measured_fields(provid
     from fleet_rlm.rlm.dspy_contract import observed_usage
 
     class Prediction:
-        trajectory = [{"output": "step one"}, {"output": "step two"}]
+        trajectory: ClassVar[list[object]] = [{"output": "step one"}, {"output": "step two"}]
 
         def get_lm_usage(self):
             return provider_usage

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
@@ -20,8 +21,8 @@ from fleet_rlm.rlm.dspy_contract import (
     prediction_result,
 )
 from fleet_rlm.rlm.errors import (
-    TurnCancelled,
-    TurnIntegrityFailure,
+    TurnCancelledError,
+    TurnIntegrityFailureError,
     TurnTerminalError,
 )
 from fleet_rlm.rlm.events import (
@@ -79,10 +80,8 @@ class _WorkerOwnership:
             except BaseException:
                 break
         if task.done() and not task.cancelled():
-            try:
+            with contextlib.suppress(BaseException):
                 task.exception()
-            except BaseException:
-                pass
 
 
 class TurnEventStream:
@@ -340,11 +339,11 @@ class _WorkerMonitor:
         try:
             while not self.task.done():
                 if await self.context.cancellation_requested():
-                    self.intended_stop = TurnCancelled()
+                    self.intended_stop = TurnCancelledError()
                     break
                 remaining = self.context.deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
-                    self.intended_stop = asyncio.TimeoutError()
+                    self.intended_stop = TimeoutError()
                     break
                 pending = asyncio.create_task(self.relay.get())
                 done, _ = await asyncio.wait(
@@ -459,7 +458,7 @@ class RLMRunner:
             yield event
         prediction.append(task.result())
         if guards.integrity.unresolved:
-            raise TurnIntegrityFailure
+            raise TurnIntegrityFailureError
         async for event in self._prediction_events(context, observations, prediction[-1]):
             yield event
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -493,7 +492,7 @@ class RLMRunner:
         for item in self._drain_capability_details(context):
             yield observations.record(item)
         if await context.cancellation_requested():
-            raise TurnCancelled
+            raise TurnCancelledError
 
     def _start_worker(
         self, context: RLMExecutionContext

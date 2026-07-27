@@ -6,6 +6,7 @@ with host-side poll (mirrors legacy Fleet bridge semantics; not Deno JSON-RPC).
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import inspect
 import json
@@ -33,7 +34,7 @@ _BROKER_SESSION_COMMAND = f"cd /home/daytona && python {_BROKER_SERVER_PATH.rspl
 _FINAL_OUTPUT_MARKER = "__FLEET_FINAL_OUTPUT__"
 
 
-class FleetFinalOutput(Exception):
+class FleetFinalOutputError(Exception):
     """Raised inside an interpreter when SUBMIT completes successfully."""
 
     def __init__(self, value: dict[str, Any]) -> None:
@@ -50,7 +51,7 @@ def remote_submit_setup_code(output_fields: list[dict[str, Any]] | None) -> str:
 import json as _json
 _FINAL_OUTPUT_MARKER = {_FINAL_OUTPUT_MARKER!r}
 
-class FleetFinalOutput(Exception):
+class FleetFinalOutputError(Exception):
     def __init__(self, value):
         self.value = value
         super().__init__("Final output submitted")
@@ -63,7 +64,7 @@ def _generic_submit_source() -> str:
     return """
 def SUBMIT(**kwargs):
     print(f"{_FINAL_OUTPUT_MARKER}{_json.dumps(kwargs, ensure_ascii=False)}{_FINAL_OUTPUT_MARKER}")
-    raise FleetFinalOutput(kwargs)
+    raise FleetFinalOutputError(kwargs)
 """.strip()
 
 
@@ -83,7 +84,7 @@ def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
 def SUBMIT({signature}):
     {body}
     print(f"{{_FINAL_OUTPUT_MARKER}}{{_json.dumps(result, ensure_ascii=False)}}{{_FINAL_OUTPUT_MARKER}}")
-    raise FleetFinalOutput(result)
+    raise FleetFinalOutputError(result)
 """.strip()
 
 
@@ -345,7 +346,7 @@ class DaytonaHttpToolBroker:
         def _runner() -> None:
             try:
                 bucket.append(run_code())
-            except BaseException as exc:  # noqa: BLE001 - deliver to waiter
+            except BaseException as exc:
                 bucket.append(exc)
 
         thread = Thread(target=_runner, daemon=True)
@@ -385,10 +386,8 @@ class DaytonaHttpToolBroker:
         self._broker_token = None
         if session_id is None:
             return
-        try:
+        with contextlib.suppress(Exception):
             self._sandbox.process.delete_session(session_id)
-        except Exception:  # noqa: BLE001 - best-effort
-            pass
 
     def _wait_health(self, *, timeout_s: float) -> None:
         deadline = time.monotonic() + timeout_s
@@ -443,7 +442,7 @@ class DaytonaHttpToolBroker:
         try:
             result = tool_executor(name, args, kwargs)
             body: dict[str, Any] = {"id": call_id, "lease_token": lease, "result": result}
-        except Exception as exc:  # noqa: BLE001 - return sanitized error to sandbox
+        except Exception as exc:
             body = {
                 "id": call_id,
                 "lease_token": lease,

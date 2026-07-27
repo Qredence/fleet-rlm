@@ -21,6 +21,7 @@ TUI_OUTPUT = TUI_ROOT / "src" / "generated" / "openapi.ts"
 
 class _Dumper(yaml.SafeDumper):
     def ignore_aliases(self, data: object) -> bool:
+        del data
         return True
 
 

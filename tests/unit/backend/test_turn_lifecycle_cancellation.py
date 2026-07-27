@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from hashlib import sha256
+from typing import ClassVar
 from uuid import uuid4
 
 import pytest
@@ -70,9 +71,10 @@ async def test_cancellation_during_artifact_write_waits_then_removes_written_pat
             raise AssertionError(args)
 
     class Sink:
-        values = {candidate.staging_path: data}
+        values: ClassVar[dict[object, object]] = {candidate.staging_path: data}
 
         async def read(self, location, *, max_bytes):
+            del max_bytes
             return self.values[location]
 
         async def write(self, location, value):
@@ -118,9 +120,10 @@ async def test_cancellation_during_snapshot_write_waits_then_removes_snapshot() 
 
     class Snapshot:
         path = f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"
-        values: dict[str, bytes] = {}
+        values: ClassVar[dict[str, bytes]] = {}
 
         def result_path(self, session_id, run_id):
+            del session_id, run_id
             return self.path
 
         async def write(self, location, value):
@@ -160,6 +163,7 @@ async def test_cancelled_commit_failure_settles_repeatedly_cancelled_rollback() 
 
     class Store:
         async def commit(self, claimed, committed, artifacts):
+            del claimed, committed, artifacts
             commit_started.set()
             await release_commit.wait()
             raise RuntimeError("commit failed")
@@ -169,9 +173,10 @@ async def test_cancelled_commit_failure_settles_repeatedly_cancelled_rollback() 
 
     class Snapshot:
         path = f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"
-        values: dict[str, bytes] = {}
+        values: ClassVar[dict[str, bytes]] = {}
 
         def result_path(self, session_id, run_id):
+            del session_id, run_id
             return self.path
 
         async def write(self, location, value):
@@ -216,6 +221,7 @@ async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> 
         failures = 0
 
         async def commit(self, claimed, committed, artifacts):
+            del artifacts
             commit_started.set()
             await release_commit.wait()
             return CommittedTurnReceipt(claimed.run_id, 1, committed, ())
@@ -226,9 +232,10 @@ async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> 
 
     class Snapshot:
         path = f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"
-        values: dict[str, bytes] = {}
+        values: ClassVar[dict[str, bytes]] = {}
 
         def result_path(self, session_id, run_id):
+            del session_id, run_id
             return self.path
 
         async def write(self, location, value):

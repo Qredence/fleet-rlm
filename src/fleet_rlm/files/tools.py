@@ -111,7 +111,7 @@ class FileToolHost:
             return {"ok": False, "error": "not_found"}
         try:
             data = self._volume_fs.read_bytes(staged.sandbox_path)
-        except Exception:  # noqa: BLE001 - provider details never reach the model
+        except Exception:
             return {"ok": False, "error": "not_found"}
 
         self._pending_events.append(
@@ -160,7 +160,7 @@ class FileToolHost:
             return self._stage_artifact_candidate(parsed_kind, data, safe_title)
         except ValueError as exc:
             return {"ok": False, "error": "validation", "message": str(exc)[:200]}
-        except Exception:  # noqa: BLE001 - never leak internals to model
+        except Exception:
             return {"ok": False, "error": "validation"}
 
     def _stage_artifact_candidate(
@@ -239,7 +239,7 @@ class FileToolHost:
             return result
         except (ArtifactValidationError, ValueError, UnicodeError) as exc:
             return {"ok": False, "error": "validation", "message": str(exc)[:200]}
-        except Exception:  # noqa: BLE001 - never leak internals to model
+        except Exception:
             return {"ok": False, "error": "not_found"}
 
     def as_tools(self) -> tuple[dspy.Tool, ...]:

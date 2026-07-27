@@ -244,7 +244,7 @@ def build_workspace_agent_code(
             "    temporary_removed = False",
             "    cleanup_errno = None",
             "    try:",
-            "        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600, dir_fd=parent_fd)",
+            "        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600, dir_fd=parent_fd)",  # noqa: E501 - emitted sandbox code is intentionally one line
             "        write_all(fd, payload)",
             "        os.fsync(fd)",
             "        os.close(fd)",
@@ -307,7 +307,7 @@ def build_workspace_agent_code(
             "            os.close(fd)",
             "            fd = None",
             "        try:",
-            "            restore_fd = os.open(name, os.O_WRONLY | os.O_TRUNC | getattr(os, 'O_NOFOLLOW', 0), dir_fd=parent_fd)",
+            "            restore_fd = os.open(name, os.O_WRONLY | os.O_TRUNC | getattr(os, 'O_NOFOLLOW', 0), dir_fd=parent_fd)",  # noqa: E501 - emitted sandbox code is intentionally one line
             "            try:",
             "                write_all(restore_fd, previous)",
             "                os.fsync(restore_fd)",
@@ -431,7 +431,7 @@ def build_workspace_agent_code(
             "        consumed = len(content[:max_chars].encode('utf-8'))",
             "        next_offset = read_offset + consumed",
             "        eof = next_offset >= target_stat.st_size",
-            "        respond({'ok': True, 'content': content, 'byte_size': target_stat.st_size, 'next_offset': next_offset, 'eof': eof})",
+            "        respond({'ok': True, 'content': content, 'byte_size': target_stat.st_size, 'next_offset': next_offset, 'eof': eof})",  # noqa: E501 - emitted sandbox code is intentionally one line
             "    if operation == 'append':",
             "        payload = base64.b64decode(content_b64.encode('ascii'))",
             "        if len(payload) > max_bytes:",
@@ -492,7 +492,7 @@ def build_workspace_agent_code(
             "                    written_stat = replace_existing(parent_fd, relative_parts[-1], payload)",
             "                except ReplacementUnsupported:",
             "                    previous = read_existing(parent_fd, relative_parts[-1], max_bytes)",
-            "                    written_stat = overwrite_existing_direct(parent_fd, relative_parts[-1], payload, previous)",
+            "                    written_stat = overwrite_existing_direct(parent_fd, relative_parts[-1], payload, previous)",  # noqa: E501 - emitted sandbox code is intentionally one line
             "                    fallback_overwrite = True",
             "            else:",
             "                written_stat = publish_new(parent_fd, relative_parts[-1], payload)",

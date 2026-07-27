@@ -13,11 +13,11 @@ from fleet_rlm.files.tools import FileToolHost
 
 __all__ = [
     "AttachmentError",
+    "AttachmentLifecycleService",
     "AttachmentNotFoundError",
     "AttachmentRef",
-    "AttachmentLifecycleService",
     "AttachmentValidationError",
     "FileToolHost",
-    "StoredAttachment",
     "StagedAttachment",
+    "StoredAttachment",
 ]

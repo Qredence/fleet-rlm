@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -19,7 +20,7 @@ from fleet_rlm.files.workspace_models import (
 from fleet_rlm.files.workspace_tools import WorkspaceToolError, WorkspaceToolHost
 from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
-from fleet_rlm.rlm.errors import TurnCancelled
+from fleet_rlm.rlm.errors import TurnCancelledError
 from fleet_rlm.rlm.runner import RLMRunner
 from fleet_rlm.sessions.models import TurnAccess
 
@@ -136,10 +137,8 @@ class WorkspaceFlowFactory:
                     return dspy.Prediction(answer=final["content"], trajectory=[])
                 if request.startswith(("unresolved", "repaired")):
                     tools["write_workspace_text"](path="notes/target.md", content="old", overwrite=False)
-                    try:
+                    with contextlib.suppress(WorkspaceToolError):
                         tools["write_workspace_text"](path="notes/target.md", content="new", overwrite=False)
-                    except WorkspaceToolError:
-                        pass
                     if request.startswith("repaired"):
                         tools["write_workspace_text"](path="notes/target.md", content="new", overwrite=True)
                     tools["read_workspace_text"](path="notes/target.md", max_chars=100)
@@ -156,7 +155,7 @@ class WorkspaceFlowFactory:
                 assert result["ok"] is True
                 if request == "failed":
                     raise RuntimeError("turn failed after write")
-                raise TurnCancelled
+                raise TurnCancelledError
 
         return Program()
 

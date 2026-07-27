@@ -131,7 +131,7 @@ def test_history_tool_skips_oversized_message_and_continues() -> None:
         **_budget_fields(
             has_more=False,
             truncated=True,
-            bytes_returned=len("recoverable".encode("utf-8")),
+            bytes_returned=len(b"recoverable"),
             skipped_ordinal=1,
         ),
     }
@@ -162,7 +162,7 @@ def test_history_event_view_exposes_page_metadata_without_message_bodies() -> No
         "has_more": False,
         "done": True,
         "truncated": False,
-        "bytes_returned": len("private history body".encode("utf-8")),
+        "bytes_returned": len(b"private history body"),
         "byte_budget": SESSION_HISTORY_RESULT_BYTE_BUDGET,
         "message_count": 1,
     }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import ClassVar
 from uuid import uuid4
 
 import pytest
@@ -59,7 +60,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
     operations: list[str] = []
 
     class Sink:
-        values = {candidate.staging_path: data}
+        values: ClassVar[dict[object, object]] = {candidate.staging_path: data}
 
         async def read(self, location, *, max_bytes):
             operations.append(f"read:{location}")
@@ -84,6 +85,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
 
     class Preparation:
         async def prepare(self, _turn, *, deadline):
+            del deadline
             operations.append("prepare")
             return Prepared()
 
@@ -223,6 +225,7 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
 
     class Preparation:
         async def prepare(self, _turn, *, deadline):
+            del deadline
             return Prepared()
 
     class Stream:
@@ -247,7 +250,8 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
             return None
 
     class Runner:
-        def stream(self, _execution):
+        def stream(self, execution):
+            del execution
             return Stream()
 
     coordinator = TurnCoordinator(
@@ -323,6 +327,7 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
 
         class Preparation:
             async def prepare(self, _turn, *, deadline):
+                del deadline
                 return Prepared()
 
         class Stream:
@@ -348,7 +353,8 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
         class Runner:
             calls = 0
 
-            def stream(self, _execution):
+            def stream(self, execution):
+                del execution
                 self.calls += 1
                 return Stream()
 
@@ -421,18 +427,23 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
         stale_after_seconds = 120.0
 
         async def begin(self, request):
+            del request
             return turn
 
         async def heartbeat(self, claimed):
+            del claimed
             return None
 
         async def settle(self, claimed, failure):
+            del claimed, failure
             return None
 
         async def revoke_claim(self, claimed, failure):
+            del claimed, failure
             return None
 
         async def complete_settling(self, claimed):
+            del claimed
             return None
 
         async def finish(
@@ -443,6 +454,7 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
             artifact_sink=None,
             result_snapshot_sink=None,
         ):
+            del claimed, resolution, artifact_sink
             assert result_snapshot_sink is None
             operations.append("finish")
             return CommittedTurnReceipt(run_id, 1, committed, ())
@@ -457,6 +469,7 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
 
     class Preparation:
         async def prepare(self, claimed, *, deadline):
+            del claimed, deadline
             operations.append("prepare")
             return Prepared()
 
@@ -481,6 +494,7 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
 
     class Runner:
         def stream(self, execution):
+            del execution
             operations.append("run")
             return Stream()
 

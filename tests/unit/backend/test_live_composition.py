@@ -47,14 +47,14 @@ def test_common_storage_adapter_builder_owns_local_and_sql_catalog_branches(tmp_
     )
 
     if session_factory is None:
-        assert isinstance(adapters.attachment_lifecycle._catalog, LocalAttachmentCatalog)  # noqa: SLF001
-        assert isinstance(adapters.artifact_reader._catalog, LocalArtifactReaderCatalog)  # noqa: SLF001
+        assert isinstance(adapters.attachment_lifecycle._catalog, LocalAttachmentCatalog)
+        assert isinstance(adapters.artifact_reader._catalog, LocalArtifactReaderCatalog)
     else:
-        assert isinstance(adapters.attachment_lifecycle._catalog, SqlAlchemyAttachmentCatalog)  # noqa: SLF001
-        assert adapters.attachment_lifecycle._blobs is sql_attachment_blobs  # noqa: SLF001
-        assert adapters.attachment_lifecycle._paths is sql_attachment_paths  # noqa: SLF001
-        assert isinstance(adapters.artifact_reader._catalog, SqlAlchemyArtifactCatalog)  # noqa: SLF001
-        assert adapters.artifact_reader._blobs is sql_artifact_blobs  # noqa: SLF001
+        assert isinstance(adapters.attachment_lifecycle._catalog, SqlAlchemyAttachmentCatalog)
+        assert adapters.attachment_lifecycle._blobs is sql_attachment_blobs
+        assert adapters.attachment_lifecycle._paths is sql_attachment_paths
+        assert isinstance(adapters.artifact_reader._catalog, SqlAlchemyArtifactCatalog)
+        assert adapters.artifact_reader._blobs is sql_artifact_blobs
 
 
 def test_require_daytona_settings_fails_closed_without_deps(monkeypatch: pytest.MonkeyPatch) -> None:

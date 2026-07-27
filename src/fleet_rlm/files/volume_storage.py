@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from typing import AsyncContextManager, Protocol
+from typing import Protocol
 from uuid import UUID
 
 
@@ -50,7 +51,7 @@ class WorkspaceVolumeSession(Protocol):
 
 
 class WorkspaceVolumeGateway(Protocol):
-    def open_workspace(self, workspace_id: UUID) -> AsyncContextManager[WorkspaceVolumeSession]: ...
+    def open_workspace(self, workspace_id: UUID) -> AbstractAsyncContextManager[WorkspaceVolumeSession]: ...
 
     async def write_bytes(self, workspace_id: UUID, logical_path: str, data: bytes) -> None: ...
 

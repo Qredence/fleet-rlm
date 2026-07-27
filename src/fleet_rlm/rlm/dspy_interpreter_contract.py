@@ -58,8 +58,8 @@ def is_final_output(value: Any) -> bool:
 
 
 __all__ = [
-    "FinalOutput",
     "PUBLIC_FINAL_OUTPUT_LABEL",
+    "FinalOutput",
     "copy_output_fields",
     "initial_tools_registered",
     "is_final_output",

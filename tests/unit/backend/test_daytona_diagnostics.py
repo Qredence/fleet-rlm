@@ -28,6 +28,7 @@ class FakeDoctorDependencies:
         self._record("database")
 
     async def resolve_volume(self, settings: Settings) -> str:
+        del settings
         self._record("provider")
         return "volume-doctor"
 
@@ -46,6 +47,7 @@ class FakeDoctorDependencies:
         return self.sandbox
 
     async def verify_mount(self, sandbox: Any, expected_mount: Any) -> None:
+        del expected_mount
         assert sandbox is self.sandbox
         self._record("mount")
 
@@ -128,7 +130,8 @@ async def test_daytona_doctor_reports_dependency_construction_failure(
 ) -> None:
     from fleet_rlm.daytona import diagnostics
 
-    def construct(_settings: Settings) -> Any:
+    def construct(settings: Settings) -> Any:
+        del settings
         raise RuntimeError("provider api_key=private")
 
     monkeypatch.setattr(diagnostics, "_ProductionDaytonaDoctorDependencies", construct)

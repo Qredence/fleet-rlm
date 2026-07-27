@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -31,7 +32,7 @@ async def _build_harness(adapter_kind: str) -> _Harness:
         assert isinstance(turn, ExecuteTurn)
 
         async def state() -> tuple[str, str | None]:
-            run = store._runs[run_id]  # noqa: SLF001 - contract inspection
+            run = store._runs[run_id]
             return run.status, run.failure_code
 
         async def close() -> None:

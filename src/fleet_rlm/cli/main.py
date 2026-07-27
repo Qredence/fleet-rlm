@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import sys
 from collections.abc import Sequence
 from typing import Any
 
@@ -139,24 +140,29 @@ def _run_doctor(parser: argparse.ArgumentParser, provider: str) -> None:
 
     try:
         settings = load_runtime_settings()
-    except Exception:  # noqa: BLE001 - settings errors must remain bounded and secret-free
-        print("[failed] settings: Required Fleet Daytona settings are missing or invalid.")
-        print(f"action: {_DOCTOR_ACTIONS['settings']}")
+    except Exception:
+        _emit("[failed] settings: Required Fleet Daytona settings are missing or invalid.")
+        _emit(f"action: {_DOCTOR_ACTIONS['settings']}")
         raise SystemExit(1) from None
     profile = os.environ.get(_PROFILE_ENVIRONMENT) or settings._dotenv_values.get(_PROFILE_ENVIRONMENT)
-    print(f"[ok] policy: {redacted_policy_summary(settings, profile=profile or 'unknown')}")
+    _emit(f"[ok] policy: {redacted_policy_summary(settings, profile=profile or 'unknown')}")
     result = asyncio.run(run_daytona_doctor(settings))
     for step in result.steps:
         state = "ok" if step.ok else "failed"
-        print(f"[{state}] {step.name}: {step.message}")
+        _emit(f"[{state}] {step.name}: {step.message}")
     if not result.ok:
         categories = [step.category for step in result.steps if not step.ok and step.category]
         if not categories:
             categories = [result.failure_category or "unknown"]
         for category in dict.fromkeys(categories):
             action = _DOCTOR_ACTIONS.get(category, _DOCTOR_ACTIONS["unknown"])
-            print(f"action: {action}")
+            _emit(f"action: {action}")
         raise SystemExit(1)
+
+
+def _emit(message: str) -> None:
+    """Write one public CLI message to stdout."""
+    sys.stdout.write(f"{message}\n")
 
 
 def fleet_main(argv: Sequence[str] | None = None) -> None:

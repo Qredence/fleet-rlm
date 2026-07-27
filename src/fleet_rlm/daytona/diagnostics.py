@@ -285,7 +285,7 @@ async def run_daytona_doctor(
     if dependencies is None:
         try:
             dependencies = _ProductionDaytonaDoctorDependencies(settings)
-        except Exception as exc:  # noqa: BLE001 - client construction must remain structured
+        except Exception as exc:
             failed = _failed_step("provider", exc)
             return DaytonaDoctorResult(
                 ok=False,
@@ -334,14 +334,14 @@ async def run_daytona_doctor(
         if output.strip() != "fleet-doctor-ok":
             raise RuntimeError("interpreter diagnostic output mismatch")
         steps.append(DaytonaDoctorStep("interpreter", True, _SUCCESS_MESSAGES["interpreter"]))
-    except Exception as exc:  # noqa: BLE001 - diagnostics must return safe structured failures
+    except Exception as exc:
         primary_failure = _failed_step(current_step, exc)
         steps.append(primary_failure)
     finally:
         if sandbox is not None:
             try:
                 await dependencies.delete_sandbox(sandbox)
-            except Exception as exc:  # noqa: BLE001 - report cleanup without leaking provider text
+            except Exception as exc:
                 cleanup_failure = _failed_step("cleanup", exc)
                 steps.append(cleanup_failure)
                 if primary_failure is None:
@@ -350,7 +350,7 @@ async def run_daytona_doctor(
                 steps.append(DaytonaDoctorStep("cleanup", True, _SUCCESS_MESSAGES["cleanup"]))
         try:
             await dependencies.close()
-        except Exception as exc:  # noqa: BLE001 - client cleanup is also structured
+        except Exception as exc:
             cleanup_failure = _failed_step("cleanup", exc)
             steps.append(cleanup_failure)
             if primary_failure is None:

@@ -12,10 +12,10 @@ from fleet_rlm.persistence.repositories.turns import (
 )
 
 __all__ = [
-    "SqlAlchemyArtifactCatalog",
-    "SqlAlchemyAttachmentCatalog",
     "InMemorySessionCatalog",
     "InMemoryTurnStateStore",
+    "SqlAlchemyArtifactCatalog",
+    "SqlAlchemyAttachmentCatalog",
     "SqlAlchemySessionCatalog",
     "SqlAlchemyTurnStateStore",
 ]

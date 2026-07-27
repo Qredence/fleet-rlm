@@ -161,6 +161,7 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
 
     class Store:
         async def commit(self, claimed, committed, artifacts):
+            del claimed, committed, artifacts
             raise RuntimeError("commit failed")
 
         async def transition_claim(self, claimed, command):

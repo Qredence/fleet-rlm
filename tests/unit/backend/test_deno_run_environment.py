@@ -53,7 +53,7 @@ def test_rlm_factory_keeps_dspy_default_interpreter() -> None:
     assert type(rlm) is dspy.RLM
     assert rlm.verbose is True
     assert not hasattr(rlm, "bind_observer")
-    assert rlm._interpreter is None  # noqa: SLF001
+    assert rlm._interpreter is None
 
 
 @pytest.mark.asyncio

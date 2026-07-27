@@ -32,25 +32,32 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
 
     class Sink:
         async def read(self, location, *, max_bytes):
+            del location, max_bytes
             return b""
 
         async def write(self, location, data):
+            del location, data
             return None
 
         async def remove(self, location):
+            del location
             return None
 
         async def read_private(self, location):
+            del location
             return b""
 
         async def write_private(self, location, data):
+            del location, data
             return None
 
         async def remove_private(self, location):
+            del location
             return None
 
     class Attachments:
         async def prepare_run(self, access, ids, run, sink):
+            del access, ids, run, sink
             return PreparedAttachments((), ())
 
     class Capabilities:
@@ -67,6 +74,7 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
 
     class CapabilityFactory:
         async def prepare(self, turn, environment, attachments, *, deadline):
+            del turn, environment, attachments
             assert deadline > 0
             return Capabilities()
 
@@ -74,6 +82,8 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
 
     class Environments:
         async def acquire(self, turn, *, deadline):
+            del turn, deadline
+
             async def release():
                 return None
 

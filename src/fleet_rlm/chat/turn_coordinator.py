@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from typing import Protocol, Self
@@ -10,7 +11,7 @@ from uuid import UUID
 
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
-from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailable
+from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailableError
 from fleet_rlm.chat.turn_lifecycle import (
     BeginTurn,
     CommittedTurnReceipt,
@@ -19,14 +20,14 @@ from fleet_rlm.chat.turn_lifecycle import (
     ReplayTurn,
     TurnFailure,
     TurnLifecycle,
-    TurnLifecycleUnavailable,
+    TurnLifecycleUnavailableError,
     TurnStateError,
 )
 from fleet_rlm.chat.turn_preparation import (
     PreparedTurn,
     TurnPreparation,
-    TurnPreparationCancelled,
-    TurnPreparationTimeout,
+    TurnPreparationCancelledError,
+    TurnPreparationTimeoutError,
 )
 from fleet_rlm.observability.turn_tracing import turn_trace
 from fleet_rlm.rlm.context import RLMExecutionContext
@@ -175,8 +176,8 @@ class TurnCoordinator:
         """Complete claim and preparation before a transport sends headers."""
         try:
             self._cleanup.require_capacity()
-        except TurnCleanupUnavailable as exc:
-            raise TurnLifecycleUnavailable("Turn cleanup capacity is unavailable") from exc
+        except TurnCleanupUnavailableError as exc:
+            raise TurnLifecycleUnavailableError("Turn cleanup capacity is unavailable") from exc
         deadline = asyncio.get_running_loop().time() + self._turn_timeout_seconds
         request = BeginTurn(
             command.access,
@@ -189,7 +190,7 @@ class TurnCoordinator:
             async with asyncio.timeout_at(deadline):
                 start = await self._lifecycle.begin(request)
         except TimeoutError:
-            raise TurnPreparationTimeout("Turn preparation timed out") from None
+            raise TurnPreparationTimeoutError("Turn preparation timed out") from None
 
         if isinstance(start, ReplayTurn):
             return OpenedTurnStream(start.run_id, self._replay(start))
@@ -212,12 +213,12 @@ class TurnCoordinator:
                 preparation_task.cancel()
                 await asyncio.gather(preparation_task, return_exceptions=True)
                 self._submit_claim_loss_cleanup(start, heartbeat)
-                raise TurnLifecycleUnavailable("Turn claim is no longer available")
+                raise TurnLifecycleUnavailableError("Turn claim is no longer available")
             prepared = preparation_task.result()
             if heartbeat_lost is not None:
                 heartbeat_lost.cancel()
                 await asyncio.gather(heartbeat_lost, return_exceptions=True)
-        except TurnPreparationCancelled:
+        except TurnPreparationCancelledError:
             await self._stop_heartbeat(heartbeat)
             await _shield_cleanup(
                 self._lifecycle.finish(
@@ -226,7 +227,7 @@ class TurnCoordinator:
                 )
             )
             raise
-        except (TurnPreparationTimeout, TimeoutError) as exc:
+        except (TurnPreparationTimeoutError, TimeoutError) as exc:
             await self._stop_heartbeat(heartbeat)
             await _shield_cleanup(
                 self._lifecycle.finish(
@@ -234,9 +235,9 @@ class TurnCoordinator:
                     TurnFailure("timeout", "timeout", "Turn preparation timed out", empty_rlm_usage()),
                 )
             )
-            if isinstance(exc, TurnPreparationTimeout):
+            if isinstance(exc, TurnPreparationTimeoutError):
                 raise
-            raise TurnPreparationTimeout("Turn preparation timed out") from None
+            raise TurnPreparationTimeoutError("Turn preparation timed out") from None
         except Exception:
             if start.authority.revoked:
                 raise
@@ -469,16 +470,12 @@ class TurnCoordinator:
                     if self._claim_loss_fence is not None:
                         await self._claim_loss_fence(turn.session_id)
                 if stream is not None:
-                    try:
+                    with contextlib.suppress(BaseException):
                         await stream.aclose()
-                    except BaseException:
-                        pass
                     await stream.wait_owned()
                 if finalization_task is not None:
-                    try:
+                    with contextlib.suppress(BaseException):
                         await asyncio.shield(finalization_task)
-                    except BaseException:
-                        pass
                 await prepared.aclose()
                 await self._lifecycle.complete_settling(turn)
             finally:
@@ -501,7 +498,7 @@ class TurnCoordinator:
                 try:
                     async with asyncio.timeout_at(authority_deadline):
                         await self._lifecycle.heartbeat(turn)
-                except (TurnLifecycleUnavailable, TurnStateError):
+                except (TurnLifecycleUnavailableError, TurnStateError):
                     turn.authority.revoke()
                     lost.set()
                     return

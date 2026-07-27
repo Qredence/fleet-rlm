@@ -24,7 +24,7 @@ class _FakeBackend:
             raise self.fail_with
         if variables:
             self.namespace.update(variables)
-        exec(code, self.namespace, self.namespace)  # noqa: S102
+        exec(code, self.namespace, self.namespace)
         return str(self.namespace.get("_out", ""))
 
     def close(self) -> None:
@@ -163,6 +163,7 @@ async def test_sync_sandbox_exposes_only_explicit_async_services() -> None:
             return content, path, kwargs
 
         async def download_file(self, path, **kwargs):
+            del kwargs
             return path.encode()
 
         async def delete_file(self, path, **kwargs):
@@ -194,8 +195,9 @@ async def test_sync_sandbox_exposes_only_explicit_async_services() -> None:
         assert bridge.fs.delete_file("/x") == ("/x", {})
         assert bridge.fs.list_files("/") == ("/", {})
         assert bridge.get_preview_link(3000) == (3000, {})
+        unknown_method = "unknown_sdk_method"
         with pytest.raises(AttributeError):
-            getattr(bridge, "unknown_sdk_method")
+            getattr(bridge, unknown_method)
 
     await asyncio.to_thread(exercise)
 

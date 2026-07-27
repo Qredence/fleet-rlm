@@ -28,6 +28,7 @@ async def test_replay_bypasses_preparation_and_runner() -> None:
 
     class Lifecycle:
         async def begin(self, request):
+            del request
             return replay
 
     class Never:

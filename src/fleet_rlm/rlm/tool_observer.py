@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import dspy
 
-from fleet_rlm.rlm.errors import TurnNoProgress
+from fleet_rlm.rlm.errors import TurnNoProgressError
 from fleet_rlm.rlm.events import JsonValue, ObservationDetail, ToolCompleted, ToolFailed, ToolStarted, WarningEvent
 from fleet_rlm.rlm.tool_guards import TurnToolGuards
 
@@ -51,13 +51,13 @@ class ToolEventView:
     def input(self, arguments: Mapping[str, Any]) -> JsonValue:
         try:
             return self.input_projection(arguments)
-        except Exception:  # noqa: BLE001 - a projection defect must fail closed
+        except Exception:
             return {}
 
     def output(self, result: Any) -> JsonValue:
         try:
             return self.output_projection(result)
-        except Exception:  # noqa: BLE001 - a projection defect must fail closed
+        except Exception:
             return {}
 
     def error(self, *, validation: bool, exception: BaseException | None = None) -> str:
@@ -137,7 +137,7 @@ def observe_tool(
             if warning is not None:
                 observer(WarningEvent(warning, "tool_no_progress"))
                 if not event_view.allow_repeated_identical:
-                    raise TurnNoProgress
+                    raise TurnNoProgressError
         observer(ToolCompleted(call_id, str(source.name), event_view.output(result)))
         return result
 

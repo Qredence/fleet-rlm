@@ -204,7 +204,7 @@ def test_observe_tool_rejects_non_tools_and_awaitable_results() -> None:
     def plain() -> str:
         return "plain"
 
-    with pytest.raises(TypeError, match="dspy.Tool"):
+    with pytest.raises(TypeError, match=r"dspy.Tool"):
         observe_tool(plain, observed.append, ToolEventView())  # type: ignore[arg-type]
 
     async def async_tool() -> str:

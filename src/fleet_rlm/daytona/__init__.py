@@ -9,7 +9,7 @@ from fleet_rlm.daytona.platform import build_daytona_client
 from fleet_rlm.daytona.provisioning import DEFAULT_VOLUME_NAME, VolumeConfig
 from fleet_rlm.daytona.session_manager import (
     DaytonaAdmission,
-    DaytonaAdmissionTimeout,
+    DaytonaAdmissionTimeoutError,
     DaytonaSessionManager,
     InterpreterLease,
     LeaseRequest,
@@ -26,7 +26,7 @@ __all__ = [
     "DEFAULT_VOLUME_NAME",
     "DaytonaAdapterError",
     "DaytonaAdmission",
-    "DaytonaAdmissionTimeout",
+    "DaytonaAdmissionTimeoutError",
     "DaytonaCodeInterpreter",
     "DaytonaSandboxVolumeFs",
     "DaytonaSessionManager",

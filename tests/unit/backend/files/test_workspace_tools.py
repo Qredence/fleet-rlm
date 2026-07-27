@@ -259,11 +259,12 @@ def test_workspace_storage_failure_has_structured_host_error() -> None:
 def test_entry_serialization_does_not_mutate_domain_value() -> None:
     entry = WorkspaceEntry("notes", "directory", None, None)
     workspace, tools = _tools()
-    workspace.list_entries = lambda _path, limit=100, after=None: WorkspaceListResult(  # type: ignore[method-assign]
-        (entry,),
-        truncated=False,
-        next_cursor=None,
-    )
+
+    def list_entries(_path, *, limit=100, after=None) -> WorkspaceListResult:
+        del limit, after
+        return WorkspaceListResult((entry,), truncated=False, next_cursor=None)
+
+    workspace.list_entries = list_entries  # type: ignore[method-assign]
 
     result = tools["list_workspace_files"](path=".", limit=1)
 

@@ -60,8 +60,8 @@ def test_dspy_rlm_accepts_file_tool_names_and_fresh_custom_interpreters() -> Non
     assert set(first.tools) == {"read_attachment", "create_artifact", "lookup"}
     assert set(second.tools) == {"read_attachment", "create_artifact"}
     assert first is not second
-    assert first._interpreter is first_interpreter  # noqa: SLF001 - installed DSPy contract
-    assert second._interpreter is second_interpreter  # noqa: SLF001 - installed DSPy contract
+    assert first._interpreter is first_interpreter
+    assert second._interpreter is second_interpreter
 
 
 def test_pinned_json_adapter_formats_typed_inputs_and_native_rlm_action_outputs() -> None:

@@ -26,7 +26,7 @@ from fleet_rlm.chat.turn_claim import (
     CompleteSettlement,
     FailClaim,
     HeartbeatClaim,
-    InvalidClaimTransition,
+    InvalidClaimTransitionError,
     RevokeClaim,
     decide_claim_transition,
 )
@@ -206,14 +206,14 @@ class InMemoryTurnStateStore:
         session_id: UUID,
         access: TurnAccess,
         *,
-        history: SessionHistory = SessionHistory(),
+        history: SessionHistory | None = None,
         checkpoint_version: int = 0,
         status: Literal["active", "archived"] = "active",
     ) -> None:
         async with self._lock:
             self._sessions[session_id] = _SessionState(
                 access=access,
-                history=list(history.messages),
+                history=list(history.messages) if history is not None else [],
                 checkpoint_version=checkpoint_version,
                 status=status,
             )
@@ -361,7 +361,7 @@ class InMemoryTurnStateStore:
                 raise TurnStateError("Turn claim is invalid")
             try:
                 decision = decide_claim_transition(_memory_claim_state(run), command)
-            except InvalidClaimTransition as exc:
+            except InvalidClaimTransitionError as exc:
                 raise TurnStateError(str(exc)) from exc
             if isinstance(command, HeartbeatClaim):
                 if not decision.heartbeat_allowed:
@@ -605,7 +605,7 @@ class SqlAlchemyTurnStateStore:
                 raise TurnStateError("Turn claim is invalid")
             try:
                 decision = decide_claim_transition(_row_claim_state(run), command)
-            except InvalidClaimTransition as exc:
+            except InvalidClaimTransitionError as exc:
                 raise TurnStateError(str(exc)) from exc
             if isinstance(command, HeartbeatClaim):
                 if not decision.heartbeat_allowed or run.claim_owner != str(turn._claim.value):
@@ -708,7 +708,7 @@ class SqlAlchemyTurnStateStore:
             try:
                 if fence is not None:
                     await fence(pending_run.session_id)
-            except Exception:  # noqa: BLE001 - one provider failure must not stop recovery
+            except Exception:
                 async with self._sessions() as db, db.begin():
                     run = await db.get(RunRow, pending_run.id, with_for_update=True)
                     if run is not None and run.status == pending_run.status and run.claim_owner == recovery_owner:
@@ -741,7 +741,7 @@ class SqlAlchemyTurnStateStore:
                 else:
                     try:
                         decision = decide_claim_transition(_row_claim_state(run), CompleteSettlement()).transition
-                    except InvalidClaimTransition:
+                    except InvalidClaimTransitionError:
                         continue
                 if decision is None or decision.next_state is None:
                     continue

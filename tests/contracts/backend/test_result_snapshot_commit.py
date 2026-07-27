@@ -136,6 +136,7 @@ async def test_commit_failure_removes_snapshot_before_failure_is_durable() -> No
 
     class Store:
         async def commit(self, claimed, committed, artifacts):
+            del claimed, committed, artifacts
             raise RuntimeError("database unavailable")
 
         async def transition_claim(self, claimed, command):

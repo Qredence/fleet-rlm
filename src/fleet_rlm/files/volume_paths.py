@@ -50,10 +50,8 @@ def validate_mount_path(mount_path: str) -> PurePosixPath:
         raise UnsafePathError("mount path must be absolute")
     if raw in {"/", "//"}:
         raise UnsafePathError("mount path cannot be filesystem root")
-    if "//" in raw.lstrip("/"):  # consecutive slashes after leading /
-        # Allow only a single leading slash; reject internal //
-        if re.search(r"//+", raw[1:]):
-            raise UnsafePathError("mount path cannot contain consecutive slashes")
+    if "//" in raw.lstrip("/") and re.search(r"//+", raw[1:]):
+        raise UnsafePathError("mount path cannot contain consecutive slashes")
     parts = PurePosixPath(raw).parts
     if ".." in parts or "." in parts[1:]:  # "." only ok as lone; not as component mid-path
         # PurePosixPath collapses '.' but not when given explicitly in string checks

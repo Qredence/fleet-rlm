@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
-from fleet_rlm.chat.turn_preparation import TurnPreparationUnavailable
+from fleet_rlm.chat.turn_preparation import TurnPreparationUnavailableError
 from fleet_rlm.config import Settings
 from fleet_rlm.daytona.run_environment import build_turn_preparation
 from fleet_rlm.files.models import AttachmentRef
@@ -26,6 +26,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     monkeypatch,
     with_skill_catalog: bool,
 ) -> None:
+    del monkeypatch
     data = b"attachment body"
     attachment_id = uuid4()
     ref = AttachmentRef(
@@ -169,12 +170,12 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
 
 @pytest.mark.asyncio
 async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
-    from fleet_rlm.daytona.session_manager import DaytonaAdmissionTimeout
+    from fleet_rlm.daytona.session_manager import DaytonaAdmissionTimeoutError
 
     class SessionManager:
         async def acquire(self, _request, *, deadline):
             assert deadline > asyncio.get_running_loop().time()
-            raise DaytonaAdmissionTimeout("provider secret should not escape")
+            raise DaytonaAdmissionTimeoutError("provider secret should not escape")
 
     resources = SimpleNamespace(
         settings=Settings(run_environment="daytona"),
@@ -201,7 +202,7 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
         _TurnClaimToken(uuid4()),
     )
 
-    with pytest.raises(TurnPreparationUnavailable) as caught:
+    with pytest.raises(TurnPreparationUnavailableError) as caught:
         await build_turn_preparation(
             resources,
             attachment_lifecycle=Attachments(),
@@ -214,7 +215,7 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["timeout", "cancel"])
 async def test_post_acquisition_sandbox_lookup_settles_before_lease_release(mode: str) -> None:
-    from fleet_rlm.chat.turn_preparation import TurnPreparationTimeout
+    from fleet_rlm.chat.turn_preparation import TurnPreparationTimeoutError
     from fleet_rlm.daytona.run_environment import _DaytonaEnvironmentProvider
 
     entered = threading.Event()
@@ -230,6 +231,7 @@ async def test_post_acquisition_sandbox_lookup_settles_before_lease_release(mode
         released = 0
 
         async def acquire(self, _request, *, deadline):
+            del deadline
             return SimpleNamespace(sandbox_id="sandbox", interpreter=object())
 
         async def release(self, _lease) -> None:
@@ -272,6 +274,6 @@ async def test_post_acquisition_sandbox_lookup_settles_before_lease_release(mode
         with pytest.raises(asyncio.CancelledError):
             await acquisition
     else:
-        with pytest.raises(TurnPreparationTimeout):
+        with pytest.raises(TurnPreparationTimeoutError):
             await acquisition
     assert resources.session_manager.released == 1

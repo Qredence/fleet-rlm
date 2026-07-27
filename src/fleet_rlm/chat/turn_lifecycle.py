@@ -61,7 +61,7 @@ class TurnIntegrityError(TurnLifecycleError):
     pass
 
 
-class TurnLifecycleUnavailable(TurnLifecycleError):
+class TurnLifecycleUnavailableError(TurnLifecycleError):
     pass
 
 
@@ -248,7 +248,7 @@ class TurnLifecycleService:
         result_snapshot_sink: ResultSnapshotSink | None = None,
     ) -> TurnFinalization:
         if turn.authority.revoked:
-            raise TurnLifecycleUnavailable("Turn claim is no longer available")
+            raise TurnLifecycleUnavailableError("Turn claim is no longer available")
         if isinstance(resolution, TurnFailure):
             return await self._transition_receipt(turn, FailClaim(_claim_failure(resolution), resolution.usage))
         if not resolution.succeeded:

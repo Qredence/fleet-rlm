@@ -22,25 +22,32 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
 
     class Sink:
         async def read(self, location, *, max_bytes):
+            del location, max_bytes
             return b""
 
         async def write(self, location, data):
+            del location, data
             return None
 
         async def remove(self, location):
+            del location
             operations.append("remove-artifact")
 
         async def read_private(self, location):
+            del location
             return b""
 
         async def write_private(self, location, data):
+            del location, data
             return None
 
         async def remove_private(self, location):
+            del location
             operations.append("remove-attachment")
 
     class Attachments:
         async def prepare_run(self, access, ids, run, sink):
+            del access, ids, run, sink
             return PreparedAttachments((), ())
 
     class Capabilities:
@@ -59,6 +66,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
 
     class Environments:
         async def acquire(self, turn, *, deadline):
+            del turn
             assert deadline > 0
 
             async def release():
@@ -68,6 +76,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
 
     class CapabilityFactory:
         async def prepare(self, turn, environment, attachments, *, deadline):
+            del turn, environment, attachments
             assert deadline > 0
             return Capabilities()
 
@@ -108,7 +117,7 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
     import asyncio
 
     from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, _TurnClaimToken
-    from fleet_rlm.chat.turn_preparation import DefaultTurnPreparer, RunEnvironment, TurnPreparationTimeout
+    from fleet_rlm.chat.turn_preparation import DefaultTurnPreparer, RunEnvironment, TurnPreparationTimeoutError
     from fleet_rlm.files.models import PreparedAttachments
     from fleet_rlm.rlm.dspy_contract import RLMOptions
     from fleet_rlm.rlm.model_bundle import RLMModelBundle
@@ -117,7 +126,8 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
     released = False
 
     class Sink:
-        async def remove_private(self, _location):
+        async def remove_private(self, location):
+            del location
             return None
 
     class Environments:
@@ -162,7 +172,7 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
         capabilities=SlowCapabilities(),
     )
 
-    with pytest.raises(TurnPreparationTimeout, match="timed out"):
+    with pytest.raises(TurnPreparationTimeoutError, match="timed out"):
         await module.prepare(turn, deadline=asyncio.get_running_loop().time() + 0.01)
     assert released is True
 

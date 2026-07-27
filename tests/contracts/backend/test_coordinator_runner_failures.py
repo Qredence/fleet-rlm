@@ -14,8 +14,7 @@ import pytest
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.chat.turn_coordinator import TurnCoordinator
 from fleet_rlm.chat.turn_lifecycle import ExecuteTurn, TurnLifecycleService
-from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.persistence.repositories import InMemoryTurnStateStore
 from fleet_rlm.rlm.context import RLMExecutionContext, RLMExecutionSpec
 from fleet_rlm.rlm.dspy_contract import RLMOptions
@@ -154,7 +153,7 @@ class _Harness:
             preparation=self,
             runner=RLMRunner(factory=_Factory(self.mode, self.program_started)),
         )
-        self.cleanup_supervisor = coordinator._cleanup  # noqa: SLF001 - acceptance observes process ownership
+        self.cleanup_supervisor = coordinator._cleanup
         opened = await coordinator.open(
             OpenTurnCommand(
                 self.access,

@@ -121,7 +121,7 @@ class LiveDaytonaPlatform:
         """
         try:
             return await self._client.get(sandbox_id)
-        except Exception as exc:  # noqa: BLE001 - classify provider outcomes
+        except Exception as exc:
             if is_sandbox_not_found(exc):
                 return None
             raise map_provider_error(exc) from exc

@@ -13,6 +13,7 @@ class _Catalog:
     stored: object
 
     async def get(self, *, access: object, artifact_id: UUID) -> object:
+        del access, artifact_id
         return self.stored
 
 
@@ -21,6 +22,7 @@ class _Blobs:
     data: bytes
 
     async def read(self, workspace_id: UUID, logical_path: str) -> bytes:
+        del workspace_id, logical_path
         return self.data
 
 

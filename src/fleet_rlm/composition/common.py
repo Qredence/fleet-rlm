@@ -196,10 +196,7 @@ def install_local_inventory(
     )
     app.state.config_policy = ConfigPolicyService(
         _CONFIG_PATH,
-        active_profile=(
-            os.environ.get(_PROFILE_ENVIRONMENT)
-            or settings._dotenv_values.get(_PROFILE_ENVIRONMENT)
-        ),
+        active_profile=(os.environ.get(_PROFILE_ENVIRONMENT) or settings._dotenv_values.get(_PROFILE_ENVIRONMENT)),
     )
     app.state.turn_coordinator = coordinator
     app.state.turn_preparation = preparation

@@ -178,6 +178,7 @@ def test_volume_mount_spec_requires_workspace_subpath() -> None:
 async def test_live_platform_rejects_unscoped_volume_mount() -> None:
     class _Client:
         async def create(self, params: Any) -> Any:
+            del params
             raise AssertionError("must not create unscoped sandbox")
 
     platform = LiveDaytonaPlatform(_Client(), _SPEC)
@@ -248,7 +249,7 @@ async def test_acquire_rejects_binding_with_wrong_workspace_scope_without_replac
 
 @pytest.mark.asyncio
 async def test_acquire_rejects_live_mount_mismatch_without_replacement() -> None:
-    mgr, plat, store = _manager()
+    mgr, plat, _store = _manager()
     req = LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=uuid4())
     lease = await _acquire(mgr, req)
     await mgr.release(lease)

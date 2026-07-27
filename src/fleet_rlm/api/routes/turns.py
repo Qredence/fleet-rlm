@@ -19,10 +19,10 @@ from fleet_rlm.chat.turn_coordinator import OpenedTurnStream
 from fleet_rlm.chat.turn_lifecycle import (
     TurnIdempotencyMismatchError,
     TurnInProgressError,
-    TurnLifecycleUnavailable,
+    TurnLifecycleUnavailableError,
     TurnNotFoundError,
 )
-from fleet_rlm.chat.turn_preparation import TurnPreparationTimeout, TurnPreparationUnavailable
+from fleet_rlm.chat.turn_preparation import TurnPreparationTimeoutError, TurnPreparationUnavailableError
 from fleet_rlm.observability.failure_diagnostics import normalize_turn_failure
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
@@ -107,9 +107,9 @@ async def _open_turn(
         raise _http_error(409, "idempotency_mismatch", "Idempotency key input mismatch") from exc
     except InvalidSkillSelectionError as exc:
         raise _http_error(422, "invalid_skill_selection", "Invalid Skill selection") from exc
-    except TurnPreparationTimeout as exc:
+    except TurnPreparationTimeoutError as exc:
         raise _http_error(504, "turn_preparation_timeout", "Turn preparation timed out") from exc
-    except (TurnLifecycleUnavailable, TurnPreparationUnavailable) as exc:
+    except (TurnLifecycleUnavailableError, TurnPreparationUnavailableError) as exc:
         raise _preparation_unavailable(request, exc) from exc
     except ValueError as exc:
         raise _http_error(422, "invalid_request", "Invalid request") from exc

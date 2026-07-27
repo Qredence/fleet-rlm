@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 from collections.abc import Mapping
 from pathlib import PurePosixPath
@@ -32,10 +33,8 @@ class AsyncDaytonaVolumeFS:
     async def write_bytes(self, logical_path: str, data: bytes) -> None:
         path = as_posix(logical_path)
         parent = str(PurePosixPath(path).parent)
-        try:
+        with contextlib.suppress(Exception):
             await self.sandbox.fs.create_folder(parent, "700")
-        except Exception:
-            pass
         await self.sandbox.fs.upload_file(data, path)
 
     async def read_bytes(self, logical_path: str) -> bytes:
@@ -94,10 +93,8 @@ class DaytonaSandboxVolumeFs:
     def write_bytes(self, logical_path: str, data: bytes) -> None:
         path = as_posix(logical_path)
         parent = str(PurePosixPath(path).parent)
-        try:
+        with contextlib.suppress(Exception):
             self.sandbox.fs.create_folder(parent, "700")
-        except Exception:
-            pass
         self.sandbox.fs.upload_file(data, path)
 
     def read_bytes(self, logical_path: str) -> bytes:
@@ -498,8 +495,8 @@ class AsyncDaytonaSessionWorkspaceFS:
             max_file_bytes=max_file_bytes,
         )
         self._sandbox = sandbox
-        self._volume_root = validated._volume_root  # noqa: SLF001
-        self._root = validated._root  # noqa: SLF001
+        self._volume_root = validated._volume_root
+        self._root = validated._root
         self._max_file_bytes = max_file_bytes
         self._last_warnings: tuple[dict[str, object], ...] = ()
 

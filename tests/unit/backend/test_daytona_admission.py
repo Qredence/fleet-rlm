@@ -54,13 +54,13 @@ async def test_cancelled_waiter_restores_capacity() -> None:
 
 @pytest.mark.asyncio
 async def test_deadline_exhaustion_does_not_consume_capacity() -> None:
-    from fleet_rlm.daytona.session_manager import DaytonaAdmission, DaytonaAdmissionTimeout
+    from fleet_rlm.daytona.session_manager import DaytonaAdmission, DaytonaAdmissionTimeoutError
 
     admission = DaytonaAdmission(max_active_leases=1)
     loop = asyncio.get_running_loop()
     held = await admission.acquire(deadline=loop.time() + 10)
 
-    with pytest.raises(DaytonaAdmissionTimeout, match="Daytona admission unavailable"):
+    with pytest.raises(DaytonaAdmissionTimeoutError, match="Daytona admission unavailable"):
         await admission.acquire(deadline=loop.time())
 
     held.release()

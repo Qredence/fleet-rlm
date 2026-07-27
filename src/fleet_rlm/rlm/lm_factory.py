@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import re
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 
 import dspy
@@ -123,7 +123,7 @@ def build_model_bundle(settings: Settings) -> RLMModelBundle:
     return RLMModelBundle(root_lm=root, sub_lm=sub)
 
 
-class LMTier(str, Enum):
+class LMTier(StrEnum):
     """AI Gateway capability/cost tier for fleet-rlm DSPy modules.
 
     FRONTIER  Highest capability; reserved for offline optimization (GEPA only).

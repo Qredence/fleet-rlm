@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import importlib.metadata
 import inspect
 import json
@@ -214,10 +215,8 @@ async def _run_cycle(
     finally:
         cleanup_started = time.perf_counter()
         if interpreter is not None:
-            try:
+            with contextlib.suppress(Exception):
                 interpreter.shutdown()
-            except Exception:
-                pass
         if sandbox is not None:
             try:
                 await platform.delete(sandbox)

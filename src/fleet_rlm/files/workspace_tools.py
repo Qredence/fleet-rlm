@@ -86,7 +86,7 @@ class WorkspaceToolHost:
                     "next_cursor": listing.next_cursor,
                     "entries": [_entry(item) for item in listing.entries],
                 }
-            except Exception as exc:  # noqa: BLE001 - public error is normalized
+            except Exception as exc:
                 _raise_tool_error(exc)
 
         def stat_workspace_file(path: str) -> dict[str, object]:
@@ -98,7 +98,7 @@ class WorkspaceToolHost:
                 return {"ok": True, "namespace": SESSION_WORKSPACE_NAMESPACE, "entry": _entry(entry)}
             except WorkspaceToolError:
                 raise
-            except Exception as exc:  # noqa: BLE001 - public error is normalized
+            except Exception as exc:
                 _raise_tool_error(exc)
 
         def read_workspace_text(
@@ -116,7 +116,7 @@ class WorkspaceToolHost:
                     max_chars=max_chars,
                     max_bytes=self._max_file_bytes,
                 )
-            except Exception as exc:  # noqa: BLE001 - public error is normalized
+            except Exception as exc:
                 _raise_tool_error(exc)
             return {
                 "ok": True,
@@ -148,7 +148,7 @@ class WorkspaceToolHost:
                 if isinstance(warnings, tuple) and warnings:
                     result["warnings"] = [dict(item) for item in warnings if isinstance(item, Mapping)]
                 return result
-            except Exception as exc:  # noqa: BLE001 - public error is normalized
+            except Exception as exc:
                 _raise_tool_error(exc)
 
         def append_workspace_text(path: str, content: str) -> dict[str, object]:
@@ -167,7 +167,7 @@ class WorkspaceToolHost:
                 if isinstance(warnings, tuple) and warnings:
                     result["warnings"] = [dict(item) for item in warnings if isinstance(item, Mapping)]
                 return result
-            except Exception as exc:  # noqa: BLE001 - public error is normalized
+            except Exception as exc:
                 _raise_tool_error(exc)
 
         return (

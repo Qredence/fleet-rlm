@@ -7,6 +7,7 @@ Workspace Volume Scope uses VolumeMount subpath ``workspaces/<workspace_id>``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -15,7 +16,7 @@ from threading import Lock
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
-from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailable
+from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailableError
 from fleet_rlm.daytona.bindings import SandboxBinding
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
@@ -41,7 +42,7 @@ from fleet_rlm.daytona.provisioning import (
 logger = logging.getLogger(__name__)
 
 
-class DaytonaAdmissionTimeout(RuntimeError):
+class DaytonaAdmissionTimeoutError(RuntimeError):
     """The Turn deadline elapsed before Daytona capacity became available."""
 
 
@@ -74,7 +75,7 @@ class DaytonaAdmission:
             async with asyncio.timeout_at(deadline):
                 await self._semaphore.acquire()
         except TimeoutError:
-            raise DaytonaAdmissionTimeout("Daytona admission unavailable") from None
+            raise DaytonaAdmissionTimeoutError("Daytona admission unavailable") from None
         return DaytonaAdmissionPermit(self._semaphore)
 
 
@@ -148,13 +149,11 @@ class InterpreterLease:
             self.interpreter.shutdown()
         finally:
             if self._on_release is not None:
-                try:
+                with contextlib.suppress(Exception):
                     self._on_release()
-                except Exception:
-                    pass
 
 
-class DaytonaLeaseAcquisitionTimeout(RuntimeError):
+class DaytonaLeaseAcquisitionTimeoutError(RuntimeError):
     """The Turn deadline elapsed while provider lease work was in flight."""
 
 
@@ -270,7 +269,7 @@ class DaytonaSessionManager:
                 self._adopt_late_acquisition(acquisition, permit, request, run_id)
                 permit = None
                 claim_held = False
-                raise DaytonaLeaseAcquisitionTimeout("Daytona lease acquisition timed out") from None
+                raise DaytonaLeaseAcquisitionTimeoutError("Daytona lease acquisition timed out") from None
             except asyncio.CancelledError:
                 self._adopt_late_acquisition(acquisition, permit, request, run_id)
                 permit = None
@@ -340,7 +339,7 @@ class DaytonaSessionManager:
             deletion = self._platform.delete(lease.sandbox_id)
             try:
                 self._cleanup.submit(deletion)
-            except TurnCleanupUnavailable:
+            except TurnCleanupUnavailableError:
                 deletion.close()
                 await self._platform.delete(lease.sandbox_id)
 
@@ -398,7 +397,7 @@ class DaytonaSessionManager:
             finally:
                 get_active_lease_registry().release(session_id, run_id)
 
-        lease._on_release = _clear_active  # noqa: SLF001
+        lease._on_release = _clear_active
 
     async def _acquire_provider(self, request: LeaseRequest, *, run_id: UUID) -> InterpreterLease:
         """Complete provider work after admission; caller owns settlement."""
@@ -430,7 +429,7 @@ class DaytonaSessionManager:
                 raise
             except DaytonaAdapterError:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 raise map_provider_error(exc) from exc
 
         if sandbox is not None:
@@ -485,10 +484,8 @@ class DaytonaSessionManager:
             )
         except BaseException:
             if created_sandbox:
-                try:
+                with contextlib.suppress(Exception):
                     await self._platform.delete(_sandbox_id(sandbox))
-                except Exception:  # noqa: BLE001 - preserve the acquisition failure
-                    pass
             raise
 
         sid = _sandbox_id(sandbox)
@@ -598,7 +595,7 @@ class DaytonaSessionManager:
         for attempt in range(2):
             try:
                 return await get_or_create_volume_id(self._volume_client, self._volume_config)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 mapped = map_provider_error(exc)
                 if attempt == 0 and is_safe_pre_creation_retry(mapped):
                     continue
@@ -625,10 +622,8 @@ class DaytonaSessionManager:
         volume_id = binding.volume_id or await get_or_create_volume_id(self._volume_client, self._volume_config)
         expected = self._expected_mount(volume_id=volume_id, workspace_id=resolved_workspace)
         if binding.sandbox_id:
-            try:
+            with contextlib.suppress(Exception):
                 await self._platform.delete(binding.sandbox_id)
-            except Exception:  # noqa: BLE001 - best-effort delete of broken sandbox
-                pass
         request = LeaseRequest(
             session_id=binding.session_id,
             user_id=user_id,
@@ -707,7 +702,7 @@ __all__ = [
     "ActiveLeaseConflictError",
     "BindingStoreLike",
     "DaytonaAdmission",
-    "DaytonaAdmissionTimeout",
+    "DaytonaAdmissionTimeoutError",
     "DaytonaSessionManager",
     "InterpreterLease",
     "LeaseRequest",

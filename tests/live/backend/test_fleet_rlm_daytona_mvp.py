@@ -67,7 +67,9 @@ _FIRST_SCENARIO = """
 `batch_results = llm_query_batched(["Return exactly ALPHA", "Return exactly BETA", "Return exactly GAMMA"])`.
 Reject `[ERROR]`; extend with `[single_result, *batch_results]`. Call once, no
 casts/copies/positional args:
-`verification = verify_semantic_work(iteration_token=iteration_token, single_result=single_result, batch_results=batch_results, accumulator=accumulator)`.
+`verification = verify_semantic_work(iteration_token=iteration_token,
+single_result=single_result, batch_results=batch_results,
+accumulator=accumulator)`.
 Append `notes/findings.md` with results and `verification["checksum"]` via
 `append_workspace_text(path="notes/findings.md", content=content)`; require
 `workspace_result["ok"]`. Publish the existing Workspace document without
@@ -83,7 +85,9 @@ Exactly two RLM iterations; do not create `accumulator`, explore, parse, or
 retry. 1) Set `accumulator_present = "accumulator" in globals()`, then call
 `workspace_result = read_workspace_text(path="notes/findings.md", max_chars=10000)`.
 Require dictionary key `workspace_result["ok"]`; call exactly once
-`reload_verification = verify_workspace_reload(workspace_content=workspace_result["content"], accumulator_present=accumulator_present)`;
+`reload_verification = verify_workspace_reload(
+workspace_content=workspace_result["content"],
+accumulator_present=accumulator_present)`;
 require `reload_verification["ok"]`, set `workspace_checksum`, and print
 `RELOAD_ITERATION_READY`. 2) Set non-empty string-only `summary` and `findings`,
 then call exactly `SUBMIT(answer=summary, findings=findings)` with keywords.
@@ -180,11 +184,7 @@ def _live_settings(tmp_path: Path) -> Settings:
     _load_repo_env()
     if os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"}:
         pytest.skip("Set FLEET_LIVE=1 for the complete Daytona MVP proof")
-    missing = [
-        name
-        for name in ("FLEET_DAYTONA_API_KEY", "DATABRICKS_TOKEN")
-        if not os.environ.get(name)
-    ]
+    missing = [name for name in ("FLEET_DAYTONA_API_KEY", "DATABRICKS_TOKEN") if not os.environ.get(name)]
     if missing:
         pytest.fail("Live Daytona MVP proof missing required credentials: " + ", ".join(missing))
     policy = load_runtime_settings()
@@ -468,7 +468,7 @@ def _retry_cleanup(operation: Any) -> bool:
         try:
             operation()
             return True
-        except Exception:  # noqa: BLE001 - retain only a bounded cleanup phase
+        except Exception:
             if attempt == len(_CLEANUP_RETRY_DELAYS):
                 return False
             if delay:
@@ -478,7 +478,7 @@ def _retry_cleanup(operation: Any) -> bool:
 
 def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: str) -> tuple[str, ...]:
     failures: list[str] = []
-    tracked_ids = sandbox_ids | set(resources._sandbox_ids)  # noqa: SLF001 - strict test cleanup
+    tracked_ids = sandbox_ids | set(resources._sandbox_ids)
     for sandbox_id in sorted(tracked_ids):
 
         def delete_sandbox(sandbox_id: str = sandbox_id) -> None:
@@ -490,7 +490,7 @@ def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: str) -> 
             failures.append("sandbox")
     try:
         resources.forget_sandboxes()
-    except Exception:  # noqa: BLE001 - retain only a bounded cleanup phase
+    except Exception:
         failures.append("tracking")
 
     def delete_volume() -> None:
@@ -710,10 +710,10 @@ def test_complete_daytona_mvp_through_fastapi(
         with TestClient(app) as client:
             resources = app.state.run_environment_resources
             preparation = app.state.turn_preparation
-            preparation._capabilities = _ProofCapabilityPreparer(  # noqa: SLF001
+            preparation._capabilities = _ProofCapabilityPreparer(
                 preparation._capabilities,
                 proof_tools,
-                proof_views,  # noqa: SLF001
+                proof_views,
             )
             portal = client.portal
             assert portal is not None

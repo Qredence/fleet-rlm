@@ -204,8 +204,8 @@ exclude = [
 # B (flake8-bugbear), UP (pyupgrade), A (flake8-builtins), Q (flake8-quotes),
 # T20 (flake8-print), ARG (unused-arguments), RUF (ruff-specific), SIM (simplify),
 # LOG (flake8-logging-usage).
-# Several selected families are partially suppressed in `ignore` until the
-# repo-wide backlog is remediated one rule (or small cluster) at a time.
+# Selected rules are enforced across the repository. Exceptions are scoped to
+# files whose public role makes the otherwise-disallowed construct intentional.
 # pydocstyle (D) is not selected; enable only after a dedicated docstring pass.
 # Note: COM (trailing commas) handled by formatter, so excluded to avoid conflicts
 select = [
@@ -225,58 +225,11 @@ select = [
     "LOG",   # flake8-logging-usage
 ]
 
-# Permanent policy: E501 (formatter-owned). Remaining entries are temporary
-# backlog suppressions — prefer fix+re-enable or per-file scope over growth.
-ignore = [
-    "E501",   # Line too long (handled by formatter)
-    "A002",   # Existing builtin-shadowing backlog in tests.
-    "ARG001", # Unused function arguments (common in callbacks/handlers)
-    "ARG002", # Unused method arguments (common in inheritance)
-    "ARG005", # Existing callback/lambda test fixture backlog.
-    "B008",   # Existing Typer/default-call backlog.
-    "B009",   # Existing dynamic getattr backlog in tests.
-    "B010",   # Existing dynamic setattr backlog.
-    "B904",   # Existing exception chaining backlog.
-    "B905",   # Existing zip(strict=...) backlog.
-    "T201",   # Existing CLI/script print backlog.
-    "UP037",  # Existing quoted annotation backlog.
-    "UP041",  # Existing asyncio timeout alias backlog.
-    "UP045",  # Existing Optional[...] annotation backlog.
-    "UP012",  # Existing redundant encode() encoding backlog.
-    "UP017",  # Existing datetime.timezone.utc backlog.
-    "UP028",  # Existing yield-from simplification backlog.
-    "UP033",  # Existing lru_cache(None) backlog.
-    "UP034",  # Existing extraneous-parentheses backlog.
-    "UP035",  # Existing deprecated import backlog.
-    "UP042",  # Existing str + Enum backlog.
-    "N802",   # Existing uppercase runtime callback name backlog.
-    "N806",   # Existing uppercase local test-double backlog.
-    "N818",   # Existing exception-name compatibility backlog.
-    "LOG014", # Existing logging exc_info backlog.
-    "LOG015", # Existing root logger backlog.
-    "RUF001", # Existing intentional unicode CLI glyph backlog.
-    "RUF003", # Existing intentional unicode comment backlog.
-    "RUF010", # Existing explicit f-string conversion backlog.
-    "RUF012", # Existing mutable class attribute test backlog.
-    "RUF021", # Existing mixed boolean precedence backlog.
-    "RUF022", # Existing __all__ ordering backlog.
-    "RUF043", # Existing pytest match-pattern backlog.
-    "RUF059", # Existing unused unpacked variable backlog.
-    "RUF100", # Existing stale noqa backlog.
-    "SIM102", # Existing collapsible-if backlog.
-    "SIM103", # Existing return-condition simplification backlog.
-    "SIM105", # Existing suppressible-exception backlog.
-    "SIM108", # Existing ternary simplification backlog.
-    "SIM110", # Existing any(...) simplification backlog.
-    "SIM114", # Existing duplicate-branch simplification backlog.
-    "SIM117", # Existing nested-with backlog.
-    "SIM118", # Existing dict.keys() membership backlog.
-    "SIM300", # Existing yoda-condition backlog.
-]
-
-# Per-file ignores for specific directories
+# Public package re-exports and standalone script stdout are intentional.
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401", "F403"]  # Allow star imports and unused imports in __init__
+"__init__.py" = ["F401", "F403"]
+"scripts/**/*.py" = ["T201"]
+"src/fleet_rlm/skills/bundled/**/scripts/*.py" = ["T201"]
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"

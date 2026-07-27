@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import ClassVar
 from uuid import uuid4
 
 import pytest
@@ -45,9 +46,11 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
         failures = 0
 
         async def begin(self, request):
+            del request
             return turn
 
         async def commit(self, claimed, committed, artifacts):
+            del claimed
             commit_started.set()
             await release_commit.wait()
             if not commit_succeeds:
@@ -76,13 +79,15 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
             )
 
         async def heartbeat(self, claimed):
+            del claimed
             return None
 
     class Snapshot:
         path = f"/sessions/{session_id}/runs/{run_id}/result.json"
-        values: dict[str, bytes] = {}
+        values: ClassVar[dict[str, bytes]] = {}
 
         def result_path(self, requested_session_id, requested_run_id):
+            del requested_session_id, requested_run_id
             return self.path
 
         async def write(self, location, value):
@@ -103,6 +108,7 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
 
     class Preparation:
         async def prepare(self, claimed, *, deadline):
+            del claimed, deadline
             return Prepared()
 
     class Stream:
@@ -122,6 +128,7 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
 
     class Runner:
         def stream(self, execution):
+            del execution
             return Stream()
 
     store = Store()

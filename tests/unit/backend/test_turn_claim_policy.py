@@ -11,7 +11,7 @@ from fleet_rlm.chat.turn_claim import (
     CompleteSettlement,
     FailClaim,
     HeartbeatClaim,
-    InvalidClaimTransition,
+    InvalidClaimTransitionError,
     RevokeClaim,
     decide_claim_transition,
 )
@@ -54,7 +54,7 @@ def test_revoke_policy_owns_stale_claim_terminal_intent() -> None:
 
 @pytest.mark.parametrize("command", [FailClaim(FAILURE), BeginSettlement(FAILURE), RevokeClaim(FAILURE)])
 def test_completed_claim_rejects_failure_transitions(command) -> None:
-    with pytest.raises(InvalidClaimTransition):
+    with pytest.raises(InvalidClaimTransitionError):
         decide_claim_transition(ClaimState("completed"), command)
 
 
@@ -108,5 +108,5 @@ def test_decide_claim_transition_legal_matrix(command, state, expected_status, e
     ),
 )
 def test_decide_claim_transition_illegal_matrix(command, state) -> None:
-    with pytest.raises(InvalidClaimTransition):
+    with pytest.raises(InvalidClaimTransitionError):
         decide_claim_transition(state, command)

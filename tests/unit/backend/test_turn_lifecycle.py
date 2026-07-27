@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from typing import ClassVar
 from uuid import uuid4
 
 import pytest
@@ -75,8 +76,8 @@ async def test_success_validates_and_publishes_before_atomic_commit() -> None:
             raise AssertionError((claimed, failure))
 
     class Sink:
-        values = {candidate.staging_path: data}
-        operations: list[tuple[str, str]] = []
+        values: ClassVar[dict[object, object]] = {candidate.staging_path: data}
+        operations: ClassVar[list[tuple[str, str]]] = []
 
         async def read(self, location, *, max_bytes):
             assert max_bytes >= len(data)
@@ -173,12 +174,14 @@ async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None
 
     class Sink:
         async def read(self, location, *, max_bytes):
+            del location, max_bytes
             return b"bad-value"
 
         async def write(self, location, value):
             raise AssertionError((location, value))
 
         async def remove(self, location):
+            del location
             return None
 
     receipt = await TurnLifecycleService(Store(), max_artifact_bytes=100).finish(
@@ -245,7 +248,7 @@ async def test_daytona_success_writes_snapshot_before_commit_and_retains_it() ->
 
     class SnapshotSink:
         path = f"/sessions/{session_id}/runs/{run_id}/result.json"
-        values: dict[str, bytes] = {}
+        values: ClassVar[dict[str, bytes]] = {}
 
         def result_path(self, requested_session_id, requested_run_id):
             assert (requested_session_id, requested_run_id) == (session_id, run_id)
@@ -321,6 +324,7 @@ async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failu
 
     class Store:
         async def commit(self, claimed, committed, artifacts):
+            del claimed, committed, artifacts
             operations.append("commit")
             raise RuntimeError("database unavailable")
 
@@ -346,9 +350,10 @@ async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failu
             )
 
     class ArtifactSink:
-        values = {candidate.staging_path: data}
+        values: ClassVar[dict[object, object]] = {candidate.staging_path: data}
 
         async def read(self, location, *, max_bytes):
+            del max_bytes
             return self.values[location]
 
         async def write(self, location, value):
@@ -361,9 +366,10 @@ async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failu
 
     class SnapshotSink:
         path = f"/sessions/{session_id}/runs/{run_id}/result.json"
-        values: dict[str, bytes] = {}
+        values: ClassVar[dict[str, bytes]] = {}
 
         def result_path(self, requested_session_id, requested_run_id):
+            del requested_session_id, requested_run_id
             return self.path
 
         async def write(self, location, value):
@@ -537,8 +543,8 @@ async def test_non_success_removes_run_local_artifact_candidate_bytes(status: st
             )
 
     class Sink:
-        values = {candidate.staging_path: data}
-        removals: list[str] = []
+        values: ClassVar[dict[object, object]] = {candidate.staging_path: data}
+        removals: ClassVar[list[str]] = []
 
         async def remove(self, location):
             self.removals.append(location)

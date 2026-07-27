@@ -113,7 +113,11 @@ def upgrade() -> None:
         ),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint(
-            "(status = 'running' AND claim_owner IS NOT NULL AND claim_heartbeat_at IS NOT NULL AND commit_checkpoint_version IS NULL AND failure_code IS NULL) OR (status = 'completed' AND claim_owner IS NULL AND commit_checkpoint_version IS NOT NULL AND failure_code IS NULL) OR (status IN ('failed', 'cancelled', 'timeout') AND claim_owner IS NULL AND commit_checkpoint_version IS NULL AND failure_code IS NOT NULL)",
+            "(status = 'running' AND claim_owner IS NOT NULL AND claim_heartbeat_at IS NOT NULL AND "
+            "commit_checkpoint_version IS NULL AND failure_code IS NULL) OR (status = 'completed' "
+            "AND claim_owner IS NULL AND commit_checkpoint_version IS NOT NULL AND failure_code IS "
+            "NULL) OR (status IN ('failed', 'cancelled', 'timeout') AND claim_owner IS NULL AND "
+            "commit_checkpoint_version IS NULL AND failure_code IS NOT NULL)",
             name="ck_fleet_runs_terminal_shape",
         ),
         sa.CheckConstraint(
@@ -175,7 +179,8 @@ def upgrade() -> None:
             "created_at", sa.DateTime(timezone=True), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=False
         ),
         sa.CheckConstraint(
-            "(role = 'user' AND user_input_json IS NOT NULL AND committed_turn_json IS NULL) OR (role = 'assistant' AND user_input_json IS NULL AND committed_turn_json IS NOT NULL)",
+            "(role = 'user' AND user_input_json IS NOT NULL AND committed_turn_json IS NULL) OR "
+            "(role = 'assistant' AND user_input_json IS NULL AND committed_turn_json IS NOT NULL)",
             name="ck_fleet_turns_role_shape",
         ),
         sa.ForeignKeyConstraint(["session_id"], ["fleet_sessions.id"], ondelete="CASCADE"),

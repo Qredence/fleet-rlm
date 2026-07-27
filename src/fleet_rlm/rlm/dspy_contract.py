@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ DSPY_VERSION = "3.3.0b1"
 JsonValue: TypeAlias = bool | int | float | str | tuple["JsonValue", ...] | Mapping[str, "JsonValue"] | None
 ObservedUsageValue: TypeAlias = bool | int | float | str | dict[str, JsonValue] | None
 ReasoningObserver: TypeAlias = Callable[[Any], None]
+
 
 class RLMUsage(TypedDict):
     """Closed public and durable usage observed for one RLM Turn."""
@@ -331,7 +333,7 @@ class _RLMReasoningCallback(BaseCallback):
                     self._iteration,
                 )
             )
-        except Exception:  # noqa: BLE001 - observation must never alter execution
+        except Exception:
             return
 
 
@@ -389,14 +391,12 @@ def observed_usage(prediction: Any, *, duration_ms: int) -> RLMUsage:
     getter = getattr(prediction, "get_lm_usage", None)
     try:
         raw_usage = getter() if callable(getter) else None
-    except Exception:  # noqa: BLE001 - incomplete provider telemetry is represented as empty
+    except Exception:
         raw_usage = None
     observed_lm_usage: dict[str, dict[str, JsonValue]] = {}
     if isinstance(raw_usage, Mapping):
-        try:
+        with contextlib.suppress(ValueError):
             observed_lm_usage = _safe_observed_usage(raw_usage, filter_unknown=True)
-        except ValueError:
-            pass
     return validate_rlm_usage(
         {
             "iterations": iterations,

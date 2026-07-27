@@ -44,7 +44,7 @@ async def test_heartbeat_supervision_covers_preparation() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
-    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService, TurnLifecycleUnavailable, TurnStateError
+    from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService, TurnLifecycleUnavailableError, TurnStateError
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
@@ -70,6 +70,7 @@ async def test_heartbeat_supervision_covers_preparation() -> None:
 
     class Preparation:
         async def prepare(self, _turn, *, deadline):
+            del deadline
             await asyncio.Event().wait()
             raise AssertionError("unreachable")
 
@@ -97,7 +98,7 @@ async def test_heartbeat_supervision_covers_preparation() -> None:
         claim_loss_fence=fence,
     )
 
-    with pytest.raises(TurnLifecycleUnavailable):
+    with pytest.raises(TurnLifecycleUnavailableError):
         await coordinator.open(OpenTurnCommand(access, session.id, TurnInput("hello"), "preparation", uuid4()))
     await cleanup.shutdown(drain_seconds=1)
     assert fenced.is_set()
@@ -152,6 +153,7 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
 
     class Preparation:
         async def prepare(self, _turn, *, deadline):
+            del deadline
             await asyncio.sleep(0.08)
             return Prepared()
 
@@ -245,6 +247,7 @@ async def test_deno_repeated_transient_failures_revoke_without_provider_fence() 
 
     class Preparation:
         async def prepare(self, _turn, *, deadline):
+            del deadline
             return Prepared()
 
     class Stream:
@@ -341,6 +344,7 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
 
     class Preparation:
         async def prepare(self, _turn, *, deadline):
+            del deadline
             return Prepared()
 
     class Stream:
@@ -353,7 +357,7 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
             raise StopAsyncIteration
 
         async def aclose(self):
-            run = authoritative._runs[run_id]  # noqa: SLF001 - ordering acceptance evidence
+            run = authoritative._runs[run_id]
             assert (run.status, run.failure_code) == ("settling", "stale_claim")
             assert release_commit.is_set()
 
@@ -365,7 +369,7 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
             return Stream()
 
     async def fence(_session_id):
-        run = authoritative._runs[run_id]  # noqa: SLF001 - ordering acceptance evidence
+        run = authoritative._runs[run_id]
         assert (run.status, run.failure_code) == ("settling", "stale_claim")
         release_commit.set()
 
@@ -392,7 +396,7 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
     assert events[-1].detail.code == "unavailable"
     await cleanup.shutdown(drain_seconds=1)
     assert await authoritative.turn_records(session.id, access) == ()
-    old_run = authoritative._runs[run_id]  # noqa: SLF001 - persistence-state acceptance evidence
+    old_run = authoritative._runs[run_id]
     assert (old_run.status, old_run.failure_code) == ("failed", "stale_claim")
 
 
@@ -441,6 +445,7 @@ async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> 
 
     class Preparation:
         async def prepare(self, _turn, *, deadline):
+            del deadline
             return Prepared()
 
     class Stream:
@@ -498,7 +503,7 @@ async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> 
 
     await cleanup.shutdown(drain_seconds=1)
     assert cleanup_order == ["sandbox-fenced", "worker-stopped", "resources-closed"]
-    old_run = authoritative._runs[run_id]  # noqa: SLF001 - persistence-state acceptance evidence
+    old_run = authoritative._runs[run_id]
     assert old_run.status == "failed"
     assert old_run.failure_code == "stale_claim"
     from fleet_rlm.chat.turn_lifecycle import BeginTurn, ExecuteTurn

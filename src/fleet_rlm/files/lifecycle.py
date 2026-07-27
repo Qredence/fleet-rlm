@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID, uuid4
@@ -147,11 +148,8 @@ class AttachmentLifecycleService:
         return ref
 
     async def _rollback_blob(self, workspace_id: UUID, storage_ref: str) -> None:
-        try:
+        with suppress(Exception):
             await self._blobs.remove(workspace_id, storage_ref)
-        except Exception:
-            # Catalog failure is still reported; cleanup is best effort.
-            pass
 
     async def metadata(
         self,
@@ -236,5 +234,5 @@ class AttachmentLifecycleService:
         for logical_path in reversed(tuple(written)):
             try:
                 await sink.remove_private(logical_path)
-            except Exception:  # noqa: BLE001 - best effort; private Run garbage only
+            except Exception:
                 continue

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import errno
 import os
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, suppress
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,11 +21,8 @@ class LocalProcess:
     def code_run(self, code: str):
         self.calls.append(code)
         output = StringIO()
-        with redirect_stdout(output):
-            try:
-                exec(code, {})  # noqa: S102 - executes only adapter-generated guard code in this test
-            except SystemExit:
-                pass
+        with redirect_stdout(output), suppress(SystemExit):
+            exec(code, {})
         return SimpleNamespace(exit_code=0, result=output.getvalue().strip())
 
 
@@ -248,14 +245,14 @@ def test_list_observes_only_one_entry_beyond_limit(tmp_path: Path, monkeypatch: 
         def __init__(self, iterator: os.ScandirIterator[os.DirEntry[str]]) -> None:
             self._iterator = iterator
 
-        def __enter__(self) -> "CountingScanner":
+        def __enter__(self) -> CountingScanner:
             self._iterator.__enter__()
             return self
 
         def __exit__(self, *args: object) -> None:
             self._iterator.__exit__(*args)
 
-        def __iter__(self) -> "CountingScanner":
+        def __iter__(self) -> CountingScanner:
             return self
 
         def __next__(self) -> os.DirEntry[str]:

@@ -173,7 +173,7 @@ def install_testing_composition(
         WorkspaceFileService,
     )
 
-    upload_root, artifact_root = host_roots(settings)
+    upload_root, _artifact_root = host_roots(settings)
     mirror = HostVolumeMirror(
         Path(upload_root) / "_workspace_volume",
         volume_paths=volume_paths_from_settings(settings),

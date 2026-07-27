@@ -128,9 +128,7 @@ def is_sandbox_not_found(exc: BaseException) -> bool:
         return True
     # Nested HTTP responses (httpx / requests style).
     response = getattr(exc, "response", None)
-    if response is not None and getattr(response, "status_code", None) == 404:
-        return True
-    return False
+    return bool(response is not None and getattr(response, "status_code", None) == 404)
 
 
 def map_provider_error(exc: BaseException) -> DaytonaAdapterError:

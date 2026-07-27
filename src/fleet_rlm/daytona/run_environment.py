@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -19,8 +20,8 @@ from fleet_rlm.chat.turn_lifecycle import ExecuteTurn
 from fleet_rlm.chat.turn_preparation import (
     DefaultTurnPreparer,
     RunEnvironment,
-    TurnPreparationTimeout,
-    TurnPreparationUnavailable,
+    TurnPreparationTimeoutError,
+    TurnPreparationUnavailableError,
 )
 from fleet_rlm.config import Settings, load_runtime_settings
 from fleet_rlm.daytona.bindings import BindingStore, InMemoryBindingStore
@@ -38,8 +39,8 @@ from fleet_rlm.daytona.provisioning import (
 from fleet_rlm.daytona.session_manager import (
     DEFAULT_IDLE_STOP_SECONDS,
     DaytonaAdmission,
-    DaytonaAdmissionTimeout,
-    DaytonaLeaseAcquisitionTimeout,
+    DaytonaAdmissionTimeoutError,
+    DaytonaLeaseAcquisitionTimeoutError,
     DaytonaSessionManager,
     LeaseRequest,
 )
@@ -78,10 +79,8 @@ async def _settle_owned_thread(task: asyncio.Task[Any]) -> bool:
 def _consume_task_result(task: asyncio.Task[Any]) -> None:
     if task.cancelled():
         return
-    try:
+    with contextlib.suppress(BaseException):
         task.result()
-    except BaseException:
-        pass
 
 
 class LivePreparedCapabilities(PreparedHostCapabilities):
@@ -160,10 +159,10 @@ class _DaytonaEnvironmentProvider:
                 ),
                 deadline=deadline,
             )
-        except DaytonaAdmissionTimeout as exc:
-            raise TurnPreparationUnavailable("Turn environment is unavailable") from exc
-        except DaytonaLeaseAcquisitionTimeout as exc:
-            raise TurnPreparationTimeout("Turn preparation timed out") from exc
+        except DaytonaAdmissionTimeoutError as exc:
+            raise TurnPreparationUnavailableError("Turn environment is unavailable") from exc
+        except DaytonaLeaseAcquisitionTimeoutError as exc:
+            raise TurnPreparationTimeoutError("Turn preparation timed out") from exc
         try:
             self.resources.track_sandbox(lease.sandbox_id)
             lookup = asyncio.create_task(self.resources.platform.get(lease.sandbox_id))
@@ -177,7 +176,7 @@ class _DaytonaEnvironmentProvider:
                 _consume_task_result(lookup)
                 if cancelled:
                     raise asyncio.CancelledError from None
-                raise TurnPreparationTimeout("Turn preparation timed out") from None
+                raise TurnPreparationTimeoutError("Turn preparation timed out") from None
             except asyncio.CancelledError:
                 await _settle_owned_thread(lookup)
                 _consume_task_result(lookup)
@@ -232,7 +231,8 @@ class _LiveCapabilityPreparer:
         from fleet_rlm.files.workspace_tools import WorkspaceToolHost
 
         sink = environment.attachment_sink
-        volume_fs = getattr(sink, "volume_fs")
+        volume_fs = cast(_DaytonaRunSink, sink).volume_fs
+        assert volume_fs is not None  # _DaytonaRunSink is always constructed with loop
         paths = volume_paths_from_settings(self.resources.settings)
         file_host = FileToolHost(
             attachments=attachments.refs,
@@ -375,10 +375,8 @@ class LiveKernelResources:
     async def cleanup(self) -> None:
         """Delete tracked sandboxes (best-effort). Does not dispose the DB engine."""
         for sid in list(self._sandbox_ids):
-            try:
+            with contextlib.suppress(Exception):
                 await self.platform.delete(sid)
-            except Exception:  # noqa: BLE001 - best-effort live cleanup
-                pass
         self._sandbox_ids.clear()
 
     async def adispose_engine(self) -> None:

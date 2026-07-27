@@ -10,7 +10,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_cleanup_supervisor_is_bounded_and_drains_owned_work() -> None:
-    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailable
+    from fleet_rlm.chat.turn_cleanup import TurnCleanupSupervisor, TurnCleanupUnavailableError
 
     release = asyncio.Event()
     supervisor = TurnCleanupSupervisor(max_jobs=1)
@@ -20,7 +20,7 @@ async def test_cleanup_supervisor_is_bounded_and_drains_owned_work() -> None:
 
     supervisor.submit(cleanup())
     assert supervisor.active_jobs == 1
-    with pytest.raises(TurnCleanupUnavailable):
+    with pytest.raises(TurnCleanupUnavailableError):
         supervisor.require_capacity()
 
     release.set()
@@ -92,7 +92,7 @@ async def test_in_memory_revoke_completion_uses_policy_terminal_intent() -> None
     assert revoked is not None
     assert (revoked.terminal_status, revoked.failure_code, revoked.durable) == ("failed", "stale_claim", False)
 
-    run = store._runs[turn.run_id]  # noqa: SLF001 - policy parity acceptance evidence
+    run = store._runs[turn.run_id]
     assert (run.status, run.failure_code, run.terminal_intent.terminal_status) == (
         "settling",
         "stale_claim",

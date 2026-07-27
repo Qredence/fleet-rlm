@@ -40,7 +40,7 @@ def configure_tracing(settings: Settings) -> None:
     Safe to call multiple times; only the first invocation takes effect.
     Never raises — logs warnings on failure.
     """
-    global _TRACING_CONFIGURED  # noqa: PLW0603
+    global _TRACING_CONFIGURED
     if _TRACING_CONFIGURED:
         return
     _TRACING_CONFIGURED = True
@@ -85,9 +85,7 @@ def configure_tracing(settings: Settings) -> None:
         if tracking_uri == _DEFAULT_TRACKING_URI:
             from mlflow.entities.trace_location import UnityCatalog
 
-            os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = cast(
-                str, settings.mlflow_tracing_sql_warehouse_id
-            )
+            os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = cast(str, settings.mlflow_tracing_sql_warehouse_id)
             mlflow.set_experiment(
                 experiment_name=settings.mlflow_experiment_name,
                 trace_location=UnityCatalog(
@@ -104,5 +102,5 @@ def configure_tracing(settings: Settings) -> None:
             tracking_uri,
             settings.mlflow_experiment_name,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning("MLflow tracing setup failed; continuing without traces", exc_info=True)

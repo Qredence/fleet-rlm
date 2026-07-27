@@ -104,7 +104,8 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
             closes += 1
 
     class Preparation:
-        async def prepare(self, _turn, *, deadline):
+        async def prepare(self, turn, *, deadline):
+            del turn, deadline
             return Prepared()
 
     class Stream:
@@ -163,7 +164,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
     assert [event.sequence for event in events] == [1, 2, 3]
     assert sink_operations == []
     assert closes == 1
-    run = store._runs[run_id]  # noqa: SLF001 - cleanup ordering acceptance evidence
+    run = store._runs[run_id]
     assert (run.status, run.failure_code) == (status, status)
     assert cleanup.active_jobs == 0
     assert await store.turn_records(session.id, access) == ()
@@ -174,7 +175,7 @@ async def test_open_preparation_failure_is_durable_before_stream_and_releases_cl
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.chat.turn_lifecycle import BeginTurn, TurnFailure, TurnLifecycleService
-    from fleet_rlm.chat.turn_preparation import TurnPreparationUnavailable
+    from fleet_rlm.chat.turn_preparation import TurnPreparationUnavailableError
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.rlm.dspy_contract import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -190,8 +191,9 @@ async def test_open_preparation_failure_is_durable_before_stream_and_releases_cl
     runner_calls = 0
 
     class Preparation:
-        async def prepare(self, _turn, *, deadline):
-            raise TurnPreparationUnavailable("provider detail must not escape")
+        async def prepare(self, turn, *, deadline):
+            del turn, deadline
+            raise TurnPreparationUnavailableError("provider detail must not escape")
 
     class Runner:
         def stream(self, _execution):
@@ -200,7 +202,7 @@ async def test_open_preparation_failure_is_durable_before_stream_and_releases_cl
             raise AssertionError("runner must not start")
 
     coordinator = TurnCoordinator(lifecycle=lifecycle, preparation=Preparation(), runner=Runner())
-    with pytest.raises(TurnPreparationUnavailable):
+    with pytest.raises(TurnPreparationUnavailableError):
         await coordinator.open(OpenTurnCommand(access, session.id, TurnInput("prepare"), "prepare-failure", uuid4()))
 
     assert runner_calls == 0
@@ -217,7 +219,7 @@ async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream(
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.turn_coordinator import TurnCoordinator
     from fleet_rlm.chat.turn_lifecycle import TurnLifecycleService
-    from fleet_rlm.chat.turn_preparation import TurnPreparationTimeout
+    from fleet_rlm.chat.turn_preparation import TurnPreparationTimeoutError
     from fleet_rlm.persistence.repositories import InMemorySessionCatalog, InMemoryTurnStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
@@ -255,14 +257,15 @@ async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream(
             return await authoritative.finish(turn, resolution, **kwargs)
 
     class Preparation:
-        async def prepare(self, _turn, *, deadline):
-            raise TurnPreparationTimeout("private provider timeout")
+        async def prepare(self, turn, *, deadline):
+            del turn, deadline
+            raise TurnPreparationTimeoutError("private provider timeout")
 
     class Runner:
         def stream(self, _execution):
             raise AssertionError("runner must not start")
 
-    with pytest.raises(TurnPreparationTimeout):
+    with pytest.raises(TurnPreparationTimeoutError):
         await TurnCoordinator(
             lifecycle=Lifecycle(),
             preparation=Preparation(),
@@ -305,7 +308,8 @@ async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_orde
             closes += 1
 
     class Preparation:
-        async def prepare(self, _turn, *, deadline):
+        async def prepare(self, turn, *, deadline):
+            del turn, deadline
             return Prepared()
 
     class Stream:
@@ -383,6 +387,7 @@ async def test_open_commit_failure_projects_commit_failure_terminal() -> None:
         request_cancel = authoritative.request_cancel
 
         async def commit(self, turn, committed, artifacts):
+            del turn, committed, artifacts
             raise RuntimeError("database detail must not escape")
 
     class Prepared:
@@ -395,7 +400,8 @@ async def test_open_commit_failure_projects_commit_failure_terminal() -> None:
             closes += 1
 
     class Preparation:
-        async def prepare(self, _turn, *, deadline):
+        async def prepare(self, turn, *, deadline):
+            del turn, deadline
             return Prepared()
 
     class Stream:

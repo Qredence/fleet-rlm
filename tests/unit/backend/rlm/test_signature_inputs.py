@@ -240,12 +240,13 @@ def test_backend_module_suffix_is_reserved_for_dspy_modules() -> None:
             if not isinstance(node, ast.ClassDef) or not node.name.endswith("Module"):
                 continue
             if not any(
-                isinstance(base, ast.Attribute)
-                and isinstance(base.value, ast.Name)
-                and base.value.id == "dspy"
-                and base.attr == "Module"
-                or isinstance(base, ast.Name)
-                and base.id == "Module"
+                (
+                    isinstance(base, ast.Attribute)
+                    and isinstance(base.value, ast.Name)
+                    and base.value.id == "dspy"
+                    and base.attr == "Module"
+                )
+                or (isinstance(base, ast.Name) and base.id == "Module")
                 for base in node.bases
             ):
                 offenders.append(f"{path.relative_to(source_root)}:{node.name}")

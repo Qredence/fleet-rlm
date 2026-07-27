@@ -78,7 +78,7 @@ class ClaimDecision:
     heartbeat_allowed: bool = False
 
 
-class InvalidClaimTransition(ValueError):
+class InvalidClaimTransitionError(ValueError):
     """The requested action is invalid for the current durable state."""
 
 
@@ -101,7 +101,7 @@ def decide_claim_transition(state: ClaimState, command: ClaimCommand) -> ClaimDe
 
 def _fail(state: ClaimState, failure: ClaimFailure) -> ClaimTransition:
     if state.status == "completed":
-        raise InvalidClaimTransition("a committed Run cannot be failed")
+        raise InvalidClaimTransitionError("a committed Run cannot be failed")
     if state.status == "running":
         next_state = ClaimState(failure.status, failure.code)
         return ClaimTransition(failure.status, failure.code, failure.public_message, True, next_state)
@@ -118,7 +118,7 @@ def _fail(state: ClaimState, failure: ClaimFailure) -> ClaimTransition:
 
 def _settle(state: ClaimState, failure: ClaimFailure) -> ClaimTransition:
     if state.status == "completed":
-        raise InvalidClaimTransition("a committed Run cannot be settled")
+        raise InvalidClaimTransitionError("a committed Run cannot be settled")
     if state.status == "running":
         next_state = ClaimState("settling", failure.code, failure)
         return ClaimTransition(failure.status, failure.code, failure.public_message, False, next_state)
@@ -135,7 +135,7 @@ def _settle(state: ClaimState, failure: ClaimFailure) -> ClaimTransition:
 
 def _revoke(state: ClaimState, failure: ClaimFailure) -> ClaimTransition:
     if state.status == "completed":
-        raise InvalidClaimTransition("a committed Run cannot be revoked")
+        raise InvalidClaimTransitionError("a committed Run cannot be revoked")
     if state.status == "failed" and state.failure_code == "stale_claim":
         return ClaimTransition("failed", "stale_claim", "Turn failed", True)
     if state.status == "running":
@@ -148,7 +148,7 @@ def _revoke(state: ClaimState, failure: ClaimFailure) -> ClaimTransition:
             ClaimState("settling", "stale_claim", intent),
         )
     if state.status != "settling":
-        raise InvalidClaimTransition("a terminal Run cannot be revoked")
+        raise InvalidClaimTransitionError("a terminal Run cannot be revoked")
     return ClaimTransition("failed", "stale_claim", (state.intent or failure).public_message, False)
 
 
@@ -156,7 +156,7 @@ def _complete(state: ClaimState) -> ClaimTransition:
     if state.status == "failed" and state.failure_code == "stale_claim":
         return ClaimTransition("failed", "stale_claim", "Turn failed", True)
     if state.status != "settling" or state.intent is None:
-        raise InvalidClaimTransition("Turn is not settling under this claim")
+        raise InvalidClaimTransitionError("Turn is not settling under this claim")
     intent = state.intent
     return ClaimTransition(
         intent.status,
@@ -169,7 +169,7 @@ def _complete(state: ClaimState) -> ClaimTransition:
 
 def _terminal_status(status: ClaimStatus) -> ClaimTerminalStatus:
     if status not in {"failed", "cancelled", "timeout"}:
-        raise InvalidClaimTransition("persisted Run has an invalid failure status")
+        raise InvalidClaimTransitionError("persisted Run has an invalid failure status")
     return cast(ClaimTerminalStatus, status)
 
 

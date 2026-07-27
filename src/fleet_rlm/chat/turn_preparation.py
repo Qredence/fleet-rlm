@@ -34,11 +34,11 @@ class TurnPreparationError(RuntimeError):
     """Base class for safe preparation failures."""
 
 
-class TurnPreparationCancelled(TurnPreparationError):
+class TurnPreparationCancelledError(TurnPreparationError):
     pass
 
 
-class TurnPreparationTimeout(TurnPreparationError):
+class TurnPreparationTimeoutError(TurnPreparationError):
     pass
 
 
@@ -50,7 +50,7 @@ class TurnPreparationIntegrityError(TurnPreparationError):
     pass
 
 
-class TurnPreparationUnavailable(TurnPreparationError):
+class TurnPreparationUnavailableError(TurnPreparationError):
     pass
 
 
@@ -141,14 +141,14 @@ class DefaultTurnPreparer:
 
     async def prepare(self, turn: ExecuteTurn, *, deadline: float) -> PreparedTurn:
         if await turn.cancellation_requested():
-            raise TurnPreparationCancelled("Turn cancelled")
+            raise TurnPreparationCancelledError("Turn cancelled")
 
         try:
             environment = await self._environments.acquire(turn, deadline=deadline)
         except TurnPreparationError:
             raise
         except Exception as exc:
-            raise TurnPreparationUnavailable("Turn environment is unavailable") from exc
+            raise TurnPreparationUnavailableError("Turn environment is unavailable") from exc
 
         staged = PreparedAttachments((), ())
         capabilities: PreparedCapabilities | None = None
@@ -164,9 +164,9 @@ class DefaultTurnPreparer:
                 async with asyncio.timeout_at(deadline):
                     capabilities = await self._prepare_capabilities(turn, environment, staged, deadline)
             except TimeoutError:
-                raise TurnPreparationTimeout("Turn preparation timed out") from None
+                raise TurnPreparationTimeoutError("Turn preparation timed out") from None
             if await turn.cancellation_requested():
-                raise TurnPreparationCancelled("Turn cancelled")
+                raise TurnPreparationCancelledError("Turn cancelled")
             self._check_deadline(deadline)
         except BaseException:
 
@@ -234,11 +234,11 @@ class DefaultTurnPreparer:
             while not task.done():
                 if await turn.cancellation_requested():
                     task.cancel()
-                    raise TurnPreparationCancelled("Turn cancelled")
+                    raise TurnPreparationCancelledError("Turn cancelled")
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
                     task.cancel()
-                    raise TurnPreparationTimeout("Turn preparation timed out")
+                    raise TurnPreparationTimeoutError("Turn preparation timed out")
                 await asyncio.wait((task,), timeout=min(0.05, remaining))
             return await task
         finally:
@@ -249,7 +249,7 @@ class DefaultTurnPreparer:
     @staticmethod
     def _check_deadline(deadline: float) -> None:
         if asyncio.get_running_loop().time() >= deadline:
-            raise TurnPreparationTimeout("Turn preparation timed out")
+            raise TurnPreparationTimeoutError("Turn preparation timed out")
 
     @staticmethod
     async def _remove_staged(

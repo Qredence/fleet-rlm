@@ -165,7 +165,7 @@ def test_artifact_survives_catalog_delete_when_volume_blob_present(tmp_path: Pat
         content="persist-me",
     )
     # Simulate host catalog blob loss while Volume Scope remains (Sandbox replace case).
-    store._blob_path(ref.id).unlink()  # noqa: SLF001
+    store._blob_path(ref.id).unlink()
     assert store.read_bytes(ref.id, user_id=user, workspace_id=ws) == b"persist-me"
 
 

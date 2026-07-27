@@ -8,7 +8,7 @@ import logging
 from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID
@@ -354,7 +354,7 @@ async def cleanup_orphan_bytes(
         raise ValueError("grace_period must not be negative")
     if max_files <= 0:
         raise ValueError("max_files must be positive")
-    cutoff = (now or datetime.now(timezone.utc)).timestamp() - grace_period.total_seconds()
+    cutoff = (now or datetime.now(UTC)).timestamp() - grace_period.total_seconds()
     async with gateway.open_workspace(workspace_id) as volume:
         artifact_files = await volume.list_files(str(paths.artifacts_root()), max_depth=2, max_files=max_files)
         snapshot_files = await volume.list_files(str(paths.sessions_root()), max_depth=6, max_files=max_files)

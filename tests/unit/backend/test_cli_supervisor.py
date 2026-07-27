@@ -9,7 +9,7 @@ import pytest
 from fleet_rlm.cli import supervisor
 from fleet_rlm.persistence.database import DatabaseCompatibilityError, DatabaseConnectionError
 
-_VALIDATE_DAYTONA_DATABASE = supervisor._validate_daytona_database  # noqa: SLF001
+_VALIDATE_DAYTONA_DATABASE = supervisor._validate_daytona_database
 
 
 @pytest.fixture(autouse=True)
@@ -81,7 +81,7 @@ def test_supervisor_rejects_node_older_than_22_19(
         lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.18.0", stderr=""),
     )
 
-    with pytest.raises(supervisor.SupervisorError, match="Node.js 22.19 or newer"):
+    with pytest.raises(supervisor.SupervisorError, match=r"Node.js 22.19 or newer"):
         supervisor.supervise(
             host="127.0.0.1",
             port=8123,
@@ -118,7 +118,7 @@ def test_supervisor_fails_before_spawn_when_port_is_occupied(
 
 def test_supervisor_rejects_ephemeral_port() -> None:
     with pytest.raises(supervisor.SupervisorError, match="between 1 and 65535"):
-        supervisor._require_available_port("127.0.0.1", 0)  # noqa: SLF001
+        supervisor._require_available_port("127.0.0.1", 0)
 
 
 def test_supervisor_rejects_incompatible_daytona_database_before_spawn(

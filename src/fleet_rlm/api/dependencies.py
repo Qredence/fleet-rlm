@@ -109,8 +109,8 @@ WorkspaceFileServiceDep = Annotated[WorkspaceFileService, Depends(get_workspace_
 
 __all__ = [
     "ArtifactReaderDep",
-    "ConfigPolicyDep",
     "AttachmentLifecycleDep",
+    "ConfigPolicyDep",
     "SessionCatalogDep",
     "SettingsDep",
     "TurnCoordinatorDep",

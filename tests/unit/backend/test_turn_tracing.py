@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
 from types import ModuleType, SimpleNamespace
-from typing import Any, Iterator
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -22,6 +23,7 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch, *, explode: bool = Fal
 
     @contextmanager
     def start_span(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Iterator[Any]:
+        del span_type
         if explode:
             raise RuntimeError("span boom")
         calls.start_span_names.append(name)

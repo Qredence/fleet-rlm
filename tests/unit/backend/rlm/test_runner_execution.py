@@ -295,7 +295,7 @@ async def test_runner_loads_two_skills_reads_python_resource_and_completes_submi
                         resource_path="scripts/helper.py",
                     )
                     namespace: dict[str, object] = {}
-                    exec(str(resource["content"]), namespace)  # noqa: S102 - exercises generated interpreter code
+                    exec(str(resource["content"]), namespace)
                     answer = namespace["produce_answer"]()
                     return dspy.Prediction(
                         answer=answer,

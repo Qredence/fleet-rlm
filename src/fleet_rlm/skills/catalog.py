@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from importlib.resources import files
 from types import MappingProxyType
-from typing import Mapping
 from uuid import UUID, uuid5
 
 import dspy
@@ -29,7 +29,8 @@ class _BundledSpec:
 _BUNDLED_SPECS = (
     _BundledSpec(
         "dspy-rlm",
-        "Use when analyzing, explaining, or implementing dspy.RLM (Recursive Language Model / REPL code agent). Not for RAG or dspy.Retrieve.",
+        "Use when analyzing, explaining, or implementing dspy.RLM "
+        "(Recursive Language Model / REPL code agent). Not for RAG or dspy.Retrieve.",
         "1.0.0",
         (("references/rlm-contract.md", "text/markdown"),),
     ),

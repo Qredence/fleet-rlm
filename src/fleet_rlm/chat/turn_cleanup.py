@@ -9,7 +9,7 @@ from collections.abc import Awaitable
 logger = logging.getLogger(__name__)
 
 
-class TurnCleanupUnavailable(RuntimeError):
+class TurnCleanupUnavailableError(RuntimeError):
     """The bounded detached-cleanup inventory cannot accept more work."""
 
 
@@ -33,7 +33,7 @@ class TurnCleanupSupervisor:
 
     def require_capacity(self) -> None:
         if not self.available:
-            raise TurnCleanupUnavailable("Turn cleanup capacity is unavailable")
+            raise TurnCleanupUnavailableError("Turn cleanup capacity is unavailable")
 
     def submit(self, cleanup: Awaitable[None]) -> None:
         self.require_capacity()
@@ -44,7 +44,7 @@ class TurnCleanupSupervisor:
     async def _run(self, cleanup: Awaitable[None]) -> None:
         try:
             await cleanup
-        except Exception:  # noqa: BLE001 - cleanup diagnostics must stay private
+        except Exception:
             logger.exception("detached Turn cleanup failed")
 
     async def shutdown(self, *, drain_seconds: float = 30.0) -> None:

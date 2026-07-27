@@ -12,6 +12,7 @@ Host-tool / SUBMIT mediation (B1):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import time
 from collections.abc import Callable, Mapping
@@ -25,7 +26,7 @@ from fleet_rlm.daytona.errors import (
     map_provider_error,
     sanitize_provider_message,
 )
-from fleet_rlm.daytona.http_broker import FleetFinalOutput, build_submit_setup_code, extract_final_payload
+from fleet_rlm.daytona.http_broker import FleetFinalOutputError, build_submit_setup_code, extract_final_payload
 from fleet_rlm.files.workspace_tools import WorkspaceToolError
 from fleet_rlm.rlm.dspy_interpreter_contract import (
     PUBLIC_FINAL_OUTPUT_LABEL,
@@ -36,7 +37,7 @@ from fleet_rlm.rlm.dspy_interpreter_contract import (
     needs_tool_reinjection,
     wrap_final_output,
 )
-from fleet_rlm.rlm.errors import TurnNoProgress, TurnTerminalError
+from fleet_rlm.rlm.errors import TurnNoProgressError, TurnTerminalError
 from fleet_rlm.rlm.events import ObservationObserver, RLMCode, RLMOutput, StepFinished, StepStarted
 from fleet_rlm.rlm.sanitize import truncate_public_text
 from fleet_rlm.rlm.tool_observer import ToolEventView, ToolObserver, observe_tool
@@ -72,10 +73,10 @@ class InProcessInterpreterBackend:
         key = _submit_signature_key(output_fields)
         if key == self._submit_key:
             return
-        self.namespace["FleetFinalOutput"] = FleetFinalOutput
+        self.namespace["FleetFinalOutputError"] = FleetFinalOutputError
         self.namespace["_FINAL_OUTPUT_MARKER"] = "__FLEET_FINAL_OUTPUT__"
         self.namespace["_json"] = __import__("json")
-        exec(build_submit_setup_code(output_fields), self.namespace, self.namespace)  # noqa: S102
+        exec(build_submit_setup_code(output_fields), self.namespace, self.namespace)
         self._submit_key = key
 
     def run(self, code: str, variables: dict[str, object] | None = None) -> BackendExecutionResult:
@@ -84,12 +85,12 @@ class InProcessInterpreterBackend:
         if variables:
             self.namespace.update(variables)
         try:
-            exec(code, self.namespace, self.namespace)  # noqa: S102
-        except FleetFinalOutput as final:
+            exec(code, self.namespace, self.namespace)
+        except FleetFinalOutputError as final:
             return BackendExecutionResult(stdout=str(self.namespace.get("_out", "")), final=dict(final.value))
         except Exception as exc:
             value = getattr(exc, "value", None)
-            if type(exc).__name__ == "FleetFinalOutput" and isinstance(value, dict):
+            if type(exc).__name__ == "FleetFinalOutputError" and isinstance(value, dict):
                 return BackendExecutionResult(stdout=str(self.namespace.get("_out", "")), final=dict(value))
             return BackendExecutionResult(
                 stdout=str(self.namespace.get("_out", "")),
@@ -257,7 +258,7 @@ class _SandboxCodeInterpreterBackend:
         if self._context is None:
             try:
                 self._context = self._sandbox.code_interpreter.create_context()
-            except Exception as exc:  # noqa: BLE001 - normalize at the SDK boundary
+            except Exception as exc:
                 raise map_provider_error(exc) from exc
         return self._context
 
@@ -268,7 +269,7 @@ class _SandboxCodeInterpreterBackend:
                 _assignments_preamble(variables) + code,
                 context=context,
             )
-        except Exception as exc:  # noqa: BLE001 - normalize at the SDK boundary
+        except Exception as exc:
             raise map_provider_error(exc) from exc
 
         stdout = str(getattr(result, "stdout", None) or "")
@@ -276,7 +277,7 @@ class _SandboxCodeInterpreterBackend:
         error = getattr(result, "error", None)
         if error is not None:
             error_name = str(getattr(error, "name", "") or "")
-            if error_name in {"FleetFinalOutput", "_FleetFinalOutput"} and final is not None:
+            if error_name in {"FleetFinalOutputError", "_FleetFinalOutput"} and final is not None:
                 return BackendExecutionResult(stdout=stdout, final=final)
             raw = f"{getattr(error, 'name', 'Error')}: {getattr(error, 'value', error)}"
             # User-generated Python errors are part of the RLM feedback loop:
@@ -295,7 +296,7 @@ class _SandboxCodeInterpreterBackend:
         self._context = None
         try:
             self._sandbox.code_interpreter.delete_context(context)
-        except Exception as exc:  # noqa: BLE001 - shutdown must stay idempotent
+        except Exception as exc:
             raise map_provider_error(exc) from exc
 
 
@@ -344,7 +345,7 @@ class DaytonaCodeInterpreter:
             return
         try:
             self._observer(detail)
-        except Exception:  # noqa: BLE001 - observation must never alter execution
+        except Exception:
             return
 
     def _public_output(self, result: Any) -> str:
@@ -416,7 +417,7 @@ class DaytonaCodeInterpreter:
         except DaytonaAdapterError:
             self._observe(RLMOutput("Execution failed", step))
             raise
-        except Exception as exc:  # noqa: BLE001 - map all provider failures
+        except Exception as exc:
             mapped = map_provider_error(exc)
             self._observe(RLMOutput("Execution failed", step))
             raise mapped from exc
@@ -429,10 +430,8 @@ class DaytonaCodeInterpreter:
             return
         self._shutdown = True
         if self._http_broker is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._http_broker.stop()
-            except Exception:  # noqa: BLE001 - shutdown must stay idempotent
-                pass
             self._http_broker = None
         if self._backend is not None:
             self._backend.close()
@@ -489,7 +488,7 @@ class DaytonaCodeInterpreter:
                     "error": exc.code,
                     "message": exc.public_message,
                 }
-            except Exception as exc:  # noqa: BLE001 - sanitize tool failures
+            except Exception as exc:
                 raise DaytonaAdapterError(
                     message=sanitize_provider_message(str(exc)),
                     cause_type=type(exc).__name__,
@@ -529,7 +528,7 @@ class DaytonaCodeInterpreter:
             return
         current = (normalized_code, str(result))
         if current == self._last_execution:
-            raise TurnNoProgress
+            raise TurnNoProgressError
         self._last_execution = current
 
 
