@@ -36,7 +36,7 @@ def annotate_trace_io(
     """Fail-soft: propagate request/response to the active root trace for MLflow judges.
 
     MLflow LLM judges (Safety, Completeness, RelevanceToQuery) read from the
-    root span\'s inputs/outputs. Without this, judges either fail or fall back
+    root span's inputs/outputs. Without this, judges either fail or fall back
     to expensive trace-based parsing of all spans.
 
     Uses span.set_inputs()/set_outputs() on the current active span (which is
