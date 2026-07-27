@@ -19,7 +19,20 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch, *, explode: bool = Fal
         start_span_names=[],
         update_kwargs=[],
         get_trace_calls=0,
+        span_inputs=[],
+        span_outputs=[],
     )
+
+    class _FakeSpan:
+        request_id = "tr-from-span"
+
+        def set_inputs(self, payload: dict[str, object]) -> None:
+            calls.span_inputs.append(payload)
+
+        def set_outputs(self, payload: dict[str, object]) -> None:
+            calls.span_outputs.append(payload)
+
+    active_span = _FakeSpan()
 
     @contextmanager
     def start_span(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Iterator[Any]:
@@ -27,7 +40,7 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch, *, explode: bool = Fal
         if explode:
             raise RuntimeError("span boom")
         calls.start_span_names.append(name)
-        yield SimpleNamespace(request_id="tr-from-span")
+        yield active_span
 
     def update_current_trace(**kwargs: Any) -> None:
         calls.update_kwargs.append(kwargs)
@@ -36,10 +49,14 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch, *, explode: bool = Fal
         calls.get_trace_calls += 1
         return "tr-active-123"
 
+    def get_current_active_span() -> _FakeSpan:
+        return active_span
+
     mlflow = ModuleType("mlflow")
     mlflow.start_span = start_span  # type: ignore[attr-defined]
     mlflow.update_current_trace = update_current_trace  # type: ignore[attr-defined]
     mlflow.get_last_active_trace_id = get_last_active_trace_id  # type: ignore[attr-defined]
+    mlflow.get_current_active_span = get_current_active_span  # type: ignore[attr-defined]
 
     entities = ModuleType("mlflow.entities")
     entities.SpanType = SimpleNamespace(CHAIN="CHAIN")  # type: ignore[attr-defined]
@@ -111,11 +128,12 @@ def test_annotate_trace_io_updates_trace_request_response(monkeypatch: pytest.Mo
         },
     )
 
-    assert calls.update_kwargs[-1] == {
-        "request": {"request": "how are you?"},
-        "response": {"answer": "public answer", "final_reasoning": "public reasoning"},
+    assert calls.span_inputs[-1] == {"request": "how are you?"}
+    assert calls.span_outputs[-1] == {
+        "answer": "public answer",
+        "final_reasoning": "public reasoning",
     }
-    assert "internal_payload" not in calls.update_kwargs[-1]["response"]
+    assert "internal_payload" not in calls.span_outputs[-1]
 
 
 def test_annotate_trace_io_falls_back_to_empty_answer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -123,7 +141,5 @@ def test_annotate_trace_io_falls_back_to_empty_answer(monkeypatch: pytest.Monkey
 
     annotate_trace_io(request="hello")
 
-    assert calls.update_kwargs[-1] == {
-        "request": {"request": "hello"},
-        "response": {"answer": ""},
-    }
+    assert calls.span_inputs[-1] == {"request": "hello"}
+    assert calls.span_outputs[-1] == {"answer": ""}
