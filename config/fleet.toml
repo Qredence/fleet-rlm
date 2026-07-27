@@ -36,7 +36,7 @@ database_url_env = "FLEET_DATABASE_URL"
 
 [defaults.daytona]
 api_key_env = "FLEET_DAYTONA_API_KEY"
-volume_name = "rlm-volume-dspy"
+volume_name = "fleet-volume"
 volume_mount_path = "/home/daytona/fleet"
 
 [defaults.logging]
